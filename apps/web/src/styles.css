@@ -1,0 +1,279 @@
+:root {
+  color: #182027;
+  background: #f5f7f8;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.app-shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 40px;
+}
+
+.topbar {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 10px 0 24px;
+}
+
+.eyebrow {
+  margin: 0 0 8px;
+  color: #5c6975;
+  font-size: 0.86rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+h1,
+h2,
+p {
+  margin: 0;
+}
+
+h1 {
+  font-size: 2.25rem;
+  line-height: 1.08;
+  letter-spacing: 0;
+}
+
+h2 {
+  font-size: 1.05rem;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+.route-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 10px;
+  border: 1px solid #cdd7de;
+  border-radius: 6px;
+  background: #ffffff;
+  color: #30404d;
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
+
+.status-band {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 18px;
+}
+
+.status-tile,
+.panel,
+.alert-panel {
+  border: 1px solid #d7e0e5;
+  border-radius: 8px;
+  background: #ffffff;
+}
+
+.status-tile {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 96px;
+  padding: 16px;
+}
+
+.status-tile svg {
+  flex: 0 0 auto;
+}
+
+.status-tile span {
+  display: block;
+  color: #61707c;
+  font-size: 0.84rem;
+  font-weight: 700;
+}
+
+.status-tile strong {
+  display: block;
+  max-width: 100%;
+  margin-top: 4px;
+  color: #182027;
+  font-size: 1rem;
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.status-tile.good svg {
+  color: #1f7a55;
+}
+
+.status-tile.warn svg {
+  color: #9a6517;
+}
+
+.status-tile.bad svg {
+  color: #a13636;
+}
+
+.status-tile.neutral svg {
+  color: #3e6678;
+}
+
+.alert-panel {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  margin-bottom: 18px;
+  padding: 16px;
+  border-color: #e2c2bd;
+  background: #fff8f6;
+}
+
+.alert-panel svg {
+  color: #a13636;
+  flex: 0 0 auto;
+}
+
+.alert-panel p {
+  margin-top: 4px;
+  color: #66535a;
+  line-height: 1.5;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.panel {
+  min-height: 240px;
+  padding: 18px;
+}
+
+.panel.wide {
+  grid-column: 1 / -1;
+  min-height: 130px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.panel-heading svg {
+  color: #3e6678;
+}
+
+.metric-list {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+
+.metric {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 42px;
+  padding: 10px 0;
+  border-bottom: 1px solid #edf1f3;
+}
+
+.metric:last-child {
+  border-bottom: 0;
+}
+
+.metric dt {
+  color: #61707c;
+  font-weight: 700;
+}
+
+.metric dd {
+  margin: 0;
+  color: #1f2a33;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.ops-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ops-row span {
+  min-height: 48px;
+  padding: 14px 12px;
+  border: 1px solid #d7e0e5;
+  border-radius: 6px;
+  background: #f8fafb;
+  color: #30404d;
+  font-weight: 700;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 860px) {
+  .topbar,
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    display: grid;
+  }
+
+  .status-band,
+  .ops-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .route-chip {
+    width: 100%;
+    white-space: normal;
+  }
+}
+
+@media (max-width: 560px) {
+  .app-shell {
+    width: min(100% - 20px, 1180px);
+    padding-top: 16px;
+  }
+
+  h1 {
+    font-size: 1.85rem;
+  }
+
+  .status-band,
+  .ops-row {
+    grid-template-columns: 1fr;
+  }
+
+  .status-tile {
+    min-height: 82px;
+  }
+}
