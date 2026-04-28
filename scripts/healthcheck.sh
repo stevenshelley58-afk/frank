@@ -44,6 +44,7 @@ fi
 echo "Checking database seeds..."
 role_count="$(docker compose exec -T -e PGPASSWORD="${POSTGRES_PASSWORD}" postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Atc "select count(*) from model_roles;")"
 provider_count="$(docker compose exec -T -e PGPASSWORD="${POSTGRES_PASSWORD}" postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Atc "select count(*) from provider_registry;")"
+agent_count="$(docker compose exec -T -e PGPASSWORD="${POSTGRES_PASSWORD}" postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Atc "select count(*) from agents where id in ('frank','coding','research','ops','memory','content','image','scraping');")"
 audit_count="$(docker compose exec -T -e PGPASSWORD="${POSTGRES_PASSWORD}" postgres psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -Atc "select count(*) from audit_log where action in ('api.startup','worker.startup');")"
 
 if [ "$role_count" != "17" ]; then
@@ -53,6 +54,11 @@ fi
 
 if [ "$provider_count" != "15" ]; then
   echo "Expected 15 providers, found ${provider_count}." >&2
+  exit 1
+fi
+
+if [ "$agent_count" != "8" ]; then
+  echo "Expected 8 seeded agents, found ${agent_count}." >&2
   exit 1
 fi
 

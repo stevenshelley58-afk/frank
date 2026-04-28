@@ -47,6 +47,23 @@ export const PROVIDER_IDS = [
 
 export type ProviderId = (typeof PROVIDER_IDS)[number];
 
+export const TASK_STATES = [
+  "draft",
+  "queued",
+  "running",
+  "blocked",
+  "waiting_approval",
+  "completed",
+  "failed",
+  "cancelled"
+] as const;
+
+export type TaskState = (typeof TASK_STATES)[number];
+
+export const AGENT_PERMISSION_LEVELS = ["denied", "auto", "auto_review", "manual"] as const;
+
+export type AgentPermissionLevel = (typeof AGENT_PERMISSION_LEVELS)[number];
+
 export const serviceStatusSchema = z.object({
   ok: z.boolean(),
   message: z.string().optional(),
@@ -84,4 +101,12 @@ export function isModelRole(value: string): value is ModelRoleId {
 
 export function isProviderId(value: string): value is ProviderId {
   return PROVIDER_IDS.includes(value as ProviderId);
+}
+
+export function isTaskState(value: string): value is TaskState {
+  return TASK_STATES.includes(value as TaskState);
+}
+
+export function isAgentPermissionLevel(value: string): value is AgentPermissionLevel {
+  return AGENT_PERMISSION_LEVELS.includes(value as AgentPermissionLevel);
 }

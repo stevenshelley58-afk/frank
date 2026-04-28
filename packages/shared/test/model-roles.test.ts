@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { MODEL_ROLES, PROVIDER_IDS, isModelRole, isProviderId } from "../src/index.js";
+import {
+  AGENT_PERMISSION_LEVELS,
+  MODEL_ROLES,
+  PROVIDER_IDS,
+  TASK_STATES,
+  isAgentPermissionLevel,
+  isModelRole,
+  isProviderId,
+  isTaskState
+} from "../src/index.js";
 
 describe("Frank Hub shared constants", () => {
   it("defines exactly the required model roles", () => {
@@ -31,5 +40,26 @@ describe("Frank Hub shared constants", () => {
     expect(PROVIDER_IDS).toHaveLength(15);
     expect(isProviderId("openrouter")).toBe(true);
     expect(isProviderId("unknown")).toBe(false);
+  });
+
+  it("defines the required task states", () => {
+    expect(TASK_STATES).toEqual([
+      "draft",
+      "queued",
+      "running",
+      "blocked",
+      "waiting_approval",
+      "completed",
+      "failed",
+      "cancelled"
+    ]);
+    expect(isTaskState("waiting_approval")).toBe(true);
+    expect(isTaskState("pending")).toBe(false);
+  });
+
+  it("defines the required agent permission levels", () => {
+    expect(AGENT_PERMISSION_LEVELS).toEqual(["denied", "auto", "auto_review", "manual"]);
+    expect(isAgentPermissionLevel("auto_review")).toBe(true);
+    expect(isAgentPermissionLevel("approval_required")).toBe(false);
   });
 });

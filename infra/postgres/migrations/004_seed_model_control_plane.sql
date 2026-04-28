@@ -75,6 +75,13 @@ on conflict (id) do update set
 insert into model_budget_rules (role_id, period, max_requests, max_cost_usd, behavior, enabled, metadata)
 select id, 'daily', null, null, 'require_approval', true, '{"foundation":"placeholder"}'
 from model_roles
+where not exists (
+  select 1
+  from model_budget_rules existing
+  where existing.role_id = model_roles.id
+    and existing.period = 'daily'
+    and existing.metadata ->> 'foundation' = 'placeholder'
+)
 on conflict do nothing;
 
 insert into permission_policies (id, description, default_decision, metadata)
