@@ -7,7 +7,8 @@ import {
   isAgentPermissionLevel,
   isModelRole,
   isProviderId,
-  isTaskState
+  isTaskState,
+  validateTaskStateTransition
 } from "../src/index.js";
 
 describe("Frank Hub shared constants", () => {
@@ -61,5 +62,16 @@ describe("Frank Hub shared constants", () => {
     expect(AGENT_PERMISSION_LEVELS).toEqual(["denied", "auto", "auto_review", "manual"]);
     expect(isAgentPermissionLevel("auto_review")).toBe(true);
     expect(isAgentPermissionLevel("approval_required")).toBe(false);
+  });
+
+  it("validates conservative task state transitions and explicit reopen attempts", () => {
+    expect(validateTaskStateTransition("draft", "queued").ok).toBe(true);
+    expect(validateTaskStateTransition("draft", "completed").statusCode).toBe(409);
+    expect(validateTaskStateTransition("completed", "queued").statusCode).toBe(400);
+    expect(validateTaskStateTransition("completed", "queued", { reopened: true })).toMatchObject({
+      ok: true,
+      reopen: true
+    });
+    expect(validateTaskStateTransition("queued", "running", { reopened: true }).statusCode).toBe(400);
   });
 });

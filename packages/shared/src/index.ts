@@ -107,6 +107,78 @@ export function isTaskState(value: string): value is TaskState {
   return TASK_STATES.includes(value as TaskState);
 }
 
+export const REOPENABLE_TASK_STATES = ["completed", "cancelled"] as const;
+
+export type ReopenableTaskState = (typeof REOPENABLE_TASK_STATES)[number];
+
+export const TASK_STATE_TRANSITIONS: Record<TaskState, readonly TaskState[]> = {
+  draft: ["queued", "cancelled"],
+  queued: ["running", "blocked", "cancelled"],
+  running: ["blocked", "waiting_approval", "completed", "failed", "cancelled"],
+  blocked: ["queued", "running", "failed", "cancelled"],
+  waiting_approval: ["queued", "running", "failed", "cancelled"],
+  completed: ["queued"],
+  failed: ["queued", "cancelled"],
+  cancelled: ["queued"]
+} as const;
+
+export interface TaskStateTransitionResult {
+  ok: boolean;
+  reason?: string;
+  reopen?: boolean;
+  statusCode?: 400 | 409;
+}
+
+export function isReopenableTaskState(value: TaskState): value is ReopenableTaskState {
+  return REOPENABLE_TASK_STATES.includes(value as ReopenableTaskState);
+}
+
+export function validateTaskStateTransition(
+  from: TaskState,
+  to: TaskState,
+  options: { reopened?: boolean } = {}
+): TaskStateTransitionResult {
+  if (from === to) {
+    if (options.reopened) {
+      return {
+        ok: false,
+        statusCode: 400,
+        reason: "Reopening requires a state change to queued."
+      };
+    }
+    return { ok: true };
+  }
+
+  if (options.reopened) {
+    if (!isReopenableTaskState(from) || to !== "queued") {
+      return {
+        ok: false,
+        statusCode: 400,
+        reason: "Reopening requires the current state to be completed or cancelled and the target state to be queued."
+      };
+    }
+    return { ok: true, reopen: true };
+  }
+
+  if (isReopenableTaskState(from) && to === "queued") {
+    return {
+      ok: false,
+      statusCode: 400,
+      reason: "Reopening a completed or cancelled task requires reopened=true."
+    };
+  }
+
+  if (!TASK_STATE_TRANSITIONS[from].includes(to)) {
+    return {
+      ok: false,
+      statusCode: 409,
+      reason: `Invalid task state transition from ${from} to ${to}.`
+    };
+  }
+
+  return { ok: true };
+}
+
 export function isAgentPermissionLevel(value: string): value is AgentPermissionLevel {
   return AGENT_PERMISSION_LEVELS.includes(value as AgentPermissionLevel);
 }

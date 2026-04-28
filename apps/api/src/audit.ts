@@ -1,4 +1,9 @@
-import type { PgPool } from "./db.js";
+export interface AuditQueryable {
+  query<Row = Record<string, unknown>>(
+    text: string,
+    values?: unknown[]
+  ): Promise<{ rows: Row[]; rowCount: number | null }>;
+}
 
 export interface AuditEvent {
   actorType: "system" | "user" | "worker" | "agent";
@@ -10,8 +15,8 @@ export interface AuditEvent {
   metadata?: Record<string, unknown>;
 }
 
-export async function recordAuditEvent(pool: PgPool, event: AuditEvent): Promise<void> {
-  await pool.query(
+export async function recordAuditEvent(db: AuditQueryable, event: AuditEvent): Promise<void> {
+  await db.query(
     `
       insert into audit_log (
         actor_type,

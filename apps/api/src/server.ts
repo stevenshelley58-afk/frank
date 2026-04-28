@@ -8,6 +8,7 @@ import { recordAuditEvent } from "./audit.js";
 import { checkPostgres, type PgPool } from "./db.js";
 import { checkRedis, type RedisClient } from "./redis.js";
 import { requireCloudflareAccess } from "./access.js";
+import { registerTaskRoutes } from "./routes/tasks.js";
 
 export interface ServerDependencies {
   config: ApiConfig;
@@ -118,6 +119,8 @@ export function buildServer({ config, pool, redis }: ServerDependencies) {
 
     return { ok: true };
   });
+
+  registerTaskRoutes(server, pool);
 
   return server;
 }
