@@ -9,16 +9,19 @@ import { checkPostgres, type PgPool } from "./db.js";
 import { checkRedis, type RedisClient } from "./redis.js";
 import { requireCloudflareAccess } from "./access.js";
 import { registerAgentRoutes } from "./routes/agents.js";
+import { registerAuditLogRoutes } from "./routes/audit-log.js";
 import { registerModelRoutes } from "./routes/models.js";
+import { registerOpsRoutes, type OpsCollectors } from "./routes/ops.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 
 export interface ServerDependencies {
   config: ApiConfig;
   pool: PgPool;
   redis: RedisClient;
+  opsCollectors?: OpsCollectors;
 }
 
-export function buildServer({ config, pool, redis }: ServerDependencies) {
+export function buildServer({ config, pool, redis, opsCollectors }: ServerDependencies) {
   const server = Fastify({
     logger: {
       level: config.logLevel
@@ -125,6 +128,8 @@ export function buildServer({ config, pool, redis }: ServerDependencies) {
   registerTaskRoutes(server, pool);
   registerAgentRoutes(server, pool);
   registerModelRoutes(server, pool, config);
+  registerAuditLogRoutes(server, pool);
+  registerOpsRoutes(server, pool, opsCollectors);
 
   return server;
 }
