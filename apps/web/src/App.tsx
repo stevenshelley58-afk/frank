@@ -1,173 +1,77 @@
-import { Activity, Database, KeyRound, Lock, Server, ShieldCheck, Workflow } from "lucide-react";
-import { useEffect, useState } from "react";
-import { MODEL_ROLES, PROVIDER_IDS, type SystemStatus } from "@frank/shared";
-import { fetchSystemStatus } from "./api.js";
+import { Activity, Bot, Boxes, FileClock, PlugZap, Settings as SettingsIcon } from "lucide-react";
+import { useState } from "react";
+import { AppShell, type AppShellPage } from "./components/layout/index.js";
+import { AgentsPage, AuditLogPage, DashboardPage, ModelsPage, ProvidersPage, SettingsPage } from "./pages/index.js";
 
-type LoadState =
-  | { status: "loading" }
-  | { status: "ready"; data: SystemStatus }
-  | { status: "error"; message: string };
+const pages: AppShellPage[] = [
+  {
+    id: "dashboard",
+    label: "Dashboard",
+    title: "System Dashboard",
+    description: "Private infrastructure status for the Frank Hub control plane.",
+    icon: Activity
+  },
+  {
+    id: "agents",
+    label: "Agents",
+    title: "Agents",
+    description: "Operator-facing registry for future agent surfaces and approval boundaries.",
+    icon: Bot
+  },
+  {
+    id: "models",
+    label: "Models",
+    title: "Models",
+    description: "Model-role control plane without hardcoded concrete model selections.",
+    icon: Boxes
+  },
+  {
+    id: "providers",
+    label: "Providers",
+    title: "Providers",
+    description: "Provider registry planning without runtime provider wiring.",
+    icon: PlugZap
+  },
+  {
+    id: "audit-log",
+    label: "Audit Log",
+    title: "Audit Log",
+    description: "Reviewable operational events and system activity.",
+    icon: FileClock
+  },
+  {
+    id: "settings",
+    label: "Settings",
+    title: "Settings",
+    description: "Dashboard endpoints, access posture, and guardrail visibility.",
+    icon: SettingsIcon
+  }
+];
 
 export function App() {
-  const [state, setState] = useState<LoadState>({ status: "loading" });
-
-  useEffect(() => {
-    let active = true;
-
-    fetchSystemStatus()
-      .then((data) => {
-        if (active) {
-          setState({ status: "ready", data });
-        }
-      })
-      .catch((error) => {
-        if (active) {
-          setState({
-            status: "error",
-            message: error instanceof Error ? error.message : "Unable to load system status."
-          });
-        }
-      });
-
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const generatedAt = state.status === "ready" ? new Date(state.data.generatedAt).toLocaleString() : "Pending";
+  const [activePageId, setActivePageId] = useState(pages[0]!.id);
 
   return (
-    <main className="app-shell">
-      <header className="topbar">
-        <div>
-          <p className="eyebrow">Frank Hub</p>
-          <h1>System Dashboard</h1>
-        </div>
-        <div className="route-chip">
-          <ShieldCheck size={18} aria-hidden="true" />
-          <span>Cloudflare Tunnel: frank-hub-vps</span>
-        </div>
-      </header>
-
-      <section className="status-band">
-        <StatusTile
-          icon={<Activity size={22} aria-hidden="true" />}
-          label="Dashboard"
-          value="hub.frank.fail"
-          tone="good"
-        />
-        <StatusTile
-          icon={<Server size={22} aria-hidden="true" />}
-          label="API"
-          value={state.status === "ready" ? serviceText(state.data.services.postgres.ok && state.data.services.redis.ok) : statusText(state)}
-          tone={state.status === "ready" ? (state.data.services.postgres.ok && state.data.services.redis.ok ? "good" : "warn") : state.status === "error" ? "bad" : "neutral"}
-        />
-        <StatusTile
-          icon={<Lock size={22} aria-hidden="true" />}
-          label="Access"
-          value={state.status === "ready" ? state.data.services.cloudflareAccess.message ?? "enabled" : "Protected"}
-          tone="neutral"
-        />
-        <StatusTile
-          icon={<Database size={22} aria-hidden="true" />}
-          label="Last Check"
-          value={generatedAt}
-          tone="neutral"
-        />
-      </section>
-
-      {state.status === "error" ? (
-        <section className="alert-panel">
-          <KeyRound size={22} aria-hidden="true" />
-          <div>
-            <h2>Status requires access</h2>
-            <p>{state.message}</p>
-          </div>
-        </section>
-      ) : null}
-
-      <section className="dashboard-grid">
-        <article className="panel">
-          <div className="panel-heading">
-            <Database size={20} aria-hidden="true" />
-            <h2>Runtime</h2>
-          </div>
-          <dl className="metric-list">
-            <Metric label="Postgres" value={state.status === "ready" ? serviceText(state.data.services.postgres.ok) : statusText(state)} />
-            <Metric label="Redis" value={state.status === "ready" ? serviceText(state.data.services.redis.ok) : statusText(state)} />
-            <Metric label="Audit Log" value="startup writes enabled" />
-            <Metric label="Mode" value="dashboard-first" />
-          </dl>
-        </article>
-
-        <article className="panel">
-          <div className="panel-heading">
-            <Workflow size={20} aria-hidden="true" />
-            <h2>Model Control Plane</h2>
-          </div>
-          <dl className="metric-list">
-            <Metric label="Roles" value={String(state.status === "ready" ? state.data.modelControlPlane.roleCount : MODEL_ROLES.length)} />
-            <Metric label="Providers" value={String(state.status === "ready" ? state.data.modelControlPlane.providerCount : PROVIDER_IDS.length)} />
-            <Metric label="Routing" value="role-based skeleton" />
-            <Metric label="Provider Calls" value="disabled" />
-          </dl>
-        </article>
-
-        <article className="panel wide">
-          <div className="panel-heading">
-            <ShieldCheck size={20} aria-hidden="true" />
-            <h2>No-terminal Ops Console</h2>
-          </div>
-          <div className="ops-row">
-            <span>Read-only status</span>
-            <span>approval gates</span>
-            <span>host commands denied</span>
-            <span>destructive actions denied</span>
-          </div>
-        </article>
-      </section>
-    </main>
+    <AppShell pages={pages} activePageId={activePageId} onNavigate={setActivePageId}>
+      {renderPage(activePageId)}
+    </AppShell>
   );
 }
 
-function StatusTile({
-  icon,
-  label,
-  value,
-  tone
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  tone: "good" | "warn" | "bad" | "neutral";
-}) {
-  return (
-    <article className={`status-tile ${tone}`}>
-      {icon}
-      <div>
-        <span>{label}</span>
-        <strong>{value}</strong>
-      </div>
-    </article>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="metric">
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </div>
-  );
-}
-
-function serviceText(ok: boolean) {
-  return ok ? "healthy" : "degraded";
-}
-
-function statusText(state: LoadState) {
-  if (state.status === "loading") {
-    return "checking";
+function renderPage(pageId: string) {
+  switch (pageId) {
+    case "agents":
+      return <AgentsPage />;
+    case "models":
+      return <ModelsPage />;
+    case "providers":
+      return <ProvidersPage />;
+    case "audit-log":
+      return <AuditLogPage />;
+    case "settings":
+      return <SettingsPage />;
+    case "dashboard":
+    default:
+      return <DashboardPage />;
   }
-  return "access needed";
 }
