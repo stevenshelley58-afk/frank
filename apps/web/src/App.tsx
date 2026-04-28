@@ -1,7 +1,25 @@
-import { Activity, Bot, Boxes, FileClock, PlugZap, Settings as SettingsIcon } from "lucide-react";
+import {
+  Activity,
+  Bot,
+  Boxes,
+  FileClock,
+  ListTodo,
+  PlugZap,
+  Settings as SettingsIcon,
+  TerminalSquare
+} from "lucide-react";
 import { useState } from "react";
 import { AppShell, type AppShellPage } from "./components/layout/index.js";
-import { AgentsPage, AuditLogPage, DashboardPage, ModelsPage, ProvidersPage, SettingsPage } from "./pages/index.js";
+import {
+  AgentsPage,
+  AuditLogPage,
+  DashboardPage,
+  ModelsPage,
+  OpsConsolePage,
+  ProvidersPage,
+  SettingsPage,
+  TasksPage
+} from "./pages/index.js";
 
 const pages: AppShellPage[] = [
   {
@@ -10,6 +28,13 @@ const pages: AppShellPage[] = [
     title: "System Dashboard",
     description: "Private infrastructure status for the Frank Hub control plane.",
     icon: Activity
+  },
+  {
+    id: "tasks",
+    label: "Tasks",
+    title: "Tasks",
+    description: "Manual task intake and conservative state tracking without agent execution.",
+    icon: ListTodo
   },
   {
     id: "agents",
@@ -40,6 +65,13 @@ const pages: AppShellPage[] = [
     icon: FileClock
   },
   {
+    id: "ops-console",
+    label: "Ops Console",
+    title: "Ops Console",
+    description: "Read-only service, system, and deploy posture for Frank Hub.",
+    icon: TerminalSquare
+  },
+  {
     id: "settings",
     label: "Settings",
     title: "Settings",
@@ -60,6 +92,8 @@ export function App() {
 
 function renderPage(pageId: string) {
   switch (pageId) {
+    case "tasks":
+      return <TasksPage />;
     case "agents":
       return <AgentsPage />;
     case "models":
@@ -68,6 +102,8 @@ function renderPage(pageId: string) {
       return <ProvidersPage />;
     case "audit-log":
       return <AuditLogPage />;
+    case "ops-console":
+      return <OpsConsolePage />;
     case "settings":
       return <SettingsPage />;
     case "dashboard":

@@ -2,5 +2,7 @@ export * from "./agents.js";
 export * from "./audit-log.js";
 export * from "./dashboard.js";
 export * from "./models.js";
+export * from "./ops-console.js";
 export * from "./providers.js";
 export * from "./settings.js";
+export * from "./tasks.js";

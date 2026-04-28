@@ -1,28 +1,53 @@
-import { LockKeyhole, Settings, ShieldCheck } from "lucide-react";
-import { FRANK_API_URL, FRANK_DASHBOARD_URL } from "@frank/shared";
-import { KeyValueList, SectionCard } from "../components/dashboard/index.js";
+import { LockKeyhole, RefreshCw, Settings, ShieldCheck } from "lucide-react";
+import { useEffect, useState } from "react";
 import {
-  Button,
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-  Input,
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-  Tabs,
-  TabsContent,
-  TabsList,
-  TabsTrigger
-} from "../components/ui/index.js";
+  KeyValueList,
+  LoadingBlock,
+  ResourceError,
+  SectionCard,
+  StatusBadge
+} from "../components/dashboard/index.js";
+import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/index.js";
+import { fetchSystemStatus, getOpsStatus, type OpsStatus } from "../api.js";
+import type { SystemStatus } from "@frank/shared";
+import { formatDateTime, titleize } from "../lib/format.js";
+
+type LoadState =
+  | { status: "loading" }
+  | { status: "ready"; data: { system: SystemStatus; ops: OpsStatus } }
+  | { status: "error"; message: string };
 
 export function SettingsPage() {
+  const [state, setState] = useState<LoadState>({ status: "loading" });
+
+  const loadSettings = () => {
+    const controller = new AbortController();
+    setState({ status: "loading" });
+    Promise.all([fetchSystemStatus({ signal: controller.signal }), getOpsStatus({ signal: controller.signal })])
+      .then(([system, ops]) => setState({ status: "ready", data: { system, ops } }))
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setState({ status: "error", message: errorMessage(error) });
+        }
+      });
+    return controller;
+  };
+
+  useEffect(() => {
+    const controller = loadSettings();
+    return () => controller.abort();
+  }, []);
+
+  if (state.status === "loading") {
+    return <LoadingBlock rows={6} />;
+  }
+
+  if (state.status === "error") {
+    return <ResourceError message={state.message} onRetry={() => loadSettings()} />;
+  }
+
+  const { system, ops } = state.data;
+
   return (
     <Tabs defaultValue="general" className="grid gap-5">
       <TabsList className="w-fit">
@@ -32,80 +57,82 @@ export function SettingsPage() {
 
       <TabsContent value="general" className="mt-0">
         <SectionCard
-          title="Dashboard Settings"
-          description="Public endpoints and default operator view."
+          title="Read-Only Settings"
+          description="Safe environment and endpoint summary from existing APIs. Secrets and raw env vars are not exposed."
           icon={<Settings aria-hidden="true" />}
+          action={
+            <Button type="button" variant="outline" size="sm" onClick={() => loadSettings()}>
+              <RefreshCw aria-hidden="true" />
+              Refresh
+            </Button>
+          }
         >
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="grid gap-2 text-sm font-semibold text-foreground">
-              Dashboard URL
-              <Input value={FRANK_DASHBOARD_URL} readOnly />
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-foreground">
-              API URL
-              <Input value={FRANK_API_URL} readOnly />
-            </label>
-            <label className="grid gap-2 text-sm font-semibold text-foreground">
-              Default View
-              <Select defaultValue="dashboard">
-                <SelectTrigger>
-                  <SelectValue placeholder="Select view" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="dashboard">Dashboard</SelectItem>
-                  <SelectItem value="agents">Agents</SelectItem>
-                  <SelectItem value="models">Models</SelectItem>
-                </SelectContent>
-              </Select>
-            </label>
-          </div>
+          <KeyValueList
+            items={[
+              { label: "System", value: system.systemName },
+              { label: "Environment", value: system.environment },
+              { label: "Dashboard URL", value: system.dashboardUrl },
+              { label: "API URL", value: system.apiUrl },
+              { label: "Generated", value: formatDateTime(system.generatedAt) },
+              { label: "Model routing", value: titleize(system.modelControlPlane.routingMode) },
+              { label: "Ops mode", value: ops.mode },
+              { label: "Terminal access", value: titleize(system.opsConsole.terminalAccess) }
+            ]}
+          />
         </SectionCard>
       </TabsContent>
 
       <TabsContent value="access" className="mt-0">
         <SectionCard
           title="Access Guardrails"
-          description="Deployment and runtime restrictions kept visible in the operator UI."
+          description="Dashboard-visible posture only. No secret editing or provider key input is available."
           icon={<LockKeyhole aria-hidden="true" />}
           action={
-            <Dialog>
-              <DialogTrigger asChild>
-                <Button variant="outline" size="sm">
-                  <ShieldCheck aria-hidden="true" />
-                  Review
-                </Button>
-              </DialogTrigger>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Operational guardrails</DialogTitle>
-                  <DialogDescription>
-                    Frank Hub keeps normal operation dashboard-first and fails closed when a control is not ready.
-                  </DialogDescription>
-                </DialogHeader>
-                <KeyValueList
-                  items={[
-                    { label: "Production deploys", value: "Manual approval only" },
-                    { label: "Secrets", value: "Never committed" },
-                    { label: "Terminal operations", value: "Disabled in normal operation" }
-                  ]}
-                />
-                <DialogFooter>
-                  <Button type="button">Understood</Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <StatusBadge tone={system.services.cloudflareAccess.ok ? "healthy" : "degraded"}>
+              {system.services.cloudflareAccess.ok ? "Configured" : "Review"}
+            </StatusBadge>
           }
         >
           <KeyValueList
             items={[
-              { label: "Cloudflare Access", value: "Required" },
-              { label: "Cloudflare Tunnel", value: "frank-hub-vps" },
-              { label: "Backend platform", value: "VPS Fastify service" },
-              { label: "Frontend platform", value: "Static Vite SPA" }
+              {
+                label: "Cloudflare Access",
+                value: system.services.cloudflareAccess.message ?? "Unavailable",
+                description: system.services.cloudflareAccess.ok ? "Access boundary is enabled or intentionally disabled in config." : undefined
+              },
+              { label: "Postgres", value: system.services.postgres.ok ? "Available" : "Unavailable", description: system.services.postgres.message },
+              { label: "Redis", value: system.services.redis.ok ? "Available" : "Unavailable", description: system.services.redis.message },
+              { label: "Deploy actions", value: "Not exposed" },
+              { label: "Restart actions", value: "Not exposed" },
+              { label: "Shell input", value: "Not exposed" },
+              { label: "Secrets", value: "Not displayed" }
+            ]}
+          />
+        </SectionCard>
+
+        <SectionCard
+          title="Runtime Boundaries"
+          description="The current frontend exposes read and review surfaces only."
+          icon={<ShieldCheck aria-hidden="true" />}
+        >
+          <KeyValueList
+            items={[
+              { label: "WhatsApp runtime", value: "Not wired" },
+              { label: "Image generation runtime", value: "Not wired" },
+              { label: "SearXNG", value: "Not wired" },
+              { label: "Playwright", value: "Not wired" },
+              { label: "code-server", value: "Not wired" },
+              { label: "Infisical runtime", value: "Not wired" },
+              { label: "LiteLLM runtime", value: "Not wired" },
+              { label: "Model inference", value: "Not exposed" }
             ]}
           />
         </SectionCard>
       </TabsContent>
     </Tabs>
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unable to load settings.";
 }
