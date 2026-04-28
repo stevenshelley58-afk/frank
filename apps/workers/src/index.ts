@@ -1,7 +1,7 @@
-import { providerAdapters } from "@frank/model-sdk";
 import { Redis } from "ioredis";
 import pg from "pg";
 import { z } from "zod";
+import { loadTaskWorkerConfig, startTaskWorker, type RunningTaskWorker } from "./task-worker.js";
 
 const { Pool } = pg;
 
@@ -13,28 +13,32 @@ const envSchema = z.object({
 });
 
 const config = envSchema.parse(process.env);
+const taskWorkerConfig = loadTaskWorkerConfig(process.env);
 const pool = new Pool({ connectionString: config.DATABASE_URL });
 const redis = new Redis(config.REDIS_URL, {
   lazyConnect: true,
   maxRetriesPerRequest: 2
 });
+let runningWorker: RunningTaskWorker | undefined;
 
 async function main() {
   await waitForPostgres();
   await waitForRedis();
-  await recordAuditEvent("worker.startup", {
+  await recordAuditEvent(taskWorkerConfig.workerId, "worker.startup", {
     environment: config.FRANK_ENV,
     systemName: config.FRANK_SYSTEM_NAME
   });
-  await recordAuditEvent("worker.openrouter_scanner_stub.ready", {
-    providersScaffolded: providerAdapters.length,
-    providerCallsEnabled: false
+  await recordAuditEvent(taskWorkerConfig.workerId, "worker.task_core.ready", {
+    workerId: taskWorkerConfig.workerId,
+    pollIntervalMs: taskWorkerConfig.pollIntervalMs,
+    leaseSeconds: taskWorkerConfig.leaseSeconds,
+    batchSize: taskWorkerConfig.batchSize,
+    executionEnabled: "manual_lifecycle_only",
+    externalCallsEnabled: false
   });
 
-  console.log("Frank worker started. Provider scanner is scaffolded and disabled.");
-  setInterval(() => {
-    console.log("Frank worker heartbeat", new Date().toISOString());
-  }, 60_000);
+  runningWorker = startTaskWorker(pool, taskWorkerConfig, { logger: console });
+  console.log("Frank worker started. Task worker core is polling queued manual lifecycle tasks.");
 }
 
 async function waitForPostgres(attempts = 30): Promise<void> {
@@ -64,7 +68,7 @@ async function waitForRedis(attempts = 30): Promise<void> {
   throw new Error("Redis did not become healthy in time.");
 }
 
-async function recordAuditEvent(action: string, metadata: Record<string, unknown>) {
+async function recordAuditEvent(actorId: string, action: string, metadata: Record<string, unknown>) {
   await pool.query(
     `
       insert into audit_log (
@@ -76,14 +80,15 @@ async function recordAuditEvent(action: string, metadata: Record<string, unknown
         outcome,
         metadata
       )
-      values ('worker', 'apps/workers', $1, 'service', 'apps/workers', 'success', $2::jsonb)
+      values ('worker', $1, $2, 'service', 'apps/workers', 'success', $3::jsonb)
     `,
-    [action, JSON.stringify(metadata)]
+    [actorId, action, JSON.stringify(metadata)]
   );
 }
 
 async function shutdown(signal: string) {
   console.log(`Frank worker shutting down after ${signal}`);
+  await runningWorker?.stop().catch(() => undefined);
   await redis.quit().catch(() => undefined);
   await pool.end().catch(() => undefined);
 }

@@ -125,6 +125,53 @@ describe("Stage 2 schema migration", () => {
   });
 });
 
+describe("Stage 3 task execution migration", () => {
+  it("adds the task worker core columns and indexes idempotently", async () => {
+    const executionSql = await readMigration("006_task_execution_foundation.sql");
+
+    for (const column of [
+      "execution_kind",
+      "queued_at",
+      "started_at",
+      "finished_at",
+      "attempt_count",
+      "last_error"
+    ]) {
+      expect(executionSql).toContain(`add column if not exists ${column}`);
+    }
+
+    for (const column of ["worker_id", "lease_token", "lease_expires_at", "heartbeat_at", "attempt"]) {
+      expect(executionSql).toContain(`add column if not exists ${column}`);
+    }
+
+    expect(executionSql).toContain("add column if not exists severity");
+    expect(executionSql).toContain("add column if not exists message");
+    expect(executionSql).toContain("create index if not exists tasks_queue_claim_idx");
+    expect(executionSql).toContain("priority asc, queued_at asc nulls last, created_at asc");
+    expect(executionSql).toContain("where state = 'queued'");
+    expect(executionSql).toContain("create unique index if not exists agent_sessions_one_active_task_idx");
+    expect(executionSql).toContain("create index if not exists agent_sessions_lease_expiry_idx");
+    expect(executionSql).toContain("create index if not exists task_events_severity_idx");
+  });
+
+  it("uses rerunnable check-constraint guards for execution foundation constraints", async () => {
+    const executionSql = await readMigration("006_task_execution_foundation.sql");
+
+    expect(executionSql).toContain("do $$");
+    for (const constraint of [
+      "tasks_attempt_count_check",
+      "tasks_execution_kind_nonempty_check",
+      "agent_sessions_attempt_check",
+      "agent_sessions_worker_id_nonempty_check",
+      "agent_sessions_lease_token_nonempty_check",
+      "task_events_severity_check"
+    ]) {
+      expect(executionSql).toContain(`where conname = '${constraint}'`);
+      expect(executionSql).toContain(`add constraint ${constraint}`);
+    }
+  });
+});
+
 class FakeMigrationPool implements MigrationPool {
   readonly columns = new Set<string>();
   readonly applied = new Map<string, string | null>();
