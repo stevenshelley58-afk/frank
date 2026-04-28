@@ -175,6 +175,7 @@ function createTestServer(pool: FakeAgentPool, accessEnabled = false) {
         issuer: "https://frank.cloudflareaccess.com",
         audience: "test-aud"
       },
+      openrouterApiKey: undefined,
       logLevel: "silent"
     } satisfies ApiConfig,
     pool: pool as never,

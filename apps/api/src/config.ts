@@ -20,6 +20,7 @@ const envSchema = z.object({
   CLOUDFLARE_ACCESS_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
   CLOUDFLARE_ACCESS_ISSUER: z.string().url().optional(),
   CLOUDFLARE_ACCESS_AUD: z.string().optional(),
+  OPENROUTER_API_KEY: z.string().optional(),
   LOG_LEVEL: z.string().default("info")
 });
 
@@ -42,6 +43,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       issuer: parsed.CLOUDFLARE_ACCESS_ISSUER?.replace(/\/$/, ""),
       audience: parsed.CLOUDFLARE_ACCESS_AUD
     },
+    openrouterApiKey: parsed.OPENROUTER_API_KEY?.trim() || undefined,
     logLevel: parsed.LOG_LEVEL
   };
 }
