@@ -14,6 +14,19 @@ Configure routes in the Cloudflare Zero Trust dashboard:
 Do not use `cloudflared tunnel route dns` as the primary setup path for this
 remote-managed tunnel.
 
+## Root Domain Redirect
+
+`hub.frank.fail` is the canonical Frank Hub app URL. Configure the root domain
+as a Cloudflare Redirect Rules / Single Redirects rule, not as a Cloudflare
+Tunnel public hostname:
+
+```text
+frank.fail/* -> https://hub.frank.fail/$1
+```
+
+Use a permanent redirect. Prefer `308` if the Cloudflare UI offers it; otherwise
+use `301`. Preserve the path and preserve the query string.
+
 The web container proxies same-origin dashboard calls:
 
 ```text

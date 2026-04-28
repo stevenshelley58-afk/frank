@@ -51,6 +51,7 @@ The browser dashboard uses same-origin API calls:
 - `hub.frank.fail/api/*` is proxied by Nginx to the API container
 - `api.frank.fail` remains available as a direct API hostname on
   `http://localhost:8080`
+- `frank.fail/*` redirects to canonical app URL `https://hub.frank.fail/$1`
 
 Cloudflare Tunnel routes are configured in the Cloudflare Zero Trust dashboard,
 not with local `cloudflared tunnel route dns` commands.

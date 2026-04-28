@@ -66,6 +66,12 @@ Use the dashboard:
 The dashboard calls the API through same-origin `/api/*` on `hub.frank.fail`.
 `api.frank.fail` is kept as a direct API hostname for later/admin/debug use.
 
+Keep `hub.frank.fail` as the canonical Frank Hub app URL. Configure
+`frank.fail/* -> https://hub.frank.fail/$1` with Cloudflare Redirect Rules /
+Single Redirects, not as a Cloudflare Tunnel public hostname. Use a permanent
+redirect, preferring `308` when available and `301` otherwise, with path and
+query string preservation enabled.
+
 ## Verification
 
 ```bash
