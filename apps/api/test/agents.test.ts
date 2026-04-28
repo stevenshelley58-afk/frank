@@ -173,7 +173,7 @@ function createTestServer(pool: FakeAgentPool, accessEnabled = false) {
       cloudflareAccess: {
         enabled: accessEnabled,
         issuer: "https://frank.cloudflareaccess.com",
-        audience: "test-aud"
+        audiences: ["test-aud"]
       },
       openrouterApiKey: undefined,
       logLevel: "silent"

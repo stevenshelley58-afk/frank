@@ -37,13 +37,13 @@ export async function validateCloudflareAccessJwt(
   token: string,
   config: ApiConfig["cloudflareAccess"]
 ): Promise<AccessIdentity> {
-  if (!config.issuer || !config.audience) {
+  if (!config.issuer || config.audiences.length === 0) {
     throw new Error("cloudflare_access_not_configured");
   }
 
   const result = await jwtVerify(token, getJwksForIssuer(config.issuer), {
     issuer: config.issuer,
-    audience: config.audience
+    audience: config.audiences
   });
 
   const identity: AccessIdentity = {

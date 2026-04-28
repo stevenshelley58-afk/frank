@@ -17,6 +17,7 @@ FROM base AS migrate
 CMD ["pnpm", "--filter", "@frank/api", "migrate"]
 
 FROM base AS api
+COPY runtime ./runtime
 EXPOSE 8080
 CMD ["pnpm", "--filter", "@frank/api", "start"]
 

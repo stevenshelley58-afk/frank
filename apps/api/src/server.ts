@@ -73,7 +73,7 @@ export function buildServer({ config, pool, redis, opsCollectors }: ServerDepend
         cloudflareAccess: {
           ok:
             !config.cloudflareAccess.enabled ||
-            Boolean(config.cloudflareAccess.issuer && config.cloudflareAccess.audience),
+            Boolean(config.cloudflareAccess.issuer && config.cloudflareAccess.audiences.length > 0),
           message: config.cloudflareAccess.enabled ? "enabled" : "disabled"
         }
       },

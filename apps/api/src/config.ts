@@ -20,6 +20,7 @@ const envSchema = z.object({
   CLOUDFLARE_ACCESS_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
   CLOUDFLARE_ACCESS_ISSUER: z.string().url().optional(),
   CLOUDFLARE_ACCESS_AUD: z.string().optional(),
+  CLOUDFLARE_ACCESS_AUDS: z.string().optional(),
   OPENROUTER_API_KEY: z.string().optional(),
   LOG_LEVEL: z.string().default("info")
 });
@@ -41,9 +42,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     cloudflareAccess: {
       enabled: parsed.CLOUDFLARE_ACCESS_ENABLED,
       issuer: parsed.CLOUDFLARE_ACCESS_ISSUER?.replace(/\/$/, ""),
-      audience: parsed.CLOUDFLARE_ACCESS_AUD
+      audiences: parseCloudflareAccessAudiences(parsed.CLOUDFLARE_ACCESS_AUDS, parsed.CLOUDFLARE_ACCESS_AUD)
     },
     openrouterApiKey: parsed.OPENROUTER_API_KEY?.trim() || undefined,
     logLevel: parsed.LOG_LEVEL
   };
+}
+
+function parseCloudflareAccessAudiences(audiences: string | undefined, audience: string | undefined): string[] {
+  const audienceList = parseCommaSeparatedList(audiences);
+  return audienceList.length > 0 ? audienceList : parseCommaSeparatedList(audience);
+}
+
+function parseCommaSeparatedList(value: string | undefined): string[] {
+  if (!value) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
 }

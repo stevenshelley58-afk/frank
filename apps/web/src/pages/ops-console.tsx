@@ -199,19 +199,31 @@ export function OpsConsolePage() {
         <KeyValueList
           items={[
             {
-              label: "Git",
-              value: deploy.deploy.git.available
-                ? `${deploy.deploy.git.data.branch}@${deploy.deploy.git.data.commit}`
-                : "Unavailable",
+              label: "Current branch",
+              value: deploy.deploy.git.available ? deploy.deploy.git.data.branch : "Unavailable",
               description: deploy.deploy.git.available ? undefined : deploy.deploy.git.message
             },
             {
-              label: "Last deploy",
+              label: "Current commit",
+              value: deploy.deploy.git.available ? deploy.deploy.git.data.commit : "Unavailable",
+              description: deploy.deploy.git.available ? undefined : deploy.deploy.git.message
+            },
+            {
+              label: "Deploy timestamp",
               value: deploy.deploy.lastDeploy.available
                 ? (deploy.deploy.lastDeploy.data.deployedAt ?? "Not recorded")
                 : "Unavailable",
               description: deploy.deploy.lastDeploy.available
                 ? deploy.deploy.lastDeploy.data.source
+                : deploy.deploy.lastDeploy.message
+            },
+            {
+              label: "App version",
+              value: deploy.deploy.lastDeploy.available && deploy.deploy.lastDeploy.data.appVersion
+                ? deploy.deploy.lastDeploy.data.appVersion
+                : "Unavailable",
+              description: deploy.deploy.lastDeploy.available
+                ? (deploy.deploy.lastDeploy.data.appVersion ? undefined : "No app version recorded in deploy metadata.")
                 : deploy.deploy.lastDeploy.message
             }
           ]}

@@ -62,6 +62,9 @@ not with local `cloudflared tunnel route dns` commands.
 - `/healthz` is public.
 - `/v1/*` routes require Cloudflare Access when
   `CLOUDFLARE_ACCESS_ENABLED=true`.
+- Multiple Cloudflare Access audiences are supported with
+  `CLOUDFLARE_ACCESS_AUDS`; `CLOUDFLARE_ACCESS_AUD` remains a single-AUD
+  fallback.
 - Agent and tool scaffolds fail closed for destructive or unrestricted host
   actions.
 - Provider adapters are typed placeholders only; no real model-provider calls

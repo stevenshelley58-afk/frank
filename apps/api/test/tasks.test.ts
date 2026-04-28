@@ -247,7 +247,7 @@ function createTestServer(pool: FakeTaskPool, accessEnabled = false) {
       cloudflareAccess: {
         enabled: accessEnabled,
         issuer: "https://frank.cloudflareaccess.com",
-        audience: "test-aud"
+        audiences: ["test-aud"]
       },
       openrouterApiKey: undefined,
       logLevel: "silent"

@@ -24,8 +24,24 @@ remote JWKS:
 ```
 
 Validation checks issuer and audience and fails closed when configuration is
-missing or the JWT is invalid. Keys are fetched remotely through `jose`, so key
+missing or the JWT is invalid. Issuer validation stays strict. Audience
+validation accepts any value listed in `CLOUDFLARE_ACCESS_AUDS`, a
+comma-separated allowlist for hostnames such as `hub.frank.fail/api/*` and
+`api.frank.fail/v1/*`. Existing deployments can keep using
+`CLOUDFLARE_ACCESS_AUD` as a single-AUD fallback, but new config should prefer
+`CLOUDFLARE_ACCESS_AUDS`. Keys are fetched remotely through `jose`, so key
 rotation does not require hardcoding a public key in the repo.
+
+## Deploy Metadata
+
+`scripts/deploy.sh` writes safe deployment metadata to `runtime/deploy.json`
+before building containers. The file contains only branch, commit, deploy
+timestamp, schema version, and package version when available. It does not
+include raw environment values, secrets, tokens, or host command output.
+
+The API reads that file read-only for `/v1/ops/deploy`. If it is missing or
+invalid, deploy metadata is reported as unavailable instead of falling back to
+raw environment display or arbitrary command execution.
 
 ## Runtime
 

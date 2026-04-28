@@ -1,8 +1,11 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildServer } from "../src/server.js";
 import type { ApiConfig } from "../src/config.js";
-import type { OpsCollectors } from "../src/routes/ops.js";
+import { collectDeploy, type OpsCollectors } from "../src/routes/ops.js";
 
 const servers: FastifyInstance[] = [];
 
@@ -126,6 +129,66 @@ describe("read-only ops API routes", () => {
     expect(collectors.deploy).toHaveBeenCalledWith();
     expect(JSON.stringify(response.json())).not.toContain("OPENROUTER_API_KEY");
   });
+
+  it("reads safe deploy metadata from runtime deploy file", async () => {
+    const tempDir = await mkdtemp(join(tmpdir(), "frank-deploy-"));
+    const metadataPath = join(tempDir, "deploy.json");
+    await writeFile(
+      metadataPath,
+      JSON.stringify({
+        schemaVersion: 1,
+        branch: "stage2-api-control-plane",
+        commit: "caa809e",
+        deployedAt: "2026-04-28T06:30:00.000Z",
+        appVersion: "0.1.0"
+      })
+    );
+
+    try {
+      const deploy = await collectDeploy(metadataPath);
+
+      expect(deploy).toEqual({
+        git: {
+          available: true,
+          data: {
+            branch: "stage2-api-control-plane",
+            commit: "caa809e",
+            appVersion: "0.1.0"
+          }
+        },
+        lastDeploy: {
+          available: true,
+          data: {
+            deployedAt: "2026-04-28T06:30:00.000Z",
+            source: "runtime/deploy.json",
+            appVersion: "0.1.0"
+          }
+        }
+      });
+    } finally {
+      await rm(tempDir, {
+        recursive: true,
+        force: true
+      });
+    }
+  });
+
+  it("returns deploy metadata unavailable cleanly when runtime deploy file is missing", async () => {
+    const deploy = await collectDeploy(join(tmpdir(), "frank-missing-deploy.json"));
+
+    expect(deploy).toEqual({
+      git: {
+        available: false,
+        data: null,
+        message: "Deploy metadata is not recorded yet."
+      },
+      lastDeploy: {
+        available: false,
+        data: null,
+        message: "Deploy metadata is not recorded yet."
+      }
+    });
+  });
 });
 
 function createTestServer(pool: FakeOpsPool, opsCollectors: OpsCollectors, accessEnabled = false) {
@@ -143,7 +206,7 @@ function createTestServer(pool: FakeOpsPool, opsCollectors: OpsCollectors, acces
       cloudflareAccess: {
         enabled: accessEnabled,
         issuer: "https://frank.cloudflareaccess.com",
-        audience: "test-aud"
+        audiences: ["test-aud"]
       },
       openrouterApiKey: undefined,
       logLevel: "silent"
@@ -194,7 +257,8 @@ function createPartialCollectors(): OpsCollectors {
         available: true,
         data: {
           branch: "stage2-api-control-plane",
-          commit: "caa809e"
+          commit: "caa809e",
+          appVersion: "0.1.0"
         }
       },
       lastDeploy: {

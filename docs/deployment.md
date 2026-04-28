@@ -38,6 +38,73 @@ cp -n .env.example .env
 Edit `.env` before using this for anything beyond first health verification.
 The file must stay on the VPS and must not be committed.
 
+## Normal Update After Main Is Current
+
+After Stage 2 is merged to `main`, normal VPS updates should deploy from
+`main` with a fast-forward pull:
+
+```bash
+cd /opt/frank-hub && git checkout main && git pull --ff-only && ./scripts/deploy.sh && ./scripts/healthcheck.sh
+```
+
+`scripts/deploy.sh` writes `runtime/deploy.json` before building containers.
+That file is safe deploy metadata for the Ops Console: current branch, current
+commit, deploy timestamp, schema version, and package version when available.
+It must not contain raw env values, tokens, secrets, or arbitrary command
+output.
+
+## Testing Branch Deploys
+
+Use branch deploys only for testing a known branch before it is merged:
+
+```bash
+cd /opt/frank-hub
+git fetch origin stage2-api-control-plane
+git checkout stage2-api-control-plane
+git pull --ff-only origin stage2-api-control-plane
+./scripts/deploy.sh
+./scripts/healthcheck.sh
+```
+
+After the branch is merged, switch the VPS back to the normal `main` update
+command above.
+
+## Merge Stage 2 To Main
+
+Before merging, confirm the deployed branch is healthy on the VPS:
+
+```bash
+cd /opt/frank-hub
+git branch --show-current
+git rev-parse --short HEAD
+./scripts/healthcheck.sh
+```
+
+The branch should be `stage2-api-control-plane`, and the healthcheck should
+pass. Then merge locally without rewriting history or force pushing:
+
+```bash
+git status --short
+git fetch origin
+git checkout stage2-api-control-plane
+git pull --ff-only origin stage2-api-control-plane
+git checkout main
+git pull --ff-only origin main
+git merge --ff-only stage2-api-control-plane
+git push origin main
+```
+
+If `git merge --ff-only stage2-api-control-plane` reports that a fast-forward
+is not possible, stop and inspect the divergence. If the histories are expected
+to diverge and the merge is clean, use a normal merge commit instead:
+
+```bash
+git merge --no-ff stage2-api-control-plane
+git push origin main
+```
+
+Do not force push and do not rewrite either branch history.
+
 ## HTTPS Token Fallback
 
 Use a fine-grained GitHub token only if deploy keys are blocked. The token must:

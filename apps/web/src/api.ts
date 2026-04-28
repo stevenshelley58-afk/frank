@@ -192,10 +192,12 @@ export interface OpsDeployData {
   git: CollectorResult<{
     branch: string;
     commit: string;
+    appVersion: string | null;
   }>;
   lastDeploy: CollectorResult<{
     deployedAt: string | null;
     source: string;
+    appVersion: string | null;
   }>;
 }
 

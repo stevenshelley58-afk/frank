@@ -1,14 +1,34 @@
 import { execFile } from "node:child_process";
-import { statfs } from "node:fs/promises";
+import { readFile, statfs } from "node:fs/promises";
 import os from "node:os";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import type { FastifyInstance, FastifyRequest } from "fastify";
+import { z } from "zod";
 import { recordAuditEvent } from "../audit.js";
 import type { PgPool } from "../db.js";
 
 const execFileAsync = promisify(execFile);
 const commandTimeoutMs = 2000;
 const commandMaxBuffer = 256 * 1024;
+const deployMetadataSource = "runtime/deploy.json";
+
+const optionalDeployMetadataString = z.preprocess((value) => {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmed = value.trim();
+  return trimmed || null;
+}, z.string().min(1).nullable().optional());
+
+const deployMetadataSchema = z.object({
+  schemaVersion: z.literal(1).optional(),
+  branch: optionalDeployMetadataString,
+  commit: optionalDeployMetadataString,
+  deployedAt: optionalDeployMetadataString,
+  appVersion: optionalDeployMetadataString
+});
 
 export type CollectorResult<T> =
   | {
@@ -71,10 +91,12 @@ export interface OpsDeploy {
   git: CollectorResult<{
     branch: string;
     commit: string;
+    appVersion: string | null;
   }>;
   lastDeploy: CollectorResult<{
     deployedAt: string | null;
     source: string;
+    appVersion: string | null;
   }>;
 }
 
@@ -221,26 +243,69 @@ async function collectDiskUsage(path: string): Promise<OpsSystem["disk"]> {
   }
 }
 
-async function collectDeploy(): Promise<OpsDeploy> {
-  const [branch, commit] = await Promise.all([
-    runAllowlistedCommand("git", ["rev-parse", "--abbrev-ref", "HEAD"]),
-    runAllowlistedCommand("git", ["rev-parse", "--short", "HEAD"])
-  ]);
+export async function collectDeploy(metadataPath = defaultDeployMetadataPath()): Promise<OpsDeploy> {
+  const metadata = await readDeployMetadata(metadataPath);
+  if (!metadata.available) {
+    return {
+      git: unavailable(metadata.message),
+      lastDeploy: unavailable(metadata.message)
+    };
+  }
 
+  const appVersion = metadata.data.appVersion ?? null;
   return {
     git:
-      branch.available && commit.available
+      metadata.data.branch && metadata.data.commit
         ? available({
-            branch: branch.data.stdout.trim(),
-            commit: commit.data.stdout.trim()
+            branch: metadata.data.branch,
+            commit: metadata.data.commit,
+            appVersion
           })
-        : unavailable("Git metadata unavailable in this runtime."),
-    lastDeploy: unavailable("Last deploy metadata is not recorded yet.")
+        : unavailable("Git metadata unavailable in deploy metadata."),
+    lastDeploy: metadata.data.deployedAt
+      ? available({
+          deployedAt: metadata.data.deployedAt,
+          source: deployMetadataSource,
+          appVersion
+        })
+      : unavailable("Deploy timestamp unavailable in deploy metadata.")
   };
 }
 
+async function readDeployMetadata(
+  metadataPath: string
+): Promise<CollectorResult<z.infer<typeof deployMetadataSchema>>> {
+  let rawMetadata: string;
+  try {
+    rawMetadata = await readFile(metadataPath, "utf8");
+  } catch (error) {
+    if (isMissingFileError(error)) {
+      return unavailable("Deploy metadata is not recorded yet.");
+    }
+    return unavailable(`Deploy metadata unavailable: ${errorMessage(error)}`);
+  }
+
+  let parsedMetadata: unknown;
+  try {
+    parsedMetadata = JSON.parse(rawMetadata);
+  } catch {
+    return unavailable("Deploy metadata is invalid.");
+  }
+
+  const result = deployMetadataSchema.safeParse(parsedMetadata);
+  if (!result.success) {
+    return unavailable("Deploy metadata is invalid.");
+  }
+
+  return available(result.data);
+}
+
+function defaultDeployMetadataPath(): string {
+  return join(process.cwd(), deployMetadataSource);
+}
+
 async function runAllowlistedCommand(
-  command: "docker" | "git" | "systemctl",
+  command: "docker" | "systemctl",
   args: readonly string[]
 ): Promise<CollectorResult<{ stdout: string }>> {
   try {
@@ -341,6 +406,10 @@ function unavailable<T>(message: string): CollectorResult<T> {
     data: null,
     message
   };
+}
+
+function isMissingFileError(error: unknown): boolean {
+  return typeof error === "object" && error !== null && "code" in error && error.code === "ENOENT";
 }
 
 function errorMessage(error: unknown): string {
