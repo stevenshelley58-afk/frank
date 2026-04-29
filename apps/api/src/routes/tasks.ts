@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import path from "node:path";
 import {
   TASK_EXECUTION_KINDS,
   TASK_STATES,
@@ -125,6 +127,19 @@ interface RunnerEventRow {
   message: string;
   raw_event: Record<string, unknown> | null;
   sequence: number;
+  created_at: Date | string;
+}
+
+interface RunnerArtifactRow {
+  id: string;
+  task_id: string | null;
+  runner_session_id: string | null;
+  artifact_type: string;
+  name: string;
+  storage_path: string;
+  content_type: string;
+  size_bytes: number;
+  metadata: Record<string, unknown>;
   created_at: Date | string;
 }
 
@@ -782,14 +797,88 @@ export function registerTaskRoutes(server: FastifyInstance, pool: PgPool, config
     };
   });
 
+  server.get("/v1/tasks/:id/logs", async (request, reply) => {
+    const params = uuidParamSchema.safeParse(request.params);
+    if (!params.success) {
+      return sendValidationError(reply, params.error);
+    }
+    const query = runnerEventsQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return sendValidationError(reply, query.error);
+    }
+
+    const events = await listTaskRunnerEvents(pool, params.data.id, query.data.after_sequence, query.data.limit);
+    const lastSequence = events.at(-1)?.sequence ?? query.data.after_sequence;
+    return {
+      logs: events.map((event) => ({
+        sequence: event.sequence,
+        severity: event.severity,
+        source: event.source,
+        message: event.message,
+        eventType: event.event_type,
+        createdAt: serializeTimestamp(event.created_at)
+      })),
+      events: events.map(serializeRunnerEvent),
+      last_sequence: lastSequence,
+      next_cursor: lastSequence
+    };
+  });
+
   server.get("/v1/tasks/:id/artifacts", async (request, reply) => {
     const params = uuidParamSchema.safeParse(request.params);
     if (!params.success) {
       return sendValidationError(reply, params.error);
     }
+    const result = await pool.query<RunnerArtifactRow>(
+      `
+        select ${runnerArtifactSelectColumns}
+        from runner_artifacts
+        where task_id = $1
+        order by created_at desc
+      `,
+      [params.data.id]
+    );
     return {
-      artifacts: []
+      artifacts: result.rows.map(serializeRunnerArtifact)
     };
+  });
+
+  server.get("/v1/artifacts/:id", async (request, reply) => {
+    const params = uuidParamSchema.safeParse(request.params);
+    if (!params.success) {
+      return sendValidationError(reply, params.error);
+    }
+
+    const result = await pool.query<RunnerArtifactRow>(
+      `
+        select ${runnerArtifactSelectColumns}
+        from runner_artifacts
+        where id = $1
+      `,
+      [params.data.id]
+    );
+    const artifact = result.rows[0];
+    if (!artifact) {
+      return reply.code(404).send({
+        error: "artifact_not_found",
+        message: "Artifact not found."
+      });
+    }
+
+    const artifactPath = path.resolve(artifact.storage_path);
+    const artifactRoot = path.resolve(config.hermes.artifactRoot);
+    if (!artifactPath.startsWith(`${artifactRoot}${path.sep}`) && artifactPath !== artifactRoot) {
+      return reply.code(403).send({
+        error: "artifact_path_denied",
+        message: "Artifact path is outside the configured artifact root."
+      });
+    }
+
+    const content = await readFile(artifactPath);
+    return reply
+      .header("Content-Type", artifact.content_type)
+      .header("Content-Disposition", `attachment; filename="${safeDownloadName(artifact.name)}"`)
+      .send(content);
   });
 }
 
@@ -848,6 +937,19 @@ const runnerEventSelectColumns = `
   message,
   raw_event,
   sequence,
+  created_at
+`;
+
+const runnerArtifactSelectColumns = `
+  id,
+  task_id,
+  runner_session_id,
+  artifact_type,
+  name,
+  storage_path,
+  content_type,
+  size_bytes,
+  metadata,
   created_at
 `;
 
@@ -951,6 +1053,26 @@ async function findActiveHermesSession(db: Queryable, taskId: string): Promise<R
     [taskId]
   );
   return result.rows[0];
+}
+
+async function listTaskRunnerEvents(
+  db: Queryable,
+  taskId: string,
+  afterSequence: number,
+  limit: number
+): Promise<RunnerEventRow[]> {
+  const result = await db.query<RunnerEventRow>(
+    `
+      select ${runnerEventSelectColumns}
+      from runner_events
+      where task_id = $1
+        and sequence > $2
+      order by sequence asc
+      limit $3
+    `,
+    [taskId, afterSequence, limit]
+  );
+  return result.rows;
 }
 
 async function ensureHermesRunner(db: Queryable): Promise<void> {
@@ -1119,6 +1241,21 @@ function serializeRunnerEvent(row: RunnerEventRow) {
   };
 }
 
+function serializeRunnerArtifact(row: RunnerArtifactRow) {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    runnerSessionId: row.runner_session_id,
+    artifactType: row.artifact_type,
+    name: row.name,
+    contentType: row.content_type,
+    sizeBytes: Number(row.size_bytes),
+    metadata: row.metadata,
+    createdAt: serializeTimestamp(row.created_at),
+    downloadPath: `/v1/artifacts/${row.id}`
+  };
+}
+
 function normalizeWorkspacePath(path: string): { ok: true; path: string } | { ok: false; message: string } {
   if (path === "/" || path === "/root") {
     return {
@@ -1141,4 +1278,9 @@ function serializeNullableTimestamp(value: Date | string | null): string | null 
     return null;
   }
   return serializeTimestamp(value);
+}
+
+function safeDownloadName(name: string): string {
+  const cleaned = name.replace(/[^a-z0-9._-]+/gi, "-").replace(/^-+|-+$/g, "");
+  return cleaned || "artifact";
 }

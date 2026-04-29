@@ -1,3 +1,6 @@
+import { randomUUID } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 import { createHermesRunnerAdapter, type HermesRunnerConfig, type RunnerEvent } from "@frank/hermes-runner";
 import { z } from "zod";
 import type { TaskWorkerContext, WorkerPool, WorkerQueryable } from "./task-worker.js";
@@ -126,6 +129,7 @@ export function createHermesExecutionHandler(pool: WorkerPool, config: HermesRun
       errorSummary: null,
       finalOutput: finalOutput || "Hermes completed without a final text response."
     });
+    await persistFinalOutputArtifact(pool, config, task.id, session.id, finalOutput || "Hermes completed without a final text response.");
   };
 }
 
@@ -281,6 +285,47 @@ async function markRunnerSessionTerminal(
       where id = $1
     `,
     [sessionId, status, result.errorSummary, result.finalOutput]
+  );
+}
+
+async function persistFinalOutputArtifact(
+  pool: WorkerPool,
+  config: HermesRunnerConfig,
+  taskId: string,
+  runnerSessionId: string,
+  finalOutput: string
+): Promise<void> {
+  const artifactId = randomUUID();
+  const artifactDir = path.join(config.artifactRoot, taskId);
+  const artifactPath = path.join(artifactDir, `${artifactId}.md`);
+  await mkdir(artifactDir, { recursive: true });
+  await writeFile(artifactPath, finalOutput, "utf8");
+  await pool.query(
+    `
+      insert into runner_artifacts (
+        id,
+        task_id,
+        runner_session_id,
+        artifact_type,
+        name,
+        storage_path,
+        content_type,
+        size_bytes,
+        metadata
+      )
+      values ($1, $2, $3, 'final_report', 'Hermes final report', $4, 'text/markdown; charset=utf-8', $5, $6::jsonb)
+    `,
+    [
+      artifactId,
+      taskId,
+      runnerSessionId,
+      artifactPath,
+      Buffer.byteLength(finalOutput, "utf8"),
+      JSON.stringify({
+        generatedBy: "hermes_operator",
+        source: "final_output"
+      })
+    ]
   );
 }
 

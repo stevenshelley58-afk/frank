@@ -1,3 +1,6 @@
+import { mkdtemp, readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createHermesExecutionHandler, loadHermesWorkerConfig } from "../src/hermes-executor.js";
 import type { QueryResult, WorkerClient, WorkerPool } from "../src/task-worker.js";
@@ -33,6 +36,7 @@ describe("Hermes task execution handler", () => {
       return jsonResponse({ error: "not_found" }, 404);
     });
     vi.stubGlobal("fetch", fetchMock);
+    const artifactRoot = await mkdtemp(path.join(tmpdir(), "frank-hermes-artifacts-"));
 
     const pool = new FakeHermesWorkerPool();
     pool.tasks.set("task-1", {
@@ -51,7 +55,7 @@ describe("Hermes task execution handler", () => {
         HERMES_API_BASE_URL: "http://hermes:8642",
         HERMES_API_SERVER_KEY: "secret-test-key",
         HERMES_WORKSPACE_ROOT: "/opt/frank-hub/workspaces",
-        HERMES_ARTIFACT_ROOT: "/opt/frank-hub/runtime/artifacts"
+        HERMES_ARTIFACT_ROOT: artifactRoot
       })
     );
 
@@ -80,6 +84,15 @@ describe("Hermes task execution handler", () => {
       "hermes.message.delta",
       "hermes.run.completed"
     ]);
+    expect(pool.artifacts).toEqual([
+      expect.objectContaining({
+        task_id: "task-1",
+        runner_session_id: "runner-session-1",
+        artifact_type: "final_report",
+        name: "Hermes final report"
+      })
+    ]);
+    await expect(readFile(pool.artifacts[0]!.storage_path, "utf8")).resolves.toBe("done");
     expect(JSON.stringify(pool.runnerEvents)).not.toContain("secret-test-key");
   });
 });
@@ -121,11 +134,24 @@ interface TaskEventRecord {
   metadata: Record<string, unknown>;
 }
 
+interface ArtifactRecord {
+  id: string;
+  task_id: string;
+  runner_session_id: string;
+  artifact_type: string;
+  name: string;
+  storage_path: string;
+  content_type: string;
+  size_bytes: number;
+  metadata: Record<string, unknown>;
+}
+
 class FakeHermesWorkerPool implements WorkerPool {
   readonly tasks = new Map<string, TaskRecord>();
   readonly runnerSessions: RunnerSessionRecord[] = [];
   readonly runnerEvents: RunnerEventRecord[] = [];
   readonly taskEvents: TaskEventRecord[] = [];
+  readonly artifacts: ArtifactRecord[] = [];
   private idCounter = 1;
 
   async connect(): Promise<WorkerClient> {
@@ -209,6 +235,21 @@ class FakeHermesWorkerPool implements WorkerPool {
         severity: values[2] as string,
         message: values[3] as string,
         metadata: parseJson(values[4])
+      });
+      return rows([]);
+    }
+
+    if (normalized.startsWith("insert into runner_artifacts")) {
+      this.artifacts.push({
+        id: values[0] as string,
+        task_id: values[1] as string,
+        runner_session_id: values[2] as string,
+        artifact_type: "final_report",
+        name: "Hermes final report",
+        storage_path: values[3] as string,
+        content_type: "text/markdown; charset=utf-8",
+        size_bytes: values[4] as number,
+        metadata: parseJson(values[5]) ?? {}
       });
       return rows([]);
     }

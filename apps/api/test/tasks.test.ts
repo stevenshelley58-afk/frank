@@ -1,3 +1,6 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildServer } from "../src/server.js";
@@ -282,6 +285,82 @@ describe("task API routes", () => {
       ])
     );
   });
+
+  it("lists Hermes logs and serves protected artifacts from the configured artifact root", async () => {
+    const artifactRoot = await mkdtemp(path.join(tmpdir(), "frank-artifacts-api-"));
+    const pool = new FakeTaskPool();
+    const { server } = createTestServer(pool, false, {
+      artifactRoot
+    });
+    const created = (
+      await server.inject({
+        method: "POST",
+        url: "/v1/tasks",
+        payload: {
+          title: "Artifact task"
+        }
+      })
+    ).json().task;
+
+    await server.inject({
+      method: "POST",
+      url: `/v1/tasks/${created.id}/run-hermes`,
+      payload: {}
+    });
+
+    const logs = await server.inject({
+      method: "GET",
+      url: `/v1/tasks/${created.id}/logs?after_sequence=0&limit=10`
+    });
+    expect(logs.statusCode).toBe(200);
+    expect(logs.json()).toMatchObject({
+      last_sequence: 1,
+      logs: [
+        {
+          sequence: 1,
+          eventType: "task.hermes_queued"
+        }
+      ]
+    });
+
+    const artifactId = "00000000-0000-4000-8000-000000009999";
+    const artifactDir = path.join(artifactRoot, created.id);
+    const artifactPath = path.join(artifactDir, "final.md");
+    await mkdir(artifactDir, { recursive: true });
+    await writeFile(artifactPath, "artifact body", "utf8");
+    pool.runnerArtifacts.push({
+      id: artifactId,
+      task_id: created.id,
+      runner_session_id: pool.runnerSessions[0]!.id,
+      artifact_type: "final_report",
+      name: "Hermes final report",
+      storage_path: artifactPath,
+      content_type: "text/markdown; charset=utf-8",
+      size_bytes: 13,
+      metadata: {},
+      created_at: new Date(Date.UTC(2026, 3, 29, 0, 0, 1)).toISOString()
+    });
+
+    const artifacts = await server.inject({
+      method: "GET",
+      url: `/v1/tasks/${created.id}/artifacts`
+    });
+    expect(artifacts.statusCode).toBe(200);
+    expect(artifacts.json().artifacts).toEqual([
+      expect.objectContaining({
+        id: artifactId,
+        artifactType: "final_report",
+        downloadPath: `/v1/artifacts/${artifactId}`
+      })
+    ]);
+
+    const download = await server.inject({
+      method: "GET",
+      url: `/v1/artifacts/${artifactId}`
+    });
+    expect(download.statusCode).toBe(200);
+    expect(download.body).toBe("artifact body");
+  });
 });
 
 async function expectPatchState(server: FastifyInstance, id: string, state: TaskState): Promise<void> {
@@ -296,7 +375,7 @@ async function expectPatchState(server: FastifyInstance, id: string, state: Task
   expect(response.json().task.state).toBe(state);
 }
 
-function createTestServer(pool: FakeTaskPool, accessEnabled = false) {
+function createTestServer(pool: FakeTaskPool, accessEnabled = false, hermes: Partial<ApiConfig["hermes"]> = {}) {
   const server = buildServer({
     config: {
       environment: "test",
@@ -322,7 +401,8 @@ function createTestServer(pool: FakeTaskPool, accessEnabled = false) {
         stallTimeoutSeconds: 300,
         eventsPollMs: 1000,
         workspaceRoot: "/opt/frank-hub/workspaces",
-        artifactRoot: "/opt/frank-hub/runtime/artifacts"
+        artifactRoot: "/opt/frank-hub/runtime/artifacts",
+        ...hermes
       },
       backups: {
         root: "/opt/frank-backups"
@@ -409,12 +489,26 @@ interface RunnerEventRecord {
   created_at: string;
 }
 
+interface RunnerArtifactRecord {
+  id: string;
+  task_id: string | null;
+  runner_session_id: string | null;
+  artifact_type: string;
+  name: string;
+  storage_path: string;
+  content_type: string;
+  size_bytes: number;
+  metadata: Record<string, unknown>;
+  created_at: string;
+}
+
 class FakeTaskPool {
   readonly tasks = new Map<string, TaskRecord>();
   readonly events: TaskEventRecord[] = [];
   readonly audits: AuditRecord[] = [];
   readonly runnerSessions: RunnerSessionRecord[] = [];
   readonly runnerEvents: RunnerEventRecord[] = [];
+  readonly runnerArtifacts: RunnerArtifactRecord[] = [];
   private idCounter = 1;
   private clock = 1;
 
@@ -552,6 +646,43 @@ class FakeTaskPool {
       };
       this.runnerEvents.push(event);
       return rows([event] as Row[]);
+    }
+
+    if (normalized.startsWith("select") && normalized.includes("from runner_events")) {
+      const taskId = values[0] as string;
+      const afterSequence = values[1] as number;
+      const limit = values[2] as number;
+      return rows(
+        this.runnerEvents
+          .filter((event) => event.task_id === taskId && event.sequence > afterSequence)
+          .sort((left, right) => left.sequence - right.sequence)
+          .slice(0, limit) as Row[]
+      );
+    }
+
+    if (normalized.startsWith("select") && normalized.includes("from runner_artifacts")) {
+      const firstValue = values[0] as string;
+      const artifacts = normalized.includes("where id = $1")
+        ? this.runnerArtifacts.filter((artifact) => artifact.id === firstValue)
+        : this.runnerArtifacts.filter((artifact) => artifact.task_id === firstValue);
+      return rows(artifacts as Row[]);
+    }
+
+    if (normalized.startsWith("insert into runner_artifacts")) {
+      const artifact: RunnerArtifactRecord = {
+        id: values[0] as string,
+        task_id: values[1] as string,
+        runner_session_id: values[2] as string,
+        artifact_type: "final_report",
+        name: "Hermes final report",
+        storage_path: values[3] as string,
+        content_type: "text/markdown; charset=utf-8",
+        size_bytes: values[4] as number,
+        metadata: parseJson(values[5]),
+        created_at: this.now()
+      };
+      this.runnerArtifacts.push(artifact);
+      return rows([artifact] as Row[]);
     }
 
     if (normalized.startsWith("select") && normalized.includes("from tasks")) {
