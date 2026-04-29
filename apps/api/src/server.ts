@@ -10,8 +10,10 @@ import { checkRedis, type RedisClient } from "./redis.js";
 import { requireCloudflareAccess } from "./access.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerAuditLogRoutes } from "./routes/audit-log.js";
+import { registerBackupRoutes } from "./routes/backups.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerOpsRoutes, type OpsCollectors } from "./routes/ops.js";
+import { registerRunnerRoutes } from "./routes/runners.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 
 export interface ServerDependencies {
@@ -125,11 +127,13 @@ export function buildServer({ config, pool, redis, opsCollectors }: ServerDepend
     return { ok: true };
   });
 
-  registerTaskRoutes(server, pool);
+  registerTaskRoutes(server, pool, config);
   registerAgentRoutes(server, pool);
   registerModelRoutes(server, pool, config);
   registerAuditLogRoutes(server, pool);
   registerOpsRoutes(server, pool, opsCollectors);
+  registerRunnerRoutes(server, pool, config);
+  registerBackupRoutes(server, pool, config);
 
   return server;
 }

@@ -14,6 +14,7 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
+    "@frank/hermes-runner": "workspace:*",
     "@frank/model-sdk": "workspace:*",
     "@frank/shared": "workspace:*",
     "ioredis": "^5.4.2",

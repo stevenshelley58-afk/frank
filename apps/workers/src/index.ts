@@ -1,6 +1,7 @@
 import { Redis } from "ioredis";
 import pg from "pg";
 import { z } from "zod";
+import { createHermesExecutionHandler, loadHermesWorkerConfig } from "./hermes-executor.js";
 import { loadTaskWorkerConfig, startTaskWorker, type RunningTaskWorker } from "./task-worker.js";
 
 const { Pool } = pg;
@@ -14,6 +15,7 @@ const envSchema = z.object({
 
 const config = envSchema.parse(process.env);
 const taskWorkerConfig = loadTaskWorkerConfig(process.env);
+const hermesConfig = loadHermesWorkerConfig(process.env);
 const pool = new Pool({ connectionString: config.DATABASE_URL });
 const redis = new Redis(config.REDIS_URL, {
   lazyConnect: true,
@@ -33,12 +35,17 @@ async function main() {
     pollIntervalMs: taskWorkerConfig.pollIntervalMs,
     leaseSeconds: taskWorkerConfig.leaseSeconds,
     batchSize: taskWorkerConfig.batchSize,
-    executionEnabled: "manual_lifecycle_only",
-    externalCallsEnabled: false
+    executionEnabled: hermesConfig.enabled ? "manual_lifecycle_and_hermes_operator" : "manual_lifecycle_only",
+    externalCallsEnabled: hermesConfig.enabled
   });
 
-  runningWorker = startTaskWorker(pool, taskWorkerConfig, { logger: console });
-  console.log("Frank worker started. Task worker core is polling queued manual lifecycle tasks.");
+  runningWorker = startTaskWorker(pool, taskWorkerConfig, {
+    logger: console,
+    executionHandlers: {
+      hermes_operator: createHermesExecutionHandler(pool, hermesConfig)
+    }
+  });
+  console.log("Frank worker started. Task worker is polling queued manual and Hermes tasks.");
 }
 
 async function waitForPostgres(attempts = 30): Promise<void> {

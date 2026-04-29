@@ -172,6 +172,31 @@ describe("Stage 3 task execution migration", () => {
   });
 });
 
+describe("Stage 4 Hermes runner migration", () => {
+  it("adds runner persistence, active-session uniqueness, backups, and kill-switch tables", async () => {
+    const runnerSql = await readMigration("007_stage4_hermes_runner.sql");
+
+    for (const table of [
+      "runners",
+      "runner_sessions",
+      "runner_events",
+      "runner_artifacts",
+      "runner_stop_requests",
+      "backup_runs",
+      "kill_switch_events"
+    ]) {
+      expect(runnerSql).toContain(`create table if not exists ${table}`);
+    }
+
+    expect(runnerSql).toContain("runner_sessions_one_active_hermes_per_task_idx");
+    expect(runnerSql).toContain("status in ('queued', 'starting', 'running', 'stopping')");
+    expect(runnerSql).toContain("runner_events_session_sequence_idx");
+    expect(runnerSql).toContain("sequence bigint not null");
+    expect(runnerSql).toContain("workspace_path <> '/' and workspace_path <> '/root'");
+    expect(runnerSql).toContain("values ('hermes', 'hermes', 'Hermes Operator'");
+  });
+});
+
 class FakeMigrationPool implements MigrationPool {
   readonly columns = new Set<string>();
   readonly applied = new Map<string, string | null>();

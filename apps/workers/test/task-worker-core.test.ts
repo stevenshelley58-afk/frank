@@ -176,6 +176,33 @@ describe("task worker core", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("dispatches hermes_operator tasks to the registered execution handler", async () => {
+    const hermesExecutor = vi.fn(async () => undefined);
+    const db = new FakeWorkerPool();
+    db.addAgent("ops");
+    db.addTask({ id: "task-1", executionKind: "hermes_operator", assignedAgentId: "ops" });
+
+    const result = await runWorkerTick(db, workerConfig, {
+      executionHandlers: {
+        hermes_operator: hermesExecutor
+      }
+    });
+
+    expect(result.claim).toEqual({
+      status: "completed",
+      taskId: "task-1",
+      sessionId: "session-1"
+    });
+    expect(hermesExecutor).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "task-1",
+        agentId: "ops",
+        executionKind: "hermes_operator"
+      })
+    );
+    expect(db.tasks.get("task-1")?.state).toBe("completed");
+  });
+
   it("marks worker failures as failed with sanitized errors", async () => {
     const db = new FakeWorkerPool();
     db.addAgent("frank");

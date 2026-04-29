@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { hostname } from "node:os";
 import { z } from "zod";
 
-const allowedExecutionKind = "manual_lifecycle";
+const allowedExecutionKinds = ["manual_lifecycle", "hermes_operator"] as const;
 const maxSafeStringLength = 500;
 const maxExpiredLeasesPerTick = 10;
 
@@ -45,10 +45,12 @@ export interface TaskWorkerContext {
   sessionId: string;
   workerId: string;
   attempt: number;
+  executionKind: string;
 }
 
 export interface RunWorkerTickOptions {
   manualLifecycleExecutor?: (context: TaskWorkerContext) => Promise<void>;
+  executionHandlers?: Record<string, (context: TaskWorkerContext) => Promise<void>>;
 }
 
 export interface RunWorkerTickResult {
@@ -115,6 +117,7 @@ interface ClaimedTask {
   sessionId: string;
   leaseToken: string;
   attempt: number;
+  executionKind: string;
 }
 
 type ClaimNextTaskResult =
@@ -201,12 +204,21 @@ export async function processClaimedTask(
 ): Promise<RunWorkerTickResult["claim"]> {
   try {
     await startClaimedTask(pool, config, claimed);
-    await (options.manualLifecycleExecutor ?? defaultManualLifecycleExecutor)({
+    const executor =
+      claimed.executionKind === "manual_lifecycle"
+        ? options.manualLifecycleExecutor ?? defaultManualLifecycleExecutor
+        : options.executionHandlers?.[claimed.executionKind];
+    if (!executor) {
+      throw new Error(`No worker executor registered for execution_kind ${claimed.executionKind}.`);
+    }
+
+    await executor({
       taskId: claimed.taskId,
       agentId: claimed.agentId,
       sessionId: claimed.sessionId,
       workerId: config.workerId,
-      attempt: claimed.attempt
+      attempt: claimed.attempt,
+      executionKind: claimed.executionKind
     });
     await completeClaimedTask(pool, config, claimed);
     return {
@@ -411,10 +423,10 @@ async function getBlockReason(client: WorkerClient, task: TaskRow): Promise<Bloc
     };
   }
 
-  if (task.execution_kind !== allowedExecutionKind) {
+  if (!allowedExecutionKinds.includes(task.execution_kind as (typeof allowedExecutionKinds)[number])) {
     return {
       code: "unsupported_execution_kind",
-      message: "Task blocked because execution_kind is not supported by the Stage 3 worker core."
+      message: "Task blocked because execution_kind is not supported by the worker."
     };
   }
 
@@ -557,7 +569,8 @@ async function createTaskLease(client: WorkerClient, task: TaskRow, config: Task
     agentId: task.assigned_agent_id,
     sessionId: createdSession.id,
     leaseToken,
-    attempt
+    attempt,
+    executionKind: task.execution_kind ?? "manual_lifecycle"
   };
 }
 
@@ -639,7 +652,7 @@ async function startClaimedTask(pool: WorkerPool, config: TaskWorkerConfig, clai
       workerId: config.workerId,
       sessionId: claimed.sessionId,
       agentId: claimed.agentId,
-      executionKind: allowedExecutionKind,
+      executionKind: claimed.executionKind,
       attempt: claimed.attempt
     });
 
@@ -650,7 +663,7 @@ async function startClaimedTask(pool: WorkerPool, config: TaskWorkerConfig, clai
       fromState: "queued",
       toState: "running",
       severity: "info",
-      message: "Worker started manual lifecycle task.",
+      message: `Worker started ${claimed.executionKind} task.`,
       metadata
     });
 
@@ -709,6 +722,7 @@ async function completeClaimedTask(pool: WorkerPool, config: TaskWorkerConfig, c
         claimed.sessionId,
         JSON.stringify({
           endedBy: "manual_lifecycle",
+          executionKind: claimed.executionKind,
           workerId: config.workerId
         })
       ]
@@ -718,7 +732,7 @@ async function completeClaimedTask(pool: WorkerPool, config: TaskWorkerConfig, c
       workerId: config.workerId,
       sessionId: claimed.sessionId,
       agentId: claimed.agentId,
-      executionKind: allowedExecutionKind,
+      executionKind: claimed.executionKind,
       attempt: claimed.attempt
     });
 
@@ -729,7 +743,7 @@ async function completeClaimedTask(pool: WorkerPool, config: TaskWorkerConfig, c
       fromState: "running",
       toState: "completed",
       severity: "info",
-      message: "Worker completed manual lifecycle task.",
+      message: `Worker completed ${claimed.executionKind} task.`,
       metadata
     });
 
@@ -801,7 +815,7 @@ async function failClaimedTask(
       workerId: config.workerId,
       sessionId: claimed.sessionId,
       agentId: claimed.agentId,
-      executionKind: allowedExecutionKind,
+      executionKind: claimed.executionKind,
       attempt: claimed.attempt,
       error: sanitizedError
     });

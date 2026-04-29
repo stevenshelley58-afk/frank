@@ -6,3 +6,12 @@ coverage
 .env
 .env.*
 *.log
+runtime/hermes
+runtime/artifacts
+runtime/backups
+workspaces
+backups
+*.dump
+*.sql.gz
+*.tar.gz
+*.tgz

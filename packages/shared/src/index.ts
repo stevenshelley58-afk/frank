@@ -60,6 +60,16 @@ export const TASK_STATES = [
 
 export type TaskState = (typeof TASK_STATES)[number];
 
+export const TASK_EXECUTION_KINDS = [
+  "manual_lifecycle",
+  "hermes_operator",
+  "hermes_coding",
+  "hermes_research",
+  "hermes_ops"
+] as const;
+
+export type TaskExecutionKind = (typeof TASK_EXECUTION_KINDS)[number];
+
 export const AGENT_PERMISSION_LEVELS = ["denied", "auto", "auto_review", "manual"] as const;
 
 export type AgentPermissionLevel = (typeof AGENT_PERMISSION_LEVELS)[number];
