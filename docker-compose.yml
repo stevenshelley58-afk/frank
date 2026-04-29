@@ -31,7 +31,8 @@ services:
       context: .
       target: migrate
     env_file:
-      - .env
+      - path: .env
+        required: false
     depends_on:
       postgres:
         condition: service_healthy
@@ -43,7 +44,10 @@ services:
       target: api
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
+    volumes:
+      - ${FRANK_BACKUP_ROOT:-/opt/frank-backups}:/opt/frank-backups
     ports:
       - "127.0.0.1:${API_PORT:-8080}:8080"
     depends_on:
@@ -76,7 +80,8 @@ services:
       target: worker
     restart: unless-stopped
     env_file:
-      - .env
+      - path: .env
+        required: false
     depends_on:
       postgres:
         condition: service_healthy
