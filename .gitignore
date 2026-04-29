@@ -7,6 +7,15 @@ dist/
 .turbo/
 coverage/
 runtime/deploy.json
+runtime/hermes/
+runtime/artifacts/
+runtime/backups/
+workspaces/
+backups/
+*.dump
+*.sql.gz
+*.tar.gz
+*.tgz
 
 # Environment and secrets
 .env
