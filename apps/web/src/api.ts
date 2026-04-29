@@ -38,6 +38,7 @@ export interface Task {
   priority: number;
   createdBy: string | null;
   assignedAgentId: string | null;
+  executionKind: string | null;
   metadata: JsonRecord;
   createdAt: string;
   updatedAt: string;
@@ -167,6 +168,129 @@ export interface HermesInstallCheckResponse {
   ok: boolean;
   status: HermesRunnerStatus;
   setupHints: string[];
+}
+
+export interface RunnerSession {
+  id: string;
+  taskId: string | null;
+  runnerId: string;
+  hermesRunId: string | null;
+  conversationId: string | null;
+  workspacePath: string | null;
+  status: "queued" | "starting" | "running" | "stopping" | "completed" | "failed" | "cancelled" | "blocked";
+  startedAt: string | null;
+  finishedAt: string | null;
+  lastEventAt: string | null;
+  exitCode: number | null;
+  errorSummary: string | null;
+  finalOutput: string | null;
+  metadata: JsonRecord;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface RunnerEvent {
+  id: string;
+  runnerSessionId: string;
+  taskId: string | null;
+  source: "frank" | "hermes" | "system";
+  eventType: string;
+  severity: "info" | "warning" | "error" | "success";
+  message: string;
+  rawEvent: JsonRecord | null;
+  sequence: number;
+  createdAt: string;
+}
+
+export interface RunnerLogEntry {
+  sequence: number;
+  severity: RunnerEvent["severity"];
+  source: RunnerEvent["source"];
+  message: string;
+  eventType: string;
+  createdAt: string;
+}
+
+export interface RunnerArtifact {
+  id: string;
+  taskId: string;
+  runnerSessionId: string;
+  artifactType: string;
+  name: string;
+  contentType: string;
+  sizeBytes: number;
+  metadata: JsonRecord;
+  createdAt: string;
+  downloadPath: string;
+}
+
+export interface RunHermesResponse {
+  task: Task;
+  session: RunnerSession;
+  reused: boolean;
+}
+
+export interface StopHermesResponse {
+  task: Task;
+  session: RunnerSession;
+  stopResult: {
+    stopped: boolean;
+    method: "api" | "process" | "container" | "frank_only" | "unavailable";
+    message: string;
+  };
+}
+
+export interface RunnerEventsResponse {
+  events: RunnerEvent[];
+  last_sequence: number;
+  next_cursor: number;
+}
+
+export interface TaskLogsResponse extends RunnerEventsResponse {
+  logs: RunnerLogEntry[];
+}
+
+export interface TaskArtifactsResponse {
+  artifacts: RunnerArtifact[];
+}
+
+export interface BackupRun {
+  id: string;
+  backupType: "postgres" | "files" | "preflight";
+  status: "running" | "completed" | "failed";
+  path: string | null;
+  sizeBytes: number | null;
+  branch: string | null;
+  commit: string | null;
+  metadata: JsonRecord;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface BackupPreflightResponse {
+  backup: BackupRun;
+  status: JsonRecord;
+}
+
+export interface BackupStatusResponse {
+  backups: BackupRun[];
+  backupRoot: string;
+}
+
+export interface BackupRunResponse {
+  backup: BackupRun;
+}
+
+export interface KillSwitchResponse {
+  scope: "hermes";
+  affectedSessions: Array<{
+    sessionId: string;
+    taskId: string | null;
+    stopped: boolean;
+    method: string;
+    message: string;
+  }>;
+  outcome: "success" | "partial";
 }
 
 export type CollectorResult<T> =
@@ -319,6 +443,7 @@ export async function createTask(body: {
   description?: string | null;
   priority?: number;
   assignedAgentId?: string | null;
+  executionKind?: string | null;
   metadata?: JsonRecord;
 }): Promise<Task> {
   const data = await apiRequest<{ task: Task }>("/v1/tasks", { method: "POST", body });
@@ -332,7 +457,9 @@ export async function getTask(id: string, options?: { signal?: AbortSignal }): P
 
 export async function updateTask(
   id: string,
-  body: Partial<Pick<Task, "title" | "description" | "state" | "priority" | "assignedAgentId" | "metadata">> & {
+  body: Partial<
+    Pick<Task, "title" | "description" | "state" | "priority" | "assignedAgentId" | "executionKind" | "metadata">
+  > & {
     reopened?: true | undefined;
   }
 ): Promise<Task> {
@@ -458,6 +585,133 @@ export async function runHermesInstallCheck(): Promise<HermesInstallCheckRespons
   return apiRequest<HermesInstallCheckResponse>("/v1/runners/hermes/install-check", { method: "POST" });
 }
 
+export async function getHermesRunnerSession(
+  id: string,
+  options?: { signal?: AbortSignal }
+): Promise<RunnerSession> {
+  const data = await apiRequest<{ session: RunnerSession }>(`/v1/runners/hermes/sessions/${encodeURIComponent(id)}`, {
+    signal: options?.signal
+  });
+  return data.session;
+}
+
+export async function listHermesRunnerSessionEvents(
+  id: string,
+  query: { afterSequence?: number; limit?: number } = {},
+  options?: { signal?: AbortSignal }
+): Promise<RunnerEventsResponse> {
+  return apiRequest<RunnerEventsResponse>(`/v1/runners/hermes/sessions/${encodeURIComponent(id)}/events`, {
+    query: cursorQuery(query),
+    signal: options?.signal
+  });
+}
+
+export async function runHermesTestRun(): Promise<{ session: RunnerSession; result: unknown }> {
+  return apiRequest<{ session: RunnerSession; result: unknown }>("/v1/runners/hermes/test-run", { method: "POST" });
+}
+
+export async function stopHermesRunnerSession(
+  sessionId: string,
+  reason?: string
+): Promise<{ session: RunnerSession; stopResult: StopHermesResponse["stopResult"] }> {
+  return apiRequest<{ session: RunnerSession; stopResult: StopHermesResponse["stopResult"] }>(
+    `/v1/runners/hermes/stop/${encodeURIComponent(sessionId)}`,
+    {
+      method: "POST",
+      body: reason ? { reason } : {}
+    }
+  );
+}
+
+export async function runTaskWithHermes(
+  id: string,
+  body: { force?: boolean; workspacePath?: string | null; metadata?: JsonRecord } = {}
+): Promise<RunHermesResponse> {
+  return apiRequest<RunHermesResponse>(`/v1/tasks/${encodeURIComponent(id)}/run-hermes`, {
+    method: "POST",
+    body
+  });
+}
+
+export async function stopTaskHermes(id: string, reason?: string): Promise<StopHermesResponse> {
+  return apiRequest<StopHermesResponse>(`/v1/tasks/${encodeURIComponent(id)}/stop-hermes`, {
+    method: "POST",
+    body: reason ? { reason } : {}
+  });
+}
+
+export async function listTaskRunnerEvents(
+  id: string,
+  query: { afterSequence?: number; limit?: number } = {},
+  options?: { signal?: AbortSignal }
+): Promise<RunnerEventsResponse> {
+  return apiRequest<RunnerEventsResponse>(`/v1/tasks/${encodeURIComponent(id)}/runner-events`, {
+    query: cursorQuery(query),
+    signal: options?.signal
+  });
+}
+
+export async function listTaskLogs(
+  id: string,
+  query: { afterSequence?: number; limit?: number } = {},
+  options?: { signal?: AbortSignal }
+): Promise<TaskLogsResponse> {
+  return apiRequest<TaskLogsResponse>(`/v1/tasks/${encodeURIComponent(id)}/logs`, {
+    query: cursorQuery(query),
+    signal: options?.signal
+  });
+}
+
+export async function listTaskArtifacts(
+  id: string,
+  options?: { signal?: AbortSignal }
+): Promise<TaskArtifactsResponse> {
+  return apiRequest<TaskArtifactsResponse>(`/v1/tasks/${encodeURIComponent(id)}/artifacts`, {
+    signal: options?.signal
+  });
+}
+
+export function getArtifactDownloadUrl(downloadPath: string): string {
+  return `${apiBase}${downloadPath.startsWith("/") ? downloadPath : `/${downloadPath}`}`;
+}
+
+export async function runBackupPreflight(): Promise<BackupPreflightResponse> {
+  return apiRequest<BackupPreflightResponse>("/v1/backups/preflight", { method: "POST" });
+}
+
+export async function getBackupStatus(options?: { signal?: AbortSignal }): Promise<BackupStatusResponse> {
+  return apiRequest<BackupStatusResponse>("/v1/backups/status", { signal: options?.signal });
+}
+
+export async function listBackups(
+  query: { backupType?: BackupRun["backupType"]; limit?: number } = {},
+  options?: { signal?: AbortSignal }
+): Promise<BackupRun[]> {
+  const data = await apiRequest<{ backups: BackupRun[] }>("/v1/backups", {
+    query: {
+      backup_type: query.backupType,
+      limit: query.limit
+    },
+    signal: options?.signal
+  });
+  return data.backups;
+}
+
+export async function createPostgresBackup(): Promise<BackupRunResponse> {
+  return apiRequest<BackupRunResponse>("/v1/backups/postgres", { method: "POST" });
+}
+
+export async function createFilesBackup(): Promise<BackupRunResponse> {
+  return apiRequest<BackupRunResponse>("/v1/backups/files", { method: "POST" });
+}
+
+export async function runHermesKillSwitch(reason?: string): Promise<KillSwitchResponse> {
+  return apiRequest<KillSwitchResponse>("/v1/runners/hermes/kill-switch", {
+    method: "POST",
+    body: reason ? { reason } : {}
+  });
+}
+
 export async function getOpsStatus(options?: { signal?: AbortSignal }): Promise<OpsStatus> {
   return apiRequest<OpsStatus>("/v1/ops/status", { signal: options?.signal });
 }
@@ -488,6 +742,13 @@ function withQuery(path: string, query: ApiRequestOptions["query"]): string {
 
   const search = params.toString();
   return search ? `${path}?${search}` : path;
+}
+
+function cursorQuery(query: { afterSequence?: number; limit?: number }): Record<string, string | number | boolean | null | undefined> {
+  return {
+    after_sequence: query.afterSequence,
+    limit: query.limit
+  };
 }
 
 async function parseResponseBody(response: Response): Promise<unknown> {

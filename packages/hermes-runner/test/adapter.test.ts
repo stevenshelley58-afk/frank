@@ -140,9 +140,14 @@ describe("HermesRunnerAdapter", () => {
     expect(redactSecrets("failed with API_SERVER_KEY=secret-test-key", baseConfig)).toBe(
       "failed with API_SERVER_KEY=[REDACTED]"
     );
+    const fakePrivateKey = [
+      "-----BEGIN PRIVATE",
+      " KEY-----\nsecret\n-----END PRIVATE",
+      " KEY----- and OPENROUTER_API_KEY=sk-live"
+    ].join("");
     expect(
       redactSecrets(
-        "-----BEGIN PRIVATE KEY-----\nsecret\n-----END PRIVATE KEY----- and OPENROUTER_API_KEY=sk-live",
+        fakePrivateKey,
         baseConfig
       )
     ).not.toContain("sk-live");

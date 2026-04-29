@@ -1,5 +1,15 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { ApiClientError, apiRequest } from "./api.js";
+import {
+  ApiClientError,
+  apiRequest,
+  createFilesBackup,
+  getArtifactDownloadUrl,
+  listTaskLogs,
+  runBackupPreflight,
+  runHermesKillSwitch,
+  runTaskWithHermes,
+  stopTaskHermes
+} from "./api.js";
 
 describe("apiRequest", () => {
   afterEach(() => {
@@ -49,5 +59,71 @@ describe("apiRequest", () => {
     vi.stubGlobal("fetch", fetchMock);
 
     await expect(apiRequest("/v1/ops/status")).rejects.toThrow("Frank API returned HTTP 502");
+  });
+
+  it("wraps Hermes task, log, artifact, backup, and kill switch routes", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          task: { id: "task-1" },
+          session: { id: "session-1" },
+          logs: [],
+          events: [],
+          last_sequence: 0,
+          next_cursor: 0,
+          backup: { id: "backup-1" },
+          scope: "hermes",
+          affectedSessions: [],
+          outcome: "success"
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await runTaskWithHermes("task-1");
+    await stopTaskHermes("task-1", "operator stop");
+    await listTaskLogs("task-1", { afterSequence: 10, limit: 25 });
+    await runBackupPreflight();
+    await createFilesBackup();
+    await runHermesKillSwitch("stop all active Hermes runs");
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/tasks/task-1/run-hermes",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/tasks/task-1/stop-hermes",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ reason: "operator stop" })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/v1/tasks/task-1/logs?after_sequence=10&limit=25",
+      expect.objectContaining({ method: "GET" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      4,
+      "/api/v1/backups/preflight",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/v1/backups/files",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      6,
+      "/api/v1/runners/hermes/kill-switch",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ reason: "stop all active Hermes runs" })
+      })
+    );
+    expect(getArtifactDownloadUrl("/v1/artifacts/artifact-1")).toBe("/api/v1/artifacts/artifact-1");
   });
 });
