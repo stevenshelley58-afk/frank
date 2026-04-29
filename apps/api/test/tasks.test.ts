@@ -218,6 +218,70 @@ describe("task API routes", () => {
       ])
     );
   });
+
+  it("queues Hermes execution once and returns the active session on duplicate run requests", async () => {
+    const pool = new FakeTaskPool();
+    const { server } = createTestServer(pool);
+    const created = (
+      await server.inject({
+        method: "POST",
+        url: "/v1/tasks",
+        payload: {
+          title: "Hermes task",
+          description: "Run with Hermes"
+        }
+      })
+    ).json().task;
+
+    const firstRun = await server.inject({
+      method: "POST",
+      url: `/v1/tasks/${created.id}/run-hermes`,
+      payload: {}
+    });
+
+    expect(firstRun.statusCode).toBe(202);
+    expect(firstRun.json()).toMatchObject({
+      reused: false,
+      task: {
+        id: created.id,
+        state: "queued",
+        executionKind: "hermes_operator"
+      },
+      session: {
+        taskId: created.id,
+        status: "queued"
+      }
+    });
+
+    const secondRun = await server.inject({
+      method: "POST",
+      url: `/v1/tasks/${created.id}/run-hermes`,
+      payload: {}
+    });
+
+    expect(secondRun.statusCode).toBe(200);
+    expect(secondRun.json()).toMatchObject({
+      reused: true,
+      session: {
+        id: firstRun.json().session.id
+      }
+    });
+    expect(pool.runnerSessions).toHaveLength(1);
+    expect(pool.runnerEvents).toEqual([
+      expect.objectContaining({
+        event_type: "task.hermes_queued",
+        sequence: 1
+      })
+    ]);
+    expect(pool.audits).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: "task.run_hermes",
+          target_id: created.id
+        })
+      ])
+    );
+  });
 });
 
 async function expectPatchState(server: FastifyInstance, id: string, state: TaskState): Promise<void> {
@@ -285,6 +349,7 @@ interface TaskRecord {
   priority: number;
   created_by: string | null;
   assigned_agent_id: string | null;
+  execution_kind: string | null;
   metadata: Record<string, unknown>;
   created_at: string;
   updated_at: string;
@@ -312,10 +377,44 @@ interface AuditRecord {
   metadata: Record<string, unknown>;
 }
 
+interface RunnerSessionRecord {
+  id: string;
+  task_id: string | null;
+  runner_id: string;
+  hermes_run_id: string | null;
+  conversation_id: string | null;
+  workspace_path: string | null;
+  status: "queued" | "starting" | "running" | "stopping" | "completed" | "failed" | "cancelled" | "blocked";
+  started_at: string | null;
+  finished_at: string | null;
+  last_event_at: string | null;
+  exit_code: number | null;
+  error_summary: string | null;
+  final_output: string | null;
+  metadata: Record<string, unknown>;
+  created_at: string;
+  updated_at: string;
+}
+
+interface RunnerEventRecord {
+  id: string;
+  runner_session_id: string;
+  task_id: string | null;
+  source: "frank" | "hermes" | "system";
+  event_type: string;
+  severity: "info" | "warning" | "error" | "success";
+  message: string;
+  raw_event: Record<string, unknown> | null;
+  sequence: number;
+  created_at: string;
+}
+
 class FakeTaskPool {
   readonly tasks = new Map<string, TaskRecord>();
   readonly events: TaskEventRecord[] = [];
   readonly audits: AuditRecord[] = [];
+  readonly runnerSessions: RunnerSessionRecord[] = [];
+  readonly runnerEvents: RunnerEventRecord[] = [];
   private idCounter = 1;
   private clock = 1;
 
@@ -343,12 +442,34 @@ class FakeTaskPool {
         priority: values[2] as number,
         created_by: values[3] as string,
         assigned_agent_id: values[4] as string | null,
-        metadata: parseJson(values[5]),
+        execution_kind: values[5] as string | null,
+        metadata: parseJson(values[6]),
         created_at: this.now(),
         updated_at: this.now()
       };
       this.tasks.set(record.id, record);
       return rows([record] as Row[]);
+    }
+
+    if (normalized.startsWith("update tasks") && normalized.includes("execution_kind = 'hermes_operator'")) {
+      const id = values[0] as string;
+      const current = this.tasks.get(id);
+      if (!current) {
+        return rows([]);
+      }
+      const updated: TaskRecord = {
+        ...current,
+        state: "queued",
+        assigned_agent_id: current.assigned_agent_id ?? "ops",
+        execution_kind: "hermes_operator",
+        metadata: {
+          ...current.metadata,
+          ...parseJson(values[1])
+        },
+        updated_at: this.now()
+      };
+      this.tasks.set(id, updated);
+      return rows([updated] as Row[]);
     }
 
     if (normalized.startsWith("update tasks")) {
@@ -364,7 +485,8 @@ class FakeTaskPool {
         state: values[3] as TaskState,
         priority: values[4] as number,
         assigned_agent_id: values[5] as string | null,
-        metadata: parseJson(values[6]),
+        execution_kind: values[6] as string | null,
+        metadata: parseJson(values[7]),
         updated_at: this.now()
       };
       this.tasks.set(id, updated);
@@ -374,6 +496,62 @@ class FakeTaskPool {
     if (normalized.startsWith("select") && normalized.includes("from tasks") && normalized.includes("where id = $1")) {
       const task = this.tasks.get(values[0] as string);
       return rows((task ? [task] : []) as Row[]);
+    }
+
+    if (normalized.startsWith("select") && normalized.includes("from runner_sessions")) {
+      const taskId = values[0] as string;
+      const session = this.runnerSessions.find(
+        (candidate) =>
+          candidate.task_id === taskId &&
+          candidate.runner_id === "hermes" &&
+          ["queued", "starting", "running", "stopping"].includes(candidate.status)
+      );
+      return rows((session ? [session] : []) as Row[]);
+    }
+
+    if (normalized.startsWith("insert into runners")) {
+      return rows([]);
+    }
+
+    if (normalized.startsWith("insert into runner_sessions")) {
+      const session: RunnerSessionRecord = {
+        id: this.nextUuid(),
+        task_id: values[0] as string,
+        runner_id: "hermes",
+        hermes_run_id: null,
+        conversation_id: null,
+        workspace_path: values[1] as string,
+        status: "queued",
+        started_at: null,
+        finished_at: null,
+        last_event_at: null,
+        exit_code: null,
+        error_summary: null,
+        final_output: null,
+        metadata: parseJson(values[2]),
+        created_at: this.now(),
+        updated_at: this.now()
+      };
+      this.runnerSessions.push(session);
+      return rows([session] as Row[]);
+    }
+
+    if (normalized.startsWith("insert into runner_events")) {
+      const runnerSessionId = values[0] as string;
+      const event: RunnerEventRecord = {
+        id: this.nextUuid(),
+        runner_session_id: runnerSessionId,
+        task_id: values[1] as string | null,
+        source: values[2] as RunnerEventRecord["source"],
+        event_type: values[3] as string,
+        severity: values[4] as RunnerEventRecord["severity"],
+        message: values[5] as string,
+        raw_event: parseJson(values[6]) as Record<string, unknown> | null,
+        sequence: this.runnerEvents.filter((item) => item.runner_session_id === runnerSessionId).length + 1,
+        created_at: this.now()
+      };
+      this.runnerEvents.push(event);
+      return rows([event] as Row[]);
     }
 
     if (normalized.startsWith("select") && normalized.includes("from tasks")) {

@@ -126,7 +126,7 @@ export function buildServer({ config, pool, redis, opsCollectors }: ServerDepend
     return { ok: true };
   });
 
-  registerTaskRoutes(server, pool);
+  registerTaskRoutes(server, pool, config);
   registerAgentRoutes(server, pool);
   registerModelRoutes(server, pool, config);
   registerAuditLogRoutes(server, pool);

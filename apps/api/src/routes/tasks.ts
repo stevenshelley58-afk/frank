@@ -1,12 +1,21 @@
-import { TASK_STATES, validateTaskStateTransition, type TaskState } from "@frank/shared";
+import {
+  TASK_EXECUTION_KINDS,
+  TASK_STATES,
+  validateTaskStateTransition,
+  type TaskExecutionKind,
+  type TaskState
+} from "@frank/shared";
+import { createHermesRunnerAdapter } from "@frank/hermes-runner";
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { recordAuditEvent } from "../audit.js";
+import type { ApiConfig } from "../config.js";
 import type { PgPool } from "../db.js";
 
 const actorTypes = ["system", "user", "worker", "agent"] as const;
 
 const taskStateSchema = z.enum(TASK_STATES);
+const taskExecutionKindSchema = z.enum(TASK_EXECUTION_KINDS);
 const uuidParamSchema = z.object({
   id: z.string().uuid()
 });
@@ -19,6 +28,7 @@ const createTaskSchema = z
     description: z.string().nullable().optional(),
     priority: z.number().int().min(0).max(1000).optional(),
     assignedAgentId: z.string().trim().min(1).nullable().optional(),
+    executionKind: taskExecutionKindSchema.optional(),
     metadata: metadataSchema.optional()
   })
   .strict();
@@ -30,6 +40,7 @@ const patchTaskSchema = z
     state: taskStateSchema.optional(),
     priority: z.number().int().min(0).max(1000).optional(),
     assignedAgentId: z.string().trim().min(1).nullable().optional(),
+    executionKind: taskExecutionKindSchema.optional(),
     metadata: metadataSchema.optional(),
     reopened: z.literal(true).optional()
   })
@@ -52,6 +63,25 @@ const createTaskEventSchema = z
   })
   .strict();
 
+const runnerEventsQuerySchema = z.object({
+  after_sequence: z.coerce.number().int().min(0).default(0),
+  limit: z.coerce.number().int().min(1).max(500).default(100)
+});
+
+const runHermesSchema = z
+  .object({
+    force: z.boolean().optional(),
+    workspacePath: z.string().trim().min(1).nullable().optional(),
+    metadata: metadataSchema.optional()
+  })
+  .strict();
+
+const stopHermesSchema = z
+  .object({
+    reason: z.string().trim().min(1).max(1000).optional()
+  })
+  .strict();
+
 interface TaskRow {
   id: string;
   title: string;
@@ -60,9 +90,42 @@ interface TaskRow {
   priority: number;
   created_by: string | null;
   assigned_agent_id: string | null;
+  execution_kind: TaskExecutionKind | null;
   metadata: Record<string, unknown>;
   created_at: Date | string;
   updated_at: Date | string;
+}
+
+interface RunnerSessionRow {
+  id: string;
+  task_id: string | null;
+  runner_id: string;
+  hermes_run_id: string | null;
+  conversation_id: string | null;
+  workspace_path: string | null;
+  status: "queued" | "starting" | "running" | "stopping" | "completed" | "failed" | "cancelled" | "blocked";
+  started_at: Date | string | null;
+  finished_at: Date | string | null;
+  last_event_at: Date | string | null;
+  exit_code: number | null;
+  error_summary: string | null;
+  final_output: string | null;
+  metadata: Record<string, unknown>;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+interface RunnerEventRow {
+  id: string;
+  runner_session_id: string;
+  task_id: string | null;
+  source: "frank" | "hermes" | "system";
+  event_type: string;
+  severity: "info" | "warning" | "error" | "success";
+  message: string;
+  raw_event: Record<string, unknown> | null;
+  sequence: number;
+  created_at: Date | string;
 }
 
 interface TaskEventRow {
@@ -79,7 +142,7 @@ interface TaskEventRow {
 
 type TaskBodyPatch = z.infer<typeof patchTaskSchema>;
 
-export function registerTaskRoutes(server: FastifyInstance, pool: PgPool): void {
+export function registerTaskRoutes(server: FastifyInstance, pool: PgPool, config: ApiConfig): void {
   server.get("/v1/tasks", async (request, reply) => {
     const query = listTasksQuerySchema.safeParse(request.query);
     if (!query.success) {
@@ -133,9 +196,10 @@ export function registerTaskRoutes(server: FastifyInstance, pool: PgPool): void 
             priority,
             created_by,
             assigned_agent_id,
+            execution_kind,
             metadata
           )
-          values ($1, $2, 'draft', $3, $4, $5, $6::jsonb)
+          values ($1, $2, 'draft', $3, $4, $5, $6, $7::jsonb)
           returning ${taskSelectColumns}
         `,
         [
@@ -144,6 +208,7 @@ export function registerTaskRoutes(server: FastifyInstance, pool: PgPool): void 
           body.data.priority ?? 100,
           actorId,
           body.data.assignedAgentId ?? null,
+          body.data.executionKind ?? "manual_lifecycle",
           JSON.stringify(body.data.metadata ?? {})
         ]
       );
@@ -244,7 +309,7 @@ export function registerTaskRoutes(server: FastifyInstance, pool: PgPool): void 
 
       const nextState = body.data.state ?? current.state;
       const stateChanged = nextState !== current.state;
-      const transitionOptions = body.data.reopened === true ? { reopened: true } : {};
+      const transitionOptions: { reopened?: boolean } = body.data.reopened === true ? { reopened: true } : {};
       const transition = validateTaskStateTransition(current.state, nextState, transitionOptions);
 
       if (!transition.ok) {
@@ -263,6 +328,7 @@ export function registerTaskRoutes(server: FastifyInstance, pool: PgPool): void 
         assignedAgentId: Object.hasOwn(body.data, "assignedAgentId")
           ? body.data.assignedAgentId ?? null
           : current.assigned_agent_id,
+        executionKind: body.data.executionKind ?? current.execution_kind,
         metadata: body.data.metadata ?? current.metadata
       };
 
@@ -275,7 +341,8 @@ export function registerTaskRoutes(server: FastifyInstance, pool: PgPool): void 
             state = $4,
             priority = $5,
             assigned_agent_id = $6,
-            metadata = $7::jsonb,
+            execution_kind = $7,
+            metadata = $8::jsonb,
             updated_at = now()
           where id = $1
           returning ${taskSelectColumns}
@@ -287,6 +354,7 @@ export function registerTaskRoutes(server: FastifyInstance, pool: PgPool): void 
           nextTaskValues.state,
           nextTaskValues.priority,
           nextTaskValues.assignedAgentId,
+          nextTaskValues.executionKind,
           JSON.stringify(nextTaskValues.metadata)
         ]
       );
@@ -419,6 +487,310 @@ export function registerTaskRoutes(server: FastifyInstance, pool: PgPool): void 
       client.release();
     }
   });
+
+  server.post("/v1/tasks/:id/run-hermes", async (request, reply) => {
+    const params = uuidParamSchema.safeParse(request.params);
+    if (!params.success) {
+      return sendValidationError(reply, params.error);
+    }
+    const body = runHermesSchema.safeParse(request.body ?? {});
+    if (!body.success) {
+      return sendValidationError(reply, body.error);
+    }
+
+    const actorId = getRequestActorId(request);
+    const workspacePath = normalizeWorkspacePath(
+      body.data.workspacePath ?? `${config.hermes.workspaceRoot.replace(/\/$/, "")}/tasks/${params.data.id}`
+    );
+    if (!workspacePath.ok) {
+      return reply.code(400).send({
+        error: "invalid_workspace",
+        message: workspacePath.message
+      });
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("begin");
+      const currentResult = await client.query<TaskRow>(
+        `
+          select ${taskSelectColumns}
+          from tasks
+          where id = $1
+          for update
+        `,
+        [params.data.id]
+      );
+      const current = currentResult.rows[0];
+      if (!current) {
+        await client.query("rollback");
+        return reply.code(404).send({
+          error: "task_not_found",
+          message: "Task not found."
+        });
+      }
+
+      const activeSession = await findActiveHermesSession(client, current.id);
+      if (activeSession) {
+        await client.query("commit");
+        return {
+          task: serializeTask(current),
+          session: serializeRunnerSession(activeSession),
+          reused: true
+        };
+      }
+
+      await ensureHermesRunner(client);
+      const session = await createHermesRunnerSession(client, {
+        taskId: current.id,
+        workspacePath: workspacePath.path,
+        metadata: {
+          requestedBy: actorId,
+          force: body.data.force === true,
+          backupPreflight: null,
+          ...(body.data.metadata ?? {})
+        }
+      });
+
+      const updatedResult = await client.query<TaskRow>(
+        `
+          update tasks
+          set
+            state = 'queued',
+            execution_kind = 'hermes_operator',
+            assigned_agent_id = coalesce(assigned_agent_id, 'ops'),
+            queued_at = now(),
+            finished_at = null,
+            last_error = null,
+            metadata = metadata || $2::jsonb,
+            updated_at = now()
+          where id = $1
+          returning ${taskSelectColumns}
+        `,
+        [
+          current.id,
+          JSON.stringify({
+            activeRunnerSessionId: session.id,
+            executionRequestedBy: actorId
+          })
+        ]
+      );
+      const queuedTask = updatedResult.rows[0] ?? current;
+
+      await insertTaskEvent(client, {
+        taskId: current.id,
+        eventType: "task.hermes_queued",
+        actorType: "user",
+        actorId,
+        fromState: current.state,
+        toState: "queued",
+        metadata: {
+          runnerSessionId: session.id
+        }
+      });
+      await insertRunnerEvent(client, {
+        runnerSessionId: session.id,
+        taskId: current.id,
+        source: "frank",
+        eventType: "task.hermes_queued",
+        severity: "info",
+        message: "Task queued for Hermes operator execution.",
+        rawEvent: {
+          taskId: current.id
+        }
+      });
+      await recordAuditEvent(client, {
+        actorType: "user",
+        actorId,
+        action: "task.run_hermes",
+        targetType: "task",
+        targetId: current.id,
+        outcome: "success",
+        metadata: {
+          runnerSessionId: session.id
+        }
+      });
+
+      await client.query("commit");
+      return reply.code(202).send({
+        task: serializeTask(queuedTask),
+        session: serializeRunnerSession(session),
+        reused: false
+      });
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  server.post("/v1/tasks/:id/stop-hermes", async (request, reply) => {
+    const params = uuidParamSchema.safeParse(request.params);
+    if (!params.success) {
+      return sendValidationError(reply, params.error);
+    }
+    const body = stopHermesSchema.safeParse(request.body ?? {});
+    if (!body.success) {
+      return sendValidationError(reply, body.error);
+    }
+
+    const actorId = getRequestActorId(request);
+    const session = await findActiveHermesSession(pool, params.data.id);
+    if (!session) {
+      return reply.code(404).send({
+        error: "active_hermes_session_not_found",
+        message: "No active Hermes session was found for this task."
+      });
+    }
+
+    const reason = body.data.reason ?? "Stop requested from Frank task action.";
+    const adapter = createHermesRunnerAdapter(config.hermes);
+    const stopResult = await adapter.stopRun({
+      runnerSessionId: session.id,
+      hermesRunId: session.hermes_run_id,
+      reason
+    });
+    const terminalTaskState: TaskState = stopResult.stopped ? "cancelled" : "failed";
+    const terminalSessionState: RunnerSessionRow["status"] = stopResult.stopped ? "cancelled" : "failed";
+    const client = await pool.connect();
+
+    try {
+      await client.query("begin");
+      await client.query(
+        `
+          insert into runner_stop_requests (
+            runner_session_id,
+            task_id,
+            requested_by,
+            reason,
+            status,
+            method
+          )
+          values ($1, $2, $3, $4, $5, $6)
+        `,
+        [
+          session.id,
+          session.task_id,
+          actorId,
+          reason,
+          stopResult.stopped ? "succeeded" : "failed",
+          stopResult.method
+        ]
+      );
+      const updatedSession = await client.query<RunnerSessionRow>(
+        `
+          update runner_sessions
+          set
+            status = $2,
+            finished_at = now(),
+            error_summary = $3,
+            updated_at = now()
+          where id = $1
+          returning ${runnerSessionSelectColumns}
+        `,
+        [session.id, terminalSessionState, stopResult.message]
+      );
+      const updatedTask = await client.query<TaskRow>(
+        `
+          update tasks
+          set
+            state = $2,
+            finished_at = now(),
+            last_error = $3,
+            updated_at = now()
+          where id = $1
+          returning ${taskSelectColumns}
+        `,
+        [params.data.id, terminalTaskState, stopResult.message]
+      );
+      await insertTaskEvent(client, {
+        taskId: params.data.id,
+        eventType: stopResult.stopped ? "task.hermes_cancelled" : "task.hermes_stop_failed",
+        actorType: "user",
+        actorId,
+        fromState: "running",
+        toState: terminalTaskState,
+        metadata: {
+          runnerSessionId: session.id,
+          method: stopResult.method
+        }
+      });
+      await insertRunnerEvent(client, {
+        runnerSessionId: session.id,
+        taskId: params.data.id,
+        source: "frank",
+        eventType: stopResult.stopped ? "task.hermes_cancelled" : "task.hermes_stop_failed",
+        severity: stopResult.stopped ? "success" : "error",
+        message: stopResult.message,
+        rawEvent: {
+          method: stopResult.method
+        }
+      });
+      await recordAuditEvent(client, {
+        actorType: "user",
+        actorId,
+        action: stopResult.stopped ? "task.stop_hermes" : "task.stop_hermes_failed",
+        targetType: "task",
+        targetId: params.data.id,
+        outcome: stopResult.stopped ? "success" : "failure",
+        metadata: {
+          runnerSessionId: session.id,
+          method: stopResult.method
+        }
+      });
+      await client.query("commit");
+      return {
+        task: serializeTask(updatedTask.rows[0]!),
+        session: serializeRunnerSession(updatedSession.rows[0]!),
+        stopResult
+      };
+    } catch (error) {
+      await client.query("rollback").catch(() => undefined);
+      throw error;
+    } finally {
+      client.release();
+    }
+  });
+
+  server.get("/v1/tasks/:id/runner-events", async (request, reply) => {
+    const params = uuidParamSchema.safeParse(request.params);
+    if (!params.success) {
+      return sendValidationError(reply, params.error);
+    }
+    const query = runnerEventsQuerySchema.safeParse(request.query);
+    if (!query.success) {
+      return sendValidationError(reply, query.error);
+    }
+
+    const events = await pool.query<RunnerEventRow>(
+      `
+        select ${runnerEventSelectColumns}
+        from runner_events
+        where task_id = $1
+          and sequence > $2
+        order by sequence asc
+        limit $3
+      `,
+      [params.data.id, query.data.after_sequence, query.data.limit]
+    );
+    const lastSequence = events.rows.at(-1)?.sequence ?? query.data.after_sequence;
+    return {
+      events: events.rows.map(serializeRunnerEvent),
+      last_sequence: lastSequence,
+      next_cursor: lastSequence
+    };
+  });
+
+  server.get("/v1/tasks/:id/artifacts", async (request, reply) => {
+    const params = uuidParamSchema.safeParse(request.params);
+    if (!params.success) {
+      return sendValidationError(reply, params.error);
+    }
+    return {
+      artifacts: []
+    };
+  });
 }
 
 const taskSelectColumns = `
@@ -429,6 +801,7 @@ const taskSelectColumns = `
   priority,
   created_by,
   assigned_agent_id,
+  execution_kind,
   metadata,
   created_at,
   updated_at
@@ -443,6 +816,38 @@ const taskEventSelectColumns = `
   from_state,
   to_state,
   metadata,
+  created_at
+`;
+
+const runnerSessionSelectColumns = `
+  id,
+  task_id,
+  runner_id,
+  hermes_run_id,
+  conversation_id,
+  workspace_path,
+  status,
+  started_at,
+  finished_at,
+  last_event_at,
+  exit_code,
+  error_summary,
+  final_output,
+  metadata,
+  created_at,
+  updated_at
+`;
+
+const runnerEventSelectColumns = `
+  id,
+  runner_session_id,
+  task_id,
+  source,
+  event_type,
+  severity,
+  message,
+  raw_event,
+  sequence,
   created_at
 `;
 
@@ -527,8 +932,113 @@ function hasTaskPatch(body: TaskBodyPatch): boolean {
     Object.hasOwn(body, "state") ||
     Object.hasOwn(body, "priority") ||
     Object.hasOwn(body, "assignedAgentId") ||
+    Object.hasOwn(body, "executionKind") ||
     Object.hasOwn(body, "metadata")
   );
+}
+
+async function findActiveHermesSession(db: Queryable, taskId: string): Promise<RunnerSessionRow | undefined> {
+  const result = await db.query<RunnerSessionRow>(
+    `
+      select ${runnerSessionSelectColumns}
+      from runner_sessions
+      where task_id = $1
+        and runner_id = 'hermes'
+        and status in ('queued', 'starting', 'running', 'stopping')
+      order by created_at desc
+      limit 1
+    `,
+    [taskId]
+  );
+  return result.rows[0];
+}
+
+async function ensureHermesRunner(db: Queryable): Promise<void> {
+  await db.query(
+    `
+      insert into runners (id, type, display_name, status, config_summary)
+      values ('hermes', 'hermes', 'Hermes Operator', 'disabled', '{}'::jsonb)
+      on conflict (id) do nothing
+    `
+  );
+}
+
+async function createHermesRunnerSession(
+  db: Queryable,
+  input: { taskId: string; workspacePath: string; metadata: Record<string, unknown> }
+): Promise<RunnerSessionRow> {
+  const result = await db.query<RunnerSessionRow>(
+    `
+      insert into runner_sessions (
+        task_id,
+        runner_id,
+        workspace_path,
+        status,
+        metadata
+      )
+      values ($1, 'hermes', $2, 'queued', $3::jsonb)
+      returning ${runnerSessionSelectColumns}
+    `,
+    [input.taskId, input.workspacePath, JSON.stringify(input.metadata)]
+  );
+  const session = result.rows[0];
+  if (!session) {
+    throw new Error("Runner session insert did not return a row.");
+  }
+  return session;
+}
+
+async function insertRunnerEvent(
+  db: Queryable,
+  event: {
+    runnerSessionId: string;
+    taskId: string | null;
+    source: "frank" | "hermes" | "system";
+    eventType: string;
+    severity: "info" | "warning" | "error" | "success";
+    message: string;
+    rawEvent: Record<string, unknown> | null;
+  }
+): Promise<RunnerEventRow> {
+  const result = await db.query<RunnerEventRow>(
+    `
+      insert into runner_events (
+        runner_session_id,
+        task_id,
+        source,
+        event_type,
+        severity,
+        message,
+        raw_event,
+        sequence
+      )
+      values (
+        $1,
+        $2,
+        $3,
+        $4,
+        $5,
+        $6,
+        $7::jsonb,
+        coalesce((select max(sequence) + 1 from runner_events where runner_session_id = $1), 1)
+      )
+      returning ${runnerEventSelectColumns}
+    `,
+    [
+      event.runnerSessionId,
+      event.taskId,
+      event.source,
+      event.eventType,
+      event.severity,
+      event.message,
+      JSON.stringify(event.rawEvent)
+    ]
+  );
+  const inserted = result.rows[0];
+  if (!inserted) {
+    throw new Error("Runner event insert did not return a row.");
+  }
+  return inserted;
 }
 
 function getChangedFields(previous: TaskRow, next: TaskRow): string[] {
@@ -538,6 +1048,7 @@ function getChangedFields(previous: TaskRow, next: TaskRow): string[] {
   if (previous.state !== next.state) changed.push("state");
   if (previous.priority !== next.priority) changed.push("priority");
   if (previous.assigned_agent_id !== next.assigned_agent_id) changed.push("assignedAgentId");
+  if (previous.execution_kind !== next.execution_kind) changed.push("executionKind");
   if (JSON.stringify(previous.metadata) !== JSON.stringify(next.metadata)) changed.push("metadata");
   return changed;
 }
@@ -551,6 +1062,7 @@ function serializeTask(row: TaskRow) {
     priority: row.priority,
     createdBy: row.created_by,
     assignedAgentId: row.assigned_agent_id,
+    executionKind: row.execution_kind,
     metadata: row.metadata,
     createdAt: serializeTimestamp(row.created_at),
     updatedAt: serializeTimestamp(row.updated_at)
@@ -571,6 +1083,62 @@ function serializeTaskEvent(row: TaskEventRow) {
   };
 }
 
+function serializeRunnerSession(row: RunnerSessionRow) {
+  return {
+    id: row.id,
+    taskId: row.task_id,
+    runnerId: row.runner_id,
+    hermesRunId: row.hermes_run_id,
+    conversationId: row.conversation_id,
+    workspacePath: row.workspace_path,
+    status: row.status,
+    startedAt: serializeNullableTimestamp(row.started_at),
+    finishedAt: serializeNullableTimestamp(row.finished_at),
+    lastEventAt: serializeNullableTimestamp(row.last_event_at),
+    exitCode: row.exit_code,
+    errorSummary: row.error_summary,
+    finalOutput: row.final_output,
+    metadata: row.metadata,
+    createdAt: serializeTimestamp(row.created_at),
+    updatedAt: serializeTimestamp(row.updated_at)
+  };
+}
+
+function serializeRunnerEvent(row: RunnerEventRow) {
+  return {
+    id: row.id,
+    runnerSessionId: row.runner_session_id,
+    taskId: row.task_id,
+    source: row.source,
+    eventType: row.event_type,
+    severity: row.severity,
+    message: row.message,
+    rawEvent: row.raw_event,
+    sequence: row.sequence,
+    createdAt: serializeTimestamp(row.created_at)
+  };
+}
+
+function normalizeWorkspacePath(path: string): { ok: true; path: string } | { ok: false; message: string } {
+  if (path === "/" || path === "/root") {
+    return {
+      ok: false,
+      message: "Hermes workspace cannot be / or /root."
+    };
+  }
+  return {
+    ok: true,
+    path
+  };
+}
+
 function serializeTimestamp(value: Date | string): string {
   return value instanceof Date ? value.toISOString() : value;
+}
+
+function serializeNullableTimestamp(value: Date | string | null): string | null {
+  if (!value) {
+    return null;
+  }
+  return serializeTimestamp(value);
 }

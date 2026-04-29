@@ -118,6 +118,9 @@ importers:
 
   apps/workers:
     dependencies:
+      '@frank/hermes-runner':
+        specifier: workspace:*
+        version: link:../../packages/hermes-runner
       '@frank/model-sdk':
         specifier: workspace:*
         version: link:../../packages/model-sdk
