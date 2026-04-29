@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "@fastify/cors": "^10.0.2",
+    "@frank/hermes-runner": "workspace:*",
     "@frank/model-sdk": "workspace:*",
     "@frank/shared": "workspace:*",
     "@frank/tool-sdk": "workspace:*",

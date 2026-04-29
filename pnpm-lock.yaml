@@ -26,6 +26,9 @@ importers:
       '@fastify/cors':
         specifier: ^10.0.2
         version: 10.1.0
+      '@frank/hermes-runner':
+        specifier: workspace:*
+        version: link:../../packages/hermes-runner
       '@frank/model-sdk':
         specifier: workspace:*
         version: link:../../packages/model-sdk
@@ -137,6 +140,8 @@ importers:
       tsx:
         specifier: ^4.19.2
         version: 4.21.0
+
+  packages/hermes-runner: {}
 
   packages/model-sdk:
     dependencies:

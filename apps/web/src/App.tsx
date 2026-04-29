@@ -3,6 +3,7 @@ import {
   Bot,
   Boxes,
   FileClock,
+  Hammer,
   ListTodo,
   PlugZap,
   Settings as SettingsIcon,
@@ -14,6 +15,7 @@ import {
   AgentsPage,
   AuditLogPage,
   DashboardPage,
+  HermesPage,
   ModelsPage,
   OpsConsolePage,
   ProvidersPage,
@@ -72,6 +74,13 @@ const pages: AppShellPage[] = [
     icon: TerminalSquare
   },
   {
+    id: "hermes",
+    label: "Hermes",
+    title: "Hermes Runner",
+    description: "Private operator runtime status and configuration summary.",
+    icon: Hammer
+  },
+  {
     id: "settings",
     label: "Settings",
     title: "Settings",
@@ -104,6 +113,8 @@ function renderPage(pageId: string) {
       return <AuditLogPage />;
     case "ops-console":
       return <OpsConsolePage />;
+    case "hermes":
+      return <HermesPage />;
     case "settings":
       return <SettingsPage />;
     case "dashboard":

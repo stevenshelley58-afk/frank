@@ -22,6 +22,15 @@ const envSchema = z.object({
   CLOUDFLARE_ACCESS_AUD: z.string().optional(),
   CLOUDFLARE_ACCESS_AUDS: z.string().optional(),
   OPENROUTER_API_KEY: z.string().optional(),
+  HERMES_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
+  HERMES_API_BASE_URL: z.string().url().default("http://hermes:8642"),
+  HERMES_API_SERVER_KEY: z.string().optional(),
+  HERMES_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(1800),
+  HERMES_STALL_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(300),
+  HERMES_EVENTS_POLL_MS: z.coerce.number().int().positive().default(1000),
+  HERMES_WORKSPACE_ROOT: z.string().default("/opt/frank-hub/workspaces"),
+  HERMES_ARTIFACT_ROOT: z.string().default("/opt/frank-hub/runtime/artifacts"),
+  FRANK_BACKUP_ROOT: z.string().default("/opt/frank-backups"),
   LOG_LEVEL: z.string().default("info")
 });
 
@@ -45,6 +54,19 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       audiences: parseCloudflareAccessAudiences(parsed.CLOUDFLARE_ACCESS_AUDS, parsed.CLOUDFLARE_ACCESS_AUD)
     },
     openrouterApiKey: parsed.OPENROUTER_API_KEY?.trim() || undefined,
+    hermes: {
+      enabled: parsed.HERMES_ENABLED,
+      apiBaseUrl: parsed.HERMES_API_BASE_URL.replace(/\/$/, ""),
+      apiServerKey: parsed.HERMES_API_SERVER_KEY?.trim() || undefined,
+      timeoutSeconds: parsed.HERMES_TIMEOUT_SECONDS,
+      stallTimeoutSeconds: parsed.HERMES_STALL_TIMEOUT_SECONDS,
+      eventsPollMs: parsed.HERMES_EVENTS_POLL_MS,
+      workspaceRoot: parsed.HERMES_WORKSPACE_ROOT,
+      artifactRoot: parsed.HERMES_ARTIFACT_ROOT
+    },
+    backups: {
+      root: parsed.FRANK_BACKUP_ROOT
+    },
     logLevel: parsed.LOG_LEVEL
   };
 }

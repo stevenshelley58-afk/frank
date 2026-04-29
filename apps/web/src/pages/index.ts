@@ -1,6 +1,7 @@
 export * from "./agents.js";
 export * from "./audit-log.js";
 export * from "./dashboard.js";
+export * from "./hermes.js";
 export * from "./models.js";
 export * from "./ops-console.js";
 export * from "./providers.js";

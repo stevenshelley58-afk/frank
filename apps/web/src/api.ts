@@ -139,6 +139,36 @@ export interface AuditLogResponse {
   };
 }
 
+export interface HermesRunnerStatus {
+  enabled: boolean;
+  configured: boolean;
+  reachable: boolean;
+  health: "ok" | "unavailable" | "error";
+  models: string[];
+  detailedHealth: JsonRecord | null;
+  message: string | null;
+}
+
+export interface RunnerSummary {
+  id: string;
+  type: string;
+  displayName: string;
+  status: "disabled" | "not_configured" | "available" | "unavailable";
+  configSummary: JsonRecord;
+  health?: HermesRunnerStatus;
+}
+
+export interface HermesStatusResponse {
+  runner: RunnerSummary;
+  status: HermesRunnerStatus;
+}
+
+export interface HermesInstallCheckResponse {
+  ok: boolean;
+  status: HermesRunnerStatus;
+  setupHints: string[];
+}
+
 export type CollectorResult<T> =
   | {
       available: true;
@@ -413,6 +443,19 @@ export async function listAuditLog(
   options?: { signal?: AbortSignal }
 ): Promise<AuditLogResponse> {
   return apiRequest<AuditLogResponse>("/v1/audit-log", { query, signal: options?.signal });
+}
+
+export async function listRunners(options?: { signal?: AbortSignal }): Promise<RunnerSummary[]> {
+  const data = await apiRequest<{ runners: RunnerSummary[] }>("/v1/runners", { signal: options?.signal });
+  return data.runners;
+}
+
+export async function getHermesStatus(options?: { signal?: AbortSignal }): Promise<HermesStatusResponse> {
+  return apiRequest<HermesStatusResponse>("/v1/runners/hermes/status", { signal: options?.signal });
+}
+
+export async function runHermesInstallCheck(): Promise<HermesInstallCheckResponse> {
+  return apiRequest<HermesInstallCheckResponse>("/v1/runners/hermes/install-check", { method: "POST" });
 }
 
 export async function getOpsStatus(options?: { signal?: AbortSignal }): Promise<OpsStatus> {

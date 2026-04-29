@@ -176,6 +176,19 @@ function createTestServer(pool: FakeAgentPool, accessEnabled = false) {
         audiences: ["test-aud"]
       },
       openrouterApiKey: undefined,
+      hermes: {
+        enabled: false,
+        apiBaseUrl: "http://127.0.0.1:8642",
+        apiServerKey: undefined,
+        timeoutSeconds: 1800,
+        stallTimeoutSeconds: 300,
+        eventsPollMs: 1000,
+        workspaceRoot: "/opt/frank-hub/workspaces",
+        artifactRoot: "/opt/frank-hub/runtime/artifacts"
+      },
+      backups: {
+        root: "/opt/frank-backups"
+      },
       logLevel: "silent"
     } satisfies ApiConfig,
     pool: pool as never,
