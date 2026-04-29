@@ -131,7 +131,7 @@ export function buildServer({ config, pool, redis, opsCollectors }: ServerDepend
   registerModelRoutes(server, pool, config);
   registerAuditLogRoutes(server, pool);
   registerOpsRoutes(server, pool, opsCollectors);
-  registerRunnerRoutes(server, config);
+  registerRunnerRoutes(server, pool, config);
 
   return server;
 }
