@@ -28,6 +28,25 @@ control plane. The system name is Frank Hub.
 - Access: Cloudflare Tunnel and Cloudflare Access.
 - Model routing: model-role based and provider-agnostic.
 
+## Agent skills
+
+Frank uses external engineering skills as build-process guardrails, not as
+product runtime code. These instructions are subordinate to the hard rules in
+this file.
+
+- Issue tracker: GitHub Issues. See `docs/agents/issue-tracker.md`.
+- Domain layout: single-context repo for now. Domain language lives in
+  `CONTEXT.md`.
+- Architecture decisions: ADRs live in `docs/adr/`.
+- Large ambiguous changes must use `grill-with-docs` before implementation.
+- Feature shaping should use `to-prd` and `to-issues` to create vertical
+  slices.
+- Code work should use vertical tracer bullets and TDD instead of horizontal
+  bulk implementation.
+- Failures should be diagnosed with `diagnose` before patching.
+- Run `improve-codebase-architecture` after large merges or repeated design
+  friction.
+
 ## Current Public URLs
 
 - `hub.frank.fail` -> Frank Hub dashboard

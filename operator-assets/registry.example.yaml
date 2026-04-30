@@ -1,0 +1,142 @@
+source:
+  repository: github:mattpocock/skills
+  pinned_ref: f71bb975bfae2dc0d31c529c7dd4a8479ecc3748
+  policy: "Review pinned sources before manual installation; do not run @latest from repository scripts."
+
+skills:
+  - id: setup-matt-pocock-skills
+    source: github:mattpocock/skills/skills/engineering/setup-matt-pocock-skills
+    status: active
+    applies_to: [codex, hermes, frank]
+    trigger:
+      - initial skill configuration
+      - issue tracker changes
+      - triage label changes
+      - domain documentation layout changes
+    notes: "Use the pattern, but keep AGENTS.md hard rules authoritative."
+
+  - id: grill-with-docs
+    source: github:mattpocock/skills/skills/engineering/grill-with-docs
+    status: active
+    applies_to: [codex, hermes, frank]
+    trigger:
+      - large build
+      - unclear plan
+      - architecture decision
+      - hard-to-reverse change
+      - user asks for a bulletproof plan
+    notes: "Read AGENTS.md, CONTEXT.md, and relevant ADRs before implementation."
+
+  - id: to-prd
+    source: github:mattpocock/skills/skills/engineering/to-prd
+    status: active
+    applies_to: [codex, hermes, frank]
+    trigger:
+      - settled feature intent
+      - messy chat needs product shape
+      - large task needs GitHub issue tracking
+    notes: "Publish PRDs to GitHub Issues only when issue creation is requested."
+
+  - id: to-issues
+    source: github:mattpocock/skills/skills/engineering/to-issues
+    status: active
+    applies_to: [codex, hermes, frank]
+    trigger:
+      - PRD needs implementation slices
+      - plan needs AFK-ready tasks
+      - large work needs vertical breakdown
+    notes: "Create independently implementable vertical slices, not layer-by-layer tasks."
+
+  - id: tdd
+    source: github:mattpocock/skills/skills/engineering/tdd
+    status: active
+    applies_to: [codex, hermes]
+    trigger:
+      - implement feature
+      - fix bug
+      - API route change
+      - worker change
+      - integration change
+    notes: "Use red-green-refactor through public interfaces."
+
+  - id: diagnose
+    source: github:mattpocock/skills/skills/engineering/diagnose
+    status: active
+    applies_to: [codex, hermes, frank]
+    trigger:
+      - failing build
+      - failing test
+      - broken runtime behavior
+      - production regression
+      - performance regression
+    notes: "Reproduce and minimize before patching."
+
+  - id: zoom-out
+    source: github:mattpocock/skills/skills/engineering/zoom-out
+    status: active
+    applies_to: [codex, hermes]
+    trigger:
+      - unfamiliar code area
+      - refactor request
+      - suspected local fix with system impact
+    notes: "Use before structural changes that touch shared concepts."
+
+  - id: improve-codebase-architecture
+    source: github:mattpocock/skills/skills/engineering/improve-codebase-architecture
+    status: active
+    applies_to: [codex, hermes]
+    trigger:
+      - after large merge
+      - code feels messy
+      - repeated bugs
+      - duplicate modules
+      - low testability
+    notes: "Convert accepted findings into GitHub Issues before implementation."
+
+  - id: git-guardrails-claude-code
+    source: github:mattpocock/skills/skills/misc/git-guardrails-claude-code
+    status: later
+    applies_to: [claude-code]
+    trigger:
+      - local Claude Code setup
+      - prevent destructive git commands
+    notes: "Claude Code specific; not part of Frank runtime."
+
+  - id: setup-pre-commit
+    source: github:mattpocock/skills/skills/misc/setup-pre-commit
+    status: later
+    applies_to: [codex]
+    trigger:
+      - repository hook policy approved
+      - pre-commit checks requested
+    notes: "Do not add hooks until explicitly requested."
+
+  - id: caveman
+    source: github:mattpocock/skills/skills/productivity/caveman
+    status: optional
+    applies_to: [codex, hermes]
+    trigger:
+      - user requests shorter output
+      - low-token status update
+    notes: "Communication preference only."
+
+  - id: obsidian-vault
+    source: github:mattpocock/skills/skills/personal/obsidian-vault
+    status: out-of-workflow
+    applies_to: []
+    trigger: []
+    notes: "Personal knowledge workflow; not normal Frank work."
+
+  - id: migrate-to-shoehorn
+    source: github:mattpocock/skills/skills/misc/migrate-to-shoehorn
+    status: out-of-workflow
+    applies_to: []
+    trigger: []
+    notes: "Only relevant if Frank later adopts @total-typescript/shoehorn."
+
+  - id: scaffold-exercises
+    source: github:mattpocock/skills/skills/misc/scaffold-exercises
+    status: out-of-workflow
+    applies_to: []
+    trigger: []
+    notes: "Course material workflow; not normal Frank work."
