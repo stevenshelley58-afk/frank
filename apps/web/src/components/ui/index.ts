@@ -8,3 +8,4 @@ export * from "./select.js";
 export * from "./skeleton.js";
 export * from "./table.js";
 export * from "./tabs.js";
+export * from "./textarea.js";

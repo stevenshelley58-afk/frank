@@ -1,8 +1,21 @@
+import { useEffect, useState } from "react";
 import type * as React from "react";
 import type { LucideIcon } from "lucide-react";
-import { ShieldCheck } from "lucide-react";
-import { Badge } from "../ui/index.js";
+import {
+  Bell,
+  Calendar,
+  CheckCircle2,
+  ChevronsUpDown,
+  MessageCircle,
+  Settings as SettingsIcon
+} from "lucide-react";
+import { recentChats, upcomingItems } from "../../data/homeMockData.js";
+import type { HomeSelection } from "../../lib/home-context.js";
 import { cn } from "../../lib/utils.js";
+import { titleize } from "../../lib/format.js";
+import { listTasks, type Task } from "../../api.js";
+import { StatusPill } from "../status/status-pill.js";
+import { SidebarSection } from "./sidebar-section.js";
 
 export interface AppShellPage {
   id: string;
@@ -10,80 +23,245 @@ export interface AppShellPage {
   title: string;
   description: string;
   icon: LucideIcon;
+  placement?: "primary" | "settings" | "hidden" | undefined;
 }
 
 export interface AppShellProps {
   pages: AppShellPage[];
   activePageId: string;
   onNavigate: (pageId: string) => void;
+  onHomeContextSelect: (selection: HomeSelection) => void;
   children: React.ReactNode;
 }
 
-export function AppShell({ pages, activePageId, onNavigate, children }: AppShellProps) {
+type TaskLoadState =
+  | { status: "loading" }
+  | { status: "ready"; tasks: Task[] }
+  | { status: "error"; message: string };
+
+export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect, children }: AppShellProps) {
   const activePage = pages.find((page) => page.id === activePageId) ?? pages[0]!;
+  const primaryPages = pages.filter((page) => (page.placement ?? "primary") === "primary");
+  const settingsPage = pages.find((page) => page.placement === "settings");
+  const [tasksState, setTasksState] = useState<TaskLoadState>({ status: "loading" });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listTasks({ limit: 5 }, { signal: controller.signal })
+      .then((tasks) => setTasksState({ status: "ready", tasks }))
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setTasksState({ status: "error", message: error instanceof Error ? error.message : "Recent tasks unavailable." });
+        }
+      });
+    return () => controller.abort();
+  }, []);
+
+  function chooseContext(selection: HomeSelection) {
+    onHomeContextSelect(selection);
+    onNavigate("home");
+  }
 
   return (
     <div className="min-h-screen bg-background">
+      <a
+        href="#main-content"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-[60] focus:rounded-md focus:bg-surface focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-foreground focus:ring-2 focus:ring-ring"
+      >
+        Skip to main content
+      </a>
       <div className="grid min-h-screen lg:grid-cols-[var(--frank-sidebar-width)_minmax(0,1fr)]">
         <aside className="border-b border-sidebar-border bg-sidebar text-sidebar-foreground lg:border-b-0 lg:border-r">
-          <div className="flex h-full flex-col">
-            <div className="flex min-h-[var(--frank-topbar-height)] items-center gap-3 border-b border-sidebar-border px-4 lg:px-5">
-              <div className="flex size-9 shrink-0 items-center justify-center rounded-md bg-primary text-sm font-semibold text-primary-foreground">
+          <div className="flex h-full min-h-screen flex-col px-4 py-5">
+            <div className="flex min-h-14 items-center gap-3">
+              <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary text-base font-semibold text-primary-foreground">
                 FH
               </div>
               <div className="min-w-0">
-                <p className="text-sm font-semibold leading-5">Frank Hub</p>
-                <p className="truncate text-xs leading-5 text-muted-foreground">Control plane</p>
+                <p className="truncate text-xl font-semibold leading-7 text-foreground">Frank Hub</p>
               </div>
             </div>
 
-            <nav className="flex gap-1 overflow-x-auto px-3 py-3 lg:grid lg:overflow-visible lg:px-3" aria-label="Primary navigation">
-              {pages.map((page) => {
-                const Icon = page.icon;
-                const isActive = page.id === activePage.id;
-
-                return (
-                  <button
-                    key={page.id}
-                    type="button"
-                    aria-current={isActive ? "page" : undefined}
-                    onClick={() => onNavigate(page.id)}
-                    className={cn(
-                      "inline-flex h-10 shrink-0 items-center gap-3 rounded-md px-3 text-sm font-semibold outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring lg:w-full",
-                      isActive
-                        ? "bg-sidebar-accent text-foreground"
-                        : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground"
-                    )}
-                  >
-                    <Icon className="size-4" aria-hidden="true" />
-                    <span>{page.label}</span>
-                  </button>
-                );
-              })}
+            <nav className="mt-8 grid gap-1" aria-label="Primary navigation">
+              {primaryPages.map((page) => (
+                <SidebarNavButton
+                  key={page.id}
+                  page={page}
+                  active={page.id === activePage.id}
+                  onClick={() => onNavigate(page.id)}
+                />
+              ))}
             </nav>
+
+            <div className="mt-7">
+              <SidebarSection id="recent-chats" title="Recent Chats" icon={MessageCircle} defaultOpen={false}>
+                {recentChats.map((chat) => (
+                  <SidebarContextRow
+                    key={chat.id}
+                    title={chat.title}
+                    onClick={() => chooseContext({ kind: "chat", id: chat.id, title: chat.title })}
+                  />
+                ))}
+                <SidebarActionRow title="Show more" onClick={() => chooseContext({ kind: "chat", title: "Recent Chats" })} />
+              </SidebarSection>
+
+              <SidebarSection id="recent-tasks" title="Recent Tasks" icon={CheckCircle2} defaultOpen={false}>
+                {tasksState.status === "loading" ? <SidebarMutedRow>Loading tasks</SidebarMutedRow> : null}
+                {tasksState.status === "error" ? <SidebarMutedRow>{tasksState.message}</SidebarMutedRow> : null}
+                {tasksState.status === "ready" && tasksState.tasks.length === 0 ? <SidebarMutedRow>No recent tasks</SidebarMutedRow> : null}
+                {tasksState.status === "ready"
+                  ? tasksState.tasks.slice(0, 5).map((task) => (
+                      <SidebarContextRow
+                        key={task.id}
+                        title={task.title}
+                        subtitle={titleize(task.state)}
+                        onClick={() =>
+                          chooseContext({
+                            kind: "task",
+                            id: task.id,
+                            title: task.title,
+                            subtitle: titleize(task.state)
+                          })
+                        }
+                      />
+                    ))
+                  : null}
+                <SidebarActionRow title="Show more" onClick={() => onNavigate("tasks")} />
+              </SidebarSection>
+
+              <SidebarSection id="upcoming" title="Upcoming" icon={Calendar} defaultOpen={false}>
+                {upcomingItems.map((item) => (
+                  <SidebarContextRow
+                    key={item.id}
+                    title={item.title}
+                    subtitle={item.timeLabel}
+                    onClick={() =>
+                      chooseContext({
+                        kind: "upcoming",
+                        id: item.id,
+                        title: item.title,
+                        subtitle: item.timeLabel
+                      })
+                    }
+                  />
+                ))}
+                <SidebarActionRow title="View full schedule" onClick={() => chooseContext({ kind: "upcoming", title: "Upcoming" })} />
+              </SidebarSection>
+            </div>
+
+            <div className="mt-auto grid gap-3 border-t border-sidebar-border pt-5">
+              {settingsPage ? (
+                <SidebarNavButton
+                  page={settingsPage}
+                  active={settingsPage.id === activePage.id}
+                  onClick={() => onNavigate(settingsPage.id)}
+                />
+              ) : null}
+              <button
+                type="button"
+                className="flex min-h-14 items-center gap-3 rounded-lg px-2 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
+                onClick={() => onNavigate("settings")}
+              >
+                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
+                  FH
+                </div>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-semibold text-foreground">Frank Hub</span>
+                  <span className="block truncate text-xs text-muted-foreground">Workspace</span>
+                </span>
+                <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              </button>
+            </div>
           </div>
         </aside>
 
         <div className="flex min-w-0 flex-col">
-          <header className="flex min-h-[var(--frank-topbar-height)] flex-col justify-center gap-3 border-b border-border bg-background/95 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
+          <header className="flex min-h-[var(--frank-topbar-height)] items-center justify-between gap-4 border-b border-border bg-background/95 px-4 py-4 sm:px-6 lg:px-8">
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase text-muted-foreground">Frank Hub</p>
-              <h1 className="mt-1 text-2xl font-semibold leading-8 text-foreground">{activePage.title}</h1>
-              <p className="mt-1 max-w-3xl text-sm leading-6 text-muted-foreground">{activePage.description}</p>
+              <p className="truncate text-sm font-medium text-muted-foreground">{activePage.id === "home" ? "Workspace" : "Frank Hub"}</p>
+              <h1 className="truncate text-base font-semibold leading-6 text-foreground">{activePage.title}</h1>
             </div>
-            <div className="flex shrink-0 items-center gap-2">
-              <Badge variant="outline" className="gap-1.5">
-                <ShieldCheck className="size-3.5" aria-hidden="true" />
-                Cloudflare Access
-              </Badge>
+            <div className="flex shrink-0 items-center gap-3">
+              <StatusPill onNavigateOps={() => onNavigate("ops-console")} />
+              <button
+                type="button"
+                className="hidden size-11 items-center justify-center rounded-full text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring sm:flex"
+                aria-label="Notifications"
+                title="Notifications"
+              >
+                <Bell className="size-5" aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                className="hidden size-11 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
+                aria-label="Frank Hub user menu"
+                title="Frank Hub user menu"
+              >
+                FH
+              </button>
             </div>
           </header>
 
-          <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8">
-            <div className="mx-auto grid w-full max-w-[var(--frank-content-max)] gap-5">{children}</div>
+          <main id="main-content" className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8" tabIndex={-1}>
+            {children}
           </main>
         </div>
       </div>
     </div>
   );
+}
+
+function SidebarNavButton({ page, active, onClick }: { page: AppShellPage; active: boolean; onClick: () => void }) {
+  const Icon = page.icon;
+  return (
+    <button
+      type="button"
+      aria-current={active ? "page" : undefined}
+      onClick={onClick}
+      className={cn(
+        "flex min-h-11 w-full items-center gap-3 rounded-lg px-3 text-left text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring",
+        active ? "bg-sidebar-accent text-foreground" : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-foreground"
+      )}
+    >
+      <Icon className="size-5 shrink-0" aria-hidden="true" />
+      <span className="truncate">{page.label}</span>
+    </button>
+  );
+}
+
+function SidebarContextRow({
+  title,
+  subtitle,
+  onClick
+}: {
+  title: string;
+  subtitle?: string | undefined;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="grid min-h-10 w-full gap-0.5 rounded-md px-3 py-2 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={onClick}
+    >
+      <span className="truncate text-sm font-medium text-foreground">{title}</span>
+      {subtitle ? <span className="truncate text-xs text-muted-foreground">{subtitle}</span> : null}
+    </button>
+  );
+}
+
+function SidebarActionRow({ title, onClick }: { title: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      className="min-h-9 rounded-md px-3 text-left text-xs font-semibold text-accent-foreground outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
+      onClick={onClick}
+    >
+      {title}
+    </button>
+  );
+}
+
+function SidebarMutedRow({ children }: { children: React.ReactNode }) {
+  return <p className="rounded-md px-3 py-2 text-xs leading-5 text-muted-foreground">{children}</p>;
 }

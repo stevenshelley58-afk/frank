@@ -3,6 +3,7 @@ import {
   ApiClientError,
   apiRequest,
   createFilesBackup,
+  fetchSystemStatus,
   getArtifactDownloadUrl,
   listTaskLogs,
   runBackupPreflight,
@@ -52,6 +53,42 @@ describe("apiRequest", () => {
       code: "invalid_request",
       message: "Request validation failed."
     } satisfies Partial<ApiClientError>);
+  });
+
+  it("fetches system status from same-origin API", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          systemName: "Frank Hub",
+          environment: "test",
+          dashboardUrl: "https://hub.frank.fail",
+          apiUrl: "https://api.frank.fail",
+          generatedAt: "2026-04-30T00:00:00.000Z",
+          services: {
+            postgres: { ok: true },
+            redis: { ok: true },
+            cloudflareAccess: { ok: true }
+          },
+          modelControlPlane: {
+            roleCount: 1,
+            providerCount: 1,
+            routingMode: "role_based_skeleton"
+          },
+          opsConsole: {
+            mode: "skeleton",
+            terminalAccess: "disabled"
+          }
+        }),
+        {
+          status: 200,
+          headers: { "content-type": "application/json" }
+        }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(fetchSystemStatus()).resolves.toMatchObject({ systemName: "Frank Hub" });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/system/status", expect.objectContaining({ method: "GET" }));
   });
 
   it("falls back to HTTP status when the error body is not JSON", async () => {
