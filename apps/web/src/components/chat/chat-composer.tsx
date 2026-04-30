@@ -257,8 +257,14 @@ export function ChatComposer({
                 </div>
               ) : null}
             </div>
-            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
-              <ModelSelector models={models} selectedModelId={selectedModelId} onChange={handleModelChange} disabled={submitting} />
+            <div className="grid w-full grid-cols-[minmax(0,1fr)_auto_auto_auto] items-center gap-2 sm:flex sm:w-auto sm:flex-wrap sm:justify-end">
+              <ModelSelector
+                models={models}
+                selectedModelId={selectedModelId}
+                onChange={handleModelChange}
+                disabled={submitting}
+                className="min-w-0"
+              />
               <ComposerIconButton
                 label="Start voice input"
                 onClick={() => {
@@ -274,7 +280,7 @@ export function ChatComposer({
               <Button
                 type="submit"
                 size="icon"
-                className="size-11 rounded-full bg-primary text-primary-foreground"
+                className="size-11 shrink-0 rounded-full bg-primary text-primary-foreground"
                 disabled={!text.trim() || submitting}
                 aria-label="Send message"
                 aria-busy={submitting}

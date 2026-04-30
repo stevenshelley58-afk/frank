@@ -63,21 +63,21 @@ export function FullscreenComposer({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[calc(100vh-2rem)] max-w-none rounded-xl p-0 sm:w-[calc(100%-2rem)]">
+      <DialogContent className="!h-[100dvh] !w-full !max-w-none !rounded-none p-0 sm:!h-[calc(100vh-2rem)] sm:!w-[calc(100%-2rem)] sm:!rounded-xl">
         <div className="flex min-h-0 flex-1 flex-col bg-surface">
-          <DialogHeader className="border-b border-border px-6 py-5">
+          <DialogHeader className="border-b border-border px-4 py-4 sm:px-6 sm:py-5">
             <div className="flex items-center gap-3">
-              <span className="flex size-10 items-center justify-center rounded-full bg-accent text-accent-foreground">
+              <span className="hidden size-10 items-center justify-center rounded-full bg-accent text-accent-foreground sm:flex">
                 <Maximize2 className="size-4" aria-hidden="true" />
               </span>
-              <div>
+              <div className="pr-10">
                 <DialogTitle>Expanded composer</DialogTitle>
                 <DialogDescription>Write a longer request with the same model, tool, and attachments.</DialogDescription>
               </div>
             </div>
           </DialogHeader>
           <form
-            className="flex min-h-0 flex-1 flex-col gap-4 p-6"
+            className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-6"
             onSubmit={(event) => {
               event.preventDefault();
               onSubmit();
@@ -93,7 +93,7 @@ export function FullscreenComposer({
               onChange={(event) => onTextChange(event.target.value)}
               onKeyDown={onKeyDown}
               placeholder="Ask for anything..."
-              className="min-h-0 flex-1 resize-none rounded-xl bg-background p-5 text-base leading-7 shadow-none"
+              className="min-h-0 flex-1 resize-none rounded-xl bg-background p-4 text-base leading-7 shadow-none sm:p-5"
               disabled={submitting}
             />
             <AttachmentChips attachments={attachments} onRemove={onRemoveAttachment} />
@@ -108,11 +108,11 @@ export function FullscreenComposer({
               </p>
             ) : null}
             <div className="flex flex-col gap-3 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
-              <div className="flex flex-wrap gap-2">
+              <div className="grid gap-2 sm:flex sm:flex-wrap">
                 <ToolsSelector modes={modes} selectedMode={selectedMode} onChange={onModeChange} disabled={submitting} />
                 <ModelSelector models={models} selectedModelId={selectedModelId} onChange={onModelChange} disabled={submitting} />
               </div>
-              <Button type="submit" className="rounded-full" disabled={!text.trim() || submitting} aria-busy={submitting}>
+              <Button type="submit" className="min-h-11 rounded-full" disabled={!text.trim() || submitting} aria-busy={submitting}>
                 <ArrowUp aria-hidden="true" />
                 {submitting ? "Sending" : "Send"}
               </Button>

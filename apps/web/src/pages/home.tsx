@@ -126,7 +126,7 @@ export function HomePage({ selection, onSelectionChange }: HomePageProps) {
   }
 
   return (
-    <section className="relative flex min-h-[calc(100vh-var(--frank-topbar-height)-2.5rem)] flex-col overflow-hidden rounded-xl bg-background">
+    <section className="relative flex min-h-[calc(100dvh-var(--frank-topbar-height)-5rem)] flex-col overflow-hidden rounded-xl bg-background lg:min-h-[calc(100vh-var(--frank-topbar-height)-2.5rem)]">
       <button
         type="button"
         className="absolute right-0 top-0 hidden size-11 items-center justify-center rounded-xl border border-border bg-surface text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring md:flex"
@@ -136,11 +136,11 @@ export function HomePage({ selection, onSelectionChange }: HomePageProps) {
         <Maximize2 className="size-4" aria-hidden="true" />
       </button>
 
-      <div className="flex min-h-0 flex-1 items-center justify-center px-3 pb-8 pt-8">
+      <div className="flex min-h-0 flex-1 items-center justify-center px-1 pb-6 pt-6 sm:px-3 sm:pb-8 sm:pt-8">
         <div className="grid max-w-2xl justify-items-center gap-4 text-center">
           <div className="grid gap-2">
-            <h2 className="text-3xl font-semibold leading-tight text-foreground sm:text-4xl">How can I help you today?</h2>
-            <p className="w-fit justify-self-center rounded-full border border-border bg-surface px-4 py-2 text-sm text-muted-foreground">
+            <h2 className="text-2xl font-semibold leading-tight text-foreground sm:text-4xl">How can I help you today?</h2>
+            <p className="w-fit max-w-full justify-self-center rounded-full border border-border bg-surface px-3 py-2 text-sm text-muted-foreground sm:px-4">
               Ask anything or type <kbd className="rounded bg-surface-muted px-1.5 py-0.5 text-foreground">/</kbd> for commands
             </p>
           </div>
@@ -162,7 +162,7 @@ export function HomePage({ selection, onSelectionChange }: HomePageProps) {
         </div>
       ) : null}
 
-      <div className="sticky bottom-0 mx-auto w-full max-w-6xl bg-gradient-to-t from-background via-background/95 to-background/0 pb-3 pt-8">
+      <div className="sticky bottom-0 mx-auto w-full max-w-6xl bg-gradient-to-t from-background via-background/95 to-background/0 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-6 sm:pt-8">
         <ChatComposer
           models={models}
           modes={modes}

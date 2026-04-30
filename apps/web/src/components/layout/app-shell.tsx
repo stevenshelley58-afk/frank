@@ -6,6 +6,7 @@ import {
   Calendar,
   CheckCircle2,
   ChevronsUpDown,
+  Menu,
   MessageCircle,
   Settings as SettingsIcon
 } from "lucide-react";
@@ -16,6 +17,7 @@ import { titleize } from "../../lib/format.js";
 import { listTasks, type Task } from "../../api.js";
 import { StatusPill } from "../status/status-pill.js";
 import { SidebarSection } from "./sidebar-section.js";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "../ui/index.js";
 
 export interface AppShellPage {
   id: string;
@@ -44,6 +46,7 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
   const primaryPages = pages.filter((page) => (page.placement ?? "primary") === "primary");
   const settingsPage = pages.find((page) => page.placement === "settings");
   const [tasksState, setTasksState] = useState<TaskLoadState>({ status: "loading" });
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -57,7 +60,13 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
     return () => controller.abort();
   }, []);
 
-  function chooseContext(selection: HomeSelection) {
+  function navigateTo(pageId: string) {
+    setMobileNavOpen(false);
+    onNavigate(pageId);
+  }
+
+  function chooseHomeContext(selection: HomeSelection) {
+    setMobileNavOpen(false);
     onHomeContextSelect(selection);
     onNavigate("home");
   }
@@ -70,107 +79,67 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
       >
         Skip to main content
       </a>
-      <div className="grid min-h-screen lg:grid-cols-[var(--frank-sidebar-width)_minmax(0,1fr)]">
-        <aside className="border-b border-sidebar-border bg-sidebar text-sidebar-foreground lg:border-b-0 lg:border-r">
-          <div className="flex h-full min-h-screen flex-col px-4 py-5">
-            <div className="flex min-h-14 items-center gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-2xl font-semibold leading-7 text-foreground">Frank Hub</p>
-              </div>
-            </div>
 
-            <nav className="mt-8 grid gap-1" aria-label="Primary navigation">
-              {primaryPages.map((page) => (
-                <SidebarNavButton
-                  key={page.id}
-                  page={page}
-                  active={page.id === activePage.id}
-                  onClick={() => onNavigate(page.id)}
-                />
-              ))}
-            </nav>
+      <header className="sticky top-0 z-40 flex min-h-16 items-center justify-between gap-3 border-b border-border bg-surface/95 px-4 py-3 backdrop-blur lg:hidden">
+        <button
+          type="button"
+          className="flex size-11 items-center justify-center rounded-full border border-border bg-surface text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Open navigation menu"
+          aria-haspopup="dialog"
+          aria-expanded={mobileNavOpen}
+          onClick={() => setMobileNavOpen(true)}
+        >
+          <Menu className="size-5" aria-hidden="true" />
+        </button>
+        <div className="min-w-0 flex-1 text-center">
+          <p className="truncate text-sm font-semibold text-foreground">Frank Hub</p>
+          <p className="truncate text-xs text-muted-foreground">{activePage.title}</p>
+        </div>
+        <button
+          type="button"
+          className="flex size-11 items-center justify-center rounded-full text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+          aria-label="Notifications"
+          title="Notifications"
+        >
+          <Bell className="size-5" aria-hidden="true" />
+        </button>
+      </header>
 
-            <div className="mt-7">
-              <SidebarSection id="recent-chats" title="Recent Chats" icon={MessageCircle} defaultOpen={false}>
-                {recentChats.map((chat) => (
-                  <SidebarContextRow
-                    key={chat.id}
-                    title={chat.title}
-                    onClick={() => chooseContext({ kind: "chat", id: chat.id, title: chat.title })}
-                  />
-                ))}
-                <SidebarActionRow title="Show more" onClick={() => chooseContext({ kind: "chat", title: "Recent Chats" })} />
-              </SidebarSection>
+      <Dialog open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <DialogContent className="!left-0 !top-0 !h-[100dvh] !w-[min(22rem,calc(100vw-2rem))] !max-w-none !translate-x-0 !translate-y-0 !rounded-none border-y-0 border-l-0 p-0">
+          <DialogHeader className="sr-only">
+            <DialogTitle>Navigation</DialogTitle>
+            <DialogDescription>Primary navigation, recent chats, recent tasks, upcoming work, and settings.</DialogDescription>
+          </DialogHeader>
+          <SidebarContent
+            activePage={activePage}
+            primaryPages={primaryPages}
+            settingsPage={settingsPage}
+            tasksState={tasksState}
+            sectionIdPrefix="mobile"
+            className="h-[100dvh] overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-5"
+            onNavigate={navigateTo}
+            onHomeContextSelect={chooseHomeContext}
+          />
+        </DialogContent>
+      </Dialog>
 
-              <SidebarSection id="recent-tasks" title="Recent Tasks" icon={CheckCircle2} defaultOpen={false}>
-                {tasksState.status === "loading" ? <SidebarMutedRow>Loading tasks</SidebarMutedRow> : null}
-                {tasksState.status === "error" ? <SidebarMutedRow>{tasksState.message}</SidebarMutedRow> : null}
-                {tasksState.status === "ready" && tasksState.tasks.length === 0 ? <SidebarMutedRow>No recent tasks</SidebarMutedRow> : null}
-                {tasksState.status === "ready"
-                  ? tasksState.tasks.slice(0, 5).map((task) => (
-                      <SidebarContextRow
-                        key={task.id}
-                        title={task.title}
-                        subtitle={titleize(task.state)}
-                        onClick={() =>
-                          chooseContext({
-                            kind: "task",
-                            id: task.id,
-                            title: task.title,
-                            subtitle: titleize(task.state)
-                          })
-                        }
-                      />
-                    ))
-                  : null}
-                <SidebarActionRow title="Show more" onClick={() => onNavigate("tasks")} />
-              </SidebarSection>
-
-              <SidebarSection id="upcoming" title="Upcoming" icon={Calendar} defaultOpen={false}>
-                {upcomingItems.map((item) => (
-                  <SidebarContextRow
-                    key={item.id}
-                    title={item.title}
-                    subtitle={item.timeLabel}
-                    onClick={() =>
-                      chooseContext({
-                        kind: "upcoming",
-                        id: item.id,
-                        title: item.title,
-                        subtitle: item.timeLabel
-                      })
-                    }
-                  />
-                ))}
-                <SidebarActionRow title="View full schedule" onClick={() => chooseContext({ kind: "upcoming", title: "Upcoming" })} />
-              </SidebarSection>
-            </div>
-
-            <div className="mt-auto grid gap-3 border-t border-sidebar-border pt-5">
-              {settingsPage ? (
-                <SidebarNavButton
-                  page={settingsPage}
-                  active={settingsPage.id === activePage.id}
-                  onClick={() => onNavigate(settingsPage.id)}
-                />
-              ) : null}
-              <button
-                type="button"
-                className="flex min-h-14 items-center gap-3 rounded-lg px-3 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
-                onClick={() => onNavigate("settings")}
-              >
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate text-sm font-semibold text-foreground">Frank Hub</span>
-                  <span className="block truncate text-xs text-muted-foreground">Workspace</span>
-                </span>
-                <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              </button>
-            </div>
-          </div>
+      <div className="grid min-h-[calc(100dvh-4rem)] lg:min-h-screen lg:grid-cols-[var(--frank-sidebar-width)_minmax(0,1fr)]">
+        <aside className="hidden border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:block">
+          <SidebarContent
+            activePage={activePage}
+            primaryPages={primaryPages}
+            settingsPage={settingsPage}
+            tasksState={tasksState}
+            sectionIdPrefix="desktop"
+            className="h-full min-h-screen px-4 py-5"
+            onNavigate={navigateTo}
+            onHomeContextSelect={chooseHomeContext}
+          />
         </aside>
 
         <div className="flex min-w-0 flex-col">
-          <header className="flex min-h-[var(--frank-topbar-height)] items-center justify-between gap-4 border-b border-border bg-background/95 px-4 py-4 sm:px-6 lg:px-8">
+          <header className="flex min-h-[var(--frank-topbar-height)] flex-col items-start justify-center gap-3 border-b border-border bg-background/95 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-6 lg:px-8">
             <div className="min-w-0">
               <p className="truncate text-sm font-medium text-muted-foreground">{activePage.id === "home" ? "Workspace" : "Frank Hub"}</p>
               <h1 className="truncate text-base font-semibold leading-6 text-foreground">{activePage.title}</h1>
@@ -188,10 +157,119 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
             </div>
           </header>
 
-          <main id="main-content" className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8" tabIndex={-1}>
+          <main id="main-content" className="min-w-0 flex-1 px-3 py-4 sm:px-6 lg:px-8" tabIndex={-1}>
             {children}
           </main>
         </div>
+      </div>
+    </div>
+  );
+}
+
+function SidebarContent({
+  activePage,
+  primaryPages,
+  settingsPage,
+  tasksState,
+  sectionIdPrefix,
+  onNavigate,
+  onHomeContextSelect,
+  className
+}: {
+  activePage: AppShellPage;
+  primaryPages: AppShellPage[];
+  settingsPage: AppShellPage | undefined;
+  tasksState: TaskLoadState;
+  sectionIdPrefix: string;
+  onNavigate: (pageId: string) => void;
+  onHomeContextSelect: (selection: HomeSelection) => void;
+  className?: string | undefined;
+}) {
+  return (
+    <div className={cn("flex flex-col bg-sidebar text-sidebar-foreground", className)}>
+      <div className="flex min-h-14 items-center gap-3">
+        <div className="min-w-0">
+          <p className="truncate text-2xl font-semibold leading-7 text-foreground">Frank Hub</p>
+        </div>
+      </div>
+
+      <nav className="mt-8 grid gap-1" aria-label="Primary navigation">
+        {primaryPages.map((page) => (
+          <SidebarNavButton key={page.id} page={page} active={page.id === activePage.id} onClick={() => onNavigate(page.id)} />
+        ))}
+      </nav>
+
+      <div className="mt-7">
+        <SidebarSection id={`${sectionIdPrefix}-recent-chats`} title="Recent Chats" icon={MessageCircle} defaultOpen={false}>
+          {recentChats.map((chat) => (
+            <SidebarContextRow
+              key={chat.id}
+              title={chat.title}
+              onClick={() => onHomeContextSelect({ kind: "chat", id: chat.id, title: chat.title })}
+            />
+          ))}
+          <SidebarActionRow title="Show more" onClick={() => onHomeContextSelect({ kind: "chat", title: "Recent Chats" })} />
+        </SidebarSection>
+
+        <SidebarSection id={`${sectionIdPrefix}-recent-tasks`} title="Recent Tasks" icon={CheckCircle2} defaultOpen={false}>
+          {tasksState.status === "loading" ? <SidebarMutedRow>Loading tasks</SidebarMutedRow> : null}
+          {tasksState.status === "error" ? <SidebarMutedRow>{tasksState.message}</SidebarMutedRow> : null}
+          {tasksState.status === "ready" && tasksState.tasks.length === 0 ? <SidebarMutedRow>No recent tasks</SidebarMutedRow> : null}
+          {tasksState.status === "ready"
+            ? tasksState.tasks.slice(0, 5).map((task) => (
+                <SidebarContextRow
+                  key={task.id}
+                  title={task.title}
+                  subtitle={titleize(task.state)}
+                  onClick={() =>
+                    onHomeContextSelect({
+                      kind: "task",
+                      id: task.id,
+                      title: task.title,
+                      subtitle: titleize(task.state)
+                    })
+                  }
+                />
+              ))
+            : null}
+          <SidebarActionRow title="Show more" onClick={() => onNavigate("tasks")} />
+        </SidebarSection>
+
+        <SidebarSection id={`${sectionIdPrefix}-upcoming`} title="Upcoming" icon={Calendar} defaultOpen={false}>
+          {upcomingItems.map((item) => (
+            <SidebarContextRow
+              key={item.id}
+              title={item.title}
+              subtitle={item.timeLabel}
+              onClick={() =>
+                onHomeContextSelect({
+                  kind: "upcoming",
+                  id: item.id,
+                  title: item.title,
+                  subtitle: item.timeLabel
+                })
+              }
+            />
+          ))}
+          <SidebarActionRow title="View full schedule" onClick={() => onHomeContextSelect({ kind: "upcoming", title: "Upcoming" })} />
+        </SidebarSection>
+      </div>
+
+      <div className="mt-auto grid gap-3 border-t border-sidebar-border pt-5">
+        {settingsPage ? (
+          <SidebarNavButton page={settingsPage} active={settingsPage.id === activePage.id} onClick={() => onNavigate(settingsPage.id)} />
+        ) : null}
+        <button
+          type="button"
+          className="flex min-h-14 items-center gap-3 rounded-lg px-3 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
+          onClick={() => onNavigate("settings")}
+        >
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-sm font-semibold text-foreground">Frank Hub</span>
+            <span className="block truncate text-xs text-muted-foreground">Workspace</span>
+          </span>
+          <ChevronsUpDown className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+        </button>
       </div>
     </div>
   );

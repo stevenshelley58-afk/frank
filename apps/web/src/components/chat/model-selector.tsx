@@ -29,7 +29,7 @@ export function ModelSelector({ models, selectedModelId, onChange, disabled, cla
       <SelectTrigger
         aria-label="Model"
         className={cn(
-          "h-11 w-auto min-w-44 rounded-full border-border bg-surface px-4 text-sm font-medium shadow-none",
+          "h-11 w-full min-w-0 rounded-full border-border bg-surface px-4 text-sm font-medium shadow-none sm:w-auto sm:min-w-44",
           className
         )}
       >
