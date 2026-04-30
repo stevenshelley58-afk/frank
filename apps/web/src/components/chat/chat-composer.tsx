@@ -1,11 +1,12 @@
-import { useRef, useState } from "react";
+import { forwardRef, useEffect, useId, useRef, useState } from "react";
 import type * as React from "react";
-import { ArrowUp, FilePlus2, FolderUp, Image, Maximize2, Mic, Paperclip, Plus } from "lucide-react";
+import type { LucideIcon } from "lucide-react";
+import { ArrowUp, ChevronDown, FilePlus2, FolderUp, Image, Maximize2, Mic, Paperclip, Plus } from "lucide-react";
 import { Button, Textarea } from "../ui/index.js";
 import { AttachmentChips, type ComposerAttachment, type ComposerAttachmentType } from "./attachment-chips.js";
 import { FullscreenComposer } from "./fullscreen-composer.js";
 import { ModelSelector, type ComposerModel } from "./model-selector.js";
-import { ToolsSelector, type ComposerMode } from "./tools-selector.js";
+import type { ComposerMode } from "./tools-selector.js";
 import { cn } from "../../lib/utils.js";
 
 export type { ComposerMode } from "./tools-selector.js";
@@ -46,10 +47,45 @@ export function ChatComposer({
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [fullscreenOpen, setFullscreenOpen] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuId = useId();
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const firstMenuItemRef = useRef<HTMLButtonElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const folderInputRef = useRef<HTMLInputElement | null>(null);
   const imageInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) {
+      return undefined;
+    }
+
+    function handlePointerDown(event: PointerEvent) {
+      const target = event.target as Node | null;
+      if (target && (menuRef.current?.contains(target) || menuButtonRef.current?.contains(target))) {
+        return;
+      }
+      setMenuOpen(false);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenuOpen(false);
+        menuButtonRef.current?.focus();
+      }
+    }
+
+    document.addEventListener("pointerdown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    window.setTimeout(() => firstMenuItemRef.current?.focus(), 0);
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen]);
 
   async function submitMessage() {
     const trimmed = text.trim();
@@ -112,6 +148,19 @@ export function ChatComposer({
 
   function handleModeChange(mode: string) {
     onModeChange(mode);
+    setMenuOpen(false);
+    window.setTimeout(() => textareaRef.current?.focus(), 0);
+  }
+
+  function openFilePicker(type: ComposerAttachmentType) {
+    setMenuOpen(false);
+    if (type === "folder") {
+      folderInputRef.current?.click();
+    } else if (type === "image") {
+      imageInputRef.current?.click();
+    } else {
+      fileInputRef.current?.click();
+    }
     window.setTimeout(() => textareaRef.current?.focus(), 0);
   }
 
@@ -119,7 +168,7 @@ export function ChatComposer({
     <>
       <section
         className={cn(
-          "rounded-[2rem] border border-border bg-surface px-5 py-4 text-foreground shadow-[var(--frank-shadow-panel)]",
+          "rounded-3xl border border-border bg-surface px-5 py-4 text-foreground shadow-[var(--frank-shadow-panel)]",
           className
         )}
         aria-label="Chat composer"
@@ -141,7 +190,7 @@ export function ChatComposer({
             onChange={(event) => setText(event.target.value)}
             onKeyDown={handleKeyDown}
             placeholder="Ask for anything..."
-            className="min-h-14 border-0 bg-transparent px-1 py-1 text-base shadow-none focus-visible:ring-0"
+            className="min-h-14 border-0 bg-transparent px-0 py-1 text-base shadow-none focus-visible:ring-0"
             disabled={submitting}
           />
           <AttachmentChips attachments={attachments} onRemove={removeAttachment} />
@@ -156,20 +205,57 @@ export function ChatComposer({
             </p>
           ) : null}
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap items-center gap-2">
-              <ComposerIconButton label="Add" onClick={() => fileInputRef.current?.click()}>
+            <div className="relative flex items-center gap-2">
+              <Button
+                ref={menuButtonRef}
+                type="button"
+                variant="outline"
+                className="h-11 rounded-full border-border bg-surface px-4 text-sm font-medium shadow-none hover:bg-accent"
+                aria-label="Open composer menu"
+                aria-haspopup="menu"
+                aria-expanded={menuOpen}
+                aria-controls={menuOpen ? menuId : undefined}
+                onClick={() => setMenuOpen((open) => !open)}
+                disabled={submitting}
+              >
                 <Plus aria-hidden="true" />
-              </ComposerIconButton>
-              <ComposerIconButton label="Attach file" onClick={() => fileInputRef.current?.click()}>
-                <Paperclip aria-hidden="true" />
-              </ComposerIconButton>
-              <ComposerIconButton label="Attach folder" onClick={() => folderInputRef.current?.click()}>
-                <FolderUp aria-hidden="true" />
-              </ComposerIconButton>
-              <ComposerIconButton label="Attach image" onClick={() => imageInputRef.current?.click()}>
-                <Image aria-hidden="true" />
-              </ComposerIconButton>
-              <ToolsSelector modes={modes} selectedMode={selectedMode} onChange={handleModeChange} disabled={submitting} />
+                Menu
+                <ChevronDown className={cn("transition-transform", menuOpen ? "rotate-180" : "")} aria-hidden="true" />
+              </Button>
+              {menuOpen ? (
+                <div
+                  ref={menuRef}
+                  id={menuId}
+                  role="menu"
+                  aria-label="Composer menu"
+                  className="absolute bottom-full left-0 z-20 mb-2 grid w-64 gap-1 rounded-xl border border-border bg-popover p-2 text-sm text-popover-foreground shadow-[var(--frank-shadow-panel)]"
+                >
+                  <ComposerMenuItem ref={firstMenuItemRef} label="Attach file" icon={Paperclip} onClick={() => openFilePicker("file")} />
+                  <ComposerMenuItem label="Attach folder" icon={FolderUp} onClick={() => openFilePicker("folder")} />
+                  <ComposerMenuItem label="Attach image" icon={Image} onClick={() => openFilePicker("image")} />
+                  <div className="my-1 h-px bg-border" role="separator" />
+                  {modes.map((mode) => (
+                    <button
+                      key={mode.id}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={mode.id === selectedMode}
+                      className={cn(
+                        "flex min-h-10 items-center justify-between rounded-lg px-3 text-left outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
+                        mode.id === selectedMode ? "bg-accent text-accent-foreground" : "text-foreground"
+                      )}
+                      onClick={() => handleModeChange(mode.id)}
+                    >
+                      <span>{mode.label}</span>
+                      {mode.id === selectedMode ? (
+                        <span className="text-xs text-muted-foreground" aria-hidden="true">
+                          Selected
+                        </span>
+                      ) : null}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
             </div>
             <div className="flex flex-wrap items-center gap-2 sm:justify-end">
               <ModelSelector models={models} selectedModelId={selectedModelId} onChange={handleModelChange} disabled={submitting} />
@@ -188,7 +274,7 @@ export function ChatComposer({
               <Button
                 type="submit"
                 size="icon"
-                className="size-12 rounded-full bg-primary text-primary-foreground"
+                className="size-11 rounded-full bg-primary text-primary-foreground"
                 disabled={!text.trim() || submitting}
                 aria-label="Send message"
                 aria-busy={submitting}
@@ -251,6 +337,28 @@ export function ChatComposer({
   );
 }
 
+const ComposerMenuItem = forwardRef<
+  HTMLButtonElement,
+  {
+    label: string;
+    icon: LucideIcon;
+    onClick: () => void;
+  }
+>(({ label, icon: Icon, onClick }, ref) => (
+  <button
+    ref={ref}
+    type="button"
+    role="menuitem"
+    className="flex min-h-10 items-center gap-3 rounded-lg px-3 text-left text-foreground outline-none hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring"
+    onClick={onClick}
+  >
+    <Icon className="size-4 text-muted-foreground" aria-hidden="true" />
+    <span>{label}</span>
+  </button>
+));
+
+ComposerMenuItem.displayName = "ComposerMenuItem";
+
 function ComposerIconButton({
   label,
   onClick,
@@ -265,7 +373,7 @@ function ComposerIconButton({
       type="button"
       variant="outline"
       size="icon"
-      className="size-12 rounded-full border-border bg-surface text-foreground shadow-none hover:bg-accent"
+      className="size-11 rounded-full border-border bg-surface text-foreground shadow-none hover:bg-accent"
       aria-label={label}
       title={label}
       onClick={onClick}

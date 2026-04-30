@@ -11,7 +11,6 @@ import {
   PlugZap,
   Settings as SettingsIcon,
   ShieldCheck,
-  Sparkles,
   TerminalSquare
 } from "lucide-react";
 import { useState } from "react";
@@ -61,7 +60,7 @@ const pages: AppShellPage[] = [
     label: "Skills",
     title: "Skills",
     description: "Agent capability and skill surfaces.",
-    icon: Sparkles
+    icon: Boxes
   },
   {
     id: "rules",

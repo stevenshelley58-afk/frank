@@ -74,11 +74,8 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
         <aside className="border-b border-sidebar-border bg-sidebar text-sidebar-foreground lg:border-b-0 lg:border-r">
           <div className="flex h-full min-h-screen flex-col px-4 py-5">
             <div className="flex min-h-14 items-center gap-3">
-              <div className="flex size-12 shrink-0 items-center justify-center rounded-xl bg-primary text-base font-semibold text-primary-foreground">
-                FH
-              </div>
               <div className="min-w-0">
-                <p className="truncate text-xl font-semibold leading-7 text-foreground">Frank Hub</p>
+                <p className="truncate text-2xl font-semibold leading-7 text-foreground">Frank Hub</p>
               </div>
             </div>
 
@@ -159,12 +156,9 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
               ) : null}
               <button
                 type="button"
-                className="flex min-h-14 items-center gap-3 rounded-lg px-2 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
+                className="flex min-h-14 items-center gap-3 rounded-lg px-3 text-left outline-none hover:bg-sidebar-accent focus-visible:ring-2 focus-visible:ring-ring"
                 onClick={() => onNavigate("settings")}
               >
-                <div className="flex size-10 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground">
-                  FH
-                </div>
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-sm font-semibold text-foreground">Frank Hub</span>
                   <span className="block truncate text-xs text-muted-foreground">Workspace</span>
@@ -190,14 +184,6 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
                 title="Notifications"
               >
                 <Bell className="size-5" aria-hidden="true" />
-              </button>
-              <button
-                type="button"
-                className="hidden size-11 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring sm:flex"
-                aria-label="Frank Hub user menu"
-                title="Frank Hub user menu"
-              >
-                FH
               </button>
             </div>
           </header>

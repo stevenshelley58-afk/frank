@@ -1,4 +1,3 @@
-import { Sparkles } from "lucide-react";
 import {
   Select,
   SelectContent,
@@ -30,14 +29,11 @@ export function ModelSelector({ models, selectedModelId, onChange, disabled, cla
       <SelectTrigger
         aria-label="Model"
         className={cn(
-          "h-12 w-auto min-w-44 rounded-full border-border bg-surface px-4 text-sm font-medium shadow-none",
+          "h-11 w-auto min-w-44 rounded-full border-border bg-surface px-4 text-sm font-medium shadow-none",
           className
         )}
       >
-        <span className="flex min-w-0 items-center gap-2">
-          <Sparkles className="size-4 shrink-0 text-accent-foreground" aria-hidden="true" />
-          <SelectValue placeholder="Default model" />
-        </span>
+        <SelectValue placeholder="Default model" />
       </SelectTrigger>
       <SelectContent>
         {items.map((model) => (

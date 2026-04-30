@@ -27,20 +27,26 @@ function renderComposer(overrides: Partial<React.ComponentProps<typeof ChatCompo
 afterEach(() => cleanup());
 
 describe("ChatComposer", () => {
-  it("renders the required premium composer controls", () => {
+  it("renders a clean composer with secondary controls inside one menu", async () => {
+    const user = userEvent.setup();
     renderComposer();
 
     expect(screen.getByLabelText("Message")).toBeTruthy();
     expect(screen.getByPlaceholderText("Ask for anything...")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Add" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Attach file" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Attach folder" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Attach image" })).toBeTruthy();
-    expect(screen.getByRole("combobox", { name: "Tools mode" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open composer menu" })).toBeTruthy();
     expect(screen.getByRole("combobox", { name: "Model" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Start voice input" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Expand composer" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Send message" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Attach file" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "Open composer menu" }));
+
+    expect(screen.getByRole("menu", { name: "Composer menu" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Attach file" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Attach folder" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Attach image" })).toBeTruthy();
+    expect(screen.getByRole("menuitemradio", { name: "Chat" })).toBeTruthy();
   });
 
   it("keeps send disabled when the message is empty", () => {
