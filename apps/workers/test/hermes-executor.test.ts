@@ -95,6 +95,129 @@ describe("Hermes task execution handler", () => {
     await expect(readFile(pool.artifacts[0]!.storage_path, "utf8")).resolves.toBe("done");
     expect(JSON.stringify(pool.runnerEvents)).not.toContain("secret-test-key");
   });
+
+  it("links self-upgrade run status to the Hermes runner session", async () => {
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith("/v1/runs")) {
+        return jsonResponse({ run_id: "run_self_upgrade", status: "started" }, 202);
+      }
+      if (url.endsWith("/v1/runs/run_self_upgrade/events")) {
+        return new Response(['data: {"event":"run.completed","output":"self-upgrade done"}', "", ""].join("\n"), {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream"
+          }
+        });
+      }
+      return jsonResponse({ error: "not_found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const artifactRoot = await mkdtemp(path.join(tmpdir(), "frank-hermes-self-upgrade-"));
+
+    const pool = new FakeHermesWorkerPool();
+    pool.selfUpgradeRuns.set("self-upgrade-1", {
+      id: "self-upgrade-1",
+      status: "queued",
+      runner_session_id: null,
+      finished_at: null
+    });
+    pool.tasks.set("task-self", {
+      id: "task-self",
+      title: "Self-upgrade Frank",
+      description: "Improve Frank.",
+      metadata: {
+        selfUpgradeRunId: "self-upgrade-1"
+      }
+    });
+
+    const handler = createHermesExecutionHandler(
+      pool,
+      loadHermesWorkerConfig({
+        HERMES_ENABLED: "true",
+        HERMES_API_BASE_URL: "http://hermes:8642",
+        HERMES_API_SERVER_KEY: "secret-test-key",
+        HERMES_WORKSPACE_ROOT: "/opt/frank-hub/workspaces",
+        HERMES_ARTIFACT_ROOT: artifactRoot
+      })
+    );
+
+    await handler({
+      taskId: "task-self",
+      agentId: "ops",
+      sessionId: "agent-session-self",
+      workerId: "worker-1",
+      attempt: 1,
+      executionKind: "hermes_operator"
+    });
+
+    expect(pool.selfUpgradeRuns.get("self-upgrade-1")).toMatchObject({
+      status: "completed",
+      runner_session_id: "runner-session-1"
+    });
+  });
+
+  it("marks rollback self-upgrade tasks as rolled back when Hermes completes", async () => {
+    const fetchMock = vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith("/v1/runs")) {
+        return jsonResponse({ run_id: "run_rollback", status: "started" }, 202);
+      }
+      if (url.endsWith("/v1/runs/run_rollback/events")) {
+        return new Response(['data: {"event":"run.completed","output":"rollback done"}', "", ""].join("\n"), {
+          status: 200,
+          headers: {
+            "Content-Type": "text/event-stream"
+          }
+        });
+      }
+      return jsonResponse({ error: "not_found" }, 404);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const artifactRoot = await mkdtemp(path.join(tmpdir(), "frank-hermes-rollback-"));
+
+    const pool = new FakeHermesWorkerPool();
+    pool.selfUpgradeRuns.set("self-upgrade-rollback", {
+      id: "self-upgrade-rollback",
+      status: "failed",
+      runner_session_id: null,
+      finished_at: null
+    });
+    pool.tasks.set("task-rollback", {
+      id: "task-rollback",
+      title: "Rollback Frank",
+      description: "Rollback the failed self-upgrade.",
+      metadata: {
+        kind: "self_upgrade_rollback",
+        selfUpgradeRunId: "self-upgrade-rollback"
+      }
+    });
+
+    const handler = createHermesExecutionHandler(
+      pool,
+      loadHermesWorkerConfig({
+        HERMES_ENABLED: "true",
+        HERMES_API_BASE_URL: "http://hermes:8642",
+        HERMES_API_SERVER_KEY: "secret-test-key",
+        HERMES_WORKSPACE_ROOT: "/opt/frank-hub/workspaces",
+        HERMES_ARTIFACT_ROOT: artifactRoot
+      })
+    );
+
+    await handler({
+      taskId: "task-rollback",
+      agentId: "ops",
+      sessionId: "agent-session-rollback",
+      workerId: "worker-1",
+      attempt: 1,
+      executionKind: "hermes_operator"
+    });
+
+    expect(pool.selfUpgradeRuns.get("self-upgrade-rollback")).toMatchObject({
+      status: "rolled_back",
+      runner_session_id: "runner-session-1"
+    });
+  });
 });
 
 interface TaskRecord {
@@ -146,12 +269,20 @@ interface ArtifactRecord {
   metadata: Record<string, unknown>;
 }
 
+interface SelfUpgradeRecord {
+  id: string;
+  status: string;
+  runner_session_id: string | null;
+  finished_at: string | null;
+}
+
 class FakeHermesWorkerPool implements WorkerPool {
   readonly tasks = new Map<string, TaskRecord>();
   readonly runnerSessions: RunnerSessionRecord[] = [];
   readonly runnerEvents: RunnerEventRecord[] = [];
   readonly taskEvents: TaskEventRecord[] = [];
   readonly artifacts: ArtifactRecord[] = [];
+  readonly selfUpgradeRuns = new Map<string, SelfUpgradeRecord>();
   private idCounter = 1;
 
   async connect(): Promise<WorkerClient> {
@@ -255,6 +386,18 @@ class FakeHermesWorkerPool implements WorkerPool {
     }
 
     if (normalized.startsWith("update runner_sessions set last_event_at")) {
+      return rows([]);
+    }
+
+    if (normalized.startsWith("update self_upgrade_runs")) {
+      const run = this.selfUpgradeRuns.get(values[0] as string);
+      if (run) {
+        run.status = values[1] as string;
+        run.runner_session_id = values[2] as string | null;
+        if (["completed", "failed", "cancelled", "rolled_back"].includes(run.status)) {
+          run.finished_at = new Date(Date.UTC(2026, 4, 4, 0, 0, 1)).toISOString();
+        }
+      }
       return rows([]);
     }
 

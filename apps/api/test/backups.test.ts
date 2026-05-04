@@ -115,6 +115,19 @@ function createTestServer(pool: FakeBackupPool) {
       backups: {
         root: "/tmp/frank-backups"
       },
+      operator: {
+        mode: "guarded",
+        repoWorkspacePath: "/opt/frank-hub",
+        allowedWorkspaces: ["/opt/frank-hub/workspaces"],
+        protectedPaths: ["/", "/root", "/tmp/frank-backups", "/opt/frank-hub/.env"],
+        accessEnvPath: "/opt/frank-hub/runtime/access/frank-access.env"
+      },
+      accessProfile: {
+        emailAddress: undefined,
+        mobileNumber: undefined,
+        whatsappNumber: undefined,
+        apiKeyNames: []
+      },
       logLevel: "silent"
     } satisfies ApiConfig,
     pool: pool as never,

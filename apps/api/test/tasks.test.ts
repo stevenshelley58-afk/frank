@@ -286,6 +286,56 @@ describe("task API routes", () => {
     );
   });
 
+  it("allows Frank repo workspace in lab mode and rejects workspaces outside operator allowlist", async () => {
+    const pool = new FakeTaskPool();
+    const { server } = createTestServer(
+      pool,
+      false,
+      {},
+      {
+        mode: "lab",
+        repoWorkspacePath: "/opt/frank-hub",
+        allowedWorkspaces: ["/opt/frank-hub", "/opt/frank-hub/workspaces", "/opt/frank-projects"],
+        protectedPaths: ["/", "/root", "/opt/frank-backups", "/opt/frank-hub/.env"],
+        accessEnvPath: "/opt/frank-hub/runtime/access/frank-access.env"
+      }
+    );
+    const created = (
+      await server.inject({
+        method: "POST",
+        url: "/v1/tasks",
+        payload: {
+          title: "Self upgrade Frank"
+        }
+      })
+    ).json().task;
+
+    const selfUpgrade = await server.inject({
+      method: "POST",
+      url: `/v1/tasks/${created.id}/run-hermes`,
+      payload: {
+        workspacePath: "/opt/frank-hub"
+      }
+    });
+
+    expect(selfUpgrade.statusCode).toBe(202);
+    expect(selfUpgrade.json().session.workspacePath).toBe("/opt/frank-hub");
+
+    const outside = await server.inject({
+      method: "POST",
+      url: `/v1/tasks/${created.id}/run-hermes`,
+      payload: {
+        force: true,
+        workspacePath: "/tmp/random"
+      }
+    });
+
+    expect(outside.statusCode).toBe(400);
+    expect(outside.json()).toMatchObject({
+      error: "invalid_workspace"
+    });
+  });
+
   it("lists Hermes logs and serves protected artifacts from the configured artifact root", async () => {
     const artifactRoot = await mkdtemp(path.join(tmpdir(), "frank-artifacts-api-"));
     const pool = new FakeTaskPool();
@@ -375,7 +425,12 @@ async function expectPatchState(server: FastifyInstance, id: string, state: Task
   expect(response.json().task.state).toBe(state);
 }
 
-function createTestServer(pool: FakeTaskPool, accessEnabled = false, hermes: Partial<ApiConfig["hermes"]> = {}) {
+function createTestServer(
+  pool: FakeTaskPool,
+  accessEnabled = false,
+  hermes: Partial<ApiConfig["hermes"]> = {},
+  operator: Partial<ApiConfig["operator"]> = {}
+) {
   const server = buildServer({
     config: {
       environment: "test",
@@ -406,6 +461,20 @@ function createTestServer(pool: FakeTaskPool, accessEnabled = false, hermes: Par
       },
       backups: {
         root: "/opt/frank-backups"
+      },
+      operator: {
+        mode: "guarded",
+        repoWorkspacePath: "/opt/frank-hub",
+        allowedWorkspaces: ["/opt/frank-hub/workspaces"],
+        protectedPaths: ["/", "/root", "/opt/frank-backups", "/opt/frank-hub/.env"],
+        accessEnvPath: "/opt/frank-hub/runtime/access/frank-access.env",
+        ...operator
+      },
+      accessProfile: {
+        emailAddress: undefined,
+        mobileNumber: undefined,
+        whatsappNumber: undefined,
+        apiKeyNames: []
       },
       logLevel: "silent"
     } satisfies ApiConfig,

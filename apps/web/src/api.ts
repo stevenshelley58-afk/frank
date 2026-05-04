@@ -385,6 +385,105 @@ export interface OpsDeployResponse {
   mode: "read_only";
 }
 
+export interface OperatorAccessResponse {
+  operator: {
+    mode: "lab" | "guarded" | "production";
+    repoWorkspacePath: string;
+    allowedWorkspaces: string[];
+    protectedPaths: string[];
+    accessEnvPath: string;
+    limits: {
+      externalSendPerHour: number;
+      apiSpendUsdPerDay: number;
+      fileDeleteMaxCount: number;
+      hostCommandTimeoutSeconds: number;
+      databaseDestructiveRequiresLimit: boolean;
+    };
+  };
+  accessProfile: {
+    emailConfigured: boolean;
+    mobileConfigured: boolean;
+    whatsappConfigured: boolean;
+    apiKeyNames: string[];
+  };
+  accessWrite: {
+    enabled: boolean;
+    written: boolean;
+    allowedKeys: string[];
+  };
+  notes: string[];
+}
+
+export interface OperatorAccessWriteResponse extends OperatorAccessResponse {
+  writtenKeys: Array<{
+    key: string;
+    configured: boolean;
+    sensitive: boolean;
+    fingerprint: string | null;
+  }>;
+}
+
+export interface MessagingWhatsAppStatusResponse {
+  whatsapp: {
+    provider: "hermes_native";
+    configured: boolean;
+    enabled: boolean;
+    mode: "bot" | "self-chat";
+    numberConfigured: boolean;
+    allowedUsersConfigured: boolean;
+    webhookConfigured: boolean;
+    webhookRoute: string;
+  };
+  hermes: {
+    enabled: boolean;
+    privateApiConfigured: boolean;
+    apiBaseUrl: string;
+  };
+  notes: string[];
+}
+
+export interface MessagingNotifyResponse {
+  accepted: boolean;
+  message: string;
+  whatsapp: MessagingWhatsAppStatusResponse["whatsapp"];
+}
+
+export interface SelfUpgradeRun {
+  id: string;
+  goal: string;
+  status: "queued" | "running" | "waiting_approval" | "deploying" | "completed" | "failed" | "cancelled" | "rolled_back";
+  autoDeploy: boolean;
+  branch: string;
+  baseCommit: string | null;
+  taskId: string | null;
+  runnerSessionId: string | null;
+  workspacePath: string;
+  backupIds: string[];
+  limits: JsonRecord;
+  validationResults: JsonRecord;
+  deployResult: JsonRecord;
+  rollbackTarget: JsonRecord;
+  metadata: JsonRecord;
+  createdBy: string | null;
+  createdAt: string;
+  updatedAt: string;
+  finishedAt: string | null;
+}
+
+export interface Project {
+  id: string;
+  slug: string;
+  displayName: string;
+  workspacePath: string;
+  repoRemote: string | null;
+  backupPolicy: string;
+  status: "active" | "paused" | "archived";
+  metadata: JsonRecord;
+  lastActivityAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RefreshOpenRouterResult {
   providerId: "openrouter";
   status: "success" | "not_configured";
@@ -726,6 +825,88 @@ export async function getOpsSystem(options?: { signal?: AbortSignal }): Promise<
 
 export async function getOpsDeploy(options?: { signal?: AbortSignal }): Promise<OpsDeployResponse> {
   return apiRequest<OpsDeployResponse>("/v1/ops/deploy", { signal: options?.signal });
+}
+
+export async function getOperatorAccess(options?: { signal?: AbortSignal }): Promise<OperatorAccessResponse> {
+  return apiRequest<OperatorAccessResponse>("/v1/operator/access", { signal: options?.signal });
+}
+
+export async function writeOperatorAccess(values: Record<string, string>): Promise<OperatorAccessWriteResponse> {
+  return apiRequest<OperatorAccessWriteResponse>("/v1/operator/access", {
+    method: "PATCH",
+    body: { values }
+  });
+}
+
+export async function getWhatsAppStatus(options?: { signal?: AbortSignal }): Promise<MessagingWhatsAppStatusResponse> {
+  return apiRequest<MessagingWhatsAppStatusResponse>("/v1/messaging/whatsapp/status", { signal: options?.signal });
+}
+
+export async function sendWhatsAppNotification(
+  body: { message: string; metadata?: JsonRecord }
+): Promise<MessagingNotifyResponse> {
+  return apiRequest<MessagingNotifyResponse>("/v1/messaging/whatsapp/notify", {
+    method: "POST",
+    body
+  });
+}
+
+export async function listSelfUpgrades(options?: { signal?: AbortSignal }): Promise<SelfUpgradeRun[]> {
+  const data = await apiRequest<{ selfUpgradeRuns: SelfUpgradeRun[] }>("/v1/self-upgrades", { signal: options?.signal });
+  return data.selfUpgradeRuns;
+}
+
+export async function getSelfUpgrade(id: string, options?: { signal?: AbortSignal }): Promise<SelfUpgradeRun> {
+  const data = await apiRequest<{ selfUpgradeRun: SelfUpgradeRun }>(`/v1/self-upgrades/${encodeURIComponent(id)}`, {
+    signal: options?.signal
+  });
+  return data.selfUpgradeRun;
+}
+
+export async function createSelfUpgrade(body: {
+  goal: string;
+  autoDeploy?: boolean;
+  limits?: JsonRecord;
+  metadata?: JsonRecord;
+}): Promise<{ selfUpgradeRun: SelfUpgradeRun; task: Task }> {
+  return apiRequest<{ selfUpgradeRun: SelfUpgradeRun; task: Task }>("/v1/self-upgrades", {
+    method: "POST",
+    body
+  });
+}
+
+export async function cancelSelfUpgrade(id: string, reason?: string): Promise<{ selfUpgradeRun: SelfUpgradeRun }> {
+  return apiRequest<{ selfUpgradeRun: SelfUpgradeRun }>(`/v1/self-upgrades/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+    body: reason ? { reason } : {}
+  });
+}
+
+export async function rollbackSelfUpgrade(id: string, reason?: string): Promise<{ selfUpgradeRun: SelfUpgradeRun; task: Task }> {
+  return apiRequest<{ selfUpgradeRun: SelfUpgradeRun; task: Task }>(`/v1/self-upgrades/${encodeURIComponent(id)}/rollback`, {
+    method: "POST",
+    body: reason ? { reason } : {}
+  });
+}
+
+export async function listProjects(options?: { signal?: AbortSignal }): Promise<Project[]> {
+  const data = await apiRequest<{ projects: Project[] }>("/v1/projects", { signal: options?.signal });
+  return data.projects;
+}
+
+export async function createProject(body: {
+  slug: string;
+  displayName: string;
+  workspacePath?: string;
+  repoRemote?: string | null;
+  backupPolicy?: string;
+  metadata?: JsonRecord;
+}): Promise<Project> {
+  const data = await apiRequest<{ project: Project }>("/v1/projects", {
+    method: "POST",
+    body
+  });
+  return data.project;
 }
 
 function withQuery(path: string, query: ApiRequestOptions["query"]): string {

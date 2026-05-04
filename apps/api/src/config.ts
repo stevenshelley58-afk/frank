@@ -7,6 +7,9 @@ function booleanFromEnv(value: unknown): boolean {
   return ["1", "true", "yes", "on"].includes(value.toLowerCase());
 }
 
+const operatorModeSchema = z.enum(["lab", "guarded", "production"]);
+const whatsappModeSchema = z.enum(["bot", "self-chat"]);
+
 const envSchema = z.object({
   FRANK_ENV: z.string().default("development"),
   FRANK_SYSTEM_NAME: z.string().default("Frank Hub"),
@@ -31,6 +34,32 @@ const envSchema = z.object({
   HERMES_WORKSPACE_ROOT: z.string().default("/opt/frank-hub/workspaces"),
   HERMES_ARTIFACT_ROOT: z.string().default("/opt/frank-hub/runtime/artifacts"),
   FRANK_BACKUP_ROOT: z.string().default("/opt/frank-backups"),
+  FRANK_OPERATOR_MODE: operatorModeSchema.default("guarded"),
+  FRANK_REPO_WORKSPACE_PATH: z.string().default("/opt/frank-hub"),
+  FRANK_OPERATOR_ALLOWED_WORKSPACES: z.string().default("/opt/frank-hub/workspaces"),
+  FRANK_OPERATOR_PROTECTED_PATHS: z.string().default(
+    "/,/root,/etc,/boot,/var/lib/docker,/var/lib/postgresql,/opt/frank-backups,/opt/frank-hub/.env,/opt/frank-hub/runtime/access,/opt/frank-hub/runtime/hermes/.env,/opt/frank-hub/runtime/hermes/platforms/whatsapp/session"
+  ),
+  FRANK_ACCESS_ENV_PATH: z.string().default("/opt/frank-hub/runtime/access/frank-access.env"),
+  FRANK_SECRET_WRITE_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
+  FRANK_SECRET_WRITE_ALLOWED_KEYS: z.string().default(
+    "FRANK_EMAIL_ADDRESS,FRANK_MOBILE_NUMBER,FRANK_WHATSAPP_NUMBER,FRANK_API_KEY_NAMES,FRANK_EMAIL_APP_PASSWORD,FRANK_WHATSAPP_API_TOKEN,OPENROUTER_API_KEY,WHATSAPP_ENABLED,WHATSAPP_MODE,WHATSAPP_ALLOWED_USERS,WEBHOOK_ENABLED,WEBHOOK_SECRET,HERMES_WEBHOOK_SECRET"
+  ),
+  FRANK_LIMIT_EXTERNAL_SEND_PER_HOUR: z.coerce.number().int().nonnegative().default(25),
+  FRANK_LIMIT_API_SPEND_USD_PER_DAY: z.coerce.number().nonnegative().default(10),
+  FRANK_LIMIT_FILE_DELETE_MAX_COUNT: z.coerce.number().int().nonnegative().default(500),
+  FRANK_LIMIT_HOST_COMMAND_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(1800),
+  FRANK_DATABASE_DESTRUCTIVE_REQUIRES_LIMIT: z.preprocess(booleanFromEnv, z.boolean()).default(true),
+  FRANK_EMAIL_ADDRESS: z.string().optional(),
+  FRANK_MOBILE_NUMBER: z.string().optional(),
+  FRANK_WHATSAPP_NUMBER: z.string().optional(),
+  FRANK_API_KEY_NAMES: z.string().optional(),
+  WHATSAPP_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
+  WHATSAPP_MODE: whatsappModeSchema.default("bot"),
+  WHATSAPP_ALLOWED_USERS: z.string().optional(),
+  HERMES_WEBHOOK_BASE_URL: z.string().url().default("http://hermes:8644"),
+  HERMES_WEBHOOK_ROUTE: z.string().default("frank-whatsapp"),
+  HERMES_WEBHOOK_SECRET: z.string().optional(),
   LOG_LEVEL: z.string().default("info")
 });
 
@@ -67,6 +96,52 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
     backups: {
       root: parsed.FRANK_BACKUP_ROOT
     },
+    operator: {
+      mode: parsed.FRANK_OPERATOR_MODE,
+      repoWorkspacePath: parsed.FRANK_REPO_WORKSPACE_PATH,
+      allowedWorkspaces: parseWorkspaceList(parsed.FRANK_OPERATOR_ALLOWED_WORKSPACES, [
+        parsed.HERMES_WORKSPACE_ROOT
+      ]),
+      protectedPaths: parseWorkspaceList(parsed.FRANK_OPERATOR_PROTECTED_PATHS, [
+        "/",
+        "/root",
+        "/etc",
+        "/boot",
+        "/var/lib/docker",
+        "/var/lib/postgresql",
+        parsed.FRANK_BACKUP_ROOT,
+        `${parsed.FRANK_REPO_WORKSPACE_PATH.replace(/\/$/, "")}/.env`,
+        `${parsed.FRANK_REPO_WORKSPACE_PATH.replace(/\/$/, "")}/runtime/access`,
+        `${parsed.FRANK_REPO_WORKSPACE_PATH.replace(/\/$/, "")}/runtime/hermes/.env`,
+        `${parsed.FRANK_REPO_WORKSPACE_PATH.replace(/\/$/, "")}/runtime/hermes/platforms/whatsapp/session`
+      ]),
+      accessEnvPath: parsed.FRANK_ACCESS_ENV_PATH,
+      secretWriteEnabled: parsed.FRANK_SECRET_WRITE_ENABLED,
+      secretWriteAllowedKeys: parseCommaSeparatedList(parsed.FRANK_SECRET_WRITE_ALLOWED_KEYS),
+      limits: {
+        externalSendPerHour: parsed.FRANK_LIMIT_EXTERNAL_SEND_PER_HOUR,
+        apiSpendUsdPerDay: parsed.FRANK_LIMIT_API_SPEND_USD_PER_DAY,
+        fileDeleteMaxCount: parsed.FRANK_LIMIT_FILE_DELETE_MAX_COUNT,
+        hostCommandTimeoutSeconds: parsed.FRANK_LIMIT_HOST_COMMAND_TIMEOUT_SECONDS,
+        databaseDestructiveRequiresLimit: parsed.FRANK_DATABASE_DESTRUCTIVE_REQUIRES_LIMIT
+      }
+    },
+    messaging: {
+      whatsapp: {
+        enabled: parsed.WHATSAPP_ENABLED,
+        mode: parsed.WHATSAPP_MODE,
+        allowedUsers: parseCommaSeparatedList(parsed.WHATSAPP_ALLOWED_USERS),
+        webhookBaseUrl: parsed.HERMES_WEBHOOK_BASE_URL.replace(/\/$/, ""),
+        webhookRoute: parsed.HERMES_WEBHOOK_ROUTE.trim() || "frank-whatsapp",
+        webhookSecret: parsed.HERMES_WEBHOOK_SECRET?.trim() || undefined
+      }
+    },
+    accessProfile: {
+      emailAddress: cleanOptionalString(parsed.FRANK_EMAIL_ADDRESS),
+      mobileNumber: cleanOptionalString(parsed.FRANK_MOBILE_NUMBER),
+      whatsappNumber: cleanOptionalString(parsed.FRANK_WHATSAPP_NUMBER),
+      apiKeyNames: parseCommaSeparatedList(parsed.FRANK_API_KEY_NAMES)
+    },
     logLevel: parsed.LOG_LEVEL
   };
 }
@@ -85,4 +160,14 @@ function parseCommaSeparatedList(value: string | undefined): string[] {
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+}
+
+function parseWorkspaceList(value: string | undefined, fallback: string[]): string[] {
+  const parsed = parseCommaSeparatedList(value);
+  return parsed.length > 0 ? parsed : fallback;
+}
+
+function cleanOptionalString(value: string | undefined): string | undefined {
+  const cleaned = value?.trim();
+  return cleaned ? cleaned : undefined;
 }

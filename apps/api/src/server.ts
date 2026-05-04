@@ -11,9 +11,13 @@ import { requireCloudflareAccess } from "./access.js";
 import { registerAgentRoutes } from "./routes/agents.js";
 import { registerAuditLogRoutes } from "./routes/audit-log.js";
 import { registerBackupRoutes } from "./routes/backups.js";
+import { registerMessagingRoutes } from "./routes/messaging.js";
 import { registerModelRoutes } from "./routes/models.js";
 import { registerOpsRoutes, type OpsCollectors } from "./routes/ops.js";
+import { registerOperatorRoutes } from "./routes/operator.js";
+import { registerProjectRoutes } from "./routes/projects.js";
 import { registerRunnerRoutes } from "./routes/runners.js";
+import { registerSelfUpgradeRoutes } from "./routes/self-upgrades.js";
 import { registerTaskRoutes } from "./routes/tasks.js";
 
 export interface ServerDependencies {
@@ -134,6 +138,10 @@ export function buildServer({ config, pool, redis, opsCollectors }: ServerDepend
   registerOpsRoutes(server, pool, opsCollectors);
   registerRunnerRoutes(server, pool, config);
   registerBackupRoutes(server, pool, config);
+  registerOperatorRoutes(server, pool, config);
+  registerMessagingRoutes(server, pool, config);
+  registerSelfUpgradeRoutes(server, pool, config);
+  registerProjectRoutes(server, pool, config);
 
   return server;
 }

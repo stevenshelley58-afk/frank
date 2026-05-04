@@ -5,6 +5,7 @@ import {
   createFilesBackup,
   fetchSystemStatus,
   getArtifactDownloadUrl,
+  getOperatorAccess,
   listTaskLogs,
   runBackupPreflight,
   runHermesKillSwitch,
@@ -162,5 +163,41 @@ describe("apiRequest", () => {
       })
     );
     expect(getArtifactDownloadUrl("/v1/artifacts/artifact-1")).toBe("/api/v1/artifacts/artifact-1");
+  });
+
+  it("fetches the redacted operator access profile", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          operator: {
+            mode: "lab",
+            repoWorkspacePath: "/opt/frank-hub",
+            allowedWorkspaces: ["/opt/frank-hub"],
+            protectedPaths: ["/", "/root"],
+            accessEnvPath: "/opt/frank-hub/runtime/access/frank-access.env"
+          },
+          accessProfile: {
+            emailConfigured: true,
+            mobileConfigured: true,
+            whatsappConfigured: true,
+            apiKeyNames: ["OPENROUTER_API_KEY"]
+          },
+          notes: []
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(getOperatorAccess()).resolves.toMatchObject({
+      operator: {
+        mode: "lab"
+      },
+      accessProfile: {
+        whatsappConfigured: true,
+        apiKeyNames: ["OPENROUTER_API_KEY"]
+      }
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/api/v1/operator/access", expect.objectContaining({ method: "GET" }));
   });
 });

@@ -56,6 +56,7 @@ export function createHermesExecutionHandler(pool: WorkerPool, config: HermesRun
     }
 
     const session = await findOrCreateRunnerSession(pool, task.id, config);
+    const selfUpgradeRunId = stringMetadata(task.metadata.selfUpgradeRunId);
     const workspacePath = session.workspace_path ?? taskWorkspacePath(config.workspaceRoot, task.id);
     const prompt = buildHermesPrompt({
       task,
@@ -68,6 +69,7 @@ export function createHermesExecutionHandler(pool: WorkerPool, config: HermesRun
       agentSessionId: context.sessionId,
       attempt: context.attempt
     });
+    await markSelfUpgradeRun(pool, selfUpgradeRunId, "running", session.id);
 
     const started = await adapter.startRun({
       taskId: task.id,
@@ -86,6 +88,7 @@ export function createHermesExecutionHandler(pool: WorkerPool, config: HermesRun
         errorSummary: started.message ?? "Hermes did not start.",
         finalOutput: null
       });
+      await markSelfUpgradeRun(pool, selfUpgradeRunId, "failed", session.id);
       throw new Error(started.message ?? "Hermes did not start.");
     }
 
@@ -122,6 +125,7 @@ export function createHermesExecutionHandler(pool: WorkerPool, config: HermesRun
         errorSummary: failedMessage,
         finalOutput: finalOutput || null
       });
+      await markSelfUpgradeRun(pool, selfUpgradeRunId, "failed", session.id);
       throw new Error(failedMessage);
     }
 
@@ -129,6 +133,7 @@ export function createHermesExecutionHandler(pool: WorkerPool, config: HermesRun
       errorSummary: null,
       finalOutput: finalOutput || "Hermes completed without a final text response."
     });
+    await markSelfUpgradeRun(pool, selfUpgradeRunId, selfUpgradeTerminalStatus(task.metadata), session.id);
     await persistFinalOutputArtifact(pool, config, task.id, session.id, finalOutput || "Hermes completed without a final text response.");
   };
 }
@@ -288,6 +293,29 @@ async function markRunnerSessionTerminal(
   );
 }
 
+async function markSelfUpgradeRun(
+  pool: WorkerPool,
+  selfUpgradeRunId: string | null,
+  status: "running" | "completed" | "failed" | "rolled_back",
+  runnerSessionId: string
+): Promise<void> {
+  if (!selfUpgradeRunId) {
+    return;
+  }
+  await pool.query(
+    `
+      update self_upgrade_runs
+      set
+        status = $2,
+        runner_session_id = $3,
+        finished_at = case when $2 in ('completed', 'failed', 'cancelled', 'rolled_back') then now() else finished_at end,
+        updated_at = now()
+      where id = $1
+    `,
+    [selfUpgradeRunId, status, runnerSessionId]
+  );
+}
+
 async function persistFinalOutputArtifact(
   pool: WorkerPool,
   config: HermesRunnerConfig,
@@ -423,6 +451,14 @@ function projectContext(task: TaskRow): string {
     "Hermes owns execution, terminal/file/web tools, memory, skills, and subagents.",
     `Task metadata: ${JSON.stringify(task.metadata ?? {})}`
   ].join("\n");
+}
+
+function stringMetadata(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function selfUpgradeTerminalStatus(metadata: Record<string, unknown>): "completed" | "rolled_back" {
+  return metadata.kind === "self_upgrade_rollback" ? "rolled_back" : "completed";
 }
 
 function taskSeverity(severity: RunnerEvent["severity"]): "debug" | "info" | "warn" | "error" {

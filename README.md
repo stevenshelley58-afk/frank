@@ -26,6 +26,18 @@ and VPS deployment scripts.
 - Postgres 16 with pgvector
 - Redis 7
 
+## Lab Control Surfaces
+
+- Command Center: live task queue, active Hermes posture, backups, deploy
+  status, access health, WhatsApp status, limits, and Hermes kill switch.
+- Projects: VPS workspace registry for `/opt/frank-projects/<slug>`.
+- Self-Upgrades: dashboard-created Frank self-upgrade runs backed by Hermes
+  tasks in `/opt/frank-hub`.
+- Messaging: Hermes-native WhatsApp status and Frank-to-WhatsApp notification
+  tests.
+- Settings: redacted access state and optional lab-only writes to the VPS
+  access env file.
+
 ## Local Development
 
 ```bash
@@ -69,3 +81,10 @@ not with local `cloudflared tunnel route dns` commands.
   actions.
 - Provider adapters are typed placeholders only; no real model-provider calls
   are wired in this foundation.
+- Operator mode can be set to `lab` on the private VPS so Frank and Hermes can
+  work directly on `/opt/frank-hub` while protected paths stay blocked.
+- Frank's email, mobile, WhatsApp, and private API access are configured through
+  `runtime/access/frank-access.env` on the VPS; the real file is ignored by Git.
+- Hermes-native WhatsApp is allowed only for the accepted lab ADR. Hermes stays
+  private on the Compose network, and WhatsApp/session credentials stay in VPS
+  runtime paths.

@@ -10,6 +10,7 @@ runtime/deploy.json
 runtime/hermes/
 runtime/artifacts/
 runtime/backups/
+runtime/access/
 workspaces/
 backups/
 *.dump

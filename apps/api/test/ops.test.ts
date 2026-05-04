@@ -114,6 +114,31 @@ describe("read-only ops API routes", () => {
     ]);
   });
 
+  it("reports operator mode and registered access channels without secret values", async () => {
+    const { server } = createTestServer(new FakeOpsPool(), createPartialCollectors());
+
+    const response = await server.inject({
+      method: "GET",
+      url: "/v1/operator/access"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      operator: {
+        mode: "lab",
+        repoWorkspacePath: "/opt/frank-hub"
+      },
+      accessProfile: {
+        emailConfigured: true,
+        mobileConfigured: true,
+        whatsappConfigured: true,
+        apiKeyNames: ["OPENROUTER_API_KEY", "FRANK_EMAIL_APP_PASSWORD"]
+      }
+    });
+    expect(response.body).not.toContain("secret");
+    expect(response.body).not.toContain("+15550000000");
+  });
+
   it("does not pass arbitrary command query params to collectors", async () => {
     const collectors = createPartialCollectors();
     const { server } = createTestServer(new FakeOpsPool(), collectors);
@@ -221,6 +246,19 @@ function createTestServer(pool: FakeOpsPool, opsCollectors: OpsCollectors, acces
       },
       backups: {
         root: "/opt/frank-backups"
+      },
+      operator: {
+        mode: "lab",
+        repoWorkspacePath: "/opt/frank-hub",
+        allowedWorkspaces: ["/opt/frank-hub", "/opt/frank-hub/workspaces", "/opt/frank-projects"],
+        protectedPaths: ["/", "/root", "/opt/frank-backups", "/opt/frank-hub/.env"],
+        accessEnvPath: "/opt/frank-hub/runtime/access/frank-access.env"
+      },
+      accessProfile: {
+        emailAddress: "frank@example.com",
+        mobileNumber: "+15550000000",
+        whatsappNumber: "+15550000000",
+        apiKeyNames: ["OPENROUTER_API_KEY", "FRANK_EMAIL_APP_PASSWORD"]
       },
       logLevel: "silent"
     } satisfies ApiConfig,

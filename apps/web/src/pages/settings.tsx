@@ -1,4 +1,5 @@
 import { LockKeyhole, RefreshCw, Settings, ShieldCheck } from "lucide-react";
+import type * as React from "react";
 import { useEffect, useState } from "react";
 import {
   KeyValueList,
@@ -8,23 +9,31 @@ import {
   StatusBadge
 } from "../components/dashboard/index.js";
 import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/index.js";
-import { fetchSystemStatus, getOpsStatus, type OpsStatus } from "../api.js";
+import { Input } from "../components/ui/input.js";
+import { fetchSystemStatus, getOperatorAccess, getOpsStatus, writeOperatorAccess, type OperatorAccessResponse, type OpsStatus } from "../api.js";
 import type { SystemStatus } from "@frank/shared";
 import { formatDateTime, titleize } from "../lib/format.js";
 
 type LoadState =
   | { status: "loading" }
-  | { status: "ready"; data: { system: SystemStatus; ops: OpsStatus } }
+  | { status: "ready"; data: { system: SystemStatus; ops: OpsStatus; access: OperatorAccessResponse } }
   | { status: "error"; message: string };
 
 export function SettingsPage() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
+  const [accessKey, setAccessKey] = useState("FRANK_WHATSAPP_NUMBER");
+  const [accessValue, setAccessValue] = useState("");
+  const [writeMessage, setWriteMessage] = useState<string | null>(null);
 
   const loadSettings = () => {
     const controller = new AbortController();
     setState({ status: "loading" });
-    Promise.all([fetchSystemStatus({ signal: controller.signal }), getOpsStatus({ signal: controller.signal })])
-      .then(([system, ops]) => setState({ status: "ready", data: { system, ops } }))
+    Promise.all([
+      fetchSystemStatus({ signal: controller.signal }),
+      getOpsStatus({ signal: controller.signal }),
+      getOperatorAccess({ signal: controller.signal })
+    ])
+      .then(([system, ops, access]) => setState({ status: "ready", data: { system, ops, access } }))
       .catch((error) => {
         if (!controller.signal.aborted) {
           setState({ status: "error", message: errorMessage(error) });
@@ -46,7 +55,20 @@ export function SettingsPage() {
     return <ResourceError message={state.message} onRetry={() => loadSettings()} />;
   }
 
-  const { system, ops } = state.data;
+  const { system, ops, access } = state.data;
+
+  async function writeAccess(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setWriteMessage(null);
+    const key = accessKey.trim();
+    if (!key || !accessValue) {
+      return;
+    }
+    const result = await writeOperatorAccess({ [key]: accessValue });
+    setAccessValue("");
+    setWriteMessage(`Updated ${result.writtenKeys.map((item) => item.key).join(", ")}`);
+    loadSettings();
+  }
 
   return (
     <Tabs defaultValue="general" className="grid gap-5">
@@ -85,7 +107,7 @@ export function SettingsPage() {
       <TabsContent value="access" className="mt-0">
         <SectionCard
           title="Access Guardrails"
-          description="Dashboard-visible posture only. No secret editing or provider key input is available."
+          description="Dashboard-visible posture and lab credential-write capability. Values are never displayed."
           icon={<LockKeyhole aria-hidden="true" />}
           action={
             <StatusBadge tone={system.services.cloudflareAccess.ok ? "healthy" : "degraded"}>
@@ -95,16 +117,29 @@ export function SettingsPage() {
         >
           <KeyValueList
             items={[
+              { label: "Operator mode", value: titleize(access.operator.mode) },
+              { label: "Frank repo workspace", value: access.operator.repoWorkspacePath },
+              { label: "Workspace allowlist", value: access.operator.allowedWorkspaces.join(", ") },
               {
                 label: "Cloudflare Access",
                 value: system.services.cloudflareAccess.message ?? "Unavailable",
                 description: system.services.cloudflareAccess.ok ? "Access boundary is enabled or intentionally disabled in config." : undefined
               },
+              { label: "Frank email", value: access.accessProfile.emailConfigured ? "Configured" : "Not configured" },
+              { label: "Frank mobile", value: access.accessProfile.mobileConfigured ? "Configured" : "Not configured" },
+              { label: "Frank WhatsApp", value: access.accessProfile.whatsappConfigured ? "Configured" : "Not configured" },
+              {
+                label: "API keys",
+                value: access.accessProfile.apiKeyNames.length > 0 ? access.accessProfile.apiKeyNames.join(", ") : "None registered"
+              },
+              { label: "Access env", value: access.operator.accessEnvPath },
+              { label: "Access write", value: access.accessWrite.enabled ? "Enabled" : "Disabled" },
+              { label: "Allowed access keys", value: access.accessWrite.allowedKeys.length > 0 ? access.accessWrite.allowedKeys.join(", ") : "None" },
               { label: "Postgres", value: system.services.postgres.ok ? "Available" : "Unavailable", description: system.services.postgres.message },
               { label: "Redis", value: system.services.redis.ok ? "Available" : "Unavailable", description: system.services.redis.message },
-              { label: "Deploy actions", value: "Not exposed" },
-              { label: "Restart actions", value: "Not exposed" },
-              { label: "Shell input", value: "Not exposed" },
+              { label: "Deploy actions", value: access.operator.mode === "lab" ? "Operator mode" : "Guarded" },
+              { label: "Restart actions", value: access.operator.mode === "lab" ? "Operator mode" : "Guarded" },
+              { label: "Shell input", value: access.operator.mode === "lab" ? "Operator mode" : "Guarded" },
               { label: "Secrets", value: "Not displayed" }
             ]}
           />
@@ -117,7 +152,7 @@ export function SettingsPage() {
         >
           <KeyValueList
             items={[
-              { label: "WhatsApp runtime", value: "Not wired" },
+              { label: "WhatsApp runtime", value: "Hermes lab wiring" },
               { label: "Image generation runtime", value: "Not wired" },
               { label: "SearXNG", value: "Not wired" },
               { label: "Playwright", value: "Not wired" },
@@ -127,6 +162,21 @@ export function SettingsPage() {
               { label: "Model inference", value: "Not exposed" }
             ]}
           />
+        </SectionCard>
+
+        <SectionCard
+          title="Write Access"
+          description="Lab-only write path for VPS runtime access values. Values are written to the access env file and then cleared from this form."
+          icon={<LockKeyhole aria-hidden="true" />}
+        >
+          <form className="grid gap-3 md:grid-cols-[18rem_1fr_auto]" onSubmit={writeAccess}>
+            <Input value={accessKey} onChange={(event) => setAccessKey(event.target.value)} placeholder="ENV_KEY" />
+            <Input value={accessValue} onChange={(event) => setAccessValue(event.target.value)} placeholder="Value" type="password" />
+            <Button type="submit" disabled={!access.accessWrite.enabled}>
+              Save
+            </Button>
+          </form>
+          {writeMessage ? <p className="mt-3 text-sm text-muted-foreground">{writeMessage}</p> : null}
         </SectionCard>
       </TabsContent>
     </Tabs>

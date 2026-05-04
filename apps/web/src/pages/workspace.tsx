@@ -1,14 +1,91 @@
-import { BookOpen, Bot, Boxes, FileClock, Folder, ListTodo, Route, ShieldCheck, TerminalSquare } from "lucide-react";
-import { Button } from "../components/ui/index.js";
-import { SectionCard } from "../components/dashboard/index.js";
+import type * as React from "react";
+import { BookOpen, Bot, Boxes, FileClock, Folder, ListTodo, MessageCircle, Plus, Rocket, Route, ShieldCheck, TerminalSquare } from "lucide-react";
+import { useEffect, useState } from "react";
+import { createProject, listProjects, type Project } from "../api.js";
+import { Button, Input } from "../components/ui/index.js";
+import { DataTable, EmptyState, LoadingBlock, ResourceError, SectionCard, StatusBadge } from "../components/dashboard/index.js";
+import { formatDateTime, titleize } from "../lib/format.js";
+
+type ProjectsState =
+  | { status: "loading" }
+  | { status: "ready"; projects: Project[] }
+  | { status: "error"; message: string };
 
 export function ProjectsPage() {
+  const [state, setState] = useState<ProjectsState>({ status: "loading" });
+  const [displayName, setDisplayName] = useState("");
+  const [slug, setSlug] = useState("");
+  const [repoRemote, setRepoRemote] = useState("");
+
+  const load = () => {
+    const controller = new AbortController();
+    setState({ status: "loading" });
+    listProjects({ signal: controller.signal })
+      .then((projects) => setState({ status: "ready", projects }))
+      .catch((error) => {
+        if (!controller.signal.aborted) {
+          setState({ status: "error", message: errorMessage(error) });
+        }
+      });
+    return controller;
+  };
+
+  useEffect(() => {
+    const controller = load();
+    return () => controller.abort();
+  }, []);
+
+  async function submitProject(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!displayName.trim() || !slug.trim()) {
+      return;
+    }
+    await createProject({
+      displayName: displayName.trim(),
+      slug: slug.trim(),
+      repoRemote: repoRemote.trim() || null
+    });
+    setDisplayName("");
+    setSlug("");
+    setRepoRemote("");
+    load();
+  }
+
+  if (state.status === "loading") {
+    return <LoadingBlock rows={6} />;
+  }
+
+  if (state.status === "error") {
+    return <ResourceError message={state.message} onRetry={() => load()} />;
+  }
+
   return (
-    <section className="mx-auto grid w-full max-w-4xl gap-5">
-      <SectionCard title="Projects" description="Project workspace surface for Frank Hub." icon={<Folder aria-hidden="true" />}>
-        <p className="text-sm leading-6 text-muted-foreground">
-          Project records are not wired to a backend API yet. Use Home or Tasks to start work without adding new runtime capability.
-        </p>
+    <section className="grid gap-5">
+      <SectionCard title="Add Project" description="Register VPS project workspaces under the operator allowlist." icon={<Plus aria-hidden="true" />}>
+        <form className="grid gap-3 md:grid-cols-[1fr_14rem_1fr_auto]" onSubmit={submitProject}>
+          <Input value={displayName} onChange={(event) => setDisplayName(event.target.value)} placeholder="Display name" />
+          <Input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="slug" />
+          <Input value={repoRemote} onChange={(event) => setRepoRemote(event.target.value)} placeholder="Git remote" />
+          <Button type="submit">
+            <Plus aria-hidden="true" />
+            Add
+          </Button>
+        </form>
+      </SectionCard>
+
+      <SectionCard title="Projects" description="Registered workspaces for Frank and Hermes." icon={<Folder aria-hidden="true" />}>
+        <DataTable
+          data={state.projects}
+          getRowId={(project) => project.id}
+          emptyState={<EmptyState icon={<Folder aria-hidden="true" />} title="No projects" description="Add a project workspace above." />}
+          columns={[
+            { id: "name", header: "Project", cell: (project) => <span className="font-semibold text-foreground">{project.displayName}</span> },
+            { id: "status", header: "Status", cell: (project) => <StatusBadge tone={project.status === "active" ? "healthy" : "planned"}>{titleize(project.status)}</StatusBadge> },
+            { id: "workspace", header: "Workspace", cell: (project) => <span className="text-muted-foreground">{project.workspacePath}</span> },
+            { id: "remote", header: "Remote", cell: (project) => <span className="text-muted-foreground">{project.repoRemote ?? "None"}</span> },
+            { id: "updated", header: "Updated", cell: (project) => <span className="text-muted-foreground">{formatDateTime(project.updatedAt)}</span> }
+          ]}
+        />
       </SectionCard>
     </section>
   );
@@ -33,6 +110,10 @@ export function SkillsPage({ onNavigate }: { onNavigate: (pageId: string) => voi
   );
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : "Unable to load projects.";
+}
+
 export function RulesPage({ onNavigate }: { onNavigate: (pageId: string) => void }) {
   return (
     <section className="mx-auto grid w-full max-w-4xl gap-5">
@@ -55,6 +136,8 @@ export function RulesPage({ onNavigate }: { onNavigate: (pageId: string) => void
 export function LibraryPage({ onNavigate }: { onNavigate: (pageId: string) => void }) {
   const entries = [
     { id: "tasks", label: "Tasks", icon: ListTodo },
+    { id: "self-upgrades", label: "Self-Upgrades", icon: Rocket },
+    { id: "messaging", label: "Messaging", icon: MessageCircle },
     { id: "agents", label: "Agents", icon: Bot },
     { id: "models", label: "Models", icon: Boxes },
     { id: "providers", label: "Providers", icon: Route },

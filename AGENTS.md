@@ -12,8 +12,10 @@ control plane. The system name is Frank Hub.
 - Do not hardcode model names into agent logic. Agents request model roles.
 - Do not use Vercel backend or managed Supabase.
 - Do not deploy from this repository unless explicitly asked.
-- Do not wire WhatsApp, Infisical, LiteLLM runtime, SearXNG, Playwright,
-  code-server, or image-generation runtimes in this foundation.
+- Do not wire Infisical, LiteLLM runtime, SearXNG, Playwright, code-server,
+  or image-generation runtimes in this foundation.
+- WhatsApp runtime wiring is allowed only through the Hermes-native lab slice
+  documented in `docs/adr/0002-hermes-native-whatsapp-lab.md`.
 - Do not run production-destructive actions.
 - Do not run unrestricted host commands.
 - Fail closed when unsure.

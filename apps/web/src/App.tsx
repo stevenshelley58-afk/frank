@@ -8,7 +8,9 @@ import {
   Hammer,
   Home,
   ListTodo,
+  MessageCircle,
   PlugZap,
+  Rocket,
   Settings as SettingsIcon,
   ShieldCheck,
   TerminalSquare
@@ -19,16 +21,19 @@ import type { HomeSelection } from "./lib/home-context.js";
 import {
   AgentsPage,
   AuditLogPage,
+  CommandCenterPage,
   DashboardPage,
   HermesPage,
   HomePage,
   LibraryPage,
+  MessagingPage,
   ModelsPage,
   OpsConsolePage,
   ProjectsPage,
   ProvidersPage,
   RulesPage,
   SettingsPage,
+  SelfUpgradesPage,
   SkillsPage,
   TasksPage
 } from "./pages/index.js";
@@ -42,11 +47,32 @@ const pages: AppShellPage[] = [
     icon: Home
   },
   {
+    id: "command-center",
+    label: "Command",
+    title: "Command Center",
+    description: "High-autonomy lab control surface.",
+    icon: TerminalSquare
+  },
+  {
     id: "projects",
     label: "Projects",
     title: "Projects",
     description: "Project workspace surface.",
     icon: Folder
+  },
+  {
+    id: "self-upgrades",
+    label: "Self-Upgrades",
+    title: "Self-Upgrades",
+    description: "Frank self-upgrade runs, validation, and deploy state.",
+    icon: Rocket
+  },
+  {
+    id: "messaging",
+    label: "Messaging",
+    title: "Messaging",
+    description: "WhatsApp and notification runtime status.",
+    icon: MessageCircle
   },
   {
     id: "library",
@@ -168,6 +194,12 @@ function renderPage(
   switch (pageId) {
     case "projects":
       return <ProjectsPage />;
+    case "command-center":
+      return <CommandCenterPage />;
+    case "self-upgrades":
+      return <SelfUpgradesPage />;
+    case "messaging":
+      return <MessagingPage />;
     case "library":
       return <LibraryPage onNavigate={navigate} />;
     case "skills":

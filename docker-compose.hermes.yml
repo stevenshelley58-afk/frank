@@ -3,16 +3,28 @@ services:
     image: ${HERMES_IMAGE:-nousresearch/hermes-agent:latest}
     restart: unless-stopped
     command: ["gateway", "run"]
+    env_file:
+      - path: ${FRANK_ACCESS_ENV_FILE:-./runtime/access/frank-access.env}
+        required: false
     environment:
       API_SERVER_ENABLED: "true"
       API_SERVER_HOST: "0.0.0.0"
       API_SERVER_PORT: "8642"
       API_SERVER_KEY: ${HERMES_API_SERVER_KEY:-}
       HERMES_WORKSPACE_ROOT: ${HERMES_WORKSPACE_ROOT:-/opt/frank-hub/workspaces}
+      WEBHOOK_ENABLED: ${WEBHOOK_ENABLED:-false}
+      WEBHOOK_PORT: "8644"
+      WEBHOOK_SECRET: ${WEBHOOK_SECRET:-}
+      WHATSAPP_ENABLED: ${WHATSAPP_ENABLED:-false}
+      WHATSAPP_MODE: ${WHATSAPP_MODE:-bot}
+      WHATSAPP_ALLOWED_USERS: ${WHATSAPP_ALLOWED_USERS:-}
     expose:
       - "8642"
+      - "8644"
     volumes:
+      - .:/opt/frank-hub
       - ./runtime/hermes:/opt/data
       - ./workspaces:/opt/frank-hub/workspaces
       - ./runtime/artifacts:/opt/frank-hub/runtime/artifacts
+      - ./runtime/access:/opt/frank-hub/runtime/access:ro
     shm_size: "1gb"

@@ -51,7 +51,9 @@ operator actions.
 - Do not use a Vercel backend.
 - Do not run production-destructive actions.
 - Do not hardcode model names into agent logic.
-- Do not wire WhatsApp, Infisical, LiteLLM runtime, SearXNG, Playwright,
-  code-server, or image-generation runtimes in this foundation.
+- Do not wire Infisical, LiteLLM runtime, SearXNG, Playwright, code-server,
+  or image-generation runtimes in this foundation.
+- WhatsApp runtime wiring is allowed only through the Hermes-native lab slice
+  documented in `docs/adr/0002-hermes-native-whatsapp-lab.md`.
 - Do not commit secrets, API keys, tokens, private keys, or production `.env`
   files.

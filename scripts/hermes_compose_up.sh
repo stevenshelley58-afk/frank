@@ -6,7 +6,7 @@ read_env() {
   default="$2"
   value=""
   if [ -f .env ]; then
-    value="$(grep -E "^${key}=" .env | tail -n 1 | cut -d '=' -f 2- | sed -e 's/^"//' -e 's/"$//')"
+    value="$(grep -E "^${key}=" .env | tail -n 1 | cut -d '=' -f 2- | sed -e 's/^"//' -e 's/"$//' || true)"
   fi
   printf '%s' "${value:-$default}"
 }
@@ -18,7 +18,7 @@ if [ -z "${HERMES_API_SERVER_KEY}" ]; then
   exit 1
 fi
 
-mkdir -p runtime/hermes runtime/artifacts workspaces/tasks
+mkdir -p runtime/hermes runtime/artifacts runtime/access workspaces/tasks
 
 docker compose \
   -f docker-compose.yml \

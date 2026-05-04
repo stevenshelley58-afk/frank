@@ -46,6 +46,8 @@ services:
     env_file:
       - path: .env
         required: false
+      - path: ${FRANK_ACCESS_ENV_FILE:-./runtime/access/frank-access.env}
+        required: false
     volumes:
       - ${FRANK_BACKUP_ROOT:-/opt/frank-backups}:/opt/frank-backups
     ports:
@@ -81,6 +83,8 @@ services:
     restart: unless-stopped
     env_file:
       - path: .env
+        required: false
+      - path: ${FRANK_ACCESS_ENV_FILE:-./runtime/access/frank-access.env}
         required: false
     depends_on:
       postgres:

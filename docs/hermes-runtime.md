@@ -14,10 +14,14 @@ Default service:
 - command: `gateway run`
 - restart policy: `unless-stopped`
 - container API port: `8642`
+- internal webhook port: `8644`
 - host port publishing: none
 - persistent data: `./runtime/hermes:/opt/data`
+- Frank repo workspace: `.:/opt/frank-hub`
 - task workspaces: `./workspaces:/opt/frank-hub/workspaces`
 - Frank artifacts: `./runtime/artifacts:/opt/frank-hub/runtime/artifacts`
+- Frank access env mount: `./runtime/access:/opt/frank-hub/runtime/access:ro`
+- WhatsApp session: `./runtime/hermes/platforms/whatsapp/session`
 
 Frank API and worker containers call Hermes through the private Compose network
 at:
@@ -36,12 +40,25 @@ HERMES_ENABLED=false
 HERMES_IMAGE=nousresearch/hermes-agent:latest
 HERMES_API_BASE_URL=http://hermes:8642
 HERMES_API_SERVER_KEY=
+HERMES_WEBHOOK_BASE_URL=http://hermes:8644
+HERMES_WEBHOOK_ROUTE=frank-whatsapp
+HERMES_WEBHOOK_SECRET=
+WEBHOOK_ENABLED=true
+WEBHOOK_SECRET=
+WHATSAPP_ENABLED=false
+WHATSAPP_MODE=bot
+WHATSAPP_ALLOWED_USERS=
 HERMES_TIMEOUT_SECONDS=1800
 HERMES_STALL_TIMEOUT_SECONDS=300
 HERMES_EVENTS_POLL_MS=1000
 HERMES_WORKSPACE_ROOT=/opt/frank-hub/workspaces
 HERMES_ARTIFACT_ROOT=/opt/frank-hub/runtime/artifacts
 FRANK_BACKUP_ROOT=/opt/frank-backups
+FRANK_OPERATOR_MODE=lab
+FRANK_REPO_WORKSPACE_PATH=/opt/frank-hub
+FRANK_OPERATOR_ALLOWED_WORKSPACES=/opt/frank-hub,/opt/frank-hub/workspaces,/opt/frank-projects
+FRANK_OPERATOR_PROTECTED_PATHS=/,/root,/etc,/boot,/var/lib/docker,/var/lib/postgresql,/opt/frank-backups,/opt/frank-hub/.env,/opt/frank-hub/runtime/access,/opt/frank-hub/runtime/hermes/.env,/opt/frank-hub/runtime/hermes/platforms/whatsapp/session
+FRANK_ACCESS_ENV_FILE=./runtime/access/frank-access.env
 ```
 
 `HERMES_ENABLED=true` requires a non-empty `HERMES_API_SERVER_KEY`. Frank refuses
@@ -53,7 +70,7 @@ Configure Hermes data interactively before enabling it for Frank:
 
 ```bash
 cd /opt/frank-hub
-mkdir -p runtime/hermes runtime/artifacts workspaces/tasks
+mkdir -p runtime/hermes runtime/artifacts runtime/access workspaces/tasks
 docker run -it --rm -v /opt/frank-hub/runtime/hermes:/opt/data nousresearch/hermes-agent setup
 ```
 
@@ -73,6 +90,31 @@ docker compose -f docker-compose.yml -f docker-compose.hermes.yml --env-file .en
 ./scripts/healthcheck.sh
 ./scripts/hermes_check.sh
 ```
+
+## WhatsApp Lab Setup
+
+WhatsApp is allowed only through the Hermes-native lab slice. Put real values in
+`runtime/access/frank-access.env`:
+
+```env
+WHATSAPP_ENABLED=true
+WHATSAPP_MODE=bot
+WHATSAPP_ALLOWED_USERS=15551234567
+WEBHOOK_ENABLED=true
+WEBHOOK_SECRET=change-this
+HERMES_WEBHOOK_SECRET=change-this
+```
+
+Then pair the dedicated Frank WhatsApp number against the persistent Hermes data
+volume:
+
+```bash
+cd /opt/frank-hub
+docker compose -f docker-compose.yml -f docker-compose.hermes.yml --env-file .env run --rm hermes whatsapp
+```
+
+Scan the QR code from Frank's WhatsApp account. Do not commit or copy
+`runtime/hermes/platforms/whatsapp/session`; it grants access to the account.
 
 ## Image Pinning
 
@@ -105,6 +147,7 @@ Rules:
 - Repo-wide tasks may use `/opt/frank-hub` only when explicitly selected.
 - Never use `/` as a workspace.
 - Never use `/root` as a workspace.
+- Stay inside `FRANK_OPERATOR_ALLOWED_WORKSPACES`.
 - Record `workspace_path` on `runner_sessions`.
 - Artifacts stay under `/opt/frank-hub/runtime/artifacts`.
 

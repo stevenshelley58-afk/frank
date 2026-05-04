@@ -515,7 +515,8 @@ export function registerTaskRoutes(server: FastifyInstance, pool: PgPool, config
 
     const actorId = getRequestActorId(request);
     const workspacePath = normalizeWorkspacePath(
-      body.data.workspacePath ?? `${config.hermes.workspaceRoot.replace(/\/$/, "")}/tasks/${params.data.id}`
+      body.data.workspacePath ?? `${config.hermes.workspaceRoot.replace(/\/$/, "")}/tasks/${params.data.id}`,
+      config
     );
     if (!workspacePath.ok) {
       return reply.code(400).send({
@@ -1256,17 +1257,57 @@ function serializeRunnerArtifact(row: RunnerArtifactRow) {
   };
 }
 
-function normalizeWorkspacePath(path: string): { ok: true; path: string } | { ok: false; message: string } {
-  if (path === "/" || path === "/root") {
+function normalizeWorkspacePath(workspacePath: string, config: ApiConfig): { ok: true; path: string } | { ok: false; message: string } {
+  const normalizedPath = normalizeOperatorPath(workspacePath);
+  if (normalizedPath === "/" || normalizedPath === "/root") {
     return {
       ok: false,
       message: "Hermes workspace cannot be / or /root."
     };
   }
+
+  if (isInsideAnyOperatorPath(normalizedPath, config.operator.protectedPaths)) {
+    return {
+      ok: false,
+      message: "Hermes workspace is inside a protected Frank path."
+    };
+  }
+
+  const allowedWorkspaces =
+    config.operator.mode === "lab"
+      ? config.operator.allowedWorkspaces
+      : [config.hermes.workspaceRoot];
+  if (!isInsideAnyOperatorPath(normalizedPath, allowedWorkspaces)) {
+    return {
+      ok: false,
+      message: "Hermes workspace is outside the configured Frank operator workspace allowlist."
+    };
+  }
+
   return {
     ok: true,
-    path
+    path: normalizedPath
   };
+}
+
+function isInsideAnyOperatorPath(candidate: string, roots: readonly string[]): boolean {
+  return roots.some((root) => isInsideOperatorPath(candidate, root));
+}
+
+function isInsideOperatorPath(candidate: string, root: string): boolean {
+  const normalizedRoot = normalizeOperatorPath(root);
+  if (!normalizedRoot) {
+    return false;
+  }
+  if (normalizedRoot === "/") {
+    return candidate === "/";
+  }
+  return candidate === normalizedRoot || candidate.startsWith(`${normalizedRoot}/`);
+}
+
+function normalizeOperatorPath(value: string): string {
+  const normalized = value.trim().replace(/\\/g, "/").replace(/\/+$/g, "");
+  return normalized || "/";
 }
 
 function serializeTimestamp(value: Date | string): string {

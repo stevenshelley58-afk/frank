@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { foundationToolPolicy, noTerminalOpsConsoleSkeleton } from "../src/index.js";
+import { createOperatorToolPolicy, foundationToolPolicy, noTerminalOpsConsoleSkeleton } from "../src/index.js";
 
 describe("foundation tool policy", () => {
   it("allows read-only work", () => {
@@ -30,5 +30,30 @@ describe("foundation tool policy", () => {
     ).toBe("deny");
 
     expect(noTerminalOpsConsoleSkeleton.every((action) => action.enabled === false)).toBe(true);
+  });
+
+  it("allows broad lab operator work while denying protected targets", () => {
+    const policy = createOperatorToolPolicy({
+      mode: "lab",
+      protectedTargets: ["/", "/root", "/opt/frank-backups", "/opt/frank-hub/.env"]
+    });
+
+    expect(
+      policy.evaluate({
+        toolName: "shell.exec",
+        risk: "host",
+        actorId: "frank",
+        target: "/opt/frank-hub"
+      }).decision
+    ).toBe("allow");
+
+    expect(
+      policy.evaluate({
+        toolName: "file.delete",
+        risk: "destructive",
+        actorId: "frank",
+        target: "/opt/frank-backups/postgres"
+      }).decision
+    ).toBe("deny");
   });
 });

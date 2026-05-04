@@ -38,6 +38,11 @@ cp -n .env.example .env
 Edit `.env` before using this for anything beyond first health verification.
 The file must stay on the VPS and must not be committed.
 
+For Frank's private email, mobile, WhatsApp, and provider credentials, copy
+`operator-assets/frank-access.example.env` to
+`runtime/access/frank-access.env` on the VPS and edit that runtime-only file.
+The real access file is ignored by Git.
+
 ## Normal Update After Main Is Current
 
 After Stage 2 is merged to `main`, normal VPS updates should deploy from
@@ -52,6 +57,30 @@ That file is safe deploy metadata for the Ops Console: current branch, current
 commit, deploy timestamp, schema version, and package version when available.
 It must not contain raw env values, tokens, secrets, or arbitrary command
 output.
+
+When `HERMES_ENABLED=true`, `scripts/deploy.sh` includes
+`docker-compose.hermes.yml`, refuses to continue without
+`HERMES_API_SERVER_KEY`, and starts Hermes with the rest of Frank.
+
+## Lab Self-Upgrade And WhatsApp
+
+For the high-autonomy VPS lab, enable the operator features deliberately:
+
+```env
+FRANK_OPERATOR_MODE=lab
+FRANK_SECRET_WRITE_ENABLED=true
+HERMES_ENABLED=true
+WHATSAPP_ENABLED=true
+WEBHOOK_ENABLED=true
+```
+
+Put real phone numbers, WhatsApp allowlists, webhook secrets, and API keys in
+`/opt/frank-hub/runtime/access/frank-access.env`, not in `.env.example`.
+
+Frank self-upgrade runs are created from the dashboard and stored in
+`self_upgrade_runs`. Each run creates a queued Hermes task in `/opt/frank-hub`,
+uses local VPS backups under `FRANK_BACKUP_ROOT`, and records validation/deploy
+state for review. Hermes and its webhook port remain internal to Docker Compose.
 
 ## Testing Branch Deploys
 
