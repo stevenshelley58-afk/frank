@@ -30,8 +30,20 @@ install_node_22() {
   "${sudo_cmd[@]}" apt-get install -y nodejs
 }
 
+install_docker_tools() {
+  if ! command -v docker >/dev/null 2>&1; then
+    "${sudo_cmd[@]}" apt-get install -y docker.io docker-compose-plugin
+    return
+  fi
+
+  if ! docker compose version >/dev/null 2>&1; then
+    "${sudo_cmd[@]}" apt-get install -y docker-compose-plugin
+  fi
+}
+
 "${sudo_cmd[@]}" apt-get update
-"${sudo_cmd[@]}" apt-get install -y ca-certificates curl git tmux docker.io docker-compose-plugin
+"${sudo_cmd[@]}" apt-get install -y ca-certificates curl git tmux
+install_docker_tools
 
 install_node_22
 require_command node
@@ -39,6 +51,11 @@ require_command node
 "${sudo_cmd[@]}" corepack enable
 "${sudo_cmd[@]}" corepack prepare pnpm@10.20.0 --activate
 require_command pnpm
+require_command docker
+docker compose version >/dev/null 2>&1 || {
+  echo "Missing required command after install attempt: docker compose" >&2
+  exit 1
+}
 
 cd "${repo_dir}"
 pnpm install
