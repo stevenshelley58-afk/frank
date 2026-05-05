@@ -26,7 +26,11 @@ install_node_22() {
     fi
   fi
 
-  curl -fsSL https://deb.nodesource.com/setup_22.x | "${sudo_cmd[@]}" -E bash -
+  if [ "${#sudo_cmd[@]}" -eq 0 ]; then
+    curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
+  else
+    curl -fsSL https://deb.nodesource.com/setup_22.x | "${sudo_cmd[@]}" -E bash -
+  fi
   "${sudo_cmd[@]}" apt-get install -y nodejs
 }
 
