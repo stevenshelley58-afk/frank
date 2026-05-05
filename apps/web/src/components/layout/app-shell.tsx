@@ -3,15 +3,11 @@ import type * as React from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   Bell,
-  Calendar,
   CheckCircle2,
   ChevronsUpDown,
   Menu,
-  MessageCircle,
   Settings as SettingsIcon
 } from "lucide-react";
-import { recentChats, upcomingItems } from "../../data/homeMockData.js";
-import type { HomeSelection } from "../../lib/home-context.js";
 import { cn } from "../../lib/utils.js";
 import { titleize } from "../../lib/format.js";
 import { listTasks, type Task } from "../../api.js";
@@ -32,7 +28,6 @@ export interface AppShellProps {
   pages: AppShellPage[];
   activePageId: string;
   onNavigate: (pageId: string) => void;
-  onHomeContextSelect: (selection: HomeSelection) => void;
   children: React.ReactNode;
 }
 
@@ -41,7 +36,7 @@ type TaskLoadState =
   | { status: "ready"; tasks: Task[] }
   | { status: "error"; message: string };
 
-export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect, children }: AppShellProps) {
+export function AppShell({ pages, activePageId, onNavigate, children }: AppShellProps) {
   const activePage = pages.find((page) => page.id === activePageId) ?? pages[0]!;
   const primaryPages = pages.filter((page) => (page.placement ?? "primary") === "primary");
   const settingsPage = pages.find((page) => page.placement === "settings");
@@ -63,12 +58,6 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
   function navigateTo(pageId: string) {
     setMobileNavOpen(false);
     onNavigate(pageId);
-  }
-
-  function chooseHomeContext(selection: HomeSelection) {
-    setMobileNavOpen(false);
-    onHomeContextSelect(selection);
-    onNavigate("home");
   }
 
   return (
@@ -109,7 +98,7 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
         <DialogContent className="!left-0 !top-0 !h-[100dvh] !w-[min(22rem,calc(100vw-2rem))] !max-w-none !translate-x-0 !translate-y-0 !rounded-none border-y-0 border-l-0 p-0">
           <DialogHeader className="sr-only">
             <DialogTitle>Navigation</DialogTitle>
-            <DialogDescription>Primary navigation, recent chats, recent tasks, upcoming work, and settings.</DialogDescription>
+            <DialogDescription>Primary navigation, recent tasks, and settings.</DialogDescription>
           </DialogHeader>
           <SidebarContent
             activePage={activePage}
@@ -119,7 +108,6 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
             sectionIdPrefix="mobile"
             className="h-[100dvh] overflow-y-auto px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-5"
             onNavigate={navigateTo}
-            onHomeContextSelect={chooseHomeContext}
           />
         </DialogContent>
       </Dialog>
@@ -134,7 +122,6 @@ export function AppShell({ pages, activePageId, onNavigate, onHomeContextSelect,
             sectionIdPrefix="desktop"
             className="h-full min-h-screen px-4 py-5"
             onNavigate={navigateTo}
-            onHomeContextSelect={chooseHomeContext}
           />
         </aside>
 
@@ -173,7 +160,6 @@ function SidebarContent({
   tasksState,
   sectionIdPrefix,
   onNavigate,
-  onHomeContextSelect,
   className
 }: {
   activePage: AppShellPage;
@@ -182,7 +168,6 @@ function SidebarContent({
   tasksState: TaskLoadState;
   sectionIdPrefix: string;
   onNavigate: (pageId: string) => void;
-  onHomeContextSelect: (selection: HomeSelection) => void;
   className?: string | undefined;
 }) {
   return (
@@ -200,17 +185,6 @@ function SidebarContent({
       </nav>
 
       <div className="mt-7">
-        <SidebarSection id={`${sectionIdPrefix}-recent-chats`} title="Recent Chats" icon={MessageCircle} defaultOpen={false}>
-          {recentChats.map((chat) => (
-            <SidebarContextRow
-              key={chat.id}
-              title={chat.title}
-              onClick={() => onHomeContextSelect({ kind: "chat", id: chat.id, title: chat.title })}
-            />
-          ))}
-          <SidebarActionRow title="Show more" onClick={() => onHomeContextSelect({ kind: "chat", title: "Recent Chats" })} />
-        </SidebarSection>
-
         <SidebarSection id={`${sectionIdPrefix}-recent-tasks`} title="Recent Tasks" icon={CheckCircle2} defaultOpen={false}>
           {tasksState.status === "loading" ? <SidebarMutedRow>Loading tasks</SidebarMutedRow> : null}
           {tasksState.status === "error" ? <SidebarMutedRow>{tasksState.message}</SidebarMutedRow> : null}
@@ -221,37 +195,11 @@ function SidebarContent({
                   key={task.id}
                   title={task.title}
                   subtitle={titleize(task.state)}
-                  onClick={() =>
-                    onHomeContextSelect({
-                      kind: "task",
-                      id: task.id,
-                      title: task.title,
-                      subtitle: titleize(task.state)
-                    })
-                  }
+                  onClick={() => onNavigate("tasks")}
                 />
               ))
             : null}
           <SidebarActionRow title="Show more" onClick={() => onNavigate("tasks")} />
-        </SidebarSection>
-
-        <SidebarSection id={`${sectionIdPrefix}-upcoming`} title="Upcoming" icon={Calendar} defaultOpen={false}>
-          {upcomingItems.map((item) => (
-            <SidebarContextRow
-              key={item.id}
-              title={item.title}
-              subtitle={item.timeLabel}
-              onClick={() =>
-                onHomeContextSelect({
-                  kind: "upcoming",
-                  id: item.id,
-                  title: item.title,
-                  subtitle: item.timeLabel
-                })
-              }
-            />
-          ))}
-          <SidebarActionRow title="View full schedule" onClick={() => onHomeContextSelect({ kind: "upcoming", title: "Upcoming" })} />
         </SidebarSection>
       </div>
 

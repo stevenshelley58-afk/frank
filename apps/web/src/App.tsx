@@ -185,7 +185,6 @@ export function App() {
       pages={pages}
       activePageId={activePageId}
       onNavigate={setActivePageId}
-      onHomeContextSelect={() => undefined}
     >
       {renderPage(activePageId, setActivePageId)}
     </AppShell>
@@ -233,6 +232,6 @@ function renderPage(
       return <SettingsPage />;
     case "home":
     default:
-      return <HomePage />;
+      return <HomePage onOpenAiConsole={() => navigate("ai-console")} />;
   }
 }

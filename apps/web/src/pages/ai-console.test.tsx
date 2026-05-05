@@ -56,7 +56,9 @@ describe("AiConsolePage", () => {
 
     render(<AiConsolePage />);
 
-    expect(await screen.findByText("ChatGPT Browser")).toBeTruthy();
+    expect(await screen.findByText("ChatGPT")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Open ChatGPT" })).toBeTruthy();
+    expect(screen.queryByText("Open ChatGPT Browser")).toBeNull();
     expect(screen.getAllByText("Claude Code").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Workspace path")).toBeTruthy();
 
@@ -100,7 +102,7 @@ describe("AiConsolePage", () => {
     );
 
     render(<AiConsolePage />);
-    await user.click(await screen.findByRole("button", { name: "Open ChatGPT Browser" }));
+    await user.click(await screen.findByRole("button", { name: "Open ChatGPT" }));
 
     const frame = await screen.findByTitle("VPS browser");
     expect(frame.getAttribute("src")).toBe("/vps-browser/");
@@ -134,7 +136,7 @@ describe("AiConsolePage", () => {
           return response(
             {
               error: "host_agent_not_configured",
-              message: "Frank Host Agent is not configured."
+              message: "Frank's VPS control service is not connected. Run scripts/install_host_agent.sh on the VPS, then redeploy Frank."
             },
             409
           );
@@ -147,7 +149,31 @@ describe("AiConsolePage", () => {
     expect(await screen.findByText("Frank Host Agent is configured but unreachable.")).toBeTruthy();
     await user.click(await screen.findByRole("button", { name: "Start Codex" }));
 
-    expect(await screen.findByText("Frank Host Agent is not configured.")).toBeTruthy();
+    expect(await screen.findByText("Frank's VPS control service is not connected. Run scripts/install_host_agent.sh on the VPS, then redeploy Frank.")).toBeTruthy();
+  });
+
+  it("does not claim ChatGPT is ready when the browser did not start", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url.endsWith("/v1/ai/host/status")) return response({ configured: false, reachable: false, tools: {} });
+        if (url.endsWith("/v1/ai/sessions")) return response({ sessions: [] });
+        if (url.endsWith("/v1/projects")) return response({ projects: [] });
+        if (url.endsWith("/v1/browser/status")) return response({ running: false, url: "/vps-browser/", configured: false });
+        if (url.endsWith("/v1/browser/start") && init?.method === "POST") {
+          return response({ running: false, url: "/vps-browser/", configured: false });
+        }
+        return response({});
+      })
+    );
+
+    render(<AiConsolePage />);
+    await user.click(await screen.findByRole("button", { name: "Open ChatGPT" }));
+
+    expect(await screen.findByText("Frank's VPS browser is not connected yet. Run the host agent setup on the VPS, then redeploy.")).toBeTruthy();
+    expect(screen.queryByText("ChatGPT is ready in Frank.")).toBeNull();
   });
 });
 

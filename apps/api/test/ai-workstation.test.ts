@@ -207,6 +207,25 @@ describe("AI workstation API routes", () => {
       expect.objectContaining({ method: "POST" })
     );
   });
+
+  it("returns browser start failures as user-visible browser status instead of HTTP 502", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      error: "host_agent_error",
+      message: "Browser service could not start."
+    }, 500));
+    vi.stubGlobal("fetch", fetchMock);
+    const { server } = createTestServer(new FakeAiPool());
+
+    const response = await server.inject({ method: "POST", url: "/v1/browser/start", payload: { target: "chatgpt" } });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      running: false,
+      url: "/vps-browser/",
+      configured: true,
+      message: "Browser service could not start."
+    });
+  });
 });
 
 function createTestServer(pool: FakeAiPool) {

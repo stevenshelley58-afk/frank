@@ -119,7 +119,7 @@ export function AiConsolePage() {
     try {
       const result = await startBrowser(target);
       setBrowser(result);
-      setMessage(`${target === "chatgpt" ? "ChatGPT" : "Claude"} browser is ready.`);
+      setMessage(browserActionMessage(target, result));
     } catch (error) {
       setMessage(errorMessage(error));
     }
@@ -232,7 +232,7 @@ export function AiConsolePage() {
 
   return (
     <section className="grid gap-5">
-      <section className="grid gap-3 xl:grid-cols-[1.25fr_0.75fr]">
+      <section className="grid gap-3 2xl:grid-cols-[minmax(0,1.25fr)_minmax(22rem,0.75fr)]">
         <SectionCard
           title="AI Workstation"
           description="Subscription-backed tools running inside the VPS."
@@ -245,19 +245,19 @@ export function AiConsolePage() {
           }
         >
           <div className="grid gap-4">
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))] gap-3">
               <ToolCard
-                title="ChatGPT Browser"
-                description="Use your ChatGPT web subscription in the VPS browser."
+                title="ChatGPT"
+                description="ChatGPT web in Frank's browser."
                 icon={<Globe2 aria-hidden="true" />}
-                actionLabel="Open ChatGPT Browser"
+                actionLabel="Open ChatGPT"
                 onAction={() => void openBrowser("chatgpt")}
               />
               <ToolCard
-                title="Claude Browser"
-                description="Use Claude web inside the same VPS browser profile."
+                title="Claude"
+                description="Claude web in Frank's browser."
                 icon={<Bot aria-hidden="true" />}
-                actionLabel="Open Claude Browser"
+                actionLabel="Open Claude"
                 onAction={() => void openBrowser("claude")}
               />
               <ToolCard
@@ -344,7 +344,7 @@ export function AiConsolePage() {
             <EmptyState
               icon={<Globe2 aria-hidden="true" />}
               title="Browser is stopped"
-              description="Open ChatGPT Browser or Claude Browser to start the VPS browser."
+              description={browser.message ?? "Open ChatGPT or Claude to start the VPS browser."}
             />
           )}
         </SectionCard>
@@ -456,17 +456,31 @@ function ToolCard({
   onAction: () => void;
 }) {
   return (
-    <div className="grid gap-3 rounded-lg border border-border bg-surface p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex size-9 items-center justify-center rounded-md border border-border bg-background text-foreground">{icon}</div>
+    <div className="grid min-w-0 overflow-hidden content-between gap-3 rounded-lg border border-border bg-surface p-4">
+      <div className="flex min-w-0 items-start gap-3">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">{icon}</div>
         <div className="min-w-0">
-          <h3 className="text-sm font-semibold text-foreground">{title}</h3>
+          <h3 className="truncate text-sm font-semibold text-foreground">{title}</h3>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
         </div>
       </div>
-      <Button type="button" variant="outline" size="sm" onClick={onAction}>{actionLabel}</Button>
+      <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 w-full whitespace-normal px-2 py-2 text-center leading-4" onClick={onAction}>{actionLabel}</Button>
     </div>
   );
+}
+
+function browserActionMessage(target: "chatgpt" | "claude", browser: BrowserStatusResponse): string {
+  const label = target === "chatgpt" ? "ChatGPT" : "Claude";
+  if (browser.configured === false) {
+    return "Frank's VPS browser is not connected yet. Run the host agent setup on the VPS, then redeploy.";
+  }
+  if (browser.running !== true) {
+    return browser.message?.trim() || `Frank tried to open ${label}, but the VPS browser did not report ready.`;
+  }
+  if (!browser.url.trim()) {
+    return `Frank opened ${label}, but did not receive a browser address.`;
+  }
+  return `${label} is ready in Frank.`;
 }
 
 function installedLabel(status: { installed?: boolean; path?: string | null } | undefined): string {

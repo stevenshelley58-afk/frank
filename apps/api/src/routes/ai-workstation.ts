@@ -79,7 +79,7 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
         configured: false,
         reachable: false,
         tools: {},
-        message: "FRANK_HOST_AGENT_ENABLED and FRANK_HOST_AGENT_TOKEN are required."
+        message: hostAgentNotConfiguredMessage()
       };
     }
     let result: Record<string, unknown>;
@@ -127,7 +127,7 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
     if (!isHostAgentConfigured(config)) {
       return reply.code(409).send({
         error: "host_agent_not_configured",
-        message: "Frank Host Agent is not configured."
+        message: hostAgentNotConfiguredMessage()
       });
     }
 
@@ -222,7 +222,7 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
     if (!isHostAgentConfigured(config)) {
       return reply.code(409).send({
         error: "host_agent_not_configured",
-        message: "Frank Host Agent is not configured."
+        message: hostAgentNotConfiguredMessage()
       });
     }
     const row = await findSession(pool, idParam(request));
@@ -240,7 +240,7 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
     if (!isHostAgentConfigured(config)) {
       return reply.code(409).send({
         error: "host_agent_not_configured",
-        message: "Frank Host Agent is not configured."
+        message: hostAgentNotConfiguredMessage()
       });
     }
     const body = sessionInputSchema.safeParse(request.body ?? {});
@@ -367,11 +367,13 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
         method: "POST",
         body: body.data.target ? { target: body.data.target } : undefined
       });
-    } catch {
-      return reply.code(502).send({
-        error: "host_agent_unreachable",
-        message: hostAgentUnavailableMessage()
-      });
+    } catch (error) {
+      return {
+        running: false,
+        url: "/vps-browser/",
+        configured: true,
+        message: browserStartFailureMessage(error)
+      };
     }
   });
 
@@ -457,7 +459,7 @@ async function callHostAgent<T = unknown>(
     const raw = await response.text();
     const parsed = raw ? JSON.parse(raw) as T : ({} as T);
     if (!response.ok) {
-      throw new Error(`Host Agent returned HTTP ${response.status}.`);
+      throw new Error(hostAgentErrorMessage(parsed, response.status));
     }
     return parsed;
   } finally {
@@ -527,6 +529,28 @@ function hostAgentRouteSessionId(row: AiToolSessionRow): string {
 
 function hostAgentUnavailableMessage(): string {
   return "Frank Host Agent is configured but unreachable.";
+}
+
+function hostAgentNotConfiguredMessage(): string {
+  return "Frank's VPS control service is not connected. Run scripts/install_host_agent.sh on the VPS, then redeploy Frank.";
+}
+
+function browserStartFailureMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return "Frank tried to open ChatGPT, but the browser service did not start.";
+}
+
+function hostAgentErrorMessage(parsed: unknown, status: number): string {
+  if (isRecord(parsed) && typeof parsed.message === "string" && parsed.message.trim()) {
+    return parsed.message;
+  }
+  return `Host Agent returned HTTP ${status}.`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function idParam(request: FastifyRequest): string {

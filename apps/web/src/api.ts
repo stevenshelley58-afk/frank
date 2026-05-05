@@ -528,6 +528,7 @@ export interface BrowserStatusResponse {
   running: boolean;
   url: string;
   configured?: boolean;
+  message?: string;
 }
 
 export interface SelfUpgradeRun {

@@ -44,19 +44,17 @@ const pages: AppShellPage[] = [
 
 function renderShell(overrides: Partial<React.ComponentProps<typeof AppShell>> = {}) {
   const onNavigate = vi.fn();
-  const onHomeContextSelect = vi.fn();
   const result = render(
     <AppShell
       pages={pages}
       activePageId="home"
       onNavigate={onNavigate}
-      onHomeContextSelect={onHomeContextSelect}
       {...overrides}
     >
       <div>Home content</div>
     </AppShell>
   );
-  return { ...result, onNavigate, onHomeContextSelect };
+  return { ...result, onNavigate };
 }
 
 afterEach(() => {
@@ -65,6 +63,14 @@ afterEach(() => {
 });
 
 describe("AppShell", () => {
+  it("does not show mock chat history or schedule sections in the sidebar", () => {
+    renderShell();
+
+    expect(screen.queryByText("Recent Chats")).toBeNull();
+    expect(screen.queryByText("Continue Frank Hub build")).toBeNull();
+    expect(screen.queryByText("Upcoming")).toBeNull();
+  });
+
   it("opens mobile navigation as a dialog and closes it after navigation", async () => {
     const user = userEvent.setup();
     const { onNavigate } = renderShell();
