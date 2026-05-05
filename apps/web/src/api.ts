@@ -448,6 +448,34 @@ export interface MessagingNotifyResponse {
   whatsapp: MessagingWhatsAppStatusResponse["whatsapp"];
 }
 
+export interface ChatStatusResponse {
+  provider: "openai";
+  configured: boolean;
+  apiKeyConfigured: boolean;
+  modelConfigured: boolean;
+  model: string;
+  baseUrl: string;
+  notes: string[];
+}
+
+export interface ChatMessage {
+  id: string;
+  role: "user" | "assistant";
+  content: string;
+  createdAt: string;
+}
+
+export interface ChatMessageResponse {
+  provider: "openai";
+  model: string;
+  responseId: string | null;
+  assistantMessage: ChatMessage;
+  usage: {
+    inputTokens: number;
+    outputTokens: number;
+  };
+}
+
 export interface SelfUpgradeRun {
   id: string;
   goal: string;
@@ -829,6 +857,23 @@ export async function getOpsDeploy(options?: { signal?: AbortSignal }): Promise<
 
 export async function getOperatorAccess(options?: { signal?: AbortSignal }): Promise<OperatorAccessResponse> {
   return apiRequest<OperatorAccessResponse>("/v1/operator/access", { signal: options?.signal });
+}
+
+export async function getChatStatus(options?: { signal?: AbortSignal }): Promise<ChatStatusResponse> {
+  return apiRequest<ChatStatusResponse>("/v1/chat/status", { signal: options?.signal });
+}
+
+export async function sendChatMessage(body: {
+  message: string;
+  mode?: "chat" | "research" | "code" | "summarize";
+  modelId?: string;
+  previousResponseId?: string;
+  metadata?: JsonRecord;
+}): Promise<ChatMessageResponse> {
+  return apiRequest<ChatMessageResponse>("/v1/chat/messages", {
+    method: "POST",
+    body
+  });
 }
 
 export async function writeOperatorAccess(values: Record<string, string>): Promise<OperatorAccessWriteResponse> {

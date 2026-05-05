@@ -78,12 +78,18 @@ describe("audit log API route", () => {
       risk_level: "write",
       project_id: "alpha",
       nested: {
+        openai: {
+          apiKey: "[redacted]",
+          baseUrl: "https://api.openai.com/v1",
+          chatModel: "gpt-test-chat"
+        },
         openrouterApiKey: "[redacted]",
         safe: "visible"
       },
       tokens: "[redacted]"
     });
     expect(JSON.stringify(response.json())).not.toContain("sk-live-secret");
+    expect(JSON.stringify(response.json())).not.toContain("sk-openai-secret");
   });
 });
 
@@ -104,6 +110,7 @@ function createTestServer(pool: FakeAuditLogPool, accessEnabled = false) {
         issuer: "https://frank.cloudflareaccess.com",
         audiences: ["test-aud"]
       },
+      openai: openAiTestConfig(),
       openrouterApiKey: undefined,
       hermes: {
         enabled: false,
@@ -201,6 +208,11 @@ class FakeAuditLogPool {
         risk_level: "write",
         project_id: "alpha",
         nested: {
+          openai: {
+            apiKey: "sk-openai-secret",
+            baseUrl: "https://api.openai.com/v1",
+            chatModel: "gpt-test-chat"
+          },
           openrouterApiKey: "sk-live-secret",
           safe: "visible"
         },
@@ -262,5 +274,13 @@ function rows<Row>(items: Row[]): QueryResult<Row> {
   return {
     rows: items,
     rowCount: items.length
+  };
+}
+
+function openAiTestConfig() {
+  return {
+    apiKey: undefined,
+    baseUrl: "https://api.openai.com/v1",
+    chatModel: "gpt-test-chat"
   };
 }

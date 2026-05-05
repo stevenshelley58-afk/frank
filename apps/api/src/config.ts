@@ -24,6 +24,9 @@ const envSchema = z.object({
   CLOUDFLARE_ACCESS_ISSUER: z.string().url().optional(),
   CLOUDFLARE_ACCESS_AUD: z.string().optional(),
   CLOUDFLARE_ACCESS_AUDS: z.string().optional(),
+  OPENAI_API_KEY: z.string().optional(),
+  OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
+  OPENAI_CHAT_MODEL: z.string().optional(),
   OPENROUTER_API_KEY: z.string().optional(),
   HERMES_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
   HERMES_API_BASE_URL: z.string().url().default("http://hermes:8642"),
@@ -43,7 +46,7 @@ const envSchema = z.object({
   FRANK_ACCESS_ENV_PATH: z.string().default("/opt/frank-hub/runtime/access/frank-access.env"),
   FRANK_SECRET_WRITE_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
   FRANK_SECRET_WRITE_ALLOWED_KEYS: z.string().default(
-    "FRANK_EMAIL_ADDRESS,FRANK_MOBILE_NUMBER,FRANK_WHATSAPP_NUMBER,FRANK_API_KEY_NAMES,FRANK_EMAIL_APP_PASSWORD,FRANK_WHATSAPP_API_TOKEN,OPENROUTER_API_KEY,WHATSAPP_ENABLED,WHATSAPP_MODE,WHATSAPP_ALLOWED_USERS,WEBHOOK_ENABLED,WEBHOOK_SECRET,HERMES_WEBHOOK_SECRET"
+    "FRANK_EMAIL_ADDRESS,FRANK_MOBILE_NUMBER,FRANK_WHATSAPP_NUMBER,FRANK_API_KEY_NAMES,FRANK_EMAIL_APP_PASSWORD,FRANK_WHATSAPP_API_TOKEN,OPENAI_API_KEY,OPENAI_CHAT_MODEL,OPENAI_BASE_URL,OPENROUTER_API_KEY,WHATSAPP_ENABLED,WHATSAPP_MODE,WHATSAPP_ALLOWED_USERS,WEBHOOK_ENABLED,WEBHOOK_SECRET,HERMES_WEBHOOK_SECRET"
   ),
   FRANK_LIMIT_EXTERNAL_SEND_PER_HOUR: z.coerce.number().int().nonnegative().default(25),
   FRANK_LIMIT_API_SPEND_USD_PER_DAY: z.coerce.number().nonnegative().default(10),
@@ -81,6 +84,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       enabled: parsed.CLOUDFLARE_ACCESS_ENABLED,
       issuer: parsed.CLOUDFLARE_ACCESS_ISSUER?.replace(/\/$/, ""),
       audiences: parseCloudflareAccessAudiences(parsed.CLOUDFLARE_ACCESS_AUDS, parsed.CLOUDFLARE_ACCESS_AUD)
+    },
+    openai: {
+      apiKey: parsed.OPENAI_API_KEY?.trim() || undefined,
+      baseUrl: parsed.OPENAI_BASE_URL.replace(/\/$/, ""),
+      chatModel: parsed.OPENAI_CHAT_MODEL?.trim() || ""
     },
     openrouterApiKey: parsed.OPENROUTER_API_KEY?.trim() || undefined,
     hermes: {

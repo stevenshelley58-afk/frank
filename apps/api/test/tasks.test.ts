@@ -447,6 +447,7 @@ function createTestServer(
         issuer: "https://frank.cloudflareaccess.com",
         audiences: ["test-aud"]
       },
+      openai: openAiTestConfig(),
       openrouterApiKey: undefined,
       hermes: {
         enabled: false,
@@ -835,4 +836,12 @@ function parseJson(value: unknown): Record<string, unknown> {
     return JSON.parse(value) as Record<string, unknown>;
   }
   return (value ?? {}) as Record<string, unknown>;
+}
+
+function openAiTestConfig() {
+  return {
+    apiKey: undefined,
+    baseUrl: "https://api.openai.com/v1",
+    chatModel: "gpt-test-chat"
+  };
 }

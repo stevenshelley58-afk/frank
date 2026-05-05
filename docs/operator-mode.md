@@ -45,6 +45,17 @@ chmod 0600 /opt/frank-hub/runtime/access/frank-access.env
 Put Frank's real email, mobile, WhatsApp, and API credentials in that file. The
 file is ignored by Git and loaded by the API, worker, and Hermes containers.
 
+For the primary Home chat, Frank needs an OpenAI API key in the access file:
+
+```env
+OPENAI_API_KEY=sk-...
+OPENAI_CHAT_MODEL=gpt-5.2
+```
+
+ChatGPT subscriptions and OpenAI API billing are separate. A ChatGPT Plus/Pro
+subscription does not by itself give Frank API access; Frank uses the API key
+from the OpenAI platform project.
+
 The Settings page reports whether access is configured and lists API key names.
 It does not display secret values.
 

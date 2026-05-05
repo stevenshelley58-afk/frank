@@ -12,7 +12,7 @@ afterEach(async () => {
 
 describe("model control plane API routes", () => {
   it("keeps model routes protected by Cloudflare Access", async () => {
-    const { server } = createTestServer(new FakeModelPool(), true);
+    const { server } = createTestServer(new FakeModelPool(), { accessEnabled: true });
 
     const response = await server.inject({
       method: "GET",
@@ -63,6 +63,50 @@ describe("model control plane API routes", () => {
     expect(free.json().models.map((model: { modelKey: string }) => model.modelKey)).toEqual([
       "pricing/zero-cost"
     ]);
+  });
+
+  it("exposes the configured OpenAI chat model from runtime access config", async () => {
+    const { server } = createTestServer(new FakeModelPool(), {
+      openai: {
+        apiKey: "sk-test-secret",
+        baseUrl: "https://api.openai.com/v1",
+        chatModel: "gpt-5.2"
+      }
+    });
+
+    const providers = await server.inject({
+      method: "GET",
+      url: "/v1/providers"
+    });
+    expect(providers.statusCode).toBe(200);
+    const openaiProvider = providers.json().providers.find((provider: { id: string }) => provider.id === "openai");
+    expect(openaiProvider).toMatchObject({
+      id: "openai",
+      status: "healthy",
+      enabled: true,
+      health: {
+        status: "healthy",
+        message: "OpenAI API key is configured for Home chat."
+      }
+    });
+    expect(JSON.stringify(openaiProvider)).not.toContain("sk-test-secret");
+
+    const models = await server.inject({
+      method: "GET",
+      url: "/v1/models?providerId=openai&status=available"
+    });
+    expect(models.statusCode).toBe(200);
+    expect(models.json().models).toEqual([
+      expect.objectContaining({
+        id: "openai-runtime-chat",
+        providerId: "openai",
+        modelKey: "gpt-5.2",
+        displayName: "OpenAI chat",
+        status: "available",
+        capabilities: ["chat", "reasoning"]
+      })
+    ]);
+    expect(JSON.stringify(models.json())).not.toContain("sk-test-secret");
   });
 
   it("returns not_configured without an outbound call when OPENROUTER_API_KEY is missing", async () => {
@@ -133,7 +177,7 @@ describe("model control plane API routes", () => {
       })
     }));
     vi.stubGlobal("fetch", fetchMock);
-    const { server } = createTestServer(pool, false, "sk-test-secret");
+    const { server } = createTestServer(pool, { openrouterApiKey: "sk-test-secret" });
 
     const response = await server.inject({
       method: "POST",
@@ -185,7 +229,14 @@ describe("model control plane API routes", () => {
   });
 });
 
-function createTestServer(pool: FakeModelPool, accessEnabled = false, openrouterApiKey?: string) {
+function createTestServer(
+  pool: FakeModelPool,
+  options: {
+    accessEnabled?: boolean;
+    openrouterApiKey?: string;
+    openai?: ApiConfig["openai"];
+  } = {}
+) {
   const server = buildServer({
     config: {
       environment: "test",
@@ -198,11 +249,12 @@ function createTestServer(pool: FakeModelPool, accessEnabled = false, openrouter
       redisUrl: "redis://redis:6379",
       corsOrigins: [],
       cloudflareAccess: {
-        enabled: accessEnabled,
+        enabled: options.accessEnabled ?? false,
         issuer: "https://frank.cloudflareaccess.com",
         audiences: ["test-aud"]
       },
-      openrouterApiKey,
+      openai: options.openai ?? openAiTestConfig(),
+      openrouterApiKey: options.openrouterApiKey,
       hermes: {
         enabled: false,
         apiBaseUrl: "http://127.0.0.1:8642",
@@ -559,4 +611,12 @@ function parseJson(value: unknown): Record<string, unknown> {
 
 function timestamp(second: number): string {
   return new Date(Date.UTC(2026, 3, 28, 0, 0, second)).toISOString();
+}
+
+function openAiTestConfig() {
+  return {
+    apiKey: undefined,
+    baseUrl: "https://api.openai.com/v1",
+    chatModel: "gpt-test-chat"
+  };
 }

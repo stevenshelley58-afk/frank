@@ -233,6 +233,7 @@ function createTestServer(pool: FakeOpsPool, opsCollectors: OpsCollectors, acces
         issuer: "https://frank.cloudflareaccess.com",
         audiences: ["test-aud"]
       },
+      openai: openAiTestConfig(),
       openrouterApiKey: undefined,
       hermes: {
         enabled: false,
@@ -372,5 +373,13 @@ function rows<Row>(items: Row[]): QueryResult<Row> {
   return {
     rows: items,
     rowCount: items.length
+  };
+}
+
+function openAiTestConfig() {
+  return {
+    apiKey: undefined,
+    baseUrl: "https://api.openai.com/v1",
+    chatModel: "gpt-test-chat"
   };
 }

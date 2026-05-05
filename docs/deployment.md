@@ -43,6 +43,9 @@ For Frank's private email, mobile, WhatsApp, and provider credentials, copy
 `runtime/access/frank-access.env` on the VPS and edit that runtime-only file.
 The real access file is ignored by Git.
 
+Home chat needs `OPENAI_API_KEY` and `OPENAI_CHAT_MODEL` in that access file.
+The API and worker containers load it through `FRANK_ACCESS_ENV_FILE`.
+
 ## Normal Update After Main Is Current
 
 After Stage 2 is merged to `main`, normal VPS updates should deploy from

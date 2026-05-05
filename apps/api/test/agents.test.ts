@@ -175,6 +175,7 @@ function createTestServer(pool: FakeAgentPool, accessEnabled = false) {
         issuer: "https://frank.cloudflareaccess.com",
         audiences: ["test-aud"]
       },
+      openai: openAiTestConfig(),
       openrouterApiKey: undefined,
       hermes: {
         enabled: false,
@@ -447,4 +448,12 @@ function parseJson(value: unknown): Record<string, unknown> {
 
 function timestamp(second: number): string {
   return new Date(Date.UTC(2026, 3, 28, 0, 0, second)).toISOString();
+}
+
+function openAiTestConfig() {
+  return {
+    apiKey: undefined,
+    baseUrl: "https://api.openai.com/v1",
+    chatModel: "gpt-test-chat"
+  };
 }

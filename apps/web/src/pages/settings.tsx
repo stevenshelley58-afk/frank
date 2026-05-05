@@ -159,7 +159,7 @@ export function SettingsPage() {
               { label: "code-server", value: "Not wired" },
               { label: "Infisical runtime", value: "Not wired" },
               { label: "LiteLLM runtime", value: "Not wired" },
-              { label: "Model inference", value: "Not exposed" }
+              { label: "Model inference", value: "Home chat through OpenAI" }
             ]}
           />
         </SectionCard>

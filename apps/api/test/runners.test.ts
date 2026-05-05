@@ -263,6 +263,7 @@ function createTestServer(hermes: Partial<ApiConfig["hermes"]> = {}, pool: unkno
         issuer: "https://frank.cloudflareaccess.com",
         audiences: ["test-aud"]
       },
+      openai: openAiTestConfig(),
       openrouterApiKey: undefined,
       hermes: {
         enabled: false,
@@ -516,6 +517,14 @@ function parseJson(value: unknown): Record<string, unknown> | null {
     return JSON.parse(value) as Record<string, unknown> | null;
   }
   return (value ?? null) as Record<string, unknown> | null;
+}
+
+function openAiTestConfig() {
+  return {
+    apiKey: undefined,
+    baseUrl: "https://api.openai.com/v1",
+    chatModel: "gpt-test-chat"
+  };
 }
 
 async function startFakeHermes(

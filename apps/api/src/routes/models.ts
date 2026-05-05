@@ -107,7 +107,7 @@ export function registerModelRoutes(server: FastifyInstance, pool: PgPool, confi
       `
     );
 
-    return { providers: result.rows.map(serializeProvider) };
+    return { providers: result.rows.map((row) => serializeProvider(row, config)) };
   });
 
   server.get("/v1/model-roles", async () => {
@@ -135,7 +135,7 @@ export function registerModelRoutes(server: FastifyInstance, pool: PgPool, confi
       return sendValidationError(reply, query.error);
     }
 
-    const result = await listModels(pool, query.data);
+    const result = await listModels(pool, query.data, config);
     return { models: result.map(serializeModel) };
   });
 
@@ -145,7 +145,7 @@ export function registerModelRoutes(server: FastifyInstance, pool: PgPool, confi
       return sendValidationError(reply, query.error);
     }
 
-    const models = await listModels(pool, query.data);
+    const models = await listModels(pool, query.data, config);
     return {
       models: models.filter((model) => isFreeModelMetadata(model.metadata)).map(serializeModel)
     };
@@ -317,7 +317,8 @@ interface Queryable {
 
 async function listModels(
   db: Queryable,
-  query: { providerId?: string | undefined; status?: ModelCatalogRow["status"] | undefined; limit: number }
+  query: { providerId?: string | undefined; status?: ModelCatalogRow["status"] | undefined; limit: number },
+  config: ApiConfig
 ): Promise<ModelCatalogRow[]> {
   const where: string[] = [];
   const values: unknown[] = [];
@@ -352,7 +353,54 @@ async function listModels(
     values
   );
 
-  return result.rows;
+  const rows = result.rows.filter((row) => matchesModelQuery(row, query));
+  const configuredOpenAi = configuredOpenAiChatModel(config);
+  if (
+    configuredOpenAi &&
+    matchesModelQuery(configuredOpenAi, query) &&
+    !rows.some((row) => row.provider_id === configuredOpenAi.provider_id && row.model_key === configuredOpenAi.model_key)
+  ) {
+    rows.push(configuredOpenAi);
+  }
+
+  return rows
+    .sort((left, right) => `${left.provider_id}/${left.model_key}`.localeCompare(`${right.provider_id}/${right.model_key}`))
+    .slice(0, query.limit);
+}
+
+function matchesModelQuery(
+  row: ModelCatalogRow,
+  query: { providerId?: string | undefined; status?: ModelCatalogRow["status"] | undefined }
+): boolean {
+  if (query.providerId && row.provider_id !== query.providerId) {
+    return false;
+  }
+  if (query.status && row.status !== query.status) {
+    return false;
+  }
+  return true;
+}
+
+function configuredOpenAiChatModel(config: ApiConfig): ModelCatalogRow | null {
+  if (!config.openai.apiKey || !config.openai.chatModel) {
+    return null;
+  }
+  const timestamp = new Date(0).toISOString();
+  return {
+    id: "openai-runtime-chat",
+    provider_id: "openai",
+    model_key: config.openai.chatModel,
+    display_name: "OpenAI chat",
+    capabilities: ["chat", "reasoning"],
+    status: "available",
+    metadata: {
+      source: "runtime_access",
+      runtimeConfigured: true,
+      virtual: true
+    },
+    created_at: timestamp,
+    updated_at: timestamp
+  };
 }
 
 async function upsertOpenRouterModel(db: Queryable, model: OpenRouterModel, refreshedAt: string): Promise<void> {
@@ -460,7 +508,33 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function serializeProvider(row: ProviderRow) {
+function serializeProvider(row: ProviderRow, config: ApiConfig) {
+  if (row.id === "openai" && config.openai.apiKey && config.openai.chatModel) {
+    return {
+      id: row.id,
+      displayName: row.display_name,
+      status: "healthy" as const,
+      enabled: true,
+      metadata: {
+        ...row.metadata,
+        runtimeConfigured: true,
+        configuredModel: config.openai.chatModel
+      },
+      createdAt: serializeTimestamp(row.created_at),
+      updatedAt: serializeTimestamp(row.updated_at),
+      health: {
+        status: "healthy" as const,
+        checkedAt: row.checked_at ? serializeTimestamp(row.checked_at) : null,
+        latencyMs: row.latency_ms,
+        message: "OpenAI API key is configured for Home chat.",
+        metadata: {
+          source: "runtime_access",
+          model: config.openai.chatModel
+        }
+      }
+    };
+  }
+
   return {
     id: row.id,
     displayName: row.display_name,

@@ -3,10 +3,13 @@ import { Circle, Maximize2 } from "lucide-react";
 import type { TaskState } from "@frank/shared";
 import {
   createTask,
+  getChatStatus,
   getHermesStatus,
   listModels,
   listTasks,
   runTaskWithHermes,
+  sendChatMessage,
+  type ChatMessage,
   type Model,
   type Task
 } from "../api.js";
@@ -20,7 +23,7 @@ export interface HomePageProps {
 }
 
 const activeTaskStates = new Set<TaskState>(["queued", "running", "blocked", "waiting_approval"]);
-const fallbackModel: ComposerModel = { id: "default", label: "Default model" };
+const fallbackModel: ComposerModel = { id: "default", label: "OpenAI chat" };
 
 export function HomePage({ selection, onSelectionChange }: HomePageProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -28,6 +31,8 @@ export function HomePage({ selection, onSelectionChange }: HomePageProps) {
   const [selectedModelId, setSelectedModelId] = useState(fallbackModel.id);
   const [selectedMode, setSelectedMode] = useState("chat");
   const [hermesAvailable, setHermesAvailable] = useState(false);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [previousResponseId, setPreviousResponseId] = useState<string | null>(null);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -39,10 +44,16 @@ export function HomePage({ selection, onSelectionChange }: HomePageProps) {
 
   useEffect(() => {
     const controller = new AbortController();
-    listModels({ status: "available", limit: 100 }, { signal: controller.signal })
-      .then((availableModels) => {
+    Promise.all([
+      listModels({ status: "available", limit: 100 }, { signal: controller.signal }),
+      getChatStatus({ signal: controller.signal }).catch(() => null)
+    ])
+      .then(([availableModels, chatStatus]) => {
         const mappedModels = availableModels.map(modelToComposerModel);
-        const nextModels = mappedModels.length > 0 ? mappedModels : [fallbackModel];
+        const openAiModel = chatStatus?.configured
+          ? [{ id: "default", label: "OpenAI chat", detail: chatStatus.model }]
+          : [fallbackModel];
+        const nextModels = [...openAiModel, ...mappedModels.filter((model) => model.id !== "default")];
         setModels(nextModels);
         setSelectedModelId((current) => nextModels.some((model) => model.id === current) ? current : nextModels[0]!.id);
       })
@@ -94,6 +105,33 @@ export function HomePage({ selection, onSelectionChange }: HomePageProps) {
       }))
     };
 
+    if (input.selectedMode !== "task" && input.selectedMode !== "hermes") {
+      const userMessage: ChatMessage = {
+        id: `user-${Date.now()}`,
+        role: "user",
+        content: input.text,
+        createdAt: new Date().toISOString()
+      };
+      setMessages((current) => [...current, userMessage]);
+      const mode = chatMode(input.selectedMode);
+      const response = await sendChatMessage({
+        message: input.text,
+        mode,
+        modelId: input.selectedModelId,
+        ...(previousResponseId ? { previousResponseId } : {}),
+        metadata
+      });
+      setPreviousResponseId(response.responseId);
+      setMessages((current) => [...current, response.assistantMessage]);
+      onSelectionChange({
+        kind: "chat",
+        id: response.responseId ?? response.assistantMessage.id,
+        title: "Frank replied",
+        subtitle: `${response.model} - ${response.usage.inputTokens + response.usage.outputTokens} tokens`
+      });
+      return;
+    }
+
     const task = await createTask({
       title: titleFromRequest(input.text),
       description: input.text,
@@ -137,6 +175,22 @@ export function HomePage({ selection, onSelectionChange }: HomePageProps) {
       </button>
 
       <div className="flex min-h-0 flex-1 items-center justify-center px-1 pb-6 pt-6 sm:px-3 sm:pb-8 sm:pt-8">
+        {messages.length > 0 ? (
+          <div className="grid w-full max-w-4xl gap-4 self-stretch overflow-y-auto px-1 text-left">
+            {messages.map((message) => (
+              <article
+                key={message.id}
+                className={
+                  message.role === "user"
+                    ? "ml-auto max-w-[85%] rounded-2xl bg-primary px-4 py-3 text-primary-foreground"
+                    : "mr-auto max-w-[85%] rounded-2xl border border-border bg-surface px-4 py-3 text-foreground shadow-sm"
+                }
+              >
+                <p className="whitespace-pre-wrap text-sm leading-6">{message.content}</p>
+              </article>
+            ))}
+          </div>
+        ) : (
         <div className="grid max-w-2xl justify-items-center gap-4 text-center">
           <div className="grid gap-2">
             <h2 className="text-2xl font-semibold leading-tight text-foreground sm:text-4xl">How can I help you today?</h2>
@@ -153,6 +207,7 @@ export function HomePage({ selection, onSelectionChange }: HomePageProps) {
             </div>
           ) : null}
         </div>
+        )}
       </div>
 
       {activeRuns.length > 0 ? (
@@ -188,6 +243,13 @@ function modelToComposerModel(model: Model): ComposerModel {
 function titleFromRequest(text: string): string {
   const words = text.trim().split(/\s+/).slice(0, 8).join(" ");
   return words.length > 80 ? `${words.slice(0, 77)}...` : words;
+}
+
+function chatMode(mode: string): "chat" | "research" | "code" | "summarize" {
+  if (mode === "research" || mode === "code" || mode === "summarize") {
+    return mode;
+  }
+  return "chat";
 }
 
 function errorMessage(error: unknown): string {

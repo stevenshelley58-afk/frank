@@ -144,6 +144,7 @@ function baseConfig(overrides: {
       issuer: "https://frank.cloudflareaccess.com",
       audiences: ["test-aud"]
     },
+    openai: openAiTestConfig(),
     openrouterApiKey: undefined,
     hermes: {
       enabled: true,
@@ -256,5 +257,13 @@ function rows<Row>(items: Row[]) {
   return {
     rows: items,
     rowCount: items.length
+  };
+}
+
+function openAiTestConfig() {
+  return {
+    apiKey: undefined,
+    baseUrl: "https://api.openai.com/v1",
+    chatModel: "gpt-test-chat"
   };
 }

@@ -86,6 +86,7 @@ function createTestServer(pool: FakeProjectPool) {
         issuer: "https://frank.cloudflareaccess.com",
         audiences: ["test-aud"]
       },
+      openai: openAiTestConfig(),
       openrouterApiKey: undefined,
       hermes: {
         enabled: true,
@@ -234,4 +235,12 @@ function rows<Row>(items: Row[]) {
 
 function timestamp(): string {
   return new Date(Date.UTC(2026, 4, 4, 0, 0, 1)).toISOString();
+}
+
+function openAiTestConfig() {
+  return {
+    apiKey: undefined,
+    baseUrl: "https://api.openai.com/v1",
+    chatModel: "gpt-test-chat"
+  };
 }

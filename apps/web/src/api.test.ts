@@ -5,10 +5,12 @@ import {
   createFilesBackup,
   fetchSystemStatus,
   getArtifactDownloadUrl,
+  getChatStatus,
   getOperatorAccess,
   listTaskLogs,
   runBackupPreflight,
   runHermesKillSwitch,
+  sendChatMessage,
   runTaskWithHermes,
   stopTaskHermes
 } from "./api.js";
@@ -163,6 +165,39 @@ describe("apiRequest", () => {
       })
     );
     expect(getArtifactDownloadUrl("/v1/artifacts/artifact-1")).toBe("/api/v1/artifacts/artifact-1");
+  });
+
+  it("wraps model-backed chat routes without creating tasks", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          provider: "openai",
+          configured: true,
+          model: "gpt-test-chat",
+          assistantMessage: {
+            id: "assistant-1",
+            role: "assistant",
+            content: "Frank is online.",
+            createdAt: "2026-05-05T00:00:00.000Z"
+          }
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getChatStatus();
+    await sendChatMessage({ message: "hello", mode: "chat", modelId: "default" });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/chat/status", expect.objectContaining({ method: "GET" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/chat/messages",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ message: "hello", mode: "chat", modelId: "default" })
+      })
+    );
   });
 
   it("fetches the redacted operator access profile", async () => {
