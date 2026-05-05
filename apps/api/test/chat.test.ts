@@ -144,6 +144,12 @@ function createTestServer(pool: FakeChatPool, openaiApiKey?: string) {
         audiences: ["test-aud"]
       },
       openrouterApiKey: undefined,
+      hostAgent: {
+        enabled: false,
+        baseUrl: "http://host-agent.local",
+        token: undefined,
+        timeoutSeconds: 5
+      },
       openai: {
         apiKey: openaiApiKey,
         baseUrl: "https://api.openai.com/v1",

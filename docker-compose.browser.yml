@@ -1,0 +1,21 @@
+services:
+  browser:
+    image: ${FRANK_BROWSER_IMAGE:-jlesage/chrome:latest}
+    restart: unless-stopped
+    shm_size: "2gb"
+    expose:
+      - "5800"
+    environment:
+      TZ: ${TZ:-UTC}
+      DISPLAY_WIDTH: ${FRANK_BROWSER_WIDTH:-1600}
+      DISPLAY_HEIGHT: ${FRANK_BROWSER_HEIGHT:-1000}
+      KEEP_APP_RUNNING: "1"
+      APP_ARGS: ${FRANK_BROWSER_APP_ARGS:-https://chatgpt.com}
+      VNC_PASSWORD: ${FRANK_BROWSER_VNC_PASSWORD:-}
+    volumes:
+      - ./runtime/browser:/config
+
+  web:
+    depends_on:
+      browser:
+        condition: service_started

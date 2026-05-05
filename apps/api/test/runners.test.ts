@@ -265,6 +265,12 @@ function createTestServer(hermes: Partial<ApiConfig["hermes"]> = {}, pool: unkno
       },
       openai: openAiTestConfig(),
       openrouterApiKey: undefined,
+      hostAgent: {
+        enabled: false,
+        baseUrl: "http://host-agent.local",
+        token: undefined,
+        timeoutSeconds: 5
+      },
       hermes: {
         enabled: false,
         apiBaseUrl: "http://127.0.0.1:8642",

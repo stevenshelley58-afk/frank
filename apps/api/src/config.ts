@@ -28,6 +28,10 @@ const envSchema = z.object({
   OPENAI_BASE_URL: z.string().url().default("https://api.openai.com/v1"),
   OPENAI_CHAT_MODEL: z.string().optional(),
   OPENROUTER_API_KEY: z.string().optional(),
+  FRANK_HOST_AGENT_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
+  FRANK_HOST_AGENT_BASE_URL: z.string().url().default("http://host.docker.internal:8787"),
+  FRANK_HOST_AGENT_TOKEN: z.string().optional(),
+  FRANK_HOST_AGENT_TIMEOUT_SECONDS: z.coerce.number().int().positive().default(30),
   HERMES_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
   HERMES_API_BASE_URL: z.string().url().default("http://hermes:8642"),
   HERMES_API_SERVER_KEY: z.string().optional(),
@@ -46,7 +50,7 @@ const envSchema = z.object({
   FRANK_ACCESS_ENV_PATH: z.string().default("/opt/frank-hub/runtime/access/frank-access.env"),
   FRANK_SECRET_WRITE_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
   FRANK_SECRET_WRITE_ALLOWED_KEYS: z.string().default(
-    "FRANK_EMAIL_ADDRESS,FRANK_MOBILE_NUMBER,FRANK_WHATSAPP_NUMBER,FRANK_API_KEY_NAMES,FRANK_EMAIL_APP_PASSWORD,FRANK_WHATSAPP_API_TOKEN,OPENAI_API_KEY,OPENAI_CHAT_MODEL,OPENAI_BASE_URL,OPENROUTER_API_KEY,WHATSAPP_ENABLED,WHATSAPP_MODE,WHATSAPP_ALLOWED_USERS,WEBHOOK_ENABLED,WEBHOOK_SECRET,HERMES_WEBHOOK_SECRET"
+    "FRANK_EMAIL_ADDRESS,FRANK_MOBILE_NUMBER,FRANK_WHATSAPP_NUMBER,FRANK_API_KEY_NAMES,FRANK_EMAIL_APP_PASSWORD,FRANK_WHATSAPP_API_TOKEN,OPENAI_API_KEY,OPENAI_CHAT_MODEL,OPENAI_BASE_URL,OPENROUTER_API_KEY,FRANK_HOST_AGENT_TOKEN,FRANK_BROWSER_VNC_PASSWORD,WHATSAPP_ENABLED,WHATSAPP_MODE,WHATSAPP_ALLOWED_USERS,WEBHOOK_ENABLED,WEBHOOK_SECRET,HERMES_WEBHOOK_SECRET"
   ),
   FRANK_LIMIT_EXTERNAL_SEND_PER_HOUR: z.coerce.number().int().nonnegative().default(25),
   FRANK_LIMIT_API_SPEND_USD_PER_DAY: z.coerce.number().nonnegative().default(10),
@@ -91,6 +95,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
       chatModel: parsed.OPENAI_CHAT_MODEL?.trim() || ""
     },
     openrouterApiKey: parsed.OPENROUTER_API_KEY?.trim() || undefined,
+    hostAgent: {
+      enabled: parsed.FRANK_HOST_AGENT_ENABLED,
+      baseUrl: parsed.FRANK_HOST_AGENT_BASE_URL.replace(/\/$/, ""),
+      token: parsed.FRANK_HOST_AGENT_TOKEN?.trim() || undefined,
+      timeoutSeconds: parsed.FRANK_HOST_AGENT_TIMEOUT_SECONDS
+    },
     hermes: {
       enabled: parsed.HERMES_ENABLED,
       apiBaseUrl: parsed.HERMES_API_BASE_URL.replace(/\/$/, ""),

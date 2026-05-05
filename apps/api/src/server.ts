@@ -9,6 +9,7 @@ import { checkPostgres, type PgPool } from "./db.js";
 import { checkRedis, type RedisClient } from "./redis.js";
 import { requireCloudflareAccess } from "./access.js";
 import { registerAgentRoutes } from "./routes/agents.js";
+import { registerAiWorkstationRoutes } from "./routes/ai-workstation.js";
 import { registerAuditLogRoutes } from "./routes/audit-log.js";
 import { registerBackupRoutes } from "./routes/backups.js";
 import { registerChatRoutes } from "./routes/chat.js";
@@ -133,6 +134,7 @@ export function buildServer({ config, pool, redis, opsCollectors }: ServerDepend
   });
 
   registerTaskRoutes(server, pool, config);
+  registerAiWorkstationRoutes(server, pool, config);
   registerAgentRoutes(server, pool);
   registerModelRoutes(server, pool, config);
   registerAuditLogRoutes(server, pool);

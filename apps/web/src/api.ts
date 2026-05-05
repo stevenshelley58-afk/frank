@@ -476,6 +476,59 @@ export interface ChatMessageResponse {
   };
 }
 
+export type AiTool = "codex" | "claude_code";
+
+export interface AiToolStatus {
+  installed?: boolean;
+  path?: string | null;
+}
+
+export interface AiHostStatusResponse {
+  configured: boolean;
+  reachable: boolean;
+  ok?: boolean;
+  version?: string;
+  runWild?: boolean;
+  tools: {
+    tmux?: AiToolStatus;
+    git?: AiToolStatus;
+    docker?: AiToolStatus;
+    codex?: AiToolStatus;
+    claudeCode?: AiToolStatus;
+  };
+  message?: string;
+}
+
+export interface AiToolSession {
+  id: string;
+  tool: AiTool;
+  hostSessionId?: string;
+  sessionName?: string;
+  workspacePath: string;
+  status: "running" | "stopped" | "failed";
+  metadata: JsonRecord;
+  createdAt: string;
+  updatedAt: string;
+  stoppedAt: string | null;
+}
+
+export interface AiHandoff {
+  id: string;
+  targetTool: AiTool;
+  title: string;
+  summary: string;
+  workspacePath: string;
+  prompt: string;
+  metadata: JsonRecord;
+  createdAt: string;
+}
+
+export interface BrowserStatusResponse {
+  running: boolean;
+  url: string;
+  configured?: boolean;
+}
+
 export interface SelfUpgradeRun {
   id: string;
   goal: string;
@@ -874,6 +927,69 @@ export async function sendChatMessage(body: {
     method: "POST",
     body
   });
+}
+
+export async function getAiHostStatus(options?: { signal?: AbortSignal }): Promise<AiHostStatusResponse> {
+  return apiRequest<AiHostStatusResponse>("/v1/ai/host/status", { signal: options?.signal });
+}
+
+export async function listAiSessions(options?: { signal?: AbortSignal }): Promise<AiToolSession[]> {
+  const data = await apiRequest<{ sessions: AiToolSession[] }>("/v1/ai/sessions", { signal: options?.signal });
+  return data.sessions;
+}
+
+export async function createAiSession(body: {
+  tool: AiTool;
+  workspacePath: string;
+  prompt?: string;
+  metadata?: JsonRecord;
+}): Promise<AiToolSession> {
+  const data = await apiRequest<{ session: AiToolSession }>("/v1/ai/sessions", { method: "POST", body });
+  return data.session;
+}
+
+export async function stopAiSession(id: string): Promise<AiToolSession> {
+  const data = await apiRequest<{ session: AiToolSession }>(`/v1/ai/sessions/${encodeURIComponent(id)}/stop`, {
+    method: "POST"
+  });
+  return data.session;
+}
+
+export async function getAiSessionOutput(id: string, options?: { signal?: AbortSignal }): Promise<string> {
+  const data = await apiRequest<{ output: string }>(`/v1/ai/sessions/${encodeURIComponent(id)}/output`, {
+    signal: options?.signal
+  });
+  return data.output;
+}
+
+export async function sendAiSessionInput(id: string, input: string): Promise<void> {
+  await apiRequest<{ ok: boolean }>(`/v1/ai/sessions/${encodeURIComponent(id)}/input`, {
+    method: "POST",
+    body: { input }
+  });
+}
+
+export async function createAiHandoff(body: {
+  targetTool: AiTool;
+  title: string;
+  summary: string;
+  workspacePath: string;
+  metadata?: JsonRecord;
+}): Promise<AiHandoff> {
+  const data = await apiRequest<{ handoff: AiHandoff }>("/v1/ai/handoffs", { method: "POST", body });
+  return data.handoff;
+}
+
+export async function getBrowserStatus(options?: { signal?: AbortSignal }): Promise<BrowserStatusResponse> {
+  return apiRequest<BrowserStatusResponse>("/v1/browser/status", { signal: options?.signal });
+}
+
+export async function startBrowser(): Promise<BrowserStatusResponse> {
+  return apiRequest<BrowserStatusResponse>("/v1/browser/start", { method: "POST" });
+}
+
+export async function stopBrowser(): Promise<BrowserStatusResponse> {
+  return apiRequest<BrowserStatusResponse>("/v1/browser/stop", { method: "POST" });
 }
 
 export async function writeOperatorAccess(values: Record<string, string>): Promise<OperatorAccessWriteResponse> {

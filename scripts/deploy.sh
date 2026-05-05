@@ -40,6 +40,7 @@ deploy_timestamp="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
 app_version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' package.json | head -n 1 || true)"
 hermes_enabled="$(read_env HERMES_ENABLED false)"
 hermes_api_server_key="$(read_env HERMES_API_SERVER_KEY "")"
+browser_enabled="$(read_env FRANK_BROWSER_ENABLED false)"
 
 {
   printf '{\n'
@@ -68,6 +69,10 @@ if [ "${hermes_enabled}" = "true" ]; then
     exit 1
   fi
   compose_files+=(-f docker-compose.hermes.yml)
+fi
+if [ "${browser_enabled}" = "true" ]; then
+  mkdir -p runtime/browser
+  compose_files+=(-f docker-compose.browser.yml)
 fi
 
 docker compose "${compose_files[@]}" --env-file .env build

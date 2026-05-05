@@ -11,6 +11,7 @@ import {
   MessageCircle,
   PlugZap,
   Rocket,
+  Sparkles,
   Settings as SettingsIcon,
   ShieldCheck,
   TerminalSquare
@@ -20,6 +21,7 @@ import { AppShell, type AppShellPage } from "./components/layout/index.js";
 import type { HomeSelection } from "./lib/home-context.js";
 import {
   AgentsPage,
+  AiConsolePage,
   AuditLogPage,
   CommandCenterPage,
   DashboardPage,
@@ -52,6 +54,13 @@ const pages: AppShellPage[] = [
     title: "Command Center",
     description: "High-autonomy lab control surface.",
     icon: TerminalSquare
+  },
+  {
+    id: "ai-console",
+    label: "AI",
+    title: "AI Console",
+    description: "VPS browser and subscription-backed AI workstations.",
+    icon: Sparkles
   },
   {
     id: "projects",
@@ -194,6 +203,8 @@ function renderPage(
   switch (pageId) {
     case "projects":
       return <ProjectsPage />;
+    case "ai-console":
+      return <AiConsolePage />;
     case "command-center":
       return <CommandCenterPage />;
     case "self-upgrades":

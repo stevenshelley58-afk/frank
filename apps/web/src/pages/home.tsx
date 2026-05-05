@@ -23,7 +23,7 @@ export interface HomePageProps {
 }
 
 const activeTaskStates = new Set<TaskState>(["queued", "running", "blocked", "waiting_approval"]);
-const fallbackModel: ComposerModel = { id: "default", label: "OpenAI chat" };
+const fallbackModel: ComposerModel = { id: "default", label: "API Chat" };
 
 export function HomePage({ selection, onSelectionChange }: HomePageProps) {
   const [tasks, setTasks] = useState<Task[]>([]);
@@ -51,7 +51,7 @@ export function HomePage({ selection, onSelectionChange }: HomePageProps) {
       .then(([availableModels, chatStatus]) => {
         const mappedModels = availableModels.map(modelToComposerModel);
         const openAiModel = chatStatus?.configured
-          ? [{ id: "default", label: "OpenAI chat", detail: chatStatus.model }]
+          ? [{ id: "default", label: "API Chat", detail: chatStatus.model }]
           : [fallbackModel];
         const nextModels = [...openAiModel, ...mappedModels.filter((model) => model.id !== "default")];
         setModels(nextModels);

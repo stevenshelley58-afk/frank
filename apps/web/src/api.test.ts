@@ -3,14 +3,24 @@ import {
   ApiClientError,
   apiRequest,
   createFilesBackup,
+  createAiHandoff,
+  createAiSession,
   fetchSystemStatus,
+  getAiSessionOutput,
+  getAiHostStatus,
   getArtifactDownloadUrl,
+  getBrowserStatus,
   getChatStatus,
   getOperatorAccess,
+  listAiSessions,
   listTaskLogs,
   runBackupPreflight,
+  startBrowser,
+  sendAiSessionInput,
   runHermesKillSwitch,
   sendChatMessage,
+  stopAiSession,
+  stopBrowser,
   runTaskWithHermes,
   stopTaskHermes
 } from "./api.js";
@@ -198,6 +208,80 @@ describe("apiRequest", () => {
         body: JSON.stringify({ message: "hello", mode: "chat", modelId: "default" })
       })
     );
+  });
+
+  it("wraps AI workstation session, handoff, and browser routes", async () => {
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () =>
+      new Response(
+        JSON.stringify({
+          configured: true,
+          reachable: true,
+          sessions: [],
+          session: {
+            id: "session-1",
+            tool: "codex",
+            workspacePath: "/opt/frank-hub",
+            status: "running",
+            createdAt: "2026-05-05T00:00:00.000Z",
+            updatedAt: "2026-05-05T00:00:00.000Z"
+          },
+          handoff: {
+            id: "handoff-1",
+            targetTool: "codex",
+            title: "Continue",
+            summary: "Keep going",
+            workspacePath: "/opt/frank-hub",
+            prompt: "Continue",
+            createdAt: "2026-05-05T00:00:00.000Z"
+          },
+          running: true,
+          url: "/vps-browser/"
+        }),
+        { status: 200 }
+      )
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await getAiHostStatus();
+    await listAiSessions();
+    await createAiSession({ tool: "codex", workspacePath: "/opt/frank-hub", prompt: "continue" });
+    await getAiSessionOutput("session-1");
+    await sendAiSessionInput("session-1", "run pnpm test");
+    await stopAiSession("session-1");
+    await createAiHandoff({
+      targetTool: "codex",
+      title: "Continue",
+      summary: "Keep going",
+      workspacePath: "/opt/frank-hub"
+    });
+    await getBrowserStatus();
+    await startBrowser();
+    await stopBrowser();
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/ai/host/status", expect.objectContaining({ method: "GET" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(2, "/api/v1/ai/sessions", expect.objectContaining({ method: "GET" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "/api/v1/ai/sessions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ tool: "codex", workspacePath: "/opt/frank-hub", prompt: "continue" })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(4, "/api/v1/ai/sessions/session-1/output", expect.objectContaining({ method: "GET" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      5,
+      "/api/v1/ai/sessions/session-1/input",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ input: "run pnpm test" })
+      })
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(6, "/api/v1/ai/sessions/session-1/stop", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(7, "/api/v1/ai/handoffs", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(8, "/api/v1/browser/status", expect.objectContaining({ method: "GET" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(9, "/api/v1/browser/start", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(10, "/api/v1/browser/stop", expect.objectContaining({ method: "POST" }));
   });
 
   it("fetches the redacted operator access profile", async () => {

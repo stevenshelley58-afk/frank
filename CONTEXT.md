@@ -36,6 +36,13 @@ operator actions.
   a bounded runtime.
 - **Hermes**: the agent/runtime integration path for delegated build and task
   execution.
+- **Frank Host Agent**: the VPS-local systemd service that gives Frank Hub
+  controlled access to host tools such as `tmux`, `git`, Docker, Codex,
+  Claude Code, and browser controls.
+- **AI Workstation**: the Frank dashboard surface for embedded VPS browser
+  chat, Codex sessions, Claude Code sessions, handoffs, and terminal attach.
+- **VPS Browser**: the internal browser/noVNC runtime used for subscription
+  web chat through ChatGPT or Claude without moving the session to the laptop.
 - **Audit log**: the append-only record of operator-relevant actions and
   system events.
 - **Build gate**: a workflow rule that chooses the right planning, issue, test,

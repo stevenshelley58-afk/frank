@@ -50,6 +50,8 @@ services:
         required: false
     volumes:
       - ${FRANK_BACKUP_ROOT:-/opt/frank-backups}:/opt/frank-backups
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "127.0.0.1:${API_PORT:-8080}:8080"
     depends_on:

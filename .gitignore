@@ -11,6 +11,8 @@ runtime/hermes/
 runtime/artifacts/
 runtime/backups/
 runtime/access/
+runtime/browser/
+runtime/ai-instructions/
 workspaces/
 backups/
 *.dump

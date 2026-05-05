@@ -146,6 +146,12 @@ function baseConfig(overrides: {
     },
     openai: openAiTestConfig(),
     openrouterApiKey: undefined,
+    hostAgent: {
+      enabled: false,
+      baseUrl: "http://host-agent.local",
+      token: undefined,
+      timeoutSeconds: 5
+    },
     hermes: {
       enabled: true,
       apiBaseUrl: "http://hermes:8642",
