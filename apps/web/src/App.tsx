@@ -18,7 +18,6 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 import { AppShell, type AppShellPage } from "./components/layout/index.js";
-import type { HomeSelection } from "./lib/home-context.js";
 import {
   AgentsPage,
   AiConsolePage,
@@ -45,7 +44,7 @@ const pages: AppShellPage[] = [
     id: "home",
     label: "Home",
     title: "Home",
-    description: "Chat-first command center for Frank Hub.",
+    description: "ChatGPT running inside the VPS browser.",
     icon: Home
   },
   {
@@ -179,25 +178,22 @@ const pages: AppShellPage[] = [
 ];
 
 export function App() {
-  const [activePageId, setActivePageId] = useState("ai-console");
-  const [homeSelection, setHomeSelection] = useState<HomeSelection | null>(null);
+  const [activePageId, setActivePageId] = useState("home");
 
   return (
     <AppShell
       pages={pages}
       activePageId={activePageId}
       onNavigate={setActivePageId}
-      onHomeContextSelect={setHomeSelection}
+      onHomeContextSelect={() => undefined}
     >
-      {renderPage(activePageId, homeSelection, setHomeSelection, setActivePageId)}
+      {renderPage(activePageId, setActivePageId)}
     </AppShell>
   );
 }
 
 function renderPage(
   pageId: string,
-  homeSelection: HomeSelection | null,
-  setHomeSelection: (selection: HomeSelection | null) => void,
   navigate: (pageId: string) => void
 ) {
   switch (pageId) {
@@ -237,6 +233,6 @@ function renderPage(
       return <SettingsPage />;
     case "home":
     default:
-      return <HomePage selection={homeSelection} onSelectionChange={setHomeSelection} />;
+      return <HomePage />;
   }
 }

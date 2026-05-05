@@ -8,21 +8,20 @@ afterEach(() => {
 });
 
 describe("App", () => {
-  it("opens on the VPS AI Console so ChatGPT browser and Codex are the first workflow", async () => {
+  it("opens on Home with the ChatGPT browser ready instead of task or API chat", async () => {
     vi.stubGlobal("fetch", vi.fn<typeof fetch>().mockImplementation(async (input) => {
       const url = String(input);
       if (url.endsWith("/v1/tasks?limit=5")) return response({ tasks: [] });
-      if (url.endsWith("/v1/ai/host/status")) return response({ configured: false, reachable: false, tools: {} });
-      if (url.endsWith("/v1/ai/sessions")) return response({ sessions: [] });
-      if (url.endsWith("/v1/projects")) return response({ projects: [] });
-      if (url.endsWith("/v1/browser/status")) return response({ running: false, url: "/vps-browser/" });
+      if (url.endsWith("/v1/browser/start")) return response({ running: true, url: "/vps-browser/" });
       return response({});
     }));
 
     render(<App />);
 
-    expect(await screen.findByText("AI Workstation")).toBeTruthy();
-    expect(await screen.findByText("ChatGPT Browser")).toBeTruthy();
+    expect(await screen.findByTitle("ChatGPT browser")).toBeTruthy();
+    expect(screen.queryByText("AI Workstation")).toBeNull();
+    expect(screen.queryByText("API Chat")).toBeNull();
+    expect(screen.queryByText(/OpenAI chat requires OPENAI_API_KEY/)).toBeNull();
     expect(screen.queryByText("How can I help you today?")).toBeNull();
   });
 });
