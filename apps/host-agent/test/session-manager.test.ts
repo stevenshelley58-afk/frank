@@ -4,6 +4,7 @@ import {
   createHostSessionManager,
   isProtectedWorkspace,
   normalizeWorkspacePath,
+  TmuxRunner,
   type HostRunner
 } from "../src/session-manager.js";
 
@@ -60,6 +61,49 @@ describe("Frank host agent session manager", () => {
     await manager.stopSession(session.id);
     expect(runner.stopped).toEqual([session.sessionName]);
     expect((await manager.getSession(session.id)).status).toBe("stopped");
+  });
+
+  it("starts tmux sessions as persistent shells before sending the AI tool command", async () => {
+    const calls: Array<{ file: string; args: string[] }> = [];
+    const runner = new TmuxRunner(async (file, args) => {
+      calls.push({ file, args: [...args] });
+      return { stdout: "" };
+    });
+
+    await runner.startSession({
+      sessionName: "frank-codex-test",
+      workspacePath: "/opt/frank-hub",
+      command: ["codex", "continue the build"]
+    });
+
+    expect(calls).toEqual([
+      {
+        file: "tmux",
+        args: ["new-session", "-d", "-s", "frank-codex-test", "-c", "/opt/frank-hub"]
+      },
+      {
+        file: "tmux",
+        args: ["send-keys", "-t", "frank-codex-test", "codex 'continue the build'", "Enter"]
+      }
+    ]);
+  });
+
+  it("can attach to existing frank tmux sessions after host-agent memory is reset", async () => {
+    const runner = new FakeRunner();
+    const manager = createHostSessionManager({
+      runner,
+      protectedPaths: ["/", "/root"]
+    });
+
+    runner.output.set("frank-codex-existing", "existing Codex output");
+
+    await expect(manager.captureOutput("frank-codex-existing")).resolves.toBe("existing Codex output");
+    await manager.sendInput("frank-codex-existing", "continue");
+    await manager.stopSession("frank-codex-existing");
+
+    expect(runner.sentInput).toEqual([{ sessionName: "frank-codex-existing", input: "continue" }]);
+    expect(runner.stopped).toEqual(["frank-codex-existing"]);
+    await expect(manager.captureOutput("unrelated-session")).rejects.toThrow("AI session was not found.");
   });
 });
 

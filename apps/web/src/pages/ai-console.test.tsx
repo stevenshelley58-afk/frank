@@ -104,6 +104,13 @@ describe("AiConsolePage", () => {
 
     const frame = await screen.findByTitle("VPS browser");
     expect(frame.getAttribute("src")).toBe("/vps-browser/");
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/v1/browser/start",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ target: "chatgpt" })
+      })
+    );
   });
 });
 

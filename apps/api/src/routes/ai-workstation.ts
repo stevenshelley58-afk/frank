@@ -32,6 +32,12 @@ const sessionInputSchema = z
   })
   .strict();
 
+const browserStartSchema = z
+  .object({
+    target: z.enum(["chatgpt", "claude"]).optional()
+  })
+  .strict();
+
 interface AiToolSessionRow {
   id: string;
   tool: "codex" | "claude_code";
@@ -207,7 +213,7 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
     }
     const result = await callHostAgent<{ output: string }>(
       config,
-      `/v1/sessions/${encodeURIComponent(row.host_session_id)}/output`
+      `/v1/sessions/${encodeURIComponent(hostAgentRouteSessionId(row))}/output`
     );
     return { output: result.output ?? "" };
   });
@@ -227,7 +233,7 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
     if (!row) {
       return reply.code(404).send({ error: "ai_session_not_found" });
     }
-    await callHostAgent(config, `/v1/sessions/${encodeURIComponent(row.host_session_id)}/input`, {
+    await callHostAgent(config, `/v1/sessions/${encodeURIComponent(hostAgentRouteSessionId(row))}/input`, {
       method: "POST",
       body: { input: body.data.input }
     });
@@ -249,7 +255,9 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
       return reply.code(404).send({ error: "ai_session_not_found" });
     }
     if (isHostAgentConfigured(config)) {
-      await callHostAgent(config, `/v1/sessions/${encodeURIComponent(row.host_session_id)}/stop`, { method: "POST" });
+      await callHostAgent(config, `/v1/sessions/${encodeURIComponent(hostAgentRouteSessionId(row))}/stop`, {
+        method: "POST"
+      });
     }
     const updated = await pool.query<AiToolSessionRow>(
       `
@@ -315,7 +323,11 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
     return callHostAgent(config, "/v1/browser/status");
   });
 
-  server.post("/v1/browser/start", async () => {
+  server.post("/v1/browser/start", async (request, reply) => {
+    const body = browserStartSchema.safeParse(request.body ?? {});
+    if (!body.success) {
+      return sendValidationError(reply, body.error);
+    }
     if (!isHostAgentConfigured(config)) {
       return {
         running: false,
@@ -323,7 +335,10 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
         configured: false
       };
     }
-    return callHostAgent(config, "/v1/browser/start", { method: "POST" });
+    return callHostAgent(config, "/v1/browser/start", {
+      method: "POST",
+      body: body.data.target ? { target: body.data.target } : undefined
+    });
   });
 
   server.post("/v1/browser/stop", async () => {
@@ -463,6 +478,10 @@ function serializeHandoff(row: AiHandoffRow) {
     metadata: row.metadata,
     createdAt: serializeTimestamp(row.created_at)
   };
+}
+
+function hostAgentRouteSessionId(row: AiToolSessionRow): string {
+  return row.session_name || row.host_session_id;
 }
 
 function idParam(request: FastifyRequest): string {

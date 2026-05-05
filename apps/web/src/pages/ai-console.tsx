@@ -112,7 +112,7 @@ export function AiConsolePage() {
 
   async function openBrowser(target: "chatgpt" | "claude") {
     setMessage(null);
-    const result = await startBrowser();
+    const result = await startBrowser(target);
     setBrowser(result);
     setMessage(`${target === "chatgpt" ? "ChatGPT" : "Claude"} browser is ready.`);
   }

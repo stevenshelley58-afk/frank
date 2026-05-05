@@ -179,7 +179,7 @@ const pages: AppShellPage[] = [
 ];
 
 export function App() {
-  const [activePageId, setActivePageId] = useState("home");
+  const [activePageId, setActivePageId] = useState("ai-console");
   const [homeSelection, setHomeSelection] = useState<HomeSelection | null>(null);
 
   return (

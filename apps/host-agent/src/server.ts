@@ -20,6 +20,14 @@ const sessionInputSchema = z
   })
   .strict();
 
+const browserStartSchema = z
+  .object({
+    target: z.enum(["chatgpt", "claude"]).optional()
+  })
+  .strict();
+
+type BrowserTarget = z.infer<typeof browserStartSchema>["target"];
+
 export function createHostAgentServer(input: {
   config: HostAgentConfig;
   manager?: HostSessionManager | undefined;
@@ -68,7 +76,8 @@ export function createHostAgentServer(input: {
         return sendJson(response, 200, await browserStatus(input.config));
       }
       if (request.method === "POST" && url.pathname === "/v1/browser/start") {
-        await runBrowserScript(input.config, "up");
+        const body = browserStartSchema.parse(await readJson(request));
+        await runBrowserScript(input.config, "up", body.target);
         return sendJson(response, 200, { running: true, url: "/vps-browser/" });
       }
       if (request.method === "POST" && url.pathname === "/v1/browser/stop") {
@@ -123,18 +132,40 @@ async function commandInstalled(command: string) {
 
 async function browserStatus(_config: HostAgentConfig) {
   try {
-    await execFileAsync("docker", ["compose", "-f", "docker-compose.yml", "-f", "docker-compose.browser.yml", "ps", "--status", "running", "browser"], {
+    const { stdout } = await execFileAsync("docker", [
+      "compose",
+      "-f",
+      "docker-compose.yml",
+      "-f",
+      _config.browserComposeFile,
+      "ps",
+      "--status",
+      "running",
+      "--services",
+      "browser"
+    ], {
       cwd: _config.repoPath
     });
-    return { running: true, url: "/vps-browser/" };
+    return { running: stdout.toString().trim().split(/\s+/).includes("browser"), url: "/vps-browser/" };
   } catch {
     return { running: false, url: "/vps-browser/" };
   }
 }
 
-async function runBrowserScript(config: HostAgentConfig, direction: "up" | "down") {
+async function runBrowserScript(config: HostAgentConfig, direction: "up" | "down", target?: BrowserTarget) {
   const script = direction === "up" ? "scripts/browser_up.sh" : "scripts/browser_down.sh";
-  await execFileAsync("bash", [script], { cwd: config.repoPath });
+  const targetUrl = browserTargetUrl(target);
+  await execFileAsync("bash", targetUrl ? [script, targetUrl] : [script], { cwd: config.repoPath });
+}
+
+function browserTargetUrl(target: BrowserTarget): string | undefined {
+  if (target === "chatgpt") {
+    return "https://chatgpt.com";
+  }
+  if (target === "claude") {
+    return "https://claude.ai";
+  }
+  return undefined;
 }
 
 async function readJson(request: IncomingMessage): Promise<Record<string, unknown>> {

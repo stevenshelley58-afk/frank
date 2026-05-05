@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 export type AiTool = "codex" | "claude_code";
+export type TmuxExec = (file: string, args: readonly string[]) => Promise<{ stdout: string | Buffer }>;
 
 export interface HostSession {
   id: string;
@@ -55,12 +56,25 @@ export function createHostSessionManager(input: {
   const protectedPaths = input.protectedPaths ?? defaultProtectedPaths;
   const sessions = new Map<string, HostSession>();
 
-  function requireSession(id: string): HostSession {
+  function resolveSession(id: string): HostSession {
     const session = sessions.get(id);
-    if (!session) {
-      throw new Error("AI session was not found.");
+    if (session) {
+      return session;
     }
-    return session;
+    if (isFrankSessionName(id)) {
+      const now = new Date().toISOString();
+      return {
+        id,
+        sessionName: id,
+        tool: id.includes("claude-code") ? "claude_code" : "codex",
+        workspacePath: "",
+        status: "running",
+        createdAt: now,
+        updatedAt: now,
+        error: null
+      };
+    }
+    throw new Error("AI session was not found.");
   }
 
   return {
@@ -97,28 +111,32 @@ export function createHostSessionManager(input: {
     },
 
     async getSession(id) {
-      return requireSession(id);
+      return resolveSession(id);
     },
 
     async sendInput(id, text) {
-      const session = requireSession(id);
+      const session = resolveSession(id);
       await runner.sendInput(session.sessionName, text);
       session.updatedAt = new Date().toISOString();
     },
 
     async captureOutput(id) {
-      const session = requireSession(id);
+      const session = resolveSession(id);
       return runner.captureOutput(session.sessionName);
     },
 
     async stopSession(id) {
-      const session = requireSession(id);
+      const session = resolveSession(id);
       await runner.stopSession(session.sessionName);
       session.status = "stopped";
       session.updatedAt = new Date().toISOString();
       return session;
     }
   };
+}
+
+function isFrankSessionName(value: string): boolean {
+  return /^frank-(codex|claude-code)-[A-Za-z0-9-]+$/.test(value);
 }
 
 export function normalizeWorkspacePath(value: string): string {
@@ -140,31 +158,31 @@ function isInsidePath(candidate: string, root: string): boolean {
 }
 
 export class TmuxRunner implements HostRunner {
+  constructor(private readonly exec: TmuxExec = defaultTmuxExec) {}
+
   async startSession(input: { sessionName: string; workspacePath: string; command: string[] }): Promise<void> {
-    await execFileAsync("tmux", [
-      "new-session",
-      "-d",
-      "-s",
-      input.sessionName,
-      "-c",
-      input.workspacePath,
-      shellCommand(input.command)
-    ]);
+    await this.exec("tmux", ["new-session", "-d", "-s", input.sessionName, "-c", input.workspacePath]);
+    await this.exec("tmux", ["send-keys", "-t", input.sessionName, shellCommand(input.command), "Enter"]);
   }
 
   async sendInput(sessionName: string, input: string): Promise<void> {
-    await execFileAsync("tmux", ["send-keys", "-t", sessionName, input, "Enter"]);
+    await this.exec("tmux", ["send-keys", "-t", sessionName, input, "Enter"]);
   }
 
   async captureOutput(sessionName: string): Promise<string> {
-    const { stdout } = await execFileAsync("tmux", ["capture-pane", "-pt", sessionName, "-S", "-2000"]);
-    return stdout;
+    const { stdout } = await this.exec("tmux", ["capture-pane", "-pt", sessionName, "-S", "-2000"]);
+    return typeof stdout === "string" ? stdout : stdout.toString("utf8");
   }
 
   async stopSession(sessionName: string): Promise<void> {
-    await execFileAsync("tmux", ["kill-session", "-t", sessionName]);
+    await this.exec("tmux", ["kill-session", "-t", sessionName]);
   }
 }
+
+const defaultTmuxExec: TmuxExec = async (file, args) => {
+  const { stdout } = await execFileAsync(file, [...args]);
+  return { stdout };
+};
 
 function shellCommand(command: string[]): string {
   return command.map(shellQuote).join(" ");

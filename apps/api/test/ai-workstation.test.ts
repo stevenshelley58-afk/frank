@@ -128,7 +128,7 @@ describe("AI workstation API routes", () => {
     });
     const fetchMock = vi.fn(async (input) => {
       const url = String(input);
-      if (url.endsWith("/v1/sessions/host-session-1/output")) {
+      if (url.endsWith("/v1/sessions/frank-codex-host-session-1/output")) {
         return jsonResponse({ output: "codex ready" });
       }
       return jsonResponse({ ok: true });
@@ -151,12 +151,12 @@ describe("AI workstation API routes", () => {
     expect(input.statusCode).toBe(200);
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "http://host-agent.local/v1/sessions/host-session-1/output",
+      "http://host-agent.local/v1/sessions/frank-codex-host-session-1/output",
       expect.objectContaining({ method: "GET" })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
-      "http://host-agent.local/v1/sessions/host-session-1/input",
+      "http://host-agent.local/v1/sessions/frank-codex-host-session-1/input",
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({ input: "run pnpm test" })
@@ -169,7 +169,7 @@ describe("AI workstation API routes", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { server } = createTestServer(new FakeAiPool());
 
-    const started = await server.inject({ method: "POST", url: "/v1/browser/start" });
+    const started = await server.inject({ method: "POST", url: "/v1/browser/start", payload: { target: "claude" } });
     const stopped = await server.inject({ method: "POST", url: "/v1/browser/stop" });
 
     expect(started.statusCode).toBe(200);
@@ -177,7 +177,10 @@ describe("AI workstation API routes", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       "http://host-agent.local/v1/browser/start",
-      expect.objectContaining({ method: "POST" })
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ target: "claude" })
+      })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,

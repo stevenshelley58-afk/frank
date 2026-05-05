@@ -477,6 +477,7 @@ export interface ChatMessageResponse {
 }
 
 export type AiTool = "codex" | "claude_code";
+export type BrowserTarget = "chatgpt" | "claude";
 
 export interface AiToolStatus {
   installed?: boolean;
@@ -984,8 +985,11 @@ export async function getBrowserStatus(options?: { signal?: AbortSignal }): Prom
   return apiRequest<BrowserStatusResponse>("/v1/browser/status", { signal: options?.signal });
 }
 
-export async function startBrowser(): Promise<BrowserStatusResponse> {
-  return apiRequest<BrowserStatusResponse>("/v1/browser/start", { method: "POST" });
+export async function startBrowser(target?: BrowserTarget): Promise<BrowserStatusResponse> {
+  return apiRequest<BrowserStatusResponse>("/v1/browser/start", {
+    method: "POST",
+    body: target ? { target } : undefined
+  });
 }
 
 export async function stopBrowser(): Promise<BrowserStatusResponse> {

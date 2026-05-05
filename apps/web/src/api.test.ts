@@ -255,7 +255,7 @@ describe("apiRequest", () => {
       workspacePath: "/opt/frank-hub"
     });
     await getBrowserStatus();
-    await startBrowser();
+    await startBrowser("claude");
     await stopBrowser();
 
     expect(fetchMock).toHaveBeenNthCalledWith(1, "/api/v1/ai/host/status", expect.objectContaining({ method: "GET" }));
@@ -280,7 +280,14 @@ describe("apiRequest", () => {
     expect(fetchMock).toHaveBeenNthCalledWith(6, "/api/v1/ai/sessions/session-1/stop", expect.objectContaining({ method: "POST" }));
     expect(fetchMock).toHaveBeenNthCalledWith(7, "/api/v1/ai/handoffs", expect.objectContaining({ method: "POST" }));
     expect(fetchMock).toHaveBeenNthCalledWith(8, "/api/v1/browser/status", expect.objectContaining({ method: "GET" }));
-    expect(fetchMock).toHaveBeenNthCalledWith(9, "/api/v1/browser/start", expect.objectContaining({ method: "POST" }));
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      9,
+      "/api/v1/browser/start",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ target: "claude" })
+      })
+    );
     expect(fetchMock).toHaveBeenNthCalledWith(10, "/api/v1/browser/stop", expect.objectContaining({ method: "POST" }));
   });
 
