@@ -96,46 +96,66 @@ export function AiConsolePage() {
 
   async function startTool(tool: AiTool) {
     setMessage(null);
-    const session = await createAiSession({
-      tool,
-      workspacePath,
-      prompt,
-      metadata: {
-        source: "ai_console"
-      }
-    });
-    setActiveSession(session);
-    setMessage(`${toolLabel(tool)} started in ${workspacePath}`);
-    await refreshTerminal(session);
-    load();
+    try {
+      const session = await createAiSession({
+        tool,
+        workspacePath,
+        prompt,
+        metadata: {
+          source: "ai_console"
+        }
+      });
+      setActiveSession(session);
+      setMessage(`${toolLabel(tool)} started in ${workspacePath}`);
+      await refreshTerminal(session);
+      load();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
   }
 
   async function openBrowser(target: "chatgpt" | "claude") {
     setMessage(null);
-    const result = await startBrowser(target);
-    setBrowser(result);
-    setMessage(`${target === "chatgpt" ? "ChatGPT" : "Claude"} browser is ready.`);
+    try {
+      const result = await startBrowser(target);
+      setBrowser(result);
+      setMessage(`${target === "chatgpt" ? "ChatGPT" : "Claude"} browser is ready.`);
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
   }
 
   async function closeBrowser() {
     setMessage(null);
-    const result = await stopBrowser();
-    setBrowser(result);
-    setMessage("VPS browser stopped.");
+    try {
+      const result = await stopBrowser();
+      setBrowser(result);
+      setMessage("VPS browser stopped.");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
   }
 
   async function stopSession(id: string) {
-    const session = await stopAiSession(id);
-    setActiveSession(session);
-    load();
+    try {
+      const session = await stopAiSession(id);
+      setActiveSession(session);
+      load();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
   }
 
   async function stopAllSessions() {
     const running = displayedSessions.filter((session) => session.status === "running");
-    await Promise.all(running.map((session) => stopAiSession(session.id)));
-    setActiveSession((current) => current ? { ...current, status: "stopped", stoppedAt: new Date().toISOString() } : current);
-    setMessage(`Stopped ${running.length} ${running.length === 1 ? "session" : "sessions"}.`);
-    load();
+    try {
+      await Promise.all(running.map((session) => stopAiSession(session.id)));
+      setActiveSession((current) => current ? { ...current, status: "stopped", stoppedAt: new Date().toISOString() } : current);
+      setMessage(`Stopped ${running.length} ${running.length === 1 ? "session" : "sessions"}.`);
+      load();
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
   }
 
   async function attachSession(session: AiToolSession) {
@@ -161,35 +181,43 @@ export function AiConsolePage() {
     if (!activeSession || !input) {
       return;
     }
-    await sendAiSessionInput(activeSession.id, input);
-    setTerminalInput("");
-    await refreshTerminal(activeSession);
+    try {
+      await sendAiSessionInput(activeSession.id, input);
+      setTerminalInput("");
+      await refreshTerminal(activeSession);
+    } catch (error) {
+      setTerminalError(errorMessage(error));
+    }
   }
 
   async function copyHandoff() {
-    const handoff = await createAiHandoff({
-      targetTool: "codex",
-      title: "Continue Frank Hub work",
-      summary: handoffSummary,
-      workspacePath,
-      metadata: {
-        source: "ai_console"
-      }
-    });
-    await navigator.clipboard?.writeText(handoff.prompt).catch(() => undefined);
-    const session = await createAiSession({
-      tool: "codex",
-      workspacePath,
-      prompt: handoff.prompt,
-      metadata: {
-        source: "ai_console_handoff",
-        handoffId: handoff.id
-      }
-    });
-    setActiveSession(session);
-    await refreshTerminal(session);
-    load();
-    setMessage("Codex handoff created, copied when clipboard access is available, and launched.");
+    try {
+      const handoff = await createAiHandoff({
+        targetTool: "codex",
+        title: "Continue Frank Hub work",
+        summary: handoffSummary,
+        workspacePath,
+        metadata: {
+          source: "ai_console"
+        }
+      });
+      await navigator.clipboard?.writeText(handoff.prompt).catch(() => undefined);
+      const session = await createAiSession({
+        tool: "codex",
+        workspacePath,
+        prompt: handoff.prompt,
+        metadata: {
+          source: "ai_console_handoff",
+          handoffId: handoff.id
+        }
+      });
+      setActiveSession(session);
+      await refreshTerminal(session);
+      load();
+      setMessage("Codex handoff created, copied when clipboard access is available, and launched.");
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
   }
 
   if (state.status === "loading") {
@@ -277,17 +305,24 @@ export function AiConsolePage() {
         </SectionCard>
 
         <SectionCard title="Host Agent" description="Install and runtime status from the VPS host." icon={<PlugZap aria-hidden="true" />}>
-          <KeyValueList
-            items={[
-              { label: "Configured", value: host.configured ? "Yes" : "No" },
-              { label: "Reachable", value: host.reachable ? "Yes" : "No" },
-              { label: "Run wild", value: host.runWild ? "Enabled" : "Unknown" },
-              { label: "tmux", value: installedLabel(host.tools.tmux) },
-              { label: "Codex", value: installedLabel(host.tools.codex) },
-              { label: "Claude Code", value: installedLabel(host.tools.claudeCode) },
-              { label: "Docker", value: installedLabel(host.tools.docker) }
-            ]}
-          />
+          <div className="grid gap-3">
+            <KeyValueList
+              items={[
+                { label: "Configured", value: host.configured ? "Yes" : "No" },
+                { label: "Reachable", value: host.reachable ? "Yes" : "No" },
+                { label: "Run wild", value: host.runWild ? "Enabled" : "Unknown" },
+                { label: "tmux", value: installedLabel(host.tools.tmux) },
+                { label: "Codex", value: installedLabel(host.tools.codex) },
+                { label: "Claude Code", value: installedLabel(host.tools.claudeCode) },
+                { label: "Docker", value: installedLabel(host.tools.docker) }
+              ]}
+            />
+            {host.message ? (
+              <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
+                {host.message}
+              </p>
+            ) : null}
+          </div>
         </SectionCard>
       </section>
 

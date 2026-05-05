@@ -20,13 +20,12 @@ Frank Hub can run AI tools inside the VPS so the laptop only opens
 1. Deploy Frank from GitHub.
 2. On the VPS, run `scripts/install_ai_tools.sh`.
 3. Run `scripts/install_host_agent.sh`.
-4. Set `FRANK_HOST_AGENT_ENABLED=true` and make sure
-   `FRANK_HOST_AGENT_TOKEN` is available to the API from `.env` or
-   `runtime/access/frank-access.env`.
-5. Redeploy or restart the API.
-6. Run `scripts/ai_doctor.sh`.
-7. Start the embedded browser with `scripts/browser_up.sh`.
-8. Log into ChatGPT, Codex, Claude, and Claude Code once from the VPS user.
+4. Redeploy or restart the API. The installer writes
+   `FRANK_HOST_AGENT_ENABLED`, `FRANK_HOST_AGENT_BASE_URL`, and the redacted
+   token source into `runtime/access/frank-access.env`.
+5. Run `scripts/ai_doctor.sh`.
+6. Start the embedded browser with `scripts/browser_up.sh` or from the AI Console.
+7. Log into ChatGPT, Codex, Claude, and Claude Code once from the VPS user.
 
 ## Daily Workflow
 

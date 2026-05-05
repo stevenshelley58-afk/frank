@@ -43,6 +43,25 @@ describe("AI workstation API routes", () => {
     expect(response.body).not.toContain("host-agent-secret");
   });
 
+  it("reports host-agent outages as unreachable status instead of breaking the AI console", async () => {
+    const fetchMock = vi.fn(async () => {
+      throw new Error("connect ECONNREFUSED");
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { server } = createTestServer(new FakeAiPool());
+
+    const response = await server.inject({ method: "GET", url: "/v1/ai/host/status" });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      configured: true,
+      reachable: false,
+      tools: {},
+      message: "Frank Host Agent is configured but unreachable."
+    });
+    expect(response.body).not.toContain("host-agent-secret");
+  });
+
   it("starts a Codex session, records it, and rejects protected workspaces", async () => {
     const pool = new FakeAiPool();
     vi.stubGlobal("fetch", vi.fn(async () => jsonResponse({

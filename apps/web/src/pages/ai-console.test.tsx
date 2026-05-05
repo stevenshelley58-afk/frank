@@ -112,11 +112,48 @@ describe("AiConsolePage", () => {
       })
     );
   });
+
+  it("shows action errors inside the AI Console instead of failing silently", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url.endsWith("/v1/ai/host/status")) {
+          return response({
+            configured: true,
+            reachable: false,
+            tools: {},
+            message: "Frank Host Agent is configured but unreachable."
+          });
+        }
+        if (url.endsWith("/v1/ai/sessions") && init?.method === "GET") return response({ sessions: [] });
+        if (url.endsWith("/v1/projects")) return response({ projects: [] });
+        if (url.endsWith("/v1/browser/status")) return response({ running: false, url: "/vps-browser/" });
+        if (url.endsWith("/v1/ai/sessions") && init?.method === "POST") {
+          return response(
+            {
+              error: "host_agent_not_configured",
+              message: "Frank Host Agent is not configured."
+            },
+            409
+          );
+        }
+        return response({});
+      })
+    );
+
+    render(<AiConsolePage />);
+    expect(await screen.findByText("Frank Host Agent is configured but unreachable.")).toBeTruthy();
+    await user.click(await screen.findByRole("button", { name: "Start Codex" }));
+
+    expect(await screen.findByText("Frank Host Agent is not configured.")).toBeTruthy();
+  });
 });
 
-function response(body: unknown): Response {
+function response(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
-    status: 200,
+    status,
     headers: { "content-type": "application/json" }
   });
 }

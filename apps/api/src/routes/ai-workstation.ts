@@ -82,7 +82,17 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
         message: "FRANK_HOST_AGENT_ENABLED and FRANK_HOST_AGENT_TOKEN are required."
       };
     }
-    const result = await callHostAgent<Record<string, unknown>>(config, "/v1/status");
+    let result: Record<string, unknown>;
+    try {
+      result = await callHostAgent<Record<string, unknown>>(config, "/v1/status");
+    } catch {
+      return {
+        configured: true,
+        reachable: false,
+        tools: {},
+        message: hostAgentUnavailableMessage()
+      };
+    }
     await recordAuditEvent(pool, {
       actorType: "user",
       actorId: getRequestActorId(request),
@@ -130,14 +140,22 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
       });
     }
 
-    const hostSession = await callHostAgent<HostSessionResponse>(config, "/v1/sessions", {
-      method: "POST",
-      body: {
-        tool: body.data.tool,
-        workspacePath,
-        prompt: body.data.prompt
-      }
-    });
+    let hostSession: HostSessionResponse;
+    try {
+      hostSession = await callHostAgent<HostSessionResponse>(config, "/v1/sessions", {
+        method: "POST",
+        body: {
+          tool: body.data.tool,
+          workspacePath,
+          prompt: body.data.prompt
+        }
+      });
+    } catch {
+      return reply.code(502).send({
+        error: "host_agent_unreachable",
+        message: hostAgentUnavailableMessage()
+      });
+    }
 
     const id = hostSession.id;
     const inserted = await pool.query<AiToolSessionRow>(
@@ -320,7 +338,16 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
     if (!isHostAgentConfigured(config)) {
       return { running: false, url: "/vps-browser/", configured: false };
     }
-    return callHostAgent(config, "/v1/browser/status");
+    try {
+      return await callHostAgent(config, "/v1/browser/status");
+    } catch {
+      return {
+        running: false,
+        url: "/vps-browser/",
+        configured: true,
+        message: hostAgentUnavailableMessage()
+      };
+    }
   });
 
   server.post("/v1/browser/start", async (request, reply) => {
@@ -335,13 +362,20 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
         configured: false
       };
     }
-    return callHostAgent(config, "/v1/browser/start", {
-      method: "POST",
-      body: body.data.target ? { target: body.data.target } : undefined
-    });
+    try {
+      return await callHostAgent(config, "/v1/browser/start", {
+        method: "POST",
+        body: body.data.target ? { target: body.data.target } : undefined
+      });
+    } catch {
+      return reply.code(502).send({
+        error: "host_agent_unreachable",
+        message: hostAgentUnavailableMessage()
+      });
+    }
   });
 
-  server.post("/v1/browser/stop", async () => {
+  server.post("/v1/browser/stop", async (_request, reply) => {
     if (!isHostAgentConfigured(config)) {
       return {
         running: false,
@@ -349,7 +383,14 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
         configured: false
       };
     }
-    return callHostAgent(config, "/v1/browser/stop", { method: "POST" });
+    try {
+      return await callHostAgent(config, "/v1/browser/stop", { method: "POST" });
+    } catch {
+      return reply.code(502).send({
+        error: "host_agent_unreachable",
+        message: hostAgentUnavailableMessage()
+      });
+    }
   });
 }
 
@@ -482,6 +523,10 @@ function serializeHandoff(row: AiHandoffRow) {
 
 function hostAgentRouteSessionId(row: AiToolSessionRow): string {
   return row.session_name || row.host_session_id;
+}
+
+function hostAgentUnavailableMessage(): string {
+  return "Frank Host Agent is configured but unreachable.";
 }
 
 function idParam(request: FastifyRequest): string {

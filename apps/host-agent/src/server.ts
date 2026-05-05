@@ -87,6 +87,19 @@ export function createHostAgentServer(input: {
 
       return sendJson(response, 404, { error: "not_found" });
     } catch (error) {
+      if (error instanceof z.ZodError) {
+        return sendJson(response, 400, {
+          error: "invalid_request",
+          message: "Request validation failed.",
+          details: error.flatten()
+        });
+      }
+      if (error instanceof SyntaxError) {
+        return sendJson(response, 400, {
+          error: "invalid_json",
+          message: "Request body must be valid JSON."
+        });
+      }
       return sendJson(response, 500, {
         error: "host_agent_error",
         message: error instanceof Error ? error.message : "Host agent failed."

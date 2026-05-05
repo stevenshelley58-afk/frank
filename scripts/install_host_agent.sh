@@ -16,6 +16,29 @@ else
   sudo_cmd=(sudo)
 fi
 
+upsert_env_var() {
+  local file="$1"
+  local key="$2"
+  local value="$3"
+  local tmp_file
+  tmp_file="$(mktemp)"
+  awk -v key="${key}" -v value="${value}" '
+    BEGIN { updated = 0 }
+    $0 ~ "^" key "=" {
+      print key "=" value
+      updated = 1
+      next
+    }
+    { print }
+    END {
+      if (updated == 0) {
+        print key "=" value
+      }
+    }
+  ' "${file}" > "${tmp_file}"
+  mv "${tmp_file}" "${file}"
+}
+
 if [ -z "${pnpm_bin}" ] || [ -z "${node_bin}" ]; then
   echo "node and pnpm are required. Run scripts/install_ai_tools.sh first." >&2
   exit 1
@@ -41,6 +64,9 @@ if ! grep -q '^FRANK_HOST_AGENT_TOKEN=' "${repo_dir}/runtime/access/frank-access
   chmod 0600 "${repo_dir}/runtime/access/frank-access.env"
   echo "Generated FRANK_HOST_AGENT_TOKEN in runtime/access/frank-access.env."
 fi
+
+upsert_env_var "${repo_dir}/runtime/access/frank-access.env" "FRANK_HOST_AGENT_ENABLED" "true"
+upsert_env_var "${repo_dir}/runtime/access/frank-access.env" "FRANK_HOST_AGENT_BASE_URL" "http://${host}:${port}"
 
 "${sudo_cmd[@]}" chown "${service_user}" "${repo_dir}/runtime/access" "${repo_dir}/runtime/access/frank-access.env"
 chmod 0700 "${repo_dir}/runtime/access"
@@ -76,4 +102,5 @@ SERVICE
 "${sudo_cmd[@]}" systemctl enable --now "${service_name}"
 
 echo "Frank Host Agent installed as ${service_name} on ${host}:${port}."
-echo "Set FRANK_HOST_AGENT_ENABLED=true and FRANK_HOST_AGENT_TOKEN in .env or runtime/access, then redeploy/restart the API."
+echo "FRANK_HOST_AGENT_ENABLED, FRANK_HOST_AGENT_BASE_URL, and FRANK_HOST_AGENT_TOKEN are set in runtime/access/frank-access.env."
+echo "Redeploy or restart the API so the container reads the updated runtime access env."
