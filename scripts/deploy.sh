@@ -72,6 +72,14 @@ if [ "${hermes_enabled}" = "true" ]; then
 fi
 if [ "${browser_enabled}" = "true" ]; then
   mkdir -p runtime/browser
+  browser_image="$(read_env FRANK_BROWSER_IMAGE "jlesage/chromium:latest")"
+  case "${browser_image}" in
+    jlesage/chrome|jlesage/chrome:*)
+      browser_image="jlesage/chromium:latest"
+      echo "FRANK_BROWSER_IMAGE uses the retired jlesage/chrome image; using ${browser_image}." >&2
+      ;;
+  esac
+  export FRANK_BROWSER_IMAGE="${browser_image}"
   compose_files+=(-f docker-compose.browser.yml)
 fi
 

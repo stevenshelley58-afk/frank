@@ -24,4 +24,12 @@ describe("VPS browser runtime config", () => {
     expect(script).toContain("--no-recreate");
     expect(script).not.toContain("--force-recreate");
   });
+
+  it("keeps deploys working when the VPS still has the retired browser image in its private env", async () => {
+    const script = await readFile(resolve(repoRoot, "scripts/deploy.sh"), "utf8");
+
+    expect(script).toContain('FRANK_BROWSER_IMAGE="${browser_image}"');
+    expect(script).toContain("jlesage/chrome|jlesage/chrome:*");
+    expect(script).toContain('browser_image="jlesage/chromium:latest"');
+  });
 });
