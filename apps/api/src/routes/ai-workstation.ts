@@ -536,10 +536,21 @@ function hostAgentNotConfiguredMessage(): string {
 }
 
 function browserStartFailureMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (isRetiredBrowserImageError(message)) {
+    return "Frank's browser image setting is outdated. Use FRANK_BROWSER_IMAGE=jlesage/chromium:latest, then try again.";
+  }
+  if (message) {
+    return message;
   }
   return "Frank tried to open ChatGPT, but the browser service did not start.";
+}
+
+function isRetiredBrowserImageError(message: string): boolean {
+  return (
+    /\bjlesage\/chrome(?::[^\s]+)?\b/.test(message) &&
+    /(pull access denied|repository does not exist|docker login)/i.test(message)
+  );
 }
 
 function hostAgentErrorMessage(parsed: unknown, status: number): string {

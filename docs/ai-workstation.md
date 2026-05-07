@@ -10,8 +10,9 @@ Frank Hub can run AI tools inside the VPS so the laptop only opens
 - AI Console: dashboard page for ChatGPT Browser, Claude Browser, Codex,
   Claude Code, handoffs, terminal attach, and session stop.
 - VPS Browser: internal Compose service at `/vps-browser/` with persistent
-  profile data in `runtime/browser`. ChatGPT and Claude buttons restart the
-  same private browser service with the selected startup URL.
+  profile data in `runtime/browser`. ChatGPT and Claude buttons start or reuse
+  the same private browser service; when the container is first created, it
+  opens the selected startup URL.
 - Shared instructions: `AGENTS.md`, `CONTEXT.md`, ADRs, and `CLAUDE.md`
   synced into `runtime/ai-instructions`.
 
@@ -26,6 +27,8 @@ Frank Hub can run AI tools inside the VPS so the laptop only opens
 5. Run `scripts/ai_doctor.sh`.
 6. Start the embedded browser with `scripts/browser_up.sh` or from the AI Console.
 7. Log into ChatGPT, Codex, Claude, and Claude Code once from the VPS user.
+   ChatGPT and Claude web sessions persist in `runtime/browser` for as long as
+   the provider accepts the saved browser profile.
 
 ## Daily Workflow
 

@@ -226,6 +226,26 @@ describe("AI workstation API routes", () => {
       message: "Browser service could not start."
     });
   });
+
+  it("summarizes the retired jlesage chrome image failure without exposing Docker noise", async () => {
+    const fetchMock = vi.fn(async () => jsonResponse({
+      error: "host_agent_error",
+      message: "Command failed: bash scripts/browser_up.sh https://chatgpt.com Image jlesage/chrome:latest Pulling Error response from daemon: pull access denied for jlesage/chrome, repository does not exist or may require 'docker login'"
+    }, 500));
+    vi.stubGlobal("fetch", fetchMock);
+    const { server } = createTestServer(new FakeAiPool());
+
+    const response = await server.inject({ method: "POST", url: "/v1/browser/start", payload: { target: "chatgpt" } });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      running: false,
+      url: "/vps-browser/",
+      configured: true,
+      message: "Frank's browser image setting is outdated. Use FRANK_BROWSER_IMAGE=jlesage/chromium:latest, then try again."
+    });
+    expect(response.body).not.toContain("docker login");
+  });
 });
 
 function createTestServer(pool: FakeAiPool) {
