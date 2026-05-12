@@ -40,7 +40,7 @@ describe("HomePage", () => {
     expect(await screen.findByText("ChatGPT is not connected")).toBeTruthy();
     expect(screen.queryByTitle("ChatGPT browser")).toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "Open AI tools" }));
+    fireEvent.click(screen.getByRole("button", { name: "Open Codex workstation" }));
 
     expect(onOpenAiConsole).toHaveBeenCalledOnce();
   });

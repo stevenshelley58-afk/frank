@@ -100,7 +100,7 @@ export function HomePage({ onOpenAiConsole }: HomePageProps = {}) {
               </Button>
               {state.showAiTools && onOpenAiConsole ? (
                 <Button type="button" variant="outline" onClick={onOpenAiConsole}>
-                  Open AI tools
+                  Open Codex workstation
                 </Button>
               ) : null}
             </div>
@@ -126,7 +126,7 @@ function browserState(browser: BrowserStatusResponse): BrowserLoadState {
     return {
       status: "error",
       title: "ChatGPT is not connected",
-      message: "Frank's browser setup is missing. Open AI tools to check the connection, then try again.",
+      message: "Frank's browser setup is missing. Open the Codex workstation to check the connection, then try again.",
       showAiTools: true
     };
   }

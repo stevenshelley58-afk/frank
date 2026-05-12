@@ -234,8 +234,8 @@ export function AiConsolePage() {
     <section className="grid gap-5">
       <section className="grid gap-3 2xl:grid-cols-[minmax(0,1.25fr)_minmax(22rem,0.75fr)]">
         <SectionCard
-          title="AI Workstation"
-          description="Subscription-backed tools running inside the VPS."
+          title="Launch Codex"
+          description="Start Codex in Frank's selected VPS workspace, then attach to the terminal below."
           icon={<Monitor aria-hidden="true" />}
           action={
             <Button type="button" variant="outline" size="sm" onClick={() => load()}>
@@ -246,6 +246,13 @@ export function AiConsolePage() {
         >
           <div className="grid gap-4">
             <div className="grid grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))] gap-3">
+              <ToolCard
+                title="Codex"
+                description="Run Codex inside Frank's selected VPS workspace."
+                icon={<Code2 aria-hidden="true" />}
+                actionLabel="Start Codex"
+                onAction={() => void startTool("codex")}
+              />
               <ToolCard
                 title="ChatGPT"
                 description="ChatGPT web in Frank's browser."
@@ -259,13 +266,6 @@ export function AiConsolePage() {
                 icon={<Bot aria-hidden="true" />}
                 actionLabel="Open Claude"
                 onAction={() => void openBrowser("claude")}
-              />
-              <ToolCard
-                title="Codex"
-                description="Launch Codex CLI in the selected VPS workspace."
-                icon={<Code2 aria-hidden="true" />}
-                actionLabel="Start Codex"
-                onAction={() => void startTool("codex")}
               />
               <ToolCard
                 title="Claude Code"
@@ -495,5 +495,5 @@ function toolLabel(tool: AiTool): string {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unable to load AI Console.";
+  return error instanceof Error ? error.message : "Unable to load Codex Workstation.";
 }

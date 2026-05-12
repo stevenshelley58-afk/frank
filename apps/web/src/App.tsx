@@ -5,8 +5,8 @@ import {
   BookOpen,
   FileClock,
   Folder,
+  Globe2,
   Hammer,
-  Home,
   ListTodo,
   MessageCircle,
   PlugZap,
@@ -41,11 +41,11 @@ import {
 
 const pages: AppShellPage[] = [
   {
-    id: "home",
-    label: "Home",
-    title: "Home",
-    description: "ChatGPT running inside the VPS browser.",
-    icon: Home
+    id: "ai-console",
+    label: "Codex",
+    title: "Codex Workstation",
+    description: "Codex and subscription-backed AI tools running inside Frank.",
+    icon: Sparkles
   },
   {
     id: "command-center",
@@ -55,11 +55,11 @@ const pages: AppShellPage[] = [
     icon: TerminalSquare
   },
   {
-    id: "ai-console",
-    label: "AI",
-    title: "AI Console",
-    description: "VPS browser and subscription-backed AI workstations.",
-    icon: Sparkles
+    id: "home",
+    label: "ChatGPT",
+    title: "ChatGPT Browser",
+    description: "ChatGPT running inside the VPS browser.",
+    icon: Globe2
   },
   {
     id: "projects",
@@ -178,7 +178,7 @@ const pages: AppShellPage[] = [
 ];
 
 export function App() {
-  const [activePageId, setActivePageId] = useState("home");
+  const [activePageId, setActivePageId] = useState("ai-console");
 
   return (
     <AppShell
