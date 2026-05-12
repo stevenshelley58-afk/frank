@@ -46,13 +46,29 @@ The real access file is ignored by Git.
 Home chat needs `OPENAI_API_KEY` and `OPENAI_CHAT_MODEL` in that access file.
 The API and worker containers load it through `FRANK_ACCESS_ENV_FILE`.
 
-## Normal Update After Main Is Current
+## Standard GitHub Deploy Flow
 
-After Stage 2 is merged to `main`, normal VPS updates should deploy from
-`main` with a fast-forward pull:
+Frank's normal deploy path is:
+
+1. commit locally;
+2. push the current branch to GitHub;
+3. paste one command into the VPS to pull that branch, deploy, and healthcheck.
+
+Use this from the VPS for every branch deploy:
 
 ```bash
-cd /opt/frank-hub && git checkout main && git pull --ff-only && ./scripts/deploy.sh && ./scripts/healthcheck.sh
+cd /opt/frank-hub && ./scripts/deploy_from_github.sh codex/c-dev-project-import
+```
+
+Replace `codex/c-dev-project-import` with the branch that was just pushed.
+The helper refuses to deploy if the VPS worktree has uncommitted changes,
+fetches the branch from GitHub, fast-forwards only, runs `scripts/deploy.sh`,
+and then runs `scripts/healthcheck.sh`.
+
+For normal `main` deploys:
+
+```bash
+cd /opt/frank-hub && ./scripts/deploy_from_github.sh main
 ```
 
 `scripts/deploy.sh` writes `runtime/deploy.json` before building containers.
@@ -85,21 +101,16 @@ Frank self-upgrade runs are created from the dashboard and stored in
 uses local VPS backups under `FRANK_BACKUP_ROOT`, and records validation/deploy
 state for review. Hermes and its webhook port remain internal to Docker Compose.
 
-## Testing Branch Deploys
+## First Deploy Of The GitHub Helper
 
-Use branch deploys only for testing a known branch before it is merged:
+If the VPS branch does not have `scripts/deploy_from_github.sh` yet, use this
+bootstrap form once. After that, use the standard command above.
 
 ```bash
-cd /opt/frank-hub
-git fetch origin stage2-api-control-plane
-git checkout stage2-api-control-plane
-git pull --ff-only origin stage2-api-control-plane
-./scripts/deploy.sh
-./scripts/healthcheck.sh
+cd /opt/frank-hub && branch=codex/c-dev-project-import && git fetch origin "$branch" && (git checkout "$branch" 2>/dev/null || git checkout --track "origin/$branch") && git pull --ff-only origin "$branch" && ./scripts/deploy_from_github.sh "$branch"
 ```
 
-After the branch is merged, switch the VPS back to the normal `main` update
-command above.
+Replace `codex/c-dev-project-import` with the branch that was just pushed.
 
 ## Merge Stage 2 To Main
 
