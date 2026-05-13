@@ -32,6 +32,9 @@ describe("AiConsolePage", () => {
       if (url.endsWith("/v1/browser/status")) {
         return response({ running: false, url: "/vps-browser/" });
       }
+      if (url.endsWith("/v1/browser/start") && init?.method === "POST") {
+        return response({ running: true, url: "/vps-browser/" });
+      }
       if (url.endsWith("/v1/ai/sessions") && init?.method === "POST") {
         return response({
           session: {
@@ -60,9 +63,19 @@ describe("AiConsolePage", () => {
     expect(screen.queryByText("Open ChatGPT Browser")).toBeNull();
     expect(screen.getAllByText("Claude Code").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Workspace path")).toBeTruthy();
-    const codexAppLink = screen.getByRole("link", { name: "Open Codex App" });
-    expect(codexAppLink.getAttribute("href")).toBe("https://chatgpt.com/codex");
-    expect(codexAppLink.getAttribute("target")).toBe("_blank");
+    expect(screen.queryByRole("link", { name: "Open Codex App" })).toBeNull();
+    expect(screen.getByRole("link", { name: "Open ChatGPT app" }).getAttribute("href")).toBe("https://chatgpt.com/");
+
+    await user.click(screen.getByRole("button", { name: "Open Codex App" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/browser/start",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ target: "codex" })
+      })
+    ));
+    expect(await screen.findByTitle("VPS browser")).toBeTruthy();
 
     await user.click(screen.getByRole("button", { name: "Start Codex CLI" }));
 
@@ -108,6 +121,7 @@ describe("AiConsolePage", () => {
 
     const frame = await screen.findByTitle("VPS browser");
     expect(frame.getAttribute("src")).toBe("/vps-browser/");
+    expect(frame.getAttribute("allow")).toContain("virtual-keyboard");
     expect(fetch).toHaveBeenCalledWith(
       "/api/v1/browser/start",
       expect.objectContaining({

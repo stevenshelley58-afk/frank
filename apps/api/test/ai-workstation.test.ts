@@ -270,7 +270,7 @@ describe("AI workstation API routes", () => {
     vi.stubGlobal("fetch", fetchMock);
     const { server } = createTestServer(new FakeAiPool());
 
-    const started = await server.inject({ method: "POST", url: "/v1/browser/start", payload: { target: "claude" } });
+    const started = await server.inject({ method: "POST", url: "/v1/browser/start", payload: { target: "codex" } });
     const stopped = await server.inject({ method: "POST", url: "/v1/browser/stop" });
 
     expect(started.statusCode).toBe(200);
@@ -280,7 +280,7 @@ describe("AI workstation API routes", () => {
       "http://host-agent.local/v1/browser/start",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ target: "claude" })
+        body: JSON.stringify({ target: "codex" })
       })
     );
     expect(fetchMock).toHaveBeenNthCalledWith(

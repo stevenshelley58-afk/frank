@@ -477,7 +477,7 @@ export interface ChatMessageResponse {
 }
 
 export type AiTool = "codex" | "claude_code";
-export type BrowserTarget = "chatgpt" | "claude";
+export type BrowserTarget = "chatgpt" | "claude" | "codex";
 
 export interface AiToolStatus {
   installed?: boolean;

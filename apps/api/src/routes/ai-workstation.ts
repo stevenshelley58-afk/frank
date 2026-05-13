@@ -34,7 +34,7 @@ const sessionInputSchema = z
 
 const browserStartSchema = z
   .object({
-    target: z.enum(["chatgpt", "claude"]).optional()
+    target: z.enum(["chatgpt", "claude", "codex"]).optional()
   })
   .strict();
 

@@ -17,6 +17,7 @@ import {
   type AiTool,
   type AiToolSession,
   type BrowserStatusResponse,
+  type BrowserTarget,
   type Project
 } from "../api.js";
 import {
@@ -42,7 +43,7 @@ interface AiConsoleData {
   browser: BrowserStatusResponse;
 }
 
-const CODEX_APP_URL = "https://chatgpt.com/codex";
+const CHATGPT_APP_URL = "https://chatgpt.com/";
 
 export function AiConsolePage() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -115,7 +116,7 @@ export function AiConsolePage() {
     }
   }
 
-  async function openBrowser(target: "chatgpt" | "claude") {
+  async function openBrowser(target: BrowserTarget) {
     setMessage(null);
     try {
       const result = await startBrowser(target);
@@ -253,13 +254,11 @@ export function AiConsolePage() {
                   Codex App
                 </div>
                 <p className="text-sm leading-6 text-muted-foreground">
-                  Open the official Codex app in a new tab.
+                  Open the official Codex app inside Frank's VPS browser.
                 </p>
-                <Button asChild size="lg" className="w-full sm:w-fit">
-                  <a href={CODEX_APP_URL} target="_blank" rel="noreferrer">
-                    <ExternalLink aria-hidden="true" />
-                    Open Codex App
-                  </a>
+                <Button type="button" size="lg" className="w-full sm:w-fit" onClick={() => void openBrowser("codex")}>
+                  <ExternalLink aria-hidden="true" />
+                  Open Codex App
                 </Button>
               </div>
 
@@ -393,6 +392,12 @@ export function AiConsolePage() {
                 <Globe2 aria-hidden="true" />
                 Open ChatGPT
               </Button>
+              <Button asChild variant="outline">
+                <a href={CHATGPT_APP_URL} target="_blank" rel="noreferrer">
+                  <ExternalLink aria-hidden="true" />
+                  Open ChatGPT app
+                </a>
+              </Button>
               <Button type="button" variant="outline" onClick={() => void openBrowser("claude")}>
                 <Bot aria-hidden="true" />
                 Open Claude
@@ -405,7 +410,13 @@ export function AiConsolePage() {
               ) : null}
             </div>
             {browser.running ? (
-              <iframe title="VPS browser" src={browser.url} className="h-[32rem] w-full rounded-md border border-border bg-black" />
+              <iframe
+                title="VPS browser"
+                src={browser.url}
+                allow="clipboard-read; clipboard-write; fullscreen; virtual-keyboard"
+                referrerPolicy="no-referrer"
+                className="h-[32rem] w-full rounded-md border border-border bg-black"
+              />
             ) : (
               <EmptyState
                 icon={<Globe2 aria-hidden="true" />}
@@ -478,8 +489,8 @@ export function AiConsolePage() {
   );
 }
 
-function browserActionMessage(target: "chatgpt" | "claude", browser: BrowserStatusResponse): string {
-  const label = target === "chatgpt" ? "ChatGPT" : "Claude";
+function browserActionMessage(target: BrowserTarget, browser: BrowserStatusResponse): string {
+  const label = browserTargetLabel(target);
   if (browser.configured === false) {
     return "Frank's VPS browser is not connected yet. Run the host agent setup on the VPS, then redeploy.";
   }
@@ -490,6 +501,13 @@ function browserActionMessage(target: "chatgpt" | "claude", browser: BrowserStat
     return `Frank opened ${label}, but did not receive a browser address.`;
   }
   return `${label} is ready in Frank.`;
+}
+
+function browserTargetLabel(target: BrowserTarget): string {
+  if (target === "codex") {
+    return "Codex App";
+  }
+  return target === "chatgpt" ? "ChatGPT" : "Claude";
 }
 
 type HostStatusTone = "ok" | "warning" | "bad";

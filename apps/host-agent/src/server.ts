@@ -22,7 +22,7 @@ const sessionInputSchema = z
 
 const browserStartSchema = z
   .object({
-    target: z.enum(["chatgpt", "claude"]).optional()
+    target: z.enum(["chatgpt", "claude", "codex"]).optional()
   })
   .strict();
 
@@ -171,9 +171,12 @@ async function runBrowserScript(config: HostAgentConfig, direction: "up" | "down
   await execFileAsync("bash", targetUrl ? [script, targetUrl] : [script], { cwd: config.repoPath });
 }
 
-function browserTargetUrl(target: BrowserTarget): string | undefined {
+export function browserTargetUrl(target: BrowserTarget): string | undefined {
   if (target === "chatgpt") {
     return "https://chatgpt.com";
+  }
+  if (target === "codex") {
+    return "https://chatgpt.com/codex";
   }
   if (target === "claude") {
     return "https://claude.ai";

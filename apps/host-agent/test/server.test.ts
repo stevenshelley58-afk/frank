@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
-import { createHostAgentServer } from "../src/server.js";
+import { browserTargetUrl, createHostAgentServer } from "../src/server.js";
 import type { HostAgentConfig } from "../src/config.js";
 import type { HostSession, HostSessionManager } from "../src/session-manager.js";
 
@@ -38,6 +38,10 @@ describe("Frank host agent server", () => {
       error: "invalid_request",
       message: "Request validation failed."
     });
+  });
+
+  it("maps the Codex browser target to the official Codex app URL", () => {
+    expect(browserTargetUrl("codex")).toBe("https://chatgpt.com/codex");
   });
 });
 
