@@ -9,15 +9,9 @@ import {
 } from "../src/session-manager.js";
 
 describe("Frank host agent session manager", () => {
-  it("builds subscription-backed tool commands in the selected workspace", () => {
-    expect(buildToolCommand({ tool: "codex", prompt: "continue this work" })).toEqual([
-      "codex",
-      "continue this work"
-    ]);
-    expect(buildToolCommand({ tool: "claude_code", prompt: "inspect the repo" })).toEqual([
-      "claude",
-      "inspect the repo"
-    ]);
+  it("builds interactive subscription-backed tool commands in the selected workspace", () => {
+    expect(buildToolCommand({ tool: "codex", prompt: "continue this work" })).toEqual(["codex"]);
+    expect(buildToolCommand({ tool: "claude_code", prompt: "inspect the repo" })).toEqual(["claude"]);
   });
 
   it("denies protected host paths even when run-wild lab mode is enabled", () => {
@@ -48,11 +42,15 @@ describe("Frank host agent session manager", () => {
     });
     expect(runner.started[0]).toMatchObject({
       workspacePath: "/opt/frank-hub",
-      command: ["codex", "resume the Frank build"]
+      command: ["codex"]
     });
+    expect(runner.sentInput).toEqual([{ sessionName: session.sessionName, input: "resume the Frank build" }]);
 
     await manager.sendInput(session.id, "run pnpm test");
-    expect(runner.sentInput).toEqual([{ sessionName: session.sessionName, input: "run pnpm test" }]);
+    expect(runner.sentInput).toEqual([
+      { sessionName: session.sessionName, input: "resume the Frank build" },
+      { sessionName: session.sessionName, input: "run pnpm test" }
+    ]);
 
     runner.output.set(session.sessionName, "tests passed");
     await expect(manager.captureOutput(session.id)).resolves.toBe("tests passed");
@@ -73,7 +71,7 @@ describe("Frank host agent session manager", () => {
     await runner.startSession({
       sessionName: "frank-codex-test",
       workspacePath: "/opt/frank-hub",
-      command: ["codex", "continue the build"]
+      command: ["codex"]
     });
 
     expect(calls).toEqual([
@@ -83,7 +81,7 @@ describe("Frank host agent session manager", () => {
       },
       {
         file: "tmux",
-        args: ["send-keys", "-t", "frank-codex-test", "codex 'continue the build'", "Enter"]
+        args: ["send-keys", "-t", "frank-codex-test", "codex", "Enter"]
       }
     ]);
   });

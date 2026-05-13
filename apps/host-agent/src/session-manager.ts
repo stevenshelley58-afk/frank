@@ -41,11 +41,10 @@ export interface HostSessionManager {
 }
 
 export function buildToolCommand(input: { tool: AiTool; prompt?: string | undefined }): string[] {
-  const prompt = input.prompt?.trim();
   if (input.tool === "codex") {
-    return prompt ? ["codex", prompt] : ["codex"];
+    return ["codex"];
   }
-  return prompt ? ["claude", prompt] : ["claude"];
+  return ["claude"];
 }
 
 export function createHostSessionManager(input: {
@@ -102,6 +101,10 @@ export function createHostSessionManager(input: {
         workspacePath,
         command: buildToolCommand(request)
       });
+      const launchPrompt = request.prompt?.trim();
+      if (launchPrompt) {
+        await runner.sendInput(sessionName, launchPrompt);
+      }
       sessions.set(id, session);
       return session;
     },

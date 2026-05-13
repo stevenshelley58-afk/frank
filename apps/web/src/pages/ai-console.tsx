@@ -177,9 +177,8 @@ export function AiConsolePage() {
     }
   }
 
-  async function submitTerminalInput(event: React.FormEvent) {
-    event.preventDefault();
-    const input = terminalInput.trim();
+  async function sendCliInput(text: string) {
+    const input = text.trim();
     if (!activeSession || !input) {
       return;
     }
@@ -190,6 +189,11 @@ export function AiConsolePage() {
     } catch (error) {
       setTerminalError(errorMessage(error));
     }
+  }
+
+  async function submitTerminalInput(event: React.FormEvent) {
+    event.preventDefault();
+    await sendCliInput(terminalInput);
   }
 
   async function copyHandoff() {
@@ -321,8 +325,8 @@ export function AiConsolePage() {
       </SectionCard>
 
       <SectionCard
-        title="Terminal"
-        description="Codex CLI and Claude Code attach here after launch."
+        title="Codex CLI Chat"
+        description="Interactive VPS CLI session with the real Codex TUI attached."
         icon={<TerminalSquare aria-hidden="true" />}
         action={activeSession ? (
           <div className="flex flex-wrap gap-2">
@@ -352,14 +356,29 @@ export function AiConsolePage() {
               {terminalOutput || "No terminal output captured yet."}
             </pre>
             {terminalError ? <p className="text-sm text-destructive">{terminalError}</p> : null}
+            <div className="flex flex-wrap gap-2" aria-label="Codex CLI quick commands">
+              {codexQuickCommands.map((command) => (
+                <Button
+                  key={command}
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  aria-label={`Send ${command}`}
+                  disabled={activeSession.tool !== "codex"}
+                  onClick={() => void sendCliInput(command)}
+                >
+                  {command}
+                </Button>
+              ))}
+            </div>
             <form className="grid gap-2 md:grid-cols-[1fr_auto]" onSubmit={submitTerminalInput}>
               <label className="grid gap-1 text-sm font-medium text-foreground">
-                Terminal input
-                <Input value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} />
+                {activeSession.tool === "codex" ? "Message Codex CLI" : "Message Claude Code"}
+                <Textarea value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} rows={3} />
               </label>
               <Button type="submit" className="self-end">
                 <Send aria-hidden="true" />
-                Send Input
+                Send Message
               </Button>
             </form>
           </div>
@@ -367,11 +386,11 @@ export function AiConsolePage() {
           <div className="grid gap-3">
             <EmptyState
               icon={<TerminalSquare aria-hidden="true" />}
-              title="No terminal attached"
+              title="No CLI session attached"
               description="Start Codex CLI or attach a recent session."
             />
             <div className="flex justify-center">
-              <Button type="button" aria-label="Start Codex CLI from terminal" onClick={() => void startTool("codex")}>
+              <Button type="button" aria-label="Start Codex CLI from chat" onClick={() => void startTool("codex")}>
                 <Code2 aria-hidden="true" />
                 Start Codex CLI
               </Button>
@@ -488,6 +507,8 @@ export function AiConsolePage() {
     </section>
   );
 }
+
+const codexQuickCommands = ["/help", "/model", "/review", "/mcp"];
 
 function browserActionMessage(target: BrowserTarget, browser: BrowserStatusResponse): string {
   const label = browserTargetLabel(target);

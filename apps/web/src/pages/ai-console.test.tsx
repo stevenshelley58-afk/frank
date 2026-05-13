@@ -88,15 +88,26 @@ describe("AiConsolePage", () => {
     ));
     expect((await screen.findAllByText("session-1")).length).toBeGreaterThan(0);
     expect(await screen.findByText(/Codex ready in/)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Codex CLI Chat" })).toBeTruthy();
 
-    await user.type(screen.getByLabelText("Terminal input"), "pnpm test");
-    await user.click(screen.getByRole("button", { name: "Send Input" }));
+    await user.type(screen.getByLabelText("Message Codex CLI"), "pnpm test");
+    await user.click(screen.getByRole("button", { name: "Send Message" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/ai/sessions/session-1/input",
       expect.objectContaining({
         method: "POST",
         body: expect.stringContaining("pnpm test")
+      })
+    ));
+
+    await user.click(screen.getByRole("button", { name: "Send /help" }));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/ai/sessions/session-1/input",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ input: "/help" })
       })
     ));
   });
