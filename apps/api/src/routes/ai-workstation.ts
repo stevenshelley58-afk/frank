@@ -150,10 +150,10 @@ export function registerAiWorkstationRoutes(server: FastifyInstance, pool: PgPoo
           prompt: body.data.prompt
         }
       });
-    } catch {
+    } catch (error) {
       return reply.code(502).send({
         error: "host_agent_unreachable",
-        message: hostAgentUnavailableMessage()
+        message: hostAgentSessionStartFailureMessage(error)
       });
     }
 
@@ -473,12 +473,24 @@ function isHostAgentConfigured(config: ApiConfig): boolean {
 
 function validateWorkspacePath(workspacePath: string, config: ApiConfig): { ok: true } | { ok: false; message: string } {
   if (isInsideAnyOperatorPath(workspacePath, config.operator.protectedPaths)) {
-    return { ok: false, message: "AI workspace is inside a protected Frank path." };
+    return { ok: false, message: `AI workspace "${workspacePath}" is inside a protected Frank path.` };
   }
-  if (!isInsideAnyOperatorPath(workspacePath, config.operator.allowedWorkspaces)) {
-    return { ok: false, message: "AI workspace is outside the configured operator workspace allowlist." };
+  const allowedWorkspaces = allowedAiWorkspaceRoots(config);
+  if (!isInsideAnyOperatorPath(workspacePath, allowedWorkspaces)) {
+    return {
+      ok: false,
+      message: `AI workspace "${workspacePath}" is outside the configured operator workspace allowlist: ${allowedWorkspaces.join(", ")}.`
+    };
   }
   return { ok: true };
+}
+
+function allowedAiWorkspaceRoots(config: ApiConfig): string[] {
+  const roots = [...config.operator.allowedWorkspaces];
+  if (config.operator.mode === "lab") {
+    roots.push(config.operator.repoWorkspacePath);
+  }
+  return uniqueNormalizedOperatorPaths(roots);
 }
 
 function buildHandoffPrompt(input: z.infer<typeof createHandoffSchema>): string {
@@ -546,6 +558,18 @@ function browserStartFailureMessage(error: unknown): string {
   return "Frank tried to open ChatGPT, but the browser service did not start.";
 }
 
+function hostAgentSessionStartFailureMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : "";
+  if (!message || isTransportFailureMessage(message)) {
+    return hostAgentUnavailableMessage();
+  }
+  return message;
+}
+
+function isTransportFailureMessage(message: string): boolean {
+  return /(fetch failed|econnrefused|enotfound|etimedout|networkerror|aborted)/i.test(message);
+}
+
 function isRetiredBrowserImageError(message: string): boolean {
   return (
     /\bjlesage\/chrome(?::[^\s]+)?\b/.test(message) &&
@@ -579,6 +603,10 @@ function isInsideOperatorPath(candidate: string, root: string): boolean {
     return candidate === "/";
   }
   return candidate === normalizedRoot || candidate.startsWith(`${normalizedRoot}/`);
+}
+
+function uniqueNormalizedOperatorPaths(paths: readonly string[]): string[] {
+  return Array.from(new Set(paths.map(normalizeOperatorPath)));
 }
 
 function normalizeOperatorPath(value: string): string {

@@ -28,8 +28,9 @@ describe("App", () => {
 
     render(<App />);
 
-    expect(await screen.findByRole("button", { name: "Start Codex" })).toBeTruthy();
-    expect(await screen.findByRole("heading", { name: "Codex Workstation" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Start Codex CLI" })).toBeTruthy();
+    expect(await screen.findByRole("link", { name: "Open Codex App" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "Codex Workstation", level: 1 })).toBeTruthy();
     expect(screen.queryByTitle("ChatGPT browser")).toBeNull();
     expect(screen.queryByText("API Chat")).toBeNull();
     expect(screen.queryByText(/OpenAI chat requires OPENAI_API_KEY/)).toBeNull();

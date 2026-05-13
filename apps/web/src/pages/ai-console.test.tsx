@@ -56,13 +56,15 @@ describe("AiConsolePage", () => {
 
     render(<AiConsolePage />);
 
-    expect(await screen.findByText("ChatGPT")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Open ChatGPT" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: "Open ChatGPT" })).toBeTruthy();
     expect(screen.queryByText("Open ChatGPT Browser")).toBeNull();
     expect(screen.getAllByText("Claude Code").length).toBeGreaterThan(0);
     expect(screen.getByLabelText("Workspace path")).toBeTruthy();
+    const codexAppLink = screen.getByRole("link", { name: "Open Codex App" });
+    expect(codexAppLink.getAttribute("href")).toBe("https://chatgpt.com/codex");
+    expect(codexAppLink.getAttribute("target")).toBe("_blank");
 
-    await user.click(screen.getByRole("button", { name: "Start Codex" }));
+    await user.click(screen.getByRole("button", { name: "Start Codex CLI" }));
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/ai/sessions",
@@ -147,9 +149,39 @@ describe("AiConsolePage", () => {
 
     render(<AiConsolePage />);
     expect(await screen.findByText("Frank Host Agent is configured but unreachable.")).toBeTruthy();
-    await user.click(await screen.findByRole("button", { name: "Start Codex" }));
+    await user.click(await screen.findByRole("button", { name: "Start Codex CLI" }));
 
     expect(await screen.findByText("Frank's VPS control service is not connected. Run scripts/install_host_agent.sh on the VPS, then redeploy Frank.")).toBeTruthy();
+  });
+
+  it("shows workspace allowlist errors with the blocked path and configured allowlist", async () => {
+    const user = userEvent.setup();
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>().mockImplementation(async (input, init) => {
+        const url = String(input);
+        if (url.endsWith("/v1/ai/host/status")) return response({ configured: true, reachable: true, tools: {} });
+        if (url.endsWith("/v1/ai/sessions") && init?.method === "GET") return response({ sessions: [] });
+        if (url.endsWith("/v1/projects")) return response({ projects: [] });
+        if (url.endsWith("/v1/browser/status")) return response({ running: false, url: "/vps-browser/" });
+        if (url.endsWith("/v1/ai/sessions") && init?.method === "POST") {
+          return response(
+            {
+              error: "invalid_ai_workspace",
+              message: "AI workspace \"/opt/frank-hub\" is outside the configured operator workspace allowlist: /opt/frank-hub/workspaces."
+            },
+            400
+          );
+        }
+        return response({});
+      })
+    );
+
+    render(<AiConsolePage />);
+    await user.click(await screen.findByRole("button", { name: "Start Codex CLI" }));
+
+    expect(await screen.findByText(/AI workspace "\/opt\/frank-hub"/)).toBeTruthy();
+    expect(screen.getByText(/\/opt\/frank-hub\/workspaces/)).toBeTruthy();
   });
 
   it("does not claim ChatGPT is ready when the browser did not start", async () => {

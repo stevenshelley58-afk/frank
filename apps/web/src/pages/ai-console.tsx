@@ -1,4 +1,4 @@
-import { Bot, Code2, Copy, Globe2, Monitor, PlugZap, RefreshCw, Square, TerminalSquare } from "lucide-react";
+import { Bot, Code2, Copy, ExternalLink, Globe2, PlugZap, RefreshCw, Send, Square, TerminalSquare } from "lucide-react";
 import type * as React from "react";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -22,7 +22,6 @@ import {
 import {
   DataTable,
   EmptyState,
-  KeyValueList,
   LoadingBlock,
   ResourceError,
   SectionCard,
@@ -42,6 +41,8 @@ interface AiConsoleData {
   projects: Project[];
   browser: BrowserStatusResponse;
 }
+
+const CODEX_APP_URL = "https://chatgpt.com/codex";
 
 export function AiConsolePage() {
   const [state, setState] = useState<LoadState>({ status: "loading" });
@@ -232,157 +233,236 @@ export function AiConsolePage() {
 
   return (
     <section className="grid gap-5">
-      <section className="grid gap-3 2xl:grid-cols-[minmax(0,1.25fr)_minmax(22rem,0.75fr)]">
-        <SectionCard
-          title="Launch Codex"
-          description="Start Codex in Frank's selected VPS workspace, then attach to the terminal below."
-          icon={<Monitor aria-hidden="true" />}
-          action={
-            <Button type="button" variant="outline" size="sm" onClick={() => load()}>
-              <RefreshCw aria-hidden="true" />
-              Refresh
-            </Button>
-          }
-        >
-          <div className="grid gap-4">
-            <div className="grid grid-cols-[repeat(auto-fit,minmax(min(12rem,100%),1fr))] gap-3">
-              <ToolCard
-                title="Codex"
-                description="Run Codex inside Frank's selected VPS workspace."
-                icon={<Code2 aria-hidden="true" />}
-                actionLabel="Start Codex"
-                onAction={() => void startTool("codex")}
-              />
-              <ToolCard
-                title="ChatGPT"
-                description="ChatGPT web in Frank's browser."
-                icon={<Globe2 aria-hidden="true" />}
-                actionLabel="Open ChatGPT"
-                onAction={() => void openBrowser("chatgpt")}
-              />
-              <ToolCard
-                title="Claude"
-                description="Claude web in Frank's browser."
-                icon={<Bot aria-hidden="true" />}
-                actionLabel="Open Claude"
-                onAction={() => void openBrowser("claude")}
-              />
-              <ToolCard
-                title="Claude Code"
-                description="Launch Claude Code in the selected VPS workspace."
-                icon={<TerminalSquare aria-hidden="true" />}
-                actionLabel="Start Claude Code"
-                onAction={() => void startTool("claude_code")}
-              />
-            </div>
-
-            <div className="grid gap-3 md:grid-cols-[18rem_1fr]">
-              <label className="grid gap-1 text-sm font-medium text-foreground">
-                Project
-                <select
-                  className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground"
-                  value={workspacePath}
-                  onChange={(event) => setWorkspacePath(event.target.value)}
-                >
-                  {projectOptions.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className="grid gap-1 text-sm font-medium text-foreground">
-                Workspace path
-                <Input value={workspacePath} onChange={(event) => setWorkspacePath(event.target.value)} />
-              </label>
-            </div>
-
-            <label className="grid gap-1 text-sm font-medium text-foreground">
-              Launch prompt
-              <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={3} />
-            </label>
-
-            {message ? <p className="text-sm text-muted-foreground">{message}</p> : null}
-          </div>
-        </SectionCard>
-
-        <SectionCard title="Host Agent" description="Install and runtime status from the VPS host." icon={<PlugZap aria-hidden="true" />}>
-          <div className="grid gap-3">
-            <KeyValueList
-              items={[
-                { label: "Configured", value: host.configured ? "Yes" : "No" },
-                { label: "Reachable", value: host.reachable ? "Yes" : "No" },
-                { label: "Run wild", value: host.runWild ? "Enabled" : "Unknown" },
-                { label: "tmux", value: installedLabel(host.tools.tmux) },
-                { label: "Codex", value: installedLabel(host.tools.codex) },
-                { label: "Claude Code", value: installedLabel(host.tools.claudeCode) },
-                { label: "Docker", value: installedLabel(host.tools.docker) }
-              ]}
-            />
-            {host.message ? (
-              <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-foreground">
-                {host.message}
-              </p>
-            ) : null}
-          </div>
-        </SectionCard>
-      </section>
-
-      <section className="grid gap-5 xl:grid-cols-[1fr_1fr]">
-        <SectionCard
-          title="VPS Browser"
-          description="Embedded same-origin browser viewer."
-          icon={<Globe2 aria-hidden="true" />}
-          action={browser.running ? (
-            <Button type="button" variant="outline" size="sm" onClick={() => void closeBrowser()}>
-              <Square aria-hidden="true" />
-              Stop
-            </Button>
-          ) : null}
-        >
-          {browser.running ? (
-            <iframe title="VPS browser" src={browser.url} className="h-[34rem] w-full rounded-md border border-border bg-black" />
-          ) : (
-            <EmptyState
-              icon={<Globe2 aria-hidden="true" />}
-              title="Browser is stopped"
-              description={browser.message ?? "Open ChatGPT or Claude to start the VPS browser."}
-            />
-          )}
-        </SectionCard>
-
-        <SectionCard title="Terminal" description="Attach to Codex or Claude Code running in tmux." icon={<TerminalSquare aria-hidden="true" />}>
-          {activeSession ? (
-            <div className="grid gap-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
-                <span className="font-mono text-xs text-muted-foreground">{activeSession.sessionName ?? activeSession.id}</span>
-                <Button type="button" variant="outline" size="sm" onClick={() => void refreshTerminal()}>
-                  <RefreshCw aria-hidden="true" />
-                  Refresh Output
+      <SectionCard
+        title="Codex Workstation"
+        description="Open the official Codex app or run Codex CLI inside Frank's VPS workspace."
+        icon={<Code2 aria-hidden="true" />}
+        action={
+          <Button type="button" variant="outline" size="sm" onClick={() => load()}>
+            <RefreshCw aria-hidden="true" />
+            Refresh
+          </Button>
+        }
+      >
+        <div className="grid gap-5">
+          <div className="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+            <div className="grid content-start gap-3">
+              <div className="grid gap-2">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <ExternalLink aria-hidden="true" className="size-4" />
+                  Codex App
+                </div>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  Open the official Codex app in a new tab.
+                </p>
+                <Button asChild size="lg" className="w-full sm:w-fit">
+                  <a href={CODEX_APP_URL} target="_blank" rel="noreferrer">
+                    <ExternalLink aria-hidden="true" />
+                    Open Codex App
+                  </a>
                 </Button>
               </div>
-              <pre className="min-h-80 max-h-[32rem] overflow-auto rounded-md border border-border bg-black p-3 font-mono text-xs leading-5 text-white">
-                {terminalOutput || "No terminal output captured yet."}
-              </pre>
-              {terminalError ? <p className="text-sm text-destructive">{terminalError}</p> : null}
-              <form className="grid gap-2 md:grid-cols-[1fr_auto]" onSubmit={submitTerminalInput}>
-                <label className="grid gap-1 text-sm font-medium text-foreground">
-                  Terminal input
-                  <Input value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} />
-                </label>
-                <Button type="submit" className="self-end">Send Input</Button>
-              </form>
+
+              <div className="grid gap-2 border-t border-border pt-3">
+                <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                  <TerminalSquare aria-hidden="true" className="size-4" />
+                  Codex CLI
+                </div>
+                <p className="text-sm leading-6 text-muted-foreground">
+                  Start a VPS tmux session in the selected workspace and attach the terminal below.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" onClick={() => void startTool("codex")}>
+                    <Code2 aria-hidden="true" />
+                    Start Codex CLI
+                  </Button>
+                  <Button type="button" variant="outline" onClick={() => void startTool("claude_code")}>
+                    <TerminalSquare aria-hidden="true" />
+                    Start Claude Code
+                  </Button>
+                </div>
+              </div>
             </div>
-          ) : (
+
+            <div className="grid gap-3">
+              <div className="grid gap-3 md:grid-cols-[18rem_1fr]">
+                <label className="grid gap-1 text-sm font-medium text-foreground">
+                  Project
+                  <select
+                    className="h-10 rounded-md border border-input bg-background px-3 text-sm text-foreground"
+                    value={workspacePath}
+                    onChange={(event) => setWorkspacePath(event.target.value)}
+                  >
+                    {projectOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="grid gap-1 text-sm font-medium text-foreground">
+                  Workspace path
+                  <Input value={workspacePath} onChange={(event) => setWorkspacePath(event.target.value)} />
+                </label>
+              </div>
+
+              <label className="grid gap-1 text-sm font-medium text-foreground">
+                Launch prompt
+                <Textarea value={prompt} onChange={(event) => setPrompt(event.target.value)} rows={4} />
+              </label>
+            </div>
+          </div>
+
+          <HostStatusStrip host={host} />
+
+          {message ? (
+            <p role="status" className="rounded-md border border-border bg-surface px-3 py-2 text-sm leading-6 text-foreground">
+              {message}
+            </p>
+          ) : null}
+        </div>
+      </SectionCard>
+
+      <SectionCard
+        title="Terminal"
+        description="Codex CLI and Claude Code attach here after launch."
+        icon={<TerminalSquare aria-hidden="true" />}
+        action={activeSession ? (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" size="sm" onClick={() => void refreshTerminal()}>
+              <RefreshCw aria-hidden="true" />
+              Refresh Output
+            </Button>
+            {activeSession.status === "running" ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => void stopSession(activeSession.id)}>
+                <Square aria-hidden="true" />
+                Stop Session
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
+      >
+        {activeSession ? (
+          <div className="grid gap-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <StatusBadge tone={activeSession.status === "running" ? "checking" : "planned"}>{titleize(activeSession.status)}</StatusBadge>
+                <span className="text-foreground">{toolLabel(activeSession.tool)}</span>
+              </div>
+              <span className="font-mono text-xs text-muted-foreground">{activeSession.sessionName ?? activeSession.id}</span>
+            </div>
+            <pre className="min-h-[28rem] max-h-[44rem] overflow-auto rounded-md border border-border bg-black p-4 font-mono text-xs leading-5 text-white">
+              {terminalOutput || "No terminal output captured yet."}
+            </pre>
+            {terminalError ? <p className="text-sm text-destructive">{terminalError}</p> : null}
+            <form className="grid gap-2 md:grid-cols-[1fr_auto]" onSubmit={submitTerminalInput}>
+              <label className="grid gap-1 text-sm font-medium text-foreground">
+                Terminal input
+                <Input value={terminalInput} onChange={(event) => setTerminalInput(event.target.value)} />
+              </label>
+              <Button type="submit" className="self-end">
+                <Send aria-hidden="true" />
+                Send Input
+              </Button>
+            </form>
+          </div>
+        ) : (
+          <div className="grid gap-3">
             <EmptyState
               icon={<TerminalSquare aria-hidden="true" />}
               title="No terminal attached"
-              description="Start or attach a Codex or Claude Code session."
+              description="Start Codex CLI or attach a recent session."
             />
-          )}
+            <div className="flex justify-center">
+              <Button type="button" aria-label="Start Codex CLI from terminal" onClick={() => void startTool("codex")}>
+                <Code2 aria-hidden="true" />
+                Start Codex CLI
+              </Button>
+            </div>
+          </div>
+        )}
+      </SectionCard>
+
+      <section className="grid gap-5 xl:grid-cols-[minmax(0,0.85fr)_minmax(0,1.15fr)]">
+        <SectionCard
+          title="Browser Tools"
+          description="Optional VPS browser for ChatGPT and Claude web sessions."
+          icon={<Globe2 aria-hidden="true" />}
+        >
+          <div className="grid gap-3">
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={() => void openBrowser("chatgpt")}>
+                <Globe2 aria-hidden="true" />
+                Open ChatGPT
+              </Button>
+              <Button type="button" variant="outline" onClick={() => void openBrowser("claude")}>
+                <Bot aria-hidden="true" />
+                Open Claude
+              </Button>
+              {browser.running ? (
+                <Button type="button" variant="outline" onClick={() => void closeBrowser()}>
+                  <Square aria-hidden="true" />
+                  Stop Browser
+                </Button>
+              ) : null}
+            </div>
+            {browser.running ? (
+              <iframe title="VPS browser" src={browser.url} className="h-[32rem] w-full rounded-md border border-border bg-black" />
+            ) : (
+              <EmptyState
+                icon={<Globe2 aria-hidden="true" />}
+                title="Browser is stopped"
+                description={browser.message ?? "Open ChatGPT or Claude when you need the web client."}
+              />
+            )}
+          </div>
+        </SectionCard>
+
+        <SectionCard
+          title="Sessions"
+          description="Running and recent VPS AI sessions."
+          icon={<TerminalSquare aria-hidden="true" />}
+          action={displayedSessions.some((session) => session.status === "running") ? (
+            <Button type="button" variant="outline" size="sm" onClick={() => void stopAllSessions()}>
+              <Square aria-hidden="true" />
+              Stop All
+            </Button>
+          ) : null}
+        >
+          <DataTable
+            data={displayedSessions}
+            getRowId={(session) => session.id}
+            emptyState={<EmptyState icon={<TerminalSquare aria-hidden="true" />} title="No AI sessions" description="Start Codex CLI or Claude Code above." />}
+            columns={[
+              { id: "id", header: "Session", cell: (session) => <span className="font-mono text-xs">{session.id}</span> },
+              { id: "tool", header: "Tool", cell: (session) => toolLabel(session.tool) },
+              { id: "status", header: "Status", cell: (session) => <StatusBadge tone={session.status === "running" ? "checking" : "planned"}>{titleize(session.status)}</StatusBadge> },
+              { id: "workspace", header: "Workspace", cell: (session) => <span className="text-muted-foreground">{session.workspacePath}</span> },
+              { id: "updated", header: "Updated", cell: (session) => formatDateTime(session.updatedAt) },
+              {
+                id: "actions",
+                header: "Actions",
+                cell: (session) => (
+                  <div className="flex flex-wrap gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => void attachSession(session)}>
+                      <TerminalSquare aria-hidden="true" />
+                      Attach
+                    </Button>
+                    {session.status === "running" ? (
+                      <Button type="button" variant="outline" size="sm" onClick={() => void stopSession(session.id)}>
+                        <Square aria-hidden="true" />
+                        Stop
+                      </Button>
+                    ) : null}
+                  </div>
+                )
+              }
+            ]}
+          />
+          {activeSession ? <p className="mt-3 text-sm text-muted-foreground">Selected session: {activeSession.id}</p> : null}
         </SectionCard>
       </section>
 
       <SectionCard
-        title="Continue In Codex"
+        title="Codex Handoff"
         description="Create a handoff prompt from current Frank context."
         icon={<Copy aria-hidden="true" />}
       >
@@ -394,78 +474,7 @@ export function AiConsolePage() {
           </Button>
         </form>
       </SectionCard>
-
-      <SectionCard
-        title="Sessions"
-        description="Running and recent VPS AI sessions."
-        icon={<TerminalSquare aria-hidden="true" />}
-        action={displayedSessions.some((session) => session.status === "running") ? (
-          <Button type="button" variant="outline" size="sm" onClick={() => void stopAllSessions()}>
-            <Square aria-hidden="true" />
-            Stop All
-          </Button>
-        ) : null}
-      >
-        <DataTable
-          data={displayedSessions}
-          getRowId={(session) => session.id}
-          emptyState={<EmptyState icon={<TerminalSquare aria-hidden="true" />} title="No AI sessions" description="Start Codex or Claude Code above." />}
-          columns={[
-            { id: "id", header: "Session", cell: (session) => <span className="font-mono text-xs">{session.id}</span> },
-            { id: "tool", header: "Tool", cell: (session) => toolLabel(session.tool) },
-            { id: "status", header: "Status", cell: (session) => <StatusBadge tone={session.status === "running" ? "checking" : "planned"}>{titleize(session.status)}</StatusBadge> },
-            { id: "workspace", header: "Workspace", cell: (session) => <span className="text-muted-foreground">{session.workspacePath}</span> },
-            { id: "updated", header: "Updated", cell: (session) => formatDateTime(session.updatedAt) },
-            {
-              id: "actions",
-              header: "Actions",
-              cell: (session) => (
-                <div className="flex flex-wrap gap-2">
-                  <Button type="button" variant="outline" size="sm" onClick={() => void attachSession(session)}>
-                    <TerminalSquare aria-hidden="true" />
-                    Attach
-                  </Button>
-                  {session.status === "running" ? (
-                    <Button type="button" variant="outline" size="sm" onClick={() => void stopSession(session.id)}>
-                      <Square aria-hidden="true" />
-                      Stop
-                    </Button>
-                  ) : null}
-                </div>
-              )
-            }
-          ]}
-        />
-        {activeSession ? <p className="mt-3 text-sm text-muted-foreground">Selected session: {activeSession.id}</p> : null}
-      </SectionCard>
     </section>
-  );
-}
-
-function ToolCard({
-  title,
-  description,
-  icon,
-  actionLabel,
-  onAction
-}: {
-  title: string;
-  description: string;
-  icon: React.ReactNode;
-  actionLabel: string;
-  onAction: () => void;
-}) {
-  return (
-    <div className="grid min-w-0 overflow-hidden content-between gap-3 rounded-lg border border-border bg-surface p-4">
-      <div className="flex min-w-0 items-start gap-3">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-background text-foreground">{icon}</div>
-        <div className="min-w-0">
-          <h3 className="truncate text-sm font-semibold text-foreground">{title}</h3>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">{description}</p>
-        </div>
-      </div>
-      <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 w-full whitespace-normal px-2 py-2 text-center leading-4" onClick={onAction}>{actionLabel}</Button>
-    </div>
   );
 }
 
@@ -483,11 +492,108 @@ function browserActionMessage(target: "chatgpt" | "claude", browser: BrowserStat
   return `${label} is ready in Frank.`;
 }
 
-function installedLabel(status: { installed?: boolean; path?: string | null } | undefined): string {
+type HostStatusTone = "ok" | "warning" | "bad";
+
+interface HostStatusItem {
+  label: string;
+  value: string;
+  tone: HostStatusTone;
+  detail?: string;
+}
+
+function HostStatusStrip({ host }: { host: AiHostStatusResponse }) {
+  const items = hostStatusItems(host);
+  return (
+    <div className="grid gap-2" aria-label="Host agent status">
+      <div className="flex flex-wrap gap-2">
+        {items.map((item) => (
+          <div
+            key={item.label}
+            className={`inline-flex min-h-9 items-center gap-2 rounded-md border px-3 text-xs ${hostStatusToneClass(item.tone)}`}
+            title={item.detail}
+          >
+            <span className={`size-2 rounded-full ${hostStatusDotClass(item.tone)}`} aria-hidden="true" />
+            <span className="font-semibold">{item.label}</span>
+            <span className="text-muted-foreground">{item.value}</span>
+          </div>
+        ))}
+      </div>
+      {host.message ? (
+        <p className="rounded-md border border-warning/30 bg-warning/10 px-3 py-2 text-sm leading-6 text-foreground">
+          <PlugZap aria-hidden="true" className="mr-2 inline size-4 align-[-0.125em]" />
+          {host.message}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function hostStatusItems(host: AiHostStatusResponse): HostStatusItem[] {
+  const hostItem: HostStatusItem = !host.configured
+    ? { label: "Host Agent", value: "Not connected", tone: "bad", detail: "Install the Frank Host Agent on the VPS." }
+    : host.reachable
+      ? {
+          label: "Host Agent",
+          value: "Reachable",
+          tone: "ok",
+          ...(host.version ? { detail: `Version ${host.version}` } : {})
+        }
+      : {
+          label: "Host Agent",
+          value: "Unreachable",
+          tone: "bad",
+          ...(host.message ? { detail: host.message } : {})
+        };
+
+  return [
+    hostItem,
+    hostToolStatusItem("tmux", host.tools.tmux),
+    hostToolStatusItem("Codex CLI", host.tools.codex),
+    hostToolStatusItem("Claude Code", host.tools.claudeCode),
+    hostToolStatusItem("Docker", host.tools.docker)
+  ].sort((left, right) => hostStatusToneRank(left.tone) - hostStatusToneRank(right.tone));
+}
+
+function hostToolStatusItem(
+  label: string,
+  status: { installed?: boolean; path?: string | null } | undefined
+): HostStatusItem {
   if (!status) {
-    return "Unknown";
+    return { label, value: "Unknown", tone: "warning" };
   }
-  return status.installed ? status.path ?? "Installed" : "Missing";
+  if (status.installed) {
+    return {
+      label,
+      value: "Ready",
+      tone: "ok",
+      ...(status.path ? { detail: status.path } : {})
+    };
+  }
+  return { label, value: "Missing", tone: "bad" };
+}
+
+function hostStatusToneRank(tone: HostStatusTone): number {
+  return tone === "bad" ? 0 : tone === "warning" ? 1 : 2;
+}
+
+function hostStatusToneClass(tone: HostStatusTone): string {
+  if (tone === "bad") {
+    return "border-destructive/30 bg-destructive/10 text-foreground";
+  }
+  if (tone === "warning") {
+    return "border-warning/30 bg-warning/10 text-foreground";
+  }
+  return "border-border bg-surface text-foreground";
+}
+
+function hostStatusDotClass(tone: HostStatusTone): string {
+  if (tone === "bad") {
+    return "bg-destructive";
+  }
+  if (tone === "warning") {
+    return "bg-warning";
+  }
+  return "bg-success";
 }
 
 function toolLabel(tool: AiTool): string {
