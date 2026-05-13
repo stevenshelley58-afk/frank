@@ -61,6 +61,13 @@ export function FullscreenComposer({
     }
   }, [open]);
 
+  function handleComposerPointerDown(event: React.PointerEvent<HTMLElement>) {
+    if (isInteractiveComposerTarget(event.target)) {
+      return;
+    }
+    textareaRef.current?.focus({ preventScroll: true });
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="!h-[100dvh] !w-full !max-w-none !rounded-none p-0 sm:!h-[calc(100vh-2rem)] sm:!w-[calc(100%-2rem)] sm:!rounded-xl">
@@ -78,6 +85,7 @@ export function FullscreenComposer({
           </DialogHeader>
           <form
             className="flex min-h-0 flex-1 flex-col gap-4 p-4 sm:p-6"
+            onPointerDown={handleComposerPointerDown}
             onSubmit={(event) => {
               event.preventDefault();
               onSubmit();
@@ -92,6 +100,11 @@ export function FullscreenComposer({
               value={text}
               onChange={(event) => onTextChange(event.target.value)}
               onKeyDown={onKeyDown}
+              inputMode="text"
+              enterKeyHint="send"
+              autoCapitalize="sentences"
+              autoComplete="off"
+              spellCheck={true}
               placeholder="Ask for anything..."
               className="min-h-0 flex-1 resize-none rounded-xl bg-background p-4 text-base leading-7 shadow-none sm:p-5"
               disabled={submitting}
@@ -122,4 +135,11 @@ export function FullscreenComposer({
       </DialogContent>
     </Dialog>
   );
+}
+
+function isInteractiveComposerTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(target.closest("a,button,input,select,textarea,[role='button'],[role='combobox']"));
 }

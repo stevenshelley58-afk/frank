@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type * as React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -53,6 +53,16 @@ describe("ChatComposer", () => {
     renderComposer();
 
     expect(screen.getByRole<HTMLButtonElement>("button", { name: "Send message" }).disabled).toBe(true);
+  });
+
+  it("focuses the message field when the composer surface is tapped", () => {
+    renderComposer();
+
+    fireEvent.pointerDown(screen.getByRole("region", { name: "Chat composer" }));
+
+    const message = screen.getByLabelText<HTMLTextAreaElement>("Message");
+    expect(document.activeElement).toBe(message);
+    expect(message.getAttribute("enterkeyhint")).toBe("send");
   });
 
   it("submits with Enter", async () => {

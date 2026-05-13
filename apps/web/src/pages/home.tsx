@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { Globe2, RefreshCw, TriangleAlert } from "lucide-react";
+import { ExternalLink, Globe2, RefreshCw, TriangleAlert } from "lucide-react";
 import { startBrowser, type BrowserStatusResponse } from "../api.js";
 import { Button } from "../components/ui/index.js";
+import { CHATGPT_APP_URL, CODEX_APP_URL } from "../lib/ai-app-links.js";
 
 type BrowserLoadState =
   | { status: "starting" }
@@ -67,10 +68,24 @@ export function HomePage({ onOpenAiConsole }: HomePageProps = {}) {
             <p className="truncate text-sm text-muted-foreground">{statusLabel(state)}</p>
           </div>
         </div>
-        <Button type="button" variant="outline" size="sm" onClick={() => void openChatGptBrowser()}>
-          <RefreshCw aria-hidden="true" />
-          Open ChatGPT
-        </Button>
+        <div className="flex w-full flex-wrap gap-2 sm:w-auto sm:justify-end">
+          <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
+            <a href={CHATGPT_APP_URL} target="_blank" rel="noreferrer">
+              <ExternalLink aria-hidden="true" />
+              Open ChatGPT app
+            </a>
+          </Button>
+          <Button asChild variant="outline" size="sm" className="w-full sm:w-auto">
+            <a href={CODEX_APP_URL} target="_blank" rel="noreferrer">
+              <ExternalLink aria-hidden="true" />
+              Open Codex app
+            </a>
+          </Button>
+          <Button type="button" variant="outline" size="sm" className="w-full sm:w-auto" onClick={() => void openChatGptBrowser()}>
+            <RefreshCw aria-hidden="true" />
+            Open ChatGPT
+          </Button>
+        </div>
       </div>
 
       {state.status === "starting" ? (
@@ -112,7 +127,7 @@ export function HomePage({ onOpenAiConsole }: HomePageProps = {}) {
         <iframe
           title="ChatGPT browser"
           src={state.browser.url}
-          allow="clipboard-read; clipboard-write; fullscreen"
+          allow="clipboard-read; clipboard-write; fullscreen; virtual-keyboard"
           referrerPolicy="no-referrer"
           className="h-full min-h-[28rem] w-full rounded-lg border border-border bg-black sm:min-h-[38rem]"
         />

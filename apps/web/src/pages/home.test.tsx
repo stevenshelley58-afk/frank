@@ -17,6 +17,9 @@ describe("HomePage", () => {
     const browser = await screen.findByTitle("ChatGPT browser");
 
     expect(browser.getAttribute("src")).toBe("/vps-browser/");
+    expect(browser.getAttribute("allow")).toContain("virtual-keyboard");
+    expect(screen.getByRole("link", { name: "Open ChatGPT app" }).getAttribute("href")).toBe("https://chatgpt.com/");
+    expect(screen.getByRole("link", { name: "Open Codex app" }).getAttribute("href")).toBe("https://chatgpt.com/codex");
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/v1/browser/start",
       expect.objectContaining({

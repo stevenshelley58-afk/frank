@@ -121,6 +121,17 @@ export function ChatComposer({
     }
   }
 
+  function focusTextarea() {
+    textareaRef.current?.focus({ preventScroll: true });
+  }
+
+  function handleComposerPointerDown(event: React.PointerEvent<HTMLElement>) {
+    if (isInteractiveComposerTarget(event.target)) {
+      return;
+    }
+    focusTextarea();
+  }
+
   function handleFiles(type: ComposerAttachmentType, files: FileList | null) {
     if (!files || files.length === 0) {
       return;
@@ -172,6 +183,7 @@ export function ChatComposer({
           className
         )}
         aria-label="Chat composer"
+        onPointerDown={handleComposerPointerDown}
       >
         <form
           className="grid gap-3"
@@ -189,6 +201,11 @@ export function ChatComposer({
             value={text}
             onChange={(event) => setText(event.target.value)}
             onKeyDown={handleKeyDown}
+            inputMode="text"
+            enterKeyHint="send"
+            autoCapitalize="sentences"
+            autoComplete="off"
+            spellCheck={true}
             placeholder="Ask for anything..."
             className="min-h-14 border-0 bg-transparent px-0 py-1 text-base shadow-none focus-visible:ring-0"
             disabled={submitting}
@@ -387,4 +404,11 @@ function ComposerIconButton({
       {children}
     </Button>
   );
+}
+
+function isInteractiveComposerTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(target.closest("a,button,input,select,textarea,[role='button'],[role='combobox'],[role='menu']"));
 }
