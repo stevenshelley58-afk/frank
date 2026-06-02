@@ -27,7 +27,7 @@ echo "Checking API health..."
 curl -fsS "${API_URL}/healthz" >/dev/null
 
 echo "Checking web dashboard..."
-curl -fsS "${WEB_URL}/" | grep -q '<div id="root">'
+curl -fsS -H 'Host: hub.frank.fail' "${WEB_URL}/" | grep -q '<div id="root">'
 
 if [ "${AIONUI_ENABLED}" = "true" ]; then
   echo "Checking AionUi web host..."
