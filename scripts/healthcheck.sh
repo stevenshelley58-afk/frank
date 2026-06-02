@@ -31,6 +31,7 @@ curl -fsS -H 'Host: hub.frank.fail' "${WEB_URL}/" | grep -q '<div id="root">'
 
 if [ "${AIONUI_ENABLED}" = "true" ]; then
   echo "Checking AionUi web host..."
+  curl -fsS -H 'Host: hub.frank.fail' "${WEB_URL}/aionui/" >/dev/null
   curl -fsS -H 'Host: aionui.frank.fail' "${WEB_URL}/" >/dev/null
 fi
 
