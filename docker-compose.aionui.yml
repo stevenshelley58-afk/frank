@@ -13,6 +13,12 @@ services:
       AIONUI_LOG_DIR: "/data/logs"
       AIONUI_OPEN_BROWSER: "0"
       AIONUI_NO_BUILD: "1"
+      # Tell AionUi it is reached over HTTPS (TLS terminates at Cloudflare/nginx)
+      # so it issues Secure session cookies and builds https login/QR URLs.
+      # AionUi intentionally does NOT trust X-Forwarded-Proto, so this must be
+      # set explicitly. See iOfficeAI/AionUi src/process/webserver/config/constants.ts.
+      AIONUI_HTTPS: "true"
+      SERVER_BASE_URL: "https://aionui.frank.fail"
       FRANK_AIONUI_ACCESS_DIR: "/access"
       FRANK_AIONUI_CREDENTIALS_PATH: "/access/aionui-admin.json"
     expose:

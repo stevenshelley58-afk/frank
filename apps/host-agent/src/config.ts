@@ -14,9 +14,12 @@ const schema = z.object({
   FRANK_HOST_AGENT_PROTECTED_PATHS: z.string().optional(),
   FRANK_HOST_AGENT_RUN_WILD: z.preprocess(booleanFromEnv, z.boolean()).default(true),
   AIONUI_VERSION: z.string().default("2.1.9"),
-  AIONUI_PUBLIC_URL: z.string().url().default("https://hub.frank.fail/aionui/"),
+  AIONUI_PUBLIC_URL: z.string().url().default("https://aionui.frank.fail/?frank_bootstrapped=1"),
   AIONUI_HOST_BASE_URL: z.string().url().default("http://127.0.0.1:25808"),
   AIONUI_ADMIN_CREDENTIALS_PATH: z.string().default("/opt/frank-hub/runtime/access/aionui-admin.json"),
+  // AionUi sets its JWT session in a cookie named "aionui-session"
+  // (see iOfficeAI/AionUi src/process/webserver/config/constants.ts AUTH_CONFIG.COOKIE.NAME).
+  AIONUI_COOKIE_NAME: z.string().default("aionui-session"),
   AIONUI_WORKSPACE_MOUNTS: z.string().default("/opt/frank-projects,/opt/frank-hub/workspaces,/opt/frank-hub/runtime/artifacts")
 });
 
@@ -37,6 +40,7 @@ export function loadHostAgentConfig(env: NodeJS.ProcessEnv = process.env) {
       publicUrl: parsed.AIONUI_PUBLIC_URL.replace(/\/$/, ""),
       hostBaseUrl: parsed.AIONUI_HOST_BASE_URL.replace(/\/$/, ""),
       adminCredentialsPath: parsed.AIONUI_ADMIN_CREDENTIALS_PATH,
+      cookieName: parsed.AIONUI_COOKIE_NAME.trim() || "aionui-session",
       workspaceMounts: parseList(parsed.AIONUI_WORKSPACE_MOUNTS) ?? []
     }
   };

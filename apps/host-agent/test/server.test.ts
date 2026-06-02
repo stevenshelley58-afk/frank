@@ -120,9 +120,10 @@ function testConfig(): HostAgentConfig {
     protectedPaths: ["/", "/root"],
     aionui: {
       version: "2.1.9",
-      publicUrl: "https://hub.frank.fail/aionui/",
+      publicUrl: "https://aionui.frank.fail/?frank_bootstrapped=1",
       hostBaseUrl: "http://127.0.0.1:25808",
       adminCredentialsPath: "/opt/frank-hub/runtime/access/aionui-admin.json",
+      cookieName: "aionui-session",
       workspaceMounts: ["/opt/frank-projects", "/opt/frank-hub/workspaces"]
     }
   };

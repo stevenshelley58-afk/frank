@@ -236,7 +236,7 @@ function createTestServer(pool: FakeSelfUpgradePool, hostAgentEnabled = false) {
       aionui: {
         enabled: false,
         version: "2.1.9",
-        publicUrl: "https://hub.frank.fail/aionui/",
+        publicUrl: "https://aionui.frank.fail/?frank_bootstrapped=1",
         internalBaseUrl: "http://aionui:25808",
         adminCredentialsPath: "/opt/frank-hub/runtime/access/aionui-admin.json",
         cookieDomain: ".frank.fail",

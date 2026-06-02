@@ -237,6 +237,9 @@ async function aionUiStatus(config: HostAgentConfig, exec: HostExec) {
 
 async function createAionUiSession(config: HostAgentConfig) {
   const credentials = await readAionUiCredentials(config.aionui.adminCredentialsPath);
+  // AionUi's WebUI login endpoint is POST /login with a JSON { username, password }
+  // body. On success it returns { success: true, token } AND a Set-Cookie for the
+  // session. See iOfficeAI/AionUi src/process/webserver/routes/authRoutes.ts.
   const response = await fetch(`${config.aionui.hostBaseUrl}/login`, {
     method: "POST",
     headers: {
@@ -245,21 +248,61 @@ async function createAionUiSession(config: HostAgentConfig) {
     },
     body: JSON.stringify({
       username: credentials.username,
-      password: credentials.password,
-      remember: true
+      password: credentials.password
     })
   });
+  const rawBody = await response.text();
   if (!response.ok) {
     throw new Error(`AionUi login returned HTTP ${response.status}.`);
   }
-  const setCookie = response.headers.get("set-cookie");
-  if (!setCookie) {
-    throw new Error("AionUi login did not return a session cookie.");
-  }
+  const cookieHeader = buildAionUiCookieHeader({
+    cookieName: config.aionui.cookieName,
+    body: rawBody,
+    setCookieHeader: response.headers.get("set-cookie")
+  });
   return {
     publicUrl: config.aionui.publicUrl,
-    cookieHeader: setCookie
+    cookieHeader
   };
+}
+
+/**
+ * Build the AionUi session cookie header from a /login response.
+ *
+ * Prefers the JWT returned in the JSON body (`token`), which is the most reliable
+ * signal, and falls back to the upstream Set-Cookie header. The API layer
+ * re-scopes this cookie to the Frank cookie domain before returning it to the
+ * browser. Exported for unit testing.
+ */
+export function buildAionUiCookieHeader(input: {
+  cookieName: string;
+  body: string;
+  setCookieHeader: string | null;
+}): string {
+  let parsed: { success?: unknown; token?: unknown } | null = null;
+  try {
+    parsed = JSON.parse(input.body) as { success?: unknown; token?: unknown };
+  } catch {
+    parsed = null;
+  }
+
+  if (parsed && parsed.success === false) {
+    throw new Error("AionUi rejected the stored admin credentials. Reset them and retry.");
+  }
+
+  const token = typeof parsed?.token === "string" && parsed.token.trim() ? parsed.token.trim() : null;
+  if (token) {
+    return `${input.cookieName}=${token}`;
+  }
+
+  if (input.setCookieHeader) {
+    const [cookiePair] = input.setCookieHeader.split(";");
+    if (cookiePair && cookiePair.includes("=")) {
+      return cookiePair.trim();
+    }
+  }
+
+  throw new Error("AionUi login did not return a session token or cookie.");
 }
 
 async function readAionUiCredentials(path: string): Promise<{ username: string; password: string }> {

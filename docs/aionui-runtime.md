@@ -13,13 +13,21 @@ Compose file: `docker-compose.aionui.yml`.
 - container port: `25808`
 - host bind: `127.0.0.1:${AIONUI_HOST_PORT:-25808}`
 - Frank web route bind: `127.0.0.1:${AIONUI_ROUTE_HOST_PORT:-33480}`
-- canonical browser path: `https://hub.frank.fail/aionui/`
-- convenience route: `aionui.frank.fail` through the Frank web/Nginx container, redirecting to the canonical path
+- canonical browser path: `https://aionui.frank.fail/?frank_bootstrapped=1` (AionUi is served at the
+  origin root through the Frank web/Nginx container; the upstream WebUI registers
+  its routes, WebSocket, and assets at `/` and cannot be mounted under a sub-path)
+- bootstrap path: `https://hub.frank.fail/aionui/` redirects to Frank API
+  `/api/v1/aionui/open`, which mints the AionUi cookie before sending the
+  browser to the canonical AionUi origin
+- session cookie: AionUi issues a JWT in the `aionui-session` cookie; Frank mints
+  and re-scopes that cookie to `${AIONUI_COOKIE_DOMAIN:-.frank.fail}` so the
+  dashboard embed is pre-authenticated
 - persistent data: `./runtime/aionui:/data`
 - credential capture: `./runtime/access/aionui-admin.json`
 
 Do not expose AionUi directly without Cloudflare Access. The intended browser
-path is Frank login first, then the embedded AionUi page.
+path is Frank/Cloudflare login first, then Frank API mints the AionUi session
+cookie, then the browser enters AionUi without a second login.
 
 ## Shared Workspace Mounts
 
@@ -77,7 +85,9 @@ docker compose -f docker-compose.yml -f docker-compose.hermes.yml -f docker-comp
 Expected:
 
 - `hub.frank.fail` loads after Cloudflare Access.
-- `aionui.frank.fail` is protected by Cloudflare Access and redirects to `hub.frank.fail/aionui/`.
-- Frank's AionUi page embeds AionUi without a second AionUi login.
+- `aionui.frank.fail` is protected by Cloudflare Access and serves AionUi at the
+  origin root; `hub.frank.fail/aionui/` redirects to it.
+- The dashboard AionUi page embeds `aionui.frank.fail` and is pre-authenticated
+  through the Frank-minted `aionui-session` cookie (no second AionUi login).
 - `/opt/frank-projects` is visible to AionUi and Hermes.
 - Hermes remains private on the Compose network.

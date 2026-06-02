@@ -33,17 +33,17 @@ curl -fsS -H 'Host: hub.frank.fail' "${WEB_URL}/" | grep -q '<div id="root">'
 
 if [ "${AIONUI_ENABLED}" = "true" ]; then
   echo "Checking AionUi web host..."
-  status_code="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: hub.frank.fail' "${WEB_URL}/aionui")"
-  if [ "${status_code}" != "308" ]; then
-    echo "Expected /aionui to redirect to /aionui/, got HTTP ${status_code}." >&2
+  hub_redirect="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' -H 'Host: hub.frank.fail' "${WEB_URL}/aionui")"
+  if [ "${hub_redirect}" != "302 http://hub.frank.fail/api/v1/aionui/open" ]; then
+    echo "Expected /aionui to redirect to Frank AionUi bootstrap, got ${hub_redirect}." >&2
     exit 1
   fi
-  curl -fsS -H 'Host: hub.frank.fail' "${WEB_URL}/aionui/" >/dev/null
-  direct_status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: aionui.frank.fail' "${AIONUI_ROUTE_URL}/")"
-  if [ "${direct_status}" != "302" ]; then
-    echo "Expected aionui.frank.fail to redirect through Frank, got HTTP ${direct_status}." >&2
+  direct_redirect="$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' -H 'Host: aionui.frank.fail' "${AIONUI_ROUTE_URL}/")"
+  if [ "${direct_redirect}" != "302 https://hub.frank.fail/api/v1/aionui/open" ]; then
+    echo "Expected aionui.frank.fail root to redirect to Frank AionUi bootstrap, got ${direct_redirect}." >&2
     exit 1
   fi
+  curl -fsS -H 'Host: aionui.frank.fail' "${AIONUI_ROUTE_URL}/?frank_bootstrapped=1" | grep -qi 'AionUi'
 fi
 
 if [ "${CLOUDFLARE_ACCESS_ENABLED}" = "true" ]; then

@@ -16,7 +16,7 @@ describe("AionUi API routes", () => {
       configured: true,
       running: true,
       version: "2.1.9",
-      publicUrl: "https://hub.frank.fail/aionui/",
+      publicUrl: "https://aionui.frank.fail/?frank_bootstrapped=1",
       internalBaseUrl: "http://aionui:25808",
       workspaceMounts: ["/opt/frank-projects", "/opt/frank-hub/workspaces"]
     }));
@@ -30,7 +30,7 @@ describe("AionUi API routes", () => {
       configured: true,
       running: true,
       version: "2.1.9",
-      publicUrl: "https://hub.frank.fail/aionui/",
+      publicUrl: "https://aionui.frank.fail/?frank_bootstrapped=1",
       workspaceMounts: ["/opt/frank-projects", "/opt/frank-hub/workspaces"]
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -47,7 +47,7 @@ describe("AionUi API routes", () => {
       const url = String(input);
       if (url === "http://host-agent.local/v1/aionui/session") {
         return jsonResponse({
-          publicUrl: "https://hub.frank.fail/aionui/",
+          publicUrl: "https://aionui.frank.fail/?frank_bootstrapped=1",
           cookieHeader: "aionui_session=abc123; Path=/; HttpOnly; SameSite=Lax"
         });
       }
@@ -60,7 +60,7 @@ describe("AionUi API routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      publicUrl: "https://hub.frank.fail/aionui/",
+      publicUrl: "https://aionui.frank.fail/?frank_bootstrapped=1",
       ready: true
     });
     expect(response.headers["set-cookie"]).toEqual(
@@ -68,6 +68,29 @@ describe("AionUi API routes", () => {
     );
     expect(response.body).not.toContain("abc123");
     expect(JSON.stringify(fetchMock.mock.calls)).not.toContain("password");
+  });
+
+  it("opens AionUi through a cookie-setting bootstrap redirect", async () => {
+    const fetchMock = vi.fn(async (input) => {
+      const url = String(input);
+      if (url === "http://host-agent.local/v1/aionui/session") {
+        return jsonResponse({
+          publicUrl: "https://aionui.frank.fail/?frank_bootstrapped=1",
+          cookieHeader: "aionui-session=jwt123; Path=/; HttpOnly; SameSite=Lax"
+        });
+      }
+      return jsonResponse({});
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const { server } = createTestServer();
+
+    const response = await server.inject({ method: "GET", url: "/v1/aionui/open" });
+
+    expect(response.statusCode).toBe(302);
+    expect(response.headers.location).toBe("https://aionui.frank.fail/?frank_bootstrapped=1");
+    expect(response.headers["set-cookie"]).toEqual(
+      "aionui-session=jwt123; Domain=.frank.fail; Path=/; HttpOnly; Secure; SameSite=Lax"
+    );
   });
 
   it("runs bounded AionUi and project operations through the host agent", async () => {
@@ -130,7 +153,7 @@ function createTestServer() {
     aionui: {
       enabled: true,
       version: "2.1.9",
-      publicUrl: "https://hub.frank.fail/aionui/",
+      publicUrl: "https://aionui.frank.fail/?frank_bootstrapped=1",
       internalBaseUrl: "http://aionui:25808",
       adminCredentialsPath: "/opt/frank-hub/runtime/access/aionui-admin.json",
       cookieDomain: ".frank.fail",

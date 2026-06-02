@@ -57,8 +57,9 @@ this file.
 
 - `hub.frank.fail` -> Frank Hub dashboard
 - `api.frank.fail` -> Frank API
-- `hub.frank.fail/aionui/` -> embedded AionUi WebUI runtime
-- `aionui.frank.fail` -> redirect to embedded AionUi WebUI runtime
+- `aionui.frank.fail` -> private AionUi WebUI runtime, served at the origin root
+  through Frank/Nginx behind Cloudflare Access
+- `hub.frank.fail/aionui/` -> Frank AionUi bootstrap, then AionUi runtime
 
 ## Reserved URLs
 

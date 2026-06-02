@@ -18,6 +18,10 @@ interface AionUiSessionResponse {
   cookieHeader: string;
 }
 
+interface AionUiOpenQuery {
+  next?: string;
+}
+
 interface HostOperationResponse {
   ok: boolean;
   action: string;
@@ -58,6 +62,25 @@ export function registerAionUiRoutes(server: FastifyInstance, pool: PgPool, conf
       publicUrl: result.publicUrl,
       ready: true
     };
+  });
+
+  server.get("/v1/aionui/open", async (request: FastifyRequest<{ Querystring: AionUiOpenQuery }>, reply: FastifyReply) => {
+    if (!isHostAgentConfigured(config)) {
+      return reply.code(409).send({
+        error: "host_agent_not_configured",
+        message: "Frank Host Agent is not connected."
+      });
+    }
+
+    const result = await callHostAgent<AionUiSessionResponse>(config, "/v1/aionui/session", {
+      method: "POST"
+    });
+    const rewrittenCookie = rewriteAionUiCookie(result.cookieHeader, aionUiConfig(config).cookieDomain);
+    reply.header("Set-Cookie", rewrittenCookie);
+    await auditAionUiOperation(pool, request, "aionui.session.open", "success", {
+      publicUrl: result.publicUrl
+    });
+    return reply.redirect(safeAionUiRedirect(request.query.next, result.publicUrl), 302);
   });
 
   server.post("/v1/aionui/start", async (request) => {
@@ -148,11 +171,26 @@ function rewriteAionUiCookie(cookieHeader: string, domain: string): string {
   return `${cookiePair.trim()}; Domain=${domain}; Path=/; HttpOnly; Secure; SameSite=Lax`;
 }
 
+function safeAionUiRedirect(next: string | undefined, fallback: string): string {
+  if (!next) {
+    return fallback;
+  }
+  try {
+    const parsed = new URL(next, fallback);
+    if (parsed.hostname === "aionui.frank.fail") {
+      return parsed.toString();
+    }
+  } catch {
+    return fallback;
+  }
+  return fallback;
+}
+
 function aionUiConfig(config: ApiConfig) {
   return config.aionui ?? {
     enabled: false,
     version: "2.1.9",
-    publicUrl: "https://hub.frank.fail/aionui/",
+    publicUrl: "https://aionui.frank.fail/?frank_bootstrapped=1",
     internalBaseUrl: "http://aionui:25808",
     adminCredentialsPath: "/opt/frank-hub/runtime/access/aionui-admin.json",
     cookieDomain: ".frank.fail",

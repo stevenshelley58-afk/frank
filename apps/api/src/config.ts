@@ -69,7 +69,7 @@ const envSchema = z.object({
   HERMES_WEBHOOK_SECRET: z.string().optional(),
   AIONUI_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
   AIONUI_VERSION: z.string().default("2.1.9"),
-  AIONUI_PUBLIC_URL: z.string().url().default("https://hub.frank.fail/aionui/"),
+  AIONUI_PUBLIC_URL: z.string().url().default("https://aionui.frank.fail/?frank_bootstrapped=1"),
   AIONUI_INTERNAL_BASE_URL: z.string().url().default("http://aionui:25808"),
   AIONUI_ADMIN_CREDENTIALS_PATH: z.string().default("/opt/frank-hub/runtime/access/aionui-admin.json"),
   AIONUI_COOKIE_DOMAIN: z.string().default(".frank.fail"),
