@@ -31,6 +31,11 @@ curl -fsS -H 'Host: hub.frank.fail' "${WEB_URL}/" | grep -q '<div id="root">'
 
 if [ "${AIONUI_ENABLED}" = "true" ]; then
   echo "Checking AionUi web host..."
+  status_code="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: hub.frank.fail' "${WEB_URL}/aionui")"
+  if [ "${status_code}" != "308" ]; then
+    echo "Expected /aionui to redirect to /aionui/, got HTTP ${status_code}." >&2
+    exit 1
+  fi
   curl -fsS -H 'Host: hub.frank.fail' "${WEB_URL}/aionui/" >/dev/null
   curl -fsS -H 'Host: aionui.frank.fail' "${WEB_URL}/" >/dev/null
 fi
