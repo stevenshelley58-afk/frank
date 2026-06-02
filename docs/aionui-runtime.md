@@ -12,6 +12,7 @@ Compose file: `docker-compose.aionui.yml`.
 - checksum: verified from the release `.sha256` file during image build
 - container port: `25808`
 - host bind: `127.0.0.1:${AIONUI_HOST_PORT:-25808}`
+- Frank web route bind: `127.0.0.1:${AIONUI_ROUTE_HOST_PORT:-33480}`
 - canonical browser path: `https://hub.frank.fail/aionui/`
 - convenience route: `aionui.frank.fail` through the Frank web/Nginx container, redirecting to the canonical path
 - persistent data: `./runtime/aionui:/data`

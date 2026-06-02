@@ -176,7 +176,7 @@ Use the dashboard:
 5. Select `Add route`.
 6. Add `hub.frank.fail` with service `http://localhost:3000`.
 7. Add `api.frank.fail` with service `http://localhost:8080`.
-8. Add `aionui.frank.fail` with service `http://localhost:3000` and the same
+8. Add `aionui.frank.fail` with service `http://localhost:33480` and the same
    Cloudflare Access policy as `hub.frank.fail`.
 
 The dashboard calls the API through same-origin `/api/*` on `hub.frank.fail`.

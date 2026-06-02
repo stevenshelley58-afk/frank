@@ -14,6 +14,7 @@ read_env() {
 
 WEB_PORT="$(read_env WEB_PORT 3000)"
 API_PORT="$(read_env API_PORT 8080)"
+AIONUI_ROUTE_HOST_PORT="$(read_env AIONUI_ROUTE_HOST_PORT 33480)"
 POSTGRES_DB="$(read_env POSTGRES_DB frank)"
 POSTGRES_USER="$(read_env POSTGRES_USER frank)"
 POSTGRES_PASSWORD="$(read_env POSTGRES_PASSWORD "")"
@@ -22,6 +23,7 @@ AIONUI_ENABLED="$(read_env AIONUI_ENABLED false)"
 
 API_URL="http://127.0.0.1:${API_PORT}"
 WEB_URL="http://127.0.0.1:${WEB_PORT}"
+AIONUI_ROUTE_URL="http://127.0.0.1:${AIONUI_ROUTE_HOST_PORT}"
 
 echo "Checking API health..."
 curl -fsS "${API_URL}/healthz" >/dev/null
@@ -37,7 +39,7 @@ if [ "${AIONUI_ENABLED}" = "true" ]; then
     exit 1
   fi
   curl -fsS -H 'Host: hub.frank.fail' "${WEB_URL}/aionui/" >/dev/null
-  direct_status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: aionui.frank.fail' "${WEB_URL}/")"
+  direct_status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: aionui.frank.fail' "${AIONUI_ROUTE_URL}/")"
   if [ "${direct_status}" != "302" ]; then
     echo "Expected aionui.frank.fail to redirect through Frank, got HTTP ${direct_status}." >&2
     exit 1

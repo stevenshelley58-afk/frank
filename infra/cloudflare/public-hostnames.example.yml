@@ -7,4 +7,4 @@ routes:
   - hostname: api.frank.fail
     service: http://localhost:8080
   - hostname: aionui.frank.fail
-    service: http://localhost:3000
+    service: http://localhost:33480

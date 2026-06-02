@@ -10,6 +10,7 @@ Configure routes in the Cloudflare Zero Trust dashboard:
 4. Select `Add route`.
 5. Add `hub.frank.fail` with service `http://localhost:3000`.
 6. Add `api.frank.fail` with service `http://localhost:8080`.
+7. Add `aionui.frank.fail` with service `http://localhost:33480`.
 
 Do not use `cloudflared tunnel route dns` as the primary setup path for this
 remote-managed tunnel.
@@ -37,4 +38,11 @@ The direct API hostname is reserved for later/admin/debug access:
 
 ```text
 https://api.frank.fail -> http://localhost:8080
+```
+
+The AionUi convenience hostname uses a dedicated loopback route into Frank's
+web container:
+
+```text
+https://aionui.frank.fail -> http://localhost:33480
 ```

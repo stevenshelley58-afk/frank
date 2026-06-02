@@ -33,6 +33,8 @@ services:
       retries: 10
 
   web:
+    ports:
+      - "127.0.0.1:${AIONUI_ROUTE_HOST_PORT:-33480}:80"
     depends_on:
       aionui:
         condition: service_started
