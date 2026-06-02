@@ -8,6 +8,7 @@ dist/
 coverage/
 runtime/deploy.json
 runtime/hermes/
+runtime/aionui/
 runtime/artifacts/
 runtime/backups/
 runtime/access/
