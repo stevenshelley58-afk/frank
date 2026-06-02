@@ -1,7 +1,7 @@
 import { ExternalLink, FolderOpen, Play, Power, RefreshCw, ScrollText, SquareTerminal } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import {
-  createAionUiSession,
+  getAionUiOpenUrl,
   getAionUiLogs,
   getAionUiStatus,
   startAionUi,
@@ -88,18 +88,12 @@ export function AionUiPage() {
     }
   }
 
-  async function openAionUi() {
+  function openAionUi() {
     setBusy("session");
     setMessage(null);
-    try {
-      const session = await createAionUiSession();
-      setFrameUrl(session.publicUrl);
-      setMessage("AionUi session is ready.");
-    } catch (error) {
-      setMessage(errorMessage(error));
-    } finally {
-      setBusy(null);
-    }
+    setFrameUrl(`${getAionUiOpenUrl()}?refresh=${Date.now()}`);
+    setMessage("AionUi session is opening.");
+    setBusy(null);
   }
 
   async function refreshLogs() {

@@ -1035,6 +1035,10 @@ export async function createAionUiSession(): Promise<AionUiSessionResponse> {
   return apiRequest<AionUiSessionResponse>("/v1/aionui/session", { method: "POST" });
 }
 
+export function getAionUiOpenUrl(): string {
+  return `${apiBase}/v1/aionui/open`;
+}
+
 export async function startAionUi(): Promise<HostOperationResponse> {
   return apiRequest<HostOperationResponse>("/v1/aionui/start", { method: "POST" });
 }
