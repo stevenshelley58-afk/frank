@@ -20,6 +20,8 @@ control plane. The system name is Frank Hub.
 - Do not run unrestricted host commands.
 - Fail closed when unsure.
 - Keep normal operation dashboard-first, not terminal-first.
+- AionUi WebUI is allowed only as the private Frank runtime slice documented
+  in `docs/aionui-runtime.md`; never expose it without Frank/Cloudflare Access.
 
 ## Architecture Defaults
 
@@ -29,6 +31,8 @@ control plane. The system name is Frank Hub.
 - Runtime: Docker Compose with Postgres + pgvector and Redis.
 - Access: Cloudflare Tunnel and Cloudflare Access.
 - Model routing: model-role based and provider-agnostic.
+- Shared project workspaces live under `/opt/frank-projects` and are mounted
+  into approved runtimes only.
 
 ## Agent skills
 
@@ -53,6 +57,7 @@ this file.
 
 - `hub.frank.fail` -> Frank Hub dashboard
 - `api.frank.fail` -> Frank API
+- `aionui.frank.fail` -> embedded AionUi WebUI runtime
 
 ## Reserved URLs
 

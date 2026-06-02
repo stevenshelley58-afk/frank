@@ -531,6 +531,29 @@ export interface BrowserStatusResponse {
   message?: string;
 }
 
+export interface AionUiStatusResponse {
+  configured: boolean;
+  running: boolean;
+  version: string;
+  publicUrl: string;
+  internalBaseUrl: string;
+  workspaceMounts: string[];
+  message?: string;
+}
+
+export interface AionUiSessionResponse {
+  publicUrl: string;
+  ready: boolean;
+}
+
+export interface HostOperationResponse {
+  ok: boolean;
+  action: string;
+  message: string;
+  output?: string;
+  metadata?: JsonRecord;
+}
+
 export interface SelfUpgradeRun {
   id: string;
   goal: string;
@@ -551,6 +574,13 @@ export interface SelfUpgradeRun {
   createdAt: string;
   updatedAt: string;
   finishedAt: string | null;
+}
+
+export interface SelfUpgradeLatestCheckResponse {
+  queued: boolean;
+  requiresApproval: boolean;
+  check: JsonRecord;
+  suggestedGoal: string | null;
 }
 
 export interface Project {
@@ -997,6 +1027,26 @@ export async function stopBrowser(): Promise<BrowserStatusResponse> {
   return apiRequest<BrowserStatusResponse>("/v1/browser/stop", { method: "POST" });
 }
 
+export async function getAionUiStatus(options?: { signal?: AbortSignal }): Promise<AionUiStatusResponse> {
+  return apiRequest<AionUiStatusResponse>("/v1/aionui/status", { signal: options?.signal });
+}
+
+export async function createAionUiSession(): Promise<AionUiSessionResponse> {
+  return apiRequest<AionUiSessionResponse>("/v1/aionui/session", { method: "POST" });
+}
+
+export async function startAionUi(): Promise<HostOperationResponse> {
+  return apiRequest<HostOperationResponse>("/v1/aionui/start", { method: "POST" });
+}
+
+export async function stopAionUi(): Promise<HostOperationResponse> {
+  return apiRequest<HostOperationResponse>("/v1/aionui/stop", { method: "POST" });
+}
+
+export async function getAionUiLogs(): Promise<HostOperationResponse> {
+  return apiRequest<HostOperationResponse>("/v1/aionui/logs", { method: "POST" });
+}
+
 export async function writeOperatorAccess(values: Record<string, string>): Promise<OperatorAccessWriteResponse> {
   return apiRequest<OperatorAccessWriteResponse>("/v1/operator/access", {
     method: "PATCH",
@@ -1041,6 +1091,10 @@ export async function createSelfUpgrade(body: {
   });
 }
 
+export async function checkLatestFrank(): Promise<SelfUpgradeLatestCheckResponse> {
+  return apiRequest<SelfUpgradeLatestCheckResponse>("/v1/self-upgrades/check-latest", { method: "POST" });
+}
+
 export async function cancelSelfUpgrade(id: string, reason?: string): Promise<{ selfUpgradeRun: SelfUpgradeRun }> {
   return apiRequest<{ selfUpgradeRun: SelfUpgradeRun }>(`/v1/self-upgrades/${encodeURIComponent(id)}/cancel`, {
     method: "POST",
@@ -1073,6 +1127,14 @@ export async function createProject(body: {
     body
   });
   return data.project;
+}
+
+export async function importCDevProjects(): Promise<HostOperationResponse> {
+  return apiRequest<HostOperationResponse>("/v1/projects/import-c-dev", { method: "POST" });
+}
+
+export async function materializeCDevProjects(): Promise<HostOperationResponse> {
+  return apiRequest<HostOperationResponse>("/v1/projects/materialize-c-dev", { method: "POST" });
 }
 
 function withQuery(path: string, query: ApiRequestOptions["query"]): string {

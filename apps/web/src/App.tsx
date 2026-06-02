@@ -1,5 +1,6 @@
 import {
   Activity,
+  AppWindow,
   Bot,
   Boxes,
   BookOpen,
@@ -21,6 +22,7 @@ import { AppShell, type AppShellPage } from "./components/layout/index.js";
 import {
   AgentsPage,
   AiConsolePage,
+  AionUiPage,
   AuditLogPage,
   CommandCenterPage,
   DashboardPage,
@@ -46,6 +48,13 @@ const pages: AppShellPage[] = [
     title: "Codex Workstation",
     description: "Codex and subscription-backed AI tools running inside Frank.",
     icon: Sparkles
+  },
+  {
+    id: "aionui",
+    label: "Hermes OS",
+    title: "Hermes OS",
+    description: "AionUi WebUI and shared project workspace running inside Frank.",
+    icon: AppWindow
   },
   {
     id: "command-center",
@@ -164,8 +173,7 @@ const pages: AppShellPage[] = [
     label: "Hermes",
     title: "Hermes Runner",
     description: "Private operator runtime status and configuration summary.",
-    icon: Hammer,
-    placement: "hidden"
+    icon: Hammer
   },
   {
     id: "settings",
@@ -200,6 +208,8 @@ function renderPage(
       return <ProjectsPage />;
     case "ai-console":
       return <AiConsolePage />;
+    case "aionui":
+      return <AionUiPage />;
     case "command-center":
       return <CommandCenterPage />;
     case "self-upgrades":

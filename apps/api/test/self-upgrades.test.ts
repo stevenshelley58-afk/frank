@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { FastifyInstance } from "fastify";
 import { buildServer } from "../src/server.js";
 import type { ApiConfig } from "../src/config.js";
@@ -6,6 +6,7 @@ import type { ApiConfig } from "../src/config.js";
 const servers: FastifyInstance[] = [];
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   await Promise.all(servers.splice(0).map((server) => server.close()));
 });
 
@@ -152,9 +153,49 @@ describe("self-upgrade routes", () => {
       selfUpgradeRunId: "00000000-0000-4000-8000-000000000444"
     });
   });
+
+  it("checks latest Frank state through the host agent without auto-deploying", async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      ok: true,
+      action: "frank.check_latest",
+      message: "Operation completed.",
+      output: JSON.stringify({
+        updateAvailable: true,
+        currentBranch: "main",
+        currentCommit: "abc123",
+        remote: "origin",
+        branch: "main",
+        remoteCommit: "def456"
+      })
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const pool = new FakeSelfUpgradePool();
+    const { server } = createTestServer(pool, true);
+
+    const response = await server.inject({
+      method: "POST",
+      url: "/v1/self-upgrades/check-latest"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      queued: false,
+      requiresApproval: true,
+      check: {
+        updateAvailable: true,
+        currentCommit: "abc123",
+        remoteCommit: "def456"
+      }
+    });
+    expect(pool.selfUpgradeRuns).toHaveLength(0);
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://host-agent.local/v1/ops/frank.check_latest",
+      expect.objectContaining({ method: "POST" })
+    );
+  });
 });
 
-function createTestServer(pool: FakeSelfUpgradePool) {
+function createTestServer(pool: FakeSelfUpgradePool, hostAgentEnabled = false) {
   const server = buildServer({
     config: {
       environment: "test",
@@ -174,9 +215,9 @@ function createTestServer(pool: FakeSelfUpgradePool) {
       openai: openAiTestConfig(),
       openrouterApiKey: undefined,
       hostAgent: {
-        enabled: false,
+        enabled: hostAgentEnabled,
         baseUrl: "http://host-agent.local",
-        token: undefined,
+        token: hostAgentEnabled ? "host-agent-secret" : undefined,
         timeoutSeconds: 5
       },
       hermes: {
@@ -191,6 +232,21 @@ function createTestServer(pool: FakeSelfUpgradePool) {
       },
       backups: {
         root: "/opt/frank-backups"
+      },
+      aionui: {
+        enabled: false,
+        version: "2.1.9",
+        publicUrl: "https://aionui.frank.fail",
+        internalBaseUrl: "http://aionui:25808",
+        adminCredentialsPath: "/opt/frank-hub/runtime/access/aionui-admin.json",
+        cookieDomain: ".frank.fail",
+        workspaceMounts: ["/opt/frank-projects", "/opt/frank-hub/workspaces", "/opt/frank-hub/runtime/artifacts"]
+      },
+      updates: {
+        checkEnabled: true,
+        checkIntervalMinutes: 60,
+        githubRemote: "origin",
+        githubBranch: "main"
       },
       operator: {
         mode: "lab",

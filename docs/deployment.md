@@ -81,6 +81,10 @@ When `HERMES_ENABLED=true`, `scripts/deploy.sh` includes
 `docker-compose.hermes.yml`, refuses to continue without
 `HERMES_API_SERVER_KEY`, and starts Hermes with the rest of Frank.
 
+When `AIONUI_ENABLED=true`, `scripts/deploy.sh` includes
+`docker-compose.aionui.yml`, builds the pinned AionUi WebUI image, and starts
+the embedded AionUi runtime with Frank.
+
 ## Lab Self-Upgrade And WhatsApp
 
 For the high-autonomy VPS lab, enable the operator features deliberately:
@@ -172,9 +176,13 @@ Use the dashboard:
 5. Select `Add route`.
 6. Add `hub.frank.fail` with service `http://localhost:3000`.
 7. Add `api.frank.fail` with service `http://localhost:8080`.
+8. Add `aionui.frank.fail` with service `http://localhost:3000` and the same
+   Cloudflare Access policy as `hub.frank.fail`.
 
 The dashboard calls the API through same-origin `/api/*` on `hub.frank.fail`.
 `api.frank.fail` is kept as a direct API hostname for later/admin/debug use.
+`aionui.frank.fail` is served by Frank's web/Nginx container and proxies to the
+private `aionui` Compose service.
 
 Keep `hub.frank.fail` as the canonical Frank Hub app URL. Configure
 `frank.fail/* -> https://hub.frank.fail/$1` with Cloudflare Redirect Rules /

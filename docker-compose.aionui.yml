@@ -1,0 +1,38 @@
+services:
+  aionui:
+    build:
+      context: ./infra/aionui
+      args:
+        AIONUI_VERSION: ${AIONUI_VERSION:-2.1.9}
+    restart: unless-stopped
+    environment:
+      AIONUI_PORT: "25808"
+      AIONUI_HOST: "0.0.0.0"
+      AIONUI_ALLOW_REMOTE: "true"
+      AIONUI_DATA_DIR: "/data"
+      AIONUI_LOG_DIR: "/data/logs"
+      AIONUI_OPEN_BROWSER: "0"
+      AIONUI_NO_BUILD: "1"
+      FRANK_AIONUI_ACCESS_DIR: "/access"
+      FRANK_AIONUI_CREDENTIALS_PATH: "/access/aionui-admin.json"
+    expose:
+      - "25808"
+    ports:
+      - "127.0.0.1:${AIONUI_HOST_PORT:-25808}:25808"
+    volumes:
+      - ./runtime/aionui:/data
+      - ./runtime/access:/access
+      - ${FRANK_PROJECT_ROOT:-/opt/frank-projects}:/opt/frank-projects
+      - ./workspaces:/opt/frank-hub/workspaces
+      - ./runtime/artifacts:/opt/frank-hub/runtime/artifacts
+      - ./runtime/ai-instructions:/opt/frank-hub/runtime/ai-instructions:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:25808/ >/dev/null || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 10
+
+  web:
+    depends_on:
+      aionui:
+        condition: service_started

@@ -6,6 +6,7 @@ process. Before changing code, read:
 - `AGENTS.md`
 - `CONTEXT.md`
 - `docs/adr/`
+- `docs/aionui-runtime.md`
 
 Do not commit secrets, API keys, tokens, private keys, or production `.env`
 files. Keep normal operation dashboard-first.

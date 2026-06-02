@@ -36,9 +36,15 @@ operator actions.
   a bounded runtime.
 - **Hermes**: the agent/runtime integration path for delegated build and task
   execution.
+- **AionUi**: the embedded private WebUI runtime exposed through Frank and
+  Cloudflare Access, with shared project workspaces mounted from
+  `/opt/frank-projects`.
 - **Frank Host Agent**: the VPS-local systemd service that gives Frank Hub
   controlled access to host tools such as `tmux`, `git`, Docker, Codex,
   Claude Code, and browser controls.
+- **Shared project workspace**: a VPS project folder under
+  `/opt/frank-projects/<slug>` materialized from the uploaded C:\Dev inventory
+  or cloned from a project remote.
 - **AI Workstation**: the Frank dashboard surface for embedded VPS browser
   chat, Codex sessions, Claude Code sessions, handoffs, and terminal attach.
 - **VPS Browser**: the internal browser/noVNC runtime used for subscription

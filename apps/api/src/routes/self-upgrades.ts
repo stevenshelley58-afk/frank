@@ -6,6 +6,7 @@ import { z } from "zod";
 import { recordAuditEvent } from "../audit.js";
 import type { ApiConfig } from "../config.js";
 import type { PgPool } from "../db.js";
+import { runHostOperation } from "./aionui.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -115,6 +116,29 @@ export function registerSelfUpgradeRoutes(server: FastifyInstance, pool: PgPool,
 
     return {
       selfUpgradeRun: serializeSelfUpgradeRun(run)
+    };
+  });
+
+  server.post("/v1/self-upgrades/check-latest", async (request) => {
+    const result = await runHostOperation(config, "frank.check_latest");
+    const check = parseLatestCheck(result.output);
+    await recordAuditEvent(pool, {
+      actorType: "user",
+      actorId: getRequestActorId(request),
+      action: "self_upgrade.check_latest",
+      targetType: "self_upgrade_run",
+      outcome: result.ok ? "success" : "failure",
+      metadata: {
+        check
+      }
+    });
+    return {
+      queued: false,
+      requiresApproval: Boolean(check.updateAvailable),
+      check,
+      suggestedGoal: check.updateAvailable
+        ? `Update Frank Hub to latest ${stringValue(check.remote, "origin")}/${stringValue(check.branch, "main")} (${stringValue(check.remoteCommit, "unknown")}) and verify in production with backups and rollback.`
+        : null
     };
   });
 
@@ -362,6 +386,34 @@ export function registerSelfUpgradeRoutes(server: FastifyInstance, pool: PgPool,
       client.release();
     }
   });
+}
+
+function parseLatestCheck(output: string | undefined): Record<string, unknown> {
+  if (!output?.trim()) {
+    return {
+      updateAvailable: false,
+      message: "No latest-check output was returned."
+    };
+  }
+  try {
+    const parsed = JSON.parse(output) as unknown;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    return {
+      updateAvailable: false,
+      message: output.trim()
+    };
+  }
+  return {
+    updateAvailable: false,
+    message: output.trim()
+  };
+}
+
+function stringValue(value: unknown, fallback: string): string {
+  return typeof value === "string" && value.trim() ? value : fallback;
 }
 
 async function createHermesTask(

@@ -18,6 +18,7 @@ POSTGRES_DB="$(read_env POSTGRES_DB frank)"
 POSTGRES_USER="$(read_env POSTGRES_USER frank)"
 POSTGRES_PASSWORD="$(read_env POSTGRES_PASSWORD "")"
 CLOUDFLARE_ACCESS_ENABLED="$(read_env CLOUDFLARE_ACCESS_ENABLED false)"
+AIONUI_ENABLED="$(read_env AIONUI_ENABLED false)"
 
 API_URL="http://127.0.0.1:${API_PORT}"
 WEB_URL="http://127.0.0.1:${WEB_PORT}"
@@ -27,6 +28,11 @@ curl -fsS "${API_URL}/healthz" >/dev/null
 
 echo "Checking web dashboard..."
 curl -fsS "${WEB_URL}/" | grep -q '<div id="root">'
+
+if [ "${AIONUI_ENABLED}" = "true" ]; then
+  echo "Checking AionUi web host..."
+  curl -fsS -H 'Host: aionui.frank.fail' "${WEB_URL}/" >/dev/null
+fi
 
 if [ "${CLOUDFLARE_ACCESS_ENABLED}" = "true" ]; then
   status_code="$(curl -sS -o /dev/null -w '%{http_code}' "${API_URL}/v1/system/status")"

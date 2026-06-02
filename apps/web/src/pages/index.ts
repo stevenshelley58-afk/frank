@@ -1,5 +1,6 @@
 export * from "./agents.js";
 export * from "./ai-console.js";
+export * from "./aionui.js";
 export * from "./audit-log.js";
 export * from "./command-center.js";
 export * from "./dashboard.js";

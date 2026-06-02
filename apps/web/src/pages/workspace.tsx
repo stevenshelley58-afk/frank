@@ -1,7 +1,7 @@
 import type * as React from "react";
 import { BookOpen, Bot, Boxes, FileClock, Folder, ListTodo, MessageCircle, Plus, Rocket, Route, ShieldCheck, TerminalSquare } from "lucide-react";
 import { useEffect, useState } from "react";
-import { createProject, listProjects, type Project } from "../api.js";
+import { createProject, importCDevProjects, listProjects, materializeCDevProjects, type Project } from "../api.js";
 import { Button, Input } from "../components/ui/index.js";
 import { DataTable, EmptyState, LoadingBlock, ResourceError, SectionCard, StatusBadge } from "../components/dashboard/index.js";
 import { formatDateTime, titleize } from "../lib/format.js";
@@ -16,6 +16,8 @@ export function ProjectsPage() {
   const [displayName, setDisplayName] = useState("");
   const [slug, setSlug] = useState("");
   const [repoRemote, setRepoRemote] = useState("");
+  const [operationMessage, setOperationMessage] = useState<string | null>(null);
+  const [busyAction, setBusyAction] = useState<string | null>(null);
 
   const load = () => {
     const controller = new AbortController();
@@ -51,6 +53,20 @@ export function ProjectsPage() {
     load();
   }
 
+  async function runInventoryAction(action: "import" | "materialize") {
+    setBusyAction(action);
+    setOperationMessage(null);
+    try {
+      const result = action === "import" ? await importCDevProjects() : await materializeCDevProjects();
+      setOperationMessage(result.message);
+      load();
+    } catch (error) {
+      setOperationMessage(errorMessage(error));
+    } finally {
+      setBusyAction(null);
+    }
+  }
+
   if (state.status === "loading") {
     return <LoadingBlock rows={6} />;
   }
@@ -71,6 +87,20 @@ export function ProjectsPage() {
             Add
           </Button>
         </form>
+      </SectionCard>
+
+      <SectionCard title="C:\\Dev Inventory" description="Register and materialize uploaded project workspaces under /opt/frank-projects." icon={<Folder aria-hidden="true" />}>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" onClick={() => void runInventoryAction("import")} disabled={busyAction !== null}>
+            <Folder aria-hidden="true" />
+            Import Registry
+          </Button>
+          <Button type="button" onClick={() => void runInventoryAction("materialize")} disabled={busyAction !== null}>
+            <Folder aria-hidden="true" />
+            Materialize Workspaces
+          </Button>
+          {operationMessage ? <span className="text-sm text-muted-foreground">{operationMessage}</span> : null}
+        </div>
       </SectionCard>
 
       <SectionCard title="Projects" description="Registered workspaces for Frank and Hermes." icon={<Folder aria-hidden="true" />}>

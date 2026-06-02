@@ -23,8 +23,10 @@ services:
       - "8644"
     volumes:
       - .:/opt/frank-hub
+      - ${FRANK_PROJECT_ROOT:-/opt/frank-projects}:/opt/frank-projects
       - ./runtime/hermes:/opt/data
       - ./workspaces:/opt/frank-hub/workspaces
       - ./runtime/artifacts:/opt/frank-hub/runtime/artifacts
+      - ./runtime/ai-instructions:/opt/frank-hub/runtime/ai-instructions:ro
       - ./runtime/access:/opt/frank-hub/runtime/access:ro
     shm_size: "1gb"

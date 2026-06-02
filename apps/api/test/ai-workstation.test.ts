@@ -364,6 +364,21 @@ function createTestServer(pool: FakeAiPool, overrides: TestConfigOverrides = {})
       workspaceRoot: "/opt/frank-hub/workspaces",
       artifactRoot: "/opt/frank-hub/runtime/artifacts"
     },
+    aionui: {
+      enabled: false,
+      version: "2.1.9",
+      publicUrl: "https://aionui.frank.fail",
+      internalBaseUrl: "http://aionui:25808",
+      adminCredentialsPath: "/opt/frank-hub/runtime/access/aionui-admin.json",
+      cookieDomain: ".frank.fail",
+      workspaceMounts: ["/opt/frank-projects", "/opt/frank-hub/workspaces", "/opt/frank-hub/runtime/artifacts"]
+    },
+    updates: {
+      checkEnabled: true,
+      checkIntervalMinutes: 60,
+      githubRemote: "origin",
+      githubBranch: "main"
+    },
     backups: { root: "/opt/frank-backups" },
     operator: {
       mode: "lab",

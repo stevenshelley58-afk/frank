@@ -3,6 +3,7 @@ import type * as React from "react";
 import { useEffect, useState } from "react";
 import {
   cancelSelfUpgrade,
+  checkLatestFrank,
   createSelfUpgrade,
   listSelfUpgrades,
   rollbackSelfUpgrade,
@@ -67,6 +68,21 @@ export function SelfUpgradesPage() {
     load();
   }
 
+  async function checkLatest() {
+    setMessage(null);
+    try {
+      const result = await checkLatestFrank();
+      if (result.suggestedGoal) {
+        setGoal(result.suggestedGoal);
+        setMessage("Latest Frank update found. Review the goal, then queue the self-upgrade.");
+      } else {
+        setMessage("Frank is already at the checked GitHub revision.");
+      }
+    } catch (error) {
+      setMessage(errorMessage(error));
+    }
+  }
+
   async function cancelRun(run: SelfUpgradeRun) {
     setMessage(null);
     const result = await cancelSelfUpgrade(run.id, "Cancelled from the Self-Upgrades page.");
@@ -115,6 +131,10 @@ export function SelfUpgradesPage() {
             <Button type="submit">
               <Play aria-hidden="true" />
               Queue self-upgrade
+            </Button>
+            <Button type="button" variant="outline" onClick={() => void checkLatest()}>
+              <RefreshCw aria-hidden="true" />
+              Check latest
             </Button>
             {message ? <span className="text-sm text-muted-foreground">{message}</span> : null}
           </div>

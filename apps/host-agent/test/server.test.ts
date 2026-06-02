@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AddressInfo } from "node:net";
 import type { Server } from "node:http";
 import { browserTargetUrl, createHostAgentServer } from "../src/server.js";
@@ -43,6 +43,65 @@ describe("Frank host agent server", () => {
   it("maps the Codex browser target to the official Codex app URL", () => {
     expect(browserTargetUrl("codex")).toBe("https://chatgpt.com/codex");
   });
+
+  it("runs only allowlisted production operations", async () => {
+    const exec = vi.fn(async () => ({ stdout: "ok\n", stderr: "" }));
+    const server = createHostAgentServer({
+      config: testConfig(),
+      manager: new FakeManager(),
+      exec
+    });
+    await listen(server);
+    const address = server.address() as AddressInfo;
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/ops/aionui.start`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer host-agent-secret"
+      }
+    });
+    const missing = await fetch(`http://127.0.0.1:${address.port}/v1/ops/rm -rf /`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer host-agent-secret"
+      }
+    });
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      ok: true,
+      action: "aionui.start"
+    });
+    expect(missing.status).toBe(404);
+    expect(exec).toHaveBeenCalledWith(
+      "bash",
+      ["scripts/aionui_compose_up.sh"],
+      expect.objectContaining({ cwd: "/opt/frank-hub" })
+    );
+  });
+
+  it("redacts sensitive operation output", async () => {
+    const exec = vi.fn(async () => ({ stdout: "FRANK_HOST_AGENT_TOKEN=secret\nok\n", stderr: "" }));
+    const server = createHostAgentServer({
+      config: testConfig(),
+      manager: new FakeManager(),
+      exec
+    });
+    await listen(server);
+    const address = server.address() as AddressInfo;
+
+    const response = await fetch(`http://127.0.0.1:${address.port}/v1/ops/aionui.logs`, {
+      method: "POST",
+      headers: {
+        Authorization: "Bearer host-agent-secret"
+      }
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.output).toContain("[redacted]");
+    expect(JSON.stringify(body)).not.toContain("secret");
+  });
 });
 
 function listen(server: Server): Promise<void> {
@@ -58,7 +117,14 @@ function testConfig(): HostAgentConfig {
     browserComposeFile: "docker-compose.browser.yml",
     repoPath: "/opt/frank-hub",
     runWild: true,
-    protectedPaths: ["/", "/root"]
+    protectedPaths: ["/", "/root"],
+    aionui: {
+      version: "2.1.9",
+      publicUrl: "https://aionui.frank.fail",
+      hostBaseUrl: "http://127.0.0.1:25808",
+      adminCredentialsPath: "/opt/frank-hub/runtime/access/aionui-admin.json",
+      workspaceMounts: ["/opt/frank-projects", "/opt/frank-hub/workspaces"]
+    }
   };
 }
 

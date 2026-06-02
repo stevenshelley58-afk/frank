@@ -3,6 +3,7 @@ import { z } from "zod";
 import { recordAuditEvent } from "../audit.js";
 import type { ApiConfig } from "../config.js";
 import type { PgPool } from "../db.js";
+import { runHostOperation } from "./aionui.js";
 
 const createProjectSchema = z
   .object({
@@ -110,6 +111,38 @@ export function registerProjectRoutes(server: FastifyInstance, pool: PgPool, con
     } finally {
       client.release();
     }
+  });
+
+  server.post("/v1/projects/import-c-dev", async (request) => {
+    const result = await runHostOperation(config, "projects.import_c_dev");
+    await recordAuditEvent(pool, {
+      actorType: "user",
+      actorId: getRequestActorId(request),
+      action: "project.import_c_dev",
+      targetType: "project_inventory",
+      targetId: "c-dev",
+      outcome: result.ok ? "success" : "failure",
+      metadata: {
+        message: result.message
+      }
+    });
+    return result;
+  });
+
+  server.post("/v1/projects/materialize-c-dev", async (request) => {
+    const result = await runHostOperation(config, "projects.materialize_c_dev");
+    await recordAuditEvent(pool, {
+      actorType: "user",
+      actorId: getRequestActorId(request),
+      action: "project.materialize_c_dev",
+      targetType: "project_inventory",
+      targetId: "c-dev",
+      outcome: result.ok ? "success" : "failure",
+      metadata: {
+        message: result.message
+      }
+    });
+    return result;
   });
 }
 

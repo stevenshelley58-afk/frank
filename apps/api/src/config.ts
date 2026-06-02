@@ -67,10 +67,23 @@ const envSchema = z.object({
   HERMES_WEBHOOK_BASE_URL: z.string().url().default("http://hermes:8644"),
   HERMES_WEBHOOK_ROUTE: z.string().default("frank-whatsapp"),
   HERMES_WEBHOOK_SECRET: z.string().optional(),
+  AIONUI_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(false),
+  AIONUI_VERSION: z.string().default("2.1.9"),
+  AIONUI_PUBLIC_URL: z.string().url().default("https://aionui.frank.fail"),
+  AIONUI_INTERNAL_BASE_URL: z.string().url().default("http://aionui:25808"),
+  AIONUI_ADMIN_CREDENTIALS_PATH: z.string().default("/opt/frank-hub/runtime/access/aionui-admin.json"),
+  AIONUI_COOKIE_DOMAIN: z.string().default(".frank.fail"),
+  AIONUI_WORKSPACE_MOUNTS: z.string().default("/opt/frank-projects,/opt/frank-hub/workspaces,/opt/frank-hub/runtime/artifacts"),
+  FRANK_UPDATE_CHECK_ENABLED: z.preprocess(booleanFromEnv, z.boolean()).default(true),
+  FRANK_UPDATE_CHECK_INTERVAL_MINUTES: z.coerce.number().int().positive().default(60),
+  FRANK_UPDATE_GITHUB_REMOTE: z.string().default("origin"),
+  FRANK_UPDATE_GITHUB_BRANCH: z.string().default("main"),
   LOG_LEVEL: z.string().default("info")
 });
 
-export type ApiConfig = ReturnType<typeof loadConfig>;
+type LoadedApiConfig = ReturnType<typeof loadConfig>;
+export type ApiConfig = Omit<LoadedApiConfig, "aionui" | "updates"> &
+  Partial<Pick<LoadedApiConfig, "aionui" | "updates">>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
   const parsed = envSchema.parse(env);
@@ -153,6 +166,21 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env) {
         webhookRoute: parsed.HERMES_WEBHOOK_ROUTE.trim() || "frank-whatsapp",
         webhookSecret: parsed.HERMES_WEBHOOK_SECRET?.trim() || undefined
       }
+    },
+    aionui: {
+      enabled: parsed.AIONUI_ENABLED,
+      version: parsed.AIONUI_VERSION.trim() || "2.1.9",
+      publicUrl: parsed.AIONUI_PUBLIC_URL.replace(/\/$/, ""),
+      internalBaseUrl: parsed.AIONUI_INTERNAL_BASE_URL.replace(/\/$/, ""),
+      adminCredentialsPath: parsed.AIONUI_ADMIN_CREDENTIALS_PATH,
+      cookieDomain: parsed.AIONUI_COOKIE_DOMAIN.trim() || ".frank.fail",
+      workspaceMounts: parseCommaSeparatedList(parsed.AIONUI_WORKSPACE_MOUNTS)
+    },
+    updates: {
+      checkEnabled: parsed.FRANK_UPDATE_CHECK_ENABLED,
+      checkIntervalMinutes: parsed.FRANK_UPDATE_CHECK_INTERVAL_MINUTES,
+      githubRemote: parsed.FRANK_UPDATE_GITHUB_REMOTE.trim() || "origin",
+      githubBranch: parsed.FRANK_UPDATE_GITHUB_BRANCH.trim() || "main"
     },
     accessProfile: {
       emailAddress: cleanOptionalString(parsed.FRANK_EMAIL_ADDRESS),

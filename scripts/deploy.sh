@@ -41,6 +41,7 @@ app_version="$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*
 hermes_enabled="$(read_env HERMES_ENABLED false)"
 hermes_api_server_key="$(read_env HERMES_API_SERVER_KEY "")"
 browser_enabled="$(read_env FRANK_BROWSER_ENABLED false)"
+aionui_enabled="$(read_env AIONUI_ENABLED false)"
 
 {
   printf '{\n'
@@ -81,6 +82,10 @@ if [ "${browser_enabled}" = "true" ]; then
   esac
   export FRANK_BROWSER_IMAGE="${browser_image}"
   compose_files+=(-f docker-compose.browser.yml)
+fi
+if [ "${aionui_enabled}" = "true" ]; then
+  mkdir -p runtime/aionui runtime/access runtime/artifacts runtime/ai-instructions workspaces
+  compose_files+=(-f docker-compose.aionui.yml)
 fi
 
 docker compose "${compose_files[@]}" --env-file .env build
