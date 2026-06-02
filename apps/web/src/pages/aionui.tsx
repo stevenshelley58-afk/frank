@@ -1,5 +1,5 @@
 import { ExternalLink, FolderOpen, Play, Power, RefreshCw, ScrollText, SquareTerminal } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   createAionUiSession,
   getAionUiLogs,
@@ -29,6 +29,7 @@ export function AionUiPage() {
   const [message, setMessage] = useState<string | null>(null);
   const [logs, setLogs] = useState<string>("");
   const [busy, setBusy] = useState<string | null>(null);
+  const sessionRequestedRef = useRef(false);
 
   const load = () => {
     const controller = new AbortController();
@@ -47,6 +48,14 @@ export function AionUiPage() {
     const controller = load();
     return () => controller.abort();
   }, []);
+
+  useEffect(() => {
+    if (state.status !== "ready" || !state.data.running || frameUrl || sessionRequestedRef.current) {
+      return;
+    }
+    sessionRequestedRef.current = true;
+    void openAionUi();
+  }, [frameUrl, state]);
 
   async function startRuntime() {
     setBusy("start");
@@ -69,8 +78,10 @@ export function AionUiPage() {
       const result = await stopAionUi();
       setMessage(result.message);
       setFrameUrl(null);
+      sessionRequestedRef.current = false;
       load();
     } catch (error) {
+      sessionRequestedRef.current = false;
       setMessage(errorMessage(error));
     } finally {
       setBusy(null);

@@ -152,7 +152,7 @@ function aionUiConfig(config: ApiConfig) {
   return config.aionui ?? {
     enabled: false,
     version: "2.1.9",
-    publicUrl: "https://aionui.frank.fail",
+    publicUrl: "https://hub.frank.fail/aionui/",
     internalBaseUrl: "http://aionui:25808",
     adminCredentialsPath: "/opt/frank-hub/runtime/access/aionui-admin.json",
     cookieDomain: ".frank.fail",

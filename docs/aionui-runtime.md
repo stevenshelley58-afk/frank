@@ -12,7 +12,8 @@ Compose file: `docker-compose.aionui.yml`.
 - checksum: verified from the release `.sha256` file during image build
 - container port: `25808`
 - host bind: `127.0.0.1:${AIONUI_HOST_PORT:-25808}`
-- public route: `aionui.frank.fail` through the Frank web/Nginx container
+- canonical browser path: `https://hub.frank.fail/aionui/`
+- convenience route: `aionui.frank.fail` through the Frank web/Nginx container, redirecting to the canonical path
 - persistent data: `./runtime/aionui:/data`
 - credential capture: `./runtime/access/aionui-admin.json`
 
@@ -75,7 +76,7 @@ docker compose -f docker-compose.yml -f docker-compose.hermes.yml -f docker-comp
 Expected:
 
 - `hub.frank.fail` loads after Cloudflare Access.
-- `aionui.frank.fail` is protected by Cloudflare Access.
+- `aionui.frank.fail` is protected by Cloudflare Access and redirects to `hub.frank.fail/aionui/`.
 - Frank's AionUi page embeds AionUi without a second AionUi login.
 - `/opt/frank-projects` is visible to AionUi and Hermes.
 - Hermes remains private on the Compose network.

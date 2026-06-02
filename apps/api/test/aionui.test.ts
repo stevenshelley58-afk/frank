@@ -16,7 +16,7 @@ describe("AionUi API routes", () => {
       configured: true,
       running: true,
       version: "2.1.9",
-      publicUrl: "https://aionui.frank.fail",
+      publicUrl: "https://hub.frank.fail/aionui/",
       internalBaseUrl: "http://aionui:25808",
       workspaceMounts: ["/opt/frank-projects", "/opt/frank-hub/workspaces"]
     }));
@@ -30,7 +30,7 @@ describe("AionUi API routes", () => {
       configured: true,
       running: true,
       version: "2.1.9",
-      publicUrl: "https://aionui.frank.fail",
+      publicUrl: "https://hub.frank.fail/aionui/",
       workspaceMounts: ["/opt/frank-projects", "/opt/frank-hub/workspaces"]
     });
     expect(fetchMock).toHaveBeenCalledWith(
@@ -47,7 +47,7 @@ describe("AionUi API routes", () => {
       const url = String(input);
       if (url === "http://host-agent.local/v1/aionui/session") {
         return jsonResponse({
-          publicUrl: "https://aionui.frank.fail",
+          publicUrl: "https://hub.frank.fail/aionui/",
           cookieHeader: "aionui_session=abc123; Path=/; HttpOnly; SameSite=Lax"
         });
       }
@@ -60,7 +60,7 @@ describe("AionUi API routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({
-      publicUrl: "https://aionui.frank.fail",
+      publicUrl: "https://hub.frank.fail/aionui/",
       ready: true
     });
     expect(response.headers["set-cookie"]).toEqual(
@@ -130,7 +130,7 @@ function createTestServer() {
     aionui: {
       enabled: true,
       version: "2.1.9",
-      publicUrl: "https://aionui.frank.fail",
+      publicUrl: "https://hub.frank.fail/aionui/",
       internalBaseUrl: "http://aionui:25808",
       adminCredentialsPath: "/opt/frank-hub/runtime/access/aionui-admin.json",
       cookieDomain: ".frank.fail",

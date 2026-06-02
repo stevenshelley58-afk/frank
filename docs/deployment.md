@@ -181,8 +181,9 @@ Use the dashboard:
 
 The dashboard calls the API through same-origin `/api/*` on `hub.frank.fail`.
 `api.frank.fail` is kept as a direct API hostname for later/admin/debug use.
-`aionui.frank.fail` is served by Frank's web/Nginx container and proxies to the
-private `aionui` Compose service.
+`aionui.frank.fail` is served by Frank's web/Nginx container and redirects to
+the embedded Frank AionUi page. The embedded page proxies to the private
+`aionui` Compose service through `hub.frank.fail/aionui/`.
 
 Keep `hub.frank.fail` as the canonical Frank Hub app URL. Configure
 `frank.fail/* -> https://hub.frank.fail/$1` with Cloudflare Redirect Rules /

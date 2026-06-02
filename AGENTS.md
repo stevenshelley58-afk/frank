@@ -57,7 +57,8 @@ this file.
 
 - `hub.frank.fail` -> Frank Hub dashboard
 - `api.frank.fail` -> Frank API
-- `aionui.frank.fail` -> embedded AionUi WebUI runtime
+- `hub.frank.fail/aionui/` -> embedded AionUi WebUI runtime
+- `aionui.frank.fail` -> redirect to embedded AionUi WebUI runtime
 
 ## Reserved URLs
 

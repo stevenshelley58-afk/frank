@@ -14,7 +14,7 @@ const schema = z.object({
   FRANK_HOST_AGENT_PROTECTED_PATHS: z.string().optional(),
   FRANK_HOST_AGENT_RUN_WILD: z.preprocess(booleanFromEnv, z.boolean()).default(true),
   AIONUI_VERSION: z.string().default("2.1.9"),
-  AIONUI_PUBLIC_URL: z.string().url().default("https://aionui.frank.fail"),
+  AIONUI_PUBLIC_URL: z.string().url().default("https://hub.frank.fail/aionui/"),
   AIONUI_HOST_BASE_URL: z.string().url().default("http://127.0.0.1:25808"),
   AIONUI_ADMIN_CREDENTIALS_PATH: z.string().default("/opt/frank-hub/runtime/access/aionui-admin.json"),
   AIONUI_WORKSPACE_MOUNTS: z.string().default("/opt/frank-projects,/opt/frank-hub/workspaces,/opt/frank-hub/runtime/artifacts")

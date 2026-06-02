@@ -37,7 +37,11 @@ if [ "${AIONUI_ENABLED}" = "true" ]; then
     exit 1
   fi
   curl -fsS -H 'Host: hub.frank.fail' "${WEB_URL}/aionui/" >/dev/null
-  curl -fsS -H 'Host: aionui.frank.fail' "${WEB_URL}/" >/dev/null
+  direct_status="$(curl -sS -o /dev/null -w '%{http_code}' -H 'Host: aionui.frank.fail' "${WEB_URL}/")"
+  if [ "${direct_status}" != "302" ]; then
+    echo "Expected aionui.frank.fail to redirect through Frank, got HTTP ${direct_status}." >&2
+    exit 1
+  fi
 fi
 
 if [ "${CLOUDFLARE_ACCESS_ENABLED}" = "true" ]; then
