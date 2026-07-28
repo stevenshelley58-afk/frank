@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "schema://frank.pack/v1",
   "title": "FRANK customer and industry pack",
-  "description": "FRANK-§6.10. A versioned extension pack for customer or industry-specific modules, configurations, and workflows. A pack may extend schemas through declared extension tables and JSON Schema fields. It may not fork core tables, bypass policy, read another cell, or replace canonical identity and audit.",
+  "description": "FRANK-\u00a76.10. A versioned extension pack for customer or industry-specific modules, configurations, and workflows. A pack may extend schemas through declared extension tables and JSON Schema fields. It may not fork core tables, bypass policy, read another cell, or replace canonical identity and audit.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -183,7 +183,7 @@
       }
     },
     "data_ownership": {
-      "description": "FRANK-§6.10. Declaration of tables and data extensions owned by this pack.",
+      "description": "FRANK-\u00a76.10. Declaration of tables and data extensions owned by this pack.",
       "type": "object",
       "additionalProperties": false,
       "required": [
@@ -232,7 +232,7 @@
       "minItems": 1
     },
     "recovery": {
-      "description": "FRANK-§6.10. Enumerated, not free text: an unrecognised recovery strategy is indistinguishable from a typo at the moment it is needed.",
+      "description": "FRANK-\u00a76.10. Enumerated, not free text: an unrecognised recovery strategy is indistinguishable from a typo at the moment it is needed.",
       "type": "string",
       "enum": [
         "restore-prior-compatible-pack",
