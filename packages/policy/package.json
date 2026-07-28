@@ -1,0 +1,27 @@
+{
+  "name": "@frank/policy",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "The FRANK-§6.9 action boundary: signature verification, the FRANK-§7.6 default operating policy encoded as data, standing-authorization matching, and the eight mandatory conformance tests. Pure; no I/O, no clock, no provider SDK.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lint: policy (schema + dependency gates run at repo root)'"
+  },
+  "dependencies": {
+    "@frank/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  },
+  "frank": {
+    "layer": "packages",
+    "mayDependOn": ["@frank/contracts"]
+  }
+}
