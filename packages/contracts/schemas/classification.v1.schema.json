@@ -1,0 +1,124 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://frank.classification/v1",
+  "title": "FRANK data classification, trust, and route decision",
+  "description": "FRANK-§2.3. One versioned vocabulary used everywhere. Classification and trust are different axes and must never be conflated. Combining data inherits the strictest class. Unknown terms or unknown classification fail closed.",
+  "$defs": {
+    "DataClass": {
+      "description": "FRANK-§2.3 classification vocabulary, ordered least to most restrictive. Ordinality is normative: see strictestOf().",
+      "type": "string",
+      "enum": ["open", "internal", "private", "sensitive", "secret"]
+    },
+    "TrustLabel": {
+      "description": "FRANK-§2.3 content trust. policy-trusted can only be produced by the policy-change workflow; ordinary documents and messages can never receive it. verified-source content remains evidence to assess and can never issue system instructions.",
+      "type": "string",
+      "enum": [
+        "policy-trusted",
+        "owner-authenticated",
+        "verified-source",
+        "external-untrusted",
+        "generated-untrusted"
+      ]
+    },
+    "RetentionTerms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["retainedForDays", "usedForTraining", "termsVersion"],
+      "properties": {
+        "retainedForDays": {
+          "description": "Null means the processor's retention is unknown. Unknown terms fail closed (FRANK-§2.3).",
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "usedForTraining": {
+          "type": ["boolean", "null"]
+        },
+        "termsVersion": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "Redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "appliedBy", "deterministic"],
+      "properties": {
+        "kind": { "type": "string", "minLength": 1 },
+        "appliedBy": { "type": "string", "minLength": 1 },
+        "deterministic": {
+          "description": "FRANK-§2.3: only an explicit deterministic redaction may produce a separately verified lower-class artifact. A model-generated redaction is not deterministic and does not lower class.",
+          "type": "boolean"
+        },
+        "verifiedArtifactId": { "type": "string" }
+      }
+    }
+  },
+  "type": "object",
+  "title:instance": "DataRouteDecision",
+  "description:instance": "FRANK-§2.3: every model, tool, projection, storage, telemetry, and connector route produces one of these.",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "decisionId",
+    "cellId",
+    "effectiveClass",
+    "contributingSources",
+    "processor",
+    "processingLocation",
+    "retention",
+    "redactions",
+    "policyVersion",
+    "reason",
+    "decidedAt"
+  ],
+  "properties": {
+    "schema": { "const": "frank.data-route/v1" },
+    "decisionId": { "type": "string", "minLength": 1 },
+    "cellId": { "type": "string", "minLength": 1 },
+    "effectiveClass": {
+      "$ref": "#/$defs/DataClass",
+      "description": "The strictest class among contributing sources unless a deterministic redaction produced a separately verified lower-class artifact."
+    },
+    "contributingSources": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["sourceId", "class", "trust"],
+        "properties": {
+          "sourceId": { "type": "string", "minLength": 1 },
+          "class": { "$ref": "#/$defs/DataClass" },
+          "trust": { "$ref": "#/$defs/TrustLabel" }
+        }
+      }
+    },
+    "processor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "id"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["model", "tool", "projection", "storage", "telemetry", "connector"]
+        },
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "processingLocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": { "type": "string", "enum": ["local", "dedicated-authenticated", "hosted-approved", "promotional-pool"] },
+        "region": { "type": "string" }
+      }
+    },
+    "retention": { "$ref": "#/$defs/RetentionTerms" },
+    "redactions": { "type": "array", "items": { "$ref": "#/$defs/Redaction" } },
+    "policyVersion": { "type": "string", "minLength": 1 },
+    "reason": { "type": "string", "minLength": 1 },
+    "decidedAt": { "type": "string", "format": "date-time" }
+  }
+}
