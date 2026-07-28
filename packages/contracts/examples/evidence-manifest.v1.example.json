@@ -10,7 +10,7 @@
   "requirements": [
     "UX-004",
     "BUILD-006",
-    "FRANK-§5.3",
+    "FRANK-\u00a75.3",
     "ADR-004"
   ],
   "source": {
