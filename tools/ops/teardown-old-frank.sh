@@ -51,12 +51,21 @@ have() { command -v "$1" >/dev/null 2>&1; }
 # this host, every pattern here matches it. Skip anything whose git origin is
 # the new repository — losing the new build to the legacy teardown would be a
 # self-inflicted wound, and it is exactly what the naive pattern would do.
-NEW_REPO_RE='stevenshelley58-afk/frank(\.git)?$'
+# Identify the new repo by CONTENT, never by git origin. The old repo was
+# deleted and a new one created at the SAME URL, so a stale legacy checkout's
+# origin still matches the new one — an origin check protects the wrong thing.
+# These paths exist only in the Slice 0 build and never existed in frank-hub.
+NEW_REPO_MARKERS=(
+  "packages/contracts/schemas/classification.v1.schema.json"
+  "tools/registry/generate-registry.mjs"
+  "infra/environments/schema.json"
+)
 is_new_repo() {
-  local p="$1" origin=""
-  [ -d "$p/.git" ] || return 1
-  origin="$(git -C "$p" remote get-url origin 2>/dev/null)" || return 1
-  [[ "$origin" =~ $NEW_REPO_RE ]]
+  local p="$1" m
+  for m in "${NEW_REPO_MARKERS[@]}"; do
+    [ -f "$p/$m" ] || return 1
+  done
+  return 0
 }
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -230,7 +239,7 @@ for u in "${SYSTEMD_UNITS[@]:-}"; do
   systemctl disable "$u" >/dev/null 2>&1
   rm -f "/etc/systemd/system/$u" "/lib/systemd/system/$u"
 done
-[ ${#SYSTEMD_UNITS[@]:-0} -gt 0 ] && systemctl daemon-reload >/dev/null 2>&1
+[ ${#SYSTEMD_UNITS[@]} -gt 0 ] && systemctl daemon-reload >/dev/null 2>&1
 
 for c in "${DOCKER_CONTAINERS[@]:-}"; do
   [ -z "$c" ] && continue
