@@ -1,1 +1,1 @@
-A§B
+A\nB§C\\D\tE\d+F
