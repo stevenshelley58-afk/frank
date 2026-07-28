@@ -1,0 +1,647 @@
+# FRANK — Slice 1 cell infrastructure
+#
+# Spec authority: FRANK-§16.1 (topology), §16.2 (service baseline — the "Preferred
+# implementation" column is binding), §16.3 (domain map), §16.6 (resource and scaling
+# policy), §15.2 (identity), §15.3 (secrets), §15.6 (network and edge), §2.4 (isolation),
+# §2.5 (Steven's personal defaults).
+#
+# Environment authority: ../environments/production.env.yaml and ../environments/local.env.yaml.
+#
+# HOST CONTRACT — this cell runs on a SHARED Ubuntu 24.04 box (8 vCPU / 31 GB RAM /
+# ~191 GB free) that already carries six unrelated production projects. Therefore:
+#
+#   1. Ports 80 and 443 belong to an existing edge (blockwise-caddy /
+#      draftcheck-wa-v3-internal_caddy-1). FRANK binds NEITHER. FRANK's own Caddy binds a
+#      configurable high port on 127.0.0.1 only and the host edge forwards frank.fail to it.
+#   2. EVERY published port is bound to 127.0.0.1. §15.6 and the Slice 1 exit gate require a
+#      public port scan to expose only intended edge services; FRANK exposes none directly.
+#   3. EVERY service carries a hard `mem_limit`, `memswap_limit` and `cpus` cap. The whole
+#      stack ceiling is ~11 GiB. See README.md for the allocation table and its §16.6 mapping.
+#   4. §16.6 priority rule: PostgreSQL, identity, workflow and secret services are protected
+#      from OOM eviction via `oom_score_adj`; cache and admin UI are the first to die.
+#   5. There is no /dev/kvm on this host. Nothing here assumes nested virtualisation.
+#      §16.6 is explicit that the control plane runs no untrusted build microVM anyway.
+#   6. Namespace: compose project `frank-cell`, containers `frank-cell-*`, volumes
+#      `frank-cell-*`, network `frank-cell-net`. The retired deployment used the `frank-hub`
+#      prefix; nothing here reuses it, so teardown can never be ambiguous (§16.3.1 step 2).
+#
+# §15.8: no image uses `:latest`. Tags are exact versions; README.md documents the digest
+# pinning procedure that must be run before the first production deploy.
+
+name: frank-cell
+
+# ---------------------------------------------------------------------------------------
+# Shared fragments
+# ---------------------------------------------------------------------------------------
+
+x-frank-logging: &frank-logging
+  # Bounded container logs. On a shared box an unbounded json-file driver is a
+  # disk-exhaustion vector against the other six projects.
+  driver: json-file
+  options:
+    max-size: "${FRANK_LOG_MAX_SIZE:-10m}"
+    max-file: "${FRANK_LOG_MAX_FILES:-3}"
+
+x-frank-service: &frank-service
+  restart: unless-stopped
+  init: true
+  logging: *frank-logging
+  security_opt:
+    - no-new-privileges:true
+  networks:
+    - frank-cell-net
+  environment: &frank-base-env
+    # §2.5: home timezone is the IANA name `Australia/Perth`, never a fixed +08:00 offset.
+    # Container-local time matches Steven's home zone so operator-facing output is readable.
+    # PostgreSQL overrides this for storage and logs (see postgres/postgresql.conf): domain
+    # timestamps are stored and logged in UTC as ISO 8601, 24-hour, per §2.5 and §11.1.
+    TZ: "${FRANK_TZ:-Australia/Perth}"
+    LANG: "${FRANK_LANG:-en_AU.UTF-8}"
+
+# ---------------------------------------------------------------------------------------
+# Services
+# ---------------------------------------------------------------------------------------
+
+services:
+
+  # -------------------------------------------------------------------------------------
+  # Canonical database — §16.2 "Canonical database | PostgreSQL | Extensions limited and
+  # pinned; pgvector for baseline semantic index". §11.4 and §16.2 also require Temporal to
+  # own a SEPARATE database; Authentik likewise (§16.2: third-party schemas are never
+  # imported into FRANK domain modules).
+  #
+  # Databases created by postgres/initdb/00-databases.sh:
+  #   frank                       — FRANK canonical domain, audit, outbox, action ledger
+  #   frank_temporal              — Temporal persistence
+  #   frank_temporal_visibility   — Temporal visibility
+  #   frank_authentik             — Authentik
+  # Each has its OWN role and password. §16.4: no environment — and here, no service —
+  # shares credentials or a writable database with another.
+  # -------------------------------------------------------------------------------------
+  frank-postgres:
+    <<: *frank-service
+    image: pgvector/pgvector:0.8.0-pg17
+    container_name: frank-cell-postgres
+    command:
+      - "postgres"
+      - "-c"
+      - "config_file=/etc/postgresql/postgresql.conf"
+    environment:
+      <<: *frank-base-env
+      POSTGRES_DB: "${FRANK_DB_NAME:-frank}"
+      POSTGRES_USER: "${FRANK_DB_USER:-frank}"
+      POSTGRES_PASSWORD: "${FRANK_DB_PASSWORD:?FRANK_DB_PASSWORD is required}"
+      POSTGRES_INITDB_ARGS: "--data-checksums --encoding=UTF8 --locale=C"
+      PGDATA: /var/lib/postgresql/data/pgdata
+      # Consumed only by the initdb bootstrap script, never by the running server.
+      FRANK_TEMPORAL_DB_USER: "${FRANK_TEMPORAL_DB_USER:-frank_temporal}"
+      FRANK_TEMPORAL_DB_PASSWORD: "${FRANK_TEMPORAL_DB_PASSWORD:?FRANK_TEMPORAL_DB_PASSWORD is required}"
+      FRANK_TEMPORAL_DB_NAME: "${FRANK_TEMPORAL_DB_NAME:-frank_temporal}"
+      FRANK_TEMPORAL_VISIBILITY_DB_NAME: "${FRANK_TEMPORAL_VISIBILITY_DB_NAME:-frank_temporal_visibility}"
+      FRANK_AUTHENTIK_DB_USER: "${FRANK_AUTHENTIK_DB_USER:-frank_authentik}"
+      FRANK_AUTHENTIK_DB_PASSWORD: "${FRANK_AUTHENTIK_DB_PASSWORD:?FRANK_AUTHENTIK_DB_PASSWORD is required}"
+      FRANK_AUTHENTIK_DB_NAME: "${FRANK_AUTHENTIK_DB_NAME:-frank_authentik}"
+    volumes:
+      - frank-cell-postgres-data:/var/lib/postgresql/data
+      - frank-cell-postgres-wal-archive:/wal-archive
+      - ./postgres/postgresql.conf:/etc/postgresql/postgresql.conf:ro
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    shm_size: "${FRANK_PG_SHM_SIZE:-256m}"
+    stop_grace_period: 60s
+    # §16.6: PostgreSQL has priority and cannot be OOM-evicted by ingestion, indexing,
+    # telemetry or model work.
+    oom_score_adj: -900
+    mem_limit: "${FRANK_MEM_POSTGRES:-4096m}"
+    memswap_limit: "${FRANK_MEM_POSTGRES:-4096m}"
+    cpus: "${FRANK_CPU_POSTGRES:-2.0}"
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \"$${POSTGRES_USER}\" -d \"$${POSTGRES_DB}\" -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 60s
+
+  # -------------------------------------------------------------------------------------
+  # Cache and ephemeral coordination — §16.2 "Valkey | Open, replaceable, and never
+  # canonical". §16.7: NATS/Valkey may be discarded and rebuilt from the PostgreSQL outbox.
+  # That is why this is the ONLY service with a positive oom_score_adj: if the box is under
+  # memory pressure, the cache is the correct thing to lose.
+  # -------------------------------------------------------------------------------------
+  frank-valkey:
+    <<: *frank-service
+    image: valkey/valkey:8.1.1-alpine
+    container_name: frank-cell-valkey
+    command:
+      - "sh"
+      - "-c"
+      - 'exec valkey-server /etc/valkey/valkey.conf --requirepass "$$FRANK_VALKEY_PASSWORD"'
+    environment:
+      <<: *frank-base-env
+      FRANK_VALKEY_PASSWORD: "${FRANK_VALKEY_PASSWORD:?FRANK_VALKEY_PASSWORD is required}"
+    volumes:
+      - ./valkey/valkey.conf:/etc/valkey/valkey.conf:ro
+      - frank-cell-valkey-data:/data
+    cap_drop:
+      - ALL
+    oom_score_adj: 300
+    mem_limit: "${FRANK_MEM_VALKEY:-512m}"
+    memswap_limit: "${FRANK_MEM_VALKEY:-512m}"
+    cpus: "${FRANK_CPU_VALKEY:-0.5}"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$$FRANK_VALKEY_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  # -------------------------------------------------------------------------------------
+  # Event transport — §16.2 "NATS JetStream | Outbox remains durability anchor".
+  # JetStream file store is capped (nats/nats.conf) because §16.6 gives the whole
+  # workflow/event store class a hard disk quota.
+  # -------------------------------------------------------------------------------------
+  frank-nats:
+    <<: *frank-service
+    image: nats:2.11.4-alpine
+    container_name: frank-cell-nats
+    command:
+      - "--config"
+      - "/etc/nats/nats.conf"
+    environment:
+      <<: *frank-base-env
+      FRANK_NATS_USER: "${FRANK_NATS_USER:-frank}"
+      FRANK_NATS_PASSWORD: "${FRANK_NATS_PASSWORD:?FRANK_NATS_PASSWORD is required}"
+      FRANK_NATS_MAX_FILE_STORE: "${FRANK_NATS_MAX_FILE_STORE:-4294967296}"
+      FRANK_NATS_MAX_MEMORY_STORE: "${FRANK_NATS_MAX_MEMORY_STORE:-268435456}"
+    volumes:
+      - ./nats/nats.conf:/etc/nats/nats.conf:ro
+      - frank-cell-nats-data:/data
+    cap_drop:
+      - ALL
+    # Transport, not truth — but losing it stalls delivery, so it sits above the cache.
+    oom_score_adj: -500
+    mem_limit: "${FRANK_MEM_NATS:-512m}"
+    memswap_limit: "${FRANK_MEM_NATS:-512m}"
+    cpus: "${FRANK_CPU_NATS:-0.5}"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:8222/healthz | grep -q '\"status\":\"ok\"'"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  # -------------------------------------------------------------------------------------
+  # Durable workflows — §16.2 "Temporal | Separate database and worker processes".
+  # The separate database is created by the postgres init script; SKIP_DB_CREATE keeps the
+  # Temporal role free of CREATEDB so it cannot reach outside its own two databases.
+  # Worker processes are FRANK application code and are NOT part of this infrastructure
+  # compose file; they attach to `frank-cell-net` from the application deployment.
+  # -------------------------------------------------------------------------------------
+  frank-temporal:
+    <<: *frank-service
+    image: temporalio/auto-setup:1.27.2
+    container_name: frank-cell-temporal
+    depends_on:
+      frank-postgres:
+        condition: service_healthy
+    environment:
+      <<: *frank-base-env
+      DB: postgres12
+      DB_PORT: "5432"
+      POSTGRES_SEEDS: frank-postgres
+      POSTGRES_USER: "${FRANK_TEMPORAL_DB_USER:-frank_temporal}"
+      POSTGRES_PWD: "${FRANK_TEMPORAL_DB_PASSWORD:?FRANK_TEMPORAL_DB_PASSWORD is required}"
+      DBNAME: "${FRANK_TEMPORAL_DB_NAME:-frank_temporal}"
+      VISIBILITY_DBNAME: "${FRANK_TEMPORAL_VISIBILITY_DB_NAME:-frank_temporal_visibility}"
+      SKIP_DB_CREATE: "true"
+      # NUM_HISTORY_SHARDS is immutable after first schema setup. 512 is the standard
+      # production floor; changing it later requires a fresh namespace, so it is set once.
+      NUM_HISTORY_SHARDS: "${FRANK_TEMPORAL_HISTORY_SHARDS:-512}"
+      DEFAULT_NAMESPACE: "${FRANK_TEMPORAL_NAMESPACE:-frank}"
+      # §16.8: database point-in-time recovery is 14 days; Temporal retention is aligned so
+      # a workflow history never outlives the PITR window that would be used to reconcile it.
+      DEFAULT_NAMESPACE_RETENTION: "${FRANK_TEMPORAL_RETENTION:-14d}"
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/frank.yaml
+      ENABLE_ES: "false"
+      BIND_ON_IP: "0.0.0.0"
+      TEMPORAL_ADDRESS: "frank-temporal:7233"
+      LOG_LEVEL: "${FRANK_TEMPORAL_LOG_LEVEL:-info}"
+    volumes:
+      - ./temporal/dynamicconfig/frank.yaml:/etc/temporal/config/dynamicconfig/frank.yaml:ro
+    stop_grace_period: 45s
+    # §16.6: workflow services have priority and cannot be OOM-evicted.
+    oom_score_adj: -800
+    mem_limit: "${FRANK_MEM_TEMPORAL:-1024m}"
+    memswap_limit: "${FRANK_MEM_TEMPORAL:-1024m}"
+    cpus: "${FRANK_CPU_TEMPORAL:-1.0}"
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD-SHELL", "temporal operator cluster health --address 127.0.0.1:7233 2>/dev/null | grep -qi serving"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+  # -------------------------------------------------------------------------------------
+  # Temporal web UI — an ADMIN CONSOLE. §16.3: "Admin consoles are private-network only and
+  # do not receive public DNS unless required." It is therefore behind the `admin` compose
+  # profile (off by default), publishes on 127.0.0.1 only, and has NO Caddy route.
+  # Start with:  docker compose --profile admin up -d frank-temporal-ui
+  # -------------------------------------------------------------------------------------
+  frank-temporal-ui:
+    <<: *frank-service
+    image: temporalio/ui:2.34.0
+    container_name: frank-cell-temporal-ui
+    profiles:
+      - admin
+    depends_on:
+      frank-temporal:
+        condition: service_healthy
+    environment:
+      <<: *frank-base-env
+      TEMPORAL_ADDRESS: "frank-temporal:7233"
+      TEMPORAL_CORS_ORIGINS: "http://127.0.0.1:${FRANK_TEMPORAL_UI_PORT:-48088}"
+      TEMPORAL_DEFAULT_NAMESPACE: "${FRANK_TEMPORAL_NAMESPACE:-frank}"
+      TEMPORAL_UI_PUBLIC_PATH: ""
+    ports:
+      - "127.0.0.1:${FRANK_TEMPORAL_UI_PORT:-48088}:8080"
+    cap_drop:
+      - ALL
+    # Operator convenience only. Nothing depends on it; kill it first.
+    oom_score_adj: 500
+    mem_limit: "${FRANK_MEM_TEMPORAL_UI:-256m}"
+    memswap_limit: "${FRANK_MEM_TEMPORAL_UI:-256m}"
+    cpus: "${FRANK_CPU_TEMPORAL_UI:-0.25}"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+
+  # -------------------------------------------------------------------------------------
+  # Identity dependency — a DEDICATED Valkey for Authentik.
+  #
+  # Judgment call (documented in README): §16.2 names one Valkey for "cache and ephemeral
+  # coordination". Authentik is given its own instance because the FRANK cache runs an
+  # `allkeys-lru` eviction policy and Authentik's session/channel keys must never be
+  # evicted (`noeviction`). Sharing one instance would make a cache-pressure event an
+  # identity outage, which §5.3 (failure-domain rules) and the §16.6 priority rule forbid.
+  # Cost: 192 MiB.
+  # -------------------------------------------------------------------------------------
+  frank-authentik-redis:
+    <<: *frank-service
+    image: valkey/valkey:8.1.1-alpine
+    container_name: frank-cell-authentik-redis
+    command:
+      - "sh"
+      - "-c"
+      - 'exec valkey-server /etc/valkey/valkey.conf --requirepass "$$FRANK_AUTHENTIK_REDIS_PASSWORD"'
+    environment:
+      <<: *frank-base-env
+      FRANK_AUTHENTIK_REDIS_PASSWORD: "${FRANK_AUTHENTIK_REDIS_PASSWORD:?FRANK_AUTHENTIK_REDIS_PASSWORD is required}"
+    volumes:
+      - ./valkey/authentik-redis.conf:/etc/valkey/valkey.conf:ro
+      - frank-cell-authentik-redis-data:/data
+    cap_drop:
+      - ALL
+    # Identity dependency — protected alongside Authentik itself (§16.6).
+    oom_score_adj: -700
+    mem_limit: "${FRANK_MEM_AUTHENTIK_REDIS:-192m}"
+    memswap_limit: "${FRANK_MEM_AUTHENTIK_REDIS:-192m}"
+    cpus: "${FRANK_CPU_AUTHENTIK_REDIS:-0.25}"
+    pids_limit: 128
+    healthcheck:
+      test: ["CMD-SHELL", "valkey-cli -a \"$$FRANK_AUTHENTIK_REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 15s
+
+  # -------------------------------------------------------------------------------------
+  # Identity — §16.2 "Authentik through OIDC | Passkeys/WebAuthn MFA, separate workload
+  # identities; implementation remains behind the identity contract". §15.2: dedicated
+  # self-hosted OIDC, passkeys preferred, short-lived sessions, workload identities.
+  # Reached only through Caddy at auth.<domain> (§16.3). Publishes no port itself.
+  # -------------------------------------------------------------------------------------
+  frank-authentik-server:
+    <<: *frank-service
+    image: ghcr.io/goauthentik/server:2025.6.4
+    container_name: frank-cell-authentik-server
+    command: ["server"]
+    depends_on:
+      frank-postgres:
+        condition: service_healthy
+      frank-authentik-redis:
+        condition: service_healthy
+    environment: &frank-authentik-env
+      <<: *frank-base-env
+      AUTHENTIK_POSTGRESQL__HOST: frank-postgres
+      AUTHENTIK_POSTGRESQL__PORT: "5432"
+      AUTHENTIK_POSTGRESQL__NAME: "${FRANK_AUTHENTIK_DB_NAME:-frank_authentik}"
+      AUTHENTIK_POSTGRESQL__USER: "${FRANK_AUTHENTIK_DB_USER:-frank_authentik}"
+      AUTHENTIK_POSTGRESQL__PASSWORD: "${FRANK_AUTHENTIK_DB_PASSWORD:?FRANK_AUTHENTIK_DB_PASSWORD is required}"
+      AUTHENTIK_REDIS__HOST: frank-authentik-redis
+      AUTHENTIK_REDIS__PORT: "6379"
+      AUTHENTIK_REDIS__PASSWORD: "${FRANK_AUTHENTIK_REDIS_PASSWORD:?FRANK_AUTHENTIK_REDIS_PASSWORD is required}"
+      AUTHENTIK_REDIS__DB: "0"
+      AUTHENTIK_SECRET_KEY: "${FRANK_AUTHENTIK_SECRET_KEY:?FRANK_AUTHENTIK_SECRET_KEY is required}"
+      # §16.3: cookies are scoped to the FRANK registrable domain only. Preview cookies,
+      # service workers, credentials and identity audience are isolated from production.
+      AUTHENTIK_COOKIE_DOMAIN: "${FRANK_DOMAIN:-frank.fail}"
+      AUTHENTIK_WEB__WORKERS: "${FRANK_AUTHENTIK_WEB_WORKERS:-2}"
+      AUTHENTIK_WEB__THREADS: "${FRANK_AUTHENTIK_WEB_THREADS:-2}"
+      # §15.7 / §2.3: telemetry defaults to metadata, never personal content, and this cell
+      # holds real owner data. No vendor error reporting, analytics or update pings.
+      AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+      AUTHENTIK_ERROR_REPORTING__SEND_PII: "false"
+      AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
+      AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
+      AUTHENTIK_AVATARS: "initials"
+      AUTHENTIK_LOG_LEVEL: "${FRANK_AUTHENTIK_LOG_LEVEL:-info}"
+      # §15.6: FRANK's Caddy terminates plaintext behind the host edge; Authentik must
+      # trust the forwarded scheme so OIDC redirect URIs are minted as https.
+      AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: "${FRANK_TRUSTED_PROXY_CIDRS:-10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,127.0.0.0/8}"
+      # First-boot only. Rotate/remove after the owner account exists (see README bootstrap).
+      AUTHENTIK_BOOTSTRAP_EMAIL: "${FRANK_AUTHENTIK_BOOTSTRAP_EMAIL:-}"
+      AUTHENTIK_BOOTSTRAP_PASSWORD: "${FRANK_AUTHENTIK_BOOTSTRAP_PASSWORD:-}"
+      AUTHENTIK_BOOTSTRAP_TOKEN: "${FRANK_AUTHENTIK_BOOTSTRAP_TOKEN:-}"
+    volumes:
+      - frank-cell-authentik-media:/media
+      - frank-cell-authentik-templates:/templates
+      - frank-cell-authentik-certs:/certs
+    stop_grace_period: 30s
+    # §16.6: identity has priority and cannot be OOM-evicted.
+    oom_score_adj: -800
+    mem_limit: "${FRANK_MEM_AUTHENTIK_SERVER:-1024m}"
+    memswap_limit: "${FRANK_MEM_AUTHENTIK_SERVER:-1024m}"
+    cpus: "${FRANK_CPU_AUTHENTIK_SERVER:-1.0}"
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 180s
+
+  frank-authentik-worker:
+    <<: *frank-service
+    image: ghcr.io/goauthentik/server:2025.6.4
+    container_name: frank-cell-authentik-worker
+    command: ["worker"]
+    depends_on:
+      frank-postgres:
+        condition: service_healthy
+      frank-authentik-redis:
+        condition: service_healthy
+    environment: *frank-authentik-env
+    volumes:
+      - frank-cell-authentik-media:/media
+      - frank-cell-authentik-templates:/templates
+      - frank-cell-authentik-certs:/certs
+    stop_grace_period: 30s
+    oom_score_adj: -700
+    mem_limit: "${FRANK_MEM_AUTHENTIK_WORKER:-768m}"
+    memswap_limit: "${FRANK_MEM_AUTHENTIK_WORKER:-768m}"
+    cpus: "${FRANK_CPU_AUTHENTIK_WORKER:-0.75}"
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD", "ak", "healthcheck"]
+      interval: 30s
+      timeout: 30s
+      retries: 10
+      start_period: 180s
+
+  # -------------------------------------------------------------------------------------
+  # Machine secrets — §16.2 "OpenBao | Short-lived, scoped credentials"; §15.3 and ADR-012
+  # require integrated Raft storage and a documented unseal path. This is a REAL server
+  # configuration (openbao/config/openbao.hcl), not `-dev`: it starts SEALED and stays
+  # useless until the documented bootstrap in README.md is performed. No key material is
+  # committed and none is generated by compose.
+  #
+  # Judgment call (documented in README): §15.3 mandates auto-unseal via a
+  # deletion-protected per-cell KMS key in the independent recovery account. That account
+  # does not exist yet at Slice 1, so this ships with Shamir manual unseal and the exact
+  # `seal` stanza to switch to, plus the seal-migration procedure. Deviation is recorded.
+  # -------------------------------------------------------------------------------------
+  frank-openbao:
+    <<: *frank-service
+    image: openbao/openbao:2.3.1
+    container_name: frank-cell-openbao
+    command:
+      - "server"
+      - "-config=/openbao/config/openbao.hcl"
+    environment:
+      <<: *frank-base-env
+      BAO_ADDR: "http://127.0.0.1:8200"
+      BAO_API_ADDR: "http://frank-openbao:8200"
+      BAO_CLUSTER_ADDR: "http://frank-openbao:8201"
+      # The image entrypoint runs `setcap` to grant itself IPC_LOCK. Compose already grants
+      # it below, and `setcap` fails under no-new-privileges, so skip it.
+      # SKIP_CHOWN is deliberately NOT set: the entrypoint must chown the Raft volume to the
+      # openbao user before dropping privileges, or the storage path is unwritable.
+      SKIP_SETCAP: "true"
+    volumes:
+      - ./openbao/config/openbao.hcl:/openbao/config/openbao.hcl:ro
+      - frank-cell-openbao-data:/openbao/data
+      - frank-cell-openbao-logs:/openbao/logs
+    # Admin endpoint. 127.0.0.1 ONLY — the host edge does not forward it and it has no
+    # Caddy route (§16.3: admin consoles are private-network only). Needed on the host so
+    # `bao operator unseal` can run from the operator's SSH/Tailscale session.
+    ports:
+      - "127.0.0.1:${FRANK_OPENBAO_PORT:-48200}:8200"
+    cap_add:
+      # mlock() so unsealed key material never reaches swap (§15.7). Note: `cap_drop: ALL` is
+      # NOT applied here — unlike the other services, this image's entrypoint must chown the
+      # Raft volume and su-exec to the openbao user, which needs CHOWN/SETUID/SETGID.
+      # no-new-privileges is still enforced, so nothing can be regained.
+      - IPC_LOCK
+    stop_grace_period: 30s
+    # §16.6: secret services have priority and cannot be OOM-evicted.
+    oom_score_adj: -900
+    mem_limit: "${FRANK_MEM_OPENBAO:-384m}"
+    memswap_limit: "${FRANK_MEM_OPENBAO:-384m}"
+    cpus: "${FRANK_CPU_OPENBAO:-0.5}"
+    pids_limit: 256
+    healthcheck:
+      # Exit 0 = unsealed and active, 2 = sealed. Both mean the process is serving; only a
+      # non-responsive server is unhealthy. A sealed OpenBao is an operator task, not a
+      # crash-loop trigger.
+      test: ["CMD-SHELL", "bao status -format=json >/dev/null 2>&1; c=$$?; [ $$c -eq 0 ] || [ $$c -eq 2 ]"]
+      interval: 15s
+      timeout: 10s
+      retries: 6
+      start_period: 20s
+
+  # -------------------------------------------------------------------------------------
+  # Object storage — §16.2 "SeaweedFS S3 API, behind `ObjectStore` contract | Immutable
+  # sources, artifacts and media; off-cell replication to an independent S3-compatible
+  # provider". Off-cell replication is Slice 8 (§16.7) and is not wired here.
+  # Private network only (§15.6); FRANK application code reaches it at
+  # http://frank-seaweedfs:8333. No Caddy route, no published port.
+  # -------------------------------------------------------------------------------------
+  frank-seaweedfs:
+    <<: *frank-service
+    image: chrislusf/seaweedfs:3.80
+    container_name: frank-cell-seaweedfs
+    entrypoint: ["/bin/sh"]
+    command:
+      - "-c"
+      - |
+        set -eu
+        umask 077
+        sed -e "s|__S3_ACCESS_KEY__|$${FRANK_S3_ACCESS_KEY}|g" \
+            -e "s|__S3_SECRET_KEY__|$${FRANK_S3_SECRET_KEY}|g" \
+            /etc/seaweedfs/s3.json.tmpl > /run/s3.json
+        exec weed server \
+          -dir=/data \
+          -ip=frank-seaweedfs \
+          -ip.bind=0.0.0.0 \
+          -master.volumeSizeLimitMB="$${FRANK_S3_VOLUME_SIZE_LIMIT_MB}" \
+          -volume.max=0 \
+          -volume.index=leveldb \
+          -filer \
+          -s3 \
+          -s3.port=8333 \
+          -s3.config=/run/s3.json
+    environment:
+      <<: *frank-base-env
+      FRANK_S3_ACCESS_KEY: "${FRANK_S3_ACCESS_KEY:?FRANK_S3_ACCESS_KEY is required}"
+      FRANK_S3_SECRET_KEY: "${FRANK_S3_SECRET_KEY:?FRANK_S3_SECRET_KEY is required}"
+      FRANK_S3_VOLUME_SIZE_LIMIT_MB: "${FRANK_S3_VOLUME_SIZE_LIMIT_MB:-1024}"
+    volumes:
+      - ./seaweedfs/s3.json.tmpl:/etc/seaweedfs/s3.json.tmpl:ro
+      - frank-cell-seaweedfs-data:/data
+    tmpfs:
+      # The rendered S3 identity file never touches disk.
+      - /run:mode=0700,size=1m
+    stop_grace_period: 45s
+    # §16.7 makes object storage a canonical store ("canonical sources and evidence"), so it
+    # ranks with the protected set even though §16.6's priority sentence names only
+    # PostgreSQL, identity, workflow and secrets.
+    oom_score_adj: -600
+    mem_limit: "${FRANK_MEM_SEAWEEDFS:-1024m}"
+    memswap_limit: "${FRANK_MEM_SEAWEEDFS:-1024m}"
+    cpus: "${FRANK_CPU_SEAWEEDFS:-0.75}"
+    pids_limit: 512
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status && wget -q -O /dev/null http://127.0.0.1:8888/ || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 45s
+
+  # -------------------------------------------------------------------------------------
+  # Reverse proxy — §16.2 "Caddy | Automatic TLS, secure headers, streaming, rate-limit
+  # integration"; §15.6 "Only the reverse proxy is publicly reachable".
+  #
+  # SHARED-HOST DEVIATION: ports 80 and 443 belong to blockwise-caddy and
+  # draftcheck-wa-v3-internal_caddy-1. FRANK's Caddy therefore runs with `auto_https off`,
+  # terminates NOTHING, and serves plain HTTP on a high port bound to 127.0.0.1. TLS,
+  # certificate issuance and HTTP->HTTPS redirection for frank.fail stay with the existing
+  # host edge, which proxies to this port. See README "Wiring the host edge".
+  # -------------------------------------------------------------------------------------
+  frank-caddy:
+    <<: *frank-service
+    image: caddy:2.10.0-alpine
+    container_name: frank-cell-caddy
+    depends_on:
+      frank-authentik-server:
+        condition: service_healthy
+    environment:
+      <<: *frank-base-env
+      FRANK_DOMAIN: "${FRANK_DOMAIN:-frank.fail}"
+      FRANK_EDGE_PORT: "${FRANK_EDGE_CONTAINER_PORT:-8443}"
+      FRANK_PUBLIC_SCHEME: "${FRANK_PUBLIC_SCHEME:-https}"
+      FRANK_WEB_UPSTREAM: "${FRANK_WEB_UPSTREAM:-frank-web:3000}"
+      FRANK_API_UPSTREAM: "${FRANK_API_UPSTREAM:-frank-api:3001}"
+      FRANK_AUTH_UPSTREAM: "${FRANK_AUTH_UPSTREAM:-frank-authentik-server:9000}"
+      # SPACE-separated (Caddy `trusted_proxies static` syntax). Authentik's equivalent
+      # setting is comma-separated and lives in FRANK_TRUSTED_PROXY_CIDRS — keep both in step.
+      FRANK_CADDY_TRUSTED_PROXIES: "${FRANK_CADDY_TRUSTED_PROXIES:-127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16}"
+      FRANK_CADDY_LOG_LEVEL: "${FRANK_CADDY_LOG_LEVEL:-INFO}"
+      FRANK_MAX_REQUEST_BODY: "${FRANK_MAX_REQUEST_BODY:-25MB}"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - frank-cell-caddy-data:/data
+      - frank-cell-caddy-config:/config
+    ports:
+      # 127.0.0.1 ONLY. A public port scan of this host must not see FRANK at all; the
+      # existing host edge is the only thing that may reach this socket.
+      - "127.0.0.1:${FRANK_EDGE_PORT:-8443}:${FRANK_EDGE_CONTAINER_PORT:-8443}"
+    cap_drop:
+      - ALL
+    stop_grace_period: 30s
+    # §16.6 puts the edge in the same envelope as identity and secrets. It is not in the
+    # "must not be evicted" sentence, but killing it makes the cell invisible, so it ranks
+    # just below the protected set.
+    oom_score_adj: -400
+    mem_limit: "${FRANK_MEM_CADDY:-256m}"
+    memswap_limit: "${FRANK_MEM_CADDY:-256m}"
+    cpus: "${FRANK_CPU_CADDY:-0.5}"
+    pids_limit: 256
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:$${FRANK_EDGE_PORT}/healthz || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+# ---------------------------------------------------------------------------------------
+# Network — ONE internal bridge. §2.4: FRANK is a single private cell. §15.6: databases,
+# Valkey, NATS, the workflow service, object storage, identity admin and observability stay
+# on private networks. No `external: true` network is joined, so nothing in this stack can
+# be addressed from blockwise, draftcheck-wa-v3, coolify, cuz, elfandwonder or
+# character-generator, and nothing in those projects can address FRANK.
+#
+# The subnet is pinned and configurable: on a box with ~20 containers across six projects,
+# letting Docker pick from the default pool risks colliding with an existing project's
+# network. preflight.sh checks for overlap before you bring the cell up.
+# ---------------------------------------------------------------------------------------
+networks:
+  frank-cell-net:
+    name: frank-cell-net
+    driver: bridge
+    driver_opts:
+      com.docker.network.bridge.name: "${FRANK_BRIDGE_NAME:-frank-cell0}"
+      com.docker.network.bridge.enable_ip_masquerade: "true"
+    ipam:
+      driver: default
+      config:
+        - subnet: "${FRANK_NETWORK_SUBNET:-172.28.240.0/24}"
+
+# ---------------------------------------------------------------------------------------
+# Volumes — every name explicitly `frank-cell-` prefixed so `docker volume ls | grep
+# '^local *frank-cell-'` is an exact, complete teardown inventory (§16.3.1 steps 1-2 and
+# 11-12 require destruction to be unambiguous). Nothing here reuses the `frank-hub` prefix.
+# ---------------------------------------------------------------------------------------
+volumes:
+  frank-cell-postgres-data:
+    name: frank-cell-postgres-data
+  frank-cell-postgres-wal-archive:
+    name: frank-cell-postgres-wal-archive
+  frank-cell-valkey-data:
+    name: frank-cell-valkey-data
+  frank-cell-nats-data:
+    name: frank-cell-nats-data
+  frank-cell-authentik-redis-data:
+    name: frank-cell-authentik-redis-data
+  frank-cell-authentik-media:
+    name: frank-cell-authentik-media
+  frank-cell-authentik-templates:
+    name: frank-cell-authentik-templates
+  frank-cell-authentik-certs:
+    name: frank-cell-authentik-certs
+  frank-cell-openbao-data:
+    name: frank-cell-openbao-data
+  frank-cell-openbao-logs:
+    name: frank-cell-openbao-logs
+  frank-cell-seaweedfs-data:
+    name: frank-cell-seaweedfs-data
+  frank-cell-caddy-data:
+    name: frank-cell-caddy-data
+  frank-cell-caddy-config:
+    name: frank-cell-caddy-config
