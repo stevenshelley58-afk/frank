@@ -1,0 +1,52 @@
+{
+  "schema": "frank.screen/v1",
+  "id": "core.today",
+  "path": "/today",
+  "navigation": "primary",
+  "roles": [
+    "owner",
+    "operator",
+    "member"
+  ],
+  "compartments": [],
+  "objects": [
+    "WorkItem",
+    "CalendarEvent",
+    "Notification",
+    "Run"
+  ],
+  "query_schema": "schema://screens/today/query/v1",
+  "commands": [
+    "work.create",
+    "run.interrupt",
+    "review.open"
+  ],
+  "event_parts": [
+    "run.status",
+    "notification.created",
+    "work.changed"
+  ],
+  "states": [
+    "loading",
+    "empty",
+    "partial",
+    "stale",
+    "offline",
+    "denied",
+    "degraded",
+    "error",
+    "recovery",
+    "success"
+  ],
+  "offline": "read-cached",
+  "capabilities": [],
+  "deep_links": [
+    "web",
+    "pwa",
+    "tauri"
+  ],
+  "acceptance_journeys": [
+    "journey.today-open",
+    "journey.capture-to-today"
+  ]
+}

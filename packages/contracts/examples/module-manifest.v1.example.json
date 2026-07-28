@@ -1,0 +1,45 @@
+{
+  "schema": "frank.module/v1",
+  "id": "brain.youtube",
+  "name": "YouTube Knowledge Ingestion",
+  "version": "1.0.0",
+  "kind": "feature",
+  "depends_on": [
+    "core.sources@^1",
+    "core.knowledge@^1"
+  ],
+  "provides": [
+    "connector.youtube.capture",
+    "pipeline.youtube.wiki"
+  ],
+  "data_scopes": [
+    "open",
+    "private"
+  ],
+  "ui": {
+    "routes": [
+      "/brain/videos"
+    ],
+    "widgets": [
+      "today.recent-learning"
+    ]
+  },
+  "events": {
+    "consumes": [
+      "source.youtube.captured.v1"
+    ],
+    "emits": [
+      "knowledge.video.ready.v1"
+    ]
+  },
+  "permissions": {
+    "required": [
+      "source:write",
+      "knowledge:write"
+    ]
+  },
+  "health_checks": [
+    "transcript_provider",
+    "capture_lag"
+  ]
+}
