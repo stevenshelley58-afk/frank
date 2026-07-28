@@ -1,0 +1,88 @@
+# FRANK durable workflows — Temporal dynamic configuration
+#
+# Spec: FRANK-§16.2 "Durable workflows | Temporal | Separate database and worker processes";
+#       FRANK-§13.1 (workflow engine decision); ADR-005; FRANK-§16.6 (resource policy);
+#       FRANK-§16.7 "Temporal | Live orchestration history | ... Contained resume within 45
+#       minutes"; FRANK-§16.8 (retention baseline).
+#
+# Mounted at /etc/temporal/config/dynamicconfig/frank.yaml and selected by
+# DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/frank.yaml.
+#
+# These values are deliberately conservative. Temporal runs under a 1024 MiB hard memory
+# limit and a 1.0 CPU cap on a SHARED host; the defaults assume a dedicated node and would
+# let a single hot task queue's rate limiters and caches push the container into OOM.
+
+# --- Persistence rate limits --------------------------------------------------------------
+# Every one of these lands on the same PostgreSQL instance that also serves the FRANK domain
+# and Authentik. Capping Temporal's persistence QPS is what stops workflow churn from
+# starving the canonical domain database (FRANK-§16.6 priority rule).
+frontend.persistenceMaxQPS:
+  - value: 800
+history.persistenceMaxQPS:
+  - value: 1500
+matching.persistenceMaxQPS:
+  - value: 800
+worker.persistenceMaxQPS:
+  - value: 400
+
+# --- Frontend request limits --------------------------------------------------------------
+frontend.rps:
+  - value: 1200
+frontend.namespaceRPS:
+  - value: 800
+frontend.namespaceCount:
+  - value: 200
+
+# --- History cache — the dominant memory term in the history service ----------------------
+# Sized for the 1024 MiB container limit rather than Temporal's dedicated-node defaults.
+history.cacheInitialSize:
+  - value: 128
+history.cacheMaxSize:
+  - value: 512
+history.eventsCacheMaxSizeBytes:
+  - value: 33554432
+history.historyCacheMaxSizeBytes:
+  - value: 67108864
+
+# --- Payload and history size limits ------------------------------------------------------
+# FRANK-§6.8: artifacts and evidence live in object storage and travel as manifests, so
+# workflow payloads stay small. Warn early, refuse before the history becomes unrecoverable.
+limit.blobSize.warn:
+  - value: 262144
+limit.blobSize.error:
+  - value: 2097152
+limit.historySize.warn:
+  - value: 10485760
+limit.historySize.error:
+  - value: 52428800
+limit.historyCount.warn:
+  - value: 10000
+limit.historyCount.error:
+  - value: 51200
+limit.maxIDLength:
+  - value: 255
+
+# --- Retention -----------------------------------------------------------------------------
+# FRANK-§16.8 sets database point-in-time recovery at 14 days. Workflow history is aligned to
+# it so an execution never outlives the PITR window that would be used to reconcile its side
+# effects against the invocation ledger (FRANK-§13.5).
+system.minRetentionDays:
+  - value: 1
+system.forceSearchAttributesCacheRefreshOnRead:
+  - value: true
+
+# --- Visibility ---------------------------------------------------------------------------
+# Standard (SQL) visibility against the separate frank_temporal_visibility database.
+# Elasticsearch is not admitted to this host: FRANK-§16.6 gives the whole workflow/event/cache
+# class one envelope, and an ES node would consume it several times over.
+system.enableReadFromSecondaryVisibility:
+  - value: false
+frontend.enableReadFromSecondaryVisibility:
+  - value: false
+
+# --- Archival ------------------------------------------------------------------------------
+# Off in Slice 1. FRANK-§16.7 protects Temporal through continuous database protection plus
+# workflow export metadata, not through Temporal's own archival, and enabling archival here
+# would write into object storage with no lifecycle rule attached (FRANK-§16.8).
+system.enableArchivalSystemWorkflow:
+  - value: false
