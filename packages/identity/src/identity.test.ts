@@ -227,7 +227,7 @@ describe('LocalSignedSessionProvider', () => {
       expect(result.authenticated).toBe(false);
       if (result.authenticated) continue;
       expect(result.detail).not.toContain('SUPER-SECRET');
-      expect(result.detail).not.toContain(value.slice(0, 24) || ' never');
+      expect(result.detail).not.toContain(value.slice(0, 24) || ' never');
     }
   });
 
