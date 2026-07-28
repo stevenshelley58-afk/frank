@@ -1,0 +1,35 @@
+{
+  "name": "@frank/adapter-postgres",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Canonical FRANK domain persistence: Drizzle schema, migrations, envelope encryption, and repositories for PostgreSQL. ADR-003, ADR-004, FRANK-§11.",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema/index.ts",
+    "./crypto": "./src/crypto/index.ts",
+    "./migrations/*": "./migrations/*"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lint: adapter-postgres (schema + dependency gates run at repo root)'",
+    "db:generate": "drizzle-kit generate",
+    "db:custom": "drizzle-kit generate --custom"
+  },
+  "dependencies": {
+    "@frank/contracts": "workspace:*",
+    "drizzle-orm": "0.45.2",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.0",
+    "drizzle-kit": "0.31.10",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  },
+  "frank": {
+    "layer": "adapter",
+    "mayDependOn": ["@frank/contracts"]
+  }
+}
