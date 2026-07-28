@@ -1,0 +1,984 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://frank.environment/v1",
+  "title": "FRANK environment definition",
+  "description": "FRANK-§16.4. One file per environment in infra/environments/<name>.env.yaml. This is infrastructure configuration, not a cross-cutting product contract, so it lives in infra/ and not in packages/contracts (FRANK-§17.1, FRANK-§17.2). The definition is the authority for what an environment is allowed to hold, reach, and promote; standing it up later may not widen it. Validated by tools/lint/validate-environments.mjs, which also enforces the cross-file invariants a single-document schema cannot express.",
+
+  "$defs": {
+    "SpecLocator": {
+      "description": "Normative section locator in the FRANK specification (FRANK-§0). Every claim in an environment definition traces to one.",
+      "type": "string",
+      "pattern": "^FRANK-§[0-9]+(\\.[0-9]+)*$"
+    },
+
+    "EnvironmentName": {
+      "description": "FRANK-§16.4 defines exactly these six environments. The set is closed; a seventh environment requires a specification change under FRANK-§0.2.",
+      "type": "string",
+      "enum": ["local", "integration", "preview", "staging", "production", "recovery"]
+    },
+
+    "PromotionEndpoint": {
+      "description": "An environment name, or a non-environment origin. `working-tree` is an uncommitted developer checkout; `source-commit` is a signed commit entering continuous integration.",
+      "type": "string",
+      "enum": [
+        "local",
+        "integration",
+        "preview",
+        "staging",
+        "production",
+        "recovery",
+        "working-tree",
+        "source-commit"
+      ]
+    },
+
+    "ServiceId": {
+      "description": "One row of the FRANK-§16.2 service baseline. The identifier names the role, never the product, because every implementation named in FRANK-§16.2 is replaceable.",
+      "type": "string",
+      "enum": [
+        "reverse-proxy",
+        "web",
+        "domain-api",
+        "durable-workflows",
+        "canonical-database",
+        "object-storage",
+        "cache",
+        "event-transport",
+        "model-gateway",
+        "untrusted-execution",
+        "preview-hosting",
+        "collaboration",
+        "knowledge-projection",
+        "identity",
+        "machine-secrets",
+        "telemetry",
+        "llm-observability",
+        "agent-evaluation",
+        "metrics",
+        "logs",
+        "traces",
+        "dashboards",
+        "availability-checks",
+        "private-access"
+      ]
+    },
+
+    "ServiceIdList": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/ServiceId" }
+    },
+
+    "Hostname": {
+      "description": "A hostname or wildcard hostname pattern. `SANDBOX_BASE_DOMAIN` is left unresolved on purpose: FRANK-§16.3 requires a separately owned registrable domain, and hard-coding one here would let a later edit make it a child of frank.fail.",
+      "type": "string",
+      "minLength": 1
+    }
+  },
+
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "name",
+    "title",
+    "status",
+    "purpose",
+    "specRefs",
+    "topology",
+    "services",
+    "dataClassification",
+    "network",
+    "isolation",
+    "traffic",
+    "externalSideEffects",
+    "secrets",
+    "backup",
+    "promotion",
+    "lifetime",
+    "destruction",
+    "resources"
+  ],
+
+  "properties": {
+    "schema": { "const": "frank.environment/v1" },
+
+    "name": { "$ref": "#/$defs/EnvironmentName" },
+
+    "title": { "type": "string", "minLength": 1 },
+
+    "status": {
+      "description": "Slice 0 exit gate 7: all six environments carry a real definition and `staging` and `recovery` may not be `stub`. `stub` records an environment whose definition is deliberately incomplete; the validator rejects it for staging and recovery.",
+      "type": "string",
+      "enum": ["defined", "stub"]
+    },
+
+    "purpose": {
+      "description": "The FRANK-§16.4 one-line purpose, expanded. An environment that cannot state a purpose distinct from its neighbours is a duplicate and should not exist.",
+      "type": "string",
+      "minLength": 1
+    },
+
+    "specRefs": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "$ref": "#/$defs/SpecLocator" }
+    },
+
+    "topology": {
+      "description": "FRANK-§16.1. Which physical failure domain and which provider account this environment occupies. FRANK-§16.1 and FRANK-§15.3 require the recovery cell, its KMS, and the backup destination to sit in a provider account independent of the control VPS.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["boundary", "providerAccount"],
+      "properties": {
+        "boundary": {
+          "type": "string",
+          "enum": [
+            "control-plane-cell",
+            "execution-and-preview-worker",
+            "warm-recovery-cell",
+            "developer-workstation",
+            "ephemeral-ci-runner"
+          ]
+        },
+        "providerAccount": {
+          "type": "string",
+          "enum": [
+            "vps-provider",
+            "independent-recovery-provider",
+            "sandbox-provider",
+            "ci-provider",
+            "developer-owned"
+          ]
+        },
+        "dedicatedTelemetryNode": {
+          "description": "FRANK-§16.6: Langfuse is not admitted to the 64 GB control VPS. True only where a separately sized telemetry node exists.",
+          "type": "boolean"
+        },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "services": {
+      "description": "FRANK-§16.2 service baseline, partitioned. Every service in the baseline must appear in exactly one of present/optional/absent; the validator enforces total coverage so a new baseline row cannot be silently ignored by an environment.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["present", "optional", "absent"],
+      "properties": {
+        "present": {
+          "description": "Runs in this environment and is required for the environment to be considered healthy.",
+          "$ref": "#/$defs/ServiceIdList"
+        },
+        "optional": {
+          "description": "May run; its absence never blocks the environment's purpose (FRANK-§16.1 for telemetry, FRANK-§16.2 for LLM observability).",
+          "$ref": "#/$defs/ServiceIdList"
+        },
+        "absent": {
+          "description": "Deliberately not deployed. Absence is a decision with a reason, not an omission.",
+          "$ref": "#/$defs/ServiceIdList"
+        },
+        "notes": {
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/ServiceId" },
+          "additionalProperties": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "dataClassification": {
+      "description": "FRANK-§2.3. The ceiling is the strictest class this environment may hold at rest. Combining data inherits the strictest class, so an environment fed by a restored production backup carries production's ceiling regardless of intent.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ceiling", "mayHoldPrivate", "mayHoldSensitive", "dataOrigin", "rationale"],
+      "properties": {
+        "ceiling": {
+          "description": "FRANK-§2.3 vocabulary minus `secret`: an environment never holds `secret`-class material as domain data. Passwords, recovery codes, private keys, and raw tokens live only in the machine secret store (FRANK-§15.3) and reach workloads as opaque handles.",
+          "type": "string",
+          "enum": ["open", "internal", "private", "sensitive"]
+        },
+        "mayHoldPrivate": {
+          "description": "Stated explicitly rather than derived, so an environment that may hold email, calendar, contacts, private code, or personal notes says so in its own file.",
+          "type": "boolean"
+        },
+        "mayHoldSensitive": {
+          "description": "Health, finance, location history, identity documents, children and intimate relationship records (FRANK-§2.3). Requires compartment-scoped agents and a contractually approved private or local route.",
+          "type": "boolean"
+        },
+        "dataOrigin": {
+          "type": "string",
+          "enum": [
+            "synthetic-fixtures",
+            "sanitized-synthetic",
+            "real-owner-data",
+            "restored-production-backup"
+          ]
+        },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "network": {
+      "description": "FRANK-§16.3 domain map. Admin consoles are private-network only and do not receive public DNS unless required.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["registrableDomain", "hostnames", "publicDns", "adminConsolesPublicDns"],
+      "properties": {
+        "registrableDomain": {
+          "description": "FRANK-§16.3: `SANDBOX_BASE_DOMAIN` must be a separately owned registrable domain, never a child of `frank.fail`. The validator rejects any preview registrable domain equal to or ending in `frank.fail`.",
+          "type": "string",
+          "minLength": 1
+        },
+        "hostnames": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/Hostname" }
+        },
+        "mustNotBeChildOf": {
+          "description": "Registrable domains this environment's hostnames may never sit under. Enforced by the validator, not by convention.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "publicDns": { "type": "boolean" },
+        "adminConsolesPublicDns": { "type": "boolean" },
+        "edge": { "type": "string", "minLength": 1 },
+        "egress": {
+          "description": "FRANK-§15.4: egress through a policy proxy with DNS, destination, protocol, and byte controls wherever untrusted or unreconciled work runs.",
+          "type": "string",
+          "enum": ["unrestricted-developer", "policy-proxy-default-deny", "allowlist", "none"]
+        },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "isolation": {
+      "description": "FRANK-§16.4 (\"No environment shares credentials or writable databases with another\") and FRANK-§2.4 (FRANK is a single private cell; separation is by cell, not by tenant row).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cellId",
+        "sharesCredentials",
+        "sharesWritableDatabase",
+        "isolatedFromProduction"
+      ],
+      "properties": {
+        "cellId": {
+          "description": "FRANK-§2.4. Distinct per environment; a shared cell identifier would make cross-environment records representable.",
+          "type": "string",
+          "minLength": 1
+        },
+        "sharesCredentials": {
+          "description": "FRANK-§16.4 forbids this outright, so the only valid value is false. The field exists to make the assertion explicit and machine-checkable per environment.",
+          "const": false
+        },
+        "sharesWritableDatabase": { "const": false },
+        "isolatedFromProduction": {
+          "description": "FRANK-§16.3: preview cookies, service workers, credentials, networks, storage, and identity audience are isolated from production. Preview must list all six.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "cookies",
+              "service-workers",
+              "credentials",
+              "networks",
+              "storage",
+              "identity-audience"
+            ]
+          }
+        },
+        "identityAudience": { "type": "string", "minLength": 1 },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "traffic": {
+      "description": "Who may reach this environment, and under what preconditions.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["acceptsOrdinaryUserTraffic", "publicAccess"],
+      "properties": {
+        "acceptsOrdinaryUserTraffic": {
+          "description": "FRANK-§16.1: the warm recovery cell accepts no ordinary user traffic until the failover controller has verified its admission preconditions.",
+          "type": "boolean"
+        },
+        "publicAccess": {
+          "type": "string",
+          "enum": ["none", "private-network-only", "authenticated-only", "public"]
+        },
+        "admissionPreconditions": {
+          "description": "FRANK-§16.1: fencing of the old writer, recovery-manifest consistency, audit roots, and a single active write authority. Required for `recovery`; the validator checks all four are present.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "old-writer-fenced",
+              "recovery-manifest-consistent",
+              "audit-roots-verified",
+              "single-active-write-authority"
+            ]
+          }
+        },
+        "canonicalWriteAuthority": {
+          "description": "FRANK-§16.1 / FRANK-§16.7: exactly one environment may be the active writer of canonical FRANK data at any moment. The validator checks that only `production` and `recovery` claim eligibility.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["holdsCanonicalData", "mayBecomeActiveWriter", "requiresFencingOfPriorWriter"],
+          "properties": {
+            "holdsCanonicalData": { "type": "boolean" },
+            "mayBecomeActiveWriter": { "type": "boolean" },
+            "requiresFencingOfPriorWriter": { "type": "boolean" }
+          }
+        },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "externalSideEffects": {
+      "description": "FRANK-§13.5 external side effects and FRANK-§16.4 (\"Recovery: isolated restoration target with no outbound side effects\"). Production is the only environment permitted real external side effects; the validator enforces that.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["allowed", "mode", "rationale"],
+      "properties": {
+        "allowed": { "type": "boolean" },
+        "mode": {
+          "description": "`none` — no outbound connector path exists. `sandboxed-doubles` — connectors run against recorded or provider sandbox endpoints. `contained` — the path exists but the egress policy blocks real effects. `contained-until-reconciled` — FRANK-§16.7: side effects stay disabled until invocation-ledger reconciliation is clean. `permitted` — real effects, governed by the FRANK-§13.5 idempotency ledger.",
+          "type": "string",
+          "enum": [
+            "none",
+            "sandboxed-doubles",
+            "contained",
+            "contained-until-reconciled",
+            "permitted"
+          ]
+        },
+        "idempotencyLedger": {
+          "description": "FRANK-§13.5 requires an idempotency ledger for every external side effect. Mandatory wherever `allowed` is true.",
+          "type": "boolean"
+        },
+        "rationale": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "secrets": {
+      "description": "FRANK-§15.3. Infrastructure code contains no secrets (FRANK-§17.2); this block names the source, never a value.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "shortLivedCredentials", "longLivedProviderKeys"],
+      "properties": {
+        "source": {
+          "type": "string",
+          "enum": [
+            "sops-age-encrypted-file",
+            "ci-oidc-short-lived",
+            "preview-issuer-expiring",
+            "openbao",
+            "openbao-recovery-path"
+          ]
+        },
+        "shortLivedCredentials": { "type": "boolean" },
+        "longLivedProviderKeys": {
+          "description": "FRANK-§15.3: unavoidable long-lived provider keys remain scoped, broker-injected at the last responsible moment, monitored, rotated, and never shown to the model.",
+          "type": "string",
+          "enum": ["none", "scoped-broker-injected"]
+        },
+        "unsealPath": {
+          "description": "FRANK-§15.3: auto-unseal through a deletion-protected per-cell KMS or HSM key held in the independent recovery account, outside the FRANK VPS provider.",
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "backup": {
+      "description": "FRANK-§16.7. Numeric objectives are not considered met by backup age alone; `restoreTested` records the proving exercise, not the schedule of copies.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["posture", "offCell", "restoreTested", "retention"],
+      "properties": {
+        "posture": {
+          "type": "string",
+          "enum": [
+            "none-disposable",
+            "ci-artifact-only",
+            "pre-change-snapshot",
+            "continuous-wal-and-offcell",
+            "restore-target"
+          ]
+        },
+        "offCell": {
+          "description": "FRANK-§16.7: the encrypted backup destination sits outside the VPS provider account.",
+          "type": "boolean"
+        },
+        "restoreTested": {
+          "type": "string",
+          "enum": [
+            "not-applicable",
+            "ad-hoc",
+            "per-release-rehearsal",
+            "monthly-isolated-restore",
+            "quarterly-full-cell-exercise"
+          ]
+        },
+        "retention": { "type": "string", "minLength": 1 },
+        "recoveryPointMinutes": { "type": "integer", "minimum": 0 },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "promotion": {
+      "description": "FRANK-§18.3 release gate and FRANK-§18.4 release mechanics (\"Build once; promote the same signed artifact\").",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["promotesFrom", "promotesTo", "artifact"],
+      "properties": {
+        "promotesFrom": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/PromotionEndpoint" }
+        },
+        "promotesTo": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/PromotionEndpoint" }
+        },
+        "artifact": {
+          "description": "FRANK-§18.2 promotion threshold \"Release identity: one artifact digest from staging evidence through production promotion.\" Staging is the evidence anchor; production consumes the pinned digest and may not rebuild.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "builtHere",
+            "digestSource",
+            "isReleaseEvidenceAnchor",
+            "requiresDigestMatchingStagingEvidence",
+            "rebuildForbidden"
+          ],
+          "properties": {
+            "builtHere": {
+              "description": "True only where the signed build, SBOM, and provenance are produced (FRANK-§15.8, FRANK-§21 Workstream 2).",
+              "type": "boolean"
+            },
+            "digestSource": { "$ref": "#/$defs/PromotionEndpoint" },
+            "isReleaseEvidenceAnchor": {
+              "description": "FRANK-§18.2: the environment whose evidence pack carries the digest that production promotion must match. Exactly one environment sets this, and it is `staging`.",
+              "type": "boolean"
+            },
+            "requiresDigestMatchingStagingEvidence": { "type": "boolean" },
+            "rebuildForbidden": { "type": "boolean" }
+          }
+        },
+        "gates": {
+          "description": "FRANK-§18.3 conditions that must hold before something is promoted INTO this environment.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "lifetime": {
+      "description": "FRANK-§16.8 retention baseline and FRANK-§21 Workstream 2 verification (\"preview and recovery environments are disposable\").",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model", "disposable", "rebuildableFromDefinition"],
+      "properties": {
+        "model": {
+          "type": "string",
+          "enum": [
+            "permanent",
+            "standing-warm",
+            "ephemeral-per-change",
+            "ephemeral-per-run",
+            "on-demand"
+          ]
+        },
+        "disposable": {
+          "description": "Destroyable and reconstructable without owner-visible loss. FRANK-§21 Workstream 2 requires this of preview and recovery. Disposable is not the same as short-lived: the recovery cell stands warm indefinitely and is still disposable.",
+          "type": "boolean"
+        },
+        "rebuildableFromDefinition": { "type": "boolean" },
+        "expiry": {
+          "description": "Required for `ephemeral-per-change`. FRANK-§16.8: expiring previews live 14 days unless retained from Review.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["ttlDays", "extendable"],
+          "properties": {
+            "ttlDays": { "type": "integer", "minimum": 1 },
+            "extendable": { "type": "boolean" },
+            "extensionAuthority": { "type": "string", "minLength": 1 },
+            "maxTtlDays": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    },
+
+    "destruction": {
+      "description": "FRANK-§16.3.1 steps 11–12 (destruction manifest) and FRANK-§16.8 (backup expiry is part of deletion evidence; FRANK must never claim immediate physical erasure from an immutable backup still inside its declared retention window).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["triggers", "method", "evidence", "preserved"],
+      "properties": {
+        "triggers": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "method": { "type": "string", "minLength": 1 },
+        "evidence": {
+          "description": "FRANK-§16.3.1 step 12: removed resource IDs, provider receipts, remaining backups and their expiry, revoked credentials, verification queries.",
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "preserved": {
+          "description": "What deliberately survives destruction. An empty list is a valid and meaningful answer.",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        },
+        "blockedWhile": {
+          "description": "Conditions under which destruction must refuse to proceed (FRANK-§16.3.1 step 2: refuse destructive work if any target remains ambiguous).",
+          "type": "array",
+          "uniqueItems": true,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+
+    "resources": {
+      "description": "FRANK-§16.6 resource and scaling policy. Deployment discovery records the actual host before provisioning; the numbers here are the reference profile, not a measurement.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile"],
+      "properties": {
+        "profile": {
+          "type": "string",
+          "enum": [
+            "reference-control-vps",
+            "warm-recovery-cell",
+            "execution-and-preview-worker",
+            "ephemeral-ci-runner",
+            "developer-machine"
+          ]
+        },
+        "vcpu": { "type": "integer", "minimum": 1 },
+        "memoryGb": { "type": "integer", "minimum": 1 },
+        "diskGb": { "type": "integer", "minimum": 1 },
+        "osReserve": {
+          "description": "FRANK-§16.6: reserve 8 GB RAM and 15% CPU for the operating system, filesystem cache, supervision, and recovery.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["memoryGb", "cpuPercent"],
+          "properties": {
+            "memoryGb": { "type": "integer", "minimum": 0 },
+            "cpuPercent": { "type": "integer", "minimum": 0, "maximum": 100 }
+          }
+        },
+        "memoryEnvelopesGb": {
+          "description": "FRANK-§16.6 control-VPS memory envelopes. When present, the validator checks that the envelopes plus the OS reserve equal memoryGb.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "postgresql",
+            "workflowEventCache",
+            "webApi",
+            "identitySecretsEdge",
+            "buzz",
+            "objectServices",
+            "modelMemoryServices",
+            "observability",
+            "controlPlaneWorkers",
+            "uncommittedReserve"
+          ],
+          "properties": {
+            "postgresql": { "type": "integer", "minimum": 0 },
+            "workflowEventCache": { "type": "integer", "minimum": 0 },
+            "webApi": { "type": "integer", "minimum": 0 },
+            "identitySecretsEdge": { "type": "integer", "minimum": 0 },
+            "buzz": { "type": "integer", "minimum": 0 },
+            "objectServices": { "type": "integer", "minimum": 0 },
+            "modelMemoryServices": { "type": "integer", "minimum": 0 },
+            "observability": { "type": "integer", "minimum": 0 },
+            "controlPlaneWorkers": { "type": "integer", "minimum": 0 },
+            "uncommittedReserve": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "diskQuotasGb": {
+          "description": "FRANK-§16.6 disk quotas. When present, the validator checks that the quotas sum to diskGb.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "canonicalDatabase",
+            "objects",
+            "logsTraces",
+            "buzz",
+            "workflowEventStores",
+            "imagesCaches",
+            "emergencyReserve"
+          ],
+          "properties": {
+            "canonicalDatabase": { "type": "integer", "minimum": 0 },
+            "objects": { "type": "integer", "minimum": 0 },
+            "logsTraces": { "type": "integer", "minimum": 0 },
+            "buzz": { "type": "integer", "minimum": 0 },
+            "workflowEventStores": { "type": "integer", "minimum": 0 },
+            "imagesCaches": { "type": "integer", "minimum": 0 },
+            "emergencyReserve": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "lifecycleThresholdsPercent": {
+          "description": "FRANK-§16.6: lifecycle automation alerts at 65%, throttles nonessential work at 75%, and contains write-heavy workers at 85%.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["alert", "throttle", "contain"],
+          "properties": {
+            "alert": { "type": "integer", "minimum": 1, "maximum": 100 },
+            "throttle": { "type": "integer", "minimum": 1, "maximum": 100 },
+            "contain": { "type": "integer", "minimum": 1, "maximum": 100 }
+          }
+        },
+        "concurrency": {
+          "description": "FRANK-§16.6: the separate execution worker admits at most two heavy builds or six light jobs until load tests justify more.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "maxHeavyBuilds": { "type": "integer", "minimum": 0 },
+            "maxLightJobs": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "notes": { "type": "string", "minLength": 1 }
+      }
+    }
+  },
+
+  "allOf": [
+    {
+      "$comment": "FRANK-§2.3. A ceiling of private or sensitive must be declared on the explicit flags too, so an environment's own file states plainly what it may hold.",
+      "if": {
+        "type": "object",
+        "required": ["dataClassification"],
+        "properties": {
+          "dataClassification": {
+            "type": "object",
+            "required": ["ceiling"],
+            "properties": { "ceiling": { "enum": ["open", "internal"] } }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "dataClassification": {
+            "type": "object",
+            "properties": {
+              "mayHoldPrivate": { "const": false },
+              "mayHoldSensitive": { "const": false }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "required": ["dataClassification"],
+        "properties": {
+          "dataClassification": {
+            "type": "object",
+            "required": ["ceiling"],
+            "properties": { "ceiling": { "const": "private" } }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "dataClassification": {
+            "type": "object",
+            "properties": {
+              "mayHoldPrivate": { "const": true },
+              "mayHoldSensitive": { "const": false }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "required": ["dataClassification"],
+        "properties": {
+          "dataClassification": {
+            "type": "object",
+            "required": ["ceiling"],
+            "properties": { "ceiling": { "const": "sensitive" } }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "dataClassification": {
+            "type": "object",
+            "properties": {
+              "mayHoldPrivate": { "const": true },
+              "mayHoldSensitive": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "FRANK-§16.4 and FRANK-§16.2: previews use synthetic data only, are isolated from production on all six axes named in FRANK-§16.3, and never sit under frank.fail.",
+      "if": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "const": "preview" } }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "dataClassification": {
+            "type": "object",
+            "properties": {
+              "ceiling": { "enum": ["open", "internal"] },
+              "dataOrigin": { "const": "synthetic-fixtures" }
+            }
+          },
+          "isolation": {
+            "type": "object",
+            "properties": {
+              "isolatedFromProduction": {
+                "type": "array",
+                "minItems": 6,
+                "allOf": [
+                  { "type": "array", "contains": { "const": "cookies" } },
+                  { "type": "array", "contains": { "const": "service-workers" } },
+                  { "type": "array", "contains": { "const": "credentials" } },
+                  { "type": "array", "contains": { "const": "networks" } },
+                  { "type": "array", "contains": { "const": "storage" } },
+                  { "type": "array", "contains": { "const": "identity-audience" } }
+                ]
+              }
+            }
+          },
+          "network": {
+            "type": "object",
+            "required": ["mustNotBeChildOf"],
+            "properties": {
+              "mustNotBeChildOf": { "type": "array", "contains": { "const": "frank.fail" } }
+            }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "FRANK-§16.4 and FRANK-§21 Workstream 2 verification: preview and recovery environments are disposable.",
+      "if": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "enum": ["preview", "recovery"] } }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "lifetime": { "type": "object", "properties": { "disposable": { "const": true } } }
+        }
+      }
+    },
+    {
+      "$comment": "FRANK-§16.8: an environment with a per-change lifetime must declare its expiry, because an unexpiring preview is how sanitized data quietly becomes permanent.",
+      "if": {
+        "type": "object",
+        "required": ["lifetime"],
+        "properties": {
+          "lifetime": {
+            "type": "object",
+            "required": ["model"],
+            "properties": { "model": { "const": "ephemeral-per-change" } }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": { "lifetime": { "type": "object", "required": ["expiry"] } }
+      }
+    },
+    {
+      "$comment": "Production is the only environment permitted real external side effects (FRANK-§16.4), and FRANK-§13.5 requires an idempotency ledger wherever they are permitted.",
+      "if": {
+        "type": "object",
+        "required": ["externalSideEffects"],
+        "properties": {
+          "externalSideEffects": {
+            "type": "object",
+            "required": ["allowed"],
+            "properties": { "allowed": { "const": true } }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "name": { "const": "production" },
+          "externalSideEffects": {
+            "type": "object",
+            "required": ["idempotencyLedger"],
+            "properties": {
+              "mode": { "const": "permitted" },
+              "idempotencyLedger": { "const": true }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "required": ["externalSideEffects"],
+        "properties": {
+          "externalSideEffects": {
+            "type": "object",
+            "required": ["allowed"],
+            "properties": { "allowed": { "const": false } }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "externalSideEffects": {
+            "type": "object",
+            "properties": { "mode": { "not": { "const": "permitted" } } }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "FRANK-§16.1: the warm recovery cell sits in an independent provider account, accepts no ordinary user traffic until the failover controller verifies all four admission preconditions, and keeps side effects contained until reconciliation is clean.",
+      "if": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "const": "recovery" } }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "traffic": {
+            "type": "object",
+            "required": ["admissionPreconditions"],
+            "properties": {
+              "acceptsOrdinaryUserTraffic": { "const": false },
+              "admissionPreconditions": {
+                "type": "array",
+                "minItems": 4,
+                "allOf": [
+                  { "type": "array", "contains": { "const": "old-writer-fenced" } },
+                  { "type": "array", "contains": { "const": "recovery-manifest-consistent" } },
+                  { "type": "array", "contains": { "const": "audit-roots-verified" } },
+                  { "type": "array", "contains": { "const": "single-active-write-authority" } }
+                ]
+              }
+            }
+          },
+          "externalSideEffects": {
+            "type": "object",
+            "properties": { "mode": { "const": "contained-until-reconciled" } }
+          },
+          "topology": {
+            "type": "object",
+            "properties": { "providerAccount": { "const": "independent-recovery-provider" } }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "FRANK-§18.2 Release identity: one artifact digest from staging evidence through production promotion. Staging anchors the evidence and may not rebuild.",
+      "if": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "const": "staging" } }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "promotion": {
+            "type": "object",
+            "properties": {
+              "promotesTo": { "type": "array", "contains": { "const": "production" } },
+              "artifact": {
+                "type": "object",
+                "properties": {
+                  "isReleaseEvidenceAnchor": { "const": true },
+                  "builtHere": { "const": false },
+                  "rebuildForbidden": { "const": true }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "FRANK-§18.2 and FRANK-§18.4: production consumes the pinned staging digest and never builds or rebuilds.",
+      "if": {
+        "type": "object",
+        "required": ["name"],
+        "properties": { "name": { "const": "production" } }
+      },
+      "then": {
+        "type": "object",
+        "properties": {
+          "promotion": {
+            "type": "object",
+            "properties": {
+              "promotesFrom": { "type": "array", "contains": { "const": "staging" } },
+              "artifact": {
+                "type": "object",
+                "properties": {
+                  "builtHere": { "const": false },
+                  "digestSource": { "const": "staging" },
+                  "requiresDigestMatchingStagingEvidence": { "const": true },
+                  "rebuildForbidden": { "const": true }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "$comment": "Only staging anchors release evidence. The validator additionally checks that exactly one environment claims it.",
+      "if": {
+        "type": "object",
+        "required": ["promotion"],
+        "properties": {
+          "promotion": {
+            "type": "object",
+            "required": ["artifact"],
+            "properties": {
+              "artifact": {
+                "type": "object",
+                "required": ["isReleaseEvidenceAnchor"],
+                "properties": { "isReleaseEvidenceAnchor": { "const": true } }
+              }
+            }
+          }
+        }
+      },
+      "then": {
+        "type": "object",
+        "properties": { "name": { "const": "staging" } }
+      }
+    }
+  ]
+}
