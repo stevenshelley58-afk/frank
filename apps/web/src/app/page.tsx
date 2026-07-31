@@ -79,7 +79,7 @@ export default function Home() {
         </div>
 
         <div className="min-h-0 flex-1">
-          <RoomView key={room.id} room={room} />
+          <RoomView key={room.id} room={room} rooms={rooms} />
         </div>
       </main>
 

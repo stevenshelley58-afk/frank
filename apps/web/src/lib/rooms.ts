@@ -81,12 +81,40 @@ export const PROJECT_ROOMS: Room[] = [
     chips: [{ label: 'Project write' }, { label: 'Global read' }],
     pulse: 'prototype idle',
   },
+  {
+    id: 'merrypaws',
+    name: 'MerryPaws',
+    tint: '#3a756f',
+    rgb: '58,117,111',
+    agent: 'merrypaws-frank',
+    initials: 'MP',
+    sub: 'merrypaws-frank · pet business ops',
+    headerSub: 'merrypaws-frank — reads everywhere, writes only here + shared with approval',
+    placeholder: 'Write inside MerryPaws — chip and ring say teal, no mistaking it…',
+    greeting:
+      "MerryPaws is quiet — no pending tasks. Drop something here and I'll keep it scoped to this room.",
+    chips: [{ label: 'Project write' }, { label: 'Global read' }],
+    pulse: 'idle',
+  },
+  {
+    id: 'lotfile',
+    name: 'LotFile',
+    tint: '#8f7433',
+    rgb: '143,116,51',
+    agent: 'lotfile-frank',
+    initials: 'LF',
+    sub: 'lotfile-frank · document & lot ops',
+    headerSub: 'lotfile-frank — reads everywhere, writes only here + shared with approval',
+    placeholder: 'Write inside LotFile — chip and ring say gold, no mistaking it…',
+    greeting:
+      "LotFile is standing by. Drop a task and I'll scope every write to this room.",
+    chips: [{ label: 'Project write' }, { label: 'Global read' }],
+    pulse: 'idle',
+  },
 ];
 
 /** Tints handed to rooms founded ad-hoc in the UI. */
 const SPARE_TINTS: Array<{ tint: string; rgb: string }> = [
-  { tint: '#3a756f', rgb: '58,117,111' },
-  { tint: '#8f7433', rgb: '143,116,51' },
   { tint: '#a04b58', rgb: '160,75,88' },
   { tint: '#6d5c96', rgb: '109,92,150' },
 ];

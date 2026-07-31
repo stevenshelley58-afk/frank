@@ -10,6 +10,14 @@ import {
   uid,
   type ChatMessage,
 } from '@/lib/frank';
+import {
+  delegationParts,
+  dispatchDelegation,
+  inboundParts,
+  onDelegation,
+  parseDelegations,
+  receiptParts,
+} from '@/lib/delegation';
 import { AuthErrorCard, useAuth } from '@/components/providers';
 import { Thread } from './thread';
 import { Composer } from './composer';
@@ -17,11 +25,12 @@ import { Composer } from './composer';
 /**
  * A room view: header · thread · composer.
  *
- * Every room streams from Goose via /api/chat. Central captures to the
- * domain API for durability; project rooms stream with a scoped identity
- * (reads everywhere, writes only inside the project).
+ * Central streams from Goose and parses delegations out of Frank's reply;
+ * the store runs each delegation in its target room. Both Central and the
+ * target room subscribe to delegation events purely for display — kickoff
+ * cards, inbound cards, and receipts all stream into the right threads.
  */
-export function RoomView({ room }: { room: Room }) {
+export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   const { api, status } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     room.isHome ? centralSeed() : roomSeed(room.greeting),
@@ -38,7 +47,6 @@ export function RoomView({ room }: { room: Room }) {
 
   const append = (m: ChatMessage) => setMessages((prev) => [...prev, m]);
 
-  /** Update the last frank message's text (for streaming). */
   const updateLast = (text: string) =>
     setMessages((prev) => {
       const last = prev[prev.length - 1];
@@ -47,6 +55,35 @@ export function RoomView({ room }: { room: Room }) {
       }
       return prev;
     });
+
+  // Subscribe to delegation events for display only.
+  useEffect(() => {
+    const off = onDelegation((e) => {
+      const d = e.d;
+      if (room.isHome) {
+        // Central shows kickoff on create and receipt on completion.
+        if (e.type === 'created') {
+          append({ id: uid(), from: 'mention', parts: delegationParts(d), at: Date.now() });
+        } else if (e.type === 'update' && d.status !== 'running') {
+          append({ id: uid(), from: 'mention', parts: receiptParts(d), at: Date.now() });
+        }
+      } else if (d.toRoomId === room.id) {
+        // Target room shows the inbound task, then the receipt.
+        if (e.type === 'created') {
+          append({ id: uid(), from: 'mention', parts: inboundParts(d), at: Date.now() });
+        } else if (e.type === 'update' && d.status !== 'running') {
+          append({
+            id: uid(),
+            from: 'frank',
+            text: d.status === 'error' ? `Hit a snag: ${d.error ?? 'unknown error'}` : (d.result ?? 'Done.'),
+            at: Date.now(),
+          });
+        }
+      }
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [room.id, room.isHome]);
 
   async function send(text: string) {
     const trimmed = text.trim();
@@ -63,34 +100,47 @@ export function RoomView({ room }: { room: Room }) {
       }).catch(() => {});
     }
 
-    // All rooms: stream from Goose with per-room identity
     setTyping(true);
     append({ id: uid(), from: 'frank', text: '', at: Date.now() });
 
     let accumulated = '';
     let finished = false;
 
-    await frankStream(trimmed, room.id, {
-      onChunk: (chunk) => {
-        accumulated += chunk;
-        setTyping(false);
-        updateLast(accumulated);
+    await frankStream(
+      trimmed,
+      room.id,
+      {
+        onChunk: (chunk) => {
+          accumulated += chunk;
+          setTyping(false);
+          updateLast(accumulated);
+        },
+        onDone: () => {
+          finished = true;
+          setTyping(false);
+          const final = accumulated || 'Acknowledged. Working on it.';
+          if (!accumulated) updateLast(final);
+          setSending(false);
+          if (room.isHome) detectDelegations(final);
+        },
+        onError: (err) => {
+          finished = true;
+          setTyping(false);
+          updateLast(accumulated || `Something went wrong: ${err}`);
+          setSending(false);
+        },
       },
-      onDone: () => {
-        finished = true;
-        setTyping(false);
-        if (!accumulated) updateLast('Acknowledged. Working on it.');
-        setSending(false);
-      },
-      onError: (err) => {
-        finished = true;
-        setTyping(false);
-        updateLast(accumulated || `Something went wrong: ${err}`);
-        setSending(false);
-      },
-    }, room.name, room.agent);
+      room.name,
+      room.agent,
+    );
 
     if (!finished) setSending(false);
+  }
+
+  function detectDelegations(frankText: string) {
+    for (const p of parseDelegations(frankText, rooms)) {
+      dispatchDelegation(p);
+    }
   }
 
   return (

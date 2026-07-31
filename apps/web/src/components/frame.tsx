@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Room } from '@/lib/rooms';
 import { PROJECT_ROOMS } from '@/lib/rooms';
+import { useDelegations } from '@/lib/delegation';
 import { briefFromToday } from '@/lib/frank';
 import { useData, useToast } from './providers';
 import { clockTime, TIME_ZONE } from '@/lib/time';
@@ -87,8 +88,7 @@ function CentralFrame() {
 
       {!hidden.has('running') && (
         <Widget title="Running" onRemove={() => remove('running')}>
-          {/* TODO(delegations): live delegation rows wire in a later session. */}
-          <p className="text-[12.5px] leading-relaxed text-muted">Nothing running.</p>
+          <RunningBody />
         </Widget>
       )}
 
@@ -239,6 +239,65 @@ function ScopedFrame({ room }: { room: Room }) {
         <IconPlus size={12} /> Add a widget — Files, Dates…
       </button>
     </>
+  );
+}
+
+/* --------------------------- running widget ----------------------- */
+
+function RunningBody() {
+  const items = useDelegations();
+  if (items.length === 0) {
+    return (
+      <p className="text-[12.5px] leading-relaxed text-muted">
+        Nothing running. Delegate work from Central with an @room handle.
+      </p>
+    );
+  }
+  return (
+    <div>
+      {items.slice(0, 8).map((d, i) => (
+        <div
+          key={d.id}
+          className={`flex items-start gap-2.5 py-[7px] ${i > 0 ? "border-t border-line/70" : ""}`}
+        >
+          <span
+            className="mt-[3px] h-[9px] w-[9px] shrink-0 rounded-[3px] ring-1 ring-ink/10"
+            style={{ background: d.tint }}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-2">
+              <b className="text-[12px] font-semibold text-ink">{d.agent}</b>
+              <StatusDot status={d.status} />
+            </div>
+            <p className="mt-0.5 truncate text-[11.5px] leading-snug text-ink2" title={d.task}>
+              {d.task}
+            </p>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function StatusDot({ status }: { status: "running" | "done" | "error" }) {
+  if (status === "running") {
+    return (
+      <span className="ml-auto inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.08em] text-accent">
+        <span className="typing-dot" /> running
+      </span>
+    );
+  }
+  if (status === "error") {
+    return (
+      <span className="ml-auto font-mono text-[9px] uppercase tracking-[0.08em] text-[#c0563a]">
+        error
+      </span>
+    );
+  }
+  return (
+    <span className="ml-auto font-mono text-[9px] uppercase tracking-[0.08em] text-[#3f7d5c]">
+      done
+    </span>
   );
 }
 
