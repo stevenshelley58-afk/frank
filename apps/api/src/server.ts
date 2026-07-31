@@ -47,6 +47,7 @@ import type { SignerRecord, SpentNonceLedger } from '@frank/policy';
 import type { AppConfig } from './config.js';
 import { buildRequestContext, identifierHeaders } from './context.js';
 import { buildOpenApiDocument } from './openapi.js';
+import { registerDevAuthRoute } from './routes/auth.js';
 import {
   PROBLEM_CONTENT_TYPE,
   ProblemError,
@@ -357,6 +358,48 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   app.get('/v1/openapi.json', async (_request, reply) => {
     void reply.type('application/json');
     return openApiDocument;
+  });
+
+  // Development-only session mint — registered directly (see routes/auth.ts):
+  // it cannot sit behind the capability gate it exists to bootstrap, and it must
+  // never appear in the generated OpenAPI contract. Refuses to mint outside dev/test.
+  registerDevAuthRoute(app, { config, now });
+
+  /* -------------------------------------------------- self-build --- */
+
+  let rebuildInProgress = false;
+  app.post('/v1/system/rebuild', async (_request, reply) => {
+    if (rebuildInProgress) {
+      void reply.code(409);
+      return { rebuilding: false, error: 'A rebuild is already in progress.' };
+    }
+    rebuildInProgress = true;
+    try {
+      const { exec } = await import('node:child_process');
+      exec('bash /scripts/rebuild.sh', { timeout: 300_000 }, (error) => {
+        rebuildInProgress = false;
+        if (error) {
+          app.log.error({ err: error }, 'rebuild failed');
+        } else {
+          app.log.info('rebuild completed successfully');
+        }
+      });
+      return { rebuilding: true, message: 'Frank rebuild triggered. Check /v1/system/rebuild/status for progress.' };
+    } catch (error) {
+      rebuildInProgress = false;
+      void reply.code(500);
+      return { rebuilding: false, error: 'Failed to start rebuild.' };
+    }
+  });
+
+  app.get('/v1/system/rebuild/status', async () => {
+    const { readFileSync } = await import('node:fs');
+    try {
+      const log = readFileSync('/tmp/frank-rebuild.log', 'utf-8');
+      return { rebuilding: rebuildInProgress, log: log.split('\n').slice(-30).join('\n') };
+    } catch {
+      return { rebuilding: rebuildInProgress, log: 'No rebuild log found.' };
+    }
   });
 
   return { app, identity, enrichment, health, openApiDocument };

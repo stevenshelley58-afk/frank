@@ -1,0 +1,129 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ============================================================
+   FRANK OS — chat-first shell
+   Light, minimal: warm near-white canvas, white surfaces,
+   hairline borders, ink text, one restrained accent. No grain.
+   ============================================================ */
+
+:root {
+  --shell: #fafaf9;
+  --rail: #ffffff;
+  --card: #ffffff;
+  --ink: #1c1917;
+  --paper: #ffffff;
+  --paper-3: #ffffff;
+  --line: #e7e5e4;
+  --muted: #78716c;
+  --accent: #2563eb;
+  --success: #16a34a;
+  --orange: #2563eb;
+  --acid: #16a34a;
+}
+
+html {
+  height: 100%;
+  background: var(--shell);
+}
+
+body {
+  min-height: 100%;
+  margin: 0;
+  color: var(--ink);
+  background: var(--shell);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overscroll-behavior: none;
+}
+
+::selection {
+  background: rgba(37, 99, 235, 0.16);
+  color: var(--ink);
+}
+
+/* ---------- quiet scrollbars (light) ---------- */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(28, 25, 23, 0.22) transparent;
+}
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(28, 25, 23, 0.16);
+  border-radius: 8px;
+}
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+.chat-scroll {
+  scrollbar-color: rgba(28, 25, 23, 0.22) transparent;
+}
+.chat-scroll::-webkit-scrollbar-thumb {
+  background: rgba(28, 25, 23, 0.16);
+}
+
+/* ---------- chat column details ---------- */
+.msg-max {
+  max-width: 76%;
+}
+
+/* keyframes referenced by the custom classes below — defined here so they
+   ship regardless of Tailwind's utility tree-shaking (no animate-* util
+   uses them). */
+@keyframes typing {
+  0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
+  40% { opacity: 1; transform: translateY(-2px); }
+}
+@keyframes flow {
+  from { background-position: 0 0; }
+  to { background-position: 200% 0; }
+}
+
+/* typing indicator dots */
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 9999px;
+  background: var(--muted);
+  animation: typing 1.2s infinite;
+}
+.typing-dot:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.typing-dot:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+/* delegation mention strip */
+.mention-strip {
+  background: rgba(37, 99, 235, 0.06);
+  border: 1px dashed rgba(37, 99, 235, 0.4);
+}
+
+/* focus ring for the composer */
+.composer-ring:focus-within {
+  box-shadow:
+    0 0 0 2px rgba(37, 99, 235, 0.28),
+    0 8px 28px rgba(28, 25, 23, 0.08);
+}
+
+/* running delegation bar (future — wired for the Running widget) */
+.run-bar-fill {
+  background: linear-gradient(90deg, var(--accent), #60a5fa, var(--accent));
+  background-size: 200% 100%;
+  animation: flow 1.7s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
