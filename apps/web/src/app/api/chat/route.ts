@@ -1,22 +1,23 @@
 /**
- * POST /api/chat — SSE bridge from Frank web to Goose ACP.
+ * POST /api/chat — SSE bridge from Frank web to the harness registry.
  *
  * Body: { message: string, roomId?: string, roomName?: string, agentName?: string }
  * Response: text/event-stream with `data: {"text":"..."}` chunks
  *           and a final `data: {"done":true}` event.
  *
- * Server-side only (Node.js runtime). Uses the ACP client in @/lib/goose-server.
+ * The harness is resolved per-room through the provider registry (spec §8.4):
+ * a room may be pinned to a named harness or left on Auto. Server-side only.
  */
 
 import { NextRequest } from 'next/server';
-import { createSession, streamMessage, gooseHealth } from '@/lib/goose-server';
+import { resolveHarness } from '@/lib/providers';
 import { identityForRoom } from '@/lib/rooms-identity';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-// Module-level session cache: roomId → goose session id
-const sessions = new Map<string, string>();
+// Module-level session cache: roomId → { providerId, sessionId }
+const sessions = new Map<string, { providerId: string; sessionId: string }>();
 // Rooms whose session has already received the identity primer.
 const primed = new Set<string>();
 
@@ -34,21 +35,26 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Health check
-  const healthy = await gooseHealth();
-  if (!healthy) {
+  // Resolve the harness for this room (Auto or pinned).
+  let provider;
+  let reason: string;
+  try {
+    ({ provider, reason } = await resolveHarness(roomId));
+  } catch {
     return new Response(
-      JSON.stringify({ error: 'Goose ACP server unreachable', fallback: true }),
+      JSON.stringify({ error: 'No harness available', fallback: true }),
       { status: 503, headers: { 'Content-Type': 'application/json' } },
     );
   }
 
-  // Get or create session
-  let sessionId = sessions.get(roomId);
-  if (!sessionId) {
+  // Get or create a session, re-creating if the harness changed (hot-swap).
+  let entry = sessions.get(roomId);
+  if (!entry || entry.providerId !== provider.id) {
     try {
-      sessionId = await createSession('/srv/frank/repo');
-      sessions.set(roomId, sessionId);
+      const sessionId = await provider.createSession('/srv/frank/repo');
+      entry = { providerId: provider.id, sessionId };
+      sessions.set(roomId, entry);
+      primed.delete(roomId); // re-prime on a fresh session
     } catch (err) {
       return new Response(
         JSON.stringify({ error: `Session create failed: ${err}` }),
@@ -56,6 +62,7 @@ export async function POST(req: NextRequest) {
       );
     }
   }
+  const activeProvider = provider;
 
   // Fold per-room identity into the first turn of a fresh session.
   let promptText = message;
@@ -65,7 +72,7 @@ export async function POST(req: NextRequest) {
     primed.add(roomId);
   }
 
-  // Stream response as SSE
+  // Stream response as SSE.
   const encoder = new TextEncoder();
   const stream = new ReadableStream({
     async start(controller) {
@@ -75,20 +82,18 @@ export async function POST(req: NextRequest) {
 
       try {
         let fullText = '';
-        for await (const chunk of streamMessage(sessionId!, promptText)) {
+        for await (const chunk of activeProvider.stream(entry!.sessionId, promptText)) {
           fullText += chunk;
           send({ text: chunk });
         }
 
-        // If no text was streamed (Goose returned result in final response)
         if (!fullText) {
           send({ text: 'Acknowledged. Working on it.' });
         }
 
-        send({ done: true });
+        send({ done: true, harness: activeProvider.id, reason });
       } catch (err) {
         send({ error: String(err) });
-        // Clear broken session so next message retries
         sessions.delete(roomId);
         primed.delete(roomId);
       } finally {

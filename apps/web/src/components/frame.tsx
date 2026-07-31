@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import type { Room } from '@/lib/rooms';
 import { PROJECT_ROOMS } from '@/lib/rooms';
 import { useDelegations } from '@/lib/delegation';
+import { useHarnesses } from '@/lib/use-harnesses';
 import { briefFromToday } from '@/lib/frank';
 import { useData, useToast } from './providers';
 import { clockTime, TIME_ZONE } from '@/lib/time';
@@ -83,6 +84,12 @@ function CentralFrame() {
               </div>
             ))}
           </div>
+        </Widget>
+      )}
+
+      {!hidden.has('harness') && (
+        <Widget title="Harness" onRemove={() => remove('harness')}>
+          <HarnessBody />
         </Widget>
       )}
 
@@ -239,6 +246,40 @@ function ScopedFrame({ room }: { room: Room }) {
         <IconPlus size={12} /> Add a widget — Files, Dates…
       </button>
     </>
+  );
+}
+
+/* --------------------------- harness widget ----------------------- */
+
+function HarnessBody() {
+  const { providers, routes, loading } = useHarnesses();
+  if (loading) {
+    return <p className="text-[12.5px] text-muted">Probing harnesses…</p>;
+  }
+  return (
+    <div>
+      {providers.map((p, i) => (
+        <div
+          key={p.id}
+          className={`flex items-center gap-2.5 py-[7px] ${i > 0 ? "border-t border-line/70" : ""}`}
+        >
+          <span
+            className={`h-[9px] w-[9px] shrink-0 rounded-full ${p.healthy ? "bg-[#3f7d5c]" : "bg-[#c0563a]"}`}
+          />
+          <b className="text-[12px] font-semibold text-ink">{p.label}</b>
+          <small className="ml-auto text-[10px] text-muted/70">
+            {p.healthy ? "healthy" : "down"}
+          </small>
+        </div>
+      ))}
+      <p className="mt-1.5 border-t border-line/70 pt-2 text-[11px] leading-snug text-muted">
+        Rooms: {Object.entries(routes).map(([room, r]) => (
+          <span key={room} className="mr-2">
+            <span className="text-ink2">{room}</span> · {r}
+          </span>
+        ))}
+      </p>
+    </div>
   );
 }
 
