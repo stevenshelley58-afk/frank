@@ -1,13 +1,13 @@
 import type { Metadata } from 'next';
 
-import { AdAnatomy } from './AdAnatomy';
+import { AdStudioConsole } from './adstudio-console';
 import { ConsoleHeader } from '../components/console-header';
 import { moduleById } from '../registry';
 
 export const metadata: Metadata = {
-  title: 'FRANK — Ad Template Anatomy',
+  title: 'FRANK — AdStudio Pipeline',
   description:
-    'Inspect measured regions on a real Blockwise ad template and simulate an edit.',
+    'Trace how a Blockwise ad template goes from source ad to customer-editable regions — and drill into any stage.',
 };
 
 export default function AdstudioConsolePage() {
@@ -17,7 +17,7 @@ export default function AdstudioConsolePage() {
     <div className="flex h-full flex-col">
       <ConsoleHeader module={module} />
       <div className="min-h-0 flex-1">
-        <AdAnatomy />
+        <AdStudioConsole />
       </div>
     </div>
   );

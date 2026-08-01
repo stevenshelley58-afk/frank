@@ -156,12 +156,17 @@ function FormatMap({ box }: { box: RegionBox }) {
 /* ------------------------------------------------------------------ */
 /* Main component                                                     */
 /* ------------------------------------------------------------------ */
-export function AdAnatomy() {
+export type AdAnatomyProps = {
+  /** Open with this template pre-selected (drill-down from the graph). */
+  initialTemplateId?: string;
+};
+
+export function AdAnatomy({ initialTemplateId }: AdAnatomyProps = {}) {
   useEffect(() => {
     injectFonts();
   }, []);
 
-  const [templateId, setTemplateId] = useState(DEMO_TEMPLATES[0].id);
+  const [templateId, setTemplateId] = useState(initialTemplateId ?? DEMO_TEMPLATES[0].id);
   const [search, setSearch] = useState("");
   const [mode, setMode] = useState<Mode>("anatomy");
   const [viewFormat, setViewFormat] = useState<ViewFormat>("4:5");
@@ -180,6 +185,12 @@ export function AdAnatomy() {
     () => DEMO_TEMPLATES.find((t) => t.id === templateId) ?? DEMO_TEMPLATES[0],
     [templateId],
   );
+
+  // Track external drill-down selection.
+  useEffect(() => {
+    if (initialTemplateId && initialTemplateId !== templateId) setTemplateId(initialTemplateId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialTemplateId]);
 
   // When the template changes, reset per-template state and pick a sensible default region.
   useEffect(() => {
