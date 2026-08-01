@@ -4,6 +4,10 @@
 # root (see infra/docker-compose.dev.yml).
 FROM node:22-alpine
 
+# ffmpeg = video thumbnail frame grabs for the Console Files module
+# (image thumbnails use `sharp`, a native module pulled by pnpm).
+RUN apk add --no-cache ffmpeg
+
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 
 WORKDIR /app
