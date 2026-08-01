@@ -5,10 +5,10 @@
 | Metric | Value |
 |---|---|
 | Specification | `docs/product/FRANK_COMPLETE_BUILD_PLAN_AND_SPEC.md` |
-| Specification SHA-256 | `9f0decdedb628eed78b7b476679aeaaeeba7f523aa30c49291e755bf71595a22` |
-| Total records | 272 |
-| Requirement rows | 112 |
-| Section locators | 160 |
+| Specification SHA-256 | `53d95f1916b2ac1d6c51416396e8f8f5678bd1f4b7f352e4661c1d74a0844efb` |
+| Total records | 279 |
+| Requirement rows | 117 |
+| Section locators | 162 |
 | Unowned records | 0 |
 
 ## Requirement ID prefixes discovered in §4
@@ -17,7 +17,7 @@
 |---|---|
 | BRAIN | 10 |
 | BUILD | 16 |
-| BUZZ | 7 |
+| BUZZ | 12 |
 | COMMS | 8 |
 | DEAL | 6 |
 | FIN | 6 |
@@ -144,6 +144,11 @@
 | BUZZ-005 | FRANK-§4.13 | Relevant room events must project into FRANK using explicit event mappings and provenance. | Rebuild test recreates projections from retained signed events. | role/builder | — | — | owned |
 | BUZZ-006 | FRANK-§4.13 | A Buzz outage must not lose canonical jobs or prevent FRANK from showing their state. | Outage and replay test. | role/builder | — | — | owned |
 | BUZZ-007 | FRANK-§4.13 | A Buzz message, reaction, or signed event is an untrusted collaboration proposal until a FRANK command resolves actor, membership-at-event-time, schema, artifact digest, replay state, and current policy. A Buzz event alone can never approve production or another consequential action. | Revoked-key, replayed-event, altered-artifact, forged-reaction, and wrong-room tests all fail closed. | role/builder | — | — | owned |
+| BUZZ-008 | FRANK-§4.13 | FRANK must reuse maintained Buzz components before building equivalent rooms, relay, ACP, CLI, agent, Git-event, Compose, or Helm functionality. | Dependency inventory proves every custom overlap is removed, justified by an ADR, or upstreamed. | steven | — | — | owned |
+| BUZZ-009 | FRANK-§4.13 | Production Buzz must run a tested pinned commit or immutable image while a separate canary tracks upstream `main` and runs compatibility, migration, security, and recovery checks daily. | Canary report records upstream commit, changed contracts, test results, promotion decision, and rollback image. | steven | — | — | owned |
+| BUZZ-010 | FRANK-§4.13 | `buzz-acp`, `buzz-agent`, `buzz-dev-mcp`, `buzz-cli`, custom ACP harness definitions, and native workflow actions may execute bounded work only through FRANK-issued assignments, capability grants, and receipts. | A direct capability escalation, duplicate scheduler, missing receipt, or bypassed FRANK policy fails closed. | steven | — | — | owned |
+| BUZZ-011 | FRANK-§4.13 | Buzz workflow actions are allowed for room-local, reversible collaboration tasks; Temporal remains the durable scheduler and completion authority for life administration, app builds, overnight work, retries, approvals, and consequential effects. | Restart, duplicate-delivery, pending-input, and long-running tests preserve one canonical FRANK run and one effect receipt. | steven | — | — | owned |
+| BUZZ-012 | FRANK-§4.13 | Buzz Git/NIP-34 features may provide branch rooms, event mirroring, and canary hosting, but the selected production forge remains authoritative until Buzz passes required forge, recovery, CI, protection, review, and migration tests. | Bidirectional reference and disaster-recovery tests preserve commit identity without granting Buzz privileged deployment credentials. | steven | — | — | owned |
 | OPS-001 | FRANK-§4.14 | Every model, media, hosting, storage, and paid connector cost must attach to a run, project, automation, and provider account where possible. | Cost reconciliation reaches the target in section 20. | role/operator | — | — | owned |
 | OPS-002 | FRANK-§4.14 | Budgets must exist per day, month, project, automation, agent, provider, and customer cell. | Budget test reroutes, slows, or stops according to policy. | role/operator | — | — | owned |
 | OPS-003 | FRANK-§4.14 | Steven must be able to pause a run, agent, connector, automation class, model provider, or the whole execution plane. | Containment exercise meets time target. | role/operator | — | — | owned |
@@ -156,6 +161,7 @@
 | Locator | Title | Parent | Owner | Test | Evidence | Status |
 |---|---|---|---|---|---|---|
 | FRANK-§0 | How to use this specification | — | role/owner | — | — | owned |
+| FRANK-§0.3 | Revision 1.1 reconciliation | FRANK-§0 | steven | — | — | owned |
 | FRANK-§0.1 | Precedence | FRANK-§0 | role/owner | — | — | owned |
 | FRANK-§0.2 | Change control | FRANK-§0 | role/owner | — | — | owned |
 | FRANK-§1 | Product charter | — | role/owner | — | — | owned |
@@ -221,6 +227,7 @@
 | FRANK-§8 | Harness and protocol architecture | — | role/builder | — | — | owned |
 | FRANK-§8.1 | Decision | FRANK-§8 | role/builder | — | — | owned |
 | FRANK-§8.2 | Protocol boundaries | FRANK-§8 | role/builder | — | — | owned |
+| FRANK-§8.2.1 | MCP 2026-07-28 implementation contract | FRANK-§8 | steven | — | — | owned |
 | FRANK-§8.3 | Shared memory and skills | FRANK-§8 | role/builder | — | — | owned |
 | FRANK-§8.4 | Harness selection | FRANK-§8 | role/builder | — | — | owned |
 | FRANK-§9 | Model Broker and inference capacity | — | role/builder | — | — | owned |

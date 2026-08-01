@@ -1,0 +1,27 @@
+{
+  "name": "@frank/memory",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "FRANK-§7.4 + BRAIN-006 agent memory port. Frank owns memory; backends are swappable behind the MemoryProvider interface. Recalled facts are minimized and generated-untrusted (FRANK-§2.3) — evidence to weigh, never system instructions. mem0 is one implementation, not this package's shape.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lint: memory (schema + dependency gates run at repo root)'"
+  },
+  "dependencies": {
+    "@frank/contracts": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  },
+  "frank": {
+    "layer": "packages",
+    "mayDependOn": ["@frank/contracts"]
+  }
+}

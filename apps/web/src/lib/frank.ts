@@ -1,0 +1,260 @@
+import type { TodayResponse } from './api';
+
+/* ------------------------------------------------------------------ */
+/* Chat message model                                                  */
+/* ------------------------------------------------------------------ */
+
+export interface TextPart {
+  text: string;
+  strong?: boolean;
+}
+
+export type MessageFrom = 'steve' | 'frank' | 'mention';
+
+export interface ChatMessage {
+  id: string;
+  from: MessageFrom;
+  /** plain text for steve/frank messages */
+  text?: string;
+  /** rich parts for delegation mentions */
+  parts?: TextPart[];
+  at: number;
+}
+
+let uidCounter = 0;
+
+/** Local message id. */
+export function uid(): string {
+  uidCounter += 1;
+  return `m-${Date.now().toString(36)}-${uidCounter}`;
+}
+
+/** command_id for POST /v1/capture (8–128 chars, unique per command). */
+export function commandId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return crypto.randomUUID();
+  }
+  return `capture-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/* ------------------------------------------------------------------ */
+/* Seed threads                                                        */
+/* ------------------------------------------------------------------ */
+
+export function centralSeed(): ChatMessage[] {
+  const now = Date.now();
+  return [
+    {
+      id: uid(),
+      from: 'frank',
+      text: "Morning, Steve. The night shift finished clean — 7 runs verified, nothing on fire. I've got your brief in the frame on the right. Want the short version, or shall I just keep watching?",
+      at: now - 4000,
+    },
+    {
+      id: uid(),
+      from: 'steve',
+      text: 'Sort out the LotFile books and tell me where Blockwise stands on the Meta scraping.',
+      at: now - 3000,
+    },
+    {
+      id: uid(),
+      from: 'mention',
+      parts: [
+        { text: 'Delegated to lotfile-frank:', strong: true },
+        { text: ' reconcile the LotFile books. I\u2019ll confirm once it\u2019s verified — you can watch it in the ' },
+        { text: 'Running', strong: true },
+        { text: ' panel.' },
+      ],
+      at: now - 2000,
+    },
+    {
+      id: uid(),
+      from: 'frank',
+      text: 'On it. Handed the books to lotfile-frank — he reads everything but can only write inside LotFile, so Blockwise stays untouched. For Blockwise, blockwise-frank reports the Meta scraper pulled 214 Perth listings overnight; 9 need your tag before the next campaign. I\u2019ve queued those in Waiting on you.',
+      at: now - 1000,
+    },
+  ];
+}
+
+export function roomSeed(greeting: string): ChatMessage[] {
+  return [{ id: uid(), from: 'frank', text: greeting, at: Date.now() }];
+}
+
+/* ------------------------------------------------------------------ */
+/* Real agent brain — streams from Goose via /api/chat SSE             */
+/* ------------------------------------------------------------------ */
+
+export interface StreamCallbacks {
+  onChunk: (text: string) => void;
+  onDone: () => void;
+  onError: (err: string) => void;
+}
+
+/**
+ * Send a message to Frank's real brain (Goose ACP via /api/chat).
+ * Streams text chunks via SSE. Calls onChunk as tokens arrive,
+ * onDone when complete, onError on failure.
+ */
+export async function frankStream(
+  message: string,
+  roomId: string,
+  callbacks: StreamCallbacks,
+  roomName?: string,
+  agentName?: string,
+): Promise<void> {
+  try {
+    const res = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, roomId, roomName, agentName }),
+    });
+
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      const err = (body as { error?: string }).error ?? `HTTP ${res.status}`;
+      const fallback = (body as { fallback?: boolean }).fallback;
+      if (fallback) {
+        // Goose is down — use canned reply so the UI doesn't die
+        callbacks.onChunk(cannedFallback(message));
+        callbacks.onDone();
+        return;
+      }
+      callbacks.onError(err);
+      return;
+    }
+
+    const reader = res.body?.getReader();
+    if (!reader) {
+      callbacks.onError('No response stream');
+      return;
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // Parse SSE lines
+      const lines = buffer.split('\n');
+      buffer = lines.pop() ?? ''; // keep incomplete line in buffer
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const json = line.slice(6).trim();
+        if (!json) continue;
+
+        try {
+          const evt = JSON.parse(json);
+          if (evt.text) callbacks.onChunk(evt.text);
+          if (evt.done) callbacks.onDone();
+          if (evt.error) callbacks.onError(evt.error);
+        } catch {
+          // skip malformed SSE
+        }
+      }
+    }
+
+    // If no done event was received, fire it
+    callbacks.onDone();
+  } catch (err) {
+    callbacks.onError(String(err));
+  }
+}
+
+/* ------------------------------------------------------------------ */
+/* Fallback (kept for when Goose is unreachable)                       */
+/* ------------------------------------------------------------------ */
+
+function snippet(text: string, max = 44): string {
+  const t = text.trim().replace(/\s+/g, ' ');
+  return t.length <= max ? t : `${t.slice(0, max).trimEnd()}…`;
+}
+
+let fallbackIndex = 0;
+
+const FALLBACK_TEMPLATES: Array<(s: string) => string> = [
+  (s) => `Got it — added "${s}" to your work. I'll keep an eye on it. (Brain offline — running on cached responses.)`,
+  (s) => `On it. "${s}" is captured. (Heads-up: my brain is temporarily unreachable, so I'm running light.)`,
+  (s) => `Noted. I've filed "${s}" as work. (Brain offline — will resume full cognition shortly.)`,
+];
+
+function cannedFallback(message: string): string {
+  const t = FALLBACK_TEMPLATES[fallbackIndex % FALLBACK_TEMPLATES.length];
+  fallbackIndex += 1;
+  return t(snippet(message));
+}
+
+/* ------------------------------------------------------------------ */
+/* Project room ack (unchanged — real wiring comes in S3)              */
+/* ------------------------------------------------------------------ */
+
+let ackIndex = 0;
+
+const ROOM_ACK_TEMPLATES: Array<(room: string, agent: string) => string> = [
+  (room) => `Noted — that stays inside ${room}. I read everywhere but write only here; anything shared goes through Central with your approval.`,
+  (room, agent) => `On it, inside ${room} only. If I need to touch something shared, ${agent} will raise it in Central first.`,
+  (room) => `Heard. Keeping every write inside ${room} — Central will see a receipt if anything crosses the fence.`,
+];
+
+/** Scoped acknowledgement for project rooms (writes are room-local). */
+export async function roomAck(roomName: string, agent: string): Promise<string> {
+  const template = ROOM_ACK_TEMPLATES[ackIndex % ROOM_ACK_TEMPLATES.length];
+  ackIndex += 1;
+  return template(roomName, agent);
+}
+
+/** Small considered-reply delay so the canned text doesn't snap in. */
+export function thinkingDelay(): Promise<void> {
+  return new Promise((resolve) => {
+    window.setTimeout(resolve, 620 + Math.random() * 320);
+  });
+}
+
+/* ------------------------------------------------------------------ */
+/* Living-frame derivations from /v1/today                             */
+/* ------------------------------------------------------------------ */
+
+export interface BriefSummary {
+  count: number;
+  topTitle: string | null;
+  body: string;
+  oneThing: string;
+}
+
+export function briefFromToday(today: TodayResponse | null): BriefSummary {
+  const cards = (today?.sections ?? []).flatMap((s) => s.cards);
+  const open = cards.filter((c) => c.state !== 'done' && c.state !== 'cancelled');
+  const top = open[0] ?? cards[0];
+  if (!today) {
+    return {
+      count: 0,
+      topTitle: null,
+      body: 'Warming up — pulling the board from the cell…',
+      oneThing: 'Nothing urgent.',
+    };
+  }
+  if (open.length === 0 && cards.length === 0) {
+    return {
+      count: 0,
+      topTitle: null,
+      body: 'Quiet board. Nothing scheduled or tracked for today yet — the night shift left it clean.',
+      oneThing: 'Nothing urgent — enjoy the slack.',
+    };
+  }
+  const body =
+    open.length === 0
+      ? `All ${cards.length} tracked item${cards.length === 1 ? '' : 's'} are closed. Clean board.`
+      : `${open.length} item${open.length === 1 ? ' needs' : 's need'} attention${
+          top ? ` — next up: "${top.title}".` : '.'
+        }`;
+  return {
+    count: open.length,
+    topTitle: top?.title ?? null,
+    body,
+    oneThing: top ? top.title : 'Nothing urgent.',
+  };
+}
