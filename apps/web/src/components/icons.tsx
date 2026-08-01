@@ -97,6 +97,15 @@ export function IconFrame(props: IconProps) {
   );
 }
 
+/** Files explorer shortcut — a folder glyph. */
+export function IconFolder(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
+    </svg>
+  );
+}
+
 /** The Frank glyph — an ink square with a single accent tick. */
 export function FrankMark(props: IconProps) {
   const { size = 20, ...rest } = props;

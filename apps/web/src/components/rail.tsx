@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { foundRoom, type Room } from '@/lib/rooms';
 import Link from 'next/link';
-import { IconFrame, IconPlus, IconShield, IconStar } from './icons';
+import { IconFolder, IconFrame, IconPlus, IconShield, IconStar } from './icons';
 import { useToast } from './providers';
 
 interface RailProps {
@@ -143,6 +143,17 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
             <IconFrame size={13} />
           </span>
           <span className="text-[12.5px] font-medium">Console</span>
+        </Link>
+
+        {/* files explorer shortcut — sits right under the console icon */}
+        <Link
+          href="/console/explorer"
+          className="flex w-full items-center gap-2.5 rounded-[10px] pl-[26px] pr-2.5 py-1.5 text-left text-muted transition-colors hover:bg-hover hover:text-ink2"
+        >
+          <span className="grid h-2.5 w-2.5 shrink-0 place-items-center">
+            <IconFolder size={12} />
+          </span>
+          <span className="text-[11.5px] font-medium">Files</span>
         </Link>
 
         {/* footer */}
