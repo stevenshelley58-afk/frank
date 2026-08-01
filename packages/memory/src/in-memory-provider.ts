@@ -14,7 +14,7 @@ import type {
   MemoryScope,
   RecalledFact,
   StoredFact,
-} from './provider.js';
+} from './provider';
 
 interface Row {
   id: string;

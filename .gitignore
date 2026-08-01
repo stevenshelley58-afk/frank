@@ -9,3 +9,6 @@ coverage/
 .DS_Store
 
 .next/
+
+# secrets
+.mem0.key

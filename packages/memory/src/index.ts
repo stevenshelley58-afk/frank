@@ -13,7 +13,7 @@ export type {
   RecalledFact,
   StoredFact,
   StoreInput,
-} from './provider.js';
-export { Mem0Provider } from './mem0-provider.js';
-export type { Mem0ProviderConfig } from './mem0-provider.js';
-export { InMemoryMemoryProvider } from './in-memory-provider.js';
+} from './provider';
+export { Mem0Provider } from './mem0-provider';
+export type { Mem0ProviderConfig } from './mem0-provider';
+export { InMemoryMemoryProvider } from './in-memory-provider';

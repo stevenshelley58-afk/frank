@@ -54,8 +54,8 @@ import type {
 import type { MemoryProvider, MemoryScope } from '@frank/memory';
 import type { SigningKeyResolver } from '@frank/policy';
 
-import { canonicalJson } from './canonical-json.js';
-import type { CanonicalValue } from './canonical-json.js';
+import { canonicalJson } from './canonical-json';
+import type { CanonicalValue } from './canonical-json';
 
 // ---------------------------------------------------------------------------
 // Errors

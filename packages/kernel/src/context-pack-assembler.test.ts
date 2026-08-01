@@ -18,8 +18,8 @@ import {
   MissingPackSigningKeyError,
   UntrustedMemoryViolationError,
   canonicalJson,
-} from './index.js';
-import { NonCanonicalValueError } from './canonical-json.js';
+} from './index';
+import { NonCanonicalValueError } from './canonical-json';
 
 // ---------------------------------------------------------------------------
 // canonical-json

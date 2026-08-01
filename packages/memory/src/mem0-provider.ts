@@ -29,7 +29,7 @@ import type {
   MemoryScope,
   RecalledFact,
   StoredFact,
-} from './provider.js';
+} from './provider';
 
 /** Raw rows as the self-hosted mem0 server returns them. */
 interface Mem0MemoryRow {

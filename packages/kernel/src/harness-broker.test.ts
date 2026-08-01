@@ -25,7 +25,7 @@ import {
   HarnessBroker,
   NoEligibleHarnessError,
   UnknownHarnessError,
-} from './harness-broker.js';
+} from './harness-broker';
 
 // ---------------------------------------------------------------------------
 // Fake adapter

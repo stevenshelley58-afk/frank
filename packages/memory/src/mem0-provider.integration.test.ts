@@ -16,8 +16,8 @@
 
 import { afterAll, describe, expect, it } from 'vitest';
 
-import { Mem0Provider } from './mem0-provider.js';
-import type { MemoryScope } from './provider.js';
+import { Mem0Provider } from './mem0-provider';
+import type { MemoryScope } from './provider';
 
 const url = process.env.MEM0_INTEGRATION_URL;
 const key = process.env.MEM0_INTEGRATION_KEY;

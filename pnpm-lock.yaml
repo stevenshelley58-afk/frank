@@ -132,6 +132,9 @@ importers:
 
   apps/web:
     dependencies:
+      '@frank/memory':
+        specifier: workspace:*
+        version: link:../../packages/memory
       '@frank/pipeline-graph':
         specifier: workspace:*
         version: link:../../packages/pipeline-graph

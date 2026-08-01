@@ -59,9 +59,9 @@ export const consoleModules: ConsoleModule[] = [
   {
     id: 'memory',
     title: 'Memory',
-    description: 'Inspect and prune what Frank remembers (mem0 backend).',
+    description: 'Review, edit, expire, and delete what Frank remembers — the memory-control surface (BRAIN-006).',
     icon: 'brain',
-    status: 'planned',
+    status: 'live',
     system: 'Frank',
   },
   {

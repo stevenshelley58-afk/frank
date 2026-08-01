@@ -10,8 +10,8 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { InMemoryMemoryProvider } from './in-memory-provider.js';
-import type { MemoryScope } from './provider.js';
+import { InMemoryMemoryProvider } from './in-memory-provider';
+import type { MemoryScope } from './provider';
 
 const personal: MemoryScope = { cellId: 'cell-steven-primary', ownerId: 'steve' };
 const projectA: MemoryScope = { ...personal, projectId: 'blockwise' };
