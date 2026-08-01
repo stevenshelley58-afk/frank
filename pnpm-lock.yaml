@@ -30,6 +30,25 @@ importers:
         specifier: 2.7.0
         version: 2.7.0
 
+  adapters/collaboration/buzz:
+    dependencies:
+      '@frank/contracts':
+        specifier: workspace:*
+        version: link:../../../packages/contracts
+      ws:
+        specifier: 8.18.0
+        version: 8.18.0
+    devDependencies:
+      '@types/ws':
+        specifier: 8.18.0
+        version: 8.18.0
+      typescript:
+        specifier: 5.7.2
+        version: 5.7.2
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.2)
+
   adapters/harness/goose:
     dependencies:
       '@frank/contracts':
