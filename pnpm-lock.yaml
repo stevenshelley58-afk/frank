@@ -132,12 +132,21 @@ importers:
 
   apps/web:
     dependencies:
+      '@frank/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+      '@frank/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
       '@frank/memory':
         specifier: workspace:*
         version: link:../../packages/memory
       '@frank/pipeline-graph':
         specifier: workspace:*
         version: link:../../packages/pipeline-graph
+      '@frank/policy':
+        specifier: workspace:*
+        version: link:../../packages/policy
       '@xyflow/react':
         specifier: ^12.10.0
         version: 12.11.2(@types/react-dom@18.3.1)(@types/react@18.3.12)(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
