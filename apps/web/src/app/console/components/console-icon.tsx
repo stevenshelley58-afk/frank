@@ -21,7 +21,7 @@ function base(props: IconProps) {
 export function ConsoleIcon({
   name,
   ...props
-}: IconProps & { name: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks' | 'arrow' }) {
+}: IconProps & { name: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks' | 'arrow' | 'folder' }) {
   switch (name) {
     case 'grid':
       return (
@@ -58,6 +58,12 @@ export function ConsoleIcon({
         <svg {...base(props)}>
           <rect x="3" y="3" width="18" height="18" rx="2" />
           <path d="m8 12 2.5 2.5L16 9" />
+        </svg>
+      );
+    case 'folder':
+      return (
+        <svg {...base(props)}>
+          <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
         </svg>
       );
     case 'arrow':

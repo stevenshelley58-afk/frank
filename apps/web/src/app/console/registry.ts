@@ -22,13 +22,22 @@ export type ConsoleModule = {
   title: string;
   description: string;
   /** icon key resolved by <ConsoleIcon /> */
-  icon: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks';
+  icon: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks' | 'folder';
   status: ModuleStatus;
   /** owning system, shown as a muted tag */
   system: string;
 };
 
 export const consoleModules: ConsoleModule[] = [
+  {
+    id: 'explorer',
+    title: 'Files',
+    description:
+      'Browse the Frank monorepo like a file explorer — skills, flows, projects, agents, prompts, docs, contracts, config. Read-only; pin what matters.',
+    icon: 'folder',
+    status: 'live',
+    system: 'Frank',
+  },
   {
     id: 'adstudio',
     title: 'Ad Template Anatomy',
