@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { foundRoom, type Room } from '@/lib/rooms';
-import { IconPlus, IconShield, IconStar } from './icons';
+import Link from 'next/link';
+import { IconFrame, IconPlus, IconShield, IconStar } from './icons';
 import { useToast } from './providers';
 
 interface RailProps {
@@ -132,6 +133,17 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
           </span>
           <span className="text-[12.5px] font-medium">New room</span>
         </button>
+
+        {/* console */}
+        <Link
+          href="/console"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-muted transition-colors hover:bg-hover hover:text-ink2"
+        >
+          <span className="grid h-2.5 w-2.5 shrink-0 place-items-center">
+            <IconFrame size={13} />
+          </span>
+          <span className="text-[12.5px] font-medium">Console</span>
+        </Link>
 
         {/* footer */}
         <div className="mt-auto pt-4">
