@@ -13,3 +13,8 @@ export {
 export type { AssembleInput } from './context-pack-assembler.js';
 export { canonicalJson, NonCanonicalValueError } from './canonical-json.js';
 export type { CanonicalValue, FloatPolicy } from './canonical-json.js';
+export {
+  HarnessBroker,
+  NoEligibleHarnessError,
+  UnknownHarnessError,
+} from './harness-broker.js';
