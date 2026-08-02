@@ -417,7 +417,7 @@ function Widget({
 }) {
   return (
     <div
-      className={`mb-3 shrink-0 rounded-[14px] border bg-white px-[15px] py-3.5 shadow-[0_1px_2px_rgba(28,25,23,0.03)] transition-colors duration-200 hover:border-ink/15 ${
+      className={`mb-3 shrink-0 rounded-[14px] border bg-card px-[15px] py-3.5 shadow-[0_1px_2px_rgba(11,13,10,0.05)] transition-colors duration-200 hover:border-ink/20 ${
         pinned ? 'border-accent/35' : 'border-line'
       }`}
     >

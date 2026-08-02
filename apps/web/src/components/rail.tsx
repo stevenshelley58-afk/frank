@@ -65,7 +65,7 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
         </div>
 
         <div className="px-2.5 pb-1.5 pt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted/70">
-          Rooms
+          Home
         </div>
 
         {/* central — home, set apart */}
@@ -74,13 +74,13 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
             onClick={() => onSelect(home.id)}
             className={`mb-2.5 flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2.5 text-left transition-all duration-200 ${
               activeId === home.id
-                ? 'border border-accent/40 bg-accent/[0.06]'
-                : 'border border-line bg-white hover:border-accent/30 hover:bg-accent/[0.04]'
+                ? 'border border-accent/40 bg-accent/10'
+                : 'border border-line bg-card hover:border-accent/30 hover:bg-accent/[0.05]'
             }`}
           >
             <span
               className="h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-ink/15"
-              style={{ background: '#1c1917' }}
+              style={{ background: '#F23B1D' }}
             />
             <span className="min-w-0 flex-1">
               <span className="block text-[13px] font-semibold leading-tight text-ink">
@@ -93,6 +93,10 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
             <IconStar size={13} className="shrink-0 text-accent" />
           </button>
         )}
+
+        <div className="px-2.5 pb-1.5 pt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted/70">
+          Rooms
+        </div>
 
         {/* project rooms */}
         <div className="flex flex-col gap-0.5">
@@ -158,7 +162,7 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
 
         {/* footer */}
         <div className="mt-auto pt-4">
-          <div className="flex items-center gap-2.5 rounded-xl border border-line bg-subtle px-3 py-2.5">
+          <div className="flex items-center gap-2.5 rounded-xl border border-line bg-card px-3 py-2.5 shadow-[0_1px_2px_rgba(21,23,17,0.04)]">
             <IconShield size={16} className="shrink-0 text-success" />
             <span>
               <b className="block text-[11px] font-semibold text-ink2">Private by design</b>

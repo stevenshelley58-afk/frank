@@ -66,7 +66,7 @@ function MessageRow({
         className="mention-strip animate-msg-in flex items-center gap-2.5 self-stretch rounded-xl px-3.5 py-2.5 text-[12px] leading-snug text-ink2"
         style={{ animationDelay: `${delay}s` }}
       >
-        <IconBolt size={14} className="shrink-0 text-accent" />
+        <IconBolt size={14} className="shrink-0 text-success" />
         <div>
           {(message.parts ?? []).map((p, i) =>
             p.strong ? <b key={i} className="text-ink">{p.text}</b> : <span key={i}>{p.text}</span>,
@@ -83,7 +83,7 @@ function MessageRow({
         style={{ animationDelay: `${delay}s` }}
       >
         <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">Steve</span>
-        <div className="whitespace-pre-wrap rounded-2xl rounded-tr-[4px] bg-ink px-[15px] py-3 text-[13.5px] leading-[1.5] text-white">
+        <div className="whitespace-pre-wrap rounded-2xl rounded-tr-[4px] bg-ink px-[15px] py-3 text-[13.5px] leading-[1.5] text-paper">
           {message.text}
         </div>
       </div>
@@ -98,7 +98,7 @@ function MessageRow({
       <span className="font-mono text-[10px] uppercase tracking-[0.09em] text-muted">
         {agentName}
       </span>
-      <div className="whitespace-pre-wrap rounded-2xl rounded-tl-[4px] border border-line bg-white px-[15px] py-3 text-[13.5px] leading-[1.5] text-ink shadow-[0_1px_2px_rgba(28,25,23,0.03)]">
+      <div className="whitespace-pre-wrap rounded-2xl rounded-tl-[4px] border border-line bg-card px-[15px] py-3 text-[13.5px] leading-[1.5] text-ink shadow-[0_1px_2px_rgba(11,13,10,0.06)]">
         {message.text}
       </div>
     </div>
@@ -112,7 +112,7 @@ function TypingBubble() {
       <span className="font-mono text-[10px] uppercase tracking-[0.09em] text-muted">
         Frank is typing
       </span>
-      <div className="flex w-max items-center gap-[5px] rounded-2xl rounded-tl-[4px] border border-line bg-white px-4 py-[13px] shadow-[0_1px_2px_rgba(28,25,23,0.03)]">
+      <div className="flex w-max items-center gap-[5px] rounded-2xl rounded-tl-[4px] border border-line bg-card px-4 py-[13px] shadow-[0_1px_2px_rgba(11,13,10,0.06)]">
         <i className="typing-dot" />
         <i className="typing-dot" />
         <i className="typing-dot" />
