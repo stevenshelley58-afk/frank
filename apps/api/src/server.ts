@@ -62,6 +62,7 @@ import { provenanceRoutes, registerProvenanceRoutes } from './routes/provenance.
 import { registerTodayRoutes, todayRoutes } from './routes/today.js';
 import { registerWorkRoutes, workRoutes } from './routes/work.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
+import { registerCodegraphRoutes } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
 import { HealthService } from './services/health.js';
 import type { EnrichmentDispatcher } from './services/enrichment.js';
@@ -348,6 +349,9 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   if (options.db) {
     registerBrainRoutes(app, { ...shared, db: options.db });
   }
+
+  // Code intelligence graph — reads from the codegraph service output volume.
+  registerCodegraphRoutes(app, shared);
 
   const openApiDocument = buildOpenApiDocument(ALL_ROUTES, {
     title: 'FRANK Domain API',
