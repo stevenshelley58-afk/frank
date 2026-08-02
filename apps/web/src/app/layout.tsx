@@ -19,6 +19,7 @@ const plexMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
+  metadataBase: new URL('https://frank.fail'),
   title: 'FRANK — Agent Operating System',
   description: 'Your AI operator. One inbox, three specialists, everything done.',
   /* FRANK brand kit — official favicons, PWA icons and link preview. */
