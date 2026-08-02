@@ -6,6 +6,14 @@ Running log of every GitHub repo / OSS project we review for Frank, with a summa
 
 ---
 
+## 2026-08-02 — Letta (agent memory)
+
+Source: `https://github.com/letta-ai/letta` · Reviewed + deployed in session (Letta Phase 1)
+
+| Repo | ★ | What it is | Verdict | Notes for Frank |
+|------|---|------------|---------|-----------------|
+| **letta-ai/letta** | 44k | Open-source agent memory server (ex-Berkeley MemGPT). Per-agent persistent memory blocks, agent self-edits via tools, hybrid search, SSE streaming. Apache 2.0. Docker, no GPU needed. | 🟢 deployed (preview) | **Live at `letta-v1.frank.fail`.** Central room pinned to Letta; Goose stays for other rooms. Session wiki self-updates after each turn. Multi-turn recall verified post-restart. Replaces mem0 plan — one memory layer, not two. Key pitfalls in ADR-021 (User-Agent header, SSE content shape, external DB config). Phase 2: dispatcher routing + sleep-time consolidation. |
+
 ## 2026-07-31 — GitHub Show report (10 featured + sponsors)
 
 Source: `https://2026-07-31.githubshow.codeshiftagent.com/` · Reviewed in session `@session:default/20260802_132510_8d702d`
@@ -42,6 +50,14 @@ Source: `https://2026-07-31.githubshow.codeshiftagent.com/` · Reviewed in sessi
 
 ---
 
+## 2026-08-02 — Letta (agent memory)
+
+Source: `https://github.com/letta-ai/letta` · Reviewed + deployed in session (Letta Phase 1)
+
+| Repo | ★ | What it is | Verdict | Notes for Frank |
+|------|---|------------|---------|-----------------|
+| **letta-ai/letta** | 44k | Open-source agent memory server (ex-Berkeley MemGPT). Per-agent persistent memory blocks, agent self-edits via tools, hybrid search, SSE streaming. Apache 2.0. Docker, no GPU needed. | 🟢 deployed (preview) | **Live at `letta-v1.frank.fail`.** Central room pinned to Letta; Goose stays for other rooms. Session wiki self-updates after each turn. Multi-turn recall verified post-restart. Replaces mem0 plan — one memory layer, not two. Key pitfalls in ADR-021 (User-Agent header, SSE content shape, external DB config). Phase 2: dispatcher routing + sleep-time consolidation. |
+
 ## 2026-08-02 — OSS "get these live" push: outcomes
 
 Source: session "get these live on prod and clean up git" · Follow-up to the 2026-07-31 GitHub Show review.
@@ -60,6 +76,14 @@ Source: session "get these live on prod and clean up git" · Follow-up to the 20
 - **Prod confirmation:** prod branch is `feat/frank-console`, NOT `main` (per deploy skill). frank.fail serving it, HTTP 200. The i-have-adhd + spec-skill work is on this branch.
 
 ---
+
+## 2026-08-02 — Letta (agent memory)
+
+Source: `https://github.com/letta-ai/letta` · Reviewed + deployed in session (Letta Phase 1)
+
+| Repo | ★ | What it is | Verdict | Notes for Frank |
+|------|---|------------|---------|-----------------|
+| **letta-ai/letta** | 44k | Open-source agent memory server (ex-Berkeley MemGPT). Per-agent persistent memory blocks, agent self-edits via tools, hybrid search, SSE streaming. Apache 2.0. Docker, no GPU needed. | 🟢 deployed (preview) | **Live at `letta-v1.frank.fail`.** Central room pinned to Letta; Goose stays for other rooms. Session wiki self-updates after each turn. Multi-turn recall verified post-restart. Replaces mem0 plan — one memory layer, not two. Key pitfalls in ADR-021 (User-Agent header, SSE content shape, external DB config). Phase 2: dispatcher routing + sleep-time consolidation. |
 
 ## Template for future reviews
 
