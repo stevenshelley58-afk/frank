@@ -1,0 +1,886 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>FRANK — Personal Operating System</title>
+<style>
+:root{
+  --bg:#F4F4F1; --surface:#FFFFFF; --surface-2:#FBFBF9;
+  --ink:#1B1D1B; --ink-2:#3E423F; --muted:#6F736F; --faint:#9BA19B;
+  --line:#E7E6E1; --line-strong:#D9D8D2;
+  --accent:#1B5E4B; --accent-strong:#144A3B; --accent-soft:#E4EFE9; --accent-ghost:#F1F6F3;
+  --amber:#A16207; --amber-soft:#F6ECD8;
+  --blue:#1D6FB8; --blue-soft:#E4EEF7;
+  --red:#B3382F; --red-soft:#F7E5E3;
+  --pos:#1B7A4A;
+  --shadow-1:0 1px 2px rgba(27,29,27,.05);
+  --shadow-2:0 14px 36px rgba(27,29,27,.12),0 2px 8px rgba(27,29,27,.05);
+  --r-sm:7px; --r-md:10px; --r-lg:14px;
+  --font:-apple-system,BlinkMacSystemFont,"Segoe UI Variable Display","Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  --mono:ui-monospace,"SF Mono","Cascadia Code",Consolas,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{height:100%}
+body{
+  font-family:var(--font); background:var(--bg); color:var(--ink);
+  font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+  overflow:hidden;
+}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+input,textarea{font:inherit;color:inherit}
+::selection{background:var(--accent-soft)}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:4px}
+
+/* ambient workspace: faint dot grid + two soft colour washes */
+.workspace-bg{position:fixed;inset:0;z-index:0;pointer-events:none;
+  background:
+    radial-gradient(1200px 480px at 78% -12%, rgba(27,94,75,.06), transparent 62%),
+    radial-gradient(900px 420px at -8% 108%, rgba(29,111,184,.05), transparent 60%),
+    radial-gradient(rgba(27,29,27,.055) 1px, transparent 1px);
+  background-size:auto,auto,22px 22px;
+}
+
+.app{position:relative;z-index:1;display:flex;height:100vh}
+.app{--rail-w:216px;--rail-cw:68px;--dock-h:62px}
+
+/* ============ nav rail — collapsible on desktop, bottom dock on mobile ============ */
+.rail{position:fixed;left:0;top:0;bottom:0;z-index:40;width:var(--rail-w);
+  background:var(--surface);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;padding:12px;
+  transition:width .3s cubic-bezier(.2,.7,.3,1),transform .3s cubic-bezier(.2,.7,.3,1)}
+.rail-head{display:flex;align-items:center;gap:6px;padding:2px 2px 4px}
+.brand{display:flex;align-items:center;gap:10px;flex:1;min-width:0;padding:6px 8px;border:0;background:none;
+  font:inherit;color:inherit;text-align:left;cursor:pointer;transition:opacity .15s}
+.brand:hover{opacity:.85}
+.brand:hover .brand-glyph{transform:rotate(-6deg) scale(1.06)}
+.brand:active .brand-glyph{transform:scale(.96)}
+.brand-glyph{width:30px;height:30px;border-radius:8px;background:var(--accent);color:#fff;flex:0 0 auto;
+  transition:transform .18s cubic-bezier(.34,1.56,.64,1);
+  display:grid;place-items:center;font-weight:700;font-size:15px;letter-spacing:-.02em;
+  box-shadow:inset 0 -2px 0 rgba(0,0,0,.18)}
+.brand b{font-size:14px;letter-spacing:.05em;white-space:nowrap}
+.brand small{display:block;font-size:10.5px;color:var(--muted);font-weight:500;letter-spacing:.02em;white-space:nowrap}
+.rail-toggle{width:27px;height:27px;border-radius:7px;border:1px solid var(--line);background:var(--surface-2);
+  color:var(--muted);display:grid;place-items:center;flex:0 0 auto;
+  transition:color .15s,border-color .15s,background .15s}
+.rail-toggle svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:2;
+  stroke-linecap:round;stroke-linejoin:round;transform:rotate(180deg);transition:transform .3s}
+.rail-toggle:hover{color:var(--accent-strong);border-color:var(--accent-soft);background:var(--accent-ghost)}
+
+.nav{display:flex;flex-direction:column;gap:2px;flex:1;overflow-y:auto;overflow-x:hidden;padding:2px 0 6px}
+.nav::-webkit-scrollbar{width:5px}
+.nav::-webkit-scrollbar-thumb{background:var(--line);border-radius:3px}
+.nav-label{font-size:10px;font-weight:600;letter-spacing:.13em;text-transform:uppercase;
+  color:var(--faint);padding:13px 10px 5px}
+.nav button{display:flex;align-items:center;gap:10px;width:100%;padding:8px 10px;border-radius:8px;
+  color:var(--ink-2);font-weight:500;font-size:13.5px;text-align:left;position:relative;white-space:nowrap;
+  transition:background .15s,color .15s,transform .15s}
+.nav button svg{width:17px;height:17px;stroke:currentColor;fill:none;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round;flex:0 0 auto;opacity:.85}
+.nav button span{overflow:hidden;text-overflow:ellipsis}
+.nav button:hover{background:var(--surface-2);color:var(--ink);transform:translateX(1px)}
+.nav button.is-active{background:var(--accent-ghost);color:var(--accent-strong);font-weight:600}
+.nav button.is-active::before{content:"";position:absolute;left:-12px;top:7px;bottom:7px;width:3px;
+  border-radius:0 3px 3px 0;background:var(--accent)}
+.nav .count{margin-left:auto;font-size:10.5px;font-weight:600;background:var(--accent);color:#fff;
+  min-width:17px;height:17px;padding:0 5px;border-radius:9px;display:grid;place-items:center;flex:0 0 auto}
+.nav .pip{margin-left:auto;width:7px;height:7px;border-radius:50%;background:var(--pos);flex:0 0 auto;
+  box-shadow:0 0 0 0 rgba(27,122,74,.5);animation:pulse 2.2s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(27,122,74,.45)}70%{box-shadow:0 0 0 6px rgba(27,122,74,0)}100%{box-shadow:0 0 0 0 rgba(27,122,74,0)}}
+.rail-foot{margin-top:auto;display:flex;flex-direction:column;gap:10px;overflow:hidden}
+.privacy{display:flex;gap:9px;align-items:center;background:var(--surface-2);border:1px solid var(--line);
+  border-radius:var(--r-md);padding:10px 11px}
+.privacy svg{width:16px;height:16px;stroke:var(--accent);fill:none;stroke-width:1.7;flex:0 0 auto}
+.privacy b{font-size:12px;display:block;white-space:nowrap}
+.privacy small{font-size:10.5px;color:var(--muted);white-space:nowrap}
+.owner{display:flex;align-items:center;gap:9px;padding:7px 8px;border-radius:9px;width:100%;
+  transition:background .15s}
+.owner:hover{background:var(--surface-2)}
+.owner .av{width:28px;height:28px;border-radius:50%;background:var(--ink);color:#fff;
+  display:grid;place-items:center;font-size:11px;font-weight:600;flex:0 0 auto}
+.owner b{font-size:12.5px;display:block;line-height:1.2;white-space:nowrap}
+.owner small{font-size:10.5px;color:var(--muted);white-space:nowrap}
+
+/* collapsed (desktop): icon rail, labels hidden via width (keeps flexbox happy) */
+.app.rail-collapsed .rail{width:var(--rail-cw)}
+.app.rail-collapsed .brand{flex:0 0 auto;width:44px;padding:6px 7px;justify-content:center}
+.app.rail-collapsed .brand-text,.app.rail-collapsed .nav-label{width:0;opacity:0;overflow:hidden;
+  padding-left:0;padding-right:0;margin:0;pointer-events:none;
+  transition:width .25s,opacity .16s,padding .25s,margin .25s}
+.app.rail-collapsed .nav button span,.app.rail-collapsed .nav .count,.app.rail-collapsed .nav .pip,
+.app.rail-collapsed .privacy,.app.rail-collapsed .owner div{width:0;opacity:0;overflow:hidden;
+  margin:0;pointer-events:none;transition:width .25s,opacity .16s,margin .25s}
+.app.rail-collapsed .privacy{border-width:0;padding-top:0;padding-bottom:0;height:0;gap:0}
+.app.rail-collapsed .nav button,.app.rail-collapsed .owner{justify-content:center;gap:0}
+.app.rail-collapsed .rail-toggle svg{transform:rotate(0deg)}
+
+/* mobile: same nav element becomes a bottom dock */
+.mob-dock{display:none}
+.scrim{position:fixed;inset:0;z-index:60;background:rgba(27,29,27,.38);opacity:0;
+  pointer-events:none;transition:opacity .28s}
+.scrim.show{opacity:1;pointer-events:auto}
+
+@media (max-width:840px){
+  .rail{top:auto;right:0;bottom:0;width:auto !important;height:auto;flex-direction:row;align-items:stretch;
+    gap:4px;padding:8px 10px calc(9px + env(safe-area-inset-bottom));
+    border-right:none;border-top:1px solid var(--line);
+    box-shadow:0 -8px 28px rgba(27,29,27,.09)}
+  .app{--rail-w:0px;--rail-cw:0px}
+  .rail-head{display:none}
+  .nav{flex-direction:row;gap:3px;overflow:visible;padding:0;flex:1}
+  .nav-label,.nav button span,.nav .count,.nav .pip{display:none !important}
+  .nav button{flex-direction:column;gap:4px;padding:8px 6px 6px;border-radius:10px;font-size:9.5px;
+    font-weight:600;letter-spacing:.01em;transform:none !important}
+  .nav button svg{width:19px;height:19px}
+  .nav button.is-active{background:none}
+  .nav button.is-active::before{left:50%;right:auto;top:auto;bottom:-9px;transform:translateX(-50%);
+    width:16px;height:3px;border-radius:3px 3px 0 0}
+  .rail-foot{margin:0 0 0 4px;flex-direction:row;align-items:center;gap:8px}
+  .privacy,.owner div{display:none}
+  .owner{width:auto;padding:6px}
+  .mob-dock{display:flex;align-items:center;justify-content:center;width:42px;height:42px;align-self:center;
+    border-radius:12px;background:var(--accent);color:#fff;flex:0 0 auto;
+    box-shadow:var(--shadow-1),inset 0 -2px 0 rgba(0,0,0,.18);transition:transform .15s,background .15s}
+  .mob-dock:active{transform:scale(.93)}
+  .mob-dock:hover{background:var(--accent-strong)}
+  .mob-dock svg{width:19px;height:19px;stroke:#fff;fill:none;stroke-width:1.9;stroke-linecap:round}
+  /* dock lifts out of the way when the keyboard is up (rooms composer) */
+  .app.kbd-open .rail{transform:translateY(calc(100% + 12px))}
+  /* drawer: rail slides up as a sheet — must sit ABOVE the scrim (40 < 60) */
+  .app.rail-open .rail{z-index:70;flex-direction:column;align-items:stretch;gap:0;
+    height:min(82vh,600px);left:10px;right:10px;width:auto !important;
+    border-radius:16px 16px 0 0;border:1px solid var(--line);border-bottom:none;
+    padding:12px 12px calc(12px + env(safe-area-inset-bottom));
+    box-shadow:0 -18px 50px rgba(27,29,27,.24);transform:none;
+    animation:sheetUp .3s cubic-bezier(.2,.7,.3,1)}
+  @keyframes sheetUp{from{transform:translateY(28px);opacity:.6}to{transform:none;opacity:1}}
+  .app.rail-open .rail-head{display:flex;align-items:center;gap:6px;padding:2px 2px 8px;
+    border-bottom:1px solid var(--line);margin-bottom:8px}
+  .app.rail-open .brand{flex:1;width:auto;justify-content:flex-start;padding:6px 8px}
+  .app.rail-open .brand-text,.app.rail-open .nav-label{display:block;width:auto;opacity:1;
+    padding-left:10px;padding-right:10px;margin:0;pointer-events:auto}
+  .app.rail-open .brand-text{display:block;padding:0;overflow:visible}
+  .app.rail-open .nav{flex-direction:column;gap:2px;overflow-y:auto;padding:2px 0 6px}
+  .app.rail-open .nav button{flex-direction:row;gap:10px;padding:8px 10px;font-size:13.5px;
+    justify-content:flex-start}
+  .app.rail-open .nav button span{display:block;width:auto;opacity:1}
+  .app.rail-open .nav button.is-active::before{left:-12px;bottom:7px;top:7px;transform:none;width:3px;height:auto}
+  .app.rail-open .rail-toggle{display:grid;transform:rotate(90deg)}
+  .app.rail-open .rail-toggle svg{transform:none}
+  .app.rail-open .mob-dock,.app.rail-open .nav .count{display:none}
+  .app.rail-open .rail-foot{margin-top:auto;flex-direction:column;align-items:stretch;gap:10px}
+  .app.rail-open .privacy{display:flex}
+  .app.rail-open .owner div{display:block;width:auto;opacity:1}
+  .app.rail-open .owner{width:100%;justify-content:flex-start}
+}
+
+/* ============ main column ============ */
+.main{flex:1;display:flex;flex-direction:column;min-width:0;margin-left:var(--rail-w);
+  transition:margin-left .3s cubic-bezier(.2,.7,.3,1)}
+.app.rail-collapsed .main{margin-left:var(--rail-cw)}
+.topbar{flex:0 0 auto;display:flex;align-items:center;gap:12px;padding:13px 24px 11px;border-bottom:1px solid var(--line)}
+.topbar h1{font-size:17px;font-weight:650;letter-spacing:-.01em;white-space:nowrap}
+.topbar .sub{font-size:12px;color:var(--muted)}
+.topbar .spacer{flex:1}
+.search{display:flex;align-items:center;gap:7px;background:var(--surface);border:1px solid var(--line);
+  border-radius:8px;padding:6px 10px;width:210px;color:var(--faint);font-size:12.5px;
+  transition:width .2s,border-color .2s,opacity .2s}
+.search:focus-within{width:280px;border-color:var(--line-strong)}
+.search svg{width:14px;height:14px;stroke:currentColor;fill:none;stroke-width:1.8}
+.search input{border:none;background:none;outline:none;width:100%;font-size:12.5px;color:var(--ink)}
+.kbd{font-family:var(--mono);font-size:10px;border:1px solid var(--line);border-radius:4px;
+  padding:1px 5px;color:var(--faint);background:var(--surface-2)}
+.btn{display:inline-flex;align-items:center;gap:7px;font-size:13px;font-weight:600;
+  padding:7px 13px;border-radius:8px;transition:background .15s,transform .12s,box-shadow .15s;white-space:nowrap}
+.btn:active{transform:translateY(1px)}
+.btn-primary{background:var(--accent);color:#fff;box-shadow:var(--shadow-1),inset 0 -2px 0 rgba(0,0,0,.15)}
+.btn-primary:hover{background:var(--accent-strong)}
+.btn-ghost{border:1px solid var(--line-strong);color:var(--ink-2);background:var(--surface)}
+.btn-ghost:hover{background:var(--surface-2)}
+.btn-sm{padding:5px 10px;font-size:12.5px;border-radius:7px}
+
+.scroll{flex:1;overflow-y:auto;overflow-x:hidden;padding:22px 26px 30px;scroll-behavior:smooth}
+.scroll::-webkit-scrollbar{width:9px}
+.scroll::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:5px;border:2px solid var(--bg)}
+.scroll::-webkit-scrollbar-thumb:hover{background:var(--faint)}
+
+/* screens */
+.screen{display:none;animation:fadeUp .28s cubic-bezier(.2,.7,.3,1)}
+.screen.is-active{display:block}
+@keyframes fadeUp{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+.reveal{opacity:0;transform:translateY(10px)}
+.reveal.in{opacity:1;transform:none;transition:opacity .45s ease,transform .45s cubic-bezier(.2,.7,.3,1)}
+
+/* hero band */
+.hero{display:flex;align-items:flex-end;gap:16px;margin-bottom:20px}
+.hero h2{font-size:27px;font-weight:700;letter-spacing:-.022em;line-height:1.15}
+.hero .dayline{font-size:12.5px;color:var(--muted);margin-top:3px}
+.hero .hero-right{margin-left:auto;text-align:right;flex:0 0 auto}
+.hero .focus{font-size:12px;color:var(--accent-strong);background:var(--accent-ghost);
+  border:1px solid var(--accent-soft);padding:5px 11px;border-radius:999px;font-weight:600;white-space:nowrap}
+
+/* cards */
+.card{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);
+  box-shadow:var(--shadow-1);overflow:hidden;transition:box-shadow .2s,border-color .2s,transform .2s}
+.card:hover{box-shadow:var(--shadow-2);border-color:var(--line-strong);transform:translateY(-1px)}
+.card-h{display:flex;align-items:center;gap:9px;padding:13px 16px;border-bottom:1px solid var(--line)}
+.card-h b{font-size:13px;font-weight:650;letter-spacing:.01em}
+.card-h .meta{margin-left:auto;font-size:11.5px;color:var(--muted)}
+.card-b{padding:14px 16px}
+
+/* grid layouts (asymmetric on purpose) */
+.grid-today{display:grid;grid-template-columns:1.55fr 1fr;gap:16px;align-items:start}
+.grid-three{display:grid;grid-template-columns:1fr 1fr 1.15fr;gap:16px;align-items:start;margin-top:16px}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:16px;align-items:start}
+.col{display:flex;flex-direction:column;gap:16px}
+
+/* today's briefing */
+.brief{display:flex;flex-direction:column}
+.brief-item{display:flex;gap:11px;padding:11px 2px;border-bottom:1px dashed var(--line)}
+.brief-item:last-child{border-bottom:none}
+.brief-item .time{font-family:var(--mono);font-size:11px;color:var(--faint);width:44px;flex:0 0 auto;padding-top:2px}
+.brief-item .t{font-size:13px;font-weight:600}
+.brief-item .d{font-size:12px;color:var(--muted);margin-top:1px}
+.tag{display:inline-flex;align-items:center;font-size:10.5px;font-weight:600;padding:1.5px 8px;
+  border-radius:999px;letter-spacing:.02em}
+.tag-green{background:var(--accent-soft);color:var(--accent-strong)}
+.tag-amber{background:var(--amber-soft);color:var(--amber)}
+.tag-blue{background:var(--blue-soft);color:var(--blue)}
+.tag-red{background:var(--red-soft);color:var(--red)}
+
+/* decisions / approvals */
+.approval{display:flex;gap:11px;padding:12px 2px;border-bottom:1px dashed var(--line);align-items:flex-start}
+.approval:last-child{border-bottom:none}
+.approval .ico{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;flex:0 0 auto}
+.approval .ico svg{width:16px;height:16px;stroke:#fff;fill:none;stroke-width:1.8}
+.ico-send{background:var(--blue)} .ico-pay{background:var(--accent)} .ico-book{background:var(--amber)} .ico-del{background:var(--red)}
+.approval .t{font-size:13px;font-weight:600}
+.approval .d{font-size:12px;color:var(--muted);margin-top:1px}
+.approval .acts{margin-left:auto;display:flex;flex-direction:column;gap:6px;flex:0 0 auto}
+.act-approve{background:var(--accent);color:#fff;font-size:11.5px;font-weight:600;padding:4px 10px;
+  border-radius:6px;transition:background .15s}
+.act-approve:hover{background:var(--accent-strong)}
+.act-later{font-size:11px;color:var(--faint);transition:color .15s}
+.act-later:hover{color:var(--muted)}
+
+/* money panel */
+.money .big{font-family:var(--mono);font-size:26px;font-weight:600;letter-spacing:-.02em}
+.money .delta{font-size:12px;color:var(--pos);font-weight:600}
+.bars{display:flex;align-items:flex-end;gap:6px;height:74px;margin:14px 0 8px}
+.bar{flex:1;background:var(--accent-soft);border-radius:4px 4px 0 0;position:relative;transition:background .2s;min-height:6px}
+.bar:hover{background:var(--accent)}
+.bar.cur{background:var(--accent)}
+.axis{display:flex;gap:6px}
+.axis span{flex:1;text-align:center;font-family:var(--mono);font-size:9.5px;color:var(--faint)}
+
+/* project row */
+.proj{display:flex;flex-direction:column;gap:12px}
+.proj-item{padding:11px 13px;border:1px solid var(--line);border-radius:var(--r-md);
+  background:var(--surface-2);transition:border-color .15s,transform .15s,box-shadow .15s}
+.proj-item:hover{border-color:var(--accent-soft);transform:translateX(2px);box-shadow:var(--shadow-1)}
+.proj-top{display:flex;align-items:center;gap:8px}
+.proj-top b{font-size:13px;font-weight:650}
+.proj-top .pct{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--muted)}
+.pbar{height:5px;background:var(--line);border-radius:3px;margin-top:8px;overflow:hidden}
+.pbar i{display:block;height:100%;background:var(--accent);border-radius:3px;transition:width .8s cubic-bezier(.2,.7,.3,1)}
+.proj-sub{font-size:11.5px;color:var(--muted);margin-top:7px}
+
+/* health dots */
+.health{display:flex;flex-direction:column;gap:10px}
+.h-row{display:flex;align-items:center;gap:10px}
+.h-dot{width:9px;height:9px;border-radius:50%;background:var(--pos);flex:0 0 auto;
+  box-shadow:0 0 0 0 rgba(27,122,74,.4);animation:pulse 2.4s infinite}
+.h-row b{font-size:12.5px;font-weight:600}
+.h-row small{font-size:11px;color:var(--muted)}
+.h-row .h-meta{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+
+/* ============ rooms (Buzz) ============ */
+.rooms{display:grid;grid-template-columns:250px 1fr 236px;gap:16px;align-items:stretch;height:calc(100vh - 150px);min-height:480px}
+.room-list{display:flex;flex-direction:column;gap:6px;padding:10px}
+.room{display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:9px;transition:background .15s,transform .15s;width:100%;text-align:left}
+.room:hover{background:var(--surface-2);transform:translateX(2px)}
+.room.is-active{background:var(--accent-ghost)}
+.room .r-ico{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-size:14px;flex:0 0 auto}
+.room b{font-size:13px;font-weight:650;display:block;line-height:1.25}
+.room small{font-size:11px;color:var(--muted)}
+.room .unread{margin-left:auto;width:8px;height:8px;border-radius:50%;background:var(--accent);flex:0 0 auto}
+.room-new{margin-top:auto;border:1px dashed var(--line-strong);border-radius:9px;padding:9px;
+  color:var(--muted);font-size:12.5px;font-weight:600;display:flex;align-items:center;justify-content:center;gap:7px;
+  transition:color .15s,border-color .15s,background .15s}
+.room-new:hover{color:var(--accent-strong);border-color:var(--accent-soft);background:var(--accent-ghost)}
+
+.chat{display:flex;flex-direction:column;padding:0;min-width:0}
+.chat-h{padding:13px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}
+.chat-h b{font-size:14px;font-weight:650}
+.chat-h .rmeta{font-size:11.5px;color:var(--muted)}
+.chat-h .live{margin-left:auto;display:flex;align-items:center;gap:6px;font-size:11px;color:var(--pos);font-weight:600}
+.chat-h .live::before{content:"";width:7px;height:7px;border-radius:50%;background:var(--pos);animation:pulse 2s infinite}
+.msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:14px}
+.msgs::-webkit-scrollbar{width:8px}.msgs::-webkit-scrollbar-thumb{background:var(--line-strong);border-radius:4px}
+.msg{display:flex;gap:10px;max-width:88%;animation:fadeUp .3s ease}
+.msg .m-av{width:28px;height:28px;border-radius:50%;flex:0 0 auto;display:grid;place-items:center;
+  font-size:11px;font-weight:700;color:#fff}
+.msg .bubble{background:var(--surface-2);border:1px solid var(--line);border-radius:4px 12px 12px 12px;
+  padding:9px 12px}
+.msg .m-name{font-size:11px;font-weight:650;color:var(--muted);display:flex;gap:8px;align-items:baseline}
+.msg .m-name small{font-family:var(--mono);font-size:9.5px;color:var(--faint);font-weight:400}
+.msg .m-text{font-size:13px;margin-top:3px}
+.msg.me{margin-left:auto;flex-direction:row-reverse}
+.msg.me .bubble{background:var(--accent-ghost);border-color:var(--accent-soft);border-radius:12px 4px 12px 12px}
+.msg .attach{margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:8px 10px;
+  display:flex;gap:8px;align-items:center;font-size:12px;background:var(--surface)}
+.msg .attach svg{width:15px;height:15px;stroke:var(--accent);fill:none;stroke-width:1.7;flex:0 0 auto}
+.composer{border-top:1px solid var(--line);padding:12px 16px;display:flex;gap:10px;align-items:flex-end}
+.composer .cbox{flex:1;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);
+  padding:9px 12px;min-height:38px;font-size:13px;outline:none;transition:border-color .15s,box-shadow .15s;resize:none;max-height:110px}
+.composer .cbox:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+.composer .send{width:38px;height:38px;border-radius:9px;background:var(--accent);color:#fff;
+  display:grid;place-items:center;transition:background .15s,transform .12s;flex:0 0 auto}
+.composer .send:hover{background:var(--accent-strong)}
+.composer .send:active{transform:scale(.94)}
+.composer .send svg{width:17px;height:17px;stroke:#fff;fill:none;stroke-width:1.9}
+.typing{font-size:11px;color:var(--faint);padding:0 16px 8px;height:16px}
+.dots{display:inline-flex;gap:3px;margin-left:5px;vertical-align:middle}
+.dots i{width:4px;height:4px;border-radius:50%;background:var(--faint);animation:blink 1.2s infinite}
+.dots i:nth-child(2){animation-delay:.18s}.dots i:nth-child(3){animation-delay:.36s}
+@keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
+
+.ctx{display:flex;flex-direction:column;gap:14px;padding:14px}
+.ctx .sec{font-size:10.5px;font-weight:650;letter-spacing:.12em;text-transform:uppercase;color:var(--faint)}
+.member{display:flex;align-items:center;gap:9px;padding:5px 0}
+.member .m-av{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font-size:10px;font-weight:700;color:#fff;flex:0 0 auto}
+.member b{font-size:12.5px;font-weight:600}
+.member small{font-size:10.5px;color:var(--muted);display:block}
+.file{display:flex;align-items:center;gap:8px;padding:7px 9px;border:1px solid var(--line);border-radius:8px;
+  font-size:12px;margin-bottom:7px;transition:border-color .15s,background .15s;cursor:pointer;background:var(--surface)}
+.file:hover{border-color:var(--accent-soft);background:var(--accent-ghost)}
+.file svg{width:14px;height:14px;stroke:var(--muted);fill:none;stroke-width:1.7;flex:0 0 auto}
+.file small{margin-left:auto;font-family:var(--mono);font-size:9.5px;color:var(--faint)}
+
+/* ============ generic list/table bits ============ */
+.tbl{width:100%;border-collapse:collapse}
+.tbl th{font-size:10.5px;font-weight:650;letter-spacing:.1em;text-transform:uppercase;color:var(--faint);
+  text-align:left;padding:8px 12px;border-bottom:1px solid var(--line)}
+.tbl td{font-size:13px;padding:11px 12px;border-bottom:1px solid var(--line)}
+.tbl tr:last-child td{border-bottom:none}
+.tbl tbody tr{transition:background .12s}
+.tbl tbody tr:hover{background:var(--surface-2)}
+.mono{font-family:var(--mono);font-size:12px}
+
+/* agent cards */
+.agents{display:grid;grid-template-columns:repeat(auto-fill,minmax(225px,1fr));gap:16px}
+.agent{background:var(--surface);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;
+  box-shadow:var(--shadow-1);transition:box-shadow .2s,transform .2s,border-color .2s}
+.agent:hover{box-shadow:var(--shadow-2);transform:translateY(-2px);border-color:var(--line-strong)}
+.agent .a-top{display:flex;align-items:center;gap:11px;margin-bottom:11px}
+.agent .glyph{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;
+  font-weight:700;font-size:15px;color:#fff;letter-spacing:-.02em;box-shadow:inset 0 -2px 0 rgba(0,0,0,.16)}
+.agent b{font-size:13.5px;font-weight:650;display:block}
+.agent small{font-size:11px;color:var(--muted)}
+.agent .a-desc{font-size:12.5px;color:var(--ink-2);margin-bottom:12px;line-height:1.45}
+.agent .a-foot{display:flex;align-items:center;gap:8px}
+.status{display:inline-flex;align-items:center;gap:6px;font-size:11px;font-weight:600}
+.status i{width:7px;height:7px;border-radius:50%}
+.st-run{color:var(--pos)} .st-run i{background:var(--pos);animation:pulse 2s infinite}
+.st-idle{color:var(--faint)} .st-idle i{background:var(--line-strong)}
+.st-wait{color:var(--amber)} .st-wait i{background:var(--amber)}
+.a-run{margin-left:auto;font-size:11.5px;font-weight:600;color:var(--accent-strong);
+  border:1px solid var(--accent-soft);background:var(--accent-ghost);padding:4px 10px;border-radius:7px;transition:background .15s}
+.a-run:hover{background:var(--accent-soft)}
+
+/* toggle */
+.toggle{width:34px;height:20px;border-radius:999px;background:var(--line-strong);position:relative;transition:background .2s;flex:0 0 auto}
+.toggle::after{content:"";position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;
+  background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.25);transition:left .2s}
+.toggle.on{background:var(--accent)}
+.toggle.on::after{left:17px}
+
+/* ============ responsive content (one codebase, fluid at every width) ============ */
+@media (max-width:1280px){
+  .grid-today{grid-template-columns:1fr}
+  .grid-three{grid-template-columns:1fr 1fr}
+}
+@media (max-width:1150px){
+  .rooms{grid-template-columns:224px 1fr}
+  .ctx{display:none}
+}
+@media (max-width:840px){
+  .main{margin-left:0 !important}
+  .scroll{padding:16px 16px calc(var(--dock-h) + 16px + env(safe-area-inset-bottom))}
+  .topbar{padding:11px 16px 9px}
+  .topbar .sub{display:none}
+  .kbd{display:none}
+  .search{width:140px}
+  .search:focus-within{width:180px}
+  .btn-primary .btn-label{display:none}
+  .btn-primary{padding:7px 10px}
+  .hero h2{font-size:23px}
+  .grid-three{grid-template-columns:1fr}
+  .rooms{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr);
+    height:calc(100vh - var(--dock-h) - 116px - env(safe-area-inset-bottom));min-height:380px}
+  .room-list{max-height:152px;overflow-y:auto;padding:8px}
+  .room{padding:7px 9px}
+  .room-new{display:none}
+  .tbl{display:block;overflow-x:auto;white-space:nowrap}
+}
+@media (max-width:600px){
+  .grid-2{grid-template-columns:1fr}
+  .hero{flex-direction:column;align-items:flex-start;gap:10px;margin-bottom:16px}
+  .hero .hero-right{margin-left:0;text-align:left}
+  .scroll{padding:14px 14px calc(var(--dock-h) + 14px + env(safe-area-inset-bottom))}
+  .agents{gap:12px}
+}
+@media (max-width:430px){
+  .search{display:none}
+  .btn-primary{padding:7px 9px}
+}
+@media (max-width:360px){
+  .nav button{font-size:0;padding:8px 4px 6px}
+}
+
+/* toast */
+.toast{position:fixed;bottom:22px;right:22px;z-index:50;background:var(--ink);color:#fff;
+  padding:11px 16px;border-radius:10px;font-size:13px;font-weight:500;box-shadow:var(--shadow-2);
+  display:flex;align-items:center;gap:9px;transform:translateY(16px);opacity:0;pointer-events:none;
+  transition:transform .3s cubic-bezier(.2,.7,.3,1),opacity .3s}
+.toast.show{transform:translateY(0);opacity:1}
+.toast svg{width:15px;height:15px;stroke:var(--pos);fill:none;stroke-width:2.2}
+@media (max-width:840px){.toast{bottom:calc(var(--dock-h) + 14px + env(safe-area-inset-bottom))}}
+</style>
+</head>
+<body>
+<div class="workspace-bg"></div>
+<div class="app">
+
+  <!-- NAV RAIL — sidebar on desktop (collapsible), bottom dock on mobile (same markup, one codebase) -->
+  <nav class="rail" id="rail" aria-label="Main navigation">
+    <div class="rail-head">
+      <button class="brand" id="brand-home" aria-label="FRANK — back to Today" title="Back to Today">
+        <div class="brand-glyph">F</div>
+        <div class="brand-text"><b>FRANK</b><small>Personal OS</small></div>
+      </button>
+      <button class="rail-toggle" id="rail-toggle" aria-label="Collapse sidebar" aria-expanded="true" title="Collapse sidebar">
+        <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+      </button>
+    </div>
+    <div class="nav" id="nav">
+      <span class="nav-label">Now</span>
+      <button data-view="today" class="is-active" id="nav-today">
+        <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9L17 7M7 17l-2.1 2.1"/></svg>
+        <span>Today</span>
+      </button>
+      <button data-view="rooms" id="nav-rooms">
+        <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+        <span>Rooms</span><span class="count" id="rooms-count">2</span>
+      </button>
+      <span class="nav-label">Work</span>
+      <button data-view="projects" id="nav-projects">
+        <svg viewBox="0 0 24 24"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
+        <span>Projects</span>
+      </button>
+      <button data-view="finances" id="nav-finances">
+        <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+        <span>Finances</span>
+      </button>
+      <span class="nav-label">System</span>
+      <button data-view="agents" id="nav-agents">
+        <svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="12" rx="2"/><path d="M9 20h6M12 16v4"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/></svg>
+        <span>Agents</span><span class="pip"></span>
+      </button>
+      <button data-view="automations" id="nav-automations">
+        <svg viewBox="0 0 24 24"><polyline points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/></svg>
+        <span>Automations</span>
+      </button>
+      <button data-view="brain" id="nav-brain">
+        <svg viewBox="0 0 24 24"><path d="M12 2a4 4 0 0 0-4 4 4 4 0 0 0-3 6.9A4 4 0 0 0 8 20a4 4 0 0 0 4-2 4 4 0 0 0 4 2 4 4 0 0 0 3-7.1A4 4 0 0 0 16 6a4 4 0 0 0-4-4z"/></svg>
+        <span>Brain</span>
+      </button>
+    </div>
+    <div class="rail-foot">
+      <div class="privacy">
+        <svg viewBox="0 0 24 24"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
+        <div><b>Local-first</b><small>Nothing leaves this machine</small></div>
+      </div>
+      <button class="owner">
+        <span class="av">S</span>
+        <div><b>Steve</b><small>Owner · solo</small></div>
+      </button>
+      <button class="mob-dock" id="mob-dock" aria-label="Open menu" aria-expanded="false">
+        <svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/></svg>
+      </button>
+    </div>
+  </nav>
+  <div class="scrim" id="scrim"></div>
+
+  <!-- MAIN -->
+  <div class="main">
+    <header class="topbar">
+      <div>
+        <h1 id="page-title">Today</h1>
+        <div class="sub" id="page-sub">Saturday, 1 August</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="21" y1="21" x2="16.6" y2="16.6"/></svg>
+        <input placeholder="Search everything…">
+        <span class="kbd">⌘K</span>
+      </div>
+      <button class="btn btn-primary" id="ask-frank" aria-label="Ask Frank">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9"><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/><circle cx="12" cy="12" r="4"/></svg>
+        <span class="btn-label">Ask Frank</span>
+      </button>
+    </header>
+
+    <div class="scroll" id="scroll">
+
+      <!-- ============ TODAY ============ -->
+      <section class="screen is-active" data-screen="today">
+        <div class="hero reveal in">
+          <div>
+            <h2>Good morning, Steve.</h2>
+            <div class="dayline">Saturday, 1 August · 3 decisions waiting · 1 project on track</div>
+          </div>
+          <div class="hero-right"><span class="focus">Deep work block · 9:00–11:00</span></div>
+        </div>
+
+        <div class="grid-today">
+          <div class="col">
+            <div class="card reveal">
+              <div class="card-h"><b>Your day</b><span class="meta">auto-built from calendar, tasks &amp; agents</span></div>
+              <div class="card-b brief">
+                <div class="brief-item"><span class="time">09:00</span><div><div class="t">Review MerryPaws launch checklist <span class="tag tag-green">on track</span></div><div class="d">12 items left · Frankie prepped a summary</div></div></div>
+                <div class="brief-item"><span class="time">11:30</span><div><div class="t">Approve Blockwise Meta ad batch <span class="tag tag-amber">needs you</span></div><div class="d">$180 spend · 4 creatives ready</div></div></div>
+                <div class="brief-item"><span class="time">14:00</span><div><div class="t">Meta API partner sync <span class="tag tag-blue">booked</span></div><div class="d">Blockwise coverage expansion · 30 min</div></div></div>
+                <div class="brief-item"><span class="time">16:00</span><div><div class="t">Chase — game character review <span class="tag tag-green">for Chase</span></div><div class="d">3 selfie→character drafts ready to pick</div></div></div>
+              </div>
+            </div>
+
+            <div class="card reveal">
+              <div class="card-h"><b>Waiting on you</b><span class="meta" id="decision-meta">3 decisions</span></div>
+              <div class="card-b" id="approvals">
+                <div class="approval" data-appr>
+                  <div class="ico ico-send"><svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></div>
+                  <div><div class="t">Send proposal to MerryPaws vendor</div><div class="d">Frankie drafted it · sitting in outbox, needs your sign-off</div></div>
+                  <div class="acts"><button class="act-approve" data-act="Sent">Approve &amp; send</button><button class="act-later" data-act="Reminded me later">Later</button></div>
+                </div>
+                <div class="approval" data-appr>
+                  <div class="ico ico-pay"><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg></div>
+                  <div><div class="t">Pay Cloudflare invoice · $42.10</div><div class="d">Due Monday · card ending 4421 on file</div></div>
+                  <div class="acts"><button class="act-approve" data-act="Payment scheduled">Pay now</button><button class="act-later" data-act="Reminded me later">Later</button></div>
+                </div>
+                <div class="approval" data-appr>
+                  <div class="ico ico-del"><svg viewBox="0 0 24 24"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg></div>
+                  <div><div class="t">Delete 212 old Blockwise backups</div><div class="d">Frees 8.4 GB · older than 90 days, safe per retention rule</div></div>
+                  <div class="acts"><button class="act-approve" data-act="Deleted, 8.4 GB freed">Approve</button><button class="act-later" data-act="Reminded me later">Later</button></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col">
+            <div class="card money reveal">
+              <div class="card-h"><b>Money this month</b><span class="meta">August</span></div>
+              <div class="card-b">
+                <span class="big">$4,280</span> <span class="delta">▲ 18% vs July</span>
+                <div class="bars">
+                  <div class="bar" style="height:22%"></div><div class="bar" style="height:34%"></div>
+                  <div class="bar" style="height:30%"></div><div class="bar" style="height:48%"></div>
+                  <div class="bar" style="height:41%"></div><div class="bar" style="height:58%"></div>
+                  <div class="bar cur" style="height:70%"></div>
+                </div>
+                <div class="axis"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+              </div>
+            </div>
+
+            <div class="card reveal">
+              <div class="card-h"><b>Projects</b><span class="meta">4 active</span></div>
+              <div class="card-b proj">
+                <div class="proj-item"><div class="proj-top"><b>MerryPaws</b><span class="tag tag-green">live</span><span class="pct">92%</span></div><div class="pbar"><i style="width:92%"></i></div><div class="proj-sub">Serving merrypaws.app · launch checklist open</div></div>
+                <div class="proj-item"><div class="proj-top"><b>Blockwise</b><span class="tag tag-amber">ads</span><span class="pct">64%</span></div><div class="pbar"><i style="width:64%"></i></div><div class="proj-sub">Meta ad batch awaiting approval</div></div>
+                <div class="proj-item"><div class="proj-top"><b>Chase's game</b><span class="tag tag-green">fun</span><span class="pct">35%</span></div><div class="pbar"><i style="width:35%"></i></div><div class="proj-sub">3 character drafts ready to review</div></div>
+              </div>
+            </div>
+
+            <div class="card reveal">
+              <div class="card-h"><b>System health</b><span class="meta">all green</span></div>
+              <div class="card-b health">
+                <div class="h-row"><span class="h-dot"></span><div><b>Frank</b><small>core agent</small></div><span class="h-meta">up 14d</span></div>
+                <div class="h-row"><span class="h-dot"></span><div><b>VPS</b><small>76.13.209.160</small></div><span class="h-meta">19 containers</span></div>
+                <div class="h-row"><span class="h-dot"></span><div><b>merrypaws.app</b><small>production</small></div><span class="h-meta">200 OK</span></div>
+                <div class="h-row"><span class="h-dot"></span><div><b>Backups</b><small>nightly</small></div><span class="h-meta">2h ago</span></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ ROOMS (Buzz) ============ -->
+      <section class="screen" data-screen="rooms">
+        <div class="rooms">
+          <div class="card room-list">
+            <div class="room is-active" data-room="0">
+              <div class="r-ico" style="background:var(--accent-soft)">🏗️</div>
+              <div><b>MerryPaws launch</b><small>Frank, Frankie · 2 files</small></div>
+            </div>
+            <div class="room" data-room="1">
+              <div class="r-ico" style="background:var(--blue-soft)">📣</div>
+              <div><b>Blockwise ads</b><small>Frank, Buzz-agent</small></div>
+              <span class="unread"></span>
+            </div>
+            <div class="room" data-room="2">
+              <div class="r-ico" style="background:var(--amber-soft)">🎮</div>
+              <div><b>Chase's game</b><small>Frank · idea board</small></div>
+            </div>
+            <button class="room-new">+ New room</button>
+          </div>
+
+          <div class="card chat">
+            <div class="chat-h">
+              <div><b id="chat-title">MerryPaws launch</b><div class="rmeta" id="chat-meta">Room · Frank + Frankie · started today</div></div>
+              <span class="live">2 agents active</span>
+            </div>
+            <div class="msgs" id="msgs">
+              <div class="msg"><div class="m-av" style="background:var(--accent)">F</div>
+                <div><div class="m-name">Frank <small>08:12</small></div>
+                <div class="bubble"><div class="m-text">Morning. I pulled the launch checklist overnight — 12 items remain, none are blockers. The big one is your call on the pricing page.</div></div></div>
+              </div>
+              <div class="msg"><div class="m-av" style="background:var(--blue)">Fr</div>
+                <div><div class="m-name">Frankie <small>ops agent · 08:14</small></div>
+                <div class="bubble"><div class="m-text">Backups verified and the rollback snapshot is staged. We're safe to flip DNS whenever you say go.</div>
+                <div class="attach"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>rollback-snapshot.json<small>2.1 KB</small></div></div></div>
+              </div>
+              <div class="msg me"><div class="m-av" style="background:var(--ink)">S</div>
+                <div><div class="m-name">You <small>08:20</small></div>
+                <div class="bubble"><div class="m-text">Hold the flip until after the 14:00 API call — I don't want two launches in one day.</div></div></div>
+              </div>
+            </div>
+            <div class="typing" id="typing"></div>
+            <div class="composer">
+              <textarea class="cbox" id="composer" rows="1" placeholder="Message this room… (agents see room context only)"></textarea>
+              <button class="send" id="send" aria-label="Send"><svg viewBox="0 0 24 24"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg></button>
+            </div>
+          </div>
+
+          <div class="card ctx">
+            <span class="sec">In this room</span>
+            <div>
+              <div class="member"><span class="m-av" style="background:var(--accent)">F</span><div><b>Frank</b><small>core · owner context</small></div></div>
+              <div class="member"><span class="m-av" style="background:var(--blue)">Fr</span><div><b>Frankie</b><small>ops agent</small></div></div>
+              <div class="member"><span class="m-av" style="background:var(--ink)">S</span><div><b>Steve</b><small>owner</small></div></div>
+            </div>
+            <span class="sec">Shared files</span>
+            <div>
+              <div class="file"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>launch-checklist.md<small>9 KB</small></div>
+              <div class="file"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>rollback-snapshot.json<small>2.1 KB</small></div>
+            </div>
+            <span class="sec">Room scope</span>
+            <div style="font-size:12px;color:var(--muted);line-height:1.5">Agents in this room only see this room's messages and files. Your other rooms stay private from them.</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============ PROJECTS ============ -->
+      <section class="screen" data-screen="projects">
+        <div class="hero reveal in"><div><h2>Projects</h2><div class="dayline">4 active · each with its own room &amp; agent</div></div>
+          <div class="hero-right"><button class="btn btn-ghost btn-sm">+ New project</button></div></div>
+        <div class="card reveal">
+          <table class="tbl">
+            <thead><tr><th>Project</th><th>Status</th><th>Progress</th><th>Agent</th><th>Next step</th></tr></thead>
+            <tbody>
+              <tr><td><b>MerryPaws</b></td><td><span class="tag tag-green">live</span></td><td class="mono">92%</td><td>Frankie</td><td>Launch checklist · 12 left</td></tr>
+              <tr><td><b>Blockwise</b></td><td><span class="tag tag-amber">ads</span></td><td class="mono">64%</td><td>Buzz-agent</td><td>Approve Meta batch · $180</td></tr>
+              <tr><td><b>Chase's game</b></td><td><span class="tag tag-green">fun</span></td><td class="mono">35%</td><td>Frank</td><td>Pick 1 of 3 character drafts</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ============ FINANCES ============ -->
+      <section class="screen" data-screen="finances">
+        <div class="hero reveal in"><div><h2>Finances</h2><div class="dayline">August · tracking revenue, costs &amp; COGS</div></div></div>
+        <div class="grid-2">
+          <div class="card reveal"><div class="card-h"><b>Revenue</b><span class="meta">month to date</span></div>
+            <div class="card-b"><span class="big mono" style="font-size:24px">$4,280</span> <span class="delta">▲ 18%</span>
+            <div style="font-size:12px;color:var(--muted);margin-top:8px">MerryPaws $2,140 · Blockwise $2,140</div></div></div>
+          <div class="card reveal"><div class="card-h"><b>Costs</b><span class="meta">month to date</span></div>
+            <div class="card-b"><span class="big mono" style="font-size:24px">$612</span> <span style="font-size:12px;color:var(--muted)">14% of revenue</span>
+            <div style="font-size:12px;color:var(--muted);margin-top:8px">VPS $180 · Meta ads $180 · Cloudflare $42 · AI spend $210</div></div></div>
+        </div>
+        <div class="card reveal" style="margin-top:16px"><div class="card-h"><b>Outgoing</b><span class="meta">needs attention</span></div>
+          <table class="tbl"><thead><tr><th>Item</th><th>Amount</th><th>Due</th><th>Status</th></tr></thead>
+          <tbody><tr><td>Cloudflare invoice</td><td class="mono">$42.10</td><td>Mon 3 Aug</td><td><span class="tag tag-amber">awaiting approval</span></td></tr>
+          <tr><td>VPS hosting</td><td class="mono">$180.00</td><td>auto · 5 Aug</td><td><span class="tag tag-green">on file</span></td></tr></tbody></table></div>
+      </section>
+
+      <!-- ============ AGENTS ============ -->
+      <section class="screen" data-screen="agents">
+        <div class="hero reveal in"><div><h2>Agents</h2><div class="dayline">Your team runs locally — you approve, they work</div></div>
+          <div class="hero-right"><button class="btn btn-ghost btn-sm">+ Hire agent</button></div></div>
+        <div class="agents">
+          <div class="agent reveal"><div class="a-top"><div class="glyph" style="background:var(--accent)">F</div><div><b>Frank</b><small>core · life &amp; projects</small></div></div>
+            <div class="a-desc">Runs your day, briefs you each morning, and owns cross-project context. The conductor.</div>
+            <div class="a-foot"><span class="status st-run"><i></i>Running</span><button class="a-run" data-act="Frank opened a briefing">Brief me</button></div></div>
+          <div class="agent reveal"><div class="a-top"><div class="glyph" style="background:var(--blue)">Fr</div><div><b>Frankie</b><small>ops &amp; infrastructure</small></div></div>
+            <div class="a-desc">Watches the VPS, backups and deploys. Flags anything unhealthy before it becomes a problem.</div>
+            <div class="a-foot"><span class="status st-run"><i></i>Watching VPS</span><button class="a-run" data-act="Frankie ran a health check">Health check</button></div></div>
+          <div class="agent reveal"><div class="a-top"><div class="glyph" style="background:var(--amber)">B</div><div><b>Buzz-agent</b><small>marketing &amp; ads</small></div></div>
+            <div class="a-desc">Preps Blockwise ad creatives and Meta batches, then waits for your approval before spending.</div>
+            <div class="a-foot"><span class="status st-wait"><i></i>Awaiting approval</span><button class="a-run" data-act="Batch moved to Today">View batch</button></div></div>
+        </div>
+      </section>
+
+      <!-- ============ AUTOMATIONS ============ -->
+      <section class="screen" data-screen="automations">
+        <div class="hero reveal in"><div><h2>Automations</h2><div class="dayline">Set-and-forget rules Frank enforces</div></div>
+          <div class="hero-right"><button class="btn btn-ghost btn-sm">+ New automation</button></div></div>
+        <div class="card reveal">
+          <table class="tbl"><thead><tr><th>Automation</th><th>Trigger</th><th>Last run</th><th>On</th></tr></thead>
+          <tbody>
+            <tr><td><b>Morning brief</b></td><td>Daily 7:30</td><td class="mono">today 07:30</td><td><button class="toggle on" data-tog></button></td></tr>
+            <tr><td><b>Nightly backups</b></td><td>Daily 02:00</td><td class="mono">today 02:00</td><td><button class="toggle on" data-tog></button></td></tr>
+            <tr><td><b>VPS health watch</b></td><td>Every 15 min</td><td class="mono">2 min ago</td><td><button class="toggle on" data-tog></button></td></tr>
+            <tr><td><b>Backup cleanup (90d)</b></td><td>Weekly</td><td class="mono">6 days ago</td><td><button class="toggle" data-tog></button></td></tr>
+            <tr><td><b>Ad spend guardrail</b></td><td>On any ad change</td><td class="mono">—</td><td><button class="toggle on" data-tog></button></td></tr>
+          </tbody></table>
+        </div>
+      </section>
+
+      <!-- ============ BRAIN ============ -->
+      <section class="screen" data-screen="brain">
+        <div class="hero reveal in"><div><h2>Brain</h2><div class="dayline">Everything Frank knows — stored on this machine</div></div></div>
+        <div class="grid-2">
+          <div class="card reveal"><div class="card-h"><b>Notes</b><span class="meta">142</span></div>
+            <div class="card-b" style="display:flex;flex-direction:column;gap:9px">
+              <div class="file"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Blockwise market expansion notes<small>md</small></div>
+              <div class="file"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Pricing page ideas<small>md</small></div>
+              <div class="file"><svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>Chase — game design doc<small>md</small></div>
+            </div></div>
+          <div class="card reveal"><div class="card-h"><b>Memory</b><span class="meta">local · encrypted</span></div>
+            <div class="card-b" style="font-size:12.5px;color:var(--ink-2);line-height:1.6">
+              Frank remembers your preferences, your projects, and past decisions — and forgets nothing unless you tell it to.
+              <div style="margin-top:12px;display:flex;gap:8px"><span class="tag tag-green">1,204 facts</span><span class="tag tag-blue">38 preferences</span><span class="tag tag-amber">12 rules</span></div>
+            </div></div>
+        </div>
+      </section>
+
+    </div>
+  </div>
+</div>
+
+<!-- toast -->
+<div class="toast" id="toast"><svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg><span id="toast-msg">Done</span></div>
+
+<script>
+const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
+const app=document.querySelector(".app");
+const mq=window.matchMedia("(max-width:840px)");
+
+/* ---- nav rail: collapse on desktop, bottom-sheet drawer on mobile ---- */
+app.classList.toggle("rail-collapsed",localStorage.getItem("frank-rail")==="1"&&!mq.matches);
+function setRailUI(){
+  const c=app.classList.contains("rail-collapsed");
+  const t=$("#rail-toggle");
+  t.setAttribute("aria-expanded",String(!c));
+  t.setAttribute("aria-label",c?"Expand sidebar":"Collapse sidebar");
+  t.title=c?"Expand sidebar":"Collapse sidebar";
+}
+$("#rail-toggle").addEventListener("click",()=>{
+  if(mq.matches){closeDrawer();return;}
+  app.classList.toggle("rail-collapsed");
+  localStorage.setItem("frank-rail",app.classList.contains("rail-collapsed")?"1":"0");
+  setRailUI();
+});
+function openDrawer(){app.classList.add("rail-open");$("#scrim").classList.add("show");
+  $("#mob-dock").setAttribute("aria-expanded","true");$("#rail-toggle").setAttribute("aria-label","Close menu");}
+function closeDrawer(){app.classList.remove("rail-open");$("#scrim").classList.remove("show");
+  $("#mob-dock").setAttribute("aria-expanded","false");setRailUI();}
+$("#mob-dock").addEventListener("click",()=>app.classList.contains("rail-open")?closeDrawer():openDrawer());
+$("#scrim").addEventListener("click",closeDrawer);
+mq.addEventListener("change",e=>{closeDrawer();
+  app.classList.toggle("rail-collapsed",localStorage.getItem("frank-rail")==="1"&&!e.matches);setRailUI();});
+setRailUI();
+document.addEventListener("keydown",e=>{if(e.key==="Escape")closeDrawer();});
+
+/* ---- tuck the mobile dock away while typing in the rooms composer ---- */
+$("#composer").addEventListener("focus",()=>app.classList.add("kbd-open"));
+$("#composer").addEventListener("blur",()=>app.classList.remove("kbd-open"));
+
+/* ---- view switching ---- */
+const titles={today:["Today","Saturday, 1 August"],rooms:["Rooms","Buzz — private spaces per project"],
+projects:["Projects","4 active"],finances:["Finances","August · revenue, costs, COGS"],
+agents:["Agents","local-first team"],automations:["Automations","set-and-forget rules"],brain:["Brain","everything Frank knows"]};
+function show(view){
+  closeDrawer();
+  $$(".screen").forEach(s=>s.classList.toggle("is-active",s.dataset.screen===view));
+  $$("#nav button[data-view]").forEach(b=>b.classList.toggle("is-active",b.dataset.view===view));
+  $("#page-title").textContent=titles[view][0]; $("#page-sub").textContent=titles[view][1];
+  $("#scroll").scrollTop=0;
+  requestAnimationFrame(()=>$$(".screen.is-active .reveal").forEach((el,i)=>setTimeout(()=>el.classList.add("in"),i*55)));
+}
+$$("#nav button[data-view]").forEach(b=>b.addEventListener("click",()=>show(b.dataset.view)));
+$("#brand-home").addEventListener("click",()=>show("today"));
+
+/* ---- toast ---- */
+let toastT;
+function toast(msg){$("#toast-msg").textContent=msg;const t=$("#toast");t.classList.add("show");
+clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2400);}
+
+/* ---- approvals ---- */
+let decisions=3;
+$("#approvals").addEventListener("click",e=>{
+  const btn=e.target.closest("[data-act]"); if(!btn)return;
+  const row=btn.closest("[data-appr]");
+  row.style.transition="opacity .3s,transform .3s"; row.style.opacity="0"; row.style.transform="translateX(12px)";
+  setTimeout(()=>{row.remove();decisions=Math.max(0,decisions-1);
+    $("#decision-meta").textContent=decisions+" decision"+(decisions===1?"":"s");
+    toast(btn.dataset.act);},300);
+});
+
+/* ---- agent run buttons / toggles / ask frank ---- */
+document.addEventListener("click",e=>{
+  const run=e.target.closest(".a-run"); if(run){toast(run.dataset.act);return;}
+  const tog=e.target.closest("[data-tog]"); if(tog){tog.classList.toggle("on");toast(tog.classList.contains("on")?"Automation on":"Automation paused");return;}
+});
+$("#ask-frank").addEventListener("click",()=>toast("Frank is listening… (prototype)"));
+
+/* ---- rooms ---- */
+const roomData=[
+ {title:"MerryPaws launch",meta:"Room · Frank + Frankie · started today"},
+ {title:"Blockwise ads",meta:"Room · Frank + Buzz-agent · 1 unread"},
+ {title:"Chase's game",meta:"Room · Frank · idea board"}];
+$$(".room").forEach(r=>r.addEventListener("click",()=>{
+  $$(".room").forEach(x=>x.classList.remove("is-active")); r.classList.add("is-active");
+  const d=roomData[+r.dataset.room]; $("#chat-title").textContent=d.title; $("#chat-meta").textContent=d.meta;
+  r.querySelector(".unread")?.remove();
+}));
+document.querySelector(".room-new").addEventListener("click",()=>toast("New room created (prototype)"));
+
+/* ---- composer + typing + reply ---- */
+const replies=["On it — I'll fold that into the plan and report back here.","Noted. Adding it to the checklist now.","Good call. I'll hold and remind you after the 14:00 call."];
+let replyIdx=0;
+function sendMsg(){
+  const box=$("#composer"), text=box.value.trim(); if(!text)return;
+  const msgs=$("#msgs");
+  const me=document.createElement("div"); me.className="msg me";
+  me.innerHTML='<div class="m-av" style="background:var(--ink)">S</div><div><div class="m-name">You <small>now</small></div><div class="bubble"><div class="m-text"></div></div></div>';
+  me.querySelector(".m-text").textContent=text; msgs.appendChild(me);
+  box.value=""; box.style.height="auto"; msgs.scrollTop=msgs.scrollHeight;
+  $("#typing").innerHTML='Frank is typing<span class="dots"><i></i><i></i><i></i></span>';
+  setTimeout(()=>{
+    $("#typing").innerHTML="";
+    const rep=document.createElement("div"); rep.className="msg";
+    rep.innerHTML='<div class="m-av" style="background:var(--accent)">F</div><div><div class="m-name">Frank <small>now</small></div><div class="bubble"><div class="m-text"></div></div></div>';
+    rep.querySelector(".m-text").textContent=replies[replyIdx++%replies.length];
+    msgs.appendChild(rep); msgs.scrollTop=msgs.scrollHeight;
+  },1300);
+}
+$("#send").addEventListener("click",sendMsg);
+$("#composer").addEventListener("keydown",e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();sendMsg();}});
+$("#composer").addEventListener("input",e=>{e.target.style.height="auto";e.target.style.height=Math.min(e.target.scrollHeight,110)+"px";});
+
+/* ---- initial reveal ---- */
+show("today");
+</script>
+</body>
+</html>
