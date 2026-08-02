@@ -1,0 +1,41 @@
+# AI code review on every PR, via Alibaba's OpenCodeReview.
+# https://github.com/alibaba/open-code-review
+#
+# Non-blocking: comments only — this workflow never fails the build.
+#
+# Required secrets/vars (repo Settings -> Secrets and variables -> Actions):
+#   secret    OCR_LLM_URL            LLM API endpoint (base URL)
+#   secret    OCR_LLM_AUTH_TOKEN     LLM API key
+#   variable  OCR_LLM_MODEL          model name
+#   variable  OCR_LLM_USE_ANTHROPIC  'true' for Anthropic, 'false' for OpenAI-compatible
+
+name: AI Code Review
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  ai-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Run OpenCodeReview
+        # continue-on-error keeps this purely advisory: even if the review
+        # errors out (bad key, LLM timeout, rate limit) the PR check stays green.
+        continue-on-error: true
+        uses: alibaba/open-code-review@main
+        with:
+          llm_url: ${{ secrets.OCR_LLM_URL }}
+          llm_auth_token: ${{ secrets.OCR_LLM_AUTH_TOKEN }}
+          llm_model: ${{ vars.OCR_LLM_MODEL }}
+          llm_use_anthropic: ${{ vars.OCR_LLM_USE_ANTHROPIC }}
+          # Sticky summary comment updated in place; inline comments only
+          # added where the bot hasn't already commented (no spam on re-runs).
+          sticky_summary: 'true'
+          incremental: 'true'
+          language: 'English'
