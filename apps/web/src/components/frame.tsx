@@ -6,9 +6,11 @@ import { PROJECT_ROOMS } from '@/lib/rooms';
 import { useDelegations } from '@/lib/delegation';
 import { useHarnesses } from '@/lib/use-harnesses';
 import { briefFromToday } from '@/lib/frank';
+import { useCalendar } from '@/lib/use-calendar';
 import { useData, useToast } from './providers';
 import { clockTime, TIME_ZONE } from '@/lib/time';
-import { IconPin, IconPlus } from './icons';
+import { IconPin, IconPlus, IconTree } from './icons';
+import { WorktreesBody } from './worktree-panel';
 
 /* ------------------------------------------------------------------ */
 /* Living frame — ambient world-state around the chat (D2/D5/D10).     */
@@ -99,6 +101,12 @@ function CentralFrame() {
         </Widget>
       )}
 
+      {!hidden.has('worktrees') && (
+        <Widget title="Worktrees" icon={<IconTree size={12} />} onRemove={() => remove('worktrees')}>
+          <WorktreesBody />
+        </Widget>
+      )}
+
       <button
         onClick={comingSoon}
         className="mt-1 flex w-full shrink-0 items-center justify-center gap-1.5 rounded-xl border border-dashed border-line px-3 py-3 text-[11px] tracking-[0.06em] text-muted transition-all duration-200 hover:-translate-y-px hover:border-accent/50 hover:text-accent"
@@ -164,35 +172,94 @@ function BriefBody() {
 
 function TodayBody() {
   const { today, loading } = useData();
+  const { events: calEvents, status: calStatus } = useCalendar(24);
 
   if (loading) {
     return <p className="text-[12.5px] text-muted">Reading the day…</p>;
   }
 
   const cards = (today?.sections ?? []).flatMap((s) => s.cards);
-  if (cards.length === 0) {
-    return <p className="text-[12.5px] text-muted">Clear day — nothing scheduled.</p>;
+
+  // Merge calendar events into the timeline
+  type TimelineEntry = { id: string; time: string; label: string; kind: 'work' | 'cal' };
+  const entries: TimelineEntry[] = [];
+
+  for (const c of cards) {
+    entries.push({
+      id: c.id,
+      time: c.scheduled_for ? clockTime(c.scheduled_for, TIME_ZONE) : '·',
+      label: c.title,
+      kind: 'work',
+    });
   }
 
-  const shown = cards.slice(0, 6);
-  const rest = cards.length - shown.length;
+  for (const e of calEvents) {
+    const start = e.allDay ? null : new Date(e.start);
+    const timeStr = e.allDay
+      ? 'all day'
+      : start
+        ? new Intl.DateTimeFormat('en-AU', { timeZone: TIME_ZONE, hour: 'numeric', minute: '2-digit' }).format(start)
+        : '·';
+    entries.push({
+      id: 'cal-' + e.id,
+      time: timeStr,
+      label: e.title,
+      kind: 'cal',
+    });
+  }
+
+  // Sort: time-based entries first (by parsed hour), then unscheduled
+  entries.sort((a, b) => {
+    const aNum = a.time === '·' || a.time === 'all day' ? 99 : parseInt(a.time) || 0;
+    const bNum = b.time === '·' || b.time === 'all day' ? 99 : parseInt(b.time) || 0;
+    return aNum - bNum;
+  });
+
+  if (entries.length === 0) {
+    return (
+      <div>
+        <p className="text-[12.5px] text-muted">Clear day — nothing scheduled.</p>
+        {calStatus === 'not_connected' && (
+          <p className="mt-2 text-[11px] text-muted/60">
+            Connect Google Calendar to see meetings here.
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  const shown = entries.slice(0, 8);
+  const rest = entries.length - shown.length;
 
   return (
     <div>
-      {shown.map((c, i) => (
+      {shown.map((e, i) => (
         <div
-          key={c.id}
-          className={`flex gap-2.5 py-1.5 text-[12px] ${i > 0 ? 'border-t border-line/70' : ''}`}
+          key={e.id}
+          className={'flex items-center gap-2.5 py-1.5 text-[12px]' + (i > 0 ? ' border-t border-line/70' : '')}
         >
           <span className="w-11 shrink-0 font-mono text-[11px] text-accent">
-            {c.scheduled_for ? clockTime(c.scheduled_for, TIME_ZONE) : '·'}
+            {e.time}
           </span>
-          <span className="min-w-0 flex-1 leading-snug text-ink2">{c.title}</span>
+          {e.kind === 'cal' && (
+            <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#4285F4]" title="Calendar" />
+          )}
+          <span className={'min-w-0 flex-1 leading-snug ' + (e.kind === 'cal' ? 'text-ink' : 'text-ink2')}>
+            {e.label}
+          </span>
+          {e.kind === 'cal' && (
+            <span className="shrink-0 font-mono text-[9px] uppercase tracking-wide text-[#4285F4]/70">cal</span>
+          )}
         </div>
       ))}
       {rest > 0 && (
         <p className="mt-1 border-t border-line/70 pt-1.5 font-mono text-[10px] uppercase tracking-[0.06em] text-muted/70">
           +{rest} more
+        </p>
+      )}
+      {calStatus === 'connected' && calEvents.length > 0 && (
+        <p className="mt-1.5 flex items-center gap-1.5 font-mono text-[9px] uppercase tracking-wide text-muted/50">
+          <span className="h-1.5 w-1.5 rounded-full bg-[#4285F4]" /> {calEvents.length} calendar event{calEvents.length !== 1 ? 's' : ''}
         </p>
       )}
     </div>
@@ -346,23 +413,25 @@ function StatusDot({ status }: { status: "running" | "done" | "error" }) {
 
 function Widget({
   title,
+  icon,
   pinned,
   onRemove,
   children,
 }: {
   title: string;
+  icon?: ReactNode;
   pinned?: boolean;
   onRemove: () => void;
   children: ReactNode;
 }) {
   return (
     <div
-      className={`mb-3 shrink-0 rounded-[14px] border bg-white px-[15px] py-3.5 shadow-[0_1px_2px_rgba(28,25,23,0.03)] transition-colors duration-200 hover:border-ink/15 ${
+      className={`mb-3 shrink-0 rounded-[14px] border bg-card px-[15px] py-3.5 shadow-[0_1px_2px_rgba(11,13,10,0.05)] transition-colors duration-200 hover:border-ink/20 ${
         pinned ? 'border-accent/35' : 'border-line'
       }`}
     >
       <div className="mb-2.5 flex items-center gap-2">
-        {pinned && <IconPin size={11} className="text-accent" />}
+        {pinned ? <IconPin size={11} className="text-accent" /> : icon}
         <h3 className="font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-muted">
           {title}
         </h3>

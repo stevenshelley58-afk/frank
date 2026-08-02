@@ -38,6 +38,14 @@ export function commandId(): string {
 }
 
 /* ------------------------------------------------------------------ */
+/** Thrown when a stream is aborted by the caller (user hit Stop). Not a chat error. */
+export class StreamAbortedError extends Error {
+  constructor() {
+    super("stream aborted");
+    this.name = "StreamAbortedError";
+  }
+}
+
 /* Seed threads                                                        */
 /* ------------------------------------------------------------------ */
 
@@ -101,12 +109,14 @@ export async function frankStream(
   callbacks: StreamCallbacks,
   roomName?: string,
   agentName?: string,
+  signal?: AbortSignal,
 ): Promise<void> {
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ message, roomId, roomName, agentName }),
+      signal,
     });
 
     if (!res.ok) {
@@ -133,7 +143,11 @@ export async function frankStream(
     let buffer = '';
 
     while (true) {
-      const { done, value } = await reader.read();
+      if (signal?.aborted) throw new StreamAbortedError();
+      const { done, value } = await reader.read().catch((e) => {
+        if (signal?.aborted) throw new StreamAbortedError();
+        throw e;
+      });
       if (done) break;
 
       buffer += decoder.decode(value, { stream: true });

@@ -61,6 +61,8 @@ import { healthRoutes, registerHealthRoutes } from './routes/health.js';
 import { provenanceRoutes, registerProvenanceRoutes } from './routes/provenance.js';
 import { registerTodayRoutes, todayRoutes } from './routes/today.js';
 import { registerWorkRoutes, workRoutes } from './routes/work.js';
+import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
+import { registerCodegraphRoutes } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
 import { HealthService } from './services/health.js';
 import type { EnrichmentDispatcher } from './services/enrichment.js';
@@ -73,6 +75,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...provenanceRoutes,
   ...todayRoutes,
   ...healthRoutes,
+  ...brainRoutes,
 ];
 
 const ENVELOPE_KEY_HANDLE = 'handle:frank.api.envelope-signing-key';
@@ -150,6 +153,8 @@ export interface BuildServerOptions {
   /** Injected in tests so expiry and freshness are deterministic. */
   readonly now?: () => Date;
   readonly startedAt?: Date;
+  /** Raw DB handle for brain routes (raw SQL queries, not yet in DomainStore). */
+  readonly db?: import("@frank/adapter-postgres").FrankDatabase;
 }
 
 export interface BuiltServer {
@@ -341,6 +346,12 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   registerProvenanceRoutes(app, { ...shared, store });
   registerTodayRoutes(app, { ...shared, store });
   registerHealthRoutes(app, { ...shared, health, serviceName: 'frank-api' });
+  if (options.db) {
+    registerBrainRoutes(app, { ...shared, db: options.db });
+  }
+
+  // Code intelligence graph — reads from the codegraph service output volume.
+  registerCodegraphRoutes(app, shared);
 
   const openApiDocument = buildOpenApiDocument(ALL_ROUTES, {
     title: 'FRANK Domain API',

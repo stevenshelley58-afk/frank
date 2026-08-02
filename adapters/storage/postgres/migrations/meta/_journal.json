@@ -15,6 +15,20 @@
       "when": 1785269174119,
       "tag": "0001_domain_invariants",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785549022166,
+      "tag": "0002_run_state_machine",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1785595144565,
+      "tag": "0003_brain",
+      "breakpoints": true
     }
   ]
 }

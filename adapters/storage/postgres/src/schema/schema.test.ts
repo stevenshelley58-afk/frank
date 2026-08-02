@@ -19,6 +19,7 @@ import { describe, expect, it } from 'vitest';
 import { DATA_CLASS_ORDER } from '@frank/contracts';
 
 import { WORK_STATES, legalTransitionPairs } from '../work-state.js';
+import { RUN_STATES, legalRunTransitionPairs } from '../run-state.js';
 import { DATA_CLASSES, POLICY_RESULTS, TRUST_LABELS, domain } from './shared.js';
 import { SOURCE_LIFECYCLES } from './source.js';
 import { WORK_KINDS, WORK_PRIORITIES } from './work.js';
@@ -33,7 +34,16 @@ function migrationSql(): string {
     .join('\n');
 }
 
+/** Read one migration file by its numeric prefix, e.g. singleMigrationSql('0001'). */
+function singleMigrationSql(prefix: string): string {
+  const name = readdirSync(MIGRATIONS_DIR).find((n) => n.startsWith(prefix) && n.endsWith('.sql'));
+  if (name === undefined) throw new Error(`no migration starting with ${prefix} in ${MIGRATIONS_DIR}`);
+  return readFileSync(path.join(MIGRATIONS_DIR, name), 'utf8');
+}
+
 const SQL = migrationSql();
+const SQL_0001 = singleMigrationSql('0001');
+const SQL_0002 = singleMigrationSql('0002');
 
 describe('FRANK-§2.3 vocabulary agrees with @frank/contracts', () => {
   it('lists the data classes in the contract-defined order', () => {
@@ -100,7 +110,10 @@ describe('WORK-004 state machine is the same in TypeScript and in SQL', () => {
   });
 
   it('seeds one row per legal transition and no others', () => {
-    const seeded = [...SQL.matchAll(/^\t\('([a-z_]+)', '([a-z_]+)', '[^']*'\)/gm)].map(
+    // Scoped to 0001: the run_state_transition seed in 0002 uses the same
+    // `('from', 'to', 'label')` row shape, so reading the joined SQL would
+    // double-count. Each transition table is checked against its own migration.
+    const seeded = [...SQL_0001.matchAll(/^\t\('([a-z_]+)', '([a-z_]+)', '[^']*'\)/gm)].map(
       ([, from, to]) => `${from}->${to}`,
     );
     const expected = legalTransitionPairs().map(([from, to]) => `${from}->${to}`);
@@ -121,6 +134,44 @@ describe('WORK-004 state machine is the same in TypeScript and in SQL', () => {
     expect(SQL).toMatch(
       /"work_item_transition_legal_fk" FOREIGN KEY \("from_state","to_state"\) REFERENCES "frank_domain"\."work_state_transition"\("from_state","to_state"\)/,
     );
+  });
+});
+
+describe('FRANK-§7.3 run state machine is the same in TypeScript and in SQL', () => {
+  it('emits the run_state enum with exactly the states RUN_STATES declares', () => {
+    const values = RUN_STATES.map((state) => `'${state}'`).join(',\n    ');
+    expect(SQL_0002).toContain(`CREATE TYPE "frank_domain"."run_state" AS ENUM(\n    ${values}\n)`);
+  });
+
+  it('seeds one row per legal run transition and no others', () => {
+    const seeded = [...SQL_0002.matchAll(/^\t\('([a-z_]+)', '([a-z_]+)', '[^']*'\)/gm)].map(
+      ([, from, to]) => `${from}->${to}`,
+    );
+    const expected = legalRunTransitionPairs().map(([from, to]) => `${from}->${to}`);
+
+    expect(seeded.sort()).toEqual([...expected].sort());
+    expect(seeded).toHaveLength(41);
+  });
+
+  it('installs the trigger that rejects an illegal run transition in the database', () => {
+    expect(SQL_0002).toContain('CREATE OR REPLACE FUNCTION "frank_domain"."run_state_machine_guard"()');
+    expect(SQL_0002).toContain('CREATE TRIGGER "run_state_machine_guard"');
+    expect(SQL_0002).toContain('BEFORE UPDATE ON "frank_domain"."run"');
+    expect(SQL_0002).toContain('illegal run state transition');
+  });
+
+  it('makes the run history table carry a composite foreign key onto the transition table', () => {
+    expect(SQL_0002).toContain('"run_transition_legal_fk"');
+    expect(SQL_0002).toMatch(
+      /"run_transition_legal_fk" FOREIGN KEY \("from_state","to_state"\) REFERENCES "frank_domain"\."run_state_transition"\("from_state","to_state"\)/,
+    );
+  });
+
+  it('makes run history append-only, including against TRUNCATE', () => {
+    expect(SQL_0002).toContain('CREATE TRIGGER "run_transition_append_only"');
+    expect(SQL_0002).toContain('BEFORE UPDATE OR DELETE ON "frank_domain"."run_transition"');
+    expect(SQL_0002).toContain('CREATE TRIGGER "run_transition_no_truncate"');
+    expect(SQL_0002).toContain('BEFORE TRUNCATE ON "frank_domain"."run_transition"');
   });
 });
 

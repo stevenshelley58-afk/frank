@@ -28,6 +28,7 @@
 export * from './ids.js';
 export * from './money.js';
 export * from './work-state.js';
+export * from './run-state.js';
 export * from './canonical-json.js';
 export * from './capture-key.js';
 export * from './audit-chain.js';

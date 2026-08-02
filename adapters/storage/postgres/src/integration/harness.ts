@@ -22,13 +22,13 @@
  *
  * ## Cleanup and privilege
  *
- * `resetDatabase` truncates every table except `work_state_transition` (which is
- * migration-seeded reference data). It has to set `session_replication_role =
+ * `resetDatabase` truncates every table except `work_state_transition` and
+ * `run_state_transition` (both are migration-seeded reference data). It has to set `session_replication_role =
  * replica` first, because `audit_entry`, `source_version`, and
- * `work_item_transition` carry append-only triggers that refuse `DELETE` and
- * `TRUNCATE` — which is the behaviour under test. Needing an elevated setting to
- * clean up is the correct shape: FRANK-§11.4 says no service holds a superuser
- * credential at runtime, and the test harness is not a service.
+ * `work_item_transition`, and `run_transition` carry append-only triggers that
+ * refuse `DELETE` and `TRUNCATE` — which is the behaviour under test. Needing an
+ * elevated setting to clean up is the correct shape: FRANK-§11.4 says no service
+ * holds a superuser credential at runtime, and the test harness is not a service.
  */
 
 import { sql } from 'drizzle-orm';
@@ -84,7 +84,7 @@ export async function resetDatabase(db: FrankDatabase): Promise<void> {
     select string_agg(format('%I.%I', schemaname, tablename), ', ') as list
     from pg_tables
     where schemaname = 'frank_domain'
-      and tablename <> 'work_state_transition'
+      and tablename not in ('work_state_transition', 'run_state_transition')
   `);
 
   const list = rows.rows[0]?.list;

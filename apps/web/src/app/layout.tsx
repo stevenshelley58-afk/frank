@@ -1,40 +1,54 @@
 import type { Metadata, Viewport } from 'next';
-import { JetBrains_Mono, Space_Grotesk } from 'next/font/google';
+import { Inter, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
-import { Shell } from './shell';
+import { Providers } from '@/components/providers';
 
-const display = Space_Grotesk({
+/* FRANK Light DS 1.0 typography: Inter for UI text, IBM Plex Mono for
+ * labels, counters, timestamps, and the system's smallest voice. */
+const inter = Inter({
   subsets: ['latin'],
-  weight: ['500', '600', '700'],
-  variable: '--font-display',
   display: 'swap',
+  variable: '--font-display',
 });
 
-const mono = JetBrains_Mono({
-  subsets: ['latin'],
+const plexMono = IBM_Plex_Mono({
   weight: ['400', '500', '600'],
-  variable: '--font-mono',
+  subsets: ['latin'],
   display: 'swap',
+  variable: '--font-mono',
 });
 
 export const metadata: Metadata = {
-  title: 'FRANK',
-  description: 'Personal agent-OS — a conversation surface with Frank.',
+  metadataBase: new URL('https://frank.fail'),
+  title: 'FRANK — Agent Operating System',
+  description: 'Your AI operator. One inbox, three specialists, everything done.',
+  /* FRANK brand kit — official favicons, PWA icons and link preview. */
+  icons: [
+    { rel: 'icon', url: '/favicon.ico', sizes: 'any' },
+    { rel: 'icon', type: 'image/png', sizes: '32x32', url: '/favicon-32x32.png' },
+    { rel: 'icon', type: 'image/png', sizes: '16x16', url: '/favicon-16x16.png' },
+    { rel: 'apple-touch-icon', sizes: '180x180', url: '/apple-touch-icon-180x180.png' },
+  ],
+  openGraph: {
+    title: 'FRANK — Agent Operating System',
+    description: 'Your AI operator. One inbox, three specialists, everything done.',
+    images: [{ url: '/frank-open-graph-dark-1200x630.png', width: 1200, height: 630 }],
+  },
 };
 
 export const viewport: Viewport = {
-  themeColor: '#FAFAF9',
+  /* Brand shell black — matches the chat vault + command deck chrome. */
+  themeColor: '#10120f',
 };
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${display.variable} ${mono.variable}`}>
-      <body className="font-sans">
-        <Shell>{children}</Shell>
+    <html lang="en" className={`${inter.variable} ${plexMono.variable}`}>
+      <head>
+        <link rel="manifest" href="/site.webmanifest" />
+      </head>
+      <body className="h-full antialiased">
+        <Providers>{children}</Providers>
       </body>
     </html>
   );

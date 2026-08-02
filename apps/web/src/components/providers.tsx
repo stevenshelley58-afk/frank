@@ -290,22 +290,22 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={{ push }}>
       {children}
-      <div className="pointer-events-none fixed bottom-6 left-1/2 z-[80] flex w-full max-w-md -translate-x-1/2 flex-col items-center gap-2 px-4">
+      <div className="pointer-events-none fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-1/2 z-[80] flex w-full max-w-md -translate-x-1/2 flex-col items-center gap-2 px-4 lg:bottom-6">
         {toasts.map((t) => (
           <div
             key={t.id}
             role="status"
-            className={`animate-slide-in pointer-events-auto flex w-full items-start gap-2.5 rounded-xl border bg-white px-4 py-3 text-ink shadow-[0_8px_30px_rgba(28,25,23,0.14)] ${
+            className={`animate-slide-in pointer-events-auto flex w-full items-start gap-2.5 rounded-xl border bg-card px-4 py-3 text-ink shadow-[0_8px_30px_rgba(11,13,10,0.16)] ${
               t.tone === 'success'
-                ? 'border-success/30'
+                ? 'border-success/40'
                 : t.tone === 'error'
-                  ? 'border-[#DC2626]/30'
+                  ? 'border-danger/40'
                   : 'border-line'
             }`}
           >
             <span
               className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
-                t.tone === 'success' ? 'bg-success' : t.tone === 'error' ? 'bg-[#DC2626]' : 'bg-muted/50'
+                t.tone === 'success' ? 'bg-success' : t.tone === 'error' ? 'bg-danger' : 'bg-muted/50'
               }`}
             />
             <p className="text-[12.5px] font-medium leading-snug">{t.message}</p>
@@ -318,4 +318,18 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 
 export function useToast(): ToastContextValue {
   return useContext(ToastContext);
+}
+
+/* ------------------------------------------------------------------ */
+/* Root composition — wraps the app in the layout                    */
+/* ------------------------------------------------------------------ */
+
+export function Providers({ children }: { children: ReactNode }) {
+  return (
+    <ToastProvider>
+      <AuthProvider>
+        <DataProvider>{children}</DataProvider>
+      </AuthProvider>
+    </ToastProvider>
+  );
 }

@@ -38,6 +38,8 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   const [typing, setTyping] = useState(false);
   const [sending, setSending] = useState(false);
   const timerRef = useRef<number | null>(null);
+  /** AbortController for the active Frank stream — powers the Stop button. */
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     return () => {
@@ -103,6 +105,9 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
     setTyping(true);
     append({ id: uid(), from: 'frank', text: '', at: Date.now() });
 
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     let accumulated = '';
     let finished = false;
 
@@ -117,6 +122,7 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
         },
         onDone: () => {
           finished = true;
+          abortRef.current = null;
           setTyping(false);
           const final = accumulated || 'Acknowledged. Working on it.';
           if (!accumulated) updateLast(final);
@@ -126,12 +132,22 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
         onError: (err) => {
           finished = true;
           setTyping(false);
-          updateLast(accumulated || `Something went wrong: ${err}`);
+          // A user-initiated stop surfaces as an abort — keep what arrived.
+          const aborted = controller.signal.aborted;
+          if (aborted && accumulated) {
+            // leave partial text as-is
+          } else if (aborted) {
+            updateLast('Stopped.');
+          } else {
+            updateLast(accumulated || `Something went wrong: ${err}`);
+          }
           setSending(false);
+          abortRef.current = null;
         },
       },
       room.name,
       room.agent,
+      controller.signal,
     );
 
     if (!finished) setSending(false);
@@ -143,6 +159,10 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
     }
   }
 
+  function stop() {
+    abortRef.current?.abort();
+  }
+
   return (
     <div className="flex h-full flex-col">
       {status === 'error' && <AuthErrorCard />}
@@ -150,7 +170,9 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
       <Composer
         room={room}
         disabled={sending}
+        running={sending}
         onSend={send}
+        onStop={stop}
         onTyping={() => {}}
       />
     </div>

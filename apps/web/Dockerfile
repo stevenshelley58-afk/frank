@@ -1,28 +1,33 @@
-FROM node:22-alpine AS base
+# @frank/web — built inside the monorepo so workspace packages
+# (@frank/pipeline-graph) resolve. Same shape as apps/api/Dockerfile:
+# COPY the repo, pnpm install, run from source. Build context is the repo
+# root (see infra/docker-compose.dev.yml).
+FROM node:22-alpine
+
+# ffmpeg = video thumbnail frame grabs for the Console Files module
+# (image thumbnails use `sharp`, a native module pulled by pnpm).
+# git = the /api/worktrees live-status route shells out to it (reads the
+# repo bind-mounted read-only at FRANK_EXPLORER_ROOT).
+RUN apk add --no-cache ffmpeg git
+
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 
-FROM base AS deps
 WORKDIR /app
-COPY apps/web/package.json ./
-RUN pnpm install
 
-FROM base AS builder
-WORKDIR /app
-COPY --from=deps /app/node_modules ./node_modules
-COPY apps/web/ .
+# Copy the monorepo (repo-root .dockerignore excludes node_modules/.next/.git)
+COPY . .
+
+# Install dependencies (workspace links included)
+RUN pnpm install --no-frozen-lockfile
+
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN pnpm build
-
-FROM node:22-alpine AS runner
-WORKDIR /app
 ENV NODE_ENV=production
-ENV NEXT_TELEMETRY_DISABLED=1
-RUN addgroup --system --gid 1001 nodejs && adduser --system --uid 1001 nextjs
-COPY --from=builder /app/public ./public
-COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
-USER nextjs
-EXPOSE 3001
 ENV PORT=3001
 ENV HOSTNAME="0.0.0.0"
-CMD ["node", "server.js"]
+
+# Build the Next.js app (transpiles @frank/pipeline-graph via next.config.mjs)
+RUN pnpm --filter @frank/web build
+
+EXPOSE 3001
+
+CMD ["pnpm", "--filter", "@frank/web", "start"]

@@ -2,128 +2,185 @@
 @tailwind components;
 @tailwind utilities;
 
-/* ============================================================
-   FRANK OS — chat-first shell
-   Light, minimal: warm near-white canvas, white surfaces,
-   hairline borders, ink text, one restrained accent. No grain.
-   ============================================================ */
-
+/* ---------------------------------------------------------------------------
+ * FRANK — Light Design System 1.0 (authoritative: frank-light-theme.css)
+ *
+ * Warm-paper surfaces, olive-ink text, vermilion signal. The Tailwind
+ * semantic palette in tailwind.config.ts mirrors these values; the custom
+ * properties below back the few surfaces that style against raw CSS
+ * (composer, scrollbars, selection, focus rings).
+ * ------------------------------------------------------------------------- */
 :root {
-  --shell: #fafaf9;
-  --rail: #ffffff;
-  --card: #ffffff;
-  --ink: #1c1917;
-  --paper: #ffffff;
-  --paper-3: #ffffff;
-  --line: #e7e5e4;
-  --muted: #78716c;
-  --accent: #2563eb;
-  --success: #16a34a;
-  --orange: #2563eb;
-  --acid: #16a34a;
+  /* surfaces — light theme */
+  --color-bg: #f1efe6;             /* workspace / warm paper */
+  --color-surface: #fbfaf5;        /* raised card / chat bubble */
+  --color-surface-raised: #ffffff; /* floating menu / modal */
+  --color-surface-sunken: #e7e3d7; /* sunken paper */
+  --color-navigation: #e7e3d7;     /* rail / dock chrome */
+  --color-frame: #edeae0;          /* living frame — soft paper */
+
+  /* ink + text */
+  --color-text: #151711;
+  --color-text-muted: #6e7068;
+  --color-text-subtle: #85867e;
+  --color-text-inverse: #fbfaf5;
+
+  /* lines + brand + semantic */
+  --color-border: rgb(21 23 17 / 14%);
+  --color-border-strong: rgb(21 23 17 / 26%);
+  --color-focus: #f23b1d;
+  --color-accent: #f23b1d;         /* brand signal — vermilion */
+  --color-verified: #b8f238;       /* acid, with ink text */
+  --color-running: #6f9df2;
+  --color-warning: #f3bd4a;
+  --color-critical: #ef5b5b;
+
+  /* central composer — the invariant: stays ink-black in light mode */
+  --color-central-composer: #151711;
+  --color-central-composer-text: #fbfaf5;
+  --color-central-send: #f23b1d;
+  --color-central-send-content: #151711;
+
+  /* type */
+  --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+
+  /* radius */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 24px;
+  --radius-full: 9999px;
+
+  /* elevation */
+  --shadow-xs: 0 1px 2px rgb(11 13 10 / 8%);
+  --shadow-sm: 0 4px 12px rgb(11 13 10 / 12%);
+  --shadow-md: 0 12px 34px rgb(11 13 10 / 16%);
+  --shadow-floating: 0 12px 34px rgb(11 13 10 / 16%);
+  --focus-ring: 0 0 0 3px rgb(242 59 29 / 28%);
 }
 
-html {
+* { box-sizing: border-box; }
+
+html, body {
   height: 100%;
-  background: var(--shell);
-}
-
-body {
-  min-height: 100%;
-  margin: 0;
-  color: var(--ink);
-  background: var(--shell);
-  -webkit-font-smoothing: antialiased;
-  text-rendering: optimizeLegibility;
   overscroll-behavior: none;
 }
 
-::selection {
-  background: rgba(37, 99, 235, 0.16);
-  color: var(--ink);
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  line-height: 1.55;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
 }
 
-/* ---------- quiet scrollbars (light) ---------- */
+::selection { background: rgb(242 59 29 / 18%); }
+
+/* thin, quiet scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgba(28, 25, 23, 0.22) transparent;
+  scrollbar-color: rgb(21 23 17 / 22%) transparent;
 }
-*::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-*::-webkit-scrollbar-thumb {
-  background: rgba(28, 25, 23, 0.16);
-  border-radius: 8px;
-}
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-.chat-scroll {
-  scrollbar-color: rgba(28, 25, 23, 0.22) transparent;
-}
-.chat-scroll::-webkit-scrollbar-thumb {
-  background: rgba(28, 25, 23, 0.16);
+*::-webkit-scrollbar { width: 6px; height: 6px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb { background: rgb(21 23 17 / 22%); border-radius: 999px; }
+
+:focus-visible {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
-/* ---------- chat column details ---------- */
-.msg-max {
-  max-width: 76%;
+/* ---------------------------------------------------------------------------
+ * The conversation vault — brand shell black (#10120f family)
+ * Frank's words render in pure #FFFFFF on this surface.
+ * ------------------------------------------------------------------------- */
+.chat-vault {
+  position: relative;
+  background:
+    radial-gradient(920px 480px at 16% -10%, rgb(242 59 29 / 7%), transparent 62%),
+    radial-gradient(720px 420px at 108% 6%, rgb(111 157 242 / 6%), transparent 58%),
+    #10120f;
 }
 
-/* keyframes referenced by the custom classes below — defined here so they
-   ship regardless of Tailwind's utility tree-shaking (no animate-* util
-   uses them). */
+.chat-vault ::selection { background: rgb(242 59 29 / 35%); color: #ffffff; }
+
+.chat-vault * {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 22%) transparent;
+}
+.chat-vault *::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 22%); }
+
+/* ---------------------------------------------------------------------------
+ * Chat thread custom pieces
+ * ------------------------------------------------------------------------- */
+
+/* cap bubble width on wide screens so lines stay readable */
+.msg-max { width: 100%; max-width: min(640px, 88%); }
+
+/* quiet vertical rhythm for the chat scroller */
+.chat-scroll { scroll-behavior: smooth; }
+
+/* Frank's delegation/handoff strip — acid-verified affordance, vault-tuned */
+.mention-strip {
+  border: 1px dashed rgb(184 242 56 / 40%);
+  background: rgb(184 242 56 / 8%);
+}
+
+/* three-dot "Frank is typing" indicator — ivory dots on the vault */
+.typing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: rgb(241 239 230 / 55%);
+  animation: typing 1.2s infinite;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.15s; }
+.typing-dot:nth-child(3) { animation-delay: 0.3s; }
+
 @keyframes typing {
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-2px); }
 }
-@keyframes flow {
-  from { background-position: 0 0; }
-  to { background-position: 200% 0; }
-}
 
-/* typing indicator dots */
-.typing-dot {
-  width: 6px;
-  height: 6px;
-  border-radius: 9999px;
-  background: var(--muted);
-  animation: typing 1.2s infinite;
-}
-.typing-dot:nth-child(2) {
-  animation-delay: 0.15s;
-}
-.typing-dot:nth-child(3) {
-  animation-delay: 0.3s;
-}
 
-/* delegation mention strip */
-.mention-strip {
-  background: rgba(37, 99, 235, 0.06);
-  border: 1px dashed rgba(37, 99, 235, 0.4);
+/* ---------------------------------------------------------------------------
+ * Frank markdown prose (vault dark surface) — headings, lists, spacing.
+ * Code blocks/tables themed inline in markdown.tsx + github-dark.
+ * ------------------------------------------------------------------------- */
+.frank-md > *:first-child { margin-top: 0; }
+.frank-md > *:last-child { margin-bottom: 0; }
+.frank-md p { margin: 0.55em 0; }
+.frank-md h1, .frank-md h2, .frank-md h3, .frank-md h4 {
+  font-weight: 600; line-height: 1.3; color: #fff; margin: 0.9em 0 0.35em;
 }
-
-/* focus ring for the composer */
-.composer-ring:focus-within {
-  box-shadow:
-    0 0 0 2px rgba(37, 99, 235, 0.28),
-    0 8px 28px rgba(28, 25, 23, 0.08);
+.frank-md h1 { font-size: 1.15em; }
+.frank-md h2 { font-size: 1.08em; }
+.frank-md h3, .frank-md h4 { font-size: 1em; }
+.frank-md ul, .frank-md ol { margin: 0.5em 0; padding-left: 1.35em; }
+.frank-md ul { list-style: disc; }
+.frank-md ol { list-style: decimal; }
+.frank-md li { margin: 0.22em 0; }
+.frank-md li > p { margin: 0.2em 0; }
+.frank-md blockquote {
+  margin: 0.6em 0; padding: 0.15em 0 0.15em 0.85em;
+  border-left: 2px solid rgb(242 59 29 / 55%); color: rgb(255 255 255 / 70%);
 }
+.frank-md hr { margin: 0.9em 0; border: 0; border-top: 1px solid rgb(255 255 255 / 12%); }
+.frank-md pre { margin: 0.7em 0; }
+.frank-md pre code { background: transparent; padding: 0; font-size: inherit; color: inherit; }
+/* task-list checkboxes */
+.frank-md input[type="checkbox"] { margin-right: 0.4em; }
+.frank-md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.2em; }
 
-/* running delegation bar (future — wired for the Running widget) */
-.run-bar-fill {
-  background: linear-gradient(90deg, var(--accent), #60a5fa, var(--accent));
-  background-size: 200% 100%;
-  animation: flow 1.7s linear infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  *,
-  *::before,
-  *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+@layer utilities {
+  .ds-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
   }
 }

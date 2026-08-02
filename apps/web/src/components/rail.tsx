@@ -2,7 +2,8 @@
 
 import { useState } from 'react';
 import { foundRoom, type Room } from '@/lib/rooms';
-import { IconPlus, IconShield, IconStar } from './icons';
+import Link from 'next/link';
+import { IconFolder, IconFrame, IconPlus, IconShield, IconStar } from './icons';
 import { useToast } from './providers';
 
 interface RailProps {
@@ -17,7 +18,9 @@ interface RailProps {
 
 /**
  * Room switcher rail (D1/D7). Central is HOME — pinned, starred, set apart.
- * Project rooms follow; identity lives in the small muted tint dots.
+ * Brand lock: the FRANK mark is the brand-kit logo asset, never a hand-drawn
+ * letterbox (frank-brand-assets usage rules). Project rooms follow; identity
+ * lives in the small muted tint dots.
  */
 export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: RailProps) {
   const { push } = useToast();
@@ -53,18 +56,18 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* brand */}
-        <div className="flex items-center gap-2.5 px-2 pb-5 pt-1">
-          <span className="grid h-[26px] w-[26px] place-items-center rounded-[8px] bg-ink font-display text-[15px] font-bold text-white">
-            F
-          </span>
-          <span className="font-display text-[13px] font-bold tracking-[0.16em] text-ink">
-            FRANK
-          </span>
+        {/* brand — official FRANK lockup from the brand kit (ink on paper) */}
+        <div className="flex items-center px-2 pb-5 pt-1">
+          <img
+            src="/brand/navbar-logo.png"
+            alt="FRANK"
+            draggable={false}
+            className="h-7 w-auto select-none"
+          />
         </div>
 
         <div className="px-2.5 pb-1.5 pt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted/70">
-          Rooms
+          Home
         </div>
 
         {/* central — home, set apart */}
@@ -73,13 +76,13 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
             onClick={() => onSelect(home.id)}
             className={`mb-2.5 flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2.5 text-left transition-all duration-200 ${
               activeId === home.id
-                ? 'border border-accent/40 bg-accent/[0.06]'
-                : 'border border-line bg-white hover:border-accent/30 hover:bg-accent/[0.04]'
+                ? 'border border-accent/40 bg-accent/10'
+                : 'border border-line bg-card hover:border-accent/30 hover:bg-accent/[0.05]'
             }`}
           >
             <span
               className="h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-ink/15"
-              style={{ background: '#1c1917' }}
+              style={{ background: '#F23B1D' }}
             />
             <span className="min-w-0 flex-1">
               <span className="block text-[13px] font-semibold leading-tight text-ink">
@@ -92,6 +95,10 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
             <IconStar size={13} className="shrink-0 text-accent" />
           </button>
         )}
+
+        <div className="px-2.5 pb-1.5 pt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted/70">
+          Rooms
+        </div>
 
         {/* project rooms */}
         <div className="flex flex-col gap-0.5">
@@ -133,9 +140,31 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
           <span className="text-[12.5px] font-medium">New room</span>
         </button>
 
+        {/* console */}
+        <Link
+          href="/console"
+          className="mt-1 flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-muted transition-colors hover:bg-hover hover:text-ink2"
+        >
+          <span className="grid h-2.5 w-2.5 shrink-0 place-items-center">
+            <IconFrame size={13} />
+          </span>
+          <span className="text-[12.5px] font-medium">Console</span>
+        </Link>
+
+        {/* files explorer shortcut — sits right under the console icon */}
+        <Link
+          href="/console/explorer"
+          className="flex w-full items-center gap-2.5 rounded-[10px] pl-[26px] pr-2.5 py-1.5 text-left text-muted transition-colors hover:bg-hover hover:text-ink2"
+        >
+          <span className="grid h-2.5 w-2.5 shrink-0 place-items-center">
+            <IconFolder size={12} />
+          </span>
+          <span className="text-[11.5px] font-medium">Files</span>
+        </Link>
+
         {/* footer */}
         <div className="mt-auto pt-4">
-          <div className="flex items-center gap-2.5 rounded-xl border border-line bg-subtle px-3 py-2.5">
+          <div className="flex items-center gap-2.5 rounded-xl border border-line bg-card px-3 py-2.5 shadow-[0_1px_2px_rgba(21,23,17,0.04)]">
             <IconShield size={16} className="shrink-0 text-success" />
             <span>
               <b className="block text-[11px] font-semibold text-ink2">Private by design</b>

@@ -37,6 +37,11 @@ export const EVENT_TYPES = {
   workAssigned: 'frank.work.assigned.v1',
   workBlocked: 'frank.work.blocked.v1',
   workCompleted: 'frank.work.completed.v1',
+  runCreated: 'frank.run.created.v1',
+  runStateChanged: 'frank.run.state_changed.v1',
+  runFailed: 'frank.run.failed.v1',
+  runReleased: 'frank.run.released.v1',
+  runCompleted: 'frank.run.completed.v1',
   usageRecorded: 'frank.usage.recorded.v1',
   budgetThresholdReached: 'frank.budget.threshold_reached.v1',
 } as const;

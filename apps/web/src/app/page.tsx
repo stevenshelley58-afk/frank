@@ -1,23 +1,33 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { DEFAULT_ROOMS, roomById, type Room } from '@/lib/rooms';
 import { Rail } from '@/components/rail';
 import { RoomView } from '@/components/room-view';
 import { FrameColumn } from '@/components/frame';
+import { WorktreesSheet, WorktreesChip } from '@/components/worktree-panel';
 import { IconFrame } from '@/components/icons';
+import { useToast } from '@/components/providers';
 
 /**
- * FRANK OS — chat-first shell.
- * Three columns: room-switcher rail · dominant chat · living frame.
+ * FRANK OS — chat-first shell (FRANK Light DS 1.0 + the dark vault).
+ *
+ * Desktop (≥lg): room-switcher rail · the ink conversation vault (Frank
+ * speaks in pure #FFFFFF) · living frame. Mobile (<lg): single chat surface,
+ * room header up top, living frame in a sheet, and a mono bottom dock
+ * (Home / Rooms / Running / You) — rail hidden.
  */
 export default function Home() {
+  const { push } = useToast();
   const [rooms, setRooms] = useState<Room[]>(DEFAULT_ROOMS);
   const [activeId, setActiveId] = useState('central');
   const [frameOpen, setFrameOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
+  const [wtOpen, setWtOpen] = useState(false);
 
   const room = roomById(rooms, activeId);
+  const home = rooms.find((r) => r.isHome) ?? rooms[0];
 
   // Escape closes the slide-over panels.
   useEffect(() => {
@@ -32,8 +42,8 @@ export default function Home() {
   }, []);
 
   return (
-    <div className="flex h-dvh overflow-hidden">
-      {/* room switcher rail */}
+    <div className="flex h-dvh overflow-hidden bg-shell">
+      {/* room switcher rail — persistent on desktop, slide-over on mobile */}
       <Rail
         rooms={rooms}
         activeId={activeId}
@@ -50,48 +60,50 @@ export default function Home() {
         onClose={() => setRailOpen(false)}
       />
 
-      {/* dominant chat column */}
-      <main className="flex min-w-0 flex-1 flex-col">
-        {/* mobile top bar */}
-        <div className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-white px-3 lg:hidden">
-          <button
-            onClick={() => setRailOpen(true)}
-            aria-label="Open rooms"
-            className="grid h-8 w-8 place-items-center rounded-lg bg-ink font-display text-[15px] font-bold text-white"
-          >
-            F
-          </button>
-          <span className="font-display text-[13px] font-semibold tracking-wide text-ink">
-            {room.name}
-          </span>
+      {/* the conversation vault — ink column, white words */}
+      <main className="chat-vault flex min-w-0 flex-1 flex-col">
+        {/* mobile room header — DS p-head: tint dot · name · mono scope · FRAME */}
+        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#151813] px-4 lg:hidden">
           <span
-            className="h-2.5 w-2.5 rounded-[3px] ring-1 ring-ink/10"
+            className="h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-white/15"
             style={{ background: room.tint }}
             aria-hidden
           />
+          <span className="min-w-0">
+            <span className="block truncate text-[14px] font-semibold leading-tight text-white">
+              {room.name}
+            </span>
+            <span className="block truncate font-mono text-[9px] uppercase tracking-[0.08em] text-white/45">
+              {room.agent} · {room.isHome ? 'full scope' : 'scoped'}
+            </span>
+          </span>
           <button
             onClick={() => setFrameOpen(true)}
-            aria-label="Open living frame"
-            className="ml-auto grid h-8 w-8 place-items-center rounded-lg border border-line text-muted transition-colors hover:border-accent/40 hover:text-accent"
+            className="ml-auto shrink-0 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-white/50 transition-colors hover:text-accent"
           >
-            <IconFrame size={15} />
+            Frame
           </button>
+          <WorktreesChip onClick={() => setWtOpen(true)} />
         </div>
 
-        <div className="min-h-0 flex-1">
+        {/* spacer so the composer clears the mobile bottom dock */}
+        <div className="min-h-0 flex-1 pb-16 lg:pb-0">
           <RoomView key={room.id} room={room} rooms={rooms} />
         </div>
       </main>
 
       {/* living frame — fixed column ≥lg, slide-over below */}
-      <aside className="hidden w-[340px] shrink-0 border-l border-line bg-shell lg:block xl:w-[352px]">
+      <aside className="hidden w-[340px] shrink-0 border-l border-line bg-frame lg:block xl:w-[352px]">
         <FrameColumn room={room} />
       </aside>
 
       {/* mobile slide-over: living frame */}
       {frameOpen && <Backdrop onClick={() => setFrameOpen(false)} />}
+
+      {/* mobile worktrees full-screen sheet */}
+      <WorktreesSheet open={wtOpen} onClose={() => setWtOpen(false)} />
       <div
-        className={`fixed inset-y-0 right-0 z-40 w-[88vw] max-w-[360px] border-l border-line bg-shell transition-transform duration-300 lg:hidden ${
+        className={`fixed inset-y-0 right-0 z-40 w-[88vw] max-w-[360px] border-l border-line bg-frame transition-transform duration-300 lg:hidden ${
           frameOpen ? 'translate-x-0' : 'translate-x-full'
         }`}
       >
@@ -113,14 +125,64 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {/* mobile bottom dock — ink chrome: mono, four targets, active in signal */}
+      <nav
+        aria-label="Primary"
+        className="fixed inset-x-0 bottom-0 z-40 grid h-16 grid-cols-4 border-t border-white/10 bg-ink text-white/55 lg:hidden"
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+      >
+        <DockTab
+          label="Home"
+          active={activeId === home.id}
+          onClick={() => {
+            setActiveId(home.id);
+            setRailOpen(false);
+          }}
+        />
+        <DockTab label="Rooms" active={railOpen} onClick={() => setRailOpen((v) => !v)} />
+        <Link
+          href="/console"
+          className="grid place-items-center font-mono text-[10px] font-semibold uppercase tracking-[0.06em] transition-colors hover:text-accent"
+        >
+          Running
+        </Link>
+        <DockTab
+          label="You"
+          active={false}
+          onClick={() => push('info', 'Owner controls land in a later session.')}
+        />
+      </nav>
     </div>
+  );
+}
+
+function DockTab({
+  label,
+  active,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      aria-current={active ? 'page' : undefined}
+      className={`grid place-items-center font-mono text-[10px] font-semibold uppercase tracking-[0.06em] transition-colors ${
+        active ? 'text-accent' : 'hover:text-accent'
+      }`}
+    >
+      {label}
+    </button>
   );
 }
 
 function Backdrop({ onClick }: { onClick: () => void }) {
   return (
     <div
-      className="fixed inset-0 z-30 bg-ink/20 backdrop-blur-[2px] lg:hidden"
+      className="fixed inset-0 z-30 bg-ink/25 backdrop-blur-[2px] lg:hidden"
       onClick={onClick}
       aria-hidden
     />

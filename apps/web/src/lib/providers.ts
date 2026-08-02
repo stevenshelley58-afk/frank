@@ -13,6 +13,7 @@
  */
 
 import { createSession, streamMessage, gooseHealth } from './goose-server';
+import { ensureAgent, streamLettaMessage, lettaHealth } from './letta-server';
 
 /* ------------------------------------------------------------------ */
 /* Chat provider interface — every harness implements this             */
@@ -47,11 +48,39 @@ const gooseProvider: ChatProvider = {
 };
 
 /* ------------------------------------------------------------------ */
+/* Letta implementation — persistent agent memory ("session wiki")     */
+/* ------------------------------------------------------------------ */
+/* One long-lived Letta agent per room; its memory blocks persist in     */
+/* Postgres across restarts. The chat route stashes the room persona on  */
+/* createSession so stream() can fold it in on first use.               */
+
+const lettaPersonaByRoom = new Map<string, string>();
+
+const lettaProvider: ChatProvider = {
+  id: 'letta',
+  label: 'Letta Memory',
+  blurb: 'Persistent agent memory — keeps a per-room session wiki that grows over time. DeepSeek backbone.',
+  health: lettaHealth,
+  // The "session" is just the room id; persona is captured here for the turn.
+  createSession: (workdir) => {
+    // workdir carries "roomId|persona" from the chat route (see route.ts).
+    const sep = workdir.indexOf('|');
+    const roomId = sep === -1 ? workdir : workdir.slice(0, sep);
+    const persona = sep === -1 ? '' : workdir.slice(sep + 1);
+    if (persona) lettaPersonaByRoom.set(roomId, persona);
+    return Promise.resolve(roomId);
+  },
+  stream: (roomId, prompt) =>
+    streamLettaMessage(roomId, lettaPersonaByRoom.get(roomId) ?? '', prompt),
+};
+
+/* ------------------------------------------------------------------ */
 /* Registry                                                            */
 /* ------------------------------------------------------------------ */
 
 const providers = new Map<string, ChatProvider>();
 providers.set(gooseProvider.id, gooseProvider);
+providers.set(lettaProvider.id, lettaProvider);
 
 export function registerProvider(p: ChatProvider): void {
   providers.set(p.id, p);
@@ -106,6 +135,10 @@ export function setAliasRoute(alias: CapabilityAlias, providerId: string): void 
 
 /** roomId → providerId. 'auto' means the broker picks. Absent = auto. */
 const roomRoutes = new Map<string, string>();
+
+// Phase 1: Central runs on the Letta memory harness (persistent per-room
+// session wiki). Other rooms stay on Auto (Goose). Hot-swappable via setRoomRoute.
+roomRoutes.set('central', 'letta');
 
 export function setRoomRoute(roomId: string, providerId: string): void {
   if (providerId === 'auto') roomRoutes.delete(roomId);
