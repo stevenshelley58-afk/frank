@@ -131,11 +131,26 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  // Fold per-room identity into the first turn of a fresh session. Goose takes
+  // it inline each fresh session; Letta bakes it into the agent's persona block
+  // at creation, so it passes the identity via createSession instead.
+  let promptText = message;
+  let identityText: string | null = null;
+  if (!primed.has(roomId)) {
+    identityText = identityForRoom(roomId, roomName, agentName);
+  }
+
   // Get or create a session, re-creating if the harness changed (hot-swap).
   let entry = sessions.get(roomId);
   if (!entry || entry.providerId !== provider.id) {
     try {
-      const sessionId = await provider.createSession('/srv/frank/repo');
+      // Letta: session key is the room id; persona rides in via "roomId|persona".
+      // Goose: session is an ACP handle rooted at the working dir.
+      const sessionArg =
+        provider.id === 'letta'
+          ? `${roomId}|${identityText ?? ''}`
+          : '/srv/frank/repo';
+      const sessionId = await provider.createSession(sessionArg);
       entry = { providerId: provider.id, sessionId };
       sessions.set(roomId, entry);
       primed.delete(roomId); // re-prime on a fresh session
@@ -148,11 +163,12 @@ export async function POST(req: NextRequest) {
   }
   const activeProvider = provider;
 
-  // Fold per-room identity into the first turn of a fresh session.
-  let promptText = message;
-  if (!primed.has(roomId)) {
-    const identity = identityForRoom(roomId, roomName, agentName);
-    promptText = `${identity}\n\n---\nSteve says: ${message}`;
+  if (!primed.has(roomId) && identityText !== null) {
+    // Goose only — inline the identity primer. Letta already stored it as the
+    // agent's persona block; folding it into the prompt would double it up.
+    if (activeProvider.id !== 'letta') {
+      promptText = `${identityText}\n\n---\nSteve says: ${message}`;
+    }
     primed.add(roomId);
   }
 
