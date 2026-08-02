@@ -6,7 +6,9 @@ FROM node:22-alpine
 
 # ffmpeg = video thumbnail frame grabs for the Console Files module
 # (image thumbnails use `sharp`, a native module pulled by pnpm).
-RUN apk add --no-cache ffmpeg
+# git = the /api/worktrees live-status route shells out to it (reads the
+# repo bind-mounted read-only at FRANK_EXPLORER_ROOT).
+RUN apk add --no-cache ffmpeg git
 
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate
 

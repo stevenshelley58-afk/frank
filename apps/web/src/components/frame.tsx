@@ -9,7 +9,8 @@ import { briefFromToday } from '@/lib/frank';
 import { useCalendar } from '@/lib/use-calendar';
 import { useData, useToast } from './providers';
 import { clockTime, TIME_ZONE } from '@/lib/time';
-import { IconPin, IconPlus } from './icons';
+import { IconPin, IconPlus, IconTree } from './icons';
+import { WorktreesBody } from './worktree-panel';
 
 /* ------------------------------------------------------------------ */
 /* Living frame — ambient world-state around the chat (D2/D5/D10).     */
@@ -97,6 +98,12 @@ function CentralFrame() {
       {!hidden.has('running') && (
         <Widget title="Running" onRemove={() => remove('running')}>
           <RunningBody />
+        </Widget>
+      )}
+
+      {!hidden.has('worktrees') && (
+        <Widget title="Worktrees" icon={<IconTree size={12} />} onRemove={() => remove('worktrees')}>
+          <WorktreesBody />
         </Widget>
       )}
 
@@ -406,11 +413,13 @@ function StatusDot({ status }: { status: "running" | "done" | "error" }) {
 
 function Widget({
   title,
+  icon,
   pinned,
   onRemove,
   children,
 }: {
   title: string;
+  icon?: ReactNode;
   pinned?: boolean;
   onRemove: () => void;
   children: ReactNode;
@@ -422,7 +431,7 @@ function Widget({
       }`}
     >
       <div className="mb-2.5 flex items-center gap-2">
-        {pinned && <IconPin size={11} className="text-accent" />}
+        {pinned ? <IconPin size={11} className="text-accent" /> : icon}
         <h3 className="font-mono text-[11px] font-bold uppercase tracking-[0.12em] text-muted">
           {title}
         </h3>

@@ -6,6 +6,7 @@ import { DEFAULT_ROOMS, roomById, type Room } from '@/lib/rooms';
 import { Rail } from '@/components/rail';
 import { RoomView } from '@/components/room-view';
 import { FrameColumn } from '@/components/frame';
+import { WorktreesSheet, WorktreesChip } from '@/components/worktree-panel';
 import { IconFrame } from '@/components/icons';
 import { useToast } from '@/components/providers';
 
@@ -23,6 +24,7 @@ export default function Home() {
   const [activeId, setActiveId] = useState('central');
   const [frameOpen, setFrameOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
+  const [wtOpen, setWtOpen] = useState(false);
 
   const room = roomById(rooms, activeId);
   const home = rooms.find((r) => r.isHome) ?? rooms[0];
@@ -81,6 +83,7 @@ export default function Home() {
           >
             Frame
           </button>
+          <WorktreesChip onClick={() => setWtOpen(true)} />
         </div>
 
         {/* spacer so the composer clears the mobile bottom dock */}
@@ -96,6 +99,9 @@ export default function Home() {
 
       {/* mobile slide-over: living frame */}
       {frameOpen && <Backdrop onClick={() => setFrameOpen(false)} />}
+
+      {/* mobile worktrees full-screen sheet */}
+      <WorktreesSheet open={wtOpen} onClose={() => setWtOpen(false)} />
       <div
         className={`fixed inset-y-0 right-0 z-40 w-[88vw] max-w-[360px] border-l border-line bg-frame transition-transform duration-300 lg:hidden ${
           frameOpen ? 'translate-x-0' : 'translate-x-full'

@@ -106,6 +106,20 @@ export function IconFolder(props: IconProps) {
   );
 }
 
+/** Git worktrees — a branch glyph. */
+export function IconTree(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="6" cy="6" r="2.5" />
+      <circle cx="18" cy="6" r="2.5" />
+      <circle cx="6" cy="18" r="2.5" />
+      <path d="M6 8.5v7" />
+      <path d="M8.5 6h7" />
+      <path d="M18 8.5c0 4-4 4-6 7" />
+    </svg>
+  );
+}
+
 /** The Frank glyph — an ink square with a single accent tick. */
 export function FrankMark(props: IconProps) {
   const { size = 20, ...rest } = props;
