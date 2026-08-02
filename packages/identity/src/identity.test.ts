@@ -78,6 +78,7 @@ describe('FRANK-§2.2 role model', () => {
 
   it('reports a stable capability list per role set', () => {
     expect(capabilitiesOf(['reviewer'])).toEqual([
+      'brain.search.read',
       'provenance.read',
       'system.health.read',
       'today.read',
