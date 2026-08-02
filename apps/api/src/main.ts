@@ -44,7 +44,7 @@ async function main(): Promise<void> {
     applicationName: 'frank-api',
   });
 
-  const { app } = buildServer({ config, store });
+  const { app } = buildServer({ config, store, db: store.db });
 
   const shutdown = (signal: string): void => {
     app.log.info({ signal }, 'shutting down');

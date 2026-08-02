@@ -74,7 +74,9 @@ export type Capability =
   | 'today.read'
   | 'provenance.read'
   | 'system.health.read'
-  | 'system.health.read.detailed';
+  | 'system.health.read.detailed'
+  | 'brain.search.read'
+  | 'brain.entry.write';
 
 /**
  * Which roles may request which operation.
@@ -103,6 +105,8 @@ export const ROLE_CAPABILITIES: Readonly<Record<Capability, readonly Role[]>> = 
   // cannot hold a session); the *detailed* view is not.
   'system.health.read': ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
   'system.health.read.detailed': ['owner', 'operator'],
+  'brain.search.read': ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
+  'brain.entry.write': ['owner', 'operator', 'builder', 'member', 'service_identity'],
 };
 
 const CAPABILITY_SET: ReadonlySet<string> = new Set<string>(Object.keys(ROLE_CAPABILITIES));

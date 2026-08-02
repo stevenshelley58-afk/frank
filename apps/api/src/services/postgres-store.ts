@@ -121,6 +121,11 @@ export class PostgresDomainStore implements DomainStore {
     this.#capture = new CaptureService(this.#audit, this.#outbox, this.#work);
   }
 
+  /** Raw DB handle for brain routes (raw SQL, not yet in DomainStore port). */
+  get db(): FrankDatabase {
+    return this.#db;
+  }
+
   /* ---------------------------------------------------------------- capture --- */
 
   /**

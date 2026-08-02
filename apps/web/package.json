@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@frank/contracts": "workspace:*",
+    "@frank/google-connectors": "workspace:*",
     "@frank/kernel": "workspace:*",
     "@frank/memory": "workspace:*",
     "@frank/pipeline-graph": "workspace:*",

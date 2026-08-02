@@ -53,7 +53,7 @@ export const consoleModules: ConsoleModule[] = [
     description:
       'Watch the Blockwise research pipeline run — stages, sources, and where a job stalls.',
     icon: 'chart',
-    status: 'planned',
+    status: 'live',
     system: 'Blockwise',
   },
   {
@@ -62,7 +62,7 @@ export const consoleModules: ConsoleModule[] = [
     description:
       'Goose run-state, sessions, and provider/model swaps across central and mini-Franks.',
     icon: 'bot',
-    status: 'planned',
+    status: 'live',
     system: 'Frank',
   },
   {
@@ -78,7 +78,7 @@ export const consoleModules: ConsoleModule[] = [
     title: 'Tasks',
     description: 'Plane projects and the Google Tasks phone mirror, side by side.',
     icon: 'tasks',
-    status: 'planned',
+    status: 'live',
     system: 'Frank',
   },
 ];
