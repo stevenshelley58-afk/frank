@@ -18,7 +18,9 @@ interface RailProps {
 
 /**
  * Room switcher rail (D1/D7). Central is HOME — pinned, starred, set apart.
- * Project rooms follow; identity lives in the small muted tint dots.
+ * Brand lock: the FRANK mark is the brand-kit logo asset, never a hand-drawn
+ * letterbox (frank-brand-assets usage rules). Project rooms follow; identity
+ * lives in the small muted tint dots.
  */
 export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: RailProps) {
   const { push } = useToast();
@@ -54,14 +56,14 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* brand */}
-        <div className="flex items-center gap-2.5 px-2 pb-5 pt-1">
-          <span className="grid h-[26px] w-[26px] place-items-center rounded-[8px] bg-ink font-display text-[15px] font-bold text-white">
-            F
-          </span>
-          <span className="font-display text-[13px] font-bold tracking-[0.16em] text-ink">
-            FRANK
-          </span>
+        {/* brand — official FRANK lockup from the brand kit (ink on paper) */}
+        <div className="flex items-center px-2 pb-5 pt-1">
+          <img
+            src="/brand/navbar-logo.png"
+            alt="FRANK"
+            draggable={false}
+            className="h-7 w-auto select-none"
+          />
         </div>
 
         <div className="px-2.5 pb-1.5 pt-1 font-mono text-[10px] uppercase tracking-[0.16em] text-muted/70">

@@ -95,7 +95,27 @@ body {
 }
 
 /* ---------------------------------------------------------------------------
- * Chat thread custom pieces (light theme)
+ * The conversation vault — brand shell black (#10120f family)
+ * Frank's words render in pure #FFFFFF on this surface.
+ * ------------------------------------------------------------------------- */
+.chat-vault {
+  position: relative;
+  background:
+    radial-gradient(920px 480px at 16% -10%, rgb(242 59 29 / 7%), transparent 62%),
+    radial-gradient(720px 420px at 108% 6%, rgb(111 157 242 / 6%), transparent 58%),
+    #10120f;
+}
+
+.chat-vault ::selection { background: rgb(242 59 29 / 35%); color: #ffffff; }
+
+.chat-vault * {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(255 255 255 / 22%) transparent;
+}
+.chat-vault *::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 22%); }
+
+/* ---------------------------------------------------------------------------
+ * Chat thread custom pieces
  * ------------------------------------------------------------------------- */
 
 /* cap bubble width on wide screens so lines stay readable */
@@ -104,19 +124,18 @@ body {
 /* quiet vertical rhythm for the chat scroller */
 .chat-scroll { scroll-behavior: smooth; }
 
-/* Frank's delegation/handoff strip — acid-verified affordance */
+/* Frank's delegation/handoff strip — acid-verified affordance, vault-tuned */
 .mention-strip {
-  border: 1px dashed rgb(118 172 15 / 55%);
-  background: rgb(184 242 56 / 14%);
-  color: var(--color-text);
+  border: 1px dashed rgb(184 242 56 / 40%);
+  background: rgb(184 242 56 / 8%);
 }
 
-/* three-dot "Frank is typing" indicator */
+/* three-dot "Frank is typing" indicator — ivory dots on the vault */
 .typing-dot {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: rgb(21 23 17 / 32%);
+  background: rgb(241 239 230 / 55%);
   animation: typing 1.2s infinite;
 }
 .typing-dot:nth-child(2) { animation-delay: 0.15s; }
