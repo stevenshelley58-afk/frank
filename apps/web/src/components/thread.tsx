@@ -3,6 +3,7 @@
 import { useEffect, useRef } from 'react';
 import type { ChatMessage } from '@/lib/frank';
 import { IconBolt } from './icons';
+import { Markdown } from './markdown';
 
 interface ThreadProps {
   messages: ChatMessage[];
@@ -110,8 +111,8 @@ function MessageRow({
           {agentName}
         </span>
       </span>
-      <div className="whitespace-pre-wrap rounded-2xl rounded-tl-[4px] px-[15px] py-3 text-[13.5px] leading-[1.5] text-white">
-        {message.text}
+      <div className="rounded-2xl rounded-tl-[4px] px-[15px] py-3 text-white">
+        <Markdown text={message.text} />
       </div>
     </div>
   );

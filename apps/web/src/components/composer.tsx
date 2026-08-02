@@ -2,14 +2,17 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { Room } from '@/lib/rooms';
-import { IconSend } from './icons';
+import { IconSend, IconStop } from './icons';
 
 interface ComposerProps {
   room: Room;
   disabled: boolean;
   /** session still minting — placeholder says so until ready */
   booting?: boolean;
+  /** Frank is mid-stream — send button becomes a Stop affordance */
+  running?: boolean;
   onSend: (text: string) => void;
+  onStop?: () => void;
   onTyping: (active: boolean) => void;
 }
 
@@ -24,7 +27,7 @@ interface ComposerProps {
  * tint ring + solid-tint send — identity reads at a glance (DS principle 04:
  * scope by sight), without competing with the thread above.
  */
-export function Composer({ room, disabled, booting, onSend, onTyping }: ComposerProps) {
+export function Composer({ room, disabled, booting, running, onSend, onStop, onTyping }: ComposerProps) {
   const [value, setValue] = useState('');
   const [focused, setFocused] = useState(false);
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -86,14 +89,24 @@ export function Composer({ room, disabled, booting, onSend, onTyping }: Composer
               {...textareaProps}
               className="max-h-[132px] min-h-[42px] flex-1 resize-none border-none bg-transparent px-1 py-2 text-[14px] leading-[1.5] text-white outline-none placeholder:text-white/40"
             />
-            <button
-              onClick={submit}
-              disabled={!sendActive}
-              aria-label="Send"
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-accent text-ink transition-all duration-150 hover:scale-[1.05] hover:bg-[#ff5233] active:scale-95 disabled:pointer-events-none disabled:opacity-35"
-            >
-              <IconSend size={17} />
-            </button>
+            {running ? (
+              <button
+                onClick={onStop}
+                aria-label="Stop"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-white/12 text-white transition-all duration-150 hover:scale-[1.05] hover:bg-white/20 active:scale-95"
+              >
+                <IconStop size={15} />
+              </button>
+            ) : (
+              <button
+                onClick={submit}
+                disabled={!sendActive}
+                aria-label="Send"
+                className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-accent text-ink transition-all duration-150 hover:scale-[1.05] hover:bg-[#ff5233] active:scale-95 disabled:pointer-events-none disabled:opacity-35"
+              >
+                <IconSend size={17} />
+              </button>
+            )}
           </div>
         </div>
       ) : (
@@ -120,15 +133,25 @@ export function Composer({ room, disabled, booting, onSend, onTyping }: Composer
             {...textareaProps}
             className="max-h-[132px] min-h-[24px] flex-1 resize-none border-none bg-transparent text-[14px] leading-[1.5] text-ink outline-none placeholder:text-muted/60"
           />
-          <button
-            onClick={submit}
-            disabled={!sendActive}
-            aria-label="Send"
-            className="grid h-[36px] w-[36px] shrink-0 place-items-center rounded-[10px] text-white transition-all duration-150 hover:scale-[1.06] active:scale-95 disabled:pointer-events-none disabled:opacity-35"
-            style={{ background: sendActive ? room.tint : `rgba(${room.rgb}, 0.4)` }}
-          >
-            <IconSend size={16} />
-          </button>
+          {running ? (
+            <button
+              onClick={onStop}
+              aria-label="Stop"
+              className="grid h-[36px] w-[36px] shrink-0 place-items-center rounded-[10px] bg-ink/85 text-white transition-all duration-150 hover:scale-[1.06] hover:bg-ink active:scale-95"
+            >
+              <IconStop size={14} />
+            </button>
+          ) : (
+            <button
+              onClick={submit}
+              disabled={!sendActive}
+              aria-label="Send"
+              className="grid h-[36px] w-[36px] shrink-0 place-items-center rounded-[10px] text-white transition-all duration-150 hover:scale-[1.06] active:scale-95 disabled:pointer-events-none disabled:opacity-35"
+              style={{ background: sendActive ? room.tint : `rgba(${room.rgb}, 0.4)` }}
+            >
+              <IconSend size={16} />
+            </button>
+          )}
         </div>
       )}
     </div>
