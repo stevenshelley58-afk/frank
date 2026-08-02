@@ -52,7 +52,7 @@ export function Rail({ rooms, activeId, open, onSelect, onAddRoom, onClose }: Ra
         />
       )}
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-[248px] shrink-0 flex-col overflow-y-auto border-r border-line bg-rail px-3 py-4 transition-transform duration-300 lg:static lg:z-auto lg:translate-x-0 ${
+        className={`frank-navigation fixed inset-y-0 left-0 z-40 flex w-[248px] shrink-0 flex-col overflow-y-auto border-r border-line bg-rail px-3 py-4 transition-transform duration-300 lg:static lg:z-auto lg:translate-x-0 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >

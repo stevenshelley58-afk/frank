@@ -14,13 +14,13 @@ interface ComposerProps {
 }
 
 /**
- * The composer — FRANK Light DS 1.0.
+ * The composer — FRANK Atlantic Design System 1.1.
  *
- * Central is the command deck: a black (ink) surface, white text, a mono
+ * Central is the command deck: a deep Atlantic surface, cool-white text, a mono
  * scope label so you always know a write lands globally, and a signal-orange
  * send. It is the anchor of the shell — quiet, unmistakable, high-contrast.
  *
- * Project rooms: a warm-paper box with a FAINT wash of the room's tint and a
+ * Project rooms: a blue-white box with a faint wash of the room's tint and a
  * tint ring + solid-tint send — identity reads at a glance (DS principle 04:
  * scope by sight), without competing with the thread above.
  */
@@ -72,12 +72,12 @@ export function Composer({ room, disabled, booting, onSend, onTyping }: Composer
   return (
     <div className="shrink-0 px-4 pb-4 pt-3 md:px-7 md:pb-6">
       {isCentral ? (
-        /* ---------- Central: the black command deck ---------- */
+        /* ---------- Central: the deep Atlantic command deck ---------- */
         <div
-          className={`rounded-2xl bg-ink p-3 transition-shadow duration-200 ${
+          className={`frank-central-composer rounded-2xl p-3 transition-shadow duration-200 ${
             focused
-              ? 'shadow-[0_0_0_2px_rgba(242,59,29,0.5),0_16px_40px_-18px_rgba(21,23,17,0.5)]'
-              : 'shadow-[0_2px_4px_rgba(21,23,17,0.12),0_16px_40px_-18px_rgba(21,23,17,0.4)]'
+              ? 'shadow-[0_0_0_2px_rgba(242,59,29,0.5),0_16px_40px_-18px_rgba(6,17,31,0.42)]'
+              : 'shadow-[0_2px_4px_rgba(6,17,31,0.10),0_16px_40px_-18px_rgba(6,17,31,0.28)]'
           }`}
         >
           <div className="ds-label px-1 pb-2 text-white/45">Central · Command Deck</div>
@@ -90,7 +90,7 @@ export function Composer({ room, disabled, booting, onSend, onTyping }: Composer
               onClick={submit}
               disabled={!sendActive}
               aria-label="Send"
-              className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-accent text-ink transition-all duration-150 hover:scale-[1.05] hover:bg-[#ff5233] active:scale-95 disabled:pointer-events-none disabled:opacity-35"
+              className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-accent text-[#06111f] transition-all duration-150 hover:scale-[1.05] hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-35"
             >
               <IconSend size={17} />
             </button>
