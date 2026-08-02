@@ -42,6 +42,25 @@ Source: `https://2026-07-31.githubshow.codeshiftagent.com/` · Reviewed in sessi
 
 ---
 
+## 2026-08-02 — OSS "get these live" push: outcomes
+
+Source: session "get these live on prod and clean up git" · Follow-up to the 2026-07-31 GitHub Show review.
+
+| Repo | Verdict | Outcome this session |
+|------|---------|----------------------|
+| **ayghri/i-have-adhd** | 🟢 use now | ✅ **LIVE & VERIFIED.** OUTPUT_POLICY (lead with the answer, number steps, minutes-only estimates, no preamble/recap, one next action) is in `apps/web/src/lib/rooms-identity.ts`, applied to every room. Confirmed by hitting the real `https://frank.fail/api/chat` and having Frank quote the policy verbatim. |
+| **virgiliojr94/book-to-skill** | 🟢 use now | ✅ **DONE (concept adapted).** Built `skills/misc/frank-spec/` — a lazy-load index + `scripts/chapter.py <N>` that pulls one of the spec's 30 chapters (~100 lines) on demand with pagination, instead of reading all 3,468 lines. Committed `e72c25e` on `feat/frank-console`, pushed. |
+| **1jehuang/jcode** (memory idea) | 🔴 skip code / 🟢 steal idea | ✅ **PLANNED, not built.** `docs/research/memory-jcode-plan.md` — the "embed every turn" idea. Finding: Frank's `@frank/memory` already recalls + stores every turn; the real gaps are (1) async-extraction latency, (2) no turn-level raw embedding, (3) no recall eval. Recommends a recall-quality eval first, conditional working-memory buffer second. No rebuild. |
+| 🤝 **Zapier MCP** | 🟢 use now | 🔒 **BLOCKED on credentials.** Adapter code `adapters/tools/zapier-mcp/` is written + tested (committed), but the MCP endpoint rejects the provided token/URL in every auth format tried (Bearer, x-api-key, query, key-in-path, uuid-path — all 307→login page). Needs the exact "Connect" config from Zapier's dashboard before it can be registered in Goose + Frank's tool registry. |
+
+### Git cleanup (same session)
+
+- **GitHub `stevenshelley58-afk/frank`:** deleted merged branches `feat/console-explorer`, `feat/run-state-machine`. Now 3 branches: `feat/frank-console` (prod), `feat/kernel-memory-foundation` (unmerged memory work), `main`.
+- **VPS `/srv/frank/repo`:** on `feat/frank-console` (prod). Deleted the same 2 local branches. `main` (Buzz boundary work, diverged) and `chore/sync-spec-1.1-buzz-mcp` (lint housekeeping) left intact — unmerged work.
+- **Prod confirmation:** prod branch is `feat/frank-console`, NOT `main` (per deploy skill). frank.fail serving it, HTTP 200. The i-have-adhd + spec-skill work is on this branch.
+
+---
+
 ## Template for future reviews
 
 ```
