@@ -127,3 +127,69 @@ export function agoShort(iso: string): string {
 export function relTime(iso: string): string {
   return agoShort(iso);
 }
+
+/* ---- plain-English stage classification ---- */
+/*
+ * Non-technical owners should never read git numbers. Every worktree is
+ * placed on a 4-stop pipeline:  mid-work → ready → queued → live.
+ * `live` = the tree that frank.fail is actually built from.
+ */
+
+export type WtStage = 'working' | 'ready' | 'queued' | 'live' | 'parked';
+
+export interface WtStageInfo {
+  stage: WtStage;
+  /** e.g. "Ready to publish" */
+  label: string;
+  /** One-line sentence a non-coder can act on or ignore. */
+  sentence: string;
+  /** Tailwind text-/bg- color token (running/warning/success/acid). */
+  tone: 'running' | 'warning' | 'success' | 'acid' | 'muted';
+}
+
+export function stageTree(t: WorktreeInfo): WtStageInfo {
+  const dirty = treeDirtyCount(t);
+  const name = t.name === '(main)' ? 'the main tree' : `“${t.name}”`;
+
+  if (t.isCurrent || t.branch === 'main') {
+    return {
+      stage: 'live',
+      label: 'Live on frank.fail',
+      sentence:
+        dirty > 0
+          ? `Your live site runs from here — ${dirty} file${dirty > 1 ? 's' : ''} mid-edit, not live yet.`
+          : 'Your live site runs from here. Up to date — nothing waiting.',
+      tone: 'success',
+    };
+  }
+  if (dirty > 0) {
+    return {
+      stage: 'working',
+      label: 'Being worked on',
+      sentence: `${name} has ${dirty} file${dirty > 1 ? 's' : ''} mid-edit — saved, not published yet.`,
+      tone: 'running',
+    };
+  }
+  if (t.ahead > 0) {
+    return {
+      stage: 'ready',
+      label: 'Ready to publish',
+      sentence: `${name} is finished and ${t.ahead} step${t.ahead > 1 ? 's' : ''} ahead of the live site — ready when you say go.`,
+      tone: 'warning',
+    };
+  }
+  if (t.branch === null || t.detached) {
+    return {
+      stage: 'parked',
+      label: 'Parked',
+      sentence: `${name} is parked mid-history — nothing live, nothing waiting on you.`,
+      tone: 'muted',
+    };
+  }
+  return {
+    stage: 'queued',
+    label: 'Saved, not started',
+    sentence: `${name} is saved and up to date — nothing waiting on you.`,
+    tone: 'muted',
+  };
+}

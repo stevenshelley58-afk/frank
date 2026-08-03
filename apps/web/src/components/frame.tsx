@@ -102,7 +102,7 @@ function CentralFrame() {
       )}
 
       {!hidden.has('worktrees') && (
-        <Widget title="Worktrees" icon={<IconTree size={12} />} onRemove={() => remove('worktrees')}>
+        <Widget title="Code status" icon={<IconTree size={12} />} onRemove={() => remove('worktrees')}>
           <WorktreesBody />
         </Widget>
       )}
