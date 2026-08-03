@@ -10,6 +10,9 @@ export interface RoomChip {
   accent?: boolean;
 }
 
+/** Room lifecycle status for the ROOMS chip strip + peek card. */
+export type RoomStatus = 'waiting' | 'running' | 'verified' | 'none';
+
 export interface Room {
   id: string;
   name: string;
@@ -27,8 +30,14 @@ export interface Room {
   greeting: string;
   chips: RoomChip[];
   isHome?: boolean;
-  /** placeholder pulse status until real telemetry lands */
+  /** static living-frame subtitle (kept for frame.tsx) */
   pulse?: string;
+  /** live lifecycle status — merged from /api/room-status at render time */
+  status?: RoomStatus;
+  /** epoch ms when `status` last changed */
+  statusSince?: number;
+  /** ≤140-char plain-text tail of the latest reply (peek card snippet) */
+  snippet?: string;
 }
 
 export const CENTRAL: Room = {
@@ -123,6 +132,66 @@ export const DEFAULT_ROOMS: Room[] = [CENTRAL, ...PROJECT_ROOMS];
 
 export function roomById(rooms: Room[], id: string): Room {
   return rooms.find((r) => r.id === id) ?? CENTRAL;
+}
+
+/* ------------------------------------------------------------------ */
+/* Chip strip + peek card ordering — pure, unit-tested                 */
+/* ------------------------------------------------------------------ */
+
+/** waiting > running > verified > none — the mockup's priority order. */
+const STATUS_RANK: Record<RoomStatus, number> = {
+  waiting: 3,
+  running: 2,
+  verified: 1,
+  none: 0,
+};
+
+/**
+ * Rooms for the ROOMS chip strip: Central pinned first (always — it is the
+ * deck anchor even while you're viewing it), then everything else by status
+ * (waiting → running → verified → none), ties broken by most recent
+ * activity (`statusSince` desc, room order as final fallback). A non-home
+ * room the user is currently viewing is excluded from the rest of the row.
+ */
+export function sortRoomsForChips(rooms: Room[], currentId: string): Room[] {
+  const pinned = rooms.find((r) => r.isHome);
+  const rest = rooms
+    .filter((r) => !r.isHome && r.id !== currentId)
+    .slice()
+    .sort((a, b) => {
+      const rank = STATUS_RANK[b.status ?? 'none'] - STATUS_RANK[a.status ?? 'none'];
+      if (rank !== 0) return rank;
+      const ta = a.statusSince ?? 0;
+      const tb = b.statusSince ?? 0;
+      if (tb !== ta) return tb - ta;
+      return rooms.indexOf(a) - rooms.indexOf(b);
+    });
+  return pinned ? [pinned, ...rest] : rest;
+}
+
+/**
+ * The room for the dismissible peek card: highest-priority room that is
+ * not Central, not the current room, and has a status worth surfacing.
+ * Returns null when nothing needs attention.
+ */
+export function topPeekRoom(rooms: Room[], currentId: string): Room | null {
+  const candidates = rooms.filter(
+    (r) => !r.isHome && r.id !== currentId && STATUS_RANK[r.status ?? 'none'] > 0,
+  );
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => {
+    const rank = STATUS_RANK[b.status ?? 'none'] - STATUS_RANK[a.status ?? 'none'];
+    if (rank !== 0) return rank;
+    return (b.statusSince ?? 0) - (a.statusSince ?? 0);
+  });
+  return candidates[0];
+}
+
+/** Count of rooms needing action — drives the "n waiting · show" restore. */
+export function waitingCount(rooms: Room[], currentId: string): number {
+  return rooms.filter(
+    (r) => !r.isHome && r.id !== currentId && r.status === 'waiting',
+  ).length;
 }
 
 /** Found a quick room client-side (the full founding ritual comes later). */

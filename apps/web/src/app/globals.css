@@ -211,6 +211,144 @@ body {
   40% { opacity: 1; transform: translateY(-2px); }
 }
 
+/* ---------------------------------------------------------------------------
+ * ROOMS chip strip — status indicators
+ * ------------------------------------------------------------------------- */
+
+/* hide the chip row's own scrollbar; the page never scrolls */
+.chip-row { scrollbar-width: none; }
+.chip-row::-webkit-scrollbar { height: 0; width: 0; }
+
+/* breathing ring around a chip face — waiting (fast) & verified (slow) */
+.ring-indicator {
+  position: absolute;
+  inset: -4px;
+  border-radius: 18px;
+  border: 2px solid transparent;
+  pointer-events: none;
+}
+.ring-indicator.waiting {
+  border-color: rgb(var(--tw-warning) / 70%);
+  animation: breathe 1.6s ease-in-out infinite;
+}
+.ring-indicator.verified {
+  border-color: rgb(var(--tw-acid) / 70%);
+  animation: breathe 2.2s ease-in-out infinite;
+}
+@keyframes breathe {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 1; }
+}
+
+/* running — pulsing corner dot on the chip face */
+.corner-dot {
+  position: absolute;
+  top: -3px;
+  right: -3px;
+  width: 11px;
+  height: 11px;
+  border-radius: 50%;
+  background: rgb(var(--tw-running));
+  border: 2px solid rgb(var(--tw-shell));
+  animation: pulse 1.6s ease-in-out infinite;
+}
+@keyframes pulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.25); opacity: 0.7; }
+}
+
+/* the 1px divider after the pinned Central chip */
+.central-divider {
+  position: absolute;
+  right: -6px;
+  top: 6px;
+  bottom: 24px;
+  width: 1px;
+  background: rgb(var(--tw-line));
+}
+
+/* ---------------------------------------------------------------------------
+ * Dismissible peek card
+ * ------------------------------------------------------------------------- */
+
+.peek {
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  padding: 11px 13px;
+  position: relative;
+  overflow: hidden;
+  max-height: 170px;
+  transition: max-height 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    padding 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    border-width 0.28s cubic-bezier(0.16, 1, 0.3, 1),
+    margin-top 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.peek.needs-action { border-color: rgb(var(--tw-warning) / 45%); }
+.peek.dismissed {
+  max-height: 0;
+  margin-top: 0;
+  padding-top: 0;
+  padding-bottom: 0;
+  opacity: 0;
+  border-width: 0;
+}
+
+/* restore pill — "{n} waiting · show" */
+.restore-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--color-text-muted);
+  background: rgb(var(--tw-warning) / 12%);
+  border: 1px solid rgb(var(--tw-warning) / 40%);
+  border-radius: 999px;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+.restore-pill:hover { background: rgb(var(--tw-warning) / 20%); }
+.restore-pill .d {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: rgb(var(--tw-warning));
+  animation: pulse 1.6s ease-in-out infinite;
+}
+
+/* ---------------------------------------------------------------------------
+ * Chat grab handle (expand/collapse preview zone)
+ * ------------------------------------------------------------------------- */
+
+.grab-handle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  height: 26px;
+  width: 100%;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  color: rgb(var(--tw-muted) / 80%);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  transition: color 0.15s ease;
+}
+.grab-handle:hover { color: var(--color-text); }
+.grab-handle .bar {
+  width: 28px;
+  height: 1px;
+  background: rgb(var(--tw-line));
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;

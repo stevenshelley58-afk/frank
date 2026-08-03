@@ -1,11 +1,13 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
-import { DEFAULT_ROOMS, roomById, type Room } from '@/lib/rooms';
+import { DEFAULT_ROOMS, roomById, topPeekRoom, type Room } from '@/lib/rooms';
+import { useRoomStatuses, withStatus } from '@/lib/use-room-statuses';
 import { Rail } from '@/components/rail';
 import { RoomView } from '@/components/room-view';
 import { FrameColumn } from '@/components/frame';
+import { PreviewZone } from '@/components/room/preview-zone';
 import { WorktreesSheet, WorktreesChip } from '@/components/worktree-panel';
 import { IconFrame } from '@/components/icons';
 import { useToast } from '@/components/providers';
@@ -20,14 +22,41 @@ import { useToast } from '@/components/providers';
  */
 export default function Home() {
   const { push } = useToast();
-  const [rooms, setRooms] = useState<Room[]>(DEFAULT_ROOMS);
+  const [baseRooms, setBaseRooms] = useState<Room[]>(DEFAULT_ROOMS);
   const [activeId, setActiveId] = useState('central');
   const [frameOpen, setFrameOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [wtOpen, setWtOpen] = useState(false);
 
+  // Preview zone: expanded by default, peek dismissible.
+  const [expanded, setExpanded] = useState(true);
+  const [peekDismissed, setPeekDismissed] = useState(false);
+
+  // Live room statuses: server ledger + client delegations merged.
+  const statuses = useRoomStatuses(baseRooms);
+  const rooms = withStatus(baseRooms, statuses);
+
   const room = roomById(rooms, activeId);
   const home = rooms.find((r) => r.isHome) ?? rooms[0];
+
+  // Auto-reopen the peek when a NEW top-priority room appears while dismissed.
+  const lastPeekKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!peekDismissed) return;
+    const top = topPeekRoom(rooms, activeId);
+    const key = top ? `${top.id}:${top.status}` : null;
+    if (key !== null && key !== lastPeekKeyRef.current) {
+      setPeekDismissed(false); // fresh urgency — bring the card back
+    }
+    lastPeekKeyRef.current = key;
+  }, [rooms, activeId, peekDismissed]);
+
+  // Track the current peek key even when not dismissed, for comparison.
+  useEffect(() => {
+    if (peekDismissed) return;
+    const top = topPeekRoom(rooms, activeId);
+    lastPeekKeyRef.current = top ? `${top.id}:${top.status}` : null;
+  }, [rooms, activeId, peekDismissed]);
 
   // Escape closes the slide-over panels.
   useEffect(() => {
@@ -53,7 +82,7 @@ export default function Home() {
           setRailOpen(false);
         }}
         onAddRoom={(r) => {
-          setRooms((prev) => [...prev, r]);
+          setBaseRooms((prev) => [...prev, r]);
           setActiveId(r.id);
           setRailOpen(false);
         }}
@@ -85,6 +114,18 @@ export default function Home() {
           </button>
           <WorktreesChip onClick={() => setWtOpen(true)} />
         </div>
+
+        {/* preview zone — ROOMS chips + dismissible peek + grab handle */}
+        <PreviewZone
+          rooms={rooms}
+          currentId={activeId}
+          expanded={expanded}
+          peekDismissed={peekDismissed}
+          onSelectRoom={(id) => setActiveId(id)}
+          onDismissPeek={() => setPeekDismissed(true)}
+          onRestorePeek={() => setPeekDismissed(false)}
+          onToggleExpanded={() => setExpanded((v) => !v)}
+        />
 
         {/* spacer so the composer clears the mobile bottom dock */}
         <div className="min-h-0 flex-1 pb-16 lg:pb-0">
