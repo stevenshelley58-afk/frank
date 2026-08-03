@@ -3,7 +3,7 @@ import { Inter, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
 
-/* FRANK Light DS 1.0 typography: Inter for UI text, IBM Plex Mono for
+/* FRANK Atlantic DS 1.1 typography: Inter for UI text, IBM Plex Mono for
  * labels, counters, timestamps, and the system's smallest voice. */
 const inter = Inter({
   subsets: ['latin'],
@@ -37,13 +37,16 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  /* Brand shell black — matches the chat vault + command deck chrome. */
-  themeColor: '#10120f',
+  themeColor: '#F3F7FB',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${plexMono.variable}`}>
+    <html
+      lang="en"
+      data-frank-theme="light"
+      className={`${inter.variable} ${plexMono.variable}`}
+    >
       <head>
         <link rel="manifest" href="/site.webmanifest" />
       </head>

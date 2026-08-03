@@ -19,7 +19,7 @@ import { WorktreesBody } from './worktree-panel';
 
 export function FrameColumn({ room }: { room: Room }) {
   return (
-    <div className="frame-scroll flex h-full min-h-0 flex-col overflow-y-auto px-4 py-4">
+    <div className="frank-frame frame-scroll flex h-full min-h-0 flex-col overflow-y-auto px-4 py-4">
       {room.isHome ? <CentralFrame /> : <ScopedFrame room={room} />}
     </div>
   );
@@ -119,9 +119,12 @@ function CentralFrame() {
 
 function BriefBody() {
   const { today, work, loading } = useData();
-  const [now, setNow] = useState(() => Date.now());
+  // Keep the server render deterministic. The page shell is cached, so a
+  // build-time clock value would disagree with the browser during hydration.
+  const [now, setNow] = useState<number | null>(null);
 
   useEffect(() => {
+    setNow(Date.now());
     const t = window.setInterval(() => setNow(Date.now()), 30_000);
     return () => window.clearInterval(t);
   }, []);
@@ -131,19 +134,21 @@ function BriefBody() {
 
   let clock = '--:--';
   let weekday = '—';
-  try {
-    const d = new Date(now);
-    clock = new Intl.DateTimeFormat('en-AU', {
-      timeZone: TIME_ZONE,
-      hour: 'numeric',
-      minute: '2-digit',
-    }).format(d);
-    weekday = new Intl.DateTimeFormat('en-AU', {
-      timeZone: TIME_ZONE,
-      weekday: 'short',
-    }).format(d);
-  } catch {
-    /* zone not resolvable — keep the dashes */
+  if (now !== null) {
+    try {
+      const d = new Date(now);
+      clock = new Intl.DateTimeFormat('en-AU', {
+        timeZone: TIME_ZONE,
+        hour: 'numeric',
+        minute: '2-digit',
+      }).format(d);
+      weekday = new Intl.DateTimeFormat('en-AU', {
+        timeZone: TIME_ZONE,
+        weekday: 'short',
+      }).format(d);
+    } catch {
+      /* zone not resolvable — keep the dashes */
+    }
   }
 
   return (

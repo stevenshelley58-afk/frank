@@ -1,15 +1,12 @@
 import type { Config } from 'tailwindcss';
 
 /**
- * FRANK — Light Design System 1.0 (design-tokens.json).
+ * FRANK Atlantic Design System 1.1.
  *
- * Warm paper canvas, olive-ink chrome, one brand signal. The semantic names
- * below (shell, rail, card, ink, line, muted, accent, …) are the vocabulary
- * every surface already uses, so remapping them here re-skins the whole app —
- * chat, living frame, and every console module — without touching markup.
- *
- * Room identity lives in per-room tints (see lib/rooms.ts), never in the
- * shell chrome.
+ * Components consume semantic roles, never palette primitives. The RGB
+ * custom properties are defined in app/globals.css so Tailwind opacity
+ * modifiers continue to work and the same component geometry can be used by
+ * both Atlantic themes.
  */
 const config: Config = {
   content: ['./src/**/*.{js,ts,jsx,tsx,mdx}'],
@@ -21,28 +18,25 @@ const config: Config = {
         mono: ['var(--font-mono)', 'ui-monospace', 'SFMono-Regular', 'Consolas', 'monospace'],
       },
       colors: {
-        /* -------- surfaces (light) -------- */
-        shell: '#F1EFE6',   // background — warm paper
-        rail: '#E7E3D7',    // chrome — sunken paper
-        card: '#FBFAF5',    // surface — paper highlight
-        hover: '#E7E3D7',   // interactive hover on paper
-        subtle: '#F1EFE6',  // quiet fill
-        paper: '#FBFAF5',   // raised paper surface
-        paper2: '#F1EFE6',  // paper mid
-        paper3: '#E7E3D7',  // paper sunken
-        frame: '#EDEAE0',   // living frame — soft paper
-        /* -------- ink -------- */
-        ink: '#151711',     // text / command chrome
-        ink2: '#353A33',    // secondary text
-        muted: '#6E7068',   // muted text
-        /* -------- hairline + brand + semantic -------- */
-        line: '#D2CEC2',    // warm hairline border
-        accent: '#F23B1D',  // brand signal orange
-        success: '#76AC0F', // verified — acid (AA-contrast ink-on-paper)
-        running: '#3E69BD', // running — blue
-        warning: '#A96F0D', // waiting — amber
-        danger: '#B52D34',  // critical — red
-        acid: '#B8F238',    // verified accent (decorative, ink text)
+        shell: 'rgb(var(--tw-shell) / <alpha-value>)',
+        rail: 'rgb(var(--tw-rail) / <alpha-value>)',
+        card: 'rgb(var(--tw-card) / <alpha-value>)',
+        hover: 'rgb(var(--tw-hover) / <alpha-value>)',
+        subtle: 'rgb(var(--tw-subtle) / <alpha-value>)',
+        paper: 'rgb(var(--tw-paper) / <alpha-value>)',
+        paper2: 'rgb(var(--tw-paper-2) / <alpha-value>)',
+        paper3: 'rgb(var(--tw-paper-3) / <alpha-value>)',
+        frame: 'rgb(var(--tw-frame) / <alpha-value>)',
+        ink: 'rgb(var(--tw-ink) / <alpha-value>)',
+        ink2: 'rgb(var(--tw-ink-2) / <alpha-value>)',
+        muted: 'rgb(var(--tw-muted) / <alpha-value>)',
+        line: 'rgb(var(--tw-line) / <alpha-value>)',
+        accent: 'rgb(var(--tw-accent) / <alpha-value>)',
+        success: 'rgb(var(--tw-success) / <alpha-value>)',
+        running: 'rgb(var(--tw-running) / <alpha-value>)',
+        warning: 'rgb(var(--tw-warning) / <alpha-value>)',
+        danger: 'rgb(var(--tw-danger) / <alpha-value>)',
+        acid: 'rgb(var(--tw-acid) / <alpha-value>)',
       },
       borderRadius: {
         sm: '8px',

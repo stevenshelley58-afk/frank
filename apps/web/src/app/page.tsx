@@ -11,10 +11,10 @@ import { IconFrame } from '@/components/icons';
 import { useToast } from '@/components/providers';
 
 /**
- * FRANK OS — chat-first shell (FRANK Light DS 1.0 + the dark vault).
+ * FRANK OS — chat-first shell (FRANK Atlantic Design System 1.1).
  *
- * Desktop (≥lg): room-switcher rail · the ink conversation vault (Frank
- * speaks in pure #FFFFFF) · living frame. Mobile (<lg): single chat surface,
+ * Desktop (≥lg): room-switcher rail · quiet Atlantic workspace · living
+ * frame. Mobile (<lg): single chat surface,
  * room header up top, living frame in a sheet, and a mono bottom dock
  * (Home / Rooms / Running / You) — rail hidden.
  */
@@ -60,26 +60,26 @@ export default function Home() {
         onClose={() => setRailOpen(false)}
       />
 
-      {/* the conversation vault — ink column, white words */}
-      <main className="chat-vault flex min-w-0 flex-1 flex-col">
+      {/* the conversation workspace */}
+      <main className="frank-workspace flex min-w-0 flex-1 flex-col bg-shell text-ink">
         {/* mobile room header — DS p-head: tint dot · name · mono scope · FRAME */}
-        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-white/10 bg-[#151813] px-4 lg:hidden">
+        <div className="flex h-14 shrink-0 items-center gap-3 border-b border-line bg-rail px-4 lg:hidden">
           <span
-            className="h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-white/15"
-            style={{ background: room.tint }}
+            className="h-2.5 w-2.5 shrink-0 rounded-[3px] ring-1 ring-ink/15"
+            style={{ background: room.isHome ? 'var(--color-accent)' : room.tint }}
             aria-hidden
           />
           <span className="min-w-0">
-            <span className="block truncate text-[14px] font-semibold leading-tight text-white">
+            <span className="block truncate text-[14px] font-semibold leading-tight text-ink">
               {room.name}
             </span>
-            <span className="block truncate font-mono text-[9px] uppercase tracking-[0.08em] text-white/45">
+            <span className="block truncate font-mono text-[9px] uppercase tracking-[0.08em] text-muted">
               {room.agent} · {room.isHome ? 'full scope' : 'scoped'}
             </span>
           </span>
           <button
             onClick={() => setFrameOpen(true)}
-            className="ml-auto shrink-0 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-white/50 transition-colors hover:text-accent"
+            className="ml-auto shrink-0 font-mono text-[10px] font-semibold uppercase tracking-[0.12em] text-muted transition-colors hover:text-accent"
           >
             Frame
           </button>
@@ -129,7 +129,7 @@ export default function Home() {
       {/* mobile bottom dock — ink chrome: mono, four targets, active in signal */}
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-40 grid h-16 grid-cols-4 border-t border-white/10 bg-ink text-white/55 lg:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 grid h-16 grid-cols-4 border-t border-line bg-rail text-muted lg:hidden"
         style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
       >
         <DockTab
@@ -182,7 +182,7 @@ function DockTab({
 function Backdrop({ onClick }: { onClick: () => void }) {
   return (
     <div
-      className="fixed inset-0 z-30 bg-ink/25 backdrop-blur-[2px] lg:hidden"
+      className="fixed inset-0 z-30 bg-ink/20 backdrop-blur-[2px] lg:hidden"
       onClick={onClick}
       aria-hidden
     />

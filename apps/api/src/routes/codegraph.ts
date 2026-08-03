@@ -74,7 +74,7 @@ async function listProjects(): Promise<Array<{ id: string; hasGraph: boolean; ha
 
 export function registerCodegraphRoutes(app: FastifyInstance, _deps: RouteDeps): void {
   // List projects
-  app.get('/v1/codegraph/projects', async (_request, reply) => {
+  app.get('/v1/codegraph/projects', async (_request, _reply) => {
     const projects = await listProjects();
     return { projects };
   });

@@ -3,43 +3,60 @@
 @tailwind utilities;
 
 /* ---------------------------------------------------------------------------
- * FRANK — Light Design System 1.0 (authoritative: frank-light-theme.css)
+ * FRANK Atlantic Design System 1.1
  *
- * Warm-paper surfaces, olive-ink text, vermilion signal. The Tailwind
- * semantic palette in tailwind.config.ts mirrors these values; the custom
- * properties below back the few surfaces that style against raw CSS
- * (composer, scrollbars, selection, focus rings).
+ * Clear-white light surfaces and layered Atlantic navy dark surfaces. The
+ * --tw-* tuples back Tailwind's semantic color roles while preserving opacity
+ * modifiers such as bg-accent/10 and border-line/70.
  * ------------------------------------------------------------------------- */
-:root {
-  /* surfaces — light theme */
-  --color-bg: #f1efe6;             /* workspace / warm paper */
-  --color-surface: #fbfaf5;        /* raised card / chat bubble */
-  --color-surface-raised: #ffffff; /* floating menu / modal */
-  --color-surface-sunken: #e7e3d7; /* sunken paper */
-  --color-navigation: #e7e3d7;     /* rail / dock chrome */
-  --color-frame: #edeae0;          /* living frame — soft paper */
+:root,
+[data-frank-theme="light"] {
+  color-scheme: light;
+  --color-bg: #ffffff;
+  --color-surface: #f8fafd;
+  --color-surface-raised: #ffffff;
+  --color-surface-sunken: #f3f7fb;
+  --color-navigation: #f3f7fb;
+  --color-frame: #f8fafd;
 
-  /* ink + text */
-  --color-text: #151711;
-  --color-text-muted: #6e7068;
-  --color-text-subtle: #85867e;
-  --color-text-inverse: #fbfaf5;
+  --color-text: #112a46;
+  --color-text-muted: #65768a;
+  --color-text-subtle: #8292a5;
+  --color-text-inverse: #f4f8fc;
 
-  /* lines + brand + semantic */
-  --color-border: rgb(21 23 17 / 14%);
-  --color-border-strong: rgb(21 23 17 / 26%);
+  --color-border: #d5e1ed;
+  --color-border-strong: #b5c4d3;
   --color-focus: #f23b1d;
-  --color-accent: #f23b1d;         /* brand signal — vermilion */
-  --color-verified: #b8f238;       /* acid, with ink text */
-  --color-running: #6f9df2;
-  --color-warning: #f3bd4a;
-  --color-critical: #ef5b5b;
+  --color-accent: #f23b1d;
+  --color-verified: #587e10;
+  --color-running: #3e69bd;
+  --color-warning: #8c5b08;
+  --color-critical: #b52d34;
 
-  /* central composer — the invariant: stays ink-black in light mode */
-  --color-central-composer: #151711;
-  --color-central-composer-text: #fbfaf5;
+  --color-central-composer: #06111f;
+  --color-central-composer-text: #f4f8fc;
   --color-central-send: #f23b1d;
-  --color-central-send-content: #151711;
+  --color-central-send-content: #06111f;
+
+  --tw-shell: 255 255 255;
+  --tw-rail: 243 247 251;
+  --tw-card: 248 250 253;
+  --tw-hover: 233 240 247;
+  --tw-subtle: 248 250 253;
+  --tw-paper: 255 255 255;
+  --tw-paper-2: 248 250 253;
+  --tw-paper-3: 243 247 251;
+  --tw-frame: 248 250 253;
+  --tw-ink: 17 42 70;
+  --tw-ink-2: 55 81 108;
+  --tw-muted: 101 118 138;
+  --tw-line: 213 225 237;
+  --tw-accent: 242 59 29;
+  --tw-success: 88 126 16;
+  --tw-running: 62 105 189;
+  --tw-warning: 140 91 8;
+  --tw-danger: 181 45 52;
+  --tw-acid: 88 126 16;
 
   /* type */
   --font-sans: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -53,11 +70,57 @@
   --radius-full: 9999px;
 
   /* elevation */
-  --shadow-xs: 0 1px 2px rgb(11 13 10 / 8%);
-  --shadow-sm: 0 4px 12px rgb(11 13 10 / 12%);
-  --shadow-md: 0 12px 34px rgb(11 13 10 / 16%);
-  --shadow-floating: 0 12px 34px rgb(11 13 10 / 16%);
+  --shadow-xs: 0 1px 2px rgb(6 17 31 / 6%);
+  --shadow-sm: 0 4px 12px rgb(6 17 31 / 8%);
+  --shadow-md: 0 12px 34px rgb(6 17 31 / 12%);
+  --shadow-floating: 0 12px 34px rgb(6 17 31 / 12%);
   --focus-ring: 0 0 0 3px rgb(242 59 29 / 28%);
+}
+
+[data-frank-theme="dark"] {
+  color-scheme: dark;
+  --color-bg: #06111f;
+  --color-surface: #081a2e;
+  --color-surface-raised: #0a213a;
+  --color-surface-sunken: #040c17;
+  --color-navigation: #081a2e;
+  --color-frame: #0a213a;
+  --color-text: #f4f8fc;
+  --color-text-muted: #91a8be;
+  --color-text-subtle: #718aa2;
+  --color-text-inverse: #112a46;
+  --color-border: #173854;
+  --color-border-strong: #245072;
+  --color-focus: #ff5a36;
+  --color-accent: #ff5a36;
+  --color-verified: #b8f238;
+  --color-running: #6f9df2;
+  --color-warning: #f3bd4a;
+  --color-critical: #ef5b5b;
+  --color-central-composer: #040c17;
+  --color-central-composer-text: #f4f8fc;
+  --color-central-send: #ff5a36;
+  --color-central-send-content: #06111f;
+  --tw-shell: 6 17 31;
+  --tw-rail: 8 26 46;
+  --tw-card: 10 33 58;
+  --tw-hover: 13 41 72;
+  --tw-subtle: 8 26 46;
+  --tw-paper: 10 33 58;
+  --tw-paper-2: 8 26 46;
+  --tw-paper-3: 4 12 23;
+  --tw-frame: 10 33 58;
+  --tw-ink: 244 248 252;
+  --tw-ink-2: 196 212 228;
+  --tw-muted: 145 168 190;
+  --tw-line: 23 56 84;
+  --tw-accent: 255 90 54;
+  --tw-success: 184 242 56;
+  --tw-running: 111 157 242;
+  --tw-warning: 243 189 74;
+  --tw-danger: 239 91 91;
+  --tw-acid: 184 242 56;
+  --shadow-floating: 0 12px 34px rgb(0 0 0 / 24%);
 }
 
 * { box-sizing: border-box; }
@@ -83,36 +146,38 @@ body {
 /* thin, quiet scrollbars */
 * {
   scrollbar-width: thin;
-  scrollbar-color: rgb(21 23 17 / 22%) transparent;
+  scrollbar-color: rgb(var(--tw-ink) / 22%) transparent;
 }
 *::-webkit-scrollbar { width: 6px; height: 6px; }
 *::-webkit-scrollbar-track { background: transparent; }
-*::-webkit-scrollbar-thumb { background: rgb(21 23 17 / 22%); border-radius: 999px; }
+*::-webkit-scrollbar-thumb { background: rgb(var(--tw-ink) / 22%); border-radius: 999px; }
 
 :focus-visible {
   outline: 2px solid var(--color-focus);
   outline-offset: 2px;
 }
 
-/* ---------------------------------------------------------------------------
- * The conversation vault — brand shell black (#10120f family)
- * Frank's words render in pure #FFFFFF on this surface.
- * ------------------------------------------------------------------------- */
-.chat-vault {
-  position: relative;
-  background:
-    radial-gradient(920px 480px at 16% -10%, rgb(242 59 29 / 7%), transparent 62%),
-    radial-gradient(720px 420px at 108% 6%, rgb(111 157 242 / 6%), transparent 58%),
-    #10120f;
+.frank-navigation {
+  background: var(--color-navigation);
+  color: var(--color-text);
+  border-color: var(--color-border);
 }
 
-.chat-vault ::selection { background: rgb(242 59 29 / 35%); color: #ffffff; }
-
-.chat-vault * {
-  scrollbar-width: thin;
-  scrollbar-color: rgb(255 255 255 / 22%) transparent;
+.frank-workspace {
+  background: var(--color-bg);
+  color: var(--color-text);
 }
-.chat-vault *::-webkit-scrollbar-thumb { background: rgb(255 255 255 / 22%); }
+
+.frank-frame {
+  background: var(--color-frame);
+  color: var(--color-text);
+  border-color: var(--color-border);
+}
+
+.frank-central-composer {
+  background: var(--color-central-composer);
+  color: var(--color-central-composer-text);
+}
 
 /* ---------------------------------------------------------------------------
  * Chat thread custom pieces
@@ -124,18 +189,18 @@ body {
 /* quiet vertical rhythm for the chat scroller */
 .chat-scroll { scroll-behavior: smooth; }
 
-/* Frank's delegation/handoff strip — acid-verified affordance, vault-tuned */
+/* Frank's delegation/handoff strip — acid-verified affordance. */
 .mention-strip {
-  border: 1px dashed rgb(184 242 56 / 40%);
-  background: rgb(184 242 56 / 8%);
+  border: 1px dashed rgb(88 126 16 / 55%);
+  background: rgb(184 242 56 / 12%);
 }
 
-/* three-dot "Frank is typing" indicator — ivory dots on the vault */
+/* three-dot "Frank is typing" indicator */
 .typing-dot {
   width: 6px;
   height: 6px;
   border-radius: 999px;
-  background: rgb(241 239 230 / 55%);
+  background: rgb(var(--tw-muted) / 68%);
   animation: typing 1.2s infinite;
 }
 .typing-dot:nth-child(2) { animation-delay: 0.15s; }
@@ -145,7 +210,6 @@ body {
   0%, 80%, 100% { opacity: 0.25; transform: translateY(0); }
   40% { opacity: 1; transform: translateY(-2px); }
 }
-
 
 /* ---------------------------------------------------------------------------
  * Frank markdown prose (vault dark surface) — headings, lists, spacing.
@@ -175,6 +239,15 @@ body {
 /* task-list checkboxes */
 .frank-md input[type="checkbox"] { margin-right: 0.4em; }
 .frank-md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.2em; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
 
 @layer utilities {
   .ds-label {
