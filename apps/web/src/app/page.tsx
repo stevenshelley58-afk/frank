@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { DEFAULT_ROOMS, roomById, topPeekRoom, type Room } from '@/lib/rooms';
+import { DEFAULT_ROOMS, roomById, type Room } from '@/lib/rooms';
 import { useRoomStatuses, withStatus } from '@/lib/use-room-statuses';
 import { Rail } from '@/components/rail';
 import { RoomView } from '@/components/room-view';
@@ -28,9 +28,8 @@ export default function Home() {
   const [railOpen, setRailOpen] = useState(false);
   const [wtOpen, setWtOpen] = useState(false);
 
-  // Preview zone: expanded by default, peek dismissible.
+  // Preview zone: expanded by default; the small square toggles it.
   const [expanded, setExpanded] = useState(true);
-  const [peekDismissed, setPeekDismissed] = useState(false);
 
   // Live room statuses: server ledger + client delegations merged.
   const statuses = useRoomStatuses(baseRooms);
@@ -38,25 +37,6 @@ export default function Home() {
 
   const room = roomById(rooms, activeId);
   const home = rooms.find((r) => r.isHome) ?? rooms[0];
-
-  // Auto-reopen the peek when a NEW top-priority room appears while dismissed.
-  const lastPeekKeyRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!peekDismissed) return;
-    const top = topPeekRoom(rooms, activeId);
-    const key = top ? `${top.id}:${top.status}` : null;
-    if (key !== null && key !== lastPeekKeyRef.current) {
-      setPeekDismissed(false); // fresh urgency — bring the card back
-    }
-    lastPeekKeyRef.current = key;
-  }, [rooms, activeId, peekDismissed]);
-
-  // Track the current peek key even when not dismissed, for comparison.
-  useEffect(() => {
-    if (peekDismissed) return;
-    const top = topPeekRoom(rooms, activeId);
-    lastPeekKeyRef.current = top ? `${top.id}:${top.status}` : null;
-  }, [rooms, activeId, peekDismissed]);
 
   // Escape closes the slide-over panels.
   useEffect(() => {
@@ -115,15 +95,12 @@ export default function Home() {
           <WorktreesChip onClick={() => setWtOpen(true)} />
         </div>
 
-        {/* preview zone — ROOMS chips + dismissible peek + grab handle */}
+        {/* preview zone — LATEST FROM OTHER ROOMS deck + minimize square */}
         <PreviewZone
           rooms={rooms}
           currentId={activeId}
           expanded={expanded}
-          peekDismissed={peekDismissed}
           onSelectRoom={(id) => setActiveId(id)}
-          onDismissPeek={() => setPeekDismissed(true)}
-          onRestorePeek={() => setPeekDismissed(false)}
           onToggleExpanded={() => setExpanded((v) => !v)}
         />
 

@@ -2,8 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CENTRAL,
   PROJECT_ROOMS,
-  sortRoomsForChips,
-  topPeekRoom,
+  sortRoomsForDeck,
   waitingCount,
   type Room,
   type RoomStatus,
@@ -24,69 +23,42 @@ const ROOMS: Room[] = [
   withStatus('lotfile', 'none', 0),
 ];
 
-describe('sortRoomsForChips', () => {
-  it('pins Central first and orders waiting → running → verified → none', () => {
-    const ordered = sortRoomsForChips(ROOMS, 'central');
-    expect(ordered.map((r) => r.id)).toEqual(['central', 'blockwise', 'chase', 'merrypaws', 'lotfile']);
+describe('sortRoomsForDeck', () => {
+  it('orders waiting → running → verified → none and excludes the current room', () => {
+    const ordered = sortRoomsForDeck(ROOMS, 'central');
+    expect(ordered.map((r) => r.id)).toEqual(['blockwise', 'chase', 'merrypaws', 'lotfile']);
   });
 
-  it('excludes the room the user is viewing', () => {
-    const ordered = sortRoomsForChips(ROOMS, 'chase');
-    expect(ordered.map((r) => r.id)).toEqual(['central', 'blockwise', 'merrypaws', 'lotfile']);
+  it('Central is not pinned — it sorts by its own status', () => {
+    const rooms = ROOMS.map((r) =>
+      r.id === 'central' ? { ...r, status: 'waiting' as RoomStatus, statusSince: NOW - 5_000 } : r,
+    );
+    const ordered = sortRoomsForDeck(rooms, 'lotfile');
+    // central is now waiting + freshest → leads the deck
+    expect(ordered[0].id).toBe('central');
+  });
+
+  it('excludes whichever room the user is viewing', () => {
+    const ordered = sortRoomsForDeck(ROOMS, 'chase');
+    expect(ordered.map((r) => r.id)).toEqual(['blockwise', 'merrypaws', 'central', 'lotfile']);
+  });
+
+  it('breaks ties by most recent activity', () => {
+    const two = [
+      withStatus('blockwise', 'verified', NOW - 5_000),
+      withStatus('merrypaws', 'verified', NOW - 1_000),
+    ];
+    const ordered = sortRoomsForDeck([...two, ROOMS[0]], 'central');
+    expect(ordered.slice(0, 2).map((r) => r.id)).toEqual(['merrypaws', 'blockwise']);
   });
 
   it('reorders when a status changes', () => {
     const moved = ROOMS.map((r) =>
       r.id === 'merrypaws' ? { ...r, status: 'waiting' as RoomStatus, statusSince: NOW - 10_000 } : r,
     );
-    const ordered = sortRoomsForChips(moved, 'central');
+    const ordered = sortRoomsForDeck(moved, 'central');
     // merrypaws now waiting + fresher than blockwise → jumps ahead
-    expect(ordered.map((r) => r.id)).toEqual(['central', 'merrypaws', 'blockwise', 'chase', 'lotfile']);
-  });
-
-  it('breaks ties by most recent activity', () => {
-    const two = [
-      withStatus('central', 'none', 0),
-      withStatus('blockwise', 'verified', NOW - 5_000),
-      withStatus('merrypaws', 'verified', NOW - 1_000),
-    ];
-    const ordered = sortRoomsForChips(two, 'central');
-    expect(ordered.map((r) => r.id)).toEqual(['central', 'merrypaws', 'blockwise']);
-  });
-
-  it('works when viewing Central itself — Central stays pinned', () => {
-    const ordered = sortRoomsForChips(ROOMS, 'central');
-    expect(ordered[0].isHome).toBe(true);
-    expect(ordered).toHaveLength(5);
-  });
-
-  it('Central stays pinned while a project room is current', () => {
-    const ordered = sortRoomsForChips(ROOMS, 'chase');
-    expect(ordered[0].id).toBe('central');
-  });
-});
-
-describe('topPeekRoom', () => {
-  it('picks the highest-priority room', () => {
-    expect(topPeekRoom(ROOMS, 'central')?.id).toBe('blockwise');
-  });
-
-  it('never picks Central or the current room', () => {
-    expect(topPeekRoom(ROOMS, 'blockwise')?.id).toBe('chase');
-  });
-
-  it('returns null when nothing is surfaced', () => {
-    const quiet = ROOMS.map((r) => ({ ...r, status: 'none' as RoomStatus }));
-    expect(topPeekRoom(quiet, 'central')).toBeNull();
-  });
-
-  it('breaks same-rank ties by freshness', () => {
-    const two = [
-      withStatus('central', 'none', 0),
-      withStatus('blockwise', 'waiting', NOW - 60_000),
-      withStatus('chase', 'waiting', NOW - 10_000),
-    ];
-    expect(topPeekRoom(two, 'central')?.id).toBe('chase');
+    expect(ordered.map((r) => r.id)).toEqual(['merrypaws', 'blockwise', 'chase', 'lotfile']);
   });
 });
 

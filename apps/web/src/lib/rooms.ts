@@ -135,7 +135,7 @@ export function roomById(rooms: Room[], id: string): Room {
 }
 
 /* ------------------------------------------------------------------ */
-/* Chip strip + peek card ordering — pure, unit-tested                 */
+/* Room deck ordering — pure, unit-tested                              */
 /* ------------------------------------------------------------------ */
 
 /** waiting > running > verified > none — the mockup's priority order. */
@@ -147,16 +147,14 @@ const STATUS_RANK: Record<RoomStatus, number> = {
 };
 
 /**
- * Rooms for the ROOMS chip strip: Central pinned first (always — it is the
- * deck anchor even while you're viewing it), then everything else by status
- * (waiting → running → verified → none), ties broken by most recent
- * activity (`statusSince` desc, room order as final fallback). A non-home
- * room the user is currently viewing is excluded from the rest of the row.
+ * Rooms for the LATEST FROM OTHER ROOMS deck: every room except the one
+ * being viewed, ordered waiting → running → verified → none, ties broken
+ * by most recent activity (`statusSince` desc, room order as fallback).
+ * No pinning — Central sorts by its own status like every other room.
  */
-export function sortRoomsForChips(rooms: Room[], currentId: string): Room[] {
-  const pinned = rooms.find((r) => r.isHome);
-  const rest = rooms
-    .filter((r) => !r.isHome && r.id !== currentId)
+export function sortRoomsForDeck(rooms: Room[], currentId: string): Room[] {
+  return rooms
+    .filter((r) => r.id !== currentId)
     .slice()
     .sort((a, b) => {
       const rank = STATUS_RANK[b.status ?? 'none'] - STATUS_RANK[a.status ?? 'none'];
@@ -166,28 +164,9 @@ export function sortRoomsForChips(rooms: Room[], currentId: string): Room[] {
       if (tb !== ta) return tb - ta;
       return rooms.indexOf(a) - rooms.indexOf(b);
     });
-  return pinned ? [pinned, ...rest] : rest;
 }
 
-/**
- * The room for the dismissible peek card: highest-priority room that is
- * not Central, not the current room, and has a status worth surfacing.
- * Returns null when nothing needs attention.
- */
-export function topPeekRoom(rooms: Room[], currentId: string): Room | null {
-  const candidates = rooms.filter(
-    (r) => !r.isHome && r.id !== currentId && STATUS_RANK[r.status ?? 'none'] > 0,
-  );
-  if (candidates.length === 0) return null;
-  candidates.sort((a, b) => {
-    const rank = STATUS_RANK[b.status ?? 'none'] - STATUS_RANK[a.status ?? 'none'];
-    if (rank !== 0) return rank;
-    return (b.statusSince ?? 0) - (a.statusSince ?? 0);
-  });
-  return candidates[0];
-}
-
-/** Count of rooms needing action — drives the "n waiting · show" restore. */
+/** Count of rooms needing action — drives the deck's red counter. */
 export function waitingCount(rooms: Room[], currentId: string): number {
   return rooms.filter(
     (r) => !r.isHome && r.id !== currentId && r.status === 'waiting',

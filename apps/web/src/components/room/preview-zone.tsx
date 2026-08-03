@@ -1,31 +1,26 @@
 'use client';
 
 /**
- * Preview zone — everything above the bottom-anchored chat:
- *   ROOMS label row (+ restore pill) · chip strip · peek card · grab handle.
+ * Preview zone — the LATEST FROM OTHER ROOMS pane above the chat.
  *
- * The grab handle collapses/expands the whole zone; when collapsed the chat
- * reclaims the space. Dismiss state for the peek lives in page.tsx so it
- * survives room switches.
+ * Mockup anatomy, top to bottom:
+ *   label row   "LATEST FROM OTHER ROOMS" · red "N need attention" ·
+ *               a small square that minimizes the whole pane
+ *   deck        horizontal row of room cards (what's happening where)
+ *   divider     "CHAT · DRAG TO EXPAND" — also toggles the pane
+ *
+ * When minimized the pane collapses to just the divider; the chat
+ * reclaims the space. Expanded state lives in page.tsx.
  */
 
-import {
-  sortRoomsForChips,
-  topPeekRoom,
-  waitingCount,
-  type Room,
-} from '@/lib/rooms';
-import { ChipStrip } from './chip-strip';
-import { PeekCard } from './peek-card';
+import { sortRoomsForDeck, waitingCount, type Room } from '@/lib/rooms';
+import { RoomDeck } from './room-deck';
 
 interface PreviewZoneProps {
   rooms: Room[];
   currentId: string;
   expanded: boolean;
-  peekDismissed: boolean;
   onSelectRoom: (id: string) => void;
-  onDismissPeek: () => void;
-  onRestorePeek: () => void;
   onToggleExpanded: () => void;
 }
 
@@ -33,53 +28,48 @@ export function PreviewZone({
   rooms,
   currentId,
   expanded,
-  peekDismissed,
   onSelectRoom,
-  onDismissPeek,
-  onRestorePeek,
   onToggleExpanded,
 }: PreviewZoneProps) {
-  const chips = sortRoomsForChips(rooms, currentId);
-  const peekRoom = topPeekRoom(rooms, currentId);
+  const deck = sortRoomsForDeck(rooms, currentId);
   const waiting = waitingCount(rooms, currentId);
-  const showRestore = peekDismissed && (waiting > 0 || peekRoom !== null);
 
   return (
     <div className="shrink-0">
-      {/* label row — ROOMS on the left, restore pill reserved on the right */}
-      <div className="flex items-center px-5 pt-3 md:px-7">
-        <span className="ds-label text-subtle">Rooms</span>
-        {showRestore && (
-          <button
-            onClick={onRestorePeek}
-            className="restore-pill ml-auto"
-            aria-label={`Show preview — ${waiting} waiting`}
+      {/* label row */}
+      <div className="flex items-center gap-3 px-5 pt-3 md:px-7">
+        <span className="ds-label text-subtle">Latest from other rooms</span>
+        {waiting > 0 && (
+          <span
+            className="font-mono text-[10px] font-semibold uppercase tracking-[0.08em] text-danger"
+            aria-live="polite"
           >
-            <span className="d" aria-hidden />
-            {waiting > 0 ? `${waiting} waiting · show` : 'show'}
-          </button>
+            {waiting} need{waiting === 1 ? 's' : ''} attention
+          </span>
         )}
+        {/* the small square — explicit minimize control */}
+        <button
+          onClick={onToggleExpanded}
+          aria-expanded={expanded}
+          aria-label={expanded ? 'Minimize room preview' : 'Show room preview'}
+          className="deck-minimize ml-auto"
+          title={expanded ? 'Minimize' : 'Expand'}
+        >
+          <span className="bar" aria-hidden />
+        </button>
       </div>
 
-      {/* the collapsible zone */}
+      {/* the collapsible deck */}
       <div
         className="grid transition-[grid-template-rows] duration-300"
         style={{ gridTemplateRows: expanded ? '1fr' : '0fr' }}
       >
         <div className="overflow-hidden">
-          <ChipStrip rooms={chips} activeId={currentId} onSelect={onSelectRoom} />
-          {peekRoom && (
-            <PeekCard
-              room={peekRoom}
-              dismissed={peekDismissed}
-              onDismiss={onDismissPeek}
-              onOpen={() => onSelectRoom(peekRoom.id)}
-            />
-          )}
+          <RoomDeck rooms={deck} onSelect={onSelectRoom} />
         </div>
       </div>
 
-      {/* grab handle — keyboard focusable, Enter/Space toggles */}
+      {/* divider — keyboard focusable, Enter/Space toggles */}
       <button
         onClick={onToggleExpanded}
         aria-expanded={expanded}

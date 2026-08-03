@@ -241,6 +241,81 @@ body {
 .frank-md input[type="checkbox"] { margin-right: 0.4em; }
 .frank-md li:has(> input[type="checkbox"]) { list-style: none; margin-left: -1.2em; }
 
+/* ---------------------------------------------------------------------------
+ * LATEST FROM OTHER ROOMS — deck cards, minimize square, divider
+ * ------------------------------------------------------------------------- */
+
+/* horizontal deck scroll without a visible scrollbar; page never scrolls */
+.deck-row { scrollbar-width: none; }
+.deck-row::-webkit-scrollbar { height: 0; width: 0; }
+
+.deck-card {
+  border-color: rgb(var(--tw-line));
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.deck-card:hover {
+  border-color: rgb(var(--tw-frame));
+  box-shadow: 0 2px 12px rgb(0 0 0 / 6%);
+}
+/* amber attention border on waiting rooms (pairs with the Review button) */
+.deck-needs-action { border-color: rgb(var(--tw-warning) / 55%); }
+.deck-needs-action:hover { border-color: rgb(var(--tw-warning) / 80%); }
+
+/* solid action button for rooms needing a decision */
+.deck-review { background: rgb(var(--tw-warning)); }
+.deck-review:hover { filter: brightness(1.06); }
+.deck-review:active { filter: brightness(0.96); }
+
+/* the small square — explicit minimize control for the whole pane */
+.deck-minimize {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgb(var(--tw-line));
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.deck-minimize:hover {
+  background: rgb(var(--tw-hover));
+  border-color: rgb(var(--tw-frame));
+}
+.deck-minimize .bar {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(var(--tw-muted));
+}
+
+/* CHAT · DRAG TO EXPAND divider — a full-width toggle button */
+.grab-handle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  padding: 6px 0 7px;
+  border: 0;
+  border-top: 1px solid rgb(var(--tw-line));
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgb(var(--tw-muted));
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.grab-handle:hover { color: rgb(var(--tw-ink-2)); background: rgb(var(--tw-hover)); }
+.grab-handle .bar {
+  width: 26px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgb(var(--tw-line));
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     scroll-behavior: auto !important;
