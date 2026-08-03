@@ -6,6 +6,16 @@ Running log of every GitHub repo / OSS project we review for Frank, with a summa
 
 ---
 
+## 2026-08-03 — last30days (multi-source research skill)
+
+Source: `https://github.com/mvanhorn/last30days-skill` · Reviewed + deployed in session
+
+| Repo | ★ | What it is | Verdict | Notes for Frank |
+|------|---|------------|---------|-----------------|
+| **mvanhorn/last30days-skill** | 57k | Multi-source "last 30 days" research skill (v3.18.4, MIT): Python engine + agent contract that pulls posts/engagement from Reddit, X, YouTube, TikTok, Hacker News, Polymarket, GitHub, arXiv, Digg + web. Zero pip deps, needs Python 3.12+. | 🟢 deployed | Installed at `skills/misc/last30days/` in the Frank repo (runtime payload only, per its `.skillignore` — no assets/dev scripts, 2.5MB). Verified on VPS: `--diagnose` shows 6 keyless sources live (reddit, youtube, hackernews, polymarket, github, grounding); a real run (`"open source agent memory" --search=reddit,hackernews --days=7 --quick`) returned ranked evidence clusters, exit 0. Installed yt-dlp 2026.07.04 for YouTube transcripts. Optional paid sources (X via xAI/cookies, TikTok/Instagram via ScrapeCreators, web search via Brave) not configured — add keys later if wanted. Invocation: `python3 skills/misc/last30days/scripts/last30days.py "<topic>" [--search=...] [--days=N] [--quick|--deep] [--emit=compact|json|md]`. |
+
+---
+
 ## 2026-08-02 — Letta (agent memory)
 
 Source: `https://github.com/letta-ai/letta` · Reviewed + deployed in session (Letta Phase 1)
