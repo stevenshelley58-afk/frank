@@ -13,11 +13,13 @@ interface ThreadProps {
 }
 
 /**
- * The message thread — the quiet Atlantic workspace.
+ * The message thread — the quiet Atlantic workspace, bottom-anchored.
  *
  * Frank speaks from blue-white cards, Steve answers in Atlantic ink, and
- * delegation receipts use the verified strip. Auto-follows the tail;
- * messages slide in.
+ * delegation receipts use the verified strip. The scroll region anchors to
+ * the bottom: short threads sit flush against the composer with the empty
+ * space above (outer scroller, inner column with margin-top:auto).
+ * Auto-follows the tail with the 80px stick rule; messages slide in.
  */
 export function Thread({ messages, typing, agentName }: ThreadProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
@@ -40,17 +42,20 @@ export function Thread({ messages, typing, agentName }: ThreadProps) {
     <div
       ref={scrollerRef}
       onScroll={onScroll}
-      className="chat-scroll flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-5 pb-5 pt-5 md:px-7"
+      className="chat-scroll flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-5 pt-5 md:px-7"
     >
-      {messages.map((m, i) => (
-        <MessageRow
-          key={m.id}
-          message={m}
-          agentName={agentName}
-          delay={i < 6 ? 0.02 + i * 0.06 : 0}
-        />
-      ))}
-      {typing && <TypingBubble />}
+      {/* inner column: pushes content to the bottom when shorter than viewport */}
+      <div className="mt-auto flex flex-col gap-3.5">
+        {messages.map((m, i) => (
+          <MessageRow
+            key={m.id}
+            message={m}
+            agentName={agentName}
+            delay={i < 6 ? 0.02 + i * 0.06 : 0}
+          />
+        ))}
+        {typing && <TypingBubble />}
+      </div>
     </div>
   );
 }

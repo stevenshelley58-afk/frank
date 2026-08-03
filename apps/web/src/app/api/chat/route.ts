@@ -26,6 +26,7 @@ import { resolveHarness } from '@/lib/providers';
 import { identityForRoom } from '@/lib/rooms-identity';
 import { getMemory } from '@/lib/memory-server';
 import { memoryScope, deploymentScope } from '@/lib/memory-scope';
+import { endRoomTurn, startRoomTurn } from '@/lib/room-activity';
 import { getAssembler, PACK_KEY_HANDLE, PACK_SIGNER_ID } from '@/lib/kernel';
 import type { AssembleInput } from '@frank/kernel';
 import type { DataClass, IsoDateTime } from '@frank/contracts';
@@ -186,6 +187,10 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
+      // Report the turn to the room-status ledger so /api/room-status and
+      // the ROOMS chip strip see this room as running.
+      startRoomTurn(roomId);
+
       try {
         let fullText = '';
         for await (const chunk of activeProvider.stream(entry!.sessionId, promptText)) {
@@ -199,6 +204,7 @@ export async function POST(req: NextRequest) {
         }
 
         send({ done: true, harness: activeProvider.id, reason, packHash });
+        endRoomTurn(roomId, { snippet: fullText });
 
         // Store the exchange for fact extraction (fire-and-forget, best-effort).
         // Uses the raw user message (not the packed prompt) so the backend
@@ -218,6 +224,7 @@ export async function POST(req: NextRequest) {
           });
       } catch (err) {
         send({ error: String(err) });
+        endRoomTurn(roomId, { error: String(err) });
         sessions.delete(roomId);
         primed.delete(roomId);
       } finally {
