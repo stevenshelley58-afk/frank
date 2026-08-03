@@ -128,6 +128,36 @@ export function IconTree(props: IconProps) {
   );
 }
 
+/** Copy to clipboard — two overlapping sheets. */
+export function IconCopy(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="9" y="9" width="11" height="11" rx="2" />
+      <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+    </svg>
+  );
+}
+
+/** Regenerate — a circular refresh arrow. */
+export function IconRefresh(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M20 11a8 8 0 1 0-2.3 6.3" />
+      <path d="M20 5v6h-6" />
+    </svg>
+  );
+}
+
+/** Edit message — a pencil. */
+export function IconEdit(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 20h4l11-11a2.1 2.1 0 0 0-3-3L5 17l-1 3Z" />
+      <path d="m13.5 6.5 3 3" />
+    </svg>
+  );
+}
+
 /** The Frank glyph — an ink square with a single accent tick. */
 export function FrankMark(props: IconProps) {
   const { size = 20, ...rest } = props;

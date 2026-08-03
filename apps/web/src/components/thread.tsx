@@ -1,8 +1,8 @@
 'use client';
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '@/lib/frank';
-import { IconBolt } from './icons';
+import { IconBolt, IconCheck, IconCopy, IconEdit, IconRefresh } from './icons';
 import { Markdown } from './markdown';
 
 interface ThreadProps {
@@ -10,18 +10,19 @@ interface ThreadProps {
   typing: boolean;
   /** label for frank messages, e.g. "Frank · Central" or "lotfile-frank" */
   agentName: string;
+  /** ChatGPT-style affordances — omit to hide. */
+  onRegenerate?: () => void;
+  onEdit?: (message: ChatMessage) => void;
 }
 
 /**
- * The message thread — the quiet Atlantic workspace, bottom-anchored.
+ * The message thread — the quiet Atlantic workspace.
  *
  * Frank speaks from blue-white cards, Steve answers in Atlantic ink, and
- * delegation receipts use the verified strip. The scroll region anchors to
- * the bottom: short threads sit flush against the composer with the empty
- * space above (outer scroller, inner column with margin-top:auto).
- * Auto-follows the tail with the 80px stick rule; messages slide in.
+ * delegation receipts use the verified strip. Auto-follows the tail;
+ * messages slide in. Hover a message to reveal copy / regenerate / edit.
  */
-export function Thread({ messages, typing, agentName }: ThreadProps) {
+export function Thread({ messages, typing, agentName, onRegenerate, onEdit }: ThreadProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
 
@@ -38,25 +39,58 @@ export function Thread({ messages, typing, agentName }: ThreadProps) {
     stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
 
+  // The last frank message id — regenerate only lands on the latest reply.
+  let lastFrankId: string | null = null;
+  for (let i = messages.length - 1; i >= 0; i -= 1) {
+    if (messages[i].from === 'frank') {
+      lastFrankId = messages[i].id;
+      break;
+    }
+  }
+
   return (
     <div
       ref={scrollerRef}
       onScroll={onScroll}
-      className="chat-scroll flex min-h-0 flex-1 flex-col overflow-y-auto px-5 pb-5 pt-5 md:px-7"
+      className="chat-scroll flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto px-5 pb-5 pt-5 md:px-7"
     >
-      {/* inner column: pushes content to the bottom when shorter than viewport */}
-      <div className="mt-auto flex flex-col gap-3.5">
-        {messages.map((m, i) => (
-          <MessageRow
-            key={m.id}
-            message={m}
-            agentName={agentName}
-            delay={i < 6 ? 0.02 + i * 0.06 : 0}
-          />
-        ))}
-        {typing && <TypingBubble />}
-      </div>
+      {messages.map((m, i) => (
+        <MessageRow
+          key={m.id}
+          message={m}
+          agentName={agentName}
+          delay={i < 6 ? 0.02 + i * 0.06 : 0}
+          isLastFrank={m.id === lastFrankId}
+          typing={typing}
+          onRegenerate={onRegenerate}
+          onEdit={onEdit}
+        />
+      ))}
+      {typing && <TypingBubble />}
     </div>
+  );
+}
+
+/** Small ghost action button — revealed on message hover. */
+function ActionButton({
+  label,
+  onClick,
+  children,
+}: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      className="grid h-6 w-6 place-items-center rounded-md text-muted transition-colors duration-100 hover:bg-hover hover:text-ink"
+    >
+      {children}
+    </button>
   );
 }
 
@@ -64,11 +98,32 @@ function MessageRow({
   message,
   agentName,
   delay,
+  isLastFrank,
+  typing,
+  onRegenerate,
+  onEdit,
 }: {
   message: ChatMessage;
   agentName: string;
   delay: number;
+  isLastFrank: boolean;
+  typing: boolean;
+  onRegenerate?: () => void;
+  onEdit?: (message: ChatMessage) => void;
 }) {
+  const [copied, setCopied] = useState(false);
+
+  const copy = async () => {
+    if (!message.text) return;
+    try {
+      await navigator.clipboard.writeText(message.text);
+    } catch {
+      // Clipboard API can be unavailable in insecure contexts — degrade silently.
+    }
+    setCopied(true);
+    window.setTimeout(() => setCopied(false), 1600);
+  };
+
   if (message.from === 'mention') {
     return (
       <div
@@ -88,12 +143,22 @@ function MessageRow({
   if (message.from === 'steve') {
     return (
       <div
-        className="msg-max animate-msg-in flex flex-col items-end gap-1.5 self-end"
+        className="msg-max group animate-msg-in flex flex-col items-end gap-1.5 self-end"
         style={{ animationDelay: `${delay}s` }}
       >
         <span className="font-mono text-[10px] uppercase tracking-[0.1em] text-muted">Steve</span>
         <div className="whitespace-pre-wrap rounded-2xl rounded-tr-[4px] bg-ink px-[15px] py-3 text-[13.5px] leading-[1.5] text-white shadow-sm">
           {message.text}
+        </div>
+        <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+          <ActionButton label="Copy message" onClick={copy}>
+            {copied ? <IconCheck size={13} className="text-acid" /> : <IconCopy size={13} />}
+          </ActionButton>
+          {onEdit && !typing && (
+            <ActionButton label="Edit message" onClick={() => onEdit(message)}>
+              <IconEdit size={13} />
+            </ActionButton>
+          )}
         </div>
       </div>
     );
@@ -101,7 +166,7 @@ function MessageRow({
 
   return (
     <div
-      className="msg-max animate-msg-in flex flex-col gap-1.5 self-start"
+      className="msg-max group animate-msg-in flex flex-col gap-1.5 self-start"
       style={{ animationDelay: `${delay}s` }}
     >
       <span className="flex items-center gap-2">
@@ -118,6 +183,16 @@ function MessageRow({
       </span>
       <div className="rounded-2xl rounded-tl-[4px] border border-line bg-card px-[15px] py-3 text-[13.5px] leading-[1.5] text-ink">
         <Markdown text={message.text} />
+      </div>
+      <div className="flex items-center gap-0.5 opacity-0 transition-opacity duration-150 group-hover:opacity-100">
+        <ActionButton label="Copy response" onClick={copy}>
+          {copied ? <IconCheck size={13} className="text-acid" /> : <IconCopy size={13} />}
+        </ActionButton>
+        {onRegenerate && isLastFrank && !typing && (
+          <ActionButton label="Regenerate response" onClick={onRegenerate}>
+            <IconRefresh size={13} />
+          </ActionButton>
+        )}
       </div>
     </div>
   );
