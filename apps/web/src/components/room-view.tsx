@@ -29,6 +29,10 @@ import { Composer } from './composer';
  * the store runs each delegation in its target room. Both Central and the
  * target room subscribe to delegation events purely for display — kickoff
  * cards, inbound cards, and receipts all stream into the right threads.
+ *
+ * Chat affordances (this chat / ChatGPT parity): copy lives in Thread,
+ * regenerate re-runs the last user turn, and edit-and-resend replaces a
+ * user message and everything after it with a fresh run.
  */
 export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   const { api, status } = useAuth();
@@ -37,6 +41,8 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   );
   const [typing, setTyping] = useState(false);
   const [sending, setSending] = useState(false);
+  /** ChatGPT-style edit-and-resend: the user message being rewritten. */
+  const [editing, setEditing] = useState<ChatMessage | null>(null);
   const timerRef = useRef<number | null>(null);
   /** AbortController for the active Frank stream — powers the Stop button. */
   const abortRef = useRef<AbortController | null>(null);
@@ -87,21 +93,13 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [room.id, room.isHome]);
 
-  async function send(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || sending) return;
-
+  /**
+   * Run one Frank turn against `prompt`: typing bubble, empty frank message,
+   * SSE stream into it, delegation detection at the end (Central only).
+   * Shared by send / regenerate / edit-and-resend.
+   */
+  async function runTurn(prompt: string) {
     setSending(true);
-    append({ id: uid(), from: 'steve', text: trimmed, at: Date.now() });
-
-    // Central: durability via domain API (fire-and-forget)
-    if (room.isHome) {
-      api?.('/v1/capture', {
-        method: 'POST',
-        body: JSON.stringify({ command_id: commandId(), kind: 'text', text: trimmed }),
-      }).catch(() => {});
-    }
-
     setTyping(true);
     append({ id: uid(), from: 'frank', text: '', at: Date.now() });
 
@@ -112,7 +110,7 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
     let finished = false;
 
     await frankStream(
-      trimmed,
+      prompt,
       room.id,
       {
         onChunk: (chunk) => {
@@ -153,6 +151,83 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
     if (!finished) setSending(false);
   }
 
+  async function send(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || sending) return;
+
+    // Edit-and-resend: replace the edited message and drop everything after it.
+    if (editing) {
+      const editId = editing.id;
+      setEditing(null);
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === editId);
+        if (idx < 0) return prev;
+        return [...prev.slice(0, idx), { ...prev[idx], text: trimmed, at: Date.now() }];
+      });
+      await runTurn(trimmed);
+      return;
+    }
+
+    append({ id: uid(), from: 'steve', text: trimmed, at: Date.now() });
+
+    // Central: durability via domain API (fire-and-forget). Fresh sends only —
+    // regenerate/edit must not duplicate the captured command.
+    if (room.isHome) {
+      api?.('/v1/capture', {
+        method: 'POST',
+        body: JSON.stringify({ command_id: commandId(), kind: 'text', text: trimmed }),
+      }).catch(() => {});
+    }
+
+    await runTurn(trimmed);
+  }
+
+  /** Regenerate: drop the last frank reply (and what followed), re-run the last user turn. */
+  function regenerate() {
+    if (sending) return;
+    let frankIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].from === 'frank') {
+        frankIdx = i;
+        break;
+      }
+    }
+    if (frankIdx < 0) return;
+    let steveIdx = -1;
+    for (let i = frankIdx - 1; i >= 0; i -= 1) {
+      if (messages[i].from === 'steve') {
+        steveIdx = i;
+        break;
+      }
+    }
+    if (steveIdx < 0) return; // no user turn to re-run (e.g. room greeting)
+    const prompt = (messages[steveIdx].text ?? '').trim();
+    if (!prompt) return;
+    setMessages((prev) => prev.slice(0, steveIdx + 1));
+    void runTurn(prompt);
+  }
+
+  /** Regenerate is only offered when a user turn exists to re-run. */
+  const canRegenerate = (() => {
+    let frankIdx = -1;
+    for (let i = messages.length - 1; i >= 0; i -= 1) {
+      if (messages[i].from === 'frank') {
+        frankIdx = i;
+        break;
+      }
+    }
+    if (frankIdx < 0) return false;
+    for (let i = frankIdx - 1; i >= 0; i -= 1) {
+      if (messages[i].from === 'steve') return true;
+    }
+    return false;
+  })();
+
+  function startEdit(msg: ChatMessage) {
+    if (sending) return;
+    setEditing(msg);
+  }
+
   function detectDelegations(frankText: string) {
     for (const p of parseDelegations(frankText, rooms)) {
       dispatchDelegation(p);
@@ -166,13 +241,21 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   return (
     <div className="flex h-full flex-col">
       {status === 'error' && <AuthErrorCard />}
-      <Thread messages={messages} typing={typing} agentName={room.agent} />
+      <Thread
+        messages={messages}
+        typing={typing}
+        agentName={room.agent}
+        onRegenerate={canRegenerate && !sending ? regenerate : undefined}
+        onEdit={!sending ? startEdit : undefined}
+      />
       <Composer
         room={room}
         disabled={sending}
         running={sending}
+        editing={editing}
         onSend={send}
         onStop={stop}
+        onCancelEdit={() => setEditing(null)}
         onTyping={() => {}}
       />
     </div>
