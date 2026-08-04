@@ -12,10 +12,8 @@ import {
 } from '@/lib/frank';
 import {
   delegationParts,
-  dispatchDelegation,
   inboundParts,
   onDelegation,
-  parseDelegations,
   receiptParts,
 } from '@/lib/delegation';
 import { AuthErrorCard, useAuth } from '@/components/providers';
@@ -125,7 +123,6 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
           const final = accumulated || 'Acknowledged. Working on it.';
           if (!accumulated) updateLast(final);
           setSending(false);
-          if (room.isHome) detectDelegations(final);
         },
         onError: (err) => {
           finished = true;
@@ -226,12 +223,6 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   function startEdit(msg: ChatMessage) {
     if (sending) return;
     setEditing(msg);
-  }
-
-  function detectDelegations(frankText: string) {
-    for (const p of parseDelegations(frankText, rooms)) {
-      dispatchDelegation(p);
-    }
   }
 
   function stop() {

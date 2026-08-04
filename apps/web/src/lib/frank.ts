@@ -111,6 +111,19 @@ export async function frankStream(
   agentName?: string,
   signal?: AbortSignal,
 ): Promise<void> {
+  let doneFired = false;
+  const fireDone = () => {
+    if (doneFired) return;
+    doneFired = true;
+    callbacks.onDone();
+  };
+  let errorFired = false;
+  const fireError = (e: string) => {
+    if (errorFired || doneFired) return;
+    errorFired = true;
+    callbacks.onError(e);
+  };
+
   try {
     const res = await fetch('/api/chat', {
       method: 'POST',
@@ -126,16 +139,16 @@ export async function frankStream(
       if (fallback) {
         // Goose is down — use canned reply so the UI doesn't die
         callbacks.onChunk(cannedFallback(message));
-        callbacks.onDone();
+        fireDone();
         return;
       }
-      callbacks.onError(err);
+      fireError(err);
       return;
     }
 
     const reader = res.body?.getReader();
     if (!reader) {
-      callbacks.onError('No response stream');
+      fireError('No response stream');
       return;
     }
 
@@ -164,8 +177,8 @@ export async function frankStream(
         try {
           const evt = JSON.parse(json);
           if (evt.text) callbacks.onChunk(evt.text);
-          if (evt.done) callbacks.onDone();
-          if (evt.error) callbacks.onError(evt.error);
+          if (evt.done) fireDone();
+          if (evt.error) fireError(evt.error);
         } catch {
           // skip malformed SSE
         }
@@ -173,9 +186,9 @@ export async function frankStream(
     }
 
     // If no done event was received, fire it
-    callbacks.onDone();
+    fireDone();
   } catch (err) {
-    callbacks.onError(String(err));
+    fireError(String(err));
   }
 }
 

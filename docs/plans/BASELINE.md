@@ -68,3 +68,15 @@ npm_config_engine_strict=false pnpm -w test
 - `apps/web/src/app/api/chat/route.ts:206` — `send({ done: true, harness: activeProvider.id, reason, packHash })`. ✅ Matches plan's Bug 3 description.
 - `apps/web/src/lib/delegation.ts` — exports `parseDelegations`, `ParsedDelegation`, `taskFromText` (regex `/@([a-z0-9][a-z0-9-]*)/g`). ✅ Matches plan's Bug 2 description.
 - Next.js version: **14.2.29** → the Phase 2 `[id]` route must use the Next 14 signature `ctx: { params: { id: string } }` with `ctx.params.id` directly (NOT the Next 15 Promise form).
+
+## Phase 1 deviations (recorded 2026-08-04)
+
+1. **VERIFY contradiction in the plan.** Step 1.1's own guard code necessarily contains one
+   literal `callbacks.onDone()` (inside `fireDone`) and one `callbacks.onError(e)` (inside
+   `fireError`), so the plan's VERIFY check `grep -c "callbacks.onDone()" … must return 0`
+   is unsatisfiable as written. Post-Phase-1 actual: `1`, and it is the guarded call site
+   itself. All other call sites use `fireDone()`/`fireError()`; the guarantee (exactly one
+   terminal callback per stream) holds.
+2. `dispatchDelegation(p: ParsedDelegation)` in `delegation.ts` was the only remaining
+   consumer of the deleted `ParsedDelegation` interface; its parameter is now an inline
+   structural type with the same shape. File is deleted entirely in Phase 2 anyway.

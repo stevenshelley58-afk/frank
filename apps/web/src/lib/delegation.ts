@@ -13,7 +13,6 @@
 // Action Envelopes, Capability Broker, isolated workspaces, FRANK spec §7.5 /
 // §8 — lands later; this is the product surface for it.)
 
-import { PROJECT_ROOMS, type Room } from './rooms';
 import { frankStream, uid, type TextPart } from './frank';
 
 export type DelegationStatus = 'running' | 'done' | 'error';
@@ -30,15 +29,6 @@ export interface Delegation {
   startedAt: number;
   result?: string;
   error?: string;
-}
-
-/** A parsed delegation mention pulled out of Central's reply. */
-export interface ParsedDelegation {
-  roomId: string;
-  roomName: string;
-  agent: string;
-  tint: string;
-  task: string;
 }
 
 type DelegationEvent =
@@ -69,7 +59,13 @@ export function activeDelegations(): Delegation[] {
 /* Dispatch — the store owns execution so runs never drop              */
 /* ------------------------------------------------------------------ */
 
-export function dispatchDelegation(p: ParsedDelegation): Delegation {
+export function dispatchDelegation(p: {
+  roomId: string;
+  roomName: string;
+  agent: string;
+  tint: string;
+  task: string;
+}): Delegation {
   const d: Delegation = {
     id: uid(),
     task: p.task,
@@ -117,51 +113,6 @@ function patch(id: string, p: Partial<Delegation>) {
   const next = { ...cur, ...p };
   delegations.set(id, next);
   emit({ type: 'update', d: next });
-}
-
-/* ------------------------------------------------------------------ */
-/* Parsing — find @roomhandle mentions in Central's reply              */
-/* ------------------------------------------------------------------ */
-
-export function parseDelegations(text: string, rooms: Room[]): ParsedDelegation[] {
-  const out: ParsedDelegation[] = [];
-  const seen = new Set<string>();
-  const re = /@([a-z0-9][a-z0-9-]*)/g;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text))) {
-    const handle = m[1];
-    const room = matchRoom(handle, rooms);
-    if (!room || room.isHome || seen.has(room.id)) continue;
-    seen.add(room.id);
-    out.push({
-      roomId: room.id,
-      roomName: room.name,
-      agent: room.agent,
-      tint: room.tint,
-      task: taskFromText(text, m.index),
-    });
-  }
-  return out;
-}
-
-function matchRoom(handle: string, rooms: Room[]): Room | undefined {
-  const h = handle.toLowerCase();
-  const byId = rooms.find((r) => r.id.toLowerCase() === h);
-  if (byId) return byId;
-  const byAgent = rooms.find((r) => r.agent.toLowerCase() === h);
-  if (byAgent) return byAgent;
-  return PROJECT_ROOMS.find(
-    (r) => r.name.toLowerCase().replace(/[^a-z0-9]+/g, '') === h,
-  );
-}
-
-/** Heuristic task: the sentence around the mention, trimmed. */
-function taskFromText(text: string, mentionIdx: number): string {
-  const after = text.slice(mentionIdx);
-  const sentence = after.split(/(?<=[.!?])\s+/)[0] ?? after;
-  const clean = sentence.replace(/\s+/g, ' ').trim();
-  const t = clean.length > 220 ? clean.slice(0, 220).trimEnd() + '…' : clean;
-  return t || 'Delegated task';
 }
 
 /* ------------------------------------------------------------------ */
