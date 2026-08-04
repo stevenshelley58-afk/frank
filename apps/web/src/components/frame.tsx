@@ -3,7 +3,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import type { Room } from '@/lib/rooms';
 import { PROJECT_ROOMS } from '@/lib/rooms';
-import { useDelegations } from '@/lib/delegation';
+import { useDelegations, type DelegationStatus } from '@/lib/use-delegations';
 import { useHarnesses } from '@/lib/use-harnesses';
 import { briefFromToday } from '@/lib/frank';
 import { useCalendar } from '@/lib/use-calendar';
@@ -359,23 +359,24 @@ function HarnessBody() {
 
 function RunningBody() {
   const items = useDelegations();
-  if (items.length === 0) {
+  const live = items.filter((d) => d.status === 'running' || d.status === 'proposed');
+  if (live.length === 0) {
     return (
       <p className="text-[12.5px] leading-relaxed text-muted">
-        Nothing running. Delegate work from Central with an @room handle.
+        Nothing running. Delegate work from Central — Frank decides when to hand a task to a room.
       </p>
     );
   }
   return (
     <div>
-      {items.slice(0, 8).map((d, i) => (
+      {live.slice(0, 8).map((d, i) => (
         <div
           key={d.id}
           className={`flex items-start gap-2.5 py-[7px] ${i > 0 ? "border-t border-line/70" : ""}`}
         >
           <span
             className="mt-[3px] h-[9px] w-[9px] shrink-0 rounded-[3px] ring-1 ring-ink/10"
-            style={{ background: d.tint }}
+            style={{ background: tintForRoom(d.toRoomId) }}
           />
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2">
@@ -392,7 +393,19 @@ function RunningBody() {
   );
 }
 
-function StatusDot({ status }: { status: "running" | "done" | "error" }) {
+/** The target room's identity color, by id (Central falls back to ink). */
+function tintForRoom(roomId: string): string {
+  return PROJECT_ROOMS.find((r) => r.id === roomId)?.tint ?? '#1c1917';
+}
+
+function StatusDot({ status }: { status: DelegationStatus }) {
+  if (status === "proposed") {
+    return (
+      <span className="ml-auto inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.08em] text-[#b08a3e]">
+        awaiting
+      </span>
+    );
+  }
   if (status === "running") {
     return (
       <span className="ml-auto inline-flex items-center gap-1 font-mono text-[9px] uppercase tracking-[0.08em] text-accent">

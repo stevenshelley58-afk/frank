@@ -22,22 +22,15 @@
 import { NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 
-import { resolveHarness } from '@/lib/providers';
-import { identityForRoom } from '@/lib/rooms-identity';
+import { runTurn, dropSession } from '@/lib/harness-session';
 import { getMemory } from '@/lib/memory-server';
 import { memoryScope, deploymentScope } from '@/lib/memory-scope';
-import { endRoomTurn, startRoomTurn } from '@/lib/room-activity';
 import { getAssembler, PACK_KEY_HANDLE, PACK_SIGNER_ID } from '@/lib/kernel';
 import type { AssembleInput } from '@frank/kernel';
 import type { DataClass, IsoDateTime } from '@frank/contracts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-
-// Module-level session cache: roomId → { providerId, sessionId }
-const sessions = new Map<string, { providerId: string; sessionId: string }>();
-// Rooms whose session has already received the identity primer.
-const primed = new Set<string>();
 
 /** How many recalled memories the pack carries (the minimization budget). */
 const RECALL_TOP_K = 5;
@@ -120,58 +113,9 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  // Resolve the harness for this room (Auto or pinned).
-  let provider;
-  let reason: string;
-  try {
-    ({ provider, reason } = await resolveHarness(roomId));
-  } catch {
-    return new Response(
-      JSON.stringify({ error: 'No harness available', fallback: true }),
-      { status: 503, headers: { 'Content-Type': 'application/json' } },
-    );
-  }
-
-  // Fold per-room identity into the first turn of a fresh session. Goose takes
-  // it inline each fresh session; Letta bakes it into the agent's persona block
-  // at creation, so it passes the identity via createSession instead.
+  // Session cache, harness resolution, and identity priming live in runTurn
+  // (harness-session.ts) so the delegation runner shares them.
   let promptText = message;
-  let identityText: string | null = null;
-  if (!primed.has(roomId)) {
-    identityText = identityForRoom(roomId, roomName, agentName);
-  }
-
-  // Get or create a session, re-creating if the harness changed (hot-swap).
-  let entry = sessions.get(roomId);
-  if (!entry || entry.providerId !== provider.id) {
-    try {
-      // Letta: session key is the room id; persona rides in via "roomId|persona".
-      // Goose: session is an ACP handle rooted at the working dir.
-      const sessionArg =
-        provider.id === 'letta'
-          ? `${roomId}|${identityText ?? ''}`
-          : '/srv/frank/repo';
-      const sessionId = await provider.createSession(sessionArg);
-      entry = { providerId: provider.id, sessionId };
-      sessions.set(roomId, entry);
-      primed.delete(roomId); // re-prime on a fresh session
-    } catch (err) {
-      return new Response(
-        JSON.stringify({ error: `Session create failed: ${err}` }),
-        { status: 502, headers: { 'Content-Type': 'application/json' } },
-      );
-    }
-  }
-  const activeProvider = provider;
-
-  if (!primed.has(roomId) && identityText !== null) {
-    // Goose only — inline the identity primer. Letta already stored it as the
-    // agent's persona block; folding it into the prompt would double it up.
-    if (activeProvider.id !== 'letta') {
-      promptText = `${identityText}\n\n---\nSteve says: ${message}`;
-    }
-    primed.add(roomId);
-  }
 
   // Assemble a signed context pack; fold its lower-trust memory section in.
   const { recallBlock, packHash } = await packForTurn(message, roomId);
@@ -187,46 +131,35 @@ export async function POST(req: NextRequest) {
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
       };
 
-      // Report the turn to the room-status ledger so /api/room-status and
-      // the ROOMS chip strip see this room as running.
-      startRoomTurn(roomId);
-
       try {
-        let fullText = '';
-        for await (const chunk of activeProvider.stream(entry!.sessionId, promptText)) {
-          fullText += chunk;
-          send({ text: chunk });
-        }
+        const { text, meta } = await runTurn({
+          roomId,
+          roomName,
+          agentName,
+          prompt: promptText,
+          onChunk: (chunk) => send({ text: chunk }),
+        });
 
+        let fullText = text;
         if (!fullText) {
           fullText = 'Acknowledged. Working on it.';
           send({ text: fullText });
         }
 
-        send({ done: true, harness: activeProvider.id, reason, packHash });
-        endRoomTurn(roomId, { snippet: fullText });
+        send({ done: true, harness: meta.harness, reason: meta.reason, packHash });
 
-        // Store the exchange for fact extraction (fire-and-forget, best-effort).
-        // Uses the raw user message (not the packed prompt) so the backend
-        // extracts from the actual conversation.
-        const userContent = message!;
-        const assistantContent = fullText;
         getMemory()
           .store({
             messages: [
-              { role: 'user', content: userContent },
-              { role: 'assistant', content: assistantContent },
+              { role: 'user', content: message! },
+              { role: 'assistant', content: fullText },
             ],
             scope: memoryScope({ roomId }),
           })
-          .catch(() => {
-            // Store failure is non-fatal — the turn already succeeded.
-          });
+          .catch(() => {});
       } catch (err) {
         send({ error: String(err) });
-        endRoomTurn(roomId, { error: String(err) });
-        sessions.delete(roomId);
-        primed.delete(roomId);
+        dropSession(roomId);
       } finally {
         controller.close();
       }

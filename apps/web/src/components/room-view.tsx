@@ -10,12 +10,6 @@ import {
   uid,
   type ChatMessage,
 } from '@/lib/frank';
-import {
-  delegationParts,
-  inboundParts,
-  onDelegation,
-  receiptParts,
-} from '@/lib/delegation';
 import { AuthErrorCard, useAuth } from '@/components/providers';
 import { Thread } from './thread';
 import { Composer } from './composer';
@@ -62,34 +56,12 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
       return prev;
     });
 
-  // Subscribe to delegation events for display only.
-  useEffect(() => {
-    const off = onDelegation((e) => {
-      const d = e.d;
-      if (room.isHome) {
-        // Central shows kickoff on create and receipt on completion.
-        if (e.type === 'created') {
-          append({ id: uid(), from: 'mention', parts: delegationParts(d), at: Date.now() });
-        } else if (e.type === 'update' && d.status !== 'running') {
-          append({ id: uid(), from: 'mention', parts: receiptParts(d), at: Date.now() });
-        }
-      } else if (d.toRoomId === room.id) {
-        // Target room shows the inbound task, then the receipt.
-        if (e.type === 'created') {
-          append({ id: uid(), from: 'mention', parts: inboundParts(d), at: Date.now() });
-        } else if (e.type === 'update' && d.status !== 'running') {
-          append({
-            id: uid(),
-            from: 'frank',
-            text: d.status === 'error' ? `Hit a snag: ${d.error ?? 'unknown error'}` : (d.result ?? 'Done.'),
-            at: Date.now(),
-          });
-        }
-      }
-    });
-    return off;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [room.id, room.isHome]);
+  // TODO(phase-4): re-render from useDelegations
+  // The old client-side delegation subscription (kickoff cards, inbound cards,
+  // receipts appended into `messages`) lived here. delegation.ts is deleted in
+  // Phase 2; delegations now live server-side (delegation-store.ts) and Phase 4
+  // renders them from the useDelegations() hook, derived — never appended.
+  // Until then the Running panel and delegation cards stay empty. Expected.
 
   /**
    * Run one Frank turn against `prompt`: typing bubble, empty frank message,
