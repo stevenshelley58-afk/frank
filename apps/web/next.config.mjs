@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  output: 'standalone',
+  // Standalone packaging needs symlink permission — unavailable on stock
+  // Windows shells. Local verification builds opt out via NEXT_SKIP_STANDALONE=1;
+  // VPS/Docker builds keep the default standalone output.
+  output: process.env.NEXT_SKIP_STANDALONE ? undefined : 'standalone',
   transpilePackages: [
     '@frank/pipeline-graph',
     '@frank/memory',
