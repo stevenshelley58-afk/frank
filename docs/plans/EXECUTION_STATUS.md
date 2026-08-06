@@ -66,7 +66,8 @@ workbench runner, never as a replacement for it.
 | GOV-01..04 | AG-0/AG-1 | main | ✅ (issue board = #15..#57) |
 | GOV-05/06 | AG-0 | main | ✅ |
 | WB-00 | AG-0/AG-3 | — | ✅ (facts in BASELINE.md) |
-| WB-01..04 | AG-3 | `agent/wb/wb-core` | 🔄 4/4 committed, final verify running |
+| WB-01..04 | AG-3 | merged 9068898 | ✅ verify green, issues #15/16/18/19 closed |
+| WB-05..09 + HITL-01/02 | AG-3 | `agent/wb/wb-behavior` (worktree wb-behavior) | 🔄 Wave 2 in flight (deleg_1e35e352) |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
 | CH-02 | AG-4 | merged dc7ee9a | ✅ conformance 21/21 (M4 hard gate passed) |
 | DEL-04, GOV-04, DEL-05 | AG-1 | `agent/del/delivery-controls` | ✅ merged ff9ab38 |
