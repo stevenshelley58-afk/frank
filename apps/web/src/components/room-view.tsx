@@ -11,16 +11,18 @@ import {
   type ChatMessage,
 } from '@/lib/frank';
 import { AuthErrorCard, useAuth } from '@/components/providers';
+import { useDelegations } from '@/lib/use-delegations';
+import { DelegationCard } from './delegation-card';
 import { Thread } from './thread';
 import { Composer } from './composer';
 
 /**
  * A room view: header · thread · composer.
  *
- * Central streams from Goose and parses delegations out of Frank's reply;
- * the store runs each delegation in its target room. Both Central and the
- * target room subscribe to delegation events purely for display — kickoff
- * cards, inbound cards, and receipts all stream into the right threads.
+ * Delegations are server-owned (delegation-store.ts) and streamed over SSE.
+ * RoomView derives them via useDelegations() and renders them as cards below
+ * the message flow — never appended into `messages` (that was the old design
+ * and the source of duplicate receipts on event replay).
  *
  * Chat affordances (this chat / ChatGPT parity): copy lives in Thread,
  * regenerate re-runs the last user turn, and edit-and-resend replaces a
@@ -56,12 +58,12 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
       return prev;
     });
 
-  // TODO(phase-4): re-render from useDelegations
-  // The old client-side delegation subscription (kickoff cards, inbound cards,
-  // receipts appended into `messages`) lived here. delegation.ts is deleted in
-  // Phase 2; delegations now live server-side (delegation-store.ts) and Phase 4
-  // renders them from the useDelegations() hook, derived — never appended.
-  // Until then the Running panel and delegation cards stay empty. Expected.
+  // Delegations are derived from server state — rendered as cards below the
+  // message flow, newest last. Central sees all; a room sees only its own.
+  const allDelegations = useDelegations();
+  const roomDelegations = room.isHome
+    ? allDelegations
+    : allDelegations.filter((d) => d.toRoomId === room.id);
 
   /**
    * Run one Frank turn against `prompt`: typing bubble, empty frank message,
@@ -208,6 +210,8 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
         messages={messages}
         typing={typing}
         agentName={room.agent}
+        delegations={[...roomDelegations].reverse()}
+        delegationView={room.isHome ? 'central' : 'room'}
         onRegenerate={canRegenerate && !sending ? regenerate : undefined}
         onEdit={!sending ? startEdit : undefined}
       />

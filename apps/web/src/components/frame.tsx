@@ -383,7 +383,11 @@ function RunningBody() {
               <b className="text-[12px] font-semibold text-ink">{d.agent}</b>
               <StatusDot status={d.status} />
             </div>
-            <p className="mt-0.5 truncate text-[11.5px] leading-snug text-ink2" title={d.task}>
+            <p
+              className="mt-0.5 truncate text-[11.5px] leading-snug text-ink2"
+              title={d.task}
+              style={d.status === 'proposed' ? { color: '#b08a3e' } : undefined}
+            >
               {d.task}
             </p>
           </div>

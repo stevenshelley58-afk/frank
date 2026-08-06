@@ -2,14 +2,20 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '@/lib/frank';
+import type { Delegation } from '@/lib/use-delegations';
 import { IconBolt, IconCheck, IconCopy, IconEdit, IconRefresh } from './icons';
 import { Markdown } from './markdown';
+import { DelegationCard } from './delegation-card';
 
 interface ThreadProps {
   messages: ChatMessage[];
   typing: boolean;
   /** label for frank messages, e.g. "Frank · Central" or "lotfile-frank" */
   agentName: string;
+  /** Server-derived delegations, oldest first — rendered below the messages. */
+  delegations?: Delegation[];
+  /** 'central' for the home room, 'room' for project rooms. */
+  delegationView?: 'central' | 'room';
   /** ChatGPT-style affordances — omit to hide. */
   onRegenerate?: () => void;
   onEdit?: (message: ChatMessage) => void;
@@ -22,7 +28,7 @@ interface ThreadProps {
  * delegation receipts use the verified strip. Auto-follows the tail;
  * messages slide in. Hover a message to reveal copy / regenerate / edit.
  */
-export function Thread({ messages, typing, agentName, onRegenerate, onEdit }: ThreadProps) {
+export function Thread({ messages, typing, agentName, delegations, delegationView, onRegenerate, onEdit }: ThreadProps) {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
 
@@ -31,7 +37,7 @@ export function Thread({ messages, typing, agentName, onRegenerate, onEdit }: Th
     if (el && stickRef.current) {
       el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
     }
-  }, [messages, typing]);
+  }, [messages, typing, delegations]);
 
   const onScroll = () => {
     const el = scrollerRef.current;
@@ -65,6 +71,9 @@ export function Thread({ messages, typing, agentName, onRegenerate, onEdit }: Th
           onRegenerate={onRegenerate}
           onEdit={onEdit}
         />
+      ))}
+      {(delegations ?? []).map((d) => (
+        <DelegationCard key={d.id} d={d} view={delegationView ?? 'central'} />
       ))}
       {typing && <TypingBubble />}
     </div>
