@@ -63,13 +63,16 @@ workbench runner, never as a replacement for it.
 
 | Task | Owner | Branch | Status |
 |---|---|---|---|
-| GOV-01..04 | AG-0 | main (this commit) | ✅ |
+| GOV-01..04 | AG-0/AG-1 | main | ✅ (issue board = #15..#57) |
+| GOV-05/06 | AG-0 | main | ✅ |
 | WB-00 | AG-0/AG-3 | — | ✅ (facts in BASELINE.md) |
-| WB-01..04 | AG-3 | `agent/wb/wb-core` | 🔄 wave-1 |
-| CH-01, CH-02 | AG-4 | `agent/ch/channelport-statestore` | 🔄 wave-1 |
+| WB-01..04 | AG-3 | `agent/wb/wb-core` | 🔄 WB-01 built, continuation agent running (cap raised 50→200) |
+| CH-01 | AG-4 | `agent/ch/channelport-statestore` | ✅ committed 002e7bf |
+| CH-02 | AG-4 | `agent/ch/channelport-statestore` | 🔄 in flight |
+| DEL-04, GOV-04, DEL-05 | AG-1 | `agent/del/delivery-controls` | ✅ merged ff9ab38 |
 | SS-07 | AG-0 | main | ✅ (docs/plans/SS-07_TEMPORAL_BOUNDARY.md) |
+| PLG-04 | AG-7 | `agent/plg/trigger-eval` | ✅ merged abb66d6, issue #14 closed |
+| M14 branch protection | AG-0 | — | ✅ enabled (strict, contexts=[verify]) |
 | CH-00 | AG-4 | — | ⛔ needs bot token |
-| DEL-01..04, UI-01..06, PLG-01..03 | AG-1/AG-2/AG-7 | — | ✅ prebuilt integration (see commit 7586d50) |
-| PLG-04 (trigger eval) | AG-7 | — | open follow-up (issue #14) |
-| FS-01..06 | AG-5 | — | blocked on G3 |
-| SS-01..06 | AG-6 | — | blocked on G3 |
+| FS-01..06 | AG-5 | — | blocked on G3 (prep done: FS_PREP.md + fixtures) |
+| SS-01..03/05 | AG-6 | — | blocked on G3 (prep done: SS_PREP.md + fixtures) |
