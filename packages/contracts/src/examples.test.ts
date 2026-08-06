@@ -14,6 +14,7 @@
 import { describe, expect, it } from 'vitest';
 
 import classificationExample from '../examples/classification.v1.example.json' with { type: 'json' };
+import channelContentExample from '../examples/channel-content.v1.example.json' with { type: 'json' };
 import eventEnvelopeExample from '../examples/event-envelope.v1.example.json' with { type: 'json' };
 import evidenceManifestExample from '../examples/evidence-manifest.v1.example.json' with { type: 'json' };
 import moduleManifestExample from '../examples/module-manifest.v1.example.json' with { type: 'json' };
@@ -24,6 +25,7 @@ import standingAuthorizationExample from '../examples/policy-decision.v1.standin
 import screenExample from '../examples/screen.v1.example.json' with { type: 'json' };
 
 import classificationSchema from '../schemas/classification.v1.schema.json' with { type: 'json' };
+import channelContentSchema from '../schemas/channel-content.v1.schema.json' with { type: 'json' };
 import eventEnvelopeSchema from '../schemas/event-envelope.v1.schema.json' with { type: 'json' };
 import evidenceSchema from '../schemas/evidence-manifest.v1.schema.json' with { type: 'json' };
 import moduleManifestSchema from '../schemas/module-manifest.v1.schema.json' with { type: 'json' };
@@ -32,6 +34,7 @@ import policySchema from '../schemas/policy-decision.v1.schema.json' with { type
 import screenSchema from '../schemas/screen.v1.schema.json' with { type: 'json' };
 
 import { DATA_CLASS_ORDER, type DataRouteDecision } from './classification.js';
+import type { ChannelContent } from './channel.js';
 import type { EventEnvelope } from './event-envelope.js';
 import type { EvidenceManifest } from './evidence.js';
 import type { ModuleManifest } from './module-manifest.js';
@@ -110,6 +113,9 @@ type RequiredKeys<T> = {
 export type AssertClassificationKeys = Assert<
   NoUnknownKeys<typeof classificationExample, DataRouteDecision>
 >;
+export type AssertChannelContentKeys = Assert<
+  NoUnknownKeys<typeof channelContentExample, ChannelContent>
+>;
 export type AssertEventEnvelopeKeys = Assert<
   NoUnknownKeys<typeof eventEnvelopeExample, EventEnvelope>
 >;
@@ -163,6 +169,17 @@ const dataRouteRequired = [
   'reason',
   'decidedAt',
 ] as const satisfies readonly (keyof DataRouteDecision)[];
+
+const channelContentRequired = [
+  'schema',
+  'contentId',
+  'cellId',
+  'roomId',
+  'title',
+  'blocks',
+  'actions',
+  'createdAt',
+] as const satisfies readonly (keyof ChannelContent)[];
 
 const eventEnvelopeRequired = [
   'specversion',
@@ -314,6 +331,9 @@ const standingAuthorizationRequired = [
 export type AssertDataRouteRequired = Assert<
   Equals<RequiredKeys<DataRouteDecision>, (typeof dataRouteRequired)[number]>
 >;
+export type AssertChannelContentRequired = Assert<
+  Equals<RequiredKeys<ChannelContent>, (typeof channelContentRequired)[number]>
+>;
 export type AssertEventEnvelopeRequired = Assert<
   Equals<RequiredKeys<EventEnvelope>, (typeof eventEnvelopeRequired)[number]>
 >;
@@ -341,6 +361,7 @@ export type AssertStandingAuthorizationRequired = Assert<
 
 const requiredKeyCases: readonly [string, readonly string[], readonly string[]][] = [
   ['classification.v1 / DataRouteDecision', dataRouteRequired, classificationSchema.required],
+  ['channel-content.v1 / ChannelContent', channelContentRequired, channelContentSchema.required],
   ['event-envelope.v1 / EventEnvelope', eventEnvelopeRequired, eventEnvelopeSchema.required],
   ['evidence-manifest.v1 / EvidenceManifest', evidenceRequired, evidenceSchema.required],
   ['module-manifest.v1 / ModuleManifest', moduleManifestRequired, moduleManifestSchema.required],
@@ -380,6 +401,21 @@ describe('frozen examples conform to their contract types', () => {
     expect(example.contributingSources.length).toBeGreaterThan(0);
     for (const source of example.contributingSources) {
       expect(DATA_CLASS_ORDER).toContain(source.class);
+    }
+  });
+
+  it('channel-content.v1 -> ChannelContent', () => {
+    const example = channelContentExample satisfies JsonShape<ChannelContent>;
+
+    expect(example.schema).toBe('frank.channel-content/v1');
+    expect(example.blocks.length).toBeGreaterThanOrEqual(1);
+    for (const block of example.blocks) {
+      expect(block.kind).toBe('text');
+    }
+    // CH-01 / ADR-022: actions propose verbs; they carry no authority of their own.
+    for (const action of example.actions) {
+      expect(action.verb.length).toBeGreaterThan(0);
+      expect(action.targetObjectId).toBe(example.workItemId);
     }
   });
 
