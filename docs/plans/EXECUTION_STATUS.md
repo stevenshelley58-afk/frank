@@ -33,7 +33,7 @@ Master plan: `docs/plans/FRANK_MASTER_PARALLEL_BUILD_PLAN.md`
 | Gate | Status | Notes |
 |---|---|---|
 | G0 Authority & baseline | ✅ DONE (this commit) | ADR-022/023 landed, WB-00 facts recorded, decisions locked |
-| G1 Delivery controls | ✅ DONE (prebuilt integration) | verify.yml live, verify-preview skill, red/green proof in history |
+| G1 Delivery controls | ✅ DONE | verify.yml live, verify-preview skill, red/green proof. **M14 branch protection ENABLED 2026-08-06** (strict, contexts=[verify]) |
 | G2 Workbench core | ⏳ in progress | WB-01..WB-09 |
 | G3 Human loop | blocked on G2 + Telegram token | |
 | G4 Folders & schedules | blocked on G3 | |
