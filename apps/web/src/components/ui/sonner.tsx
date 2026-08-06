@@ -32,9 +32,11 @@ const Toaster = ({ ...props }: ToasterProps) => {
     <Sonner
       theme={theme}
       className="toaster group"
-      /* Living-frame rule (Track A5): toasts surface at the top-right so they
-       * never cover the frame/rail or the composer. */
-      position="top-right"
+      /* Living-frame rule (Track A5): bottom-center keeps toasts clear of the
+         right-side living frame AND above the mobile dock (offset clears the
+         4.75rem dock height + safe-area). */
+      position="bottom-center"
+      offset="calc(4.75rem + env(safe-area-inset-bottom, 0px))"
       toastOptions={{
         classNames: {
           toast:
