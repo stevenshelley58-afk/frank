@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { frankStream, StreamAbortedError } from './frank';
+import { frankStream } from './frank';
 
 /** Build a fake SSE response body from raw `data:` lines. */
 function sseResponse(lines: string[]): Response {
