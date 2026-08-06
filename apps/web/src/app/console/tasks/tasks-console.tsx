@@ -1,9 +1,44 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  type ColumnDef,
+  type ColumnFiltersState,
+  type SortingState,
+  type VisibilityState,
+  flexRender,
+  getCoreRowModel,
+  getFilteredRowModel,
+  getSortedRowModel,
+  useReactTable,
+} from '@tanstack/react-table';
+
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Input } from '@/components/ui/input';
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { Skeleton } from '@/components/ui/skeleton';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
+import { cn } from '@/lib/utils';
+import { ChevronDown } from '@/components/ui/icons';
 
 /* ------------------------------------------------------------------ */
 /* Tasks console — Frank's work board (API) + Plane + Google Tasks.    */
+/* Track A2: shadcn data-table (sorting, filtering, column visibility, */
+/* row selection) on the existing /v1/work data source — no API change.*/
 /* ------------------------------------------------------------------ */
 
 interface WorkItem {
@@ -13,6 +48,8 @@ interface WorkItem {
   priority: string;
   updated_at: string;
 }
+
+const STATE_ORDER = ['active', 'ready', 'planned', 'inbox', 'waiting', 'blocked', 'done', 'cancelled', 'failed'];
 
 const STATE_COLORS: Record<string, string> = {
   inbox: 'bg-muted/20 text-muted',
@@ -34,10 +71,32 @@ const PRIORITY_DOTS: Record<string, string> = {
   none: 'bg-transparent',
 };
 
+/** Rank so state sorts by the 11-state-machine order, not alphabetically. */
+const stateRank = (state: string) => {
+  const i = STATE_ORDER.indexOf(state);
+  return i === -1 ? STATE_ORDER.length : i;
+};
+
+function relTime(iso: string): string {
+  const age = Date.now() - Date.parse(iso);
+  const mins = Math.floor(age / 60_000);
+  if (mins < 1) return 'now';
+  if (mins < 60) return `${mins}m`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h`;
+  return `${Math.floor(hrs / 24)}d`;
+}
+
 export function TasksConsole() {
   const [items, setItems] = useState<WorkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  /* table state */
+  const [sorting, setSorting] = useState<SortingState>([{ id: 'updated_at', desc: true }]);
+  const [columnFilters, setColumnFilters] = useState<ColumnFiltersState>([]);
+  const [columnVisibility, setColumnVisibility] = useState<VisibilityState>({});
+  const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     let alive = true;
@@ -72,19 +131,109 @@ export function TasksConsole() {
     };
   }, []);
 
-  // Group by state
-  const groups = items.reduce<Record<string, WorkItem[]>>((acc, item) => {
-    const key = item.state;
-    if (!acc[key]) acc[key] = [];
-    acc[key].push(item);
-    return acc;
-  }, {});
+  const columns = useMemo<ColumnDef<WorkItem>[]>(
+    () => [
+      {
+        id: 'select',
+        header: ({ table }) => (
+          <Checkbox
+            aria-label="Select all"
+            checked={table.getIsAllPageRowsSelected()}
+            onCheckedChange={(value) => table.toggleAllPageRowsSelected(!!value)}
+            className="translate-y-[2px]"
+          />
+        ),
+        cell: ({ row }) => (
+          <Checkbox
+            aria-label="Select row"
+            checked={row.getIsSelected()}
+            onCheckedChange={(value) => row.toggleSelected(!!value)}
+            className="translate-y-[2px]"
+          />
+        ),
+        enableSorting: false,
+        enableHiding: false,
+      },
+      {
+        accessorKey: 'title',
+        header: 'Task',
+        cell: ({ row }) => (
+          <span className="block max-w-[420px] truncate text-[13px] text-ink">
+            {row.getValue('title')}
+          </span>
+        ),
+      },
+      {
+        accessorKey: 'state',
+        header: 'State',
+        sortingFn: (a, b) => stateRank(a.getValue('state')) - stateRank(b.getValue('state')),
+        cell: ({ row }) => {
+          const state: string = row.getValue('state');
+          return (
+            <span
+              className={cn(
+                'rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide',
+                STATE_COLORS[state] ?? 'bg-muted/10 text-muted',
+              )}
+            >
+              {state}
+            </span>
+          );
+        },
+      },
+      {
+        accessorKey: 'priority',
+        header: 'Priority',
+        cell: ({ row }) => {
+          const priority: string = row.getValue('priority');
+          return (
+            <span className="flex items-center gap-2 text-[12px] text-muted">
+              <span className={cn('h-2 w-2 rounded-full', PRIORITY_DOTS[priority] ?? 'bg-transparent')} />
+              {priority}
+            </span>
+          );
+        },
+      },
+      {
+        accessorKey: 'updated_at',
+        header: ({ column }) => (
+          <button
+            type="button"
+            className="flex items-center gap-1 font-mono text-[10px] uppercase tracking-wide"
+            onClick={() => column.toggleSorting(column.getIsSorted() === 'asc')}
+          >
+            Updated
+            <ChevronDown
+              className={cn('size-3 transition-transform', column.getIsSorted() === 'asc' && 'rotate-180')}
+            />
+          </button>
+        ),
+        cell: ({ row }) => (
+          <span className="font-mono text-[10px] text-muted/60">{relTime(row.getValue('updated_at'))}</span>
+        ),
+        sortingFn: (a, b) => Date.parse(a.getValue('updated_at')) - Date.parse(b.getValue('updated_at')),
+      },
+    ],
+    [],
+  );
 
-  const stateOrder = ['active', 'ready', 'planned', 'inbox', 'waiting', 'blocked', 'done', 'cancelled', 'failed'];
-  const orderedStates = stateOrder.filter((s) => groups[s]?.length);
+  const table = useReactTable({
+    data: items,
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    getSortedRowModel: getSortedRowModel(),
+    getFilteredRowModel: getFilteredRowModel(),
+    onSortingChange: setSorting,
+    onColumnFiltersChange: setColumnFilters,
+    onColumnVisibilityChange: setColumnVisibility,
+    onRowSelectionChange: setRowSelection,
+    state: { sorting, columnFilters, columnVisibility, rowSelection },
+  });
+
+  const selectedCount = table.getFilteredSelectedRowModel().rows.length;
 
   return (
-    <div className="mx-auto max-w-3xl px-6 py-10">
+    <div className="mx-auto max-w-4xl px-6 py-10">
       <div className="mb-8">
         <h1 className="font-display text-xl font-bold text-ink">Tasks</h1>
         <p className="mt-1 text-[12.5px] text-muted">
@@ -95,21 +244,9 @@ export function TasksConsole() {
 
       {/* Engine status cards */}
       <div className="mb-8 grid grid-cols-1 gap-3 sm:grid-cols-3">
-        <EngineCard
-          title="Frank DB"
-          status="live"
-          detail={`${items.length} work items`}
-        />
-        <EngineCard
-          title="Plane"
-          status="deploying"
-          detail="Self-hosted PM engine"
-        />
-        <EngineCard
-          title="Google Tasks"
-          status="planned"
-          detail="Pixel 10 mirror"
-        />
+        <EngineCard title="Frank DB" status="live" detail={`${items.length} work items`} />
+        <EngineCard title="Plane" status="deploying" detail="Self-hosted PM engine" />
+        <EngineCard title="Google Tasks" status="planned" detail="Pixel 10 mirror" />
       </div>
 
       {error && (
@@ -118,8 +255,50 @@ export function TasksConsole() {
         </div>
       )}
 
+      {/* toolbar: filter, column visibility, selection count */}
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <Input
+          placeholder="Filter tasks…"
+          value={(table.getColumn('title')?.getFilterValue() as string) ?? ''}
+          onChange={(event) => table.getColumn('title')?.setFilterValue(event.target.value)}
+          className="max-w-xs h-8 text-[13px]"
+          aria-label="Filter tasks by title"
+        />
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="outline" size="sm" className="ml-auto h-8">
+              Columns <ChevronDown className="size-3.5 opacity-60" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {table
+              .getAllColumns()
+              .filter((column) => column.getCanHide())
+              .map((column) => (
+                <DropdownMenuCheckboxItem
+                  key={column.id}
+                  className="capitalize text-[12.5px]"
+                  checked={column.getIsVisible()}
+                  onCheckedChange={(value) => column.toggleVisibility(!!value)}
+                >
+                  {column.id}
+                </DropdownMenuCheckboxItem>
+              ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+        {selectedCount > 0 && (
+          <Badge variant="secondary" className="h-6">
+            {selectedCount} selected
+          </Badge>
+        )}
+      </div>
+
       {loading ? (
-        <p className="text-[13px] text-muted">Loading work items…</p>
+        <div className="space-y-2" aria-label="Loading work items">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <Skeleton key={i} className="h-10 w-full rounded-lg" />
+          ))}
+        </div>
       ) : items.length === 0 ? (
         <div className="rounded-xl border border-dashed border-line px-6 py-10 text-center">
           <p className="text-[13px] text-muted">
@@ -127,39 +306,44 @@ export function TasksConsole() {
           </p>
         </div>
       ) : (
-        <div className="space-y-6">
-          {orderedStates.map((state) => (
-            <div key={state}>
-              <div className="mb-2 flex items-center gap-2">
-                <span
-                  className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide ${STATE_COLORS[state] ?? 'bg-muted/10 text-muted'}`}
-                >
-                  {state}
-                </span>
-                <span className="font-mono text-[10px] text-muted/60">
-                  {groups[state].length}
-                </span>
-              </div>
-              <div className="space-y-1.5">
-                {groups[state].map((item) => (
-                  <div
-                    key={item.id}
-                    className="flex items-center gap-3 rounded-xl border border-line bg-white px-4 py-2.5"
-                  >
-                    <span
-                      className={`h-2 w-2 shrink-0 rounded-full ${PRIORITY_DOTS[item.priority] ?? 'bg-transparent'}`}
-                    />
-                    <span className="min-w-0 flex-1 truncate text-[13px] text-ink">
-                      {item.title}
-                    </span>
-                    <span className="shrink-0 font-mono text-[10px] text-muted/60">
-                      {relTime(item.updated_at)}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          ))}
+        <div className="rounded-xl border border-line bg-white">
+          <Table>
+            <TableHeader>
+              {table.getHeaderGroups().map((headerGroup) => (
+                <TableRow key={headerGroup.id}>
+                  {headerGroup.headers.map((header) => (
+                    <TableHead
+                      key={header.id}
+                      className="font-mono text-[10px] uppercase tracking-wide text-muted"
+                    >
+                      {header.isPlaceholder
+                        ? null
+                        : flexRender(header.column.columnDef.header, header.getContext())}
+                    </TableHead>
+                  ))}
+                </TableRow>
+              ))}
+            </TableHeader>
+            <TableBody>
+              {table.getRowModel().rows?.length ? (
+                table.getRowModel().rows.map((row) => (
+                  <TableRow key={row.id} data-state={row.getIsSelected() && 'selected'}>
+                    {row.getVisibleCells().map((cell) => (
+                      <TableCell key={cell.id}>
+                        {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                      </TableCell>
+                    ))}
+                  </TableRow>
+                ))
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={columns.length} className="h-24 text-center text-[13px] text-muted">
+                    No tasks match the filter.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
         </div>
       )}
     </div>
@@ -190,14 +374,4 @@ function EngineCard({
       </p>
     </div>
   );
-}
-
-function relTime(iso: string): string {
-  const age = Date.now() - Date.parse(iso);
-  const mins = Math.floor(age / 60_000);
-  if (mins < 1) return 'now';
-  if (mins < 60) return `${mins}m`;
-  const hrs = Math.floor(mins / 60);
-  if (hrs < 24) return `${hrs}h`;
-  return `${Math.floor(hrs / 24)}d`;
 }
