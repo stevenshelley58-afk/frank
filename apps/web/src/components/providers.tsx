@@ -19,6 +19,8 @@ import {
 } from '@/lib/api';
 import { TIME_ZONE } from '@/lib/time';
 import { IconAlert } from './icons';
+import { toast } from 'sonner';
+import { Toaster } from './ui/sonner';
 
 /* ------------------------------------------------------------------ */
 /* Auth — dev-session mint on mount, silent re-mint on 401             */
@@ -263,55 +265,31 @@ export function useData(): DataContextValue {
 
 type ToastTone = 'success' | 'error' | 'info';
 
-interface Toast {
-  id: number;
-  tone: ToastTone;
-  message: string;
-}
-
 interface ToastContextValue {
   push: (tone: ToastTone, message: string) => void;
 }
 
 const ToastContext = createContext<ToastContextValue>({ push: () => {} });
 
+/**
+ * Track A5: feedback primitives. The hand-rolled toast stack is replaced by
+ * sonner (vendored + Frank-themed in ui/sonner.tsx) — swipe-to-dismiss,
+ * stacking, promise toasts and reduced-motion handling come free. The
+ * public `push(tone, message)` API is unchanged, so every call site keeps
+ * working. Placement (bottom-center, above the mobile dock, clear of the
+ * living frame) is owned by the Toaster.
+ */
 export function ToastProvider({ children }: { children: ReactNode }) {
-  const [toasts, setToasts] = useState<Toast[]>([]);
-  const nextId = useRef(1);
-
   const push = useCallback((tone: ToastTone, message: string) => {
-    const id = nextId.current++;
-    setToasts((prev) => [...prev.slice(-3), { id, tone, message }]);
-    window.setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4200);
+    if (tone === 'success') toast.success(message);
+    else if (tone === 'error') toast.error(message);
+    else toast(message);
   }, []);
 
   return (
     <ToastContext.Provider value={{ push }}>
       {children}
-      <div className="pointer-events-none fixed bottom-[calc(4.75rem+env(safe-area-inset-bottom))] left-1/2 z-[80] flex w-full max-w-md -translate-x-1/2 flex-col items-center gap-2 px-4 lg:bottom-6">
-        {toasts.map((t) => (
-          <div
-            key={t.id}
-            role="status"
-            className={`animate-slide-in pointer-events-auto flex w-full items-start gap-2.5 rounded-xl border bg-card px-4 py-3 text-ink shadow-[0_8px_30px_rgba(11,13,10,0.16)] ${
-              t.tone === 'success'
-                ? 'border-success/40'
-                : t.tone === 'error'
-                  ? 'border-danger/40'
-                  : 'border-line'
-            }`}
-          >
-            <span
-              className={`mt-1 h-1.5 w-1.5 shrink-0 rounded-full ${
-                t.tone === 'success' ? 'bg-success' : t.tone === 'error' ? 'bg-danger' : 'bg-muted/50'
-              }`}
-            />
-            <p className="text-[12.5px] font-medium leading-snug">{t.message}</p>
-          </div>
-        ))}
-      </div>
+      <Toaster />
     </ToastContext.Provider>
   );
 }

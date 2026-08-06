@@ -11,7 +11,10 @@
 -- index column in sync with title/body/tags on every insert and update.
 
 CREATE TABLE "frank_domain"."brain_entry" (
-    "id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
+    -- FRANK-§11.1: identifiers are minted by the caller (UUIDv7 via
+    -- adapters/storage/postgres ids.ts), never by a column default — a
+    -- replayed save must be able to assert "this is the id I already used".
+    "id" uuid PRIMARY KEY NOT NULL,
     "cell_id" text NOT NULL,
     "owner_id" text NOT NULL,
     "room_id" text,

@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { Skeleton } from '@/components/ui/skeleton';
 
 /* ------------------------------------------------------------------ */
 /* Research Pipeline console — Blockwise research engine health + jobs */
@@ -65,6 +66,27 @@ export function ResearchConsole() {
 
   const stages = deriveStages(health);
   const isUp = health?.status !== 'unreachable' && health?.status !== 'disabled';
+
+  /* Track A5: skeleton while the first probe resolves — no layout jump,
+     the pipeline cards shimmer in place. */
+  if (loading && !health) {
+    return (
+      <div className="mx-auto max-w-3xl px-6 py-10" aria-label="Checking research pipeline status">
+        <div className="mb-8 flex items-center gap-4">
+          <Skeleton className="h-10 w-10 rounded-xl" />
+          <div className="space-y-2">
+            <Skeleton className="h-5 w-48" />
+            <Skeleton className="h-3 w-64" />
+          </div>
+        </div>
+        <div className="flex items-stretch gap-1.5">
+          {STAGES.map((s) => (
+            <Skeleton key={s.id} className="h-24 flex-1 rounded-xl" />
+          ))}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-3xl px-6 py-10">

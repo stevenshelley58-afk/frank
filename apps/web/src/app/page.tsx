@@ -11,6 +11,7 @@ import { PreviewZone } from '@/components/room/preview-zone';
 import { WorktreesSheet, WorktreesChip } from '@/components/worktree-panel';
 import { IconFrame } from '@/components/icons';
 import { useToast } from '@/components/providers';
+import { useCommandPalette } from '@/components/command-palette';
 
 /**
  * FRANK OS — chat-first shell (FRANK Atlantic Design System 1.1).
@@ -20,13 +21,29 @@ import { useToast } from '@/components/providers';
  * room header up top, living frame in a sheet, and a mono bottom dock
  * (Home / Rooms / Running / You) — rail hidden.
  */
-export default function Home() {
+export default function Home({ searchParams }: { searchParams?: { room?: string } }) {
   const { push } = useToast();
   const [baseRooms, setBaseRooms] = useState<Room[]>(DEFAULT_ROOMS);
-  const [activeId, setActiveId] = useState('central');
+  const [activeId, setActiveId] = useState(
+    () => (searchParams?.room && DEFAULT_ROOMS.some((r) => r.id === searchParams.room)
+      ? searchParams.room
+      : 'central'),
+  );
   const [frameOpen, setFrameOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [wtOpen, setWtOpen] = useState(false);
+
+  /* Track A3: register this page's room selector with the ⌘K palette, and
+   * pick up ?room= deep-links (palette selections made from other routes). */
+  const { registerRooms } = useCommandPalette();
+  useEffect(() => {
+    registerRooms((roomId: string) => setActiveId(roomId));
+  }, [registerRooms]);
+  useEffect(() => {
+    if (searchParams?.room && DEFAULT_ROOMS.some((r) => r.id === searchParams.room)) {
+      setActiveId(searchParams.room);
+    }
+  }, [searchParams?.room]);
 
   // Preview zone: expanded by default; the small square toggles it.
   const [expanded, setExpanded] = useState(true);

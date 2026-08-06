@@ -123,6 +123,53 @@
   --shadow-floating: 0 12px 34px rgb(0 0 0 / 24%);
 }
 
+/* ---------------------------------------------------------------------------
+ * shadcn/ui token bridge (Track A1 — FRANK_PREBUILT_INTEGRATION_PLAN.md)
+ *
+ * shadcn components consume these semantic variables; the variables are
+ * aliases over the Atlantic `--tw-*` RGB triples above, so both themes stay
+ * driven by frank-tokens alone. Values are space-separated RGB triples so
+ * Tailwind opacity modifiers (`bg-primary/10`) keep working.
+ *
+ * Collision notes (frank names win, shadcn usage adapts at vendor time):
+ *   - `accent` stays Frank's signal color; shadcn hover-surface usage maps
+ *     to the existing `hover` color instead.
+ *   - `card` / `muted` keep their Frank DEFAULTs; shadcn foreground keys
+ *     (`card-foreground`, `muted-foreground`) are additive.
+ * ------------------------------------------------------------------------- */
+/* The bridge is declared for BOTH theme attributes: custom-property
+ * declarations only re-resolve their var() aliases at elements the
+ * selector matches. A light-only selector would let dark wrappers inherit
+ * the already-computed light values (caught by the C1 Chrome click-through:
+ * --tw-shell flipped to dark while --background stayed white). */
+[data-frank-theme="light"],
+[data-frank-theme="dark"] {
+  --background: var(--tw-shell);
+  --foreground: var(--tw-ink);
+  --card: var(--tw-card);
+  --card-foreground: var(--tw-ink);
+  --popover: var(--tw-paper);
+  --popover-foreground: var(--tw-ink);
+  --primary: var(--tw-accent);
+  --primary-foreground: 255 255 255;
+  --secondary: var(--tw-paper-3);
+  --secondary-foreground: var(--tw-ink);
+  --muted-surface: var(--tw-paper-3);
+  --muted-foreground: var(--tw-muted);
+  --destructive: var(--tw-danger);
+  --destructive-foreground: 255 255 255;
+  --border: var(--tw-line);
+  --input: 181 196 211; /* --color-border-strong */
+  --ring: var(--tw-accent);
+  --radius: 12px;
+}
+
+[data-frank-theme="dark"] {
+  --primary-foreground: 6 17 31; /* dark signal #ff5a36 takes dark ink text */
+  --destructive-foreground: 244 248 252;
+  --input: 36 80 114; /* --color-border-strong */
+}
+
 * { box-sizing: border-box; }
 
 html, body {

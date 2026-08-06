@@ -415,7 +415,12 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const specPath = resolveSpec(opts);
   const specRelPath = path.relative(opts.root, specPath).split(path.sep).join('/');
-  const specText = await readFile(specPath, 'utf8');
+  const specTextRaw = await readFile(specPath, 'utf8');
+  // Line-ending normalization (Track B1 CI parity): Windows checkouts with
+  // core.autocrlf=true materialize the spec as CRLF, which would change the
+  // content hash even though the specification is unchanged. Canonicalize to
+  // LF before hashing/parsing so the registry is identical on every platform.
+  const specText = specTextRaw.replace(/\r\n?/g, '\n');
   const specSha = createHash('sha256').update(specText, 'utf8').digest('hex');
 
   const jsonPath = path.join(opts.root, REGISTRY_JSON);
@@ -449,13 +454,18 @@ async function main() {
   }
 
   /* ---------------------------------------------------------------- --check */
+  // Line-ending normalization (Track B1 CI parity): files checked out on
+  // Windows (core.autocrlf=true) materialize as CRLF; the generated text is
+  // LF. Canonicalize both sides before comparing so `--check` behaves
+  // identically on Windows and Linux.
+  const toLf = (text) => text.replace(/\r\n?/g, '\n');
   let failed = false;
 
   const driftMessages = [];
   if (!existsSync(jsonPath)) {
     driftMessages.push(`${REGISTRY_JSON} is missing`);
   } else {
-    const committedText = await readFile(jsonPath, 'utf8');
+    const committedText = toLf(await readFile(jsonPath, 'utf8'));
     if (committedText !== jsonText) {
       driftMessages.push(`${REGISTRY_JSON} differs from the specification`);
       let committed;
@@ -498,7 +508,7 @@ async function main() {
 
   if (!existsSync(mdPath)) {
     driftMessages.push(`${REGISTRY_MD} is missing`);
-  } else if ((await readFile(mdPath, 'utf8')) !== mdText) {
+  } else if (toLf(await readFile(mdPath, 'utf8')) !== mdText) {
     driftMessages.push(`${REGISTRY_MD} differs from the specification`);
   }
 
