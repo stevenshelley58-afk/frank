@@ -137,7 +137,13 @@
  *   - `card` / `muted` keep their Frank DEFAULTs; shadcn foreground keys
  *     (`card-foreground`, `muted-foreground`) are additive.
  * ------------------------------------------------------------------------- */
-[data-frank-theme="light"] {
+/* The bridge is declared for BOTH theme attributes: custom-property
+ * declarations only re-resolve their var() aliases at elements the
+ * selector matches. A light-only selector would let dark wrappers inherit
+ * the already-computed light values (caught by the C1 Chrome click-through:
+ * --tw-shell flipped to dark while --background stayed white). */
+[data-frank-theme="light"],
+[data-frank-theme="dark"] {
   --background: var(--tw-shell);
   --foreground: var(--tw-ink);
   --card: var(--tw-card);
