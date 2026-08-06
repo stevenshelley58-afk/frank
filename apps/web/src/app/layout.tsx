@@ -2,6 +2,7 @@ import type { Metadata, Viewport } from 'next';
 import { Inter, IBM_Plex_Mono } from 'next/font/google';
 import './globals.css';
 import { Providers } from '@/components/providers';
+import { CommandPaletteProvider } from '@/components/command-palette';
 
 /* FRANK Atlantic DS 1.1 typography: Inter for UI text, IBM Plex Mono for
  * labels, counters, timestamps, and the system's smallest voice. */
@@ -51,7 +52,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="manifest" href="/site.webmanifest" />
       </head>
       <body className="h-full antialiased">
-        <Providers>{children}</Providers>
+        <Providers>
+          {/* Track A3: ⌘K command palette — global hotkey, room/console switcher */}
+          <CommandPaletteProvider>{children}</CommandPaletteProvider>
+        </Providers>
       </body>
     </html>
   );
