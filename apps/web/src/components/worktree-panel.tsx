@@ -2,6 +2,11 @@
 
 import { useState } from 'react';
 import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+} from '@/components/ui/sheet';
+import {
   useWorktrees,
   stageTree,
   dirtySummary,
@@ -195,25 +200,29 @@ export function WorktreesBody() {
 /* ---------- Mobile full-screen sheet ---------- */
 
 export function WorktreesSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
-  if (!open) return null;
+  /* Track A4: migrated from a hand-rolled fixed overlay to the vendored
+     shadcn Sheet (Radix Dialog). What this buys: focus trap on open,
+     Escape-to-close, focus return to the trigger, scroll lock, and the
+     aria-dialog wiring — none of which the old div had. */
   return (
-    <div className="fixed inset-0 z-50 flex flex-col bg-shell lg:hidden">
-      <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-4">
-        <span className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-ink">
-          Code status
-        </span>
-        <button
-          onClick={onClose}
-          aria-label="Close code status"
-          className="rounded-lg px-2 py-1 text-lg text-muted transition-colors hover:text-ink"
-        >
-          ✕
-        </button>
-      </div>
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
-        <WorktreesBody />
-      </div>
-    </div>
+    <Sheet open={open} onOpenChange={(value) => !value && onClose()}>
+      <SheetContent
+        side="bottom"
+        className="flex h-[85dvh] max-w-none flex-col rounded-t-xl border-line bg-shell p-0 lg:hidden"
+      >
+        <div className="flex h-14 shrink-0 items-center justify-between border-b border-line px-4">
+          <span className="font-mono text-[11px] font-bold uppercase tracking-[0.14em] text-ink">
+            Code status
+          </span>
+        </div>
+        <SheetDescription className="sr-only">
+          A plain-English view of your project worktrees — building, ready, saved, live.
+        </SheetDescription>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-3">
+          <WorktreesBody />
+        </div>
+      </SheetContent>
+    </Sheet>
   );
 }
 

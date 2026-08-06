@@ -90,8 +90,10 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
         open={open}
         onOpenChange={setOpen}
         /* Mobile (A3): bottom-sheet presentation — the dialog docks to the
-         * bottom edge on small screens instead of floating mid-viewport. */
-        className="max-w-lg data-[state=open]:max-sm:translate-y-[38vh] data-[state=open]:max-sm:w-full data-[state=open]:max-sm:max-w-none data-[state=open]:max-sm:rounded-b-none data-[state=open]:max-sm:border-b-0"
+           bottom edge on small screens instead of floating mid-viewport.
+           Overrides the centered fixed positioning entirely (top/left/
+           translate), rounded on top like a native sheet. */
+        className="max-sm:top-auto max-sm:bottom-0 max-sm:left-0 max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:border-b-0 data-[state=open]:max-sm:slide-in-from-bottom data-[state=closed]:max-sm:slide-out-to-bottom"
       >
         <CommandInput placeholder="Jump to a room or console…" />
         <CommandList>
