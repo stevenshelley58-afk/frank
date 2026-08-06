@@ -1,0 +1,59 @@
+# FRANK Master Build — Execution Status (AG-0 control plane)
+
+Source of truth for leases, merge order, and gate status. Updated by AG-0 only.
+Master plan: `docs/plans/FRANK_MASTER_PARALLEL_BUILD_PLAN.md`
+
+## Leases (shared-file hotspots)
+
+| Hotspot | Leased to | Since |
+|---|---|---|
+| Root `package.json` / `pnpm-lock.yaml` | — (none) | — |
+| Workspace config (`pnpm-workspace.yaml`) | — (none) | — |
+| Contract exports (`packages/contracts/src/index.ts`) | AG-4 (CH-01 only, additive export) | wave-1 |
+| Schema registry (`docs/requirements/registry.json` hash) | AG-0 | — |
+| Migration journal (`adapters/storage/postgres/migrations/`) | AG-3 (WB-01; next number: **0004**) | wave-1 |
+| Docker Compose / VPS manifests (`/srv/frank/infra/`) | AG-3 (WB runner deployment only) | wave-1 |
+| `apps/web/src/app/globals.css` + Tailwind config | — (none; A-track done) | — |
+| App shell / rail / console registry | AG-2 (UI-07, after WB-06) | not started |
+| `AGENTS.md` + precedence docs | AG-0 | — |
+
+## Merge order (dependency, not finish order)
+
+1. GOV commit (this file + DECISIONS.md + BASELINE WB-00 + ADR-022/023) → main
+2. WB-01 (migration 0004 + schema) → main
+3. WB-02..WB-04 (runner/provisioner/harness) → main (single branch `agent/wb/wb-core`)
+4. CH-01/CH-02 (contracts + statestore) → main
+5. WB-05..WB-07 (front door, SSE, leash) → main
+6. HITL-01/02 → main → **Gate G3**
+7. CH-03..CH-06 (listener + Telegram) → main (needs bot token — HUMAN-GATED)
+8. FS-*, SS-* (post-G3) → main
+
+## Gates
+
+| Gate | Status | Notes |
+|---|---|---|
+| G0 Authority & baseline | ✅ DONE (this commit) | ADR-022/023 landed, WB-00 facts recorded, decisions locked |
+| G1 Delivery controls | ✅ DONE (prebuilt integration) | verify.yml live, verify-preview skill, red/green proof in history |
+| G2 Workbench core | ⏳ in progress | WB-01..WB-09 |
+| G3 Human loop | blocked on G2 + Telegram token | |
+| G4 Folders & schedules | blocked on G3 | |
+| G5 Release | not started | |
+
+## Human-gated items
+
+- **Telegram bot token**: CH-00 spike + CH-03..CH-06 need a bot token injected via OpenBao/env. Asked Steven 2026-08-06. Until then AG-4 builds CH-01/CH-02 (no token needed).
+
+## Task status
+
+| Task | Owner | Branch | Status |
+|---|---|---|---|
+| GOV-01..04 | AG-0 | main (this commit) | ✅ |
+| WB-00 | AG-0/AG-3 | — | ✅ (facts in BASELINE.md) |
+| WB-01..04 | AG-3 | `agent/wb/wb-core` | 🔄 wave-1 |
+| CH-01, CH-02 | AG-4 | `agent/ch/channelport-statestore` | 🔄 wave-1 |
+| SS-07 | AG-6 | `agent/ss/temporal-boundary` | 🔄 wave-1 (docs only) |
+| CH-00 | AG-4 | — | ⛔ needs bot token |
+| DEL-01..04, UI-01..06, PLG-01..03 | AG-1/AG-2/AG-7 | — | ✅ prebuilt integration (see commit 7586d50) |
+| PLG-04 (trigger eval) | AG-7 | — | open follow-up (issue #14) |
+| FS-01..06 | AG-5 | — | blocked on G3 |
+| SS-01..06 | AG-6 | — | blocked on G3 |

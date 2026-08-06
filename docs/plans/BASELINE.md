@@ -89,3 +89,25 @@ Probed live on the VPS (Phase 5, Step 5.1):
 - systemd unit carries `EnvironmentFile=/root/.config/goose/env` (no GOOSE_PROVIDER/GOOSE_MODEL overrides in the unit itself)
 
 So the expected model string is **`deepseek-chat`** (deepseek-chat V3 via Goose's custom DeepSeek provider). Central itself runs on Letta (deepseek/deepseek-chat) — same model family, different harness. `FRANK_EXPECTED_MODEL=deepseek-chat` is set in `apps/web/.env.local`; the mismatch check compares basenames so both harness spellings match.
+
+## WB-00 — Workbench gating facts (recorded 2026-08-06 by AG-0)
+
+| Fact | Value |
+|---|---|
+| `/dev/kvm` | **absent** → microsandbox pilot (SS-04) closed N/A per M10 |
+| Goose | `1.45.0` at `/root/.local/bin/goose`; ACP server live (`frank-goose.service`) |
+| Goose schedules | none defined |
+| Disk `/` (contains /srv) | 387G total, 141G free (64% used) |
+| Docker | 29.4.0, cgroup v2 — resource limits + non-root containers supported |
+| CPU / RAM | 8 cores / 31 GiB (~21 GiB available at baseline) |
+| Postgres | 16.14 on host (psql); test DB via `FRANK_TEST_DATABASE_URL` (vitest skip when unset) |
+| Migration journal | `adapters/storage/postgres/migrations/` — next number **0004** |
+| Delegation refactor | phases 1–3 landed; `delegation-store.run() → runTurn()` is the seam WB-05 replaces |
+| AgentHarnessAdapter | named by ADR-023 as convergence target; web `ChatProvider`s interim |
+| Preview lane | healthy (`preview.frank.fail`, `preview-deploy.sh`) |
+
+**Initial concurrency limit (AG-0 decision):** **2 concurrent workbenches**, queue beyond.
+Rationale: 8 cores / 21 GiB available with frank-web, Letta, Goose ACP, and Blockwise
+Supabase stack resident; each workbench container budget ≤ 2 cores / 4 GiB. Browser-enabled
+workbenches: **1** (chromium memory). Revisit after G2 with measured provisioning data.
+
