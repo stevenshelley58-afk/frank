@@ -92,12 +92,14 @@ export async function frankStream(
   signal?: AbortSignal,
 ): Promise<void> {
   let doneFired = false;
+  let errorFired = false;
   const fireDone = (info: TurnInfo = {}) => {
-    if (doneFired) return;
+    // Done and error are terminal — whichever fires first wins (Bug 1 guard,
+    // symmetric both ways: error-then-done must not fire onDone either).
+    if (doneFired || errorFired) return;
     doneFired = true;
     callbacks.onDone(info);
   };
-  let errorFired = false;
   const fireError = (e: string) => {
     if (errorFired || doneFired) return;
     errorFired = true;
