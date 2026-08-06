@@ -136,6 +136,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@frank/adapter-harness-goose':
+        specifier: workspace:*
+        version: link:../../adapters/harness/goose
       '@frank/adapter-postgres':
         specifier: workspace:*
         version: link:../../adapters/storage/postgres
