@@ -66,12 +66,14 @@ workbench runner, never as a replacement for it.
 | GOV-01..04 | AG-0/AG-1 | main | ✅ (issue board = #15..#57) |
 | GOV-05/06 | AG-0 | main | ✅ |
 | WB-00 | AG-0/AG-3 | — | ✅ (facts in BASELINE.md) |
-| WB-01..04 | AG-3 | `agent/wb/wb-core` | 🔄 WB-01 built, continuation agent running (cap raised 50→200) |
+| WB-01..04 | AG-3 | `agent/wb/wb-core` | 🔄 4/4 committed, final verify running |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
 | CH-02 | AG-4 | merged dc7ee9a | ✅ conformance 21/21 (M4 hard gate passed) |
 | DEL-04, GOV-04, DEL-05 | AG-1 | `agent/del/delivery-controls` | ✅ merged ff9ab38 |
 | SS-07 | AG-0 | main | ✅ (docs/plans/SS-07_TEMPORAL_BOUNDARY.md) |
 | PLG-04 | AG-7 | `agent/plg/trigger-eval` | ✅ merged abb66d6, issue #14 closed |
+| UI-07 | AG-2 | merged (0753cd6 → main) | ✅ frozen-contract build, verify green |
+| CH-03..05 | AG-4 | `agent/ch/listener-cards` | 🔄 in flight |
 | M14 branch protection | AG-0 | — | ✅ enabled (strict, contexts=[verify]) |
 | CH-00 | AG-4 | — | ⛔ needs bot token |
 | FS-01..06 | AG-5 | — | blocked on G3 (prep done: FS_PREP.md + fixtures) |
