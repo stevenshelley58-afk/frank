@@ -22,7 +22,7 @@ export type ConsoleModule = {
   title: string;
   description: string;
   /** icon key resolved by <ConsoleIcon /> */
-  icon: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks' | 'folder';
+  icon: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks' | 'folder' | 'terminal';
   status: ModuleStatus;
   /** owning system, shown as a muted tag */
   system: string;
@@ -78,6 +78,15 @@ export const consoleModules: ConsoleModule[] = [
     title: 'Tasks',
     description: 'Plane projects and the Google Tasks phone mirror, side by side.',
     icon: 'tasks',
+    status: 'live',
+    system: 'Frank',
+  },
+  {
+    id: 'workbench',
+    title: 'Workbench',
+    description:
+      'Frank’s delegated runs — step-by-step progress, live event log, artifacts, receipts, and the leash stop.',
+    icon: 'terminal',
     status: 'live',
     system: 'Frank',
   },
