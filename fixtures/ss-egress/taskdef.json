@@ -1,0 +1,24 @@
+{
+  "$comment": "SS-03 fixture — srt (sandbox-runtime) egress test profile for workbench containers. Acceptance: inside the workbench, `curl https://example.com` MUST fail and `curl https://registry.npmjs.org` MUST succeed. Filesystem policy stays explicit per mount (WB-03), srt adds the network layer.",
+  "policyVersion": 1,
+  "network": {
+    "default": "deny",
+    "egressAllowlist": [
+      "registry.npmjs.org",
+      "github.com",
+      "codeload.github.com",
+      "preview.frank.fail",
+      "frank.fail"
+    ],
+    "dns": "system"
+  },
+  "filesystem": {
+    "note": "fs policy is owned by WB-03 mount declarations (ro|rw|staged); srt must not widen it.",
+    "inheritFromTaskDef": true
+  },
+  "acceptance": [
+    { "run": "curl -sS -o /dev/null -w '%{http_code}' https://example.com", "expect": "fail|blocked" },
+    { "run": "curl -sS -o /dev/null -w '%{http_code}' https://registry.npmjs.org", "expect": "200" },
+    { "run": "curl -sS https://preview.frank.fail", "expect": "200|301|302" }
+  ]
+}

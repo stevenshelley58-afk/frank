@@ -1,0 +1,15 @@
+{
+  "$comment": "SS-01/SS-02 fixture — trivial scheduled workbench task definition. Each firing mints a FRESH work item + workbench (hard rule: no shared scratch state between runs). Used at G3+; not wired before then.",
+  "instruction": "Echo task: write a receipt file containing the current UTC timestamp and the workbench id, register it as an artifact, and finish. Do not access the network.",
+  "mounts": [],
+  "harness": { "adapter": "goose-headless", "provider": "custom_deepseek", "model": "deepseek-chat" },
+  "skills": [],
+  "leash": { "wallClockSec": 120, "tokenBudget": 20000, "spendCapUsd": 0.10 },
+  "network": { "egressAllowlist": [] },
+  "schedule": {
+    "cron": "*/15 * * * *",
+    "tz": "Asia/Shanghai",
+    "trigger": "goose-schedule-interim",
+    "expectPerFiring": ["new_work_item", "new_workbench", "room_receipt", "audit_entry"]
+  }
+}
