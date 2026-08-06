@@ -415,7 +415,12 @@ async function main() {
   const opts = parseArgs(process.argv.slice(2));
   const specPath = resolveSpec(opts);
   const specRelPath = path.relative(opts.root, specPath).split(path.sep).join('/');
-  const specText = await readFile(specPath, 'utf8');
+  const specTextRaw = await readFile(specPath, 'utf8');
+  // Line-ending normalization (Track B1 CI parity): Windows checkouts with
+  // core.autocrlf=true materialize the spec as CRLF, which would change the
+  // content hash even though the specification is unchanged. Canonicalize to
+  // LF before hashing/parsing so the registry is identical on every platform.
+  const specText = specTextRaw.replace(/\r\n?/g, '\n');
   const specSha = createHash('sha256').update(specText, 'utf8').digest('hex');
 
   const jsonPath = path.join(opts.root, REGISTRY_JSON);
