@@ -340,7 +340,7 @@ export class WorkbenchStore {
         for update skip locked
       `);
       const id = candidate.rows[0]?.id;
-      if (id === undefined) return [];
+      if (id === undefined) return null;
       return tx.execute<WorkbenchRow>(sql`
         update "frank_domain"."workbench" set
           state = 'provisioning',
@@ -354,7 +354,7 @@ export class WorkbenchStore {
         returning ${WORKBENCH_COLUMNS}
       `);
     });
-    const row = rows.rows[0];
+    const row = rows?.rows[0];
     return row === undefined ? null : toRecord(row);
   }
 
