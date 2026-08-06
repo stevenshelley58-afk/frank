@@ -1,4 +1,5 @@
 import type { TodayResponse } from './api';
+import { CENTRAL } from './rooms';
 
 /* ------------------------------------------------------------------ */
 /* Chat message model                                                  */
@@ -50,38 +51,7 @@ export class StreamAbortedError extends Error {
 /* ------------------------------------------------------------------ */
 
 export function centralSeed(): ChatMessage[] {
-  const now = Date.now();
-  return [
-    {
-      id: uid(),
-      from: 'frank',
-      text: "Morning, Steve. The night shift finished clean — 7 runs verified, nothing on fire. I've got your brief in the frame on the right. Want the short version, or shall I just keep watching?",
-      at: now - 4000,
-    },
-    {
-      id: uid(),
-      from: 'steve',
-      text: 'Sort out the LotFile books and tell me where Blockwise stands on the Meta scraping.',
-      at: now - 3000,
-    },
-    {
-      id: uid(),
-      from: 'mention',
-      parts: [
-        { text: 'Delegated to lotfile-frank:', strong: true },
-        { text: ' reconcile the LotFile books. I\u2019ll confirm once it\u2019s verified — you can watch it in the ' },
-        { text: 'Running', strong: true },
-        { text: ' panel.' },
-      ],
-      at: now - 2000,
-    },
-    {
-      id: uid(),
-      from: 'frank',
-      text: 'On it. Handed the books to lotfile-frank — he reads everything but can only write inside LotFile, so Blockwise stays untouched. For Blockwise, blockwise-frank reports the Meta scraper pulled 214 Perth listings overnight; 9 need your tag before the next campaign. I\u2019ve queued those in Waiting on you.',
-      at: now - 1000,
-    },
-  ];
+  return [{ id: uid(), from: 'frank', text: CENTRAL.greeting, at: Date.now() }];
 }
 
 export function roomSeed(greeting: string): ChatMessage[] {
@@ -278,7 +248,7 @@ export function briefFromToday(today: TodayResponse | null): BriefSummary {
     return {
       count: 0,
       topTitle: null,
-      body: 'Quiet board. Nothing scheduled or tracked for today yet — the night shift left it clean.',
+      body: 'Quiet board. Nothing scheduled or tracked for today yet.',
       oneThing: 'Nothing urgent — enjoy the slack.',
     };
   }

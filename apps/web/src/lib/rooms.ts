@@ -51,7 +51,7 @@ export const CENTRAL: Room = {
   headerSub: 'full Frank — reads & writes everywhere · manages the org',
   placeholder: 'Tell Frank anything — he manages the whole org from here…',
   greeting:
-    "Morning, Steve. The night shift finished clean — 7 runs verified, nothing on fire. I've got your brief in the frame on the right. Want the short version, or shall I just keep watching?",
+    "Central's up. Tell me what you need — I'll handle it here or hand it to a room.",
   chips: [
     { label: 'Home', accent: true },
     { label: 'Global write' },
@@ -71,9 +71,9 @@ export const PROJECT_ROOMS: Room[] = [
     headerSub: 'blockwise-frank — reads everywhere, writes only here + shared with approval',
     placeholder: 'Write inside Blockwise — chip and ring say blue, no mistaking it…',
     greeting:
-      "The Meta scraper pulled 214 Perth listings overnight; I verified the set. 9 creatives need your tag before the campaign fires — they're queued in Central's Waiting-on-you panel.",
+      "Blockwise-frank here. Meta ads, scraping, and the studio all live in this room. What are we working on?",
     chips: [{ label: 'Project write' }, { label: 'Global read' }],
-    pulse: '9 tags pending',
+    pulse: 'ready',
   },
   {
     id: 'chase',
@@ -86,9 +86,9 @@ export const PROJECT_ROOMS: Room[] = [
     headerSub: 'chase-frank — a life project, same anatomy as the work rooms',
     placeholder: "Write inside Chase's Game — chip and ring say purple…",
     greeting:
-      "The selfie → character prototype is idle. Say the word and I'll spin up a stylizer pass — every write stays inside this room.",
+      "chase-frank here — the selfie → character project. Say the word and we build; every write stays inside this room.",
     chips: [{ label: 'Project write' }, { label: 'Global read' }],
-    pulse: 'prototype idle',
+    pulse: 'ready',
   },
   {
     id: 'merrypaws',
