@@ -1,6 +1,6 @@
 ---
 name: verify-preview
-description: Chrome-verify a preview URL before handing it over (Track C1). After EVERY preview-deploy.sh run, open the URL in real Chrome, exercise the click-path, capture console/network/screenshot evidence, and only then deliver the link. Broken → fix-and-redeploy loop.
+description: Chrome-verify a preview URL before handing it over. After EVERY preview-deploy.sh run, open the URL in real Chrome, exercise the click-path, capture console/network/screenshot evidence, and only then deliver the link. Broken → fix-and-redeploy loop.
 ---
 
 # Verify Preview
