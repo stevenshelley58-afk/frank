@@ -1,0 +1,9 @@
+# Gitleaks configuration — FRANK DEL-04.
+#
+# Extends the default gitleaks ruleset. Today the allowlist is intentionally
+# empty: no fixture, test, or doc file in this repo is allowed to contain a
+# real-looking secret. If a fixture ever false-positives, add a scoped
+# allowlist entry HERE with a comment explaining why — never disable a rule
+# globally.
+[allowlist]
+paths = []
