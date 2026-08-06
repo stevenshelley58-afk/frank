@@ -137,7 +137,6 @@
  *   - `card` / `muted` keep their Frank DEFAULTs; shadcn foreground keys
  *     (`card-foreground`, `muted-foreground`) are additive.
  * ------------------------------------------------------------------------- */
-:root,
 [data-frank-theme="light"] {
   --background: var(--tw-shell);
   --foreground: var(--tw-ink);
