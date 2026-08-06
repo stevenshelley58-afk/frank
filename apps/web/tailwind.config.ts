@@ -20,7 +20,12 @@ const config: Config = {
       colors: {
         shell: 'rgb(var(--tw-shell) / <alpha-value>)',
         rail: 'rgb(var(--tw-rail) / <alpha-value>)',
-        card: 'rgb(var(--tw-card) / <alpha-value>)',
+        // `card` keeps Frank's DEFAULT surface; `card-foreground` is the
+        // additive shadcn bridge key (see globals.css, Track A1).
+        card: {
+          DEFAULT: 'rgb(var(--tw-card) / <alpha-value>)',
+          foreground: 'rgb(var(--card-foreground) / <alpha-value>)',
+        },
         hover: 'rgb(var(--tw-hover) / <alpha-value>)',
         subtle: 'rgb(var(--tw-subtle) / <alpha-value>)',
         paper: 'rgb(var(--tw-paper) / <alpha-value>)',
@@ -29,7 +34,11 @@ const config: Config = {
         frame: 'rgb(var(--tw-frame) / <alpha-value>)',
         ink: 'rgb(var(--tw-ink) / <alpha-value>)',
         ink2: 'rgb(var(--tw-ink-2) / <alpha-value>)',
-        muted: 'rgb(var(--tw-muted) / <alpha-value>)',
+        // `muted` keeps Frank's DEFAULT; `muted-foreground` is additive.
+        muted: {
+          DEFAULT: 'rgb(var(--tw-muted) / <alpha-value>)',
+          foreground: 'rgb(var(--muted-foreground) / <alpha-value>)',
+        },
         line: 'rgb(var(--tw-line) / <alpha-value>)',
         accent: 'rgb(var(--tw-accent) / <alpha-value>)',
         success: 'rgb(var(--tw-success) / <alpha-value>)',
@@ -37,6 +46,33 @@ const config: Config = {
         warning: 'rgb(var(--tw-warning) / <alpha-value>)',
         danger: 'rgb(var(--tw-danger) / <alpha-value>)',
         acid: 'rgb(var(--tw-acid) / <alpha-value>)',
+        /* ---------------------------------------------------------------
+         * shadcn/ui bridge colors (Track A1). All point at the CSS
+         * variables defined in globals.css which alias the --tw-* triples.
+         * `accent` deliberately NOT redefined: Frank's accent is the signal
+         * color; shadcn hover-surface usages map to `hover` instead.
+         * ------------------------------------------------------------- */
+        background: 'rgb(var(--background) / <alpha-value>)',
+        foreground: 'rgb(var(--foreground) / <alpha-value>)',
+        popover: {
+          DEFAULT: 'rgb(var(--popover) / <alpha-value>)',
+          foreground: 'rgb(var(--popover-foreground) / <alpha-value>)',
+        },
+        primary: {
+          DEFAULT: 'rgb(var(--primary) / <alpha-value>)',
+          foreground: 'rgb(var(--primary-foreground) / <alpha-value>)',
+        },
+        secondary: {
+          DEFAULT: 'rgb(var(--secondary) / <alpha-value>)',
+          foreground: 'rgb(var(--secondary-foreground) / <alpha-value>)',
+        },
+        destructive: {
+          DEFAULT: 'rgb(var(--destructive) / <alpha-value>)',
+          foreground: 'rgb(var(--destructive-foreground) / <alpha-value>)',
+        },
+        border: 'rgb(var(--border) / <alpha-value>)',
+        input: 'rgb(var(--input) / <alpha-value>)',
+        ring: 'rgb(var(--ring) / <alpha-value>)',
       },
       borderRadius: {
         sm: '8px',
@@ -80,6 +116,10 @@ const config: Config = {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // shadcn/ui animation utilities (Track A1): animate-in/out, fade, zoom,
+    // slide — used by dialog/sheet/popover/command/toast components.
+    require('tailwindcss-animate'),
+  ],
 };
 export default config;
