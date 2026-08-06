@@ -809,6 +809,8 @@ describe('ADR-017 OpenAPI', () => {
     };
     expect(document.openapi).toBe('3.1.0');
     expect(Object.keys(document.paths).sort()).toEqual([
+      '/v1/brain/save',
+      '/v1/brain/search',
       '/v1/capture',
       '/v1/system/health',
       '/v1/system/live',
@@ -850,7 +852,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(10);
+    expect(operations).toBe(12);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

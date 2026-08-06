@@ -13,7 +13,7 @@
 import type { FastifyInstance } from 'fastify';
 import { z } from 'zod';
 
-import type { FrankDatabase } from '@frank/adapter-postgres';
+import { newId, type FrankDatabase } from '@frank/adapter-postgres';
 import { sql } from 'drizzle-orm';
 
 import { identifiersOf } from '../context.js';
@@ -188,8 +188,10 @@ export function registerBrainRoutes(
     const tagsLiteral = '{' + tags.map((t) => '"' + t.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"').join(',') + '}';
 
     const inserted = await dependencies.db.execute(
-      sql`INSERT INTO frank_domain.brain_entry (cell_id, owner_id, room_id, title, body, tags, classification)
-          VALUES (${cellId}, ${ownerId}, ${room_id ?? null}, ${title}, ${entryBody}, ${tagsLiteral}::text[], ${classification})
+      // FRANK-§11.1: the caller mints the identifier (UUIDv7) so a replayed
+      // save can assert "this is the id I already used".
+      sql`INSERT INTO frank_domain.brain_entry (id, cell_id, owner_id, room_id, title, body, tags, classification)
+          VALUES (${newId()}, ${cellId}, ${ownerId}, ${room_id ?? null}, ${title}, ${entryBody}, ${tagsLiteral}::text[], ${classification})
           RETURNING id, title, created_at`
     );
 

@@ -26,11 +26,18 @@ import { WORK_KINDS, WORK_PRIORITIES } from './work.js';
 
 const MIGRATIONS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../migrations');
 
+/* Windows checkouts (core.autocrlf=true) materialize the .sql files as CRLF
+ * while the assertions below compare against LF strings; canonicalize to LF
+ * on read so the suite passes identically on Windows and Linux (Track B1
+ * CI parity — same fix as tools/registry/generate-registry.mjs). */
+const readSql = (file: string) =>
+  readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8').replace(/\r\n?/g, '\n');
+
 function migrationSql(): string {
   return readdirSync(MIGRATIONS_DIR)
     .filter((name) => name.endsWith('.sql'))
     .sort()
-    .map((name) => readFileSync(path.join(MIGRATIONS_DIR, name), 'utf8'))
+    .map((name) => readSql(name))
     .join('\n');
 }
 
@@ -38,7 +45,7 @@ function migrationSql(): string {
 function singleMigrationSql(prefix: string): string {
   const name = readdirSync(MIGRATIONS_DIR).find((n) => n.startsWith(prefix) && n.endsWith('.sql'));
   if (name === undefined) throw new Error(`no migration starting with ${prefix} in ${MIGRATIONS_DIR}`);
-  return readFileSync(path.join(MIGRATIONS_DIR, name), 'utf8');
+  return readSql(name);
 }
 
 const SQL = migrationSql();

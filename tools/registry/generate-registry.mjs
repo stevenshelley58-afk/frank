@@ -454,13 +454,18 @@ async function main() {
   }
 
   /* ---------------------------------------------------------------- --check */
+  // Line-ending normalization (Track B1 CI parity): files checked out on
+  // Windows (core.autocrlf=true) materialize as CRLF; the generated text is
+  // LF. Canonicalize both sides before comparing so `--check` behaves
+  // identically on Windows and Linux.
+  const toLf = (text) => text.replace(/\r\n?/g, '\n');
   let failed = false;
 
   const driftMessages = [];
   if (!existsSync(jsonPath)) {
     driftMessages.push(`${REGISTRY_JSON} is missing`);
   } else {
-    const committedText = await readFile(jsonPath, 'utf8');
+    const committedText = toLf(await readFile(jsonPath, 'utf8'));
     if (committedText !== jsonText) {
       driftMessages.push(`${REGISTRY_JSON} differs from the specification`);
       let committed;
@@ -503,7 +508,7 @@ async function main() {
 
   if (!existsSync(mdPath)) {
     driftMessages.push(`${REGISTRY_MD} is missing`);
-  } else if ((await readFile(mdPath, 'utf8')) !== mdText) {
+  } else if (toLf(await readFile(mdPath, 'utf8')) !== mdText) {
     driftMessages.push(`${REGISTRY_MD} differs from the specification`);
   }
 
