@@ -1,0 +1,29 @@
+{
+  "name": "@frank/adapter-collaboration-channels",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Channels collaboration adapter for FRANK. Postgres-backed StateStore for the channel runtime (CH-02, M4); later hosts the ChannelPort implementation (CH-03). Implements contracts from @frank/contracts; the channel surface is never an authority (ADR-022).",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lint: adapter-collaboration-channels'"
+  },
+  "dependencies": {
+    "@copilotkit/channels": "0.7.3",
+    "@frank/contracts": "workspace:*",
+    "pg": "8.22.0"
+  },
+  "devDependencies": {
+    "@types/pg": "8.20.0",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  },
+  "frank": {
+    "layer": "adapter",
+    "mayDependOn": ["@frank/contracts"]
+  }
+}
