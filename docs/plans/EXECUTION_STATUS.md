@@ -67,8 +67,8 @@ workbench runner, never as a replacement for it.
 | GOV-05/06 | AG-0 | main | ✅ |
 | WB-00 | AG-0/AG-3 | — | ✅ (facts in BASELINE.md) |
 | WB-01..04 | AG-3 | `agent/wb/wb-core` | 🔄 WB-01 built, continuation agent running (cap raised 50→200) |
-| CH-01 | AG-4 | `agent/ch/channelport-statestore` | ✅ committed 002e7bf |
-| CH-02 | AG-4 | `agent/ch/channelport-statestore` | 🔄 in flight |
+| CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
+| CH-02 | AG-4 | merged dc7ee9a | ✅ conformance 21/21 (M4 hard gate passed) |
 | DEL-04, GOV-04, DEL-05 | AG-1 | `agent/del/delivery-controls` | ✅ merged ff9ab38 |
 | SS-07 | AG-0 | main | ✅ (docs/plans/SS-07_TEMPORAL_BOUNDARY.md) |
 | PLG-04 | AG-7 | `agent/plg/trigger-eval` | ✅ merged abb66d6, issue #14 closed |
