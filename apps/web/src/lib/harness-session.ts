@@ -18,6 +18,8 @@ const primed = new Set<string>();
 export interface TurnMeta {
   harness: string;
   reason: string;
+  /** What model the harness reports it is running (cheap per-turn read). */
+  modelInfo: { provider: string | null; model: string | null };
 }
 
 export interface RunTurnArgs {
@@ -73,7 +75,9 @@ export async function runTurn(args: RunTurnArgs): Promise<{ text: string; meta: 
       onChunk(chunk);
     }
     endRoomTurn(roomId, { snippet: fullText });
-    return { text: fullText, meta: { harness: provider.id, reason } };
+    // Cheap per-turn read — lets the UI show the real model behind the harness.
+    const modelInfo = await provider.modelInfo().catch(() => ({ provider: null, model: null }));
+    return { text: fullText, meta: { harness: provider.id, reason, modelInfo } };
   } catch (err) {
     endRoomTurn(roomId, { error: String(err) });
     dropSession(roomId);

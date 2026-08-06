@@ -12,7 +12,7 @@
  * The interface explains the actual selection in plain language, per §8.4.
  */
 
-import { createSession, streamMessage, gooseHealth } from './goose-server';
+import { createSession, streamMessage, gooseHealth, gooseModelInfo } from './goose-server';
 import { ensureAgent, streamLettaMessage, lettaHealth } from './letta-server';
 
 /* ------------------------------------------------------------------ */
@@ -32,6 +32,8 @@ export interface ChatProvider {
   createSession(workdir: string): Promise<string>;
   /** stream text chunks for one turn */
   stream(sessionId: string, prompt: string): AsyncGenerator<string, void, unknown>;
+  /** What model is actually behind this harness right now. */
+  modelInfo(): Promise<{ provider: string | null; model: string | null }>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -45,6 +47,7 @@ const gooseProvider: ChatProvider = {
   health: gooseHealth,
   createSession: (workdir) => createSession(workdir),
   stream: (sessionId, prompt) => streamMessage(sessionId, prompt),
+  modelInfo: gooseModelInfo,
 };
 
 /* ------------------------------------------------------------------ */
@@ -72,6 +75,10 @@ const lettaProvider: ChatProvider = {
   },
   stream: (roomId, prompt) =>
     streamLettaMessage(roomId, lettaPersonaByRoom.get(roomId) ?? '', prompt),
+  modelInfo: async () => ({
+    provider: 'letta',
+    model: process.env.LETTA_DEFAULT_MODEL ?? 'deepseek/deepseek-chat',
+  }),
 };
 
 /* ------------------------------------------------------------------ */
@@ -86,12 +93,38 @@ export function registerProvider(p: ChatProvider): void {
   providers.set(p.id, p);
 }
 
-export function listProviders(): Array<Omit<ChatProvider, 'stream' | 'createSession' | 'health'>> {
+export function listProviders(): Array<Omit<ChatProvider, 'stream' | 'createSession' | 'health' | 'modelInfo'>> {
   return [...providers.values()].map((p) => ({ id: p.id, label: p.label, blurb: p.blurb }));
 }
 
 export function getProvider(id: string): ChatProvider | undefined {
   return providers.get(id);
+}
+
+/* ------------------------------------------------------------------ */
+/* Expected model + mismatch warning                                   */
+/* ------------------------------------------------------------------ */
+
+/**
+ * The model Steve believes he is running, declared in env. When the harness
+ * reports something else, the UI shows a warning — a silent model swap is the
+ * single most expensive kind of drift in this system.
+ */
+export function expectedModel(): string | null {
+  return process.env.FRANK_EXPECTED_MODEL ?? null;
+}
+
+export function modelMismatch(actual: string | null): boolean {
+  const exp = expectedModel();
+  if (!exp || !actual) return false;
+  // Compare basenames: Goose reports 'deepseek-chat' while Letta reports
+  // 'deepseek/deepseek-chat' — same model, different harness spelling.
+  const base = (s: string) => {
+    const t = s.trim().toLowerCase();
+    const i = t.lastIndexOf('/');
+    return i === -1 ? t : t.slice(i + 1);
+  };
+  return base(exp) !== base(actual);
 }
 
 /* ------------------------------------------------------------------ */
@@ -180,13 +213,28 @@ export interface ProviderStatus {
   label: string;
   blurb: string;
   healthy: boolean;
+  /** What model the harness reports it is running right now. */
+  model: string | null;
+  modelProvider: string | null;
+  expectedModel: string | null;
+  modelMismatch: boolean;
 }
 
 export async function providerStatuses(): Promise<ProviderStatus[]> {
   const out: ProviderStatus[] = [];
   for (const p of providers.values()) {
     const healthy = await p.health().catch(() => false);
-    out.push({ id: p.id, label: p.label, blurb: p.blurb, healthy });
+    const mi = await p.modelInfo().catch(() => ({ provider: null, model: null }));
+    out.push({
+      id: p.id,
+      label: p.label,
+      blurb: p.blurb,
+      healthy,
+      model: mi.model,
+      modelProvider: mi.provider,
+      expectedModel: expectedModel(),
+      modelMismatch: modelMismatch(mi.model),
+    });
   }
   return out;
 }

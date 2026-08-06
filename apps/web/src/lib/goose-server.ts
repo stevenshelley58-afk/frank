@@ -283,3 +283,32 @@ export async function gooseHealth(): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * What model is actually behind Goose right now. Goose's ACP surface does not
+ * report its model, so read the config it was started with. Path override:
+ * FRANK_GOOSE_CONFIG. Env wins over config file (Goose's own precedence).
+ */
+export async function gooseModelInfo(): Promise<{ provider: string | null; model: string | null }> {
+  const { readFile } = await import('node:fs/promises');
+  const { homedir } = await import('node:os');
+  const { join } = await import('node:path');
+  const path =
+    process.env.FRANK_GOOSE_CONFIG ?? join(homedir(), '.config', 'goose', 'config.yaml');
+  try {
+    const raw = await readFile(path, 'utf8');
+    const grab = (k: string) => {
+      const m = raw.match(new RegExp(`^\\s*${k}\\s*:\\s*["']?([^"'\\n]+)`, 'im'));
+      return m ? m[1].trim() : null;
+    };
+    return {
+      provider: process.env.GOOSE_PROVIDER ?? grab('GOOSE_PROVIDER') ?? grab('provider'),
+      model: process.env.GOOSE_MODEL ?? grab('GOOSE_MODEL') ?? grab('model'),
+    };
+  } catch {
+    return {
+      provider: process.env.GOOSE_PROVIDER ?? null,
+      model: process.env.GOOSE_MODEL ?? null,
+    };
+  }
+}

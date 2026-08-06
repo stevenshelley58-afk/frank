@@ -23,6 +23,7 @@ import { NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 
 import { runTurn, dropSession } from '@/lib/harness-session';
+import { expectedModel, modelMismatch } from '@/lib/providers';
 import { getMemory } from '@/lib/memory-server';
 import { memoryScope, deploymentScope } from '@/lib/memory-scope';
 import { getAssembler, PACK_KEY_HANDLE, PACK_SIGNER_ID } from '@/lib/kernel';
@@ -146,7 +147,16 @@ export async function POST(req: NextRequest) {
           send({ text: fullText });
         }
 
-        send({ done: true, harness: meta.harness, reason: meta.reason, packHash });
+        send({
+          done: true,
+          harness: meta.harness,
+          reason: meta.reason,
+          packHash,
+          model: meta.modelInfo.model,
+          modelProvider: meta.modelInfo.provider,
+          expectedModel: expectedModel(),
+          modelMismatch: modelMismatch(meta.modelInfo.model),
+        });
 
         getMemory()
           .store({

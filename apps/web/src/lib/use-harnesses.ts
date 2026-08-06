@@ -9,6 +9,11 @@ export interface ProviderInfo {
   label: string;
   blurb: string;
   healthy: boolean;
+  /** What model the harness reports it is running right now. */
+  model?: string | null;
+  modelProvider?: string | null;
+  expectedModel?: string | null;
+  modelMismatch?: boolean;
 }
 
 interface ProvidersResponse {

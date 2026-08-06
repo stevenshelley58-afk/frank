@@ -80,3 +80,12 @@ npm_config_engine_strict=false pnpm -w test
 2. `dispatchDelegation(p: ParsedDelegation)` in `delegation.ts` was the only remaining
    consumer of the deleted `ParsedDelegation` interface; its parameter is now an inline
    structural type with the same shape. File is deleted entirely in Phase 2 anyway.
+
+## Goose model as of 2026-08-06
+
+Probed live on the VPS (Phase 5, Step 5.1):
+
+- `~/.config/goose/config.yaml`: `active_provider: custom_deepseek`, both provider blocks `model: deepseek-chat`
+- systemd unit carries `EnvironmentFile=/root/.config/goose/env` (no GOOSE_PROVIDER/GOOSE_MODEL overrides in the unit itself)
+
+So the expected model string is **`deepseek-chat`** (deepseek-chat V3 via Goose's custom DeepSeek provider). Central itself runs on Letta (deepseek/deepseek-chat) — same model family, different harness. `FRANK_EXPECTED_MODEL=deepseek-chat` is set in `apps/web/.env.local`; the mismatch check compares basenames so both harness spellings match.

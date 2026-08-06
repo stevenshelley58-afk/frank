@@ -92,9 +92,19 @@ export function roomSeed(greeting: string): ChatMessage[] {
 /* Real agent brain — streams from Goose via /api/chat SSE             */
 /* ------------------------------------------------------------------ */
 
+export interface TurnInfo {
+  harness?: string;
+  reason?: string;
+  model?: string | null;
+  modelProvider?: string | null;
+  expectedModel?: string | null;
+  modelMismatch?: boolean;
+  packHash?: string | null;
+}
+
 export interface StreamCallbacks {
   onChunk: (text: string) => void;
-  onDone: () => void;
+  onDone: (info: TurnInfo) => void;
   onError: (err: string) => void;
 }
 
@@ -112,10 +122,10 @@ export async function frankStream(
   signal?: AbortSignal,
 ): Promise<void> {
   let doneFired = false;
-  const fireDone = () => {
+  const fireDone = (info: TurnInfo = {}) => {
     if (doneFired) return;
     doneFired = true;
-    callbacks.onDone();
+    callbacks.onDone(info);
   };
   let errorFired = false;
   const fireError = (e: string) => {
@@ -177,7 +187,7 @@ export async function frankStream(
         try {
           const evt = JSON.parse(json);
           if (evt.text) callbacks.onChunk(evt.text);
-          if (evt.done) fireDone();
+          if (evt.done) fireDone(evt as TurnInfo);
           if (evt.error) fireError(evt.error);
         } catch {
           // skip malformed SSE

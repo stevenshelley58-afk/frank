@@ -9,6 +9,7 @@ import {
   roomSeed,
   uid,
   type ChatMessage,
+  type TurnInfo,
 } from '@/lib/frank';
 import { AuthErrorCard, useAuth } from '@/components/providers';
 import { useDelegations } from '@/lib/use-delegations';
@@ -37,6 +38,8 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   const [sending, setSending] = useState(false);
   /** ChatGPT-style edit-and-resend: the user message being rewritten. */
   const [editing, setEditing] = useState<ChatMessage | null>(null);
+  /** Harness/model info from the last completed turn — shown as a chip. */
+  const [turnInfo, setTurnInfo] = useState<TurnInfo | null>(null);
   const timerRef = useRef<number | null>(null);
   /** AbortController for the active Frank stream — powers the Stop button. */
   const abortRef = useRef<AbortController | null>(null);
@@ -90,13 +93,14 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
           setTyping(false);
           updateLast(accumulated);
         },
-        onDone: () => {
+        onDone: (info) => {
           finished = true;
           abortRef.current = null;
           setTyping(false);
           const final = accumulated || 'Acknowledged. Working on it.';
           if (!accumulated) updateLast(final);
           setSending(false);
+          setTurnInfo(info);
         },
         onError: (err) => {
           finished = true;
@@ -206,6 +210,7 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   return (
     <div className="flex h-full flex-col">
       {status === 'error' && <AuthErrorCard />}
+      <ModelChip info={turnInfo} />
       <Thread
         messages={messages}
         typing={typing}
@@ -225,6 +230,44 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
         onCancelEdit={() => setEditing(null)}
         onTyping={() => {}}
       />
+    </div>
+  );
+}
+
+/**
+ * Small monospace chip showing which harness + model just ran the turn.
+ * Unknown is shown muted (never hidden) — an unknown model is information.
+ * A mismatch against FRANK_EXPECTED_MODEL turns it into a warning chip.
+ */
+function ModelChip({ info }: { info: TurnInfo | null }) {
+  if (!info) return null;
+  const harness = info.harness ?? 'harness?';
+  if (!info.model) {
+    return (
+      <div className="flex justify-end px-5 pt-1.5 md:px-7">
+        <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-muted/60">
+          {harness} · model unknown
+        </span>
+      </div>
+    );
+  }
+  if (info.modelMismatch) {
+    return (
+      <div className="flex justify-end px-5 pt-1.5 md:px-7">
+        <span
+          className="rounded border border-[#b08a3e]/50 bg-[#b08a3e]/10 px-1.5 py-0.5 font-mono text-[9px] uppercase tracking-[0.08em] text-[#b08a3e]"
+          title={`Expected ${info.expectedModel}, harness reports ${info.model}`}
+        >
+          ⚠ {harness} · {info.model}
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="flex justify-end px-5 pt-1.5 md:px-7">
+      <span className="font-mono text-[9px] uppercase tracking-[0.08em] text-muted/80">
+        {harness} · {info.model}
+      </span>
     </div>
   );
 }

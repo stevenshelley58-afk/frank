@@ -135,6 +135,19 @@ export function AgentConsole() {
                   </span>
                 </div>
                 <p className="mt-0.5 truncate text-[12px] text-muted">{p.blurb}</p>
+                <p className="mt-0.5 font-mono text-[10px] text-muted/80">
+                  {p.model ? (
+                    p.modelMismatch ? (
+                      <span className="text-[#b08a3e]" title={`Expected ${p.expectedModel}, harness reports ${p.model}`}>
+                        ⚠ model: {p.model} (expected {p.expectedModel})
+                      </span>
+                    ) : (
+                      <>model: {p.model}{p.modelProvider ? ` (${p.modelProvider})` : ''}</>
+                    )
+                  ) : (
+                    'model unknown'
+                  )}
+                </p>
               </div>
               <span
                 className={`font-mono text-[10px] uppercase tracking-wide ${
