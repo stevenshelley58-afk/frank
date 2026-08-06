@@ -24,6 +24,7 @@
 import { drizzle } from 'drizzle-orm/node-postgres';
 import type { NodePgDatabase } from 'drizzle-orm/node-postgres';
 import { migrate } from 'drizzle-orm/node-postgres/migrator';
+import { fileURLToPath } from 'node:url';
 import pg from 'pg';
 
 import * as schema from './schema/index.js';
@@ -82,9 +83,16 @@ export function createDatabase(options: CreateDatabaseOptions): FrankDatabaseHan
   };
 }
 
-/** Absolute path to the committed migration folder. */
+/**
+ * Absolute path to the committed migration folder.
+ *
+ * `fileURLToPath` rather than `url.pathname`: on Windows `pathname` yields
+ * `/C:/...`, which no `fs` call accepts, and drizzle's migrator then fails
+ * with "Can't find meta/_journal.json file" even though the folder exists.
+ * `fileURLToPath` produces a valid native path on every platform.
+ */
 export function migrationsFolder(): string {
-  return new URL('../migrations', import.meta.url).pathname;
+  return fileURLToPath(new URL('../migrations', import.meta.url));
 }
 
 /**
