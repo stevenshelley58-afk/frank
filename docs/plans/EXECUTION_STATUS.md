@@ -67,7 +67,7 @@ workbench runner, never as a replacement for it.
 | WB-00 | AG-0/AG-3 | — | ✅ (facts in BASELINE.md) |
 | WB-01..04 | AG-3 | `agent/wb/wb-core` | 🔄 wave-1 |
 | CH-01, CH-02 | AG-4 | `agent/ch/channelport-statestore` | 🔄 wave-1 |
-| SS-07 | AG-6 | `agent/ss/temporal-boundary` | 🔄 wave-1 (docs only) |
+| SS-07 | AG-0 | main | ✅ (docs/plans/SS-07_TEMPORAL_BOUNDARY.md) |
 | CH-00 | AG-4 | — | ⛔ needs bot token |
 | DEL-01..04, UI-01..06, PLG-01..03 | AG-1/AG-2/AG-7 | — | ✅ prebuilt integration (see commit 7586d50) |
 | PLG-04 (trigger eval) | AG-7 | — | open follow-up (issue #14) |
