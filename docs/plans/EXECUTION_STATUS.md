@@ -39,6 +39,22 @@ Master plan: `docs/plans/FRANK_MASTER_PARALLEL_BUILD_PLAN.md`
 | G4 Folders & schedules | blocked on G3 | |
 | G5 Release | not started | |
 
+## GOV-06: stably/orca re-review (recorded 2026-08-06)
+
+**Decision: CONTINUE-BUILD.** Evidence: 2026-08-02 repo review (session
+20260802_132510_8d702d, log: /srv/frank/repo/docs/research/repo-reviews.md)
+rated orca 🟡 "evaluate later" — it is a cockpit for a fleet of coding agents
+in parallel git worktrees with a phone companion app. It owns no work items,
+no approval state machine, no fences, no receipts, no VPS control plane, and
+its execution unit is a git worktree, not an isolated container workspace.
+Per the GOV-06 decision rule it could only accelerate presentation/session-
+steering pieces — and Wave 3's surfaces (Telegram cards via ChannelPort,
+Running/Waiting/Files UI) are canonical-state renderers we must own anyway.
+Nothing it offers replaces CH-06 or the Wave 3 surface work. Revisit trigger:
+if Frank needs N-way competitive agent fan-out on one repo (Steven's
+"multiple agents on 1 project" ask), evaluate orca as a layer UNDER the
+workbench runner, never as a replacement for it.
+
 ## Human-gated items
 
 - **Telegram bot token**: CH-00 spike + CH-03..CH-06 need a bot token injected via OpenBao/env. Asked Steven 2026-08-06. Until then AG-4 builds CH-01/CH-02 (no token needed).
