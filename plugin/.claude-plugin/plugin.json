@@ -1,0 +1,11 @@
+{
+  "name": "frank",
+  "version": "0.1.0",
+  "description": "Frank — the agent operating system. Skills that teach any Claude session Frank's rules (RULE 0 preview-first), deploy lane, TDD and debug discipline, and review workflow. The in-repo skills/ tree stays canonical; this plugin is regenerated from it by plugin/build.sh.",
+  "author": {
+    "name": "Steven Shelley",
+    "email": "stevenshelley58@gmail.com"
+  },
+  "homepage": "https://frank.fail",
+  "repository": "https://github.com/stevenshelley58-afk/frank"
+}
