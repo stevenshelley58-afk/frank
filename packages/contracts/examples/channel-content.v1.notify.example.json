@@ -1,0 +1,15 @@
+{
+  "schema": "frank.channel-content/v1",
+  "contentId": "cc-01J8Z9B2W4K5R9T3V6X0B4N7D9",
+  "cellId": "cell-steven-primary",
+  "roomId": "room-daily-brief",
+  "title": "Morning brief",
+  "blocks": [
+    {
+      "kind": "text",
+      "text": "Two items are waiting on you today; one run completed overnight with no incidents."
+    }
+  ],
+  "actions": [],
+  "createdAt": "2026-08-06T07:00:00.000Z"
+}
