@@ -72,7 +72,7 @@ workbench runner, never as a replacement for it.
 | WB-07 | AG-3 | merged 371d7f1 | ✅ runner leash + Stop route, integration 7/7, issue #17 closed |
 | HITL-01 | AG-3 | merged 2174980 | ✅ normal decision items + pause, integration 5/5, issue #20 closed |
 | HITL-02 | AG-3 | merged 2174980 | ✅ resume/deny/stale-rejection via command envelope, issue #21 closed |
-| WB-08 | AG-3 | `agent/wb/wb-behavior` | 🔄 artifacts + receipt + verification state |
+| WB-08 | AG-3 | merged 613c459 | ✅ artifacts + room list + reopen-with-note, integration 4/4, issue #25 closed |
 | WB-09 | AG-3 | — | next: restart durability + cleanup |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
 | CH-02 | AG-4 | merged dc7ee9a | ✅ conformance 21/21 (M4 hard gate passed) |
