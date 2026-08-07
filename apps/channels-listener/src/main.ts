@@ -99,8 +99,25 @@ export async function startListener(config: ListenerConfig): Promise<{ stop: () 
 
   let offset = 0;
   let running = true;
+  // CH-07: run the expiry sweep periodically (not on every poll — it scans the
+  // durable registration index). Every Nth poll cycle.
+  let pollCount = 0;
+  const sweepEvery = Math.max(1, Math.floor(60 / Math.max(1, config.pollTimeoutSec)));
 
   const pollOnce = async (): Promise<void> => {
+    // Periodic expiry sweep (CH-07). A sweep failure must never block tapping.
+    pollCount += 1;
+    if (pollCount % sweepEvery === 0) {
+      try {
+        const expired = await adapter.sweepExpired();
+        if (expired.length > 0) {
+          log.info(`expiry sweep: marked ${expired.length} decision(s) expired`);
+        }
+      } catch (error) {
+        log.error(`expiry sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+
     let updates;
     try {
       updates = await transport.getUpdates(offset, config.pollTimeoutSec);

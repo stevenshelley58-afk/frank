@@ -50,6 +50,8 @@ const BINDING_KEY = (roomId: string): string => `wb:bind:${roomId}`;
 const REGISTRATION_KEY = (registrationId: string): string => `wb:reg:${registrationId}`;
 /** Reverse index: a pending decision per work item (one open decision at a time). */
 const OPEN_BY_WORK_ITEM_KEY = (workItemId: string): string => `wb:open:${workItemId}`;
+/** Durable index of ALL registration ids (CH-07 expiry sweep enumerates this). */
+const REGISTRATION_INDEX_KEY = 'wb:reg:index';
 
 /** Durable record of a surfaced decision card. */
 export interface DecisionRegistrationRecord {
@@ -163,6 +165,9 @@ export class TelegramChannelAdapter implements ChannelPort {
     };
     await this.store.kv.set(REGISTRATION_KEY(registrationId), record);
     await this.store.kv.set(OPEN_BY_WORK_ITEM_KEY(request.workItemId), registrationId);
+    // Durable index so the CH-07 expiry sweep can enumerate registrations
+    // after a restart (the sweep cannot guess registration ids).
+    await this.store.list.append(REGISTRATION_INDEX_KEY, registrationId, { maxLen: 5000 });
 
     return {
       registrationId,
@@ -269,6 +274,9 @@ export class TelegramChannelAdapter implements ChannelPort {
     if (record === undefined) {
       return { expired: true, reason: 'This decision has already been handled or expired.' };
     }
+    if (record.state === 'expired') {
+      return { expired: true, reason: 'This offer expired before you responded.' };
+    }
     if (record.state !== 'pending') {
       return { expired: true, reason: 'This decision was already resolved.' };
     }
@@ -305,6 +313,53 @@ export class TelegramChannelAdapter implements ChannelPort {
       // A failed card update must not mask the resolved work state.
       this.log(`card update failed for ${registrationId}: ${error instanceof Error ? error.message : String(error)}`);
     }
+  }
+
+  /**
+   * CH-07 — expiry sweep. Enumerates the durable registration index, marks any
+   * PENDING registration past its `expiresAt` as expired, updates its card in
+   * place (expiry footer, buttons gone), and clears the open-by-work-item
+   * index so a late tap is refused. Returns the ids newly expired.
+   *
+   * Deliberate retention policy: expired records are NOT deleted — they stay
+   * durable so a late tap can be answered "expired" rather than "unknown",
+   * and so the audit trail is complete. The index is capped (maxLen) so it
+   * cannot grow without bound.
+   */
+  async sweepExpired(): Promise<string[]> {
+    const ids = await this.store.list.range<string>(REGISTRATION_INDEX_KEY);
+    const expired: string[] = [];
+    const nowIso = this.now().toISOString();
+    for (const registrationId of ids) {
+      const record = await this.store.kv.get<DecisionRegistrationRecord>(
+        REGISTRATION_KEY(registrationId),
+      );
+      if (record === undefined) continue;
+      if (record.state !== 'pending') continue;
+      if (record.expiresAt === undefined) continue; // no expiry set -> never expires
+      if (record.expiresAt >= nowIso) continue; // still within the window
+
+      record.state = 'expired';
+      await this.store.kv.set(REGISTRATION_KEY(registrationId), record);
+      await this.store.kv.delete(OPEN_BY_WORK_ITEM_KEY(record.workItemId));
+      expired.push(registrationId);
+
+      try {
+        await this.transport.editMessageText(
+          record.chatId,
+          record.messageId,
+          escapeHtml('⏱ Offer expired — no action was taken'),
+          { parse_mode: 'HTML' },
+        );
+      } catch (error) {
+        // Card-update failure must not block the sweep; the state is already
+        // durable. Log and continue.
+        this.log(
+          `expiry card update failed for ${registrationId}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return expired;
   }
 
   /* -------------------------------------------------------------- helpers --- */
