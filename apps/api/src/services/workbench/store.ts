@@ -230,6 +230,16 @@ export class WorkbenchStore {
     }));
   }
 
+  /** WB-08 / frozen contract: list workbenches for one room, newest first. */
+  async listByRoom(cellId: string, roomId: string): Promise<readonly WorkbenchRecord[]> {
+    const rows = await this.db.execute<WorkbenchRow>(sql`
+      select ${WORKBENCH_COLUMNS} from "frank_domain"."workbench"
+      where cell_id = ${cellId} and room_id = ${roomId}
+      order by created_at desc, id
+    `);
+    return rows.rows.map(toRecord);
+  }
+
   /**
    * Append one event. `seq` defaults to max(seq)+1 within the workbench;
    * pass it explicitly when the caller already allocated one (the claim path

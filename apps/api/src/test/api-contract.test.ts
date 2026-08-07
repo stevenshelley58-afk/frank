@@ -812,6 +812,8 @@ describe('ADR-017 OpenAPI', () => {
       '/v1/brain/save',
       '/v1/brain/search',
       '/v1/capture',
+      // Frozen contract: room workbench list (UI-07 Running/waiting surfaces).
+      '/v1/rooms/{roomId}/workbenches',
       '/v1/system/health',
       '/v1/system/live',
       '/v1/system/ready',
@@ -824,8 +826,12 @@ describe('ADR-017 OpenAPI', () => {
       // WB-05: the workbench front door (frozen contract WORKBENCH_API_CONTRACT.md).
       '/v1/workbenches',
       '/v1/workbenches/{id}',
+      // WB-08: artifact registration + reopen-with-note.
+      '/v1/workbenches/{id}/artifacts',
       // HITL-01: decision seam (normal decision work item + pause).
       '/v1/workbenches/{id}/decisions',
+      // WB-08: Central reopens a done workbench with a note.
+      '/v1/workbenches/{id}/reopen',
       // WB-07: first-class Stop (leash + cancellation).
       '/v1/workbenches/{id}/stop',
     ]);
@@ -859,7 +865,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(16);
+    expect(operations).toBe(19);
   });
 
   it('never documents an operation that can return secret-class data', async () => {
