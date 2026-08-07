@@ -81,7 +81,8 @@ workbench runner, never as a replacement for it.
 | CH-07 | AG-4 | merged d780643 | ✅ expiry sweep + retry/dead-letter + outage isolation + exit path, issue #35 closed |
 | **Channels stack CH-01..07** | AG-4 | main | ✅ **COMPLETE** (live phone proof pending bot token) |
 | FS-02 | AG-5 | `agent/fs/folder-bindings` | 🔄 folder-binding backend (agent in flight; migration 0006 journal entry collides with CH-06 — will rebase) |
-| WB-10 | AG-3 | `agent/wb/harness-swap` | 🔄 harness-swap proof (dispatched) |
+| WB-10 | AG-3 | merged 6a3ee7d | ✅ harness-swap proof (goose+cli equivalence), issue #27 closed |
+| **Workbench track WB-01..10** | AG-3 | main | ✅ **COMPLETE** |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
 | CH-02 | AG-4 | merged dc7ee9a | ✅ conformance 21/21 (M4 hard gate passed) |
 | DEL-04, GOV-04, DEL-05 | AG-1 | `agent/del/delivery-controls` | ✅ merged ff9ab38 |
