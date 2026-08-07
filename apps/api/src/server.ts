@@ -62,6 +62,8 @@ import { provenanceRoutes, registerProvenanceRoutes } from './routes/provenance.
 import { registerTodayRoutes, todayRoutes } from './routes/today.js';
 import { registerWorkRoutes, workRoutes } from './routes/work.js';
 import { registerWorkbenchRoutes, workbenchRoutes } from './routes/workbench.js';
+import { registerWorkbenchEventsRoute } from './routes/workbench-events.js';
+import { WorkbenchEventBus } from './services/workbench/event-bus.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { registerCodegraphRoutes } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
@@ -158,6 +160,8 @@ export interface BuildServerOptions {
   readonly startedAt?: Date;
   /** Raw DB handle for brain routes (raw SQL queries, not yet in DomainStore). */
   readonly db?: import("@frank/adapter-postgres").FrankDatabase;
+  /** WB-06: workbench SSE live-poll interval (tests use a fast value). */
+  readonly workbenchPollIntervalMs?: number;
 }
 
 export interface BuiltServer {
@@ -353,10 +357,22 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     registerBrainRoutes(app, { ...shared, db: options.db });
     // Workbench routes need Postgres (the front door + store are raw-SQL on
     // frank_domain); like brain, they only register when a DB handle exists.
+    // ONE event bus is shared by the store (writer notifications) and the SSE
+    // route (live delivery) — WB-06.
+    const workbenchBus = new WorkbenchEventBus();
+    const workbenchFrontDoor = new WorkbenchFrontDoor(options.db, workbenchBus);
     registerWorkbenchRoutes(app, {
       ...shared,
-      frontDoor: new WorkbenchFrontDoor(options.db),
+      frontDoor: workbenchFrontDoor,
       actions,
+    });
+    registerWorkbenchEventsRoute(app, {
+      ...shared,
+      frontDoor: workbenchFrontDoor,
+      bus: workbenchBus,
+      ...(options.workbenchPollIntervalMs === undefined
+        ? {}
+        : { pollIntervalMs: options.workbenchPollIntervalMs }),
     });
   }
 
