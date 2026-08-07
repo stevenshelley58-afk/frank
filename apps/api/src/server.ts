@@ -61,7 +61,7 @@ import { healthRoutes, registerHealthRoutes } from './routes/health.js';
 import { provenanceRoutes, registerProvenanceRoutes } from './routes/provenance.js';
 import { registerTodayRoutes, todayRoutes } from './routes/today.js';
 import { registerWorkRoutes, workRoutes } from './routes/work.js';
-import { registerWorkbenchRoutes, workbenchRoutes } from './routes/workbench.js';
+import { registerWorkbenchRoutes, workbenchAllRoutes } from './routes/workbench.js';
 import { registerWorkbenchEventsRoute } from './routes/workbench-events.js';
 import { WorkbenchEventBus } from './services/workbench/event-bus.js';
 import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
@@ -78,7 +78,7 @@ import type { DomainStore } from './services/store.js';
 export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...captureRoutes,
   ...workRoutes,
-  ...workbenchRoutes,
+  ...workbenchAllRoutes,
   ...provenanceRoutes,
   ...todayRoutes,
   ...healthRoutes,

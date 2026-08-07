@@ -200,3 +200,61 @@ export const workbenchDecisionResponseSchema = z
     identifiers: identifiersSchema,
   })
   .strict();
+
+/* ------------------------------------------------ WB-08 artifacts/receipt --- */
+
+/** POST /v1/workbenches/:id/artifacts body (master plan §4.2 artifact shape). */
+export const workbenchArtifactBodySchema = z
+  .object({
+    command_id: z.string().min(1).optional(),
+    path: z.string().min(1).max(2000),
+    kind: z.string().min(1).max(100),
+    preview_url: z.string().url().max(2000).optional(),
+    sha256: z.string().regex(/^[0-9a-f]{64}$/).optional(),
+    media_type: z.string().max(200).optional(),
+  })
+  .strict();
+
+export const workbenchArtifactResponseSchema = z
+  .object({
+    artifact_id: z.string(),
+    workbench_id: z.string(),
+    path: z.string(),
+    identifiers: identifiersSchema,
+  })
+  .strict();
+
+/* --------------------------------------------------------- room workbenches --- */
+
+export const workbenchRoomParamsSchema = z
+  .object({ roomId: z.string().min(1) })
+  .strict();
+
+export const workbenchRoomListResponseSchema = z
+  .object({
+    workbenches: z.array(workbenchRecordSchema),
+    identifiers: identifiersSchema,
+  })
+  .strict();
+
+/* ---------------------------------------------- WB-08 reopen-with-note --- */
+
+/**
+ * POST /v1/workbenches/:id/reopen body — Central reopens a `done` workbench
+ * with a note rather than silently accepting bad output (master plan §8D
+ * WB-08). Moves the run back to `verifying` so it can be re-run or re-reviewed.
+ */
+export const workbenchReopenBodySchema = z
+  .object({
+    command_id: z.string().min(1).optional(),
+    note: z.string().min(1).max(2000),
+  })
+  .strict();
+
+export const workbenchReopenResponseSchema = z
+  .object({
+    workbench_id: z.string(),
+    workbench_state: z.literal('verifying'),
+    identifiers: identifiersSchema,
+  })
+  .strict();

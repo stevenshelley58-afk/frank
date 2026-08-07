@@ -16,7 +16,7 @@
  * workbench is execution detail for that item, never a second state machine.
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 
 import { z } from 'zod';
 
@@ -26,12 +26,18 @@ import { identifiersOf } from '../context.js';
 import { ProblemError } from '../problem.js';
 import { defineRoute } from '../schema/registry.js';
 import {
+  workbenchArtifactBodySchema,
+  workbenchArtifactResponseSchema,
   workbenchCreateBodySchema,
   workbenchCreateResponseSchema,
   workbenchDecisionBodySchema,
   workbenchDecisionResponseSchema,
   workbenchDetailResponseSchema,
   workbenchIdParamsSchema,
+  workbenchReopenBodySchema,
+  workbenchReopenResponseSchema,
+  workbenchRoomListResponseSchema,
+  workbenchRoomParamsSchema,
   workbenchStopBodySchema,
   workbenchStopResponseSchema,
   workbenchTaskDefSchema,
@@ -179,6 +185,87 @@ export const workbenchRoutes = [
   workbenchGetRoute,
   workbenchStopRoute,
   workbenchDecisionRoute,
+];
+
+/* =================================================== WB-08 + room list ===== */
+
+export const workbenchArtifactRoute = defineRoute({
+  operationId: 'workbenchArtifact',
+  method: 'POST',
+  path: '/v1/workbenches/:id/artifacts',
+  group: '/v1/workbenches',
+  summary: 'Register an artifact (WB-08)',
+  description:
+    'Registers an output file produced by the run (path, kind, optional preview URL). Idempotent on (workbench, path) — ' +
+    're-registering the same path updates the row. Appends artifact_registered.',
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'],
+  capability: 'work.transition',
+  dataClasses: ['internal', 'private'],
+  standingPolicyEligible: false,
+  policyOperation: 'work.transition',
+  idempotency: 'required_key_single_use',
+  consistency: 'read_own_writes',
+  errors: ['validation_failed', 'unauthenticated', 'forbidden', 'not_found', 'internal_error'],
+  rateLimit: { requestsPerMinute: 300, burst: 60 },
+  auditObligations: ['workbench.artifact_registered'],
+  params: workbenchIdParamsSchema,
+  body: workbenchArtifactBodySchema,
+  response: workbenchArtifactResponseSchema,
+  successStatus: 200,
+});
+
+export const workbenchRoomListRoute = defineRoute({
+  operationId: 'workbenchRoomList',
+  method: 'GET',
+  path: '/v1/rooms/:roomId/workbenches',
+  group: '/v1/workbenches',
+  summary: 'List workbenches for a room (frozen contract)',
+  description: 'Every workbench for the room, newest first. Powers the Running/waiting room surfaces (UI-07).',
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
+  capability: 'work.read',
+  dataClasses: ['internal', 'private'],
+  standingPolicyEligible: false,
+  policyOperation: 'work.read',
+  idempotency: 'safe',
+  consistency: 'read_own_writes',
+  errors: ['validation_failed', 'unauthenticated', 'forbidden', 'internal_error'],
+  rateLimit: { requestsPerMinute: 600, burst: 60 },
+  auditObligations: [],
+  params: workbenchRoomParamsSchema,
+  response: workbenchRoomListResponseSchema,
+  successStatus: 200,
+});
+
+export const workbenchReopenRoute = defineRoute({
+  operationId: 'workbenchReopen',
+  method: 'POST',
+  path: '/v1/workbenches/:id/reopen',
+  group: '/v1/workbenches',
+  summary: 'Reopen a done workbench with a note (WB-08)',
+  description:
+    'Central reopens a completed workbench rather than silently accepting bad output (master plan §8D WB-08). ' +
+    'Moves the run done -> verifying so it can be re-reviewed or re-run. Refused unless the run is done.',
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'],
+  capability: 'work.transition',
+  dataClasses: ['internal', 'private'],
+  standingPolicyEligible: false,
+  policyOperation: 'work.transition',
+  idempotency: 'required_key_single_use',
+  consistency: 'read_own_writes',
+  errors: ['validation_failed', 'unauthenticated', 'forbidden', 'not_found', 'version_conflict', 'internal_error'],
+  rateLimit: { requestsPerMinute: 60, burst: 10 },
+  auditObligations: ['workbench.reopened'],
+  params: workbenchIdParamsSchema,
+  body: workbenchReopenBodySchema,
+  response: workbenchReopenResponseSchema,
+  successStatus: 200,
+});
+
+export const workbenchAllRoutes = [
+  ...workbenchRoutes,
+  workbenchArtifactRoute,
+  workbenchRoomListRoute,
+  workbenchReopenRoute,
 ];
 
 /** Canonical UUID (the workbench id column type). */
@@ -547,6 +634,180 @@ export function registerWorkbenchRoutes(
       }
       throw error;
     }
+  });
+
+  /* ------------------------------------------------------------- artifact --- */
+  registerRoute(app, dependencies, workbenchArtifactRoute, async ({ params, body, context, principal }) => {
+    const now = dependencies.now();
+    if (!UUID_RE.test(params.id)) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
+
+    const idempotencyKey = context.idempotencyKey ?? body.command_id;
+    if (idempotencyKey === undefined) {
+      throw new ProblemError(
+        'validation_failed',
+        'POST /v1/workbenches/:id/artifacts requires an idempotency key: send command_id in the body or an Idempotency-Key header (FRANK-§12.1).',
+      );
+    }
+
+    const requestHash = `sha256:${createHash('sha256')
+      .update(
+        JSON.stringify({ workbench_id: params.id, command: 'artifact', path: body.path }),
+        'utf8',
+      )
+      .digest('hex')}`;
+
+    const evaluation = dependencies.actions.evaluate({
+      principal,
+      operation: 'work.transition',
+      actionClass: 'internal_reversible',
+      target: { kind: 'workbench', id: params.id, cellId: context.cellId },
+      requestHash,
+      idempotencyKey,
+      dataClasses: ['internal', 'private'],
+      influences: ownerCommandInfluence(principal),
+      correlationId: context.correlationId,
+      now,
+    });
+    if (evaluation.decision.result === 'deny') {
+      throw new ProblemError('policy_denied', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+    if (evaluation.decision.result === 'hold_for_review') {
+      throw new ProblemError('policy_hold_for_review', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+
+    const store = dependencies.frontDoor.store;
+    const record = await store.getWorkbench(context.cellId, params.id);
+    if (record === null) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
+
+    const artifactId = randomUUID();
+    await store.registerArtifact(
+      params.id,
+      {
+        id: artifactId,
+        path: body.path,
+        kind: body.kind,
+        ...(body.preview_url === undefined ? {} : { previewUrl: body.preview_url }),
+        ...(body.sha256 === undefined ? {} : { sha256: body.sha256 }),
+        ...(body.media_type === undefined ? {} : { mediaType: body.media_type }),
+      },
+      now,
+    );
+    await store.appendEvent(
+      params.id,
+      'artifact_registered',
+      { path: body.path, kind: body.kind, artifactId },
+      now,
+    );
+
+    return {
+      artifact_id: artifactId,
+      workbench_id: params.id,
+      path: body.path,
+      identifiers: identifiersOf(context),
+    };
+  });
+
+  /* ------------------------------------------------------------- room list --- */
+  registerRoute(app, dependencies, workbenchRoomListRoute, async ({ params, context }) => {
+    const records = await dependencies.frontDoor.store.listByRoom(context.cellId, params.roomId);
+    return {
+      workbenches: records.map(recordToWire),
+      identifiers: identifiersOf(context),
+    };
+  });
+
+  /* --------------------------------------------------------------- reopen --- */
+  registerRoute(app, dependencies, workbenchReopenRoute, async ({ params, body, context, principal }) => {
+    const now = dependencies.now();
+    if (!UUID_RE.test(params.id)) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
+
+    const idempotencyKey = context.idempotencyKey ?? body.command_id;
+    if (idempotencyKey === undefined) {
+      throw new ProblemError(
+        'validation_failed',
+        'POST /v1/workbenches/:id/reopen requires an idempotency key: send command_id in the body or an Idempotency-Key header (FRANK-§12.1).',
+      );
+    }
+
+    const requestHash = `sha256:${createHash('sha256')
+      .update(
+        JSON.stringify({ workbench_id: params.id, command: 'reopen', note: body.note }),
+        'utf8',
+      )
+      .digest('hex')}`;
+
+    const evaluation = dependencies.actions.evaluate({
+      principal,
+      operation: 'work.transition',
+      actionClass: 'internal_reversible',
+      target: { kind: 'workbench', id: params.id, cellId: context.cellId },
+      requestHash,
+      idempotencyKey,
+      dataClasses: ['internal', 'private'],
+      influences: ownerCommandInfluence(principal),
+      correlationId: context.correlationId,
+      now,
+    });
+    if (evaluation.decision.result === 'deny') {
+      throw new ProblemError('policy_denied', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+    if (evaluation.decision.result === 'hold_for_review') {
+      throw new ProblemError('policy_hold_for_review', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+
+    // Only a `done` workbench can be reopened. Read the current state first so
+    // we can refuse anything else with a clear 409 (not silently overwrite it).
+    const existing = await dependencies.frontDoor.store.getWorkbench(context.cellId, params.id);
+    if (existing === null) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
+    if (existing.state !== 'done') {
+      throw new ProblemError(
+        'version_conflict',
+        `Workbench ${params.id} is in state "${existing.state}"; only a "done" run can be reopened.`,
+      );
+    }
+    // done -> verifying, guarded by expected_version so a concurrent reopen or
+    // state change between our read and write is detected.
+    const updated = await dependencies.frontDoor.store.setState(
+      params.id,
+      'verifying',
+      `${actorKindFor(principal)}/${principal.principalId}`,
+      now,
+      { expectedVersion: existing.version },
+    );
+    if (updated === null) {
+      throw new ProblemError(
+        'version_conflict',
+        `Workbench ${params.id} changed between the read and the reopen; retry.`,
+      );
+    }
+    await dependencies.frontDoor.store.appendEvent(
+      params.id,
+      'resumed',
+      { reason: 'reopened_with_note', note: body.note },
+      now,
+    );
+
+    return {
+      workbench_id: params.id,
+      workbench_state: 'verifying' as const,
+      identifiers: identifiersOf(context),
+    };
   });
 }
 
