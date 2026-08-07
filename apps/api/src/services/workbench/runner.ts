@@ -154,6 +154,12 @@ export interface WorkbenchRunnerOptions {
    * forces terminal bookkeeping. Default 5s (Stop must halt < 5s under load).
    */
   readonly stopGraceMs?: number;
+  /**
+   * WB-09: maximum claim attempts before a crash-looping workbench is failed
+   * honestly instead of re-queued forever. Default 5. Each claim (including a
+   * re-claim after stale recovery) consumes one attempt.
+   */
+  readonly maxAttempts?: number;
 }
 
 export class WorkbenchRunner {
@@ -169,6 +175,7 @@ export class WorkbenchRunner {
   private readonly terminalReporter: TerminalReporter | null;
   private readonly defaultWallClockSec: number;
   private readonly stopGraceMs: number;
+  private readonly maxAttempts: number;
 
   private inFlight = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -189,6 +196,7 @@ export class WorkbenchRunner {
     this.terminalReporter = options.terminalReporter ?? null;
     this.defaultWallClockSec = options.defaultWallClockSec ?? 3600;
     this.stopGraceMs = options.stopGraceMs ?? 5000;
+    this.maxAttempts = options.maxAttempts ?? 5;
   }
 
   /**
@@ -255,14 +263,64 @@ export class WorkbenchRunner {
   /**
    * WB-02 recovery scan: re-queue stale claims and clean their orphans.
    * Runs at start; also safe to invoke manually (e.g. after a deploy).
+   *
+   * WB-09 extends this into a full restart reconciliation. The durable state
+   * lives in Postgres, so a restart is safe IF we handle each non-terminal
+   * state correctly (§11.3):
+   *
+   *   provisioning/running — the old process is gone and its in-memory
+   *     claim/container state is untrusted. recoverStale re-queues them once
+   *     the claim goes stale. But a workbench that keeps crashing on every
+   *     attempt would be re-queued forever; the attempt budget caps that and
+   *     fails it honestly with a receipt instead.
+   *   waiting — a human decision is outstanding. Its resolution arrives via
+   *     the command envelope; a restart must never resume or orphan it, so we
+   *     leave it exactly where it is.
+   *   verifying — review is external state; also left alone.
+   *   queued — the normal claim loop picks it up; nothing to do.
+   *
+   * Returns the records whose state this scan touched (re-queued or failed),
+   * so tests and callers can observe the reconciliation.
    */
   async recover(): Promise<WorkbenchRecord[]> {
+    const touched: WorkbenchRecord[] = [];
+
+    /* ---- 1. stale provisioning/running claims: re-queue or honest-fail --- */
     const stale = await this.store.recoverStale(
       this.runnerId,
       this.now(),
       this.staleClaimMs,
     );
     for (const record of stale) {
+      // Each recovery consumes one attempt. Over budget => stop the loop and
+      // fail honestly rather than re-queueing a crash-looping run forever.
+      if (record.attempts >= this.maxAttempts) {
+        this.log(
+          `workbench ${record.id}: attempt budget exhausted (${record.attempts}/${this.maxAttempts}) — failing honestly instead of re-queueing`,
+        );
+        try {
+          await this.executor.cleanup(record);
+        } catch (error) {
+          this.log(
+            `workbench ${record.id}: cleanup on budget-exhaustion failed (${describeError(error)})`,
+          );
+        }
+        await this.store.failHonest(
+          record.id,
+          `recovery exhausted the attempt budget (${record.attempts} attempts)`,
+          'Run could not be recovered: it exceeded the retry budget. The runner stopped retrying rather than looping. Inspect the last_error and events for the underlying failure.',
+          this.runnerId,
+          this.now(),
+        );
+        await this.reportTerminal(record, {
+          kind: 'failed',
+          error: `attempt budget exhausted (${record.attempts})`,
+          cause: 'error',
+        });
+        touched.push(record);
+        continue;
+      }
+
       this.log(
         `workbench ${record.id}: recovered stale claim (${record.state} claimed ${record.claimedAt?.toISOString() ?? '?'}) — cleaning up and re-queueing`,
       );
@@ -279,8 +337,21 @@ export class WorkbenchRunner {
         { reason: 'stale-claim-recovery', by: this.runnerId },
         this.now(),
       );
+      touched.push(record);
     }
-    return stale;
+
+    /* ---- 2. report the full non-terminal picture (read-only) ------------- */
+    const open = await this.store.listNonTerminal();
+    const byState = new Map<string, number>();
+    for (const record of open) {
+      byState.set(record.state, (byState.get(record.state) ?? 0) + 1);
+    }
+    this.log(
+      `workbench reconcile: ${open.length} non-terminal ` +
+        `(${[...byState.entries()].map(([k, v]) => `${k}=${v}`).join(', ') || 'none'})`,
+    );
+
+    return touched;
   }
 
   private schedule(delayMs: number): void {

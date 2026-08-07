@@ -42,6 +42,8 @@ class FakeStore {
   events: Array<{ id: string; type: string }> = [];
   receipts: Array<{ id: string; summary: string }> = [];
   recovered: WorkbenchRecord[] = [];
+  nonTerminal: WorkbenchRecord[] = [];
+  honestFailures: Array<{ id: string; reason: string }> = [];
   claimBehavior: (cellId: string, runnerId: string) => WorkbenchRecord | null = () => null;
 
   async claimNext(cellId: string, runnerId: string, _now: Date) {
@@ -52,6 +54,16 @@ class FakeStore {
   async recoverStale(runnerId: string, now: Date, staleAfterMs: number) {
     void runnerId; void now; void staleAfterMs;
     return this.recovered;
+  }
+  async listNonTerminal() {
+    return this.nonTerminal;
+  }
+  async failHonest(workbenchId: string, reason: string, _receipt: string, _by: string, _now: Date) {
+    this.honestFailures.push({ id: workbenchId, reason });
+    this.stateChanges.push({ id: workbenchId, state: 'failed' });
+    // Mirror the real store.failHonest: failed + receipt_published events.
+    this.events.push({ id: workbenchId, type: 'failed' });
+    this.events.push({ id: workbenchId, type: 'receipt_published' });
   }
   async appendEvent(id: string, type: string, _payload: unknown, _at: Date) {
     this.events.push({ id, type });
@@ -351,6 +363,89 @@ describe('WorkbenchRunner', () => {
     expect(types).toContain('timed_out');
     expect(types).toContain('failed');
     expect(store.receipts.some((r) => r.id === 'wb-timeout' && /timed out/i.test(r.summary))).toBe(true);
+  });
+
+  it('WB-09: a workbench over the attempt budget fails honestly instead of re-queueing', async () => {
+    const store = new FakeStore();
+    const executor = new RecordingExecutor();
+    // A crash-looping workbench: already at the budget ceiling.
+    const stale = fakeRecord('wb-overbudget', 'provisioning');
+    (stale as { attempts: number }).attempts = 5;
+    store.recovered = [stale];
+
+    const runner = new WorkbenchRunner({
+      store: store as never,
+      executor,
+      runnerId: 'runner-1',
+      cellIds: ['cell-test'],
+      pollIntervalMs: 5,
+      maxAttempts: 5,
+      log: () => {},
+    });
+
+    await runner.start(); // recover() runs
+    await runner.stop();
+
+    // Failed honestly, NOT re-queued.
+    expect(store.honestFailures).toHaveLength(1);
+    expect(store.honestFailures[0]?.id).toBe('wb-overbudget');
+    expect(store.stateChanges).toContainEqual({ id: 'wb-overbudget', state: 'failed' });
+    // Cleanup was attempted and a failure receipt recorded.
+    expect(executor.calls).toContain('cleanup:wb-overbudget');
+    expect(store.events.some((e) => e.id === 'wb-overbudget' && e.type === 'failed')).toBe(true);
+  });
+
+  it('WB-09: waiting workbenches survive recovery untouched (never resumed/orphaned)', async () => {
+    const store = new FakeStore();
+    const executor = new RecordingExecutor();
+    // A waiting workbench with an outstanding human decision.
+    const waiting = fakeRecord('wb-waiting', 'waiting');
+    store.nonTerminal = [waiting];
+    store.recovered = []; // nothing stale
+
+    const runner = new WorkbenchRunner({
+      store: store as never,
+      executor,
+      runnerId: 'runner-1',
+      cellIds: ['cell-test'],
+      pollIntervalMs: 5,
+      log: () => {},
+    });
+
+    await runner.start();
+    await runner.stop();
+
+    // Recovery did NOT touch the waiting workbench — no state change, no
+    // resume, no failure. It stays waiting for its command-envelope resolution.
+    expect(store.stateChanges).not.toContainEqual(
+      expect.objectContaining({ id: 'wb-waiting' }),
+    );
+    expect(store.events.some((e) => e.id === 'wb-waiting')).toBe(false);
+  });
+
+  it('WB-09: a workbench under the attempt budget is re-queued for another try', async () => {
+    const store = new FakeStore();
+    const executor = new RecordingExecutor();
+    const stale = fakeRecord('wb-underbudget', 'provisioning');
+    (stale as { attempts: number }).attempts = 2; // under the default budget of 5
+    store.recovered = [stale];
+
+    const runner = new WorkbenchRunner({
+      store: store as never,
+      executor,
+      runnerId: 'runner-1',
+      cellIds: ['cell-test'],
+      pollIntervalMs: 5,
+      maxAttempts: 5,
+      log: () => {},
+    });
+
+    await runner.start();
+    await runner.stop();
+
+    // Re-queued (a resumed event), NOT failed.
+    expect(store.honestFailures).toHaveLength(0);
+    expect(store.events.some((e) => e.id === 'wb-underbudget' && e.type === 'resumed')).toBe(true);
   });
 
   it('WB-07: terminal reporter receives the terminal outcome when wired', async () => {
