@@ -75,6 +75,10 @@ workbench runner, never as a replacement for it.
 | WB-08 | AG-3 | merged 613c459 | ✅ artifacts + room list + reopen-with-note, integration 4/4, issue #25 closed |
 | WB-09 | AG-3 | merged f64ed25 | ✅ restart reconciliation + honest failure, runner.test 13/13, issue #26 closed |
 | **Workbench core WB-01..09** | AG-3 | main | ✅ **COMPLETE** — front door, SSE, leash/stop, artifacts/receipt, decision seam, durability |
+| CH-03 | AG-4 | merged 602c1a7 | ✅ channels-listener app + TelegramChannelAdapter + tap-handler, verify 44/44, issue #31 closed |
+| **Channels stack CH-01..05** | AG-4 | main | ✅ **COMPLETE** — contract, StateStore, listener, cards, identity/redaction |
+| CH-06 | AG-4 | `agent/ch/room-push` | 🔄 room binding + state push (next) |
+| FS-02 | AG-5 | `agent/fs/folder-bindings` | 🔄 folder-binding backend (dispatched) |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
 | CH-02 | AG-4 | merged dc7ee9a | ✅ conformance 21/21 (M4 hard gate passed) |
 | DEL-04, GOV-04, DEL-05 | AG-1 | `agent/del/delivery-controls` | ✅ merged ff9ab38 |
