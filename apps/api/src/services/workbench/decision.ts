@@ -42,6 +42,7 @@ import {
 import type { FrankDatabase, FrankTransaction } from '@frank/adapter-postgres';
 
 import { WorkbenchStore } from './store.js';
+import type { WorkbenchRecord } from './types.js';
 
 type ActorKind = schema.ActorKind;
 
@@ -126,12 +127,30 @@ export class WorkbenchDecisionService {
       );
     }
 
+    const decisionWorkItemId = await this.#db.transaction((tx) =>
+      this.requestDecisionInTransaction(tx, command, record),
+    );
+    return { decisionWorkItemId, workbenchState: 'waiting' };
+  }
+
+  /**
+   * The transactional body of {@link requestDecision}, exposed so callers
+   * that must commit the decision TOGETHER with their own writes (FS-03's
+   * staged-write proposal links the decision to a `staged_write` row in one
+   * FRANK-§11.5 transaction) can open the transaction themselves. The
+   * preconditions (workbench exists, state running/provisioning) are the
+   * caller's responsibility here — `requestDecision` checks them above.
+   * Returns the new decision work item's id.
+   */
+  async requestDecisionInTransaction(
+    tx: FrankTransaction,
+    command: RequestDecisionCommand,
+    record: WorkbenchRecord,
+  ): Promise<string> {
     const decisionWorkItemId = newId();
     const actorRef = `${command.actor.kind}/${command.actor.id}`;
-
-    await this.#db.transaction(async (tx) => {
-      // 1) The decision work item — a NORMAL ADR-022 decision in `waiting`.
-      const item = await this.#work.create(tx, {
+    // 1) The decision work item — a NORMAL ADR-022 decision in `waiting`.
+    const item = await this.#work.create(tx, {
         id: decisionWorkItemId,
         cellId: command.cellId,
         kind: 'decision',
@@ -237,9 +256,8 @@ export class WorkbenchDecisionService {
         aggregateId: record.id,
         createdAt: command.now,
       });
-    });
 
-    return { decisionWorkItemId, workbenchState: 'waiting' };
+    return decisionWorkItemId;
   }
 
   /**
