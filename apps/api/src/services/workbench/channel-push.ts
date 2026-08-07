@@ -218,4 +218,39 @@ export class ChannelPushStore {
         and status = 'pending'
     `);
   }
+
+  /**
+   * CH-07 — record a delivery failure and bump the attempt count. The event
+   * stays `pending` so the next poll retries it (delivery retry). Returns the
+   * new attempt count per id so the caller can dead-letter when a budget is
+   * exhausted.
+   */
+  async markDeliveryFailure(
+    ids: readonly string[],
+    error: string,
+    now: Date,
+  ): Promise<void> {
+    if (ids.length === 0) return;
+    await this.db.execute(sql`
+      update "frank_domain"."outbox_event"
+      set attempts = attempts + 1, last_error = ${error}, available_at = ${now}
+      where id in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
+        and status = 'pending'
+    `);
+  }
+
+  /**
+   * CH-07 — dead-letter events that exhausted their retry budget. Marks them
+   * `quarantined` so polling never returns them again; the row (with
+   * last_error) stays as the audit record. Idempotent.
+   */
+  async quarantineOutbox(ids: readonly string[], error: string, now: Date): Promise<void> {
+    if (ids.length === 0) return;
+    await this.db.execute(sql`
+      update "frank_domain"."outbox_event"
+      set status = 'quarantined', quarantined_at = ${now}, last_error = ${error}
+      where id in (${sql.join(ids.map((i) => sql`${i}`), sql`, `)})
+        and status = 'pending'
+    `);
+  }
 }
