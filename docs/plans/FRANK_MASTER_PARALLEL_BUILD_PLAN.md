@@ -91,6 +91,7 @@ The source material contains several open decisions and one direct overlap. This
 | M13 | Durable approval flow | Post card, finish the delivery turn, and resolve later through a new inbound interaction and the outbox. Do not keep a Node promise open for hours or days. |
 | M14 | CI protection | Add the verify workflow immediately. Enable main branch protection only after the workflow has completed successfully on two representative changes. |
 | M15 | Workbench persistence | Postgres from day one. In-memory workbench or approval state is not permitted beyond throwaway spikes. |
+| M16 | Second harness: Prime Agent | Adopt Prime Agent (`PrimeIntellect-ai/prime-agent`, pinned exact version — v0.7.0 at writing) as an EXPERIMENTAL first-class harness behind `AgentHarnessAdapter` (WB-04C). Goose remains the default until the cross-harness evaluation (WB-04E/WB-10) produces evidence. One Prime environment per workbench; Frank keeps the sandbox, schedules, outer leash, and refinement approvals. |
 
 ## 3. Non-negotiable architecture rules
 
@@ -695,6 +696,8 @@ Required sequence:
 
 ### WB-04: Harness adapter and Goose recipe
 
+**Status:** ✅ Landed (merged to main at `9068898`) as the Goose half of the split recorded below (WB-04B). The generic seam is `AgentHarnessAdapter` (`packages/contracts/src/harness.ts`).
+
 **Owner:** AG-3  
 **Dependencies:** WB-02, existing ADR-023 adapter  
 **Output:**
@@ -706,6 +709,43 @@ Required sequence:
 - `agentapi` mapping documented for non-ACP CLIs.
 
 **Verify:** A trivial task reaches a receipt through the adapter without runner code importing Goose internals.
+
+### WB-04B: GooseHarnessAdapter
+
+**Status:** ✅ Landed with WB-04 (merged `9068898`).
+
+### WB-04C: PrimeAgentHarnessAdapter
+
+**Owner:** AG-3 (post-G2)
+**Dependencies:** WB-02..05 merged; Prime spike green (session-resume path PROVEN, not assumed — Prime ACP exposes no session/load today)
+**Output:** The second real adapter per M16. A `frank-prime-sidecar` inside the workbench container owns the Prime Agent ACP stdin/stdout (Prime's ACP = one session per connection, one active prompt, fixed working directory; the process exits when ACP stdin closes — one workbench per process). The sidecar maps ACP events plus namespaced `_meta` (subagent status, quality gates, goals, compaction) to `HarnessEvent`s, stores the Prime session identifier, and exposes health + cancellation. Prime-specific types never leak past the adapter.
+
+**Constraints (PA rules, non-negotiable):**
+
+- One Prime environment per workbench: own container, state directory, credentials, root session, child-agent tree, and only its declared mounts. No shared daemon across rooms.
+- Frank's sandbox stays mandatory: Prime inside Docker + `srt` + explicit ro/rw/staged mounts + CPU/mem limits. Prime's worker/kernel split is lifecycle recovery, NOT security.
+- Frank owns schedules: Prime's persistent cron disabled in production workbenches; every scheduled firing creates a fresh workbench (W9). Short-lived in-run heartbeats allowed.
+- Frank's outer leash is authoritative (e.g. Frank 30 min / Prime inner 27 min / Frank hard-kill 30 min). Spend caps, container kill, and the audited cancellation transition stay Frank's.
+- `/refine` and any global harness store are disabled in release 1. Refinement output may become a candidate artifact; promotion to a canonical Frank skill/memory requires a staged change + ADR-022 approval. Frank memory/skills remain the only canonical stores.
+- Prime child agents (`rlm(...)`) are internal to one workbench: never Frank rooms, work items, Buzz identities, or approval authorities. The Running surface stays the Frank 3-to-10-step plan; child status is detail-view evidence.
+
+**Verify:** File fence (cross-room write fails at OS level); cancellation reaches `cancelled` under 5s; runner/adapter/container restart recovers without replaying tool actions; nested-agent activity stays inside the fence; inner+outer budgets both stop correctly; shared write becomes a Frank waiting item; artifacts register through Frank; full structured receipt; upgrade smoke test detects incompatible ACP/`_meta` changes.
+
+### WB-04D: Frank bridge skill for Prime
+
+**Owner:** AG-3 with AG-7
+**Dependencies:** WB-04C
+**Output:** A controlled `frank` skill (Python-backed, Prime's executable skill system) exposing structured calls — `publish_plan`, `update_step`, `request_decision`, `register_artifact`, `publish_receipt` — so Prime emits structured W5/W6/W7 events instead of prose Frank must infer. Skills mount from Frank's canonical `skills/` (never a parallel Prime library); Frank selects relevant skills per task via `taskDef.skills` — all approved skills stay linked, only relevant ones load.
+
+**Verify:** A trivial Prime task reaches a complete structured receipt through the bridge with zero prose parsing.
+
+### WB-04E: Cross-harness contract tests + evaluation
+
+**Owner:** AG-3
+**Dependencies:** WB-04B + WB-04C
+**Output:** The same representative task definitions run under Goose and Prime must produce identical Frank-level outputs: plan, step transitions, decision requests, artifacts, receipt, cancellation, honest timeout. Internal event streams may differ. The evaluation records completion rate, human interventions, wall-clock, token/$ cost, recovery correctness, quality-gate success, receipt quality, and event-mapping complexity — the evidence for the default-engine routing decision (recommendation only until proven: Prime for complex/long-running/parallel-specialist work, Goose for deterministic recipes).
+
+**Verify:** Both harnesses pass the same suite; comparison table recorded in the evaluation report.
 
 ### WB-05: Delegation front door
 
@@ -770,10 +810,10 @@ Required sequence:
 ### WB-10: Harness swap proof
 
 **Owner:** AG-3  
-**Dependencies:** WB-04, second adapter available  
-**Output:** Execute the same task definition under two harness adapters with no change outside adapter configuration.
+**Dependencies:** WB-04B (Goose), WB-04C (Prime Agent), WB-04E suite  
+**Output:** Execute the same task definition under Harness 1 = Goose and Harness 2 = Prime Agent (M16) with no change outside adapter configuration. Both must produce the same Frank-level outputs: plan, step transitions, decision requests, artifacts, receipt, cancellation, honest timeout result.
 
-**Verify:** Both runs produce equivalent plan, artifact, and receipt structures.
+**Verify:** Both runs produce equivalent plan, artifact, and receipt structures. The WB-04E comparison report decides whether Prime becomes the default engine for complex delegated work (Goose remains the deterministic fallback either way).
 
 ## 8E. Human loop and Channels
 
@@ -1118,6 +1158,7 @@ Exclude `in-progress/`, `deprecated/`, and `misc/last30days` from version 0.1.0.
 | Concern | Adopt | Frank builds |
 |---|---|---|
 | Default task engine | Goose headless, recipes, sub-recipes | Plan and receipt recipe templates |
+| Complex coding/research execution | Prime Agent (pinned exact version) behind `AgentHarnessAdapter` | `PrimeAgentHarnessAdapter`, per-workbench sidecar, ACP/`_meta` event mapping, Frank bridge skill, cross-harness tests |
 | Harness protocol | ACP | Adapter mapping and runner client behavior |
 | Non-ACP CLI wrapper | `coder/agentapi` | Event mapping into workbench events |
 | Sandbox policy | Docker plus `srt` | Task-specific mounts, limits, and egress profiles |
@@ -1214,6 +1255,7 @@ The existing audit and outbox remain the evidence source. Metrics must not becom
 | Risk | Severity | Mitigation |
 |---|---|---|
 | Channels SDK API churn and internal lifecycle seam | High | Pin exact version, isolate `ɵruntime` to one adapter file, run upgrade smoke test, retain direct Grammy exit path |
+| Prime Agent pre-1.0 API churn (v0.6/v0.7 breaking changes) | High | Pin exact version (no caret), all Prime types behind `PrimeAgentHarnessAdapter`, upgrade smoke test, never expose daemon/`_meta` to Frank contracts, Goose fallback always on |
 | Pending approval orphaned by restart | High | Postgres StateStore is a hard gate; conformance suite must pass before CH-03/CH-04 |
 | Mobile surface gains authority by convenience | High | Every button calls the normal command endpoint; contract and integration tests reject direct mutation |
 | Duplicate Telegram and ntfy decisions | High | One active interactive decision surface per binding; ntfy deferred |

@@ -58,3 +58,20 @@ Reversible assumptions marked (R).
 | **Workbench API routes** | `apps/api/src/routes/workbench.ts` |
 | Goose recipe templates | `apps/api/src/services/workbench/recipes/` |
 | Decision seam | `apps/api/src/services/workbench/decision.ts` |
+
+
+## M16 — Prime Agent as experimental second harness (2026-08-07)
+
+Decision: adopt `PrimeIntellect-ai/prime-agent` (pinned exact version — v0.7.0 at writing, pre-1.0, breaking churn) as an EXPERIMENTAL first-class harness behind `AgentHarnessAdapter` (WB-04C). Goose remains the default engine until WB-04E/WB-10 evidence says otherwise. Frank stays the control plane and daily driver; Prime is a worker engine inside the workbench fence.
+
+Binding rules:
+
+- One Prime environment per workbench (own container, state dir, credentials, root session, child tree, declared mounts only). No shared daemon.
+- Frank's Docker + srt fence stays mandatory: Prime's process separation is lifecycle recovery, not security.
+- Frank owns schedules: Prime persistent cron disabled in production workbenches; fresh workbench per firing (W9).
+- Frank's outer leash is authoritative; Prime inner limits set slightly under Frank's wall-clock; spend caps + kill stay Frank's.
+- `/refine` + global harness store disabled in release 1; promotion of refinement output requires staged change + ADR-022 approval. Frank memory/skills are the only canonical stores.
+- Prime child agents are internal detail — never Frank work items, rooms, identities, or approval authorities.
+- All Prime types behind the adapter; no daemon/_meta in Frank contracts; upgrade smoke test; Goose fallback always available.
+
+Reversible: yes — default-engine routing is evidence-pending (WB-04E report).
