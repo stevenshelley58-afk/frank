@@ -171,6 +171,28 @@ importers:
         specifier: 2.1.8
         version: 2.1.8(@types/node@22.10.2)
 
+  apps/channels-listener:
+    dependencies:
+      '@copilotkit/channels':
+        specifier: 0.7.3
+        version: 0.7.3(@ag-ui/core@0.0.57)(@types/express@5.0.6)(vitest@2.1.8(@types/node@22.10.2))(zod@4.4.3)
+      '@frank/adapter-collaboration-channels':
+        specifier: workspace:*
+        version: link:../../adapters/collaboration/channels
+      '@frank/contracts':
+        specifier: workspace:*
+        version: link:../../packages/contracts
+    devDependencies:
+      '@types/node':
+        specifier: 22.10.2
+        version: 22.10.2
+      typescript:
+        specifier: 5.7.2
+        version: 5.7.2
+      vitest:
+        specifier: 2.1.8
+        version: 2.1.8(@types/node@22.10.2)
+
   apps/codegraph:
     dependencies:
       chokidar:
