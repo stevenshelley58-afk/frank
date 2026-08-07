@@ -484,6 +484,60 @@ export class WorkbenchStore {
   }
 
   /**
+   * WB-09 — reconciliation on runner restart. Reads (never mutates) every
+   * non-terminal workbench for a cell so the runner can decide per-state:
+   *
+   *   queued       — picked up by the normal claim loop; nothing to do
+   *   provisioning — recoverStale re-queues once the claim goes stale
+   *   running      — same; process state is untrusted after a restart
+   *   waiting      — left ALONE: a human decision is outstanding and its
+   *                  resolution arrives through the command envelope; a
+   *                  restart must never orphan or resume it (§11.3)
+   *   verifying    — left ALONE: review/verification is external state
+   *
+   * The read-only design is the point: this method cannot lose work.
+   */
+  async listNonTerminal(): Promise<WorkbenchRecord[]> {
+    const rows = await this.db.execute<WorkbenchRow>(sql`
+      select ${WORKBENCH_COLUMNS} from "frank_domain"."workbench"
+      where state in ('queued', 'provisioning', 'running', 'waiting', 'verifying')
+      order by created_at
+    `);
+    return rows.rows.map(toRecord);
+  }
+
+  /**
+   * WB-09 — mark a workbench failed with an honest receipt because automatic
+   * recovery was unsafe (e.g. its attempt budget is exhausted). Terminal, so
+   * the claim loop and future recovery scans skip it.
+   */
+  async failHonest(
+    workbenchId: string,
+    reason: string,
+    receiptSummary: string,
+    by: string,
+    now: Date,
+  ): Promise<void> {
+    await this.setState(workbenchId, 'failed', by, now, {
+      finishedAt: now,
+      lastError: reason,
+    });
+    await this.appendEvent(
+      workbenchId,
+      'failed',
+      { by, error: reason, cause: 'recovery-unsafe' },
+      now,
+    );
+    await this.publishReceipt(
+      workbenchId,
+      { summary: receiptSummary, assumptions: [], evidence: [] },
+      `runner/${by}`,
+      now,
+    );
+    await this.appendEvent(workbenchId, 'receipt_published', { by }, now);
+  }
+
+  /**
    * WB-01 verify: reconstruct the whole run snapshot from Postgres.
    * Events come back in durable order (seq).
    */
