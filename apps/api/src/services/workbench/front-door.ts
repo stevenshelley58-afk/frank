@@ -40,6 +40,7 @@ import {
 import type { FrankDatabase } from '@frank/adapter-postgres';
 
 import { WorkbenchStore } from './store.js';
+import type { WorkbenchEventBus } from './event-bus.js';
 import type { WorkbenchRecord, WorkbenchTaskDef } from './types.js';
 
 type ActorKind = schema.ActorKind;
@@ -76,9 +77,9 @@ export class WorkbenchFrontDoor {
   readonly #outbox = new OutboxRepository();
   readonly #db: FrankDatabase;
 
-  constructor(db: FrankDatabase) {
+  constructor(db: FrankDatabase, bus?: WorkbenchEventBus) {
     this.#db = db;
-    this.#store = new WorkbenchStore(db);
+    this.#store = new WorkbenchStore(db, bus);
     this.#work = new WorkItemRepository(this.#audit, this.#outbox);
   }
 

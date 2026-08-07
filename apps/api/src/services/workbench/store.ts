@@ -30,6 +30,8 @@ import { sql } from 'drizzle-orm';
 
 import type { FrankDatabase, FrankTransaction } from '@frank/adapter-postgres';
 
+import type { WorkbenchEventBus } from './event-bus.js';
+
 import type {
   CreateWorkbenchInput,
   WorkbenchArtifact,
@@ -121,7 +123,15 @@ export interface CreateWorkbenchResult {
 }
 
 export class WorkbenchStore {
-  constructor(private readonly db: FrankDatabase) {}
+  constructor(
+    private readonly db: FrankDatabase,
+    /**
+     * WB-06: optional wake-up bus. When present, every successful appendEvent
+     * notifies subscribers so the SSE route can deliver live. Absent (tests,
+     * the front door) the store is unchanged.
+     */
+    private readonly bus?: WorkbenchEventBus,
+  ) {}
 
   /**
    * Idempotent workbench creation (WB-01 rule): the unique index on
@@ -192,6 +202,35 @@ export class WorkbenchStore {
   }
 
   /**
+   * WB-06: read events with seq greater than `afterSeq`, in durable order.
+   * The SSE route uses this for both the initial snapshot (`afterSeq = 0`)
+   * and live polling (its highest delivered seq). Reading by seq from the
+   * database is what makes resume gap-free and duplicate-free regardless of
+   * how notifications arrive.
+   */
+  async listEventsSince(
+    workbenchId: string,
+    afterSeq: number,
+  ): Promise<readonly WorkbenchEvent[]> {
+    const rows = await this.db.execute<{
+      seq: number;
+      type: WorkbenchEventType;
+      payload: Record<string, unknown>;
+      occurred_at: Date | string;
+    }>(sql`
+      select seq, type, payload, occurred_at from "frank_domain"."workbench_event"
+      where workbench_id = ${workbenchId} and seq > ${afterSeq}
+      order by seq
+    `);
+    return rows.rows.map((row) => ({
+      seq: Number(row.seq),
+      type: row.type,
+      payload: row.payload,
+      occurredAt: asDate(row.occurred_at),
+    }));
+  }
+
+  /**
    * Append one event. `seq` defaults to max(seq)+1 within the workbench;
    * pass it explicitly when the caller already allocated one (the claim path
    * does, so event order is decided before the claim commits).
@@ -218,7 +257,12 @@ export class WorkbenchStore {
       )
       returning seq
     `);
-    return rows.rows[0]?.seq ?? 0;
+    const assignedSeq = rows.rows[0]?.seq ?? 0;
+    // WB-06: wake SSE subscribers for this workbench. The bus is a hint only —
+    // the route re-reads by seq from the database, so a dropped notification
+    // cannot lose or duplicate an event (durability comes from the poll path).
+    this.bus?.notify(workbenchId);
+    return assignedSeq;
   }
 
   /**

@@ -75,6 +75,8 @@ export interface BuildTestServerOptions {
    * register — mirroring `main.ts`, which passes `store.db`.
    */
   readonly db?: import('@frank/adapter-postgres').FrankDatabase;
+  /** WB-06: workbench SSE live-poll interval (tests use a fast value). */
+  readonly workbenchPollIntervalMs?: number;
 }
 
 export function buildTestServer(options: BuildTestServerOptions = {}): TestServer {
@@ -95,6 +97,9 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
     identity: identityProvider,
     ...(options.enrichment === undefined ? {} : { enrichment: options.enrichment }),
     ...(options.db === undefined ? {} : { db: options.db }),
+    ...(options.workbenchPollIntervalMs === undefined
+      ? {}
+      : { workbenchPollIntervalMs: options.workbenchPollIntervalMs }),
     now,
     startedAt: now(),
   });
