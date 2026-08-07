@@ -171,4 +171,90 @@ describe.skipIf(requiresDatabase)(`WB-05 front door against PostgreSQL (${SKIP_R
     });
     expect(got.statusCode).toBe(404);
   });
+
+  /* ------------------------------------------------------------- WB-07 --- */
+
+  async function stopWorkbench(id: string, commandId: string) {
+    const target = server as TestServer;
+    return target.app.inject({
+      method: 'POST',
+      url: `/v1/workbenches/${id}/stop`,
+      headers: {
+        authorization: target.auth(['owner']),
+        'content-type': 'application/json',
+        'idempotency-key': commandId,
+      },
+      payload: { command_id: commandId, reason: 'test stop' },
+    });
+  }
+
+  it('WB-07: POST stop cancels a queued workbench durably + cancels the work item + honest receipt', async () => {
+    const key = 'wb07-stop-key';
+    const created = await post(key);
+    expect(created.status).toBe(200);
+    const id = (created.body.workbench as Record<string, unknown>).id as string;
+    const workItemId = (created.body.workbench as Record<string, unknown>).work_item_id as string;
+
+    const res = await stopWorkbench(id, 'stop-command-1');
+    expect(res.statusCode).toBe(200);
+    const body = res.json() as Record<string, unknown>;
+    expect(body.via).toBe('durable');
+    expect(body.workbench_id).toBe(id);
+    expect(body.work_item_id).toBe(workItemId);
+    expect(body.state).toBe('cancelled');
+
+    // Workbench is now cancelled with an honest receipt.
+    const target = server as TestServer;
+    const got = await target.app.inject({
+      method: 'GET',
+      url: `/v1/workbenches/${id}`,
+      headers: { authorization: target.auth(['owner']) },
+    });
+    expect(got.statusCode).toBe(200);
+    const detail = got.json() as Record<string, unknown>;
+    expect((detail.workbench as Record<string, unknown>).state).toBe('cancelled');
+    const receipt = detail.receipt as Record<string, unknown> | null;
+    expect(receipt).not.toBeNull();
+    expect(String(receipt?.summary)).toMatch(/stopped/i);
+
+    // Work item is cancelled too (canonical side, §3.1).
+    const item = await target.app.inject({
+      method: 'GET',
+      url: `/v1/work/${workItemId}`,
+      headers: { authorization: target.auth(['owner']) },
+    });
+    expect(item.statusCode).toBe(200);
+    expect((item.json() as Record<string, unknown>).state).toBe('cancelled');
+  });
+
+  it('WB-07: stopping an already-terminal workbench is refused (409, not replayed)', async () => {
+    const key = 'wb07-stop-terminal';
+    const created = await post(key);
+    const id = (created.body.workbench as Record<string, unknown>).id as string;
+
+    const first = await stopWorkbench(id, 'stop-terminal-1');
+    expect(first.statusCode).toBe(200);
+
+    const second = await stopWorkbench(id, 'stop-terminal-2');
+    expect(second.statusCode).toBe(409);
+  });
+
+  it('WB-07: stop requires an idempotency key (422/400 validation)', async () => {
+    const key = 'wb07-stop-nokey';
+    const created = await post(key);
+    const id = (created.body.workbench as Record<string, unknown>).id as string;
+
+    const target = server as TestServer;
+    const res = await target.app.inject({
+      method: 'POST',
+      url: `/v1/workbenches/${id}/stop`,
+      headers: {
+        authorization: target.auth(['owner']),
+        'content-type': 'application/json',
+      },
+      payload: { reason: 'no key' },
+    });
+    expect([400, 409, 422]).toContain(res.statusCode);
+    expect(res.statusCode).not.toBe(200);
+  });
 });

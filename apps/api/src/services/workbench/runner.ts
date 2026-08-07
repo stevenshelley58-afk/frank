@@ -68,11 +68,58 @@ export interface WorkbenchExecutor {
    * never provisioned is a no-op.
    */
   cleanup(record: WorkbenchRecord): Promise<void>;
+  /**
+   * WB-07: cancel the active run cooperatively (adapter.cancel → kill). The
+   * leash calls this on stop/timeout; it must return promptly (the runner
+   * gives it a short grace window before forcing terminal bookkeeping).
+   * Optional so existing fakes keep working; absent = stop lands state only.
+   */
+  cancel?(record: WorkbenchRecord, reason: string): Promise<void>;
 }
 
 export type ExecuteOutcome =
   | { kind: 'done' }
   | { kind: 'failed'; error: string };
+
+/**
+ * WB-07: canonical side effects of a terminal run (work-item transition,
+ * audit entry, outbox event — §3.1). The runner stays Postgres-execution-only;
+ * composition wires this hook to the domain store so EVERY terminal outcome
+ * carries its canonical record.
+ */
+export interface TerminalReporter {
+  reportTerminal(
+    record: WorkbenchRecord,
+    outcome:
+      | { kind: 'done' }
+      | { kind: 'failed'; error: string; cause: 'error' | 'timeout' }
+      | { kind: 'cancelled'; reason: string },
+  ): Promise<void>;
+}
+
+/** One in-flight run the runner can stop (WB-07 stop registry). */
+interface ActiveRun {
+  readonly record: WorkbenchRecord;
+  /** Resolves with the stop reason the moment a stop is requested. */
+  readonly stopSignal: Promise<string>;
+  /** Set by requestStop; resolves stopSignal. */
+  notifyStop: ((reason: string) => void) | null;
+}
+
+/** Small deferred promise helper. */
+function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void } {
+  let resolve: (value: T) => void = () => undefined;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+/** The leash's discriminated outcome for one run. */
+type LeashOutcome =
+  | { kind: 'execute'; outcome: ExecuteOutcome }
+  | { kind: 'stopped'; reason: string }
+  | { kind: 'timeout'; wallClockSec: number };
 
 export interface WorkbenchRunnerOptions {
   readonly store: WorkbenchStore;
@@ -91,6 +138,22 @@ export interface WorkbenchRunnerOptions {
   readonly now?: () => Date;
   /** Injectable logger. Default: console. */
   readonly log?: (message: string) => void;
+  /**
+   * WB-07: canonical side effects of a terminal run (§3.1 — work-item
+   * transition + audit + outbox). Optional: composition wires the domain
+   * store here; absent (unit tests) the runner lands workbench state only.
+   */
+  readonly terminalReporter?: TerminalReporter;
+  /**
+   * WB-07: default wall-clock leash in seconds when a task def carries none.
+   * Every run is leashed — the runner enforces it, never the model (W10).
+   */
+  readonly defaultWallClockSec?: number;
+  /**
+   * WB-07: grace the executor gets to cancel cooperatively before the runner
+   * forces terminal bookkeeping. Default 5s (Stop must halt < 5s under load).
+   */
+  readonly stopGraceMs?: number;
 }
 
 export class WorkbenchRunner {
@@ -103,10 +166,15 @@ export class WorkbenchRunner {
   private readonly staleClaimMs: number;
   private readonly now: () => Date;
   private readonly log: (message: string) => void;
+  private readonly terminalReporter: TerminalReporter | null;
+  private readonly defaultWallClockSec: number;
+  private readonly stopGraceMs: number;
 
   private inFlight = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private stopped = false;
+  /** WB-07 stop registry: workbench id -> its live run handle. */
+  private readonly active = new Map<string, ActiveRun>();
 
   constructor(options: WorkbenchRunnerOptions) {
     this.store = options.store;
@@ -118,6 +186,9 @@ export class WorkbenchRunner {
     this.staleClaimMs = options.staleClaimMs ?? 10 * 60 * 1000;
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? ((m) => console.error(m));
+    this.terminalReporter = options.terminalReporter ?? null;
+    this.defaultWallClockSec = options.defaultWallClockSec ?? 3600;
+    this.stopGraceMs = options.stopGraceMs ?? 5000;
   }
 
   /**
@@ -146,6 +217,39 @@ export class WorkbenchRunner {
   /** Visible for tests: how many runs are currently executing. */
   get inflightCount(): number {
     return this.inFlight;
+  }
+
+  /**
+   * WB-07: first-class Stop. Requests cancellation of the active run for
+   * `workbenchId`. Returns true if a run was live and the stop was signalled.
+   *
+   * The leash is authoritative and lives ONLY here — the model/harness cannot
+   * disable it (W10). We:
+   *   1. record `stop_requested` (append-only evidence),
+   *   2. signal the run's leash to cancel the executor,
+   *   3. let the executor a short grace to cooperate, then the `run()` loop
+   *      lands the terminal `cancelled` state + audit regardless.
+   *
+   * If the workbench is not live here (queued, or running under another
+   * runner), returns false so the caller can persist the stop for recovery.
+   */
+  async requestStop(workbenchId: string, reason: string): Promise<boolean> {
+    const handle = this.active.get(workbenchId);
+    if (handle === undefined) return false;
+
+    // Idempotent: a second stop on an already-stopping run is a no-op.
+    if (handle.notifyStop === null) return true;
+
+    await this.store.appendEvent(
+      workbenchId,
+      'stop_requested',
+      { by: this.runnerId, reason },
+      this.now(),
+    );
+    const notify = handle.notifyStop;
+    handle.notifyStop = null;
+    notify(reason);
+    return true;
   }
 
   /**
@@ -214,34 +318,38 @@ export class WorkbenchRunner {
   }
 
   private async run(record: WorkbenchRecord): Promise<void> {
+    // WB-07: register in the stop registry so requestStop() can reach this
+    // run. The leash is enforced HERE (never by the model — W10).
+    const stop = deferred<string>();
+    const handle: ActiveRun = { record, stopSignal: stop.promise, notifyStop: stop.resolve };
+    this.active.set(record.id, handle);
+
+    const wallClockSec = record.taskDef.leash?.wallClockSec ?? this.defaultWallClockSec;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
     try {
-      const outcome = await this.executor.execute(record);
-      if (this.stopped) {
-        // We finished while stopping; still land the terminal state.
-      }
-      if (outcome.kind === 'done') {
-        await this.store.setState(record.id, 'done', this.runnerId, this.now(), {
-          finishedAt: this.now(),
-        });
-        await this.store.appendEvent(record.id, 'completed', { by: this.runnerId }, this.now());
-      } else {
-        await this.store.setState(record.id, 'failed', this.runnerId, this.now(), {
-          finishedAt: this.now(),
-          lastError: outcome.error,
-        });
-        await this.store.appendEvent(
-          record.id,
-          'failed',
-          { by: this.runnerId, error: outcome.error },
-          this.now(),
-        );
-        try {
-          await this.executor.cleanup(record);
-        } catch (error) {
-          this.log(
-            `workbench ${record.id}: post-failure cleanup failed (${describeError(error)})`,
+      const outcome = await Promise.race([
+        this.executor
+          .execute(record)
+          .then((o): LeashOutcome => ({ kind: 'execute', outcome: o })),
+        new Promise<LeashOutcome>((resolve) => {
+          timer = setTimeout(
+            () => resolve({ kind: 'timeout', wallClockSec }),
+            wallClockSec * 1000,
           );
-        }
+        }),
+        handle.stopSignal.then(
+          (reason): LeashOutcome => ({ kind: 'stopped', reason }),
+        ),
+      ]);
+      if (timer !== undefined) clearTimeout(timer);
+
+      if (outcome.kind === 'execute') {
+        await this.landExecuteOutcome(record, outcome.outcome);
+      } else if (outcome.kind === 'stopped') {
+        await this.landCancellation(record, outcome.reason);
+      } else {
+        await this.landTimeout(record, outcome.wallClockSec);
       }
     } catch (error) {
       // Executor itself threw (as opposed to returning { kind:'failed' }).
@@ -258,6 +366,11 @@ export class WorkbenchRunner {
           { by: this.runnerId, error: `executor crashed: ${message}` },
           this.now(),
         );
+        await this.reportTerminal(record, {
+          kind: 'failed',
+          error: `executor crashed: ${message}`,
+          cause: 'error',
+        });
         await this.executor.cleanup(record);
       } catch (innerError) {
         this.log(
@@ -265,9 +378,169 @@ export class WorkbenchRunner {
         );
       }
     } finally {
+      if (timer !== undefined) clearTimeout(timer);
+      this.active.delete(record.id);
       this.inFlight -= 1;
     }
   }
+
+  /** Normal done/failed from the executor. */
+  private async landExecuteOutcome(
+    record: WorkbenchRecord,
+    outcome: ExecuteOutcome,
+  ): Promise<void> {
+    if (outcome.kind === 'done') {
+      await this.store.setState(record.id, 'done', this.runnerId, this.now(), {
+        finishedAt: this.now(),
+      });
+      await this.store.appendEvent(record.id, 'completed', { by: this.runnerId }, this.now());
+      await this.reportTerminal(record, { kind: 'done' });
+    } else {
+      await this.store.setState(record.id, 'failed', this.runnerId, this.now(), {
+        finishedAt: this.now(),
+        lastError: outcome.error,
+      });
+      await this.store.appendEvent(
+        record.id,
+        'failed',
+        { by: this.runnerId, error: outcome.error },
+        this.now(),
+      );
+      await this.reportTerminal(record, { kind: 'failed', error: outcome.error, cause: 'error' });
+      try {
+        await this.executor.cleanup(record);
+      } catch (error) {
+        this.log(
+          `workbench ${record.id}: post-failure cleanup failed (${describeError(error)})`,
+        );
+      }
+    }
+  }
+
+  /** WB-07: Stop → cooperative cancel with a short grace, then cancelled. */
+  private async landCancellation(record: WorkbenchRecord, reason: string): Promise<void> {
+    await this.cancelExecutor(record, reason);
+    await this.store.setState(record.id, 'cancelled', this.runnerId, this.now(), {
+      finishedAt: this.now(),
+      lastError: `stopped: ${reason}`,
+    });
+    await this.store.appendEvent(
+      record.id,
+      'cancelled',
+      { by: this.runnerId, reason },
+      this.now(),
+    );
+    // Truthful receipt — the run ended by Stop, not by completing its work.
+    await this.publishLeashReceipt(record, `Run stopped before completion. Reason: ${reason}`);
+    await this.reportTerminal(record, { kind: 'cancelled', reason });
+    try {
+      await this.executor.cleanup(record);
+    } catch (error) {
+      this.log(`workbench ${record.id}: post-cancel cleanup failed (${describeError(error)})`);
+    }
+  }
+
+  /** WB-07: wall-clock timeout → timed_out event + honest failed receipt. */
+  private async landTimeout(record: WorkbenchRecord, wallClockSec: number): Promise<void> {
+    await this.cancelExecutor(record, `wall-clock leash (${wallClockSec}s) elapsed`);
+    await this.store.appendEvent(
+      record.id,
+      'timed_out',
+      { by: this.runnerId, wallClockSec },
+      this.now(),
+    );
+    await this.store.setState(record.id, 'failed', this.runnerId, this.now(), {
+      finishedAt: this.now(),
+      lastError: `timed out after ${wallClockSec}s (runner-enforced leash)`,
+    });
+    await this.store.appendEvent(
+      record.id,
+      'failed',
+      { by: this.runnerId, error: `timed out after ${wallClockSec}s`, cause: 'timeout' },
+      this.now(),
+    );
+    await this.publishLeashReceipt(
+      record,
+      `Run timed out after ${wallClockSec}s and was stopped by the runner leash. No completion receipt was produced.`,
+    );
+    await this.reportTerminal(record, {
+      kind: 'failed',
+      error: `timed out after ${wallClockSec}s`,
+      cause: 'timeout',
+    });
+    try {
+      await this.executor.cleanup(record);
+    } catch (error) {
+      this.log(`workbench ${record.id}: post-timeout cleanup failed (${describeError(error)})`);
+    }
+  }
+
+  /**
+   * Give the executor a bounded grace window to cancel cooperatively. The
+   * terminal bookkeeping lands regardless of whether cancel returns in time —
+   * the leash is authoritative (W10: Stop halts < 5s).
+   */
+  private async cancelExecutor(record: WorkbenchRecord, reason: string): Promise<void> {
+    if (this.executor.cancel === undefined) return;
+    try {
+      await withTimeout(
+        this.executor.cancel(record, reason),
+        this.stopGraceMs,
+        'stop grace window elapsed',
+      );
+    } catch (error) {
+      this.log(
+        `workbench ${record.id}: cancel did not cooperate within ${this.stopGraceMs}ms (${describeError(error)}) — forcing terminal state`,
+      );
+    }
+  }
+
+  /** Honest receipt for leash terminations (timeout/stop) — WB-07/W10. */
+  private async publishLeashReceipt(record: WorkbenchRecord, summary: string): Promise<void> {
+    try {
+      await this.store.publishReceipt(
+        record.id,
+        { summary, assumptions: [], evidence: [] },
+        `runner/${this.runnerId}`,
+        this.now(),
+      );
+      await this.store.appendEvent(record.id, 'receipt_published', { by: this.runnerId }, this.now());
+    } catch (error) {
+      this.log(`workbench ${record.id}: leash receipt failed (${describeError(error)})`);
+    }
+  }
+
+  /** Canonical side effects of a terminal run (§3.1), when wired. */
+  private async reportTerminal(
+    record: WorkbenchRecord,
+    outcome:
+      | { kind: 'done' }
+      | { kind: 'failed'; error: string; cause: 'error' | 'timeout' }
+      | { kind: 'cancelled'; reason: string },
+  ): Promise<void> {
+    if (this.terminalReporter === null) return;
+    try {
+      await this.terminalReporter.reportTerminal(record, outcome);
+    } catch (error) {
+      // A reporter failure must not mask the run's terminal state — log it.
+      this.log(
+        `workbench ${record.id}: terminal reporter failed (${describeError(error)})`,
+      );
+    }
+  }
+}
+
+/** Race a promise against a deadline; reject with `message` if it overruns. */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return Promise.race([
+    promise.finally(() => {
+      if (timer !== undefined) clearTimeout(timer);
+    }),
+    new Promise<never>((_, reject) => {
+      timer = setTimeout(() => reject(new Error(message)), ms);
+    }),
+  ]);
 }
 
 function describeError(error: unknown): string {

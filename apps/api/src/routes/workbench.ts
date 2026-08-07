@@ -30,11 +30,15 @@ import {
   workbenchCreateResponseSchema,
   workbenchDetailResponseSchema,
   workbenchIdParamsSchema,
+  workbenchStopBodySchema,
+  workbenchStopResponseSchema,
   workbenchTaskDefSchema,
 } from '../schema/workbench.js';
 import type { ActionBoundary } from '../services/action-boundary.js';
 import { ownerCommandInfluence } from '../services/action-boundary.js';
 import type { WorkbenchFrontDoor } from '../services/workbench/front-door.js';
+import type { WorkbenchCancellationService } from '../services/workbench/cancellation.js';
+import { AlreadyTerminalError, WorkbenchNotFoundError } from '../services/workbench/cancellation.js';
 import type { WorkbenchRecord, WorkbenchTaskDef } from '../services/workbench/types.js';
 import { registerRoute } from '../plugins/route-handler.js';
 import type { RouteHandlerDependencies } from '../plugins/route-handler.js';
@@ -96,7 +100,42 @@ export const workbenchGetRoute = defineRoute({
   successStatus: 200,
 });
 
-export const workbenchRoutes = [workbenchCreateRoute, workbenchGetRoute];
+export const workbenchStopRoute = defineRoute({
+  operationId: 'workbenchStop',
+  method: 'POST',
+  path: '/v1/workbenches/:id/stop',
+  group: '/v1/workbenches',
+  summary: 'Stop a workbench run (WB-07 leash)',
+  description:
+    'First-class Stop (frozen contract): halts the run under 5 seconds. A live run is cancelled through the runner leash; ' +
+    'otherwise the cancellation is written durably (workbench + work item → cancelled, audit + outbox + honest receipt). ' +
+    'Stopping an already-terminal workbench is refused (409).',
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'],
+  capability: 'work.transition',
+  dataClasses: ['internal', 'private'],
+  standingPolicyEligible: false,
+  policyOperation: 'work.transition',
+  idempotency: 'required_key_single_use',
+  consistency: 'read_own_writes',
+  errors: [
+    'validation_failed',
+    'unauthenticated',
+    'forbidden',
+    'policy_denied',
+    'policy_hold_for_review',
+    'not_found',
+    'version_conflict',
+    'internal_error',
+  ],
+  rateLimit: { requestsPerMinute: 120, burst: 20 },
+  auditObligations: ['workbench.cancelled'],
+  params: workbenchIdParamsSchema,
+  body: workbenchStopBodySchema,
+  response: workbenchStopResponseSchema,
+  successStatus: 200,
+});
+
+export const workbenchRoutes = [workbenchCreateRoute, workbenchGetRoute, workbenchStopRoute];
 
 /** Canonical UUID (the workbench id column type). */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -106,6 +145,7 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 export interface WorkbenchRouteDependencies extends RouteHandlerDependencies {
   readonly frontDoor: WorkbenchFrontDoor;
   readonly actions: ActionBoundary;
+  readonly cancellation: WorkbenchCancellationService;
 }
 
 function recordToWire(record: WorkbenchRecord) {
@@ -305,6 +345,85 @@ export function registerWorkbenchRoutes(
             },
       identifiers: identifiersOf(context),
     };
+  });
+
+  /* ---------------------------------------------------------------- stop --- */
+  registerRoute(app, dependencies, workbenchStopRoute, async ({ params, body, context, principal }) => {
+    const now = dependencies.now();
+
+    if (!UUID_RE.test(params.id)) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
+
+    const idempotencyKey = context.idempotencyKey ?? body.command_id;
+    if (idempotencyKey === undefined) {
+      throw new ProblemError(
+        'validation_failed',
+        'POST /v1/workbenches/:id/stop requires an idempotency key: send command_id in the body or an Idempotency-Key header (FRANK-§12.1).',
+      );
+    }
+
+    const requestHash = `sha256:${createHash('sha256')
+      .update(
+        JSON.stringify({ workbench_id: params.id, command: 'stop', reason: body.reason }),
+        'utf8',
+      )
+      .digest('hex')}`;
+
+    const evaluation = dependencies.actions.evaluate({
+      principal,
+      operation: 'work.transition',
+      // Stopping is a reversible internal control decision; the fenced run
+      // itself is what gets cancelled, not a domain write this call performs.
+      actionClass: 'internal_reversible',
+      target: { kind: 'workbench', id: params.id, cellId: context.cellId },
+      requestHash,
+      idempotencyKey,
+      dataClasses: ['internal', 'private'],
+      influences: ownerCommandInfluence(principal),
+      correlationId: context.correlationId,
+      now,
+    });
+
+    if (evaluation.decision.result === 'deny') {
+      throw new ProblemError('policy_denied', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+    if (evaluation.decision.result === 'hold_for_review') {
+      throw new ProblemError('policy_hold_for_review', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+
+    try {
+      const outcome = await dependencies.cancellation.cancel({
+        cellId: context.cellId,
+        workbenchId: params.id,
+        reason: body.reason,
+        actor: { kind: actorKindFor(principal), id: principal.principalId },
+        correlationId: context.correlationId,
+        now,
+      });
+      return {
+        via: outcome.via,
+        workbench_id: params.id,
+        work_item_id: outcome.workItemId,
+        state: 'cancelled' as const,
+        identifiers: identifiersOf(context),
+      };
+    } catch (error) {
+      if (error instanceof WorkbenchNotFoundError) {
+        throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+      }
+      if (error instanceof AlreadyTerminalError) {
+        throw new ProblemError(
+          'version_conflict',
+          `Workbench ${params.id} is already in a terminal state (${error.state}); stop is a no-op that cannot be replayed.`,
+        );
+      }
+      throw error;
+    }
   });
 }
 

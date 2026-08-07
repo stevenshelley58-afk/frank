@@ -64,6 +64,7 @@ import { registerWorkRoutes, workRoutes } from './routes/work.js';
 import { registerWorkbenchRoutes, workbenchRoutes } from './routes/workbench.js';
 import { registerWorkbenchEventsRoute } from './routes/workbench-events.js';
 import { WorkbenchEventBus } from './services/workbench/event-bus.js';
+import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { registerCodegraphRoutes } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
@@ -361,10 +362,15 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // route (live delivery) — WB-06.
     const workbenchBus = new WorkbenchEventBus();
     const workbenchFrontDoor = new WorkbenchFrontDoor(options.db, workbenchBus);
+    // WB-07: cancellation service. No live runner is wired into the API
+    // process yet (production runner wiring is WB-09), so stops land durably
+    // in Postgres; when a runner is composed in, pass it here for live stops.
+    const workbenchCancellation = new WorkbenchCancellationService(options.db);
     registerWorkbenchRoutes(app, {
       ...shared,
       frontDoor: workbenchFrontDoor,
       actions,
+      cancellation: workbenchCancellation,
     });
     registerWorkbenchEventsRoute(app, {
       ...shared,

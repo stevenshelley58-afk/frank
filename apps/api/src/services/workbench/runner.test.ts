@@ -40,6 +40,7 @@ class FakeStore {
   claimed: Array<{ id: string; runnerId: string }> = [];
   stateChanges: Array<{ id: string; state: WorkbenchState }> = [];
   events: Array<{ id: string; type: string }> = [];
+  receipts: Array<{ id: string; summary: string }> = [];
   recovered: WorkbenchRecord[] = [];
   claimBehavior: (cellId: string, runnerId: string) => WorkbenchRecord | null = () => null;
 
@@ -59,6 +60,9 @@ class FakeStore {
   async setState(id: string, state: WorkbenchState, _by: string, _now: Date, _patch?: unknown) {
     this.stateChanges.push({ id, state });
     return fakeRecord(id, state);
+  }
+  async publishReceipt(id: string, receipt: { summary: string }, _by: string, _at: Date) {
+    this.receipts.push({ id, summary: receipt.summary });
   }
 }
 
@@ -261,5 +265,122 @@ describe('WorkbenchRunner', () => {
     await runner.stop();
     expect(runner.inflightCount).toBe(0);
     expect(executor.calls).toContain('execute:wb-slow');
+  });
+
+  /* ------------------------------------------------------------- WB-07 --- */
+
+  it('WB-07: requestStop cancels the active run -> cancelled state + events + honest receipt', async () => {
+    const store = new FakeStore();
+    const executor = new RecordingExecutor();
+    const rec = fakeRecord('wb-stop');
+    // A long-running execute that the stop must interrupt.
+    executor.delays.set('wb-stop', 5000);
+    store.claimBehavior = (() => {
+      let i = 0;
+      return () => [rec][i++] ?? null;
+    })();
+
+    const runner = new WorkbenchRunner({
+      store: store as never,
+      executor,
+      runnerId: 'runner-1',
+      cellIds: ['cell-test'],
+      pollIntervalMs: 5,
+      log: () => {},
+    });
+
+    await runner.start();
+    await runner.pollOnce();
+    // Wait until the run is live in the stop registry.
+    await new Promise((r) => setTimeout(r, 20));
+    const stopped = await runner.requestStop('wb-stop', 'user pressed stop');
+    expect(stopped).toBe(true);
+    await runner.stop();
+
+    expect(store.stateChanges).toContainEqual({ id: 'wb-stop', state: 'cancelled' });
+    const types = store.events.filter((e) => e.id === 'wb-stop').map((e) => e.type);
+    expect(types).toContain('stop_requested');
+    expect(types).toContain('cancelled');
+    // Honest receipt for the leash termination.
+    expect(store.receipts.some((r) => r.id === 'wb-stop' && /stopped/i.test(r.summary))).toBe(true);
+  });
+
+  it('WB-07: requestStop returns false when no run is live', async () => {
+    const store = new FakeStore();
+    const executor = new RecordingExecutor();
+    const runner = new WorkbenchRunner({
+      store: store as never,
+      executor,
+      runnerId: 'runner-1',
+      cellIds: ['cell-test'],
+      pollIntervalMs: 5,
+      log: () => {},
+    });
+    await runner.start();
+    expect(await runner.requestStop('wb-never-claimed', 'stop')).toBe(false);
+    await runner.stop();
+  });
+
+  it('WB-07: wall-clock timeout -> timed_out + failed + honest receipt', async () => {
+    const store = new FakeStore();
+    const executor = new RecordingExecutor();
+    const rec = fakeRecord('wb-timeout');
+    // Very short leash; execute never finishes in time.
+    (rec.taskDef as { leash?: { wallClockSec: number } }).leash = { wallClockSec: 0 };
+    executor.delays.set('wb-timeout', 5000);
+    store.claimBehavior = (() => {
+      let i = 0;
+      return () => [rec][i++] ?? null;
+    })();
+
+    const runner = new WorkbenchRunner({
+      store: store as never,
+      executor,
+      runnerId: 'runner-1',
+      cellIds: ['cell-test'],
+      pollIntervalMs: 5,
+      log: () => {},
+    });
+
+    await runner.start();
+    await runner.pollOnce();
+    await runner.stop();
+
+    expect(store.stateChanges).toContainEqual({ id: 'wb-timeout', state: 'failed' });
+    const types = store.events.filter((e) => e.id === 'wb-timeout').map((e) => e.type);
+    expect(types).toContain('timed_out');
+    expect(types).toContain('failed');
+    expect(store.receipts.some((r) => r.id === 'wb-timeout' && /timed out/i.test(r.summary))).toBe(true);
+  });
+
+  it('WB-07: terminal reporter receives the terminal outcome when wired', async () => {
+    const store = new FakeStore();
+    const executor = new RecordingExecutor();
+    const rec = fakeRecord('wb-report');
+    executor.outcomes.set('wb-report', { kind: 'done' });
+    store.claimBehavior = (() => {
+      let i = 0;
+      return () => [rec][i++] ?? null;
+    })();
+
+    const reported: Array<{ kind: string }> = [];
+    const runner = new WorkbenchRunner({
+      store: store as never,
+      executor,
+      runnerId: 'runner-1',
+      cellIds: ['cell-test'],
+      pollIntervalMs: 5,
+      log: () => {},
+      terminalReporter: {
+        async reportTerminal(_record, outcome) {
+          reported.push({ kind: outcome.kind });
+        },
+      },
+    });
+
+    await runner.start();
+    await runner.pollOnce();
+    await runner.stop();
+    expect(reported).toContainEqual({ kind: 'done' });
   });
 });
