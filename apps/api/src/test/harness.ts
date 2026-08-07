@@ -77,6 +77,8 @@ export interface BuildTestServerOptions {
   readonly db?: import('@frank/adapter-postgres').FrankDatabase;
   /** WB-06: workbench SSE live-poll interval (tests use a fast value). */
   readonly workbenchPollIntervalMs?: number;
+  /** FS-05: preview-lane deployer (tests inject FakePreviewDeployer). */
+  readonly previewDeployer?: import('../services/workbench/preview-backend.js').PreviewDeployer;
 }
 
 export function buildTestServer(options: BuildTestServerOptions = {}): TestServer {
@@ -100,6 +102,9 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
     ...(options.workbenchPollIntervalMs === undefined
       ? {}
       : { workbenchPollIntervalMs: options.workbenchPollIntervalMs }),
+    ...(options.previewDeployer === undefined
+      ? {}
+      : { previewDeployer: options.previewDeployer }),
     now,
     startedAt: now(),
   });

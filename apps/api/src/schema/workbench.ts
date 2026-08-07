@@ -237,6 +237,61 @@ export const workbenchRoomListResponseSchema = z
   })
   .strict();
 
+/* ---------------------------------------------- FS-05 preview + room files --- */
+
+/**
+ * POST /v1/workbenches/:id/artifacts/:artifactId/preview params
+ * (FS-05): the workbench plus the artifact row to publish a preview for.
+ */
+export const workbenchArtifactPreviewParamsSchema = z
+  .object({ id: z.string().min(1), artifactId: z.string().min(1) })
+  .strict();
+
+/** FS-05 publish-preview body. Empty body is valid (pure trigger). */
+export const workbenchArtifactPreviewBodySchema = z
+  .object({
+    command_id: z.string().min(1).optional(),
+  })
+  .strict();
+
+/**
+ * FS-05 publish-preview response: the preview URL written back to the
+ * artifact row (null when the artifact is not viewable, i.e. not
+ * auto-deployable), plus the classification that decided it.
+ */
+export const workbenchArtifactPreviewResponseSchema = z
+  .object({
+    artifact_id: z.string(),
+    workbench_id: z.string(),
+    path: z.string(),
+    preview_url: z.string().url().nullable(),
+    classification: z.enum(['html', 'mockup', 'report', 'other']),
+    slug: z.string().nullable(),
+    identifiers: identifiersSchema,
+  })
+  .strict();
+
+/** One entry of the FS-05 room Files listing. */
+export const roomFileSchema = z
+  .object({
+    artifact_id: z.string(),
+    workbench_id: z.string(),
+    workbench_state: z.string(),
+    path: z.string(),
+    kind: z.string(),
+    preview_url: z.string().url().nullable(),
+    created_at: z.string(),
+  })
+  .strict();
+
+/** GET /v1/rooms/:roomId/files response (FS-05). */
+export const roomFilesResponseSchema = z
+  .object({
+    files: z.array(roomFileSchema),
+    identifiers: identifiersSchema,
+  })
+  .strict();
+
 /* ---------------------------------------------- WB-08 reopen-with-note --- */
 
 /**

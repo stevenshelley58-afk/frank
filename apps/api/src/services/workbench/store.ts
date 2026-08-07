@@ -33,7 +33,9 @@ import type { FrankDatabase, FrankTransaction } from '@frank/adapter-postgres';
 import type { WorkbenchEventBus } from './event-bus.js';
 
 import type {
+  ArtifactDetail,
   CreateWorkbenchInput,
+  RoomArtifact,
   WorkbenchArtifact,
   WorkbenchEvent,
   WorkbenchEventType,
@@ -342,6 +344,72 @@ export class WorkbenchStore {
       on conflict (workbench_id, path) do update
         set kind = excluded.kind, preview_url = excluded.preview_url
     `);
+  }
+
+  /** Read one artifact by id (FS-05 publish-preview). Null when absent. */
+  async getArtifactById(artifactId: string): Promise<ArtifactDetail | null> {
+    const rows = await this.db.execute<{
+      id: string;
+      workbench_id: string;
+      path: string;
+      kind: string;
+      preview_url: string | null;
+      sha256: string | null;
+      media_type: string | null;
+      created_at: Date | string;
+    }>(sql`
+      select id, workbench_id, path, kind, preview_url, sha256, media_type, created_at
+      from "frank_domain"."workbench_artifact"
+      where id = ${artifactId}::uuid
+    `);
+    const row = rows.rows[0];
+    if (row === undefined) return null;
+    return {
+      id: row.id,
+      workbenchId: row.workbench_id,
+      path: row.path,
+      kind: row.kind,
+      previewUrl: row.preview_url,
+      sha256: row.sha256,
+      mediaType: row.media_type,
+      createdAt: asDate(row.created_at),
+    };
+  }
+
+  /**
+   * FS-05 room Files listing: every artifact across the room's workbenches
+   * (workbench_artifact joined to workbench by room_id), newest first.
+   */
+  async listRoomFiles(cellId: string, roomId: string): Promise<readonly RoomArtifact[]> {
+    const rows = await this.db.execute<{
+      id: string;
+      workbench_id: string;
+      workbench_state: string;
+      path: string;
+      kind: string;
+      preview_url: string | null;
+      sha256: string | null;
+      media_type: string | null;
+      created_at: Date | string;
+    }>(sql`
+      select a.id, a.workbench_id, wb.state as workbench_state, a.path, a.kind,
+             a.preview_url, a.sha256, a.media_type, a.created_at
+      from "frank_domain"."workbench_artifact" a
+      join "frank_domain"."workbench" wb on wb.id = a.workbench_id
+      where wb.cell_id = ${cellId} and wb.room_id = ${roomId}
+      order by a.created_at desc, a.id
+    `);
+    return rows.rows.map((row) => ({
+      id: row.id,
+      workbenchId: row.workbench_id,
+      workbenchState: row.workbench_state,
+      path: row.path,
+      kind: row.kind,
+      previewUrl: row.preview_url,
+      sha256: row.sha256,
+      mediaType: row.media_type,
+      createdAt: asDate(row.created_at),
+    }));
   }
 
   /** Publish the closing receipt. One per workbench (PK on workbench_id). */

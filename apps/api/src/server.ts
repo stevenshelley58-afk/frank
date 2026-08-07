@@ -74,6 +74,8 @@ import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { registerCodegraphRoutes } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
 import { WorkbenchFrontDoor } from './services/workbench/front-door.js';
+import type { PreviewDeployer } from './services/workbench/preview-backend.js';
+import { PreviewBackend, SshPreviewDeployer } from './services/workbench/preview-backend.js';
 import { HealthService } from './services/health.js';
 import type { EnrichmentDispatcher } from './services/enrichment.js';
 import { InProcessEnrichmentDispatcher, noopEnrichmentHandler } from './services/enrichment.js';
@@ -170,6 +172,12 @@ export interface BuildServerOptions {
   readonly db?: import("@frank/adapter-postgres").FrankDatabase;
   /** WB-06: workbench SSE live-poll interval (tests use a fast value). */
   readonly workbenchPollIntervalMs?: number;
+  /**
+   * FS-05: preview-lane deployer. Defaults to the real ssh deployer
+   * (`SshPreviewDeployer` → /srv/frank/infra/preview-deploy.sh); tests inject
+   * a fake so no ssh ever runs in CI.
+   */
+  readonly previewDeployer?: PreviewDeployer;
 }
 
 export interface BuiltServer {
@@ -416,12 +424,21 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     });
     // HITL-01/02: the decision seam (created once above, before the work
     // routes, so ready/cancel on a decision item can resume the run).
+    // FS-05: preview backend — classification + preview-lane publishing. The
+    // deployer is injectable: production gets the real ssh deployer; tests
+    // pass a fake so CI never shells out. Shares the bus so a published
+    // preview wakes SSE subscribers too.
+    const previewBackend = new PreviewBackend({
+      store: workbenchFrontDoor.store,
+      deployer: options.previewDeployer ?? new SshPreviewDeployer(),
+    });
     registerWorkbenchRoutes(app, {
       ...shared,
       frontDoor: workbenchFrontDoor,
       actions,
       cancellation: workbenchCancellation,
       decisions: workbenchDecisions as WorkbenchDecisionService,
+      preview: previewBackend,
     });
     // FS-02: room folder bindings — declarations are Postgres rows (migration
     // 0006), so the routes register alongside the workbench routes, only when
