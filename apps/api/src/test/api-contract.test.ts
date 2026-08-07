@@ -812,6 +812,12 @@ describe('ADR-017 OpenAPI', () => {
       '/v1/brain/save',
       '/v1/brain/search',
       '/v1/capture',
+      // CH-06: outbox poll/ack for the channels listener.
+      '/v1/channels/outbox',
+      '/v1/channels/outbox/ack',
+      // CH-06: room↔channel bindings (Frank owns the binding).
+      '/v1/rooms/{roomId}/channel-bindings',
+      '/v1/rooms/{roomId}/channel-bindings/{id}',
       // Frozen contract: room workbench list (UI-07 Running/waiting surfaces).
       '/v1/rooms/{roomId}/workbenches',
       '/v1/system/health',
@@ -865,7 +871,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(19);
+    expect(operations).toBe(24);
   });
 
   it('never documents an operation that can return secret-class data', async () => {
