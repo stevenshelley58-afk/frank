@@ -73,7 +73,8 @@ workbench runner, never as a replacement for it.
 | HITL-01 | AG-3 | merged 2174980 | ✅ normal decision items + pause, integration 5/5, issue #20 closed |
 | HITL-02 | AG-3 | merged 2174980 | ✅ resume/deny/stale-rejection via command envelope, issue #21 closed |
 | WB-08 | AG-3 | merged 613c459 | ✅ artifacts + room list + reopen-with-note, integration 4/4, issue #25 closed |
-| WB-09 | AG-3 | — | next: restart durability + cleanup |
+| WB-09 | AG-3 | merged f64ed25 | ✅ restart reconciliation + honest failure, runner.test 13/13, issue #26 closed |
+| **Workbench core WB-01..09** | AG-3 | main | ✅ **COMPLETE** — front door, SSE, leash/stop, artifacts/receipt, decision seam, durability |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
 | CH-02 | AG-4 | merged dc7ee9a | ✅ conformance 21/21 (M4 hard gate passed) |
 | DEL-04, GOV-04, DEL-05 | AG-1 | `agent/del/delivery-controls` | ✅ merged ff9ab38 |
