@@ -70,7 +70,10 @@ workbench runner, never as a replacement for it.
 | WB-05 | AG-3 | merged 68da4f7 | ✅ front door + web wiring, integration 4/4, issue #23 closed |
 | WB-06 | AG-3 | merged b13f87f | ✅ SSE snapshot→live, gap-free resume, integration 3/3, issue #24 closed |
 | WB-07 | AG-3 | merged 371d7f1 | ✅ runner leash + Stop route, integration 7/7, issue #17 closed |
-| HITL-01/02 | AG-3 | `agent/wb/wb-behavior` | 🔄 decision seam + pause/resume (path to G3) |
+| HITL-01 | AG-3 | merged 2174980 | ✅ normal decision items + pause, integration 5/5, issue #20 closed |
+| HITL-02 | AG-3 | merged 2174980 | ✅ resume/deny/stale-rejection via command envelope, issue #21 closed |
+| WB-08 | AG-3 | `agent/wb/wb-behavior` | 🔄 artifacts + receipt + verification state |
+| WB-09 | AG-3 | — | next: restart durability + cleanup |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
 | CH-02 | AG-4 | merged dc7ee9a | ✅ conformance 21/21 (M4 hard gate passed) |
 | DEL-04, GOV-04, DEL-05 | AG-1 | `agent/del/delivery-controls` | ✅ merged ff9ab38 |
