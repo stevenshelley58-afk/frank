@@ -26,7 +26,11 @@ import { identifiersOf } from '../context.js';
 import { ProblemError } from '../problem.js';
 import { defineRoute } from '../schema/registry.js';
 import {
+  roomFilesResponseSchema,
   workbenchArtifactBodySchema,
+  workbenchArtifactPreviewBodySchema,
+  workbenchArtifactPreviewParamsSchema,
+  workbenchArtifactPreviewResponseSchema,
   workbenchArtifactResponseSchema,
   workbenchCreateBodySchema,
   workbenchCreateResponseSchema,
@@ -50,6 +54,7 @@ import { AlreadyTerminalError, WorkbenchNotFoundError } from '../services/workbe
 import type { WorkbenchDecisionService } from '../services/workbench/decision.js';
 import { DecisionConflictError, WorkbenchNotFoundError as DecisionWorkbenchNotFoundError } from '../services/workbench/decision.js';
 import type { WorkbenchRecord, WorkbenchTaskDef } from '../services/workbench/types.js';
+import type { PreviewBackend } from '../services/workbench/preview-backend.js';
 import { registerRoute } from '../plugins/route-handler.js';
 import type { RouteHandlerDependencies } from '../plugins/route-handler.js';
 
@@ -214,6 +219,67 @@ export const workbenchArtifactRoute = defineRoute({
   successStatus: 200,
 });
 
+/* ========================================================= FS-05 preview ==== */
+
+export const workbenchArtifactPreviewRoute = defineRoute({
+  operationId: 'workbenchArtifactPreview',
+  method: 'POST',
+  path: '/v1/workbenches/:id/artifacts/:artifactId/preview',
+  group: '/v1/workbenches',
+  summary: 'Publish a preview for a registered artifact (FS-05)',
+  description:
+    'Classifies the artifact and, when it is viewable (html/mockup), deploys it to the preview lane through the ' +
+    'injectable PreviewDeployer and writes the resulting preview URL back onto the artifact row. Not-viewable ' +
+    'artifacts (report/other) return preview_url: null without a deploy. Idempotent on (workbench, path): ' +
+    're-publishing updates the stored preview URL. Appends artifact_registered with action preview_published.',
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'],
+  capability: 'work.transition',
+  dataClasses: ['internal', 'private'],
+  standingPolicyEligible: false,
+  policyOperation: 'work.transition',
+  idempotency: 'required_key_single_use',
+  consistency: 'read_own_writes',
+  errors: [
+    'validation_failed',
+    'unauthenticated',
+    'forbidden',
+    'policy_denied',
+    'policy_hold_for_review',
+    'not_found',
+    'internal_error',
+  ],
+  rateLimit: { requestsPerMinute: 60, burst: 10 },
+  auditObligations: ['workbench.artifact_registered'],
+  params: workbenchArtifactPreviewParamsSchema,
+  body: workbenchArtifactPreviewBodySchema,
+  response: workbenchArtifactPreviewResponseSchema,
+  successStatus: 200,
+});
+
+export const workbenchRoomFilesRoute = defineRoute({
+  operationId: 'workbenchRoomFiles',
+  method: 'GET',
+  path: '/v1/rooms/:roomId/files',
+  group: '/v1/workbenches',
+  summary: 'List files (artifacts) for a room (FS-05)',
+  description:
+    'Every registered artifact across the room\'s workbenches, newest first — the room Files surface (FS-05). ' +
+    'Entries carry the preview URL when one has been published.',
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
+  capability: 'work.read',
+  dataClasses: ['internal', 'private'],
+  standingPolicyEligible: false,
+  policyOperation: 'work.read',
+  idempotency: 'safe',
+  consistency: 'read_own_writes',
+  errors: ['validation_failed', 'unauthenticated', 'forbidden', 'internal_error'],
+  rateLimit: { requestsPerMinute: 600, burst: 60 },
+  auditObligations: [],
+  params: workbenchRoomParamsSchema,
+  response: roomFilesResponseSchema,
+  successStatus: 200,
+});
+
 export const workbenchRoomListRoute = defineRoute({
   operationId: 'workbenchRoomList',
   method: 'GET',
@@ -264,7 +330,9 @@ export const workbenchReopenRoute = defineRoute({
 export const workbenchAllRoutes = [
   ...workbenchRoutes,
   workbenchArtifactRoute,
+  workbenchArtifactPreviewRoute,
   workbenchRoomListRoute,
+  workbenchRoomFilesRoute,
   workbenchReopenRoute,
 ];
 
@@ -278,6 +346,8 @@ export interface WorkbenchRouteDependencies extends RouteHandlerDependencies {
   readonly actions: ActionBoundary;
   readonly cancellation: WorkbenchCancellationService;
   readonly decisions: WorkbenchDecisionService;
+  /** FS-05: artifact classification + preview-lane publishing. */
+  readonly preview: PreviewBackend;
 }
 
 function recordToWire(record: WorkbenchRecord) {
@@ -715,11 +785,107 @@ export function registerWorkbenchRoutes(
     };
   });
 
+  /* -------------------------------------------------- FS-05 publish-preview --- */
+  registerRoute(app, dependencies, workbenchArtifactPreviewRoute, async ({ params, body, context, principal }) => {
+    const now = dependencies.now();
+    if (!UUID_RE.test(params.id)) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
+
+    const idempotencyKey = context.idempotencyKey ?? body.command_id;
+    if (idempotencyKey === undefined) {
+      throw new ProblemError(
+        'validation_failed',
+        'POST /v1/workbenches/:id/artifacts/:artifactId/preview requires an idempotency key: send command_id in the body or an Idempotency-Key header (FRANK-§12.1).',
+      );
+    }
+
+    const requestHash = `sha256:${createHash('sha256')
+      .update(
+        JSON.stringify({ workbench_id: params.id, command: 'artifact_preview', artifact_id: params.artifactId }),
+        'utf8',
+      )
+      .digest('hex')}`;
+
+    const evaluation = dependencies.actions.evaluate({
+      principal,
+      operation: 'work.transition',
+      actionClass: 'internal_reversible',
+      target: { kind: 'workbench', id: params.id, cellId: context.cellId },
+      requestHash,
+      idempotencyKey,
+      dataClasses: ['internal', 'private'],
+      influences: ownerCommandInfluence(principal),
+      correlationId: context.correlationId,
+      now,
+    });
+    if (evaluation.decision.result === 'deny') {
+      throw new ProblemError('policy_denied', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+    if (evaluation.decision.result === 'hold_for_review') {
+      throw new ProblemError('policy_hold_for_review', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+
+    const store = dependencies.frontDoor.store;
+    const record = await store.getWorkbench(context.cellId, params.id);
+    if (record === null) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
+
+    // Artifact must exist AND belong to this workbench (the row lookup is by
+    // artifact id alone; the ownership check is what ties it to :id).
+    let artifact;
+    try {
+      artifact = await store.getArtifactById(params.artifactId);
+    } catch {
+      // A non-UUID artifact id cannot match any row.
+      artifact = null;
+    }
+    if (artifact === null || artifact.workbenchId !== params.id) {
+      throw new ProblemError(
+        'not_found',
+        `No artifact ${params.artifactId} exists on workbench ${params.id}.`,
+      );
+    }
+
+    const outcome = await dependencies.preview.publishArtifact(params.id, artifact, now);
+    return {
+      artifact_id: artifact.id,
+      workbench_id: params.id,
+      path: artifact.path,
+      preview_url: outcome.previewUrl,
+      classification: outcome.classification,
+      slug: outcome.slug,
+      identifiers: identifiersOf(context),
+    };
+  });
+
   /* ------------------------------------------------------------- room list --- */
   registerRoute(app, dependencies, workbenchRoomListRoute, async ({ params, context }) => {
     const records = await dependencies.frontDoor.store.listByRoom(context.cellId, params.roomId);
     return {
       workbenches: records.map(recordToWire),
+      identifiers: identifiersOf(context),
+    };
+  });
+
+  /* ------------------------------------------------------ FS-05 room files --- */
+  registerRoute(app, dependencies, workbenchRoomFilesRoute, async ({ params, context }) => {
+    const files = await dependencies.frontDoor.store.listRoomFiles(context.cellId, params.roomId);
+    return {
+      files: files.map((file) => ({
+        artifact_id: file.id,
+        workbench_id: file.workbenchId,
+        workbench_state: file.workbenchState,
+        path: file.path,
+        kind: file.kind,
+        preview_url: file.previewUrl,
+        created_at: file.createdAt.toISOString(),
+      })),
       identifiers: identifiersOf(context),
     };
   });

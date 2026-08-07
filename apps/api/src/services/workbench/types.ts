@@ -159,6 +159,30 @@ export interface WorkbenchArtifact {
   readonly createdAt: Date;
 }
 
+/**
+ * FS-05: a full artifact row as read for the preview backend — superset of
+ * {@link WorkbenchArtifact} carrying the owning workbench plus the optional
+ * content-hash/media-type columns.
+ */
+export interface ArtifactDetail {
+  readonly id: string;
+  readonly workbenchId: string;
+  readonly path: string;
+  readonly kind: string;
+  readonly previewUrl: string | null;
+  readonly sha256: string | null;
+  readonly mediaType: string | null;
+  readonly createdAt: Date;
+}
+
+/**
+ * FS-05 room Files entry: an artifact plus enough workbench context for the
+ * room surface (which run produced it, how far along that run is).
+ */
+export interface RoomArtifact extends ArtifactDetail {
+  readonly workbenchState: string;
+}
+
 export interface WorkbenchReceipt {
   readonly summary: string;
   readonly assumptions: readonly string[];

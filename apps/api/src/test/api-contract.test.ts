@@ -818,6 +818,8 @@ describe('ADR-017 OpenAPI', () => {
       // CH-06: room↔channel bindings (Frank owns the binding).
       '/v1/rooms/{roomId}/channel-bindings',
       '/v1/rooms/{roomId}/channel-bindings/{id}',
+      // FS-05: room Files listing (artifacts across the room's workbenches).
+      '/v1/rooms/{roomId}/files',
       // FS-02: room folder bindings (declaration records; enforcement is FS-03).
       '/v1/rooms/{roomId}/folder-bindings',
       '/v1/rooms/{roomId}/folder-bindings/{id}',
@@ -837,6 +839,8 @@ describe('ADR-017 OpenAPI', () => {
       '/v1/workbenches/{id}',
       // WB-08: artifact registration + reopen-with-note.
       '/v1/workbenches/{id}/artifacts',
+      // FS-05: publish a registered artifact's preview to the preview lane.
+      '/v1/workbenches/{id}/artifacts/{artifactId}/preview',
       // HITL-01: decision seam (normal decision work item + pause).
       '/v1/workbenches/{id}/decisions',
       // WB-08: Central reopens a done workbench with a note.
@@ -874,7 +878,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(27);
+    expect(operations).toBe(29);
   });
 
   it('never documents an operation that can return secret-class data', async () => {
