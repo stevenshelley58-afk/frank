@@ -65,6 +65,7 @@ import { registerWorkbenchRoutes, workbenchRoutes } from './routes/workbench.js'
 import { registerWorkbenchEventsRoute } from './routes/workbench-events.js';
 import { WorkbenchEventBus } from './services/workbench/event-bus.js';
 import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
+import { WorkbenchDecisionService } from './services/workbench/decision.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { registerCodegraphRoutes } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
@@ -349,8 +350,42 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     now,
   };
 
+  // HITL-01/02: the decision seam needs a DB handle. Created once here (before
+  // the work routes, which call back into it on ready/cancel) and reused by
+  // the workbench routes registered below.
+  const workbenchDecisions =
+    options.db === undefined ? null : new WorkbenchDecisionService(options.db);
+
   registerCaptureRoutes(app, { ...shared, store, enrichment, actions });
-  registerWorkRoutes(app, { ...shared, store, actions });
+  registerWorkRoutes(app, {
+    ...shared,
+    store,
+    actions,
+    // HITL-02: a ready/cancel command on a workbench decision resumes or
+    // safe-fails the linked run. A paused run that never resumes is a silent
+    // stall, so a resolution failure propagates to the caller.
+    ...(workbenchDecisions === null
+      ? {}
+      : {
+          onDecisionResolution: async (
+            cellId: string,
+            workItemId: string,
+            resolution: 'ready' | 'cancel',
+            actor: { kind: 'user' | 'agent' | 'service'; id: string },
+            correlationId: string,
+            now: Date,
+          ): Promise<void> => {
+            await workbenchDecisions.resolveDecision({
+              cellId,
+              decisionWorkItemId: workItemId,
+              resolution,
+              actor,
+              correlationId,
+              now,
+            });
+          },
+        }),
+  });
   registerProvenanceRoutes(app, { ...shared, store });
   registerTodayRoutes(app, { ...shared, store });
   registerHealthRoutes(app, { ...shared, health, serviceName: 'frank-api' });
@@ -366,11 +401,14 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // process yet (production runner wiring is WB-09), so stops land durably
     // in Postgres; when a runner is composed in, pass it here for live stops.
     const workbenchCancellation = new WorkbenchCancellationService(options.db);
+    // HITL-01/02: the decision seam (created once above, before the work
+    // routes, so ready/cancel on a decision item can resume the run).
     registerWorkbenchRoutes(app, {
       ...shared,
       frontDoor: workbenchFrontDoor,
       actions,
       cancellation: workbenchCancellation,
+      decisions: workbenchDecisions as WorkbenchDecisionService,
     });
     registerWorkbenchEventsRoute(app, {
       ...shared,

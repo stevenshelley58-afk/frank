@@ -171,6 +171,20 @@ export const workRoutes = [workListRoute, workGetRoute, workHistoryRoute, workCo
 export interface WorkRouteDependencies extends RouteHandlerDependencies {
   readonly store: DomainStore;
   readonly actions: ActionBoundary;
+  /**
+   * HITL-02 (optional): called after a successful `ready`/`cancel` command on
+   * a work item, so a linked workbench decision can resume or safe-fail its
+   * run. The workbench seam wires this at composition; it is a no-op for work
+   * items that are not workbench decisions.
+   */
+  readonly onDecisionResolution?: (
+    cellId: string,
+    workItemId: string,
+    resolution: 'ready' | 'cancel',
+    actor: { kind: 'user' | 'agent' | 'service'; id: string },
+    correlationId: string,
+    now: Date,
+  ) => Promise<void>;
 }
 
 function summaryOf(item: WorkItemRecord, now: Date): {
@@ -448,6 +462,25 @@ export function registerWorkRoutes(app: FastifyInstance, dependencies: WorkRoute
       const updated = await dependencies.store.getWork(context.cellId, params.id);
       if (updated === undefined) {
         throw new ProblemError('internal_error', 'The work item vanished between write and read.');
+      }
+
+      // HITL-02: if this command resolved a workbench decision, resume or
+      // safe-fail the linked run. `ready` approves, `cancel` denies. A failure
+      // here must not mask the successful work-item transition, but it must be
+      // surfaced — a paused run that never resumes is a silent stall. We log
+      // and rethrow so the client sees the command did not fully land.
+      if (
+        dependencies.onDecisionResolution !== undefined &&
+        (params.command === 'ready' || params.command === 'cancel')
+      ) {
+        await dependencies.onDecisionResolution(
+          context.cellId,
+          params.id,
+          params.command,
+          { kind: actorKindFor(principal), id: principal.principalId },
+          context.correlationId,
+          now,
+        );
       }
 
       return {

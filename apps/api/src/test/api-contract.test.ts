@@ -824,6 +824,8 @@ describe('ADR-017 OpenAPI', () => {
       // WB-05: the workbench front door (frozen contract WORKBENCH_API_CONTRACT.md).
       '/v1/workbenches',
       '/v1/workbenches/{id}',
+      // HITL-01: decision seam (normal decision work item + pause).
+      '/v1/workbenches/{id}/decisions',
       // WB-07: first-class Stop (leash + cancellation).
       '/v1/workbenches/{id}/stop',
     ]);
@@ -857,7 +859,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(15);
+    expect(operations).toBe(16);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

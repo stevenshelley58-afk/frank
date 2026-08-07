@@ -28,6 +28,8 @@ import { defineRoute } from '../schema/registry.js';
 import {
   workbenchCreateBodySchema,
   workbenchCreateResponseSchema,
+  workbenchDecisionBodySchema,
+  workbenchDecisionResponseSchema,
   workbenchDetailResponseSchema,
   workbenchIdParamsSchema,
   workbenchStopBodySchema,
@@ -39,6 +41,8 @@ import { ownerCommandInfluence } from '../services/action-boundary.js';
 import type { WorkbenchFrontDoor } from '../services/workbench/front-door.js';
 import type { WorkbenchCancellationService } from '../services/workbench/cancellation.js';
 import { AlreadyTerminalError, WorkbenchNotFoundError } from '../services/workbench/cancellation.js';
+import type { WorkbenchDecisionService } from '../services/workbench/decision.js';
+import { DecisionConflictError, WorkbenchNotFoundError as DecisionWorkbenchNotFoundError } from '../services/workbench/decision.js';
 import type { WorkbenchRecord, WorkbenchTaskDef } from '../services/workbench/types.js';
 import { registerRoute } from '../plugins/route-handler.js';
 import type { RouteHandlerDependencies } from '../plugins/route-handler.js';
@@ -135,7 +139,47 @@ export const workbenchStopRoute = defineRoute({
   successStatus: 200,
 });
 
-export const workbenchRoutes = [workbenchCreateRoute, workbenchGetRoute, workbenchStopRoute];
+export const workbenchDecisionRoute = defineRoute({
+  operationId: 'workbenchDecision',
+  method: 'POST',
+  path: '/v1/workbenches/:id/decisions',
+  group: '/v1/workbenches',
+  summary: 'Request a decision from inside a run (HITL-01)',
+  description:
+    'Creates a NORMAL decision work item in `waiting` (indistinguishable from any other ADR-022 approval), ' +
+    'links it to the workbench, appends decision_requested + paused, and pauses the run (state `waiting`). ' +
+    'Resolution arrives through the normal command envelope on the decision work item (HITL-02).',
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'],
+  capability: 'work.transition',
+  dataClasses: ['internal', 'private'],
+  standingPolicyEligible: false,
+  policyOperation: 'work.transition',
+  idempotency: 'required_key_single_use',
+  consistency: 'read_own_writes',
+  errors: [
+    'validation_failed',
+    'unauthenticated',
+    'forbidden',
+    'policy_denied',
+    'policy_hold_for_review',
+    'not_found',
+    'version_conflict',
+    'internal_error',
+  ],
+  rateLimit: { requestsPerMinute: 120, burst: 20 },
+  auditObligations: ['workbench.decision_requested'],
+  params: workbenchIdParamsSchema,
+  body: workbenchDecisionBodySchema,
+  response: workbenchDecisionResponseSchema,
+  successStatus: 200,
+});
+
+export const workbenchRoutes = [
+  workbenchCreateRoute,
+  workbenchGetRoute,
+  workbenchStopRoute,
+  workbenchDecisionRoute,
+];
 
 /** Canonical UUID (the workbench id column type). */
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -146,6 +190,7 @@ export interface WorkbenchRouteDependencies extends RouteHandlerDependencies {
   readonly frontDoor: WorkbenchFrontDoor;
   readonly actions: ActionBoundary;
   readonly cancellation: WorkbenchCancellationService;
+  readonly decisions: WorkbenchDecisionService;
 }
 
 function recordToWire(record: WorkbenchRecord) {
@@ -421,6 +466,84 @@ export function registerWorkbenchRoutes(
           'version_conflict',
           `Workbench ${params.id} is already in a terminal state (${error.state}); stop is a no-op that cannot be replayed.`,
         );
+      }
+      throw error;
+    }
+  });
+
+  /* ------------------------------------------------------------ decision --- */
+  registerRoute(app, dependencies, workbenchDecisionRoute, async ({ params, body, context, principal }) => {
+    const now = dependencies.now();
+
+    if (!UUID_RE.test(params.id)) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
+
+    const idempotencyKey = context.idempotencyKey ?? body.command_id;
+    if (idempotencyKey === undefined) {
+      throw new ProblemError(
+        'validation_failed',
+        'POST /v1/workbenches/:id/decisions requires an idempotency key: send command_id in the body or an Idempotency-Key header (FRANK-§12.1).',
+      );
+    }
+
+    const requestHash = `sha256:${createHash('sha256')
+      .update(
+        JSON.stringify({ workbench_id: params.id, command: 'decision', question: body.question }),
+        'utf8',
+      )
+      .digest('hex')}`;
+
+    const evaluation = dependencies.actions.evaluate({
+      principal,
+      operation: 'work.transition',
+      // Requesting a decision pauses the run for human input — an internal,
+      // reversible control transition. The decision item itself is canonical.
+      actionClass: 'internal_reversible',
+      target: { kind: 'workbench', id: params.id, cellId: context.cellId },
+      requestHash,
+      idempotencyKey,
+      dataClasses: ['internal', 'private'],
+      influences: ownerCommandInfluence(principal),
+      correlationId: context.correlationId,
+      now,
+    });
+
+    if (evaluation.decision.result === 'deny') {
+      throw new ProblemError('policy_denied', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+    if (evaluation.decision.result === 'hold_for_review') {
+      throw new ProblemError('policy_hold_for_review', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+
+    try {
+      const outcome = await dependencies.decisions.requestDecision({
+        cellId: context.cellId,
+        workbenchId: params.id,
+        question: body.question,
+        ...(body.why_now === undefined ? {} : { whyNow: body.why_now }),
+        ...(body.next_safe_action === undefined ? {} : { nextSafeAction: body.next_safe_action }),
+        ...(body.evidence === undefined ? {} : { evidence: body.evidence }),
+        actor: { kind: actorKindFor(principal), id: principal.principalId },
+        correlationId: context.correlationId,
+        now,
+      });
+      return {
+        decision_work_item_id: outcome.decisionWorkItemId,
+        workbench_id: params.id,
+        workbench_state: 'waiting' as const,
+        identifiers: identifiersOf(context),
+      };
+    } catch (error) {
+      if (error instanceof DecisionWorkbenchNotFoundError) {
+        throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+      }
+      if (error instanceof DecisionConflictError) {
+        throw new ProblemError('version_conflict', error.reason);
       }
       throw error;
     }
