@@ -38,17 +38,23 @@ import {
   workbenchReopenResponseSchema,
   workbenchRoomListResponseSchema,
   workbenchRoomParamsSchema,
+  workbenchStagedWriteBodySchema,
+  workbenchStagedWriteResponseSchema,
   workbenchStopBodySchema,
   workbenchStopResponseSchema,
   workbenchTaskDefSchema,
 } from '../schema/workbench.js';
 import type { ActionBoundary } from '../services/action-boundary.js';
 import { ownerCommandInfluence } from '../services/action-boundary.js';
+import type { RoomFolderBindingStore } from '../services/workbench/folder-binding-store.js';
+import { composeTaskDefMounts } from '../services/workbench/mount-composition.js';
 import type { WorkbenchFrontDoor } from '../services/workbench/front-door.js';
 import type { WorkbenchCancellationService } from '../services/workbench/cancellation.js';
 import { AlreadyTerminalError, WorkbenchNotFoundError } from '../services/workbench/cancellation.js';
 import type { WorkbenchDecisionService } from '../services/workbench/decision.js';
 import { DecisionConflictError, WorkbenchNotFoundError as DecisionWorkbenchNotFoundError } from '../services/workbench/decision.js';
+import type { StagedWriteService } from '../services/workbench/staged-write.js';
+import { StagedWriteRejectedError } from '../services/workbench/staged-write.js';
 import type { WorkbenchRecord, WorkbenchTaskDef } from '../services/workbench/types.js';
 import { registerRoute } from '../plugins/route-handler.js';
 import type { RouteHandlerDependencies } from '../plugins/route-handler.js';
@@ -261,11 +267,47 @@ export const workbenchReopenRoute = defineRoute({
   successStatus: 200,
 });
 
+export const workbenchStagedWriteRoute = defineRoute({
+  operationId: 'workbenchStagedWrite',
+  method: 'POST',
+  path: '/v1/workbenches/:id/staged-writes',
+  group: '/v1/workbenches',
+  summary: 'Propose a staged shared write (FS-03)',
+  description:
+    'A staged-mounted folder asks to write its copy back to the shared source (§3.2). The proposal records a staged_write row ' +
+    'and files a NORMAL decision work item (ADR-022, HITL-01 shape) that pauses the run. Nothing lands until the decision ' +
+    'resolves `ready` through the normal command envelope; the approved copy is performed by the control plane outside the harness.',
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'],
+  capability: 'work.transition',
+  dataClasses: ['internal', 'private'],
+  standingPolicyEligible: false,
+  policyOperation: 'work.transition',
+  idempotency: 'required_key_single_use',
+  consistency: 'read_own_writes',
+  errors: [
+    'validation_failed',
+    'unauthenticated',
+    'forbidden',
+    'policy_denied',
+    'policy_hold_for_review',
+    'not_found',
+    'version_conflict',
+    'internal_error',
+  ],
+  rateLimit: { requestsPerMinute: 120, burst: 20 },
+  auditObligations: ['staged_write.proposed'],
+  params: workbenchIdParamsSchema,
+  body: workbenchStagedWriteBodySchema,
+  response: workbenchStagedWriteResponseSchema,
+  successStatus: 200,
+});
+
 export const workbenchAllRoutes = [
   ...workbenchRoutes,
   workbenchArtifactRoute,
   workbenchRoomListRoute,
   workbenchReopenRoute,
+  workbenchStagedWriteRoute,
 ];
 
 /** Canonical UUID (the workbench id column type). */
@@ -278,6 +320,10 @@ export interface WorkbenchRouteDependencies extends RouteHandlerDependencies {
   readonly actions: ActionBoundary;
   readonly cancellation: WorkbenchCancellationService;
   readonly decisions: WorkbenchDecisionService;
+  /** FS-03: staged shared write proposals (created only when a DB exists). */
+  readonly stagedWrites: StagedWriteService;
+  /** FS-03: room folder bindings, read when composing workbench mounts. */
+  readonly folderBindings: RoomFolderBindingStore;
 }
 
 function recordToWire(record: WorkbenchRecord) {
@@ -426,10 +472,34 @@ export function registerWorkbenchRoutes(
       });
     }
 
+    // FS-03 mount composition (§3.2): a workbench created for a room receives
+    // ONLY folders bound to that room AND named in the task def. The binding
+    // supplies the server path + enforcement mode; the task def names the
+    // folder and its container path. Unbound requests never enter — the fence
+    // is default-closed, and the persisted record shows exactly what was
+    // received. Roomless workbenches have no binding layer and keep their
+    // mounts as declared (the provisioner's own validation still applies).
+    const declaredTaskDef = taskDefFromBody(body.task_def);
+    let taskDef = declaredTaskDef;
+    if (body.room_id !== undefined && declaredTaskDef.mounts !== undefined) {
+      const bindings = await dependencies.folderBindings.listByRoom(context.cellId, body.room_id);
+      const composed = composeTaskDefMounts(declaredTaskDef.mounts, bindings);
+      taskDef = {
+        ...declaredTaskDef,
+        // Strip composition provenance (bindingId/folderSource) before
+        // persisting: the wire schema for task_def mounts is strict.
+        mounts: composed.mounts.map((mount) => ({
+          source: mount.source,
+          path: mount.path,
+          mode: mount.mode,
+        })),
+      };
+    }
+
     const outcome = await dependencies.frontDoor.createWorkbench({
       cellId: context.cellId,
       idempotencyKey,
-      taskDef: taskDefFromBody(body.task_def),
+      taskDef,
       ...(body.room_id === undefined ? {} : { roomId: body.room_id }),
       ...(body.title === undefined ? {} : { title: body.title }),
       actor: { kind: actorKindFor(principal), id: principal.principalId },
@@ -808,6 +878,88 @@ export function registerWorkbenchRoutes(
       workbench_state: 'verifying' as const,
       identifiers: identifiersOf(context),
     };
+  });
+
+  /* ------------------------------------------------------- staged write --- */
+  registerRoute(app, dependencies, workbenchStagedWriteRoute, async ({ params, body, context, principal }) => {
+    const now = dependencies.now();
+    if (!UUID_RE.test(params.id)) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
+
+    const idempotencyKey = context.idempotencyKey ?? body.command_id;
+    if (idempotencyKey === undefined) {
+      throw new ProblemError(
+        'validation_failed',
+        'POST /v1/workbenches/:id/staged-writes requires an idempotency key: send command_id in the body or an Idempotency-Key header (FRANK-§12.1).',
+      );
+    }
+
+    const requestHash = `sha256:${createHash('sha256')
+      .update(
+        JSON.stringify({ workbench_id: params.id, command: 'staged-write', folder_source: body.folder_source }),
+        'utf8',
+      )
+      .digest('hex')}`;
+
+    const evaluation = dependencies.actions.evaluate({
+      principal,
+      operation: 'work.transition',
+      // Proposing a staged write files a decision and pauses the run — an
+      // internal, reversible control transition. The actual shared write only
+      // lands after approval, through StagedWriteService.landStagedWrite.
+      actionClass: 'internal_reversible',
+      target: { kind: 'workbench', id: params.id, cellId: context.cellId },
+      requestHash,
+      idempotencyKey,
+      dataClasses: ['internal', 'private'],
+      influences: ownerCommandInfluence(principal),
+      correlationId: context.correlationId,
+      now,
+    });
+
+    if (evaluation.decision.result === 'deny') {
+      throw new ProblemError('policy_denied', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+    if (evaluation.decision.result === 'hold_for_review') {
+      throw new ProblemError('policy_hold_for_review', evaluation.decision.reasons.join('; '), {
+        policyVersion: evaluation.decision.policyVersion,
+      });
+    }
+
+    try {
+      const outcome = await dependencies.stagedWrites.proposeStagedWrite({
+        cellId: context.cellId,
+        workbenchId: params.id,
+        roomId: body.room_id,
+        folderSource: body.folder_source,
+        stagedCopyPath: body.staged_copy_path,
+        ...(body.note === undefined ? {} : { note: body.note }),
+        actor: { kind: actorKindFor(principal), id: principal.principalId },
+        correlationId: context.correlationId,
+        now,
+      });
+      return {
+        staged_write_id: outcome.stagedWriteId,
+        decision_work_item_id: outcome.decisionWorkItemId,
+        workbench_id: params.id,
+        workbench_state: 'waiting' as const,
+        identifiers: identifiersOf(context),
+      };
+    } catch (error) {
+      if (error instanceof DecisionWorkbenchNotFoundError) {
+        throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+      }
+      if (error instanceof DecisionConflictError) {
+        throw new ProblemError('version_conflict', error.reason);
+      }
+      if (error instanceof StagedWriteRejectedError) {
+        throw new ProblemError('version_conflict', error.reason);
+      }
+      throw error;
+    }
   });
 }
 
