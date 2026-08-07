@@ -80,7 +80,7 @@ workbench runner, never as a replacement for it.
 | CH-06 | AG-4 | merged 8f12d85 | ✅ canonical bindings + outbox poll/ack, integration 3/3, issue #34 closed |
 | CH-07 | AG-4 | merged d780643 | ✅ expiry sweep + retry/dead-letter + outage isolation + exit path, issue #35 closed |
 | **Channels stack CH-01..07** | AG-4 | main | ✅ **COMPLETE** (live phone proof pending bot token) |
-| FS-02 | AG-5 | `agent/fs/folder-bindings` | 🔄 folder-binding backend (agent in flight; migration 0006 journal entry collides with CH-06 — will rebase) |
+| FS-02 | AG-5 | merged 8dff420 | ✅ room_folder_binding (migration 0007) + 4 routes, integration 5/5, issue #37 closed |\n| FS-03 | AG-5 | `agent/fs/mounts-staged` | 🔄 mount plumbing + staged shared writes (next; deps FS-02/WB-03/HITL-01 all merged) |\n| UI-08 | AG-2 | `agent/ui/files-folders` | 🔄 files/folder-binding/preview UI (dispatched) |\n| UI-09 | AG-2 | `agent/ui/channel-status` | 🔄 channel binding status UI (dispatched; deps CH-06 merged) |
 | WB-10 | AG-3 | merged 6a3ee7d | ✅ harness-swap proof (goose+cli equivalence), issue #27 closed |
 | **Workbench track WB-01..10** | AG-3 | main | ✅ **COMPLETE** |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
