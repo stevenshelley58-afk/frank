@@ -81,9 +81,10 @@ workbench runner, never as a replacement for it.
 | CH-07 | AG-4 | merged d780643 | ✅ expiry sweep + retry/dead-letter + outage isolation + exit path, issue #35 closed |
 | **Channels stack CH-01..07** | AG-4 | main | ✅ **COMPLETE** (live phone proof pending bot token) |
 | FS-02 | AG-5 | merged 8dff420 | ✅ room_folder_binding (migration 0007) + 4 routes, integration 5/5, issue #37 closed |
-| FS-03 | AG-5 | `agent/fs/mounts-staged` | 🔄 mount plumbing + staged shared writes (next; deps FS-02/WB-03/HITL-01 all merged) |
-| UI-08 | AG-2 | `agent/ui/files-folders` | 🔄 files/folder-binding/preview UI (dispatched) |
-| UI-09 | AG-2 | `agent/ui/channel-status` | 🔄 channel binding status UI (dispatched; deps CH-06 merged) |
+| FS-05 | AG-5 | merged ee2bfd5 | ✅ preview backend + publish route + room Files, integration 5/5, issue #40 closed |
+| FS-03 | AG-5 | `agent/fs/mounts-staged` | 🔄 mount plumbing + staged shared writes (agent running) |
+| UI-08 | AG-2 | `agent/ui/files-folders` | ⏳ queued (FS-02+FS-05 backends merged — ready to dispatch after FS-03/UI-09 land) |
+| UI-09 | AG-2 | merged b86a605 | ✅ channels console (bind/inspect + truthful health), tests 55/55, issue #50 closed |
 | WB-10 | AG-3 | merged 6a3ee7d | ✅ harness-swap proof (goose+cli equivalence), issue #27 closed |
 | **Workbench track WB-01..10** | AG-3 | main | ✅ **COMPLETE** |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
