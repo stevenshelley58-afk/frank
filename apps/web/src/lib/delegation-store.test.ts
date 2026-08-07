@@ -8,12 +8,16 @@ import {
   type DelegationEvent,
 } from './delegation-store';
 
-// Mock the harness runner so tests never touch a real session cache.
-vi.mock('./harness-session', () => ({
-  runTurn: vi.fn().mockResolvedValue({ text: 'done', meta: { harness: 'goose', reason: 'test', modelInfo: { provider: null, model: null } } }),
+// WB-05: delegations execute through the FRANK Domain API's workbench front
+// door, never in-process. Mock the client so tests never touch a network.
+vi.mock('./domain-api', () => ({
+  domainApiFetch: vi.fn().mockResolvedValue({
+    status: 200,
+    body: { workbench: { id: 'wb-test-1' }, created: true },
+  }),
 }));
 
-import { runTurn } from './harness-session';
+import { domainApiFetch } from './domain-api';
 
 /** Wait for the fire-and-forget run() promise chain to settle. */
 async function flush(): Promise<void> {
@@ -44,7 +48,7 @@ const BASE = {
 };
 
 afterEach(() => {
-  vi.mocked(runTurn).mockClear();
+  vi.mocked(domainApiFetch).mockClear();
 });
 
 describe('delegation-store idempotency', () => {
@@ -60,49 +64,62 @@ describe('delegation-store idempotency', () => {
 });
 
 describe('delegation-store confidence gating', () => {
-  it("confidence 'unsure' yields proposed and does not invoke the runner", () => {
+  it("confidence 'unsure' yields proposed and does not invoke the domain API", () => {
     const d = create({ ...BASE, key: uniqueKey(), confidence: 'unsure' });
     expect(d.status).toBe('proposed');
-    expect(runTurn).not.toHaveBeenCalled();
+    expect(domainApiFetch).not.toHaveBeenCalled();
   });
 
-  it("approve() on a proposed delegation moves it to running and runs exactly once", async () => {
+  it('approve() on a proposed delegation moves it to running and submits exactly once', async () => {
     const d = create({ ...BASE, key: uniqueKey(), confidence: 'unsure' });
     approve(d.id);
     await flush();
     const after = get(d.id)!;
     expect(after.startedAt).not.toBeNull();
-    expect(runTurn).toHaveBeenCalledTimes(1);
-    // The run completes against the mocked runner.
+    expect(domainApiFetch).toHaveBeenCalledTimes(1);
+    // The delegation key is the idempotency key sent to the front door.
+    const [path, init] = vi.mocked(domainApiFetch).mock.calls[0]!;
+    expect(path).toBe('/v1/workbenches');
+    expect((init.body as { command_id: string }).command_id).toBe(d.key);
     expect(after.status).toBe('done');
+    expect(after.result).toContain('wb-test-1');
   });
 
-  it('approve() called twice only runs once', async () => {
+  it('approve() called twice only submits once', async () => {
     const d = create({ ...BASE, key: uniqueKey(), confidence: 'unsure' });
     approve(d.id);
     approve(d.id);
     await flush();
-    expect(runTurn).toHaveBeenCalledTimes(1);
+    expect(domainApiFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('reject() sets rejected and never runs', async () => {
+  it('reject() sets rejected and never submits', async () => {
     const d = create({ ...BASE, key: uniqueKey(), confidence: 'unsure' });
     const after = reject(d.id)!;
     await flush();
     expect(after.status).toBe('rejected');
     expect(get(d.id)!.status).toBe('rejected');
-    expect(runTurn).not.toHaveBeenCalled();
+    expect(domainApiFetch).not.toHaveBeenCalled();
   });
 });
 
 describe('delegation-store failure path', () => {
-  it('a runner throw sets status error and populates error', async () => {
-    vi.mocked(runTurn).mockRejectedValueOnce(new Error('harness exploded'));
+  it('an unreachable domain API sets status error honestly (no silent in-process run)', async () => {
+    vi.mocked(domainApiFetch).mockResolvedValueOnce({ status: 503, body: null });
     const d = create({ ...BASE, key: uniqueKey(), confidence: 'sure' });
     await flush();
     const after = get(d.id)!;
     expect(after.status).toBe('error');
-    expect(after.error).toContain('harness exploded');
+    expect(after.error).toContain('NOT executed');
     expect(after.finishedAt).not.toBeNull();
+  });
+
+  it('a rejected submission records the HTTP status', async () => {
+    vi.mocked(domainApiFetch).mockResolvedValueOnce({ status: 422, body: null });
+    const d = create({ ...BASE, key: uniqueKey(), confidence: 'sure' });
+    await flush();
+    const after = get(d.id)!;
+    expect(after.status).toBe('error');
+    expect(after.error).toContain('422');
   });
 });

@@ -821,6 +821,9 @@ describe('ADR-017 OpenAPI', () => {
       '/v1/work/{id}/commands/{command}',
       '/v1/work/{id}/history',
       '/v1/work/{id}/provenance',
+      // WB-05: the workbench front door (frozen contract WORKBENCH_API_CONTRACT.md).
+      '/v1/workbenches',
+      '/v1/workbenches/{id}',
     ]);
   });
 
@@ -852,7 +855,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(12);
+    expect(operations).toBe(14);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

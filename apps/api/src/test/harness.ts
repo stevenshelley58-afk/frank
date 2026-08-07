@@ -70,6 +70,11 @@ export interface BuildTestServerOptions {
   readonly enrichment?: EnrichmentDispatcher;
   readonly now?: () => Date;
   readonly config?: Partial<AppConfig>;
+  /**
+   * Raw Postgres handle; when given, DB-backed routes (brain, workbench)
+   * register — mirroring `main.ts`, which passes `store.db`.
+   */
+  readonly db?: import('@frank/adapter-postgres').FrankDatabase;
 }
 
 export function buildTestServer(options: BuildTestServerOptions = {}): TestServer {
@@ -89,6 +94,7 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
     store,
     identity: identityProvider,
     ...(options.enrichment === undefined ? {} : { enrichment: options.enrichment }),
+    ...(options.db === undefined ? {} : { db: options.db }),
     now,
     startedAt: now(),
   });
