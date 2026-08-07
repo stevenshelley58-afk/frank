@@ -78,7 +78,8 @@ workbench runner, never as a replacement for it.
 | CH-03 | AG-4 | merged 602c1a7 | ✅ channels-listener app + TelegramChannelAdapter + tap-handler, verify 44/44, issue #31 closed |
 | **Channels stack CH-01..05** | AG-4 | main | ✅ **COMPLETE** — contract, StateStore, listener, cards, identity/redaction |
 | CH-06 | AG-4 | merged 8f12d85 | ✅ canonical bindings + outbox poll/ack, integration 3/3, issue #34 closed |
-| CH-07 | AG-4 | `agent/ch/expiry-outage` | 🔄 expiry + outage isolation + adapter exit test (next) |
+| CH-07 | AG-4 | merged d780643 | ✅ expiry sweep + retry/dead-letter + outage isolation + exit path, issue #35 closed |
+| **Channels stack CH-01..07** | AG-4 | main | ✅ **COMPLETE** (live phone proof pending bot token) |
 | FS-02 | AG-5 | `agent/fs/folder-bindings` | 🔄 folder-binding backend (agent in flight; migration 0006 journal entry collides with CH-06 — will rebase) |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
 | CH-02 | AG-4 | merged dc7ee9a | ✅ conformance 21/21 (M4 hard gate passed) |
