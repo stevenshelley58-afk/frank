@@ -174,3 +174,29 @@ export const workbenchStopResponseSchema = z
     identifiers: identifiersSchema,
   })
   .strict();
+
+/* ------------------------------------------------- HITL-01 decision seam --- */
+
+/**
+ * POST /v1/workbenches/:id/decisions body (frozen contract):
+ * `{ question, whyNow, nextSafeAction, evidence[] }`.
+ */
+export const workbenchDecisionBodySchema = z
+  .object({
+    command_id: z.string().min(1).optional(),
+    question: z.string().min(1).max(2000),
+    why_now: z.string().min(1).max(1000).optional(),
+    next_safe_action: z.string().min(1).max(1000).optional(),
+    evidence: z.array(z.string().min(1).max(2000)).max(20).optional(),
+  })
+  .strict();
+
+export const workbenchDecisionResponseSchema = z
+  .object({
+    /** The decision work item (a normal ADR-022 approval in `waiting`). */
+    decision_work_item_id: z.string(),
+    workbench_id: z.string(),
+    workbench_state: z.literal('waiting'),
+    identifiers: identifiersSchema,
+  })
+  .strict();
