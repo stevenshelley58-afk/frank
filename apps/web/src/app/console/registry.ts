@@ -22,7 +22,7 @@ export type ConsoleModule = {
   title: string;
   description: string;
   /** icon key resolved by <ConsoleIcon /> */
-  icon: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks' | 'folder' | 'terminal';
+  icon: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks' | 'folder' | 'terminal' | 'channels';
   status: ModuleStatus;
   /** owning system, shown as a muted tag */
   system: string;
@@ -87,6 +87,15 @@ export const consoleModules: ConsoleModule[] = [
     description:
       'Frank’s delegated runs — step-by-step progress, live event log, artifacts, receipts, and the leash stop.',
     icon: 'terminal',
+    status: 'live',
+    system: 'Frank',
+  },
+  {
+    id: 'channels',
+    title: 'Channels',
+    description:
+      'Bind a room to its Telegram conversation and see the truthful binding health — active, revoked, or not bound. Frank stays authoritative if the channel is down.',
+    icon: 'channels',
     status: 'live',
     system: 'Frank',
   },
