@@ -153,3 +153,24 @@ export const workbenchDetailResponseSchema = z
 export const workbenchIdParamsSchema = z
   .object({ id: z.string().min(1) })
   .strict();
+
+/* -------------------------------------------------------------- WB-07 stop --- */
+
+/** POST /v1/workbenches/:id/stop body (frozen contract: `{ reason }`). */
+export const workbenchStopBodySchema = z
+  .object({
+    command_id: z.string().min(1).optional(),
+    reason: z.string().min(1).max(500),
+  })
+  .strict();
+
+export const workbenchStopResponseSchema = z
+  .object({
+    /** 'live-run' = a runner's leash handled it; 'durable' = written to Postgres. */
+    via: z.enum(['live-run', 'durable']),
+    workbench_id: z.string(),
+    work_item_id: z.string(),
+    state: z.literal('cancelled'),
+    identifiers: identifiersSchema,
+  })
+  .strict();
