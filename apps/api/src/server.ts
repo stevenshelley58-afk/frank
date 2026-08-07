@@ -62,10 +62,12 @@ import { provenanceRoutes, registerProvenanceRoutes } from './routes/provenance.
 import { registerTodayRoutes, todayRoutes } from './routes/today.js';
 import { registerWorkRoutes, workRoutes } from './routes/work.js';
 import { registerWorkbenchRoutes, workbenchAllRoutes } from './routes/workbench.js';
+import { channelRoutes, registerChannelRoutes } from './routes/channels.js';
 import { registerWorkbenchEventsRoute } from './routes/workbench-events.js';
 import { WorkbenchEventBus } from './services/workbench/event-bus.js';
 import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
 import { WorkbenchDecisionService } from './services/workbench/decision.js';
+import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { registerCodegraphRoutes } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
@@ -79,6 +81,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...captureRoutes,
   ...workRoutes,
   ...workbenchAllRoutes,
+  ...channelRoutes,
   ...provenanceRoutes,
   ...todayRoutes,
   ...healthRoutes,
@@ -401,6 +404,13 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // process yet (production runner wiring is WB-09), so stops land durably
     // in Postgres; when a runner is composed in, pass it here for live stops.
     const workbenchCancellation = new WorkbenchCancellationService(options.db);
+    // CH-06: canonical room↔channel bindings + outbox access for the listener.
+    const channelPush = new ChannelPushStore(options.db);
+    registerChannelRoutes(app, {
+      ...shared,
+      channelPush,
+      actions,
+    });
     // HITL-01/02: the decision seam (created once above, before the work
     // routes, so ready/cancel on a decision item can resume the run).
     registerWorkbenchRoutes(app, {
