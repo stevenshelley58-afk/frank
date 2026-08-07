@@ -60,17 +60,31 @@ type WorkbenchRow = {
   state: WorkbenchState;
   attempts: number;
   claimed_by: string | null;
-  claimed_at: Date | null;
-  started_at: Date | null;
-  finished_at: Date | null;
+  claimed_at: Date | string | null;
+  started_at: Date | string | null;
+  finished_at: Date | string | null;
   last_error: string | null;
   container_id: string | null;
   schedule_cron: string | null;
   schedule_timezone: string | null;
   version: number;
-  created_at: Date;
-  updated_at: Date;
+  created_at: Date | string;
+  updated_at: Date | string;
 };
+
+/**
+ * The raw-SQL `execute` path returns `timestamptz` columns as ISO strings on
+ * some driver configurations (no custom type parser is registered — see
+ * `db.ts`). Every row mapping funnels through here, so all consumers get
+ * real Dates regardless of driver behavior.
+ */
+function asDate(value: Date | string): Date {
+  return value instanceof Date ? value : new Date(value);
+}
+
+function asDateOrNull(value: Date | string | null): Date | null {
+  return value === null ? null : asDate(value);
+}
 
 function toRecord(row: WorkbenchRow): WorkbenchRecord {
   return {
@@ -83,16 +97,16 @@ function toRecord(row: WorkbenchRow): WorkbenchRecord {
     state: row.state,
     attempts: row.attempts,
     claimedBy: row.claimed_by,
-    claimedAt: row.claimed_at,
-    startedAt: row.started_at,
-    finishedAt: row.finished_at,
+    claimedAt: asDateOrNull(row.claimed_at),
+    startedAt: asDateOrNull(row.started_at),
+    finishedAt: asDateOrNull(row.finished_at),
     lastError: row.last_error,
     containerId: row.container_id,
     scheduleCron: row.schedule_cron,
     scheduleTimezone: row.schedule_timezone,
     version: row.version,
-    createdAt: row.created_at,
-    updatedAt: row.updated_at,
+    createdAt: asDate(row.created_at),
+    updatedAt: asDate(row.updated_at),
   };
 }
 
@@ -429,7 +443,7 @@ export class WorkbenchStore {
         step: string;
         state: WorkbenchPlanStepState;
         note: string | null;
-        updated_at: Date;
+        updated_at: Date | string;
       }>(sql`
         select seq, step, state, note, updated_at from "frank_domain"."workbench_plan_step"
         where workbench_id = ${workbenchId} order by seq
@@ -438,7 +452,7 @@ export class WorkbenchStore {
         seq: number;
         type: WorkbenchEventType;
         payload: Record<string, unknown>;
-        occurred_at: Date;
+        occurred_at: Date | string;
       }>(sql`
         select seq, type, payload, occurred_at from "frank_domain"."workbench_event"
         where workbench_id = ${workbenchId} order by seq
@@ -448,7 +462,7 @@ export class WorkbenchStore {
         path: string;
         kind: string;
         preview_url: string | null;
-        created_at: Date;
+        created_at: Date | string;
       }>(sql`
         select id, path, kind, preview_url, created_at from "frank_domain"."workbench_artifact"
         where workbench_id = ${workbenchId} order by created_at, id
@@ -457,7 +471,7 @@ export class WorkbenchStore {
         summary: string;
         assumptions: string[];
         evidence: unknown[];
-        published_at: Date;
+        published_at: Date | string;
         published_by: string;
       }>(sql`
         select summary, assumptions, evidence, published_at, published_by
@@ -470,7 +484,7 @@ export class WorkbenchStore {
       step: row.step,
       state: row.state,
       note: row.note,
-      updatedAt: row.updated_at,
+      updatedAt: asDate(row.updated_at),
     }));
     const events: WorkbenchEvent[] = eventRows.rows.map((row) => ({
       // `seq` is a bigint column — pg returns it as a string; normalize to
@@ -478,14 +492,14 @@ export class WorkbenchStore {
       seq: Number(row.seq),
       type: row.type,
       payload: row.payload,
-      occurredAt: row.occurred_at,
+      occurredAt: asDate(row.occurred_at),
     }));
     const artifacts: WorkbenchArtifact[] = artifactRows.rows.map((row) => ({
       id: row.id,
       path: row.path,
       kind: row.kind,
       previewUrl: row.preview_url,
-      createdAt: row.created_at,
+      createdAt: asDate(row.created_at),
     }));
     const receiptRow = receiptRows.rows[0];
     const receipt: WorkbenchReceipt | null =
@@ -495,7 +509,7 @@ export class WorkbenchStore {
             summary: receiptRow.summary,
             assumptions: receiptRow.assumptions,
             evidence: receiptRow.evidence,
-            publishedAt: receiptRow.published_at,
+            publishedAt: asDate(receiptRow.published_at),
             publishedBy: receiptRow.published_by,
           };
 

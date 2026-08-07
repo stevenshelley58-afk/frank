@@ -153,11 +153,22 @@ describe.skipIf(requiresDatabase)(`WB-05 front door against PostgreSQL (${SKIP_R
 
   it('GET /v1/workbenches/:id is 404 for an unknown id', async () => {
     const target = server as TestServer;
+    // A well-formed UUID that does not exist (workbench.id is a uuid column).
     const got = await target.app.inject({
       method: 'GET',
-      url: '/v1/workbenches/01JNONEXISTENT0000000000',
+      url: '/v1/workbenches/00000000-0000-0000-0000-000000000000',
       headers: { authorization: target.auth(['owner']) },
     });
-    expect(got.statusCode, JSON.stringify(got.json())).toBe(404);
+    expect(got.statusCode).toBe(404);
+  });
+
+  it('GET /v1/workbenches/:id is 404 for a malformed id (never 500)', async () => {
+    const target = server as TestServer;
+    const got = await target.app.inject({
+      method: 'GET',
+      url: '/v1/workbenches/01JNOT-A-REAL-UUID',
+      headers: { authorization: target.auth(['owner']) },
+    });
+    expect(got.statusCode).toBe(404);
   });
 });

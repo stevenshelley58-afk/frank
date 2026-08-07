@@ -98,6 +98,9 @@ export const workbenchGetRoute = defineRoute({
 
 export const workbenchRoutes = [workbenchCreateRoute, workbenchGetRoute];
 
+/** Canonical UUID (the workbench id column type). */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 /* --------------------------------------------------------------- handlers --- */
 
 export interface WorkbenchRouteDependencies extends RouteHandlerDependencies {
@@ -272,6 +275,11 @@ export function registerWorkbenchRoutes(
 
   /* ----------------------------------------------------------------- get --- */
   registerRoute(app, dependencies, workbenchGetRoute, async ({ params, context }) => {
+    // `workbench.id` is a uuid column: a malformed id can never exist, so it
+    // is a 404 (never a 500 from string_to_uuid).
+    if (!UUID_RE.test(params.id)) {
+      throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
+    }
     const snapshot = await dependencies.frontDoor.store.getSnapshot(context.cellId, params.id);
     if (snapshot === null) {
       throw new ProblemError('not_found', `No workbench ${params.id} exists in this cell.`);
