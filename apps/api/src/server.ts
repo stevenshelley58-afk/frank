@@ -64,6 +64,8 @@ import { registerWorkRoutes, workRoutes } from './routes/work.js';
 import { registerWorkbenchRoutes, workbenchAllRoutes } from './routes/workbench.js';
 import { channelRoutes, registerChannelRoutes } from './routes/channels.js';
 import { registerWorkbenchEventsRoute } from './routes/workbench-events.js';
+import { folderBindingRoutes, registerFolderBindingRoutes } from './routes/folder-binding.js';
+import { RoomFolderBindingStore } from './services/workbench/folder-binding-store.js';
 import { WorkbenchEventBus } from './services/workbench/event-bus.js';
 import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
 import { WorkbenchDecisionService } from './services/workbench/decision.js';
@@ -82,6 +84,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...workRoutes,
   ...workbenchAllRoutes,
   ...channelRoutes,
+  ...folderBindingRoutes,
   ...provenanceRoutes,
   ...todayRoutes,
   ...healthRoutes,
@@ -419,6 +422,14 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
       actions,
       cancellation: workbenchCancellation,
       decisions: workbenchDecisions as WorkbenchDecisionService,
+    });
+    // FS-02: room folder bindings — declarations are Postgres rows (migration
+    // 0006), so the routes register alongside the workbench routes, only when
+    // a DB handle exists. Mount enforcement is FS-03, not here.
+    registerFolderBindingRoutes(app, {
+      ...shared,
+      bindings: new RoomFolderBindingStore(options.db),
+      actions,
     });
     registerWorkbenchEventsRoute(app, {
       ...shared,
