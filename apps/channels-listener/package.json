@@ -1,0 +1,30 @@
+{
+  "name": "@frank/channels-listener",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "FRANK Channels listener — a SEPARATE long-running process (FRANK §3.5) that surfaces Frank decisions on Telegram and relays taps back to the Domain API as command envelopes. It is NOT a route inside apps/api and never writes canonical state directly.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lint: channels-listener'",
+    "start": "node --experimental-strip-types src/main.ts"
+  },
+  "dependencies": {
+    "@frank/adapter-collaboration-channels": "workspace:*",
+    "@frank/contracts": "workspace:*",
+    "@copilotkit/channels": "0.7.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  },
+  "frank": {
+    "layer": "app",
+    "mayDependOn": ["@frank/contracts", "@frank/adapter-collaboration-channels"]
+  }
+}
