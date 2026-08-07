@@ -61,9 +61,11 @@ import { healthRoutes, registerHealthRoutes } from './routes/health.js';
 import { provenanceRoutes, registerProvenanceRoutes } from './routes/provenance.js';
 import { registerTodayRoutes, todayRoutes } from './routes/today.js';
 import { registerWorkRoutes, workRoutes } from './routes/work.js';
+import { registerWorkbenchRoutes, workbenchRoutes } from './routes/workbench.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { registerCodegraphRoutes } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
+import { WorkbenchFrontDoor } from './services/workbench/front-door.js';
 import { HealthService } from './services/health.js';
 import type { EnrichmentDispatcher } from './services/enrichment.js';
 import { InProcessEnrichmentDispatcher, noopEnrichmentHandler } from './services/enrichment.js';
@@ -72,6 +74,7 @@ import type { DomainStore } from './services/store.js';
 export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...captureRoutes,
   ...workRoutes,
+  ...workbenchRoutes,
   ...provenanceRoutes,
   ...todayRoutes,
   ...healthRoutes,
@@ -348,6 +351,13 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   registerHealthRoutes(app, { ...shared, health, serviceName: 'frank-api' });
   if (options.db) {
     registerBrainRoutes(app, { ...shared, db: options.db });
+    // Workbench routes need Postgres (the front door + store are raw-SQL on
+    // frank_domain); like brain, they only register when a DB handle exists.
+    registerWorkbenchRoutes(app, {
+      ...shared,
+      frontDoor: new WorkbenchFrontDoor(options.db),
+      actions,
+    });
   }
 
   // Code intelligence graph — reads from the codegraph service output volume.

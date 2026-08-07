@@ -28,7 +28,7 @@
 
 import { sql } from 'drizzle-orm';
 
-import type { FrankDatabase } from '@frank/adapter-postgres';
+import type { FrankDatabase, FrankTransaction } from '@frank/adapter-postgres';
 
 import type {
   CreateWorkbenchInput,
@@ -115,7 +115,27 @@ export class WorkbenchStore {
    * the row the first attempt created instead of a second workbench.
    */
   async createWorkbench(input: CreateWorkbenchInput): Promise<CreateWorkbenchResult> {
-    const inserted = await this.db.execute<WorkbenchRow>(sql`
+    return this.#createWorkbench(this.db, input);
+  }
+
+  /**
+   * Transactional variant for the WB-05 front door, which must create the
+   * work item and the workbench in ONE transaction (FRANK-§11.5). Same
+   * INSERT ... ON CONFLICT DO NOTHING + read-back semantics as
+   * {@link createWorkbench}.
+   */
+  async createWorkbenchInTransaction(
+    tx: FrankTransaction,
+    input: CreateWorkbenchInput,
+  ): Promise<CreateWorkbenchResult> {
+    return this.#createWorkbench(tx, input);
+  }
+
+  async #createWorkbench(
+    executor: FrankDatabase | FrankTransaction,
+    input: CreateWorkbenchInput,
+  ): Promise<CreateWorkbenchResult> {
+    const inserted = await executor.execute<WorkbenchRow>(sql`
       insert into "frank_domain"."workbench"
         (id, cell_id, created_at, updated_at, created_by, updated_by,
          work_item_id, room_id, idempotency_key, task_def, state,
@@ -134,7 +154,7 @@ export class WorkbenchStore {
     if (row !== undefined) return { record: toRecord(row), created: true };
 
     // Replay: read back the row the first attempt created.
-    const existing = await this.db.execute<WorkbenchRow>(sql`
+    const existing = await executor.execute<WorkbenchRow>(sql`
       select ${WORKBENCH_COLUMNS} from "frank_domain"."workbench"
       where cell_id = ${input.cellId} and idempotency_key = ${input.idempotencyKey}
     `);

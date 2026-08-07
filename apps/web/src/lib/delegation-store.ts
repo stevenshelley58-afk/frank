@@ -2,16 +2,21 @@
  * Server-owned delegation store (FRANK spec §7.5 product surface).
  *
  * Delegations are created by the delegate tool (or by Steve approving a
- * proposal), executed here on the server, and streamed to every connected
- * client. State survives page refresh, tab close, and navigation; it does
- * not survive a server restart (Postgres-backed persistence is a later
- * workstream — see docs/plans/BACKLOG.md).
+ * proposal) and handed to the FRANK Domain API's workbench front door
+ * (POST /v1/workbenches — WB-05). Execution is durable and server-side:
+ * the runner claims the queued workbench, so closing the browser or
+ * restarting web never stops the work. State here tracks the delegation
+ * record for the UI; the canonical work item + workbench live in Postgres.
+ *
+ * Fallback honesty: when the domain API is unreachable (FRANK_DOMAIN_API_URL
+ * down), the run records an error status rather than silently executing
+ * in-process — a delegation must either run durably or say it did not.
  *
  * Server-only. Never import from a 'use client' module.
  */
 
 import { randomUUID } from 'node:crypto';
-import { runTurn } from './harness-session';
+import { domainApiFetch } from './domain-api';
 
 export type DelegationStatus = 'proposed' | 'running' | 'done' | 'error' | 'rejected';
 
@@ -163,39 +168,47 @@ async function run(id: string) {
   if (!d) return;
   patch(id, { startedAt: Date.now(), partial: '' });
 
-  const prompt = [
-    `Central delegated this task to you:`,
-    ``,
-    d.task,
-    ``,
-    d.why ? `Context from Central: ${d.why}` : '',
-    ``,
-    `Do the work and give a tight receipt: what you did, what you found, and any decision Steve must make.`,
-    `If the task is not concrete enough to act on, say so in one line and name the single thing you need — do not invent work.`,
-  ]
-    .filter(Boolean)
-    .join('\n');
-
-  let acc = '';
-  try {
-    const { text } = await runTurn({
-      roomId: d.toRoomId,
-      roomName: d.toRoomName,
-      agentName: d.agent,
-      prompt,
-      onChunk: (c) => {
-        acc += c;
-        // Throttle: only emit every ~40 chars to avoid flooding SSE.
-        if (acc.length % 40 < c.length) patch(id, { partial: acc });
+  // WB-05: the delegation becomes a durable workbench. The delegation key is
+  // the idempotency key — a replay (retry, double-approve) returns the same
+  // workbench instead of queueing a second run (FRANK-§12.1).
+  const res = await domainApiFetch('/v1/workbenches', {
+    method: 'POST',
+    body: {
+      command_id: d.key,
+      room_id: d.toRoomId,
+      title: d.task.split('\n', 1)[0]?.slice(0, 200),
+      task_def: {
+        instruction: [
+          d.task,
+          d.why ? `Context from Central: ${d.why}` : '',
+          'Do the work and give a tight receipt: what you did, what you found, and any decision Steve must make.',
+          'If the task is not concrete enough to act on, say so in one line and name the single thing you need — do not invent work.',
+        ]
+          .filter(Boolean)
+          .join('\n\n'),
+        harness: { adapter: 'goose' },
       },
-    });
+    },
+  });
+
+  if (res.status === 200 && res.body !== null) {
+    const wb = res.body.workbench as { id: string } | undefined;
     patch(id, {
       status: 'done',
-      result: (text || acc).trim() || 'Acknowledged — working on it.',
+      result: `Queued as workbench ${wb?.id ?? '(unknown id)'} — the runner will execute it durably. Follow progress in the workbench console.`,
       partial: '',
       finishedAt: Date.now(),
     });
-  } catch (err) {
-    patch(id, { status: 'error', error: String(err), partial: '', finishedAt: Date.now() });
+    return;
   }
+
+  patch(id, {
+    status: 'error',
+    error:
+      res.status === 503
+        ? 'Domain API unreachable — delegation was NOT executed. Set FRANK_DOMAIN_API_URL and retry.'
+        : `Domain API rejected the delegation (HTTP ${res.status}) — it was NOT executed.`,
+    partial: '',
+    finishedAt: Date.now(),
+  });
 }
