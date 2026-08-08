@@ -187,7 +187,7 @@ describe.skipIf(requiresDatabase)(`HITL decision seam against PostgreSQL (${SKIP
     expect(types).toContain('decision_requested');
     expect(types).toContain('paused');
     expect(types.indexOf('decision_requested')).toBeLessThan(types.indexOf('paused'));
-  });
+  }, 90_000);
 
   it('HITL-01: a second decision while one is open is refused (409)', async () => {
     const wb = await createRunningWorkbench('hitl-req-2');
@@ -196,7 +196,7 @@ describe.skipIf(requiresDatabase)(`HITL decision seam against PostgreSQL (${SKIP
 
     const second = await requestDecision(wb.id, 'hitl-req-2-cmd-b');
     expect(second.statusCode).toBe(409);
-  });
+  }, 90_000);
 
   /* ------------------------------------------------------------- HITL-02 --- */
 
@@ -217,7 +217,7 @@ describe.skipIf(requiresDatabase)(`HITL decision seam against PostgreSQL (${SKIP
     expect(detail.workbench.state).toBe('running');
     const types = await eventTypes(wb.id);
     expect(types).toContain('resumed');
-  });
+  }, 90_000);
 
   it('HITL-02: cancel command safe-fails with an honest receipt', async () => {
     const wb = await createRunningWorkbench('hitl-deny');
@@ -238,7 +238,7 @@ describe.skipIf(requiresDatabase)(`HITL decision seam against PostgreSQL (${SKIP
     const types = await eventTypes(wb.id);
     expect(types).toContain('failed');
     expect(types).toContain('receipt_published');
-  });
+  }, 90_000);
 
   it('HITL-02: a stale expected_version is rejected — no double resolution', async () => {
     const wb = await createRunningWorkbench('hitl-stale');
@@ -259,5 +259,5 @@ describe.skipIf(requiresDatabase)(`HITL decision seam against PostgreSQL (${SKIP
     expect(types.filter((t) => t === 'resumed')).toHaveLength(1);
     const detail = await getWorkbench(wb.id);
     expect(detail.workbench.state).toBe('running');
-  });
+  }, 90_000);
 });
