@@ -28,6 +28,20 @@ export const PROTOCOL_MARKERS = {
 } as const;
 
 /**
+ * HITL-03 — the ask policy. The harness asks the human ONLY for these five
+ * classes of action; everything reversible is assumed and recorded in the
+ * receipt's `assumptions[]` instead of pausing the run. Guidance text only —
+ * the marker grammar and receipt schema are unchanged.
+ */
+export const ASK_POLICY_TRIGGERS = [
+  'irreversible',
+  'destructive',
+  'spend-gated',
+  'cross-fence',
+  'policy-gated',
+] as const;
+
+/**
  * Build the standalone headless instruction for one task def. Self-contained
  * by construction (WB-04 rule): everything the agent needs — task, mounts,
  * skills, leash, and the marker grammar — is in the returned text.
@@ -83,6 +97,23 @@ RULES
 - Do not attempt network access unless explicitly listed in the task.
 - If you cannot complete the task, still publish the plan, mark the failed
   steps, and end with a receipt whose summary explains the failure.
+
+WHEN TO ASK (HITL-03 — ask less, record assumptions)
+Pause and ask the human ONLY when the next action falls into one of these
+five classes — and never otherwise:
+1. irreversible — the action cannot be undone (e.g. publishing, sending to
+   an external party, deleting without backup).
+2. destructive — the action deletes or overwrites existing data or state.
+3. spend-gated — the action spends money or consumes paid quota.
+4. cross-fence — the action touches resources outside the declared mounts
+   and /workspace, or crosses into another cell's/owner's domain.
+5. policy-gated — the task or an operating policy explicitly requires human
+   approval for this class of action.
+For EVERYTHING ELSE, do not ask: make the most reasonable reversible
+assumption, record it in your receipt's "assumptions" array, and proceed.
+An assumption is reversible when you (or a follow-up run) could redo the
+choice cheaply once the human reviews the receipt. Asking when none of the
+five triggers applies is itself a protocol violation.
 `;
 }
 
