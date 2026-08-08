@@ -26,6 +26,54 @@ Recorded 2026-08-06. Companion to `FRANK_MASTER_PARALLEL_BUILD_PLAN.md` §8H.
 - Verify srt can enforce per-container policy without CAP_NET_ADMIN surprises
   on cgroup v2 Docker 29.4 during WB-03 merge.
 
+## SS-03 implementation status (control-plane layer) — 2026-08-08
+
+- Control-plane + testable layer landed on `agent/ss/sandbox-select`:
+  - `apps/api/src/services/workbench/egress.ts` — `EgressPolicy` builder.
+    `network.egressAllowlist` -> `allowlist` policy; absent/empty ->
+    `deny-all` (never "everything"). Entries normalized + validated.
+  - `apps/api/src/services/workbench/srt.ts` — srt wrapper. Binary path
+    injectable via `SRT_BIN`; when the binary is absent the harness command
+    is returned UNWRAPPED (`degraded: { reason }`) and the WB-03 docker
+    network profile stays the enforcement layer. Argv built element-by-
+    element, no shell interpolation.
+  - `provisioner.ts` `ProvisionSpec` now carries `egress` (the same policy
+    descriptor both layers consume) and `srtFilesystem` (writable scratch
+    volume + rw mounts; ro mounts read-only; staged copy-ins land inside
+    /workspace).
+- NOTE: npm `sandbox-runtime@0.3.5` is an empty placeholder package (README
+  only, no binary) — confirmed 2026-08-08. There is no srt binary to
+  install from npm today; the real binary must come from the srt upstream
+  once it publishes. Live srt enforcement is DEFERRED until then.
+- VPS install + acceptance test runbook (run once a real srt binary exists):
+
+  ```sh
+  # install (adjust when the real srt distribution lands; if npm-based:)
+  ssh vps 'npm install -g sandbox-runtime@latest && command -v srt && srt --version'
+
+  # point the api at it
+  ssh vps 'echo SRT_BIN=$(command -v srt) >> /etc/frank/api.env'  # or the service's env file
+  systemctl restart frank-api
+
+  # acceptance (SS-03 master-plan verify): inside the workbench container
+  ssh vps 'docker exec <workbench-container> srt run \
+    --fs-write /workspace \
+    --egress-allow registry.npmjs.org --egress-allow github.com --egress-allow preview.frank.fail \
+    --workdir /workspace \
+    -- sh -c "curl -fsS https://example.com; echo EXIT=$?"'      # must FAIL
+  ssh vps 'docker exec <workbench-container> srt run \
+    --fs-write /workspace \
+    --egress-allow registry.npmjs.org --egress-allow github.com --egress-allow preview.frank.fail \
+    --workdir /workspace \
+    -- sh -c "curl -fsS https://registry.npmjs.org"'             # must SUCCEED
+  ```
+
+  (Flag spelling in the runbook mirrors `buildSrtArgv` in `srt.ts`; if the
+  real srt CLI differs, update `buildSrtArgv` + `srt.test.ts` together.)
+- Deferred: live srt enforcement (needs a real srt binary on the VPS);
+  wiring `wrapWithSrt` into the harness exec call site (needs the srt
+  binary to exist end-to-end; the wrapper + degrade path are unit-tested).
+
 ## Microsandbox applicability (SS-04 — CLOSED, not applicable)
 
 `ls /dev/kvm` on the VPS: **No such file or directory** (recorded in

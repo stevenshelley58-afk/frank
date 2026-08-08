@@ -33,7 +33,10 @@
  *     An empty egressAllowlist means `none`, not "everything".
  */
 
+import { buildEgressPolicy } from './egress.js';
+import type { EgressPolicy } from './egress.js';
 import type { WorkbenchRecord, WorkbenchTaskDef } from './types.js';
+import type { SrtFilesystemPolicy } from './srt.js';
 
 /* ------------------------------------------------------------ docker cli --- */
 
@@ -139,6 +142,20 @@ export interface ProvisionSpec {
   /** Staged sources to copy into the scratch volume before start. */
   readonly stagedFiles: readonly { source: string; destPath: string }[];
   readonly network: NetworkProfile;
+  /**
+   * SS-03: the task's egress policy descriptor, derived once from
+   * `taskDef.network.egressAllowlist` (deny-all when absent/empty). The
+   * docker network profile above is the coarse layer; the srt wrapper
+   * (srt.ts) consumes this same descriptor for per-domain enforcement.
+   */
+  readonly egress: EgressPolicy;
+  /**
+   * SS-03: the filesystem policy srt must preserve when wrapping the
+   * harness command — writable scratch volume plus the explicit mounts.
+   * Built from the same mount list the docker spec uses, so the explicit
+   * filesystem policy survives the srt wrap unchanged.
+   */
+  readonly srtFilesystem: SrtFilesystemPolicy;
   readonly dockerArgv: readonly string[];
 }
 
@@ -198,6 +215,22 @@ export function buildProvisionSpec(
   }
 
   const network = resolveNetwork(taskDef);
+  // SS-03: one egress policy descriptor shared by the docker layer and the
+  // srt wrapper. Deny-by-default: absent/empty allowlist -> deny-all.
+  const egress = buildEgressPolicy(taskDef);
+
+  // SS-03: filesystem policy preserved through the srt wrap. Writable
+  // surface = the scratch volume (/workspace) plus rw mounts; read-only
+  // surface = ro mounts. Staged copy-ins need no entry: provision() copies
+  // them to `/workspace${destPath}`, already inside the writable scratch
+  // volume. Nothing else is writable.
+  const writablePaths: string[] = ['/workspace'];
+  const readOnlyPaths: string[] = [];
+  for (const mount of mounts) {
+    if (mount.mode === 'rw') writablePaths.push(mount.path);
+    else readOnlyPaths.push(mount.path);
+  }
+  const srtFilesystem: SrtFilesystemPolicy = { writablePaths, readOnlyPaths };
 
   const argv: string[] = [
     'run',
@@ -229,6 +262,8 @@ export function buildProvisionSpec(
     mounts,
     stagedFiles,
     network,
+    egress,
+    srtFilesystem,
     dockerArgv: argv,
   };
 }
