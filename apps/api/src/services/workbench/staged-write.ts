@@ -251,9 +251,14 @@ export class StagedWriteService {
       );
     }
     // And the workbench must actually hold the staged mount (task def named
-    // the bound folder — §3.2: both sides must agree).
+    // the bound folder — §3.2: both sides must agree). A mount can reference
+    // the folder either by its resolved server path (the production compose
+    // path resolves sources to the binding's server_path) or by the folder
+    // source name (when the task def names the folder directly). Accept either.
     const held = (record.taskDef.mounts ?? []).some(
-      (mount) => mount.source === binding.serverPath && mount.mode === 'staged',
+      (mount) =>
+        mount.mode === 'staged' &&
+        (mount.source === binding.serverPath || mount.source === binding.folderSource),
     );
     if (!held) {
       throw new StagedWriteRejectedError(

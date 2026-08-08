@@ -328,6 +328,11 @@ describe.skipIf(requiresDatabase)(`FS-03 mounts + staged writes against PostgreS
     return { wbId: wb.id, sharedSource, stagedCopy };
   }
 
+  // The propose→resolve round trips below each run several sequential
+  // injections against the VPS-hosted test DB; under load they can exceed
+  // the 30s global testTimeout. 90s headroom keeps wall-clock contention
+  // from masking the logic under test (vitest: pass the timeout as the
+  // last argument).
   it('proposing a staged write files a normal waiting decision and pauses the run', async () => {
     const scenario = await setupStagedScenario();
 
@@ -358,7 +363,7 @@ describe.skipIf(requiresDatabase)(`FS-03 mounts + staged writes against PostgreS
     expect(row?.state).toBe('pending');
     expect(row?.target_path).toBe(scenario.sharedSource);
     expect(row?.staged_copy_path).toBe(scenario.stagedCopy);
-  });
+  }, 90_000);
 
   it('direct shared write FAILS: landing without a ready decision is refused and copies nothing', async () => {
     const scenario = await setupStagedScenario();
@@ -389,7 +394,7 @@ describe.skipIf(requiresDatabase)(`FS-03 mounts + staged writes against PostgreS
     const row = await stagedWriteRow(decisionId);
     expect(row?.state).toBe('pending');
     expect((await auditActions()).filter((a) => a === 'staged_write.landed')).toHaveLength(0);
-  });
+  }, 90_000);
 
   it('approved staged write lands the copy into the shared source, fully audited', async () => {
     const scenario = await setupStagedScenario();
@@ -430,7 +435,7 @@ describe.skipIf(requiresDatabase)(`FS-03 mounts + staged writes against PostgreS
     expect(actions).toContain('staged_write.landed');
     expect(actions).toContain('workbench.decision_requested');
     expect(actions).toContain('workbench.resumed');
-  });
+  }, 90_000);
 
   it('denied staged write copies nothing and marks the proposal denied', async () => {
     const scenario = await setupStagedScenario();
@@ -457,7 +462,7 @@ describe.skipIf(requiresDatabase)(`FS-03 mounts + staged writes against PostgreS
     expect(row?.state).toBe('denied');
     expect(await getWorkbenchState(scenario.wbId)).toBe('failed');
     expect((await auditActions()).filter((a) => a === 'staged_write.denied')).toHaveLength(1);
-  });
+  }, 90_000);
 
   /* --------------------------------------------------- proposal guards ---- */
 
