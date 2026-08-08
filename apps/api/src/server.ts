@@ -65,11 +65,14 @@ import { registerWorkbenchRoutes, workbenchAllRoutes } from './routes/workbench.
 import { channelRoutes, registerChannelRoutes } from './routes/channels.js';
 import { registerWorkbenchEventsRoute } from './routes/workbench-events.js';
 import { folderBindingRoutes, registerFolderBindingRoutes } from './routes/folder-binding.js';
+import { pendingSyncRoutes, registerPendingSyncRoutes } from './routes/write-back.js';
 import { RoomFolderBindingStore } from './services/workbench/folder-binding-store.js';
 import { WorkbenchEventBus } from './services/workbench/event-bus.js';
 import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
 import { WorkbenchDecisionService } from './services/workbench/decision.js';
 import { StagedWriteService } from './services/workbench/staged-write.js';
+import type { DeviceSyncProbe } from './services/workbench/write-back.js';
+import { WriteBackService } from './services/workbench/write-back.js';
 import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { registerCodegraphRoutes } from './routes/codegraph.js';
@@ -88,6 +91,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...workbenchAllRoutes,
   ...channelRoutes,
   ...folderBindingRoutes,
+  ...pendingSyncRoutes,
   ...provenanceRoutes,
   ...todayRoutes,
   ...healthRoutes,
@@ -179,6 +183,12 @@ export interface BuildServerOptions {
    * a fake so no ssh ever runs in CI.
    */
   readonly previewDeployer?: PreviewDeployer;
+  /**
+   * FS-04: device-presence probe for write-back settlement. Defaults to the
+   * honest {@link AssumeOfflineDeviceProbe} (no presence layer until FS-01);
+   * tests inject a fake probe.
+   */
+  readonly deviceSyncProbe?: DeviceSyncProbe;
 }
 
 export interface BuiltServer {
@@ -373,10 +383,18 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   // FS-03: staged shared writes. Created alongside the decision seam because
   // the resolution hook (below) lands an approved staged write when the
   // decision item it filed resolves `ready`.
+  // FS-04: the write-back queue service is constructed first and injected —
+  // the landing hook records pending_sync/conflict rows in the SAME
+  // transaction as the landing (FRANK-§11.5). The probe defaults to the
+  // honest "offline" answer until FS-01 provides real device presence.
+  const writeBack =
+    options.db === undefined
+      ? null
+      : new WriteBackService(options.db, options.deviceSyncProbe);
   const stagedWrites =
     workbenchDecisions === null || options.db === undefined
       ? null
-      : new StagedWriteService(options.db, workbenchDecisions);
+      : new StagedWriteService(options.db, workbenchDecisions, undefined, writeBack);
 
   registerCaptureRoutes(app, { ...shared, store, enrichment, actions });
   registerWorkRoutes(app, {
@@ -480,6 +498,12 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
       ...shared,
       bindings: new RoomFolderBindingStore(options.db),
       actions,
+    });
+    // FS-04: the write-back queue — read-only surface ("results waiting to
+    // sync"); the physical drain is FS-01/Syncthing, not this API.
+    registerPendingSyncRoutes(app, {
+      ...shared,
+      writeBack: writeBack as WriteBackService,
     });
     registerWorkbenchEventsRoute(app, {
       ...shared,

@@ -823,6 +823,8 @@ describe('ADR-017 OpenAPI', () => {
       // FS-02: room folder bindings (declaration records; enforcement is FS-03).
       '/v1/rooms/{roomId}/folder-bindings',
       '/v1/rooms/{roomId}/folder-bindings/{id}',
+      // FS-04: write-back queue ("results waiting to sync" for the room).
+      '/v1/rooms/{roomId}/pending-syncs',
       // Frozen contract: room workbench list (UI-07 Running/waiting surfaces).
       '/v1/rooms/{roomId}/workbenches',
       '/v1/system/health',
@@ -880,7 +882,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(30);
+    expect(operations).toBe(31);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

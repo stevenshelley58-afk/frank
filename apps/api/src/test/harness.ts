@@ -79,6 +79,8 @@ export interface BuildTestServerOptions {
   readonly workbenchPollIntervalMs?: number;
   /** FS-05: preview-lane deployer (tests inject FakePreviewDeployer). */
   readonly previewDeployer?: import('../services/workbench/preview-backend.js').PreviewDeployer;
+  /** FS-04: device-presence probe for write-back settlement (tests inject a fake). */
+  readonly deviceSyncProbe?: import('../services/workbench/write-back.js').DeviceSyncProbe;
 }
 
 export function buildTestServer(options: BuildTestServerOptions = {}): TestServer {
@@ -105,6 +107,9 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
     ...(options.previewDeployer === undefined
       ? {}
       : { previewDeployer: options.previewDeployer }),
+    ...(options.deviceSyncProbe === undefined
+      ? {}
+      : { deviceSyncProbe: options.deviceSyncProbe }),
     now,
     startedAt: now(),
   });

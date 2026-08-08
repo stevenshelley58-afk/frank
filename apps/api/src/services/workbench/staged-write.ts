@@ -47,6 +47,8 @@ import { RoomFolderBindingStore } from './folder-binding-store.js';
 import { WorkbenchDecisionService } from './decision.js';
 import { WorkbenchNotFoundError } from './decision.js';
 import { WorkbenchStore } from './store.js';
+import type { SettleWriteBackLandingCommand } from './write-back.js';
+import type { WriteBackService } from './write-back.js';
 
 type ActorKind = schema.ActorKind;
 
@@ -193,17 +195,21 @@ export class StagedWriteService {
   readonly #decisions: WorkbenchDecisionService;
   readonly #audit = new AuditRepository();
   readonly #copier: StagedCopyLand;
+  /** FS-04: write-back/offline behavior; absent => no write-back recording. */
+  readonly #writeBack: WriteBackService | null;
 
   constructor(
     db: FrankDatabase,
     decisions: WorkbenchDecisionService,
     copier: StagedCopyLand = new FsStagedCopyLand(),
+    writeBack: WriteBackService | null = null,
   ) {
     this.#db = db;
     this.#store = new WorkbenchStore(db);
     this.#bindings = new RoomFolderBindingStore(db);
     this.#decisions = decisions;
     this.#copier = copier;
+    this.#writeBack = writeBack;
   }
 
   get store(): WorkbenchStore {
@@ -358,6 +364,14 @@ export class StagedWriteService {
    * caller), performs the controlled copy outside the harness, and records
    * the landing with a full audit entry. Idempotent: an already-settled
    * staged write is a no-op.
+   *
+   * FS-04: after the controlled copy lands on the server copy, the landing
+   * transaction ALSO records the write-back outcome in the `pending_sync`
+   * queue when the binding opted into write-back — an offline PC produces a
+   * `pending` queue entry instead of failing the workbench, and a changed
+   * device copy is recorded as a `conflict`, never auto-overwritten. The
+   * workbench resumed before landing (HITL-02) and stays unaffected here:
+   * nothing the queue recording does can fail the run.
    */
   async landStagedWrite(
     decisionWorkItemId: string,
@@ -402,6 +416,29 @@ export class StagedWriteService {
           workbenchId: write.workbenchId,
         },
       });
+
+      // FS-04: record what the landing means for the destination device —
+      // inside the SAME transaction (FRANK-§11.5), so "landed" and "waiting
+      // to sync / conflict" are one durable fact. Returns null when the
+      // binding did not opt into write-back. A failure to probe degrades to
+      // the honest offline record; nothing here throws for the device being
+      // unreachable — that is the whole point of FS-04.
+      if (this.#writeBack !== null) {
+        const landing: SettleWriteBackLandingCommand = {
+          cellId: command.cellId,
+          workbenchId: write.workbenchId,
+          roomId: write.roomId,
+          folderSource: write.folderSource,
+          bindingId: write.bindingId,
+          stagedWriteId: write.id,
+          sourcePath: write.stagedCopyPath,
+          targetPath: write.targetPath,
+          actor: command.actor,
+          correlationId: command.correlationId,
+          now: command.now,
+        };
+        await this.#writeBack.settleLanding(landing, tx);
+      }
     });
   }
 
