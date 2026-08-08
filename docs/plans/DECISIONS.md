@@ -6,7 +6,7 @@ Reversible assumptions marked (R).
 
 | ID | Decision | Reversible? |
 |---|---|---|
-| M1 | First channel platform = Telegram, direct adapter, polling mode | (R) |
+| M1 | ~~First channel platform = Telegram, direct adapter, polling mode~~ **REVISED 2026-08-08 → WhatsApp Business Cloud API, official SDK adapter, webhook mode** (see M1 revision below) | (R) |
 | M2 | First channel scope = notify + approve only | no |
 | M3 | Channels C5 deferred, needs separate ADR | no |
 | M4 | Channels StateStore = Postgres; conformance suite is a hard gate | no |
@@ -58,6 +58,7 @@ Reversible assumptions marked (R).
 | **Workbench API routes** | `apps/api/src/routes/workbench.ts` |
 | Goose recipe templates | `apps/api/src/services/workbench/recipes/` |
 | Decision seam | `apps/api/src/services/workbench/decision.ts` |
+| **WhatsApp adapter (M1 rev)** | `adapters/collaboration/channels/src/whatsapp/` |
 
 
 ## M16 — Prime Agent as experimental second harness (2026-08-07)
@@ -75,3 +76,40 @@ Binding rules:
 - All Prime types behind the adapter; no daemon/_meta in Frank contracts; upgrade smoke test; Goose fallback always available.
 
 Reversible: yes — default-engine routing is evidence-pending (WB-04E report).
+
+## M1 revision — WhatsApp, not Telegram (2026-08-08)
+
+Steven's direct instruction (Cowork session, recorded AG-0-style): he does not
+use Telegram. M1's Telegram-first rationale assumed the approval surface lives
+on an app Steven actually opens — that assumption was false. Revised decision:
+
+- First channel platform = **WhatsApp Business Cloud API (official)** via the
+  SDK's first-party adapter **`@copilotkit/channels-whatsapp@0.7.3`** —
+  already resolvable in `pnpm-lock.yaml`, same 0.7.3 line as
+  `@copilotkit/channels`. Pin exact, no caret (same churn rule as M12's SDK).
+- Transport: **webhook** — the Cloud API has no polling mode. The listener
+  gains an inbound HTTPS endpoint terminated by Caddy on the VPS and forwarded
+  to `apps/channels-listener`. It remains a separate long-running process and
+  never becomes a route in `apps/api` (§3.5 stands). Verify-token handshake +
+  `X-Hub-Signature-256` validation on every inbound event.
+- M2 (notify + approve only), M4 (Postgres StateStore hard gate), M6 (one
+  interactive surface per binding), M12 (`ɵruntime` confinement), M13 (durable
+  resolution via inbound + outbox) stand unchanged — platform-agnostic by
+  construction.
+- Frank-initiated approval cards are business-initiated messages under Meta's
+  24-hour session rule → they require **pre-approved template messages** with
+  quick-reply buttons (≤3). Card design must fit template constraints; this is
+  the one UX delta vs Telegram. Free-form messages allowed only inside a
+  user-initiated 24h session window.
+- The Telegram adapter (CH-03..07 code) is **not deleted**: it remains the
+  reference implementation, the ChannelPort swap-proof, and the upgrade smoke
+  baseline. It is simply never bound for Steven.
+- Human-gated asks change: the Telegram bot-token ask (2026-08-06) is VOID.
+  New asks recorded in `EXECUTION_STATUS.md`: Meta developer app + WhatsApp
+  Business setup (WABA ID, phone number ID, access token, webhook verify
+  token). Dev-mode test number acceptable for the CH-W0 spike with Steven's
+  personal number as recipient.
+- Work items: CH-W0 = retargeted #28 · CH-W1 adapter = #58 · CH-W2 Meta
+  assets/runbook = #59.
+
+Reversible: yes (adapter-level; canonical stack untouched).

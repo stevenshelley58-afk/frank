@@ -25,7 +25,7 @@ Master plan: `docs/plans/FRANK_MASTER_PARALLEL_BUILD_PLAN.md`
 4. CH-01/CH-02 (contracts + statestore) → main
 5. WB-05..WB-07 (front door, SSE, leash) → main
 6. HITL-01/02 → main → **Gate G3**
-7. CH-03..CH-06 (listener + Telegram) → main (needs bot token — HUMAN-GATED)
+7. CH-03..CH-06 (listener + Telegram) → main (needs bot token — HUMAN-GATED) → **superseded 2026-08-08: platform = WhatsApp per M1 revision; see CH-W0/W1/W2 (#28/#58/#59)**
 8. FS-*, SS-* (post-G3) → main
 
 ## Gates
@@ -34,8 +34,8 @@ Master plan: `docs/plans/FRANK_MASTER_PARALLEL_BUILD_PLAN.md`
 |---|---|---|
 | G0 Authority & baseline | ✅ DONE (this commit) | ADR-022/023 landed, WB-00 facts recorded, decisions locked |
 | G1 Delivery controls | ✅ DONE | verify.yml live, verify-preview skill, red/green proof. **M14 branch protection ENABLED 2026-08-06** (strict, contexts=[verify]) |
-| G2 Workbench core | ⏳ in progress | WB-01..WB-09 |
-| G3 Human loop | blocked on G2 + Telegram token | |
+| G2 Workbench core | ✅ code-complete 2026-08-08 | WB-01..10 merged (see task rows); formal gate-evidence collation in MERGE_MANIFEST pending AG-0 |
+| G3 Human loop | blocked on Meta WhatsApp setup (#59) | M1 revised 2026-08-08 — Telegram token ask VOID; live proof = WhatsApp approve/deny on Steven's phone |
 | G4 Folders & schedules | blocked on G3 | |
 | G5 Release | not started | |
 
@@ -57,7 +57,16 @@ workbench runner, never as a replacement for it.
 
 ## Human-gated items
 
-- **Telegram bot token**: CH-00 spike + CH-03..CH-06 need a bot token injected via OpenBao/env. Asked Steven 2026-08-06. Until then AG-4 builds CH-01/CH-02 (no token needed).
+- ~~**Telegram bot token**~~ **VOID 2026-08-08** — M1 revised to WhatsApp
+  (Steven does not use Telegram). See DECISIONS.md M1 revision.
+- **Meta WhatsApp Cloud API setup** (CH-W2, #59): Meta developer app →
+  WhatsApp product → record WABA ID, Phone Number ID, access token, webhook
+  verify token; inject via OpenBao/env only. Needed for the CH-W0 spike (#28)
+  and the G3 live proof. Asked Steven 2026-08-08.
+- **Goose on VPS**: install command handed to Steven 2026-08-08 (headless
+  `download_cli.sh | CONFIGURE=false bash` as root; log →
+  `.plan/goose-install.log` in the work tree). BASELINE update + SS-02 ungating
+  to follow once the log confirms `goose --version` / `goose schedule`.
 
 ## Task status
 
@@ -90,7 +99,7 @@ workbench runner, never as a replacement for it.
 | FS-04 | AG-5 | `agent/fs/writeback` | 🔄 write-back/offline (agent running) |
 | SS-01+SS-05 | AG-6 | `agent/ss/scheduling` | 🔄 schedule defs + harness selection (agent running) |
 | SS-03 | AG-6 | merged b981f68 | ✅ srt egress profiles + graceful degrade, tests 77/77, issue #43 closed |
-| SS-02 | AG-6 | — | ⏳ live Goose trigger GATED (Goose absent on VPS) |
+| SS-02 | AG-6 | — | ⏳ live Goose trigger GATED (Goose absent on VPS) → install in progress 2026-08-08 (see human-gated) |
 | WB-10 | AG-3 | merged 6a3ee7d | ✅ harness-swap proof (goose+cli equivalence), issue #27 closed |
 | **Workbench track WB-01..10** | AG-3 | main | ✅ **COMPLETE** |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
@@ -104,3 +113,7 @@ workbench runner, never as a replacement for it.
 | CH-00 | AG-4 | — | ⛔ needs bot token |
 | FS-01..06 | AG-5 | — | blocked on G3 (prep done: FS_PREP.md + fixtures) |
 | SS-01..03/05 | AG-6 | — | blocked on G3 (prep done: SS_PREP.md + fixtures) |
+| **M1-REV WhatsApp switch** | AG-0 (Cowork, Steven-directed) | `agent/gov/m1-whatsapp` | ✅ recorded 2026-08-08 — DECISIONS.md M1 revision; CH-W0=#28 retargeted, CH-W1=#58, CH-W2=#59 opened; Telegram code retained as reference/swap-proof |
+| CH-W0 spike | AG-4 | — | ⛔ blocked on #59 (Meta setup) — was Telegram CH-00 |
+| CH-W1 WhatsApp adapter | AG-4 | — | 🔜 ready to dispatch (code path; `@copilotkit/channels-whatsapp@0.7.3` pinned) |
+| CH-W2 Meta assets/runbook | AG-4 + Steven | — | ⛔ HUMAN-GATED (asked 2026-08-08) |
