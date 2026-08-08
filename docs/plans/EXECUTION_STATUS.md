@@ -89,7 +89,7 @@ workbench runner, never as a replacement for it.
 | HITL-03 | AG-3 | merged 16113eb | ✅ WHEN-TO-ASK policy, reversible->receipt, tests 55/55, issue #22 closed |
 | FS-04 | AG-5 | `agent/fs/writeback` | 🔄 write-back/offline (agent running) |
 | SS-01+SS-05 | AG-6 | `agent/ss/scheduling` | 🔄 schedule defs + harness selection (agent running) |
-| SS-03 | AG-6 | `agent/ss/sandbox-select` | 🔄 srt egress profiles (agent running) |
+| SS-03 | AG-6 | merged b981f68 | ✅ srt egress profiles + graceful degrade, tests 77/77, issue #43 closed |
 | SS-02 | AG-6 | — | ⏳ live Goose trigger GATED (Goose absent on VPS) |
 | WB-10 | AG-3 | merged 6a3ee7d | ✅ harness-swap proof (goose+cli equivalence), issue #27 closed |
 | **Workbench track WB-01..10** | AG-3 | main | ✅ **COMPLETE** |
