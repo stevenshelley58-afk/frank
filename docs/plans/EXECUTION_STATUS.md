@@ -81,10 +81,11 @@ workbench runner, never as a replacement for it.
 | CH-07 | AG-4 | merged d780643 | ✅ expiry sweep + retry/dead-letter + outage isolation + exit path, issue #35 closed |
 | **Channels stack CH-01..07** | AG-4 | main | ✅ **COMPLETE** (live phone proof pending bot token) |
 | FS-02 | AG-5 | merged 8dff420 | ✅ room_folder_binding (migration 0007) + 4 routes, integration 5/5, issue #37 closed |
+| FS-03 | AG-5 | merged 16fce5f | ✅ staged writes + mount plumbing, direct-write-fails proven, issue #38 closed |
 | FS-05 | AG-5 | merged ee2bfd5 | ✅ preview backend + publish route + room Files, integration 5/5, issue #40 closed |
-| FS-03 | AG-5 | `agent/fs/mounts-staged` | 🔄 mount plumbing + staged shared writes (agent running) |
-| UI-08 | AG-2 | `agent/ui/files-folders` | ⏳ queued (FS-02+FS-05 backends merged — ready to dispatch after FS-03/UI-09 land) |
 | UI-09 | AG-2 | merged b86a605 | ✅ channels console (bind/inspect + truthful health), tests 55/55, issue #50 closed |
+| UI-08 | AG-2 | merged dc69124 | ✅ Files console (bindings, artifacts, previews, write-back state), web tests 70/70, issue #49 closed |
+| SS-04 | AG-6 | N/A | ✅ closed #44 (no KVM on VPS per M10) |
 | WB-10 | AG-3 | merged 6a3ee7d | ✅ harness-swap proof (goose+cli equivalence), issue #27 closed |
 | **Workbench track WB-01..10** | AG-3 | main | ✅ **COMPLETE** |
 | CH-01 | AG-4 | merged dc7ee9a | ✅ contracts:validate green |
