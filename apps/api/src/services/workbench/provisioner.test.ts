@@ -221,3 +221,68 @@ describe('WorkbenchProvisioner (mocked CLI)', () => {
     expect(cli.calls.some((c) => c[0] === 'volume' && c[1] === 'rm')).toBe(true);
   });
 });
+
+describe('buildProvisionSpec — SS-03 egress + srt filesystem wiring', () => {
+  it('carries the egress policy: allowlist -> allowlist, absent -> deny-all', () => {
+    const restricted = buildProvisionSpec(
+      record({
+        instruction: 'a',
+        network: { egressAllowlist: ['registry.npmjs.org', 'github.com'] },
+      }),
+    );
+    expect(restricted.egress).toEqual({
+      mode: 'allowlist',
+      domains: ['registry.npmjs.org', 'github.com'],
+    });
+    expect(restricted.network).toBe('restricted');
+
+    const none = buildProvisionSpec(record({ instruction: 'a' }));
+    expect(none.egress).toEqual({ mode: 'deny-all', domains: [] });
+    expect(none.network).toBe('none');
+  });
+
+  it('docker network profile stays consistent with the egress policy', () => {
+    // The two layers agree: deny-all <-> none, allowlist <-> restricted.
+    for (const taskDef of [
+      { instruction: 'a' },
+      { instruction: 'a', network: { egressAllowlist: [] } },
+      { instruction: 'a', network: { egressAllowlist: ['example.com'] } },
+    ] as const) {
+      const spec = buildProvisionSpec(record(taskDef));
+      const networkIdx = spec.dockerArgv.indexOf('--network');
+      const dockerNetwork = spec.dockerArgv[networkIdx + 1];
+      if (spec.egress.mode === 'deny-all') {
+        expect(spec.network).toBe('none');
+        expect(dockerNetwork).toBe('none');
+      } else {
+        expect(spec.network).toBe('restricted');
+        expect(dockerNetwork).toBe('frank-wb-egress');
+      }
+    }
+  });
+
+  it('carries the explicit filesystem policy for the srt wrap', () => {
+    const spec = buildProvisionSpec(
+      record({
+        instruction: 'fs',
+        mounts: [
+          { source: '/srv/notes', path: '/mnt/notes', mode: 'ro' },
+          { source: '/srv/out', path: '/mnt/out', mode: 'rw' },
+          { source: '/srv/draft', path: '/mnt/draft', mode: 'staged' },
+        ],
+      }),
+    );
+    // Writable: scratch volume + rw mounts only. Staged lands inside
+    // /workspace at provision time, so it adds no separate entry.
+    expect(spec.srtFilesystem.writablePaths).toEqual(['/workspace', '/mnt/out']);
+    expect(spec.srtFilesystem.readOnlyPaths).toEqual(['/mnt/notes']);
+  });
+
+  it('minimal spec: writable scratch volume, nothing read-only', () => {
+    const spec = buildProvisionSpec(record({ instruction: 'min' }));
+    expect(spec.srtFilesystem).toEqual({
+      writablePaths: ['/workspace'],
+      readOnlyPaths: [],
+    });
+  });
+});
