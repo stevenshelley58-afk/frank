@@ -57,6 +57,13 @@
       "when": 1787000000000,
       "tag": "0007_room_folder_binding",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1787100000000,
+      "tag": "0008_staged_write",
+      "breakpoints": true
     }
   ]
 }

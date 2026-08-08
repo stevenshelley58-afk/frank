@@ -313,3 +313,35 @@ export const workbenchReopenResponseSchema = z
     identifiers: identifiersSchema,
   })
   .strict();
+
+/* ------------------------------------------- FS-03 staged shared writes --- */
+
+/**
+ * POST /v1/workbenches/:id/staged-writes body (FS-03): a staged-mounted
+ * folder proposes to write its copy back to the shared source. The proposal
+ * files a NORMAL decision work item (ADR-022) — nothing lands until that
+ * decision resolves `ready` through the command envelope.
+ */
+export const workbenchStagedWriteBodySchema = z
+  .object({
+    command_id: z.string().min(1).optional(),
+    room_id: z.string().min(1),
+    /** The synced folder's id/name (FS-01) bound to the room as `staged`. */
+    folder_source: z.string().min(1).max(200),
+    /** Where the run's copy lives (VPS path) that approval would land. */
+    staged_copy_path: z.string().min(2).max(500),
+    /** The proposer's note for the approver (WORK-006 "why now"). */
+    note: z.string().min(1).max(2000).optional(),
+  })
+  .strict();
+
+export const workbenchStagedWriteResponseSchema = z
+  .object({
+    staged_write_id: z.string(),
+    /** The ADR-022 decision that approves the write (a normal approval). */
+    decision_work_item_id: z.string(),
+    workbench_id: z.string(),
+    workbench_state: z.literal('waiting'),
+    identifiers: identifiersSchema,
+  })
+  .strict();

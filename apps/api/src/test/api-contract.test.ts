@@ -845,6 +845,8 @@ describe('ADR-017 OpenAPI', () => {
       '/v1/workbenches/{id}/decisions',
       // WB-08: Central reopens a done workbench with a note.
       '/v1/workbenches/{id}/reopen',
+      // FS-03: staged shared writes (propose; approval lands via the decision).
+      '/v1/workbenches/{id}/staged-writes',
       // WB-07: first-class Stop (leash + cancellation).
       '/v1/workbenches/{id}/stop',
     ]);
@@ -878,7 +880,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(29);
+    expect(operations).toBe(30);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

@@ -69,6 +69,7 @@ import { RoomFolderBindingStore } from './services/workbench/folder-binding-stor
 import { WorkbenchEventBus } from './services/workbench/event-bus.js';
 import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
 import { WorkbenchDecisionService } from './services/workbench/decision.js';
+import { StagedWriteService } from './services/workbench/staged-write.js';
 import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { registerCodegraphRoutes } from './routes/codegraph.js';
@@ -369,6 +370,13 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   // the workbench routes registered below.
   const workbenchDecisions =
     options.db === undefined ? null : new WorkbenchDecisionService(options.db);
+  // FS-03: staged shared writes. Created alongside the decision seam because
+  // the resolution hook (below) lands an approved staged write when the
+  // decision item it filed resolves `ready`.
+  const stagedWrites =
+    workbenchDecisions === null || options.db === undefined
+      ? null
+      : new StagedWriteService(options.db, workbenchDecisions);
 
   registerCaptureRoutes(app, { ...shared, store, enrichment, actions });
   registerWorkRoutes(app, {
@@ -397,6 +405,29 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
               correlationId,
               now,
             });
+            // FS-03: if this decision approved a staged shared write, the
+            // controlled copy lands here (outside the harness), fully
+            // audited. Denied decisions copy nothing. Non-staged-write
+            // decisions are a no-op on both paths. Landing runs AFTER the
+            // workbench resume so a copy failure never leaves the run
+            // paused-and-landed; it throws and the envelope surfaces it.
+            if (stagedWrites !== null) {
+              if (resolution === 'ready') {
+                await stagedWrites.landStagedWrite(workItemId, {
+                  cellId,
+                  actor,
+                  correlationId,
+                  now,
+                });
+              } else {
+                await stagedWrites.denyStagedWrite(workItemId, {
+                  cellId,
+                  actor,
+                  correlationId,
+                  now,
+                });
+              }
+            }
           },
         }),
   });
@@ -439,6 +470,8 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
       cancellation: workbenchCancellation,
       decisions: workbenchDecisions as WorkbenchDecisionService,
       preview: previewBackend,
+      stagedWrites: stagedWrites as StagedWriteService,
+      folderBindings: new RoomFolderBindingStore(options.db),
     });
     // FS-02: room folder bindings — declarations are Postgres rows (migration
     // 0006), so the routes register alongside the workbench routes, only when
