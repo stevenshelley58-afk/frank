@@ -99,6 +99,15 @@ export const consoleModules: ConsoleModule[] = [
     status: 'live',
     system: 'Frank',
   },
+  {
+    id: 'files',
+    title: 'Files',
+    description:
+      'A room’s folders and artifacts — folder bindings, sync direction, mount mode, write-back state, and every artifact with its preview.',
+    icon: 'folder',
+    status: 'live',
+    system: 'Frank',
+  },
 ];
 
 export function moduleById(id: string): ConsoleModule | undefined {
