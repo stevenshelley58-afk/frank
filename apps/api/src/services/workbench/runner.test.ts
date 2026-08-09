@@ -44,6 +44,7 @@ class FakeStore {
   recovered: WorkbenchRecord[] = [];
   nonTerminal: WorkbenchRecord[] = [];
   honestFailures: Array<{ id: string; reason: string }> = [];
+  staleAfterMs: number | null = null;
   claimBehavior: (cellId: string, runnerId: string) => WorkbenchRecord | null = () => null;
 
   async claimNext(cellId: string, runnerId: string, _now: Date) {
@@ -52,7 +53,8 @@ class FakeStore {
     return rec;
   }
   async recoverStale(runnerId: string, now: Date, staleAfterMs: number) {
-    void runnerId; void now; void staleAfterMs;
+    void runnerId; void now;
+    this.staleAfterMs = staleAfterMs;
     return this.recovered;
   }
   async listNonTerminal() {
@@ -251,6 +253,7 @@ describe('WorkbenchRunner', () => {
 
     expect(executor.calls).toContain('cleanup:wb-stale');
     expect(store.events.some((e) => e.id === 'wb-stale' && e.type === 'resumed')).toBe(true);
+    expect(store.staleAfterMs).toBe(90_000);
   });
 
   it('stop() drains in-flight runs before resolving', async () => {

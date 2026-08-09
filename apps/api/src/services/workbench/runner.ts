@@ -133,7 +133,7 @@ export interface WorkbenchRunnerOptions {
   readonly concurrency?: number;
   /** Poll interval when the queue was empty. Default 2000ms. */
   readonly pollIntervalMs?: number;
-  /** Claims older than this with no terminal state are recovered. Default 10min. */
+  /** Claims older than this with no terminal state are recovered. Default 90s. */
   readonly staleClaimMs?: number;
   /** Injectable clock (tests). Default Date.now. */
   readonly now?: () => Date;
@@ -198,7 +198,10 @@ export class WorkbenchRunner {
     this.cellIds = options.cellIds;
     this.concurrency = options.concurrency ?? 2;
     this.pollIntervalMs = options.pollIntervalMs ?? 2000;
-    this.staleClaimMs = options.staleClaimMs ?? 10 * 60 * 1000;
+    // Three missed 30-second heartbeats is enough evidence that the owning
+    // executor died. Ten minutes made an API restart look like a stuck
+    // mission even though the durable claim was recoverable.
+    this.staleClaimMs = options.staleClaimMs ?? 90_000;
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? ((m) => console.error(m));
     this.terminalReporter = options.terminalReporter ?? null;
@@ -206,7 +209,7 @@ export class WorkbenchRunner {
     this.stopGraceMs = options.stopGraceMs ?? 5000;
     this.maxAttempts = options.maxAttempts ?? 5;
     this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 30_000;
-    this.recoveryIntervalMs = options.recoveryIntervalMs ?? 60_000;
+    this.recoveryIntervalMs = options.recoveryIntervalMs ?? 15_000;
   }
 
   /**
