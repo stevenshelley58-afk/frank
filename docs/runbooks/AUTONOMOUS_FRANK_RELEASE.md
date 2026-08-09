@@ -131,13 +131,16 @@ export FRANK_MAX_BODY_BYTES='1048576'
 
 export FRANK_WORKBENCH_RUNNER_ENABLED='true'
 export FRANK_WORKBENCH_CONCURRENCY='2'
-export FRANK_WORKBENCH_IMAGE_REPOSITORY='<REVIEWED_REGISTRY_AND_REPOSITORY>'
-export FRANK_WORKBENCH_IMAGE_TAG='<REVIEWED_IMMUTABLE_TAG>'
-export FRANK_WORKBENCH_IMAGE_DIGEST='sha256:<64_HEX_DIGEST>'
+export FRANK_WORKBENCH_IMAGE='frank-workbench:<REVIEWED_IMMUTABLE_TAG>'
 export FRANK_WORKBENCH_MODEL_PROVIDER='<REVIEWED_PROVIDER_ID>'
 export FRANK_WORKBENCH_MODEL_BASE_URL='<REVIEWED_HTTPS_PROVIDER_BASE_URL>'
 export FRANK_WORKBENCH_MODEL='<REVIEWED_MODEL_ID>'
-export FRANK_WORKSPACE_SOURCE_HOST_PATH='/srv/frank/repo'
+export FRANK_MISSION_ORCHESTRATOR_ENABLED='true'
+export FRANK_MISSION_WORKSPACE_SOURCE='/srv/frank/workspaces/central'
+export FRANK_MISSION_PLANNER_MODEL='deepseek-v4-flash'
+export FRANK_MISSION_CHEAP_MODEL='deepseek-v4-flash'
+export FRANK_MISSION_STRONG_MODEL='deepseek-v4-pro'
+export FRANK_WORKSPACE_SOURCE_HOST_PATH='/srv/frank/workspaces/central'
 
 export GOOSE_ACP_URL='<REVIEWED_WS_OR_WSS_URL>'
 export GOOSE_PROVIDER='<REVIEWED_GOOSE_PROVIDER_ID>'
@@ -163,9 +166,9 @@ the plaintext password exists only in the root release environment for authentic
 Two values require operational issuance, not an invented repository default:
 
 - `FRANK_DOMAIN_SERVICE_TOKEN` must be a production bearer credential issued for the web
-  BFF with only its required API capabilities. The repository has no production token-mint
-  command; generate and rotate it through the accepted identity/secret system before this
-  release. A development-session token is not acceptable.
+  BFF with only its required API capabilities. Redirect
+  `scripts/production/mint-service-token.ts` directly into the root-only secret runtime;
+  never print the token or use the development-session route.
 - `FRANK_BASIC_AUTH_HASH` must be generated from a separately stored strong password with
   Caddy's bcrypt password tool. Store the hash and its corresponding
   `FRANK_BASIC_AUTH_PASSWORD` in the root-only secret runtime. Neither value belongs in Git,
@@ -184,10 +187,10 @@ test "$(printf '%s\n' '2.24.4' "$version" | sort -V | head -n1)" = '2.24.4'
 test "$FRANK_WORKBENCH_RUNNER_ENABLED" = 'true'
 test "$FRANK_WORKBENCH_CONCURRENCY" -ge 1
 test "$FRANK_WORKBENCH_CONCURRENCY" -le 8
-printf '%s' "$FRANK_WORKBENCH_IMAGE_DIGEST" | grep -Eq '^sha256:[0-9a-f]{64}$'
+printf '%s' "$FRANK_WORKBENCH_IMAGE" | grep -Eq '^[a-z0-9./_-]+:[A-Za-z0-9._-]+$'
 printf '%s' "$FRANK_RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
 printf '%s' "$FRANK_DOCKER_SOCKET_GID" | grep -Eq '^[0-9]+$'
-test "$(realpath -e -- "$FRANK_WORKSPACE_SOURCE_HOST_PATH")" = '/srv/frank/repo'
+test "$(realpath -e -- "$FRANK_WORKSPACE_SOURCE_HOST_PATH")" = '/srv/frank/workspaces/central'
 case "$FRANK_BASIC_AUTH_HASH" in
   '$2a$'*|'$2b$'*|'$2y$'*) ;;
   *) printf '%s\n' 'FRANK_BASIC_AUTH_HASH must be a bcrypt hash' >&2; exit 1 ;;
@@ -201,7 +204,7 @@ esac
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and
   (.services["frank-api"].environment.FRANK_WORKBENCH_IMAGE |
-    test("@sha256:[0-9a-f]{64}$")) and
+    test("^[a-z0-9./_-]+:[A-Za-z0-9._-]+$")) and
   ([.services | to_entries[] |
     select(any(.value.volumes[]?;
       .type == "bind" and .source == "/var/run/docker.sock")) |
@@ -314,11 +317,8 @@ docker image inspect \
   --format '{{.RepoTags}}\t{{.Id}}' \
   > "$evidence_dir/application-images.built.tsv"
 
-workbench_image_ref="${FRANK_WORKBENCH_IMAGE_REPOSITORY}:${FRANK_WORKBENCH_IMAGE_TAG}@${FRANK_WORKBENCH_IMAGE_DIGEST}"
-docker pull --quiet "$workbench_image_ref" \
-  > "$evidence_dir/workbench-image.pull.txt"
-docker image inspect "$workbench_image_ref" \
-  --format '{{.RepoDigests}}\t{{.Id}}' \
+docker image inspect "$FRANK_WORKBENCH_IMAGE" \
+  --format '{{.RepoTags}}\t{{.Id}}' \
   > "$evidence_dir/workbench-image.resolved.tsv"
 
 # One-time/repair-safe ownership initialization for the persistent artifact volume.

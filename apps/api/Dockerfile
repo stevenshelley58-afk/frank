@@ -24,4 +24,4 @@ ENV FRANK_LOG_LEVEL=info
 EXPOSE 3000
 
 # Run migrations then start the API
-CMD ["pnpm", "--filter", "@frank/api", "exec", "tsx", "apps/api/src/start.ts"]
+CMD ["pnpm", "--filter", "@frank/api", "exec", "tsx", "/app/apps/api/src/start.ts"]
