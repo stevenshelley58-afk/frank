@@ -44,8 +44,12 @@ const AuthContext = createContext<AuthContextValue>({
   retry: () => {},
 });
 
-async function mintSession(): Promise<DevSession> {
+async function mintSession(): Promise<DevSession | null> {
   const res = await fetch('/v1/auth/dev-session', { method: 'POST' });
+  // Production deliberately disables browser-minted bearer tokens. Mission
+  // and Workbench use authenticated same-origin BFF routes, so this response
+  // means "server-owned session", not an unavailable Frank cell.
+  if (res.status === 403) return null;
   if (!res.ok) {
     throw new Error(`Session request failed (${res.status})`);
   }
@@ -88,6 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!minting.current) {
       minting.current = mintSession()
         .then((s) => {
+          if (s === null) throw new Error('Browser token minting is disabled in production');
           sessionRef.current = s;
           setSession(s);
           return s.access_token;
@@ -219,7 +224,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    if (!api || status !== 'ready') return;
+    if (status !== 'ready') return;
+    if (!api) {
+      // Production keeps privileged domain credentials out of browser
+      // JavaScript; the server-owned BFF surfaces remain fully available.
+      setLoading(false);
+      return;
+    }
     let cancelled = false;
 
     const load = async () => {

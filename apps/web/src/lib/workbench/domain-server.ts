@@ -11,6 +11,7 @@ import {
   domainApiToken,
   dropDomainApiToken,
 } from '@/lib/domain-api';
+import { isSameOriginMutation as validateSameOriginMutation } from '@/lib/same-origin';
 
 export interface DomainJsonResult {
   readonly status: number;
@@ -89,10 +90,5 @@ export function domainProblem(result: DomainJsonResult): Response {
 
 /** Reject browser cross-site mutation attempts while allowing non-browser callers. */
 export function isSameOriginMutation(request: Request): boolean {
-  const fetchSite = request.headers.get('sec-fetch-site');
-  if (fetchSite !== null && fetchSite !== 'same-origin') return false;
-
-  const origin = request.headers.get('origin');
-  if (origin === null) return true;
-  return origin === new URL(request.url).origin;
+  return validateSameOriginMutation(request);
 }

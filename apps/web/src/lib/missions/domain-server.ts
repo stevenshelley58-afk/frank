@@ -1,4 +1,5 @@
 import { domainApiFetch } from '@/lib/domain-api';
+import { isSameOriginMutation } from '@/lib/same-origin';
 
 export interface MissionDomainResult {
   readonly status: number;
@@ -30,8 +31,5 @@ export function missionDomainProblem(result: MissionDomainResult): Response {
 }
 
 export function isSameOriginMissionMutation(request: Request): boolean {
-  const fetchSite = request.headers.get('sec-fetch-site');
-  if (fetchSite !== null && fetchSite !== 'same-origin') return false;
-  const origin = request.headers.get('origin');
-  return origin === null || origin === new URL(request.url).origin;
+  return isSameOriginMutation(request);
 }
