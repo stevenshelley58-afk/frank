@@ -8,7 +8,7 @@ export interface MissionDomainResult {
 
 export async function missionDomainJson(
   path: string,
-  init: { method: string; body?: unknown },
+  init: { method: string; body?: unknown; timeoutMs?: number },
 ): Promise<MissionDomainResult> {
   let result = await domainApiFetch(path, init);
   // domainApiFetch clears an expired cached token on 401. Re-run once so the

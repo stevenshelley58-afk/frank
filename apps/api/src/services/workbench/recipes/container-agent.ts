@@ -31,6 +31,7 @@ import type {
 } from '@frank/contracts';
 
 import type { DockerCli } from '../provisioner.js';
+import { parseHarnessText } from './headless-protocol.js';
 
 interface ProviderConfig {
   readonly id: string;
@@ -122,7 +123,9 @@ export class ContainerAgentHarnessAdapter implements AgentHarnessAdapter {
     this.#docker = options.docker;
     this.#provider = options.provider;
     this.#maxTurns = options.maxTurns ?? 24;
-    this.#maxToolOutputBytes = options.maxToolOutputBytes ?? 64 * 1024;
+    // Tool output is fed back into the next model turn. A tight bound prevents
+    // one broad repository scan from consuming an entire per-attempt budget.
+    this.#maxToolOutputBytes = options.maxToolOutputBytes ?? 12 * 1024;
     this.#now = options.now ?? (() => new Date());
     this.#tokenBudget = options.tokenBudget;
     this.#spendCapUsd = options.spendCapUsd;
@@ -246,7 +249,15 @@ export class ContainerAgentHarnessAdapter implements AgentHarnessAdapter {
 
     try {
       for (let turn = 0; turn < this.#maxTurns; turn += 1) {
-        const completion = await this.#complete(messages, controller.signal);
+        const remainingOutputBudget =
+          this.#tokenBudget === undefined
+            ? 4_096
+            : Math.max(1, Math.min(4_096, this.#tokenBudget - session.tokensUsed));
+        const completion = await this.#complete(
+          messages,
+          controller.signal,
+          remainingOutputBudget,
+        );
         session.turnsCompleted += 1;
         const tokensIn = completion.usage?.prompt_tokens ?? 0;
         const tokensOut = completion.usage?.completion_tokens ?? 0;
@@ -285,6 +296,21 @@ export class ContainerAgentHarnessAdapter implements AgentHarnessAdapter {
         });
 
         if (toolCalls.length === 0) {
+          const missing = missingPublicationDuties(assistantTranscript(messages));
+          if (missing.length > 0) {
+            // Protocol repair is part of the same bounded run. Models
+            // occasionally answer conversationally despite the publication
+            // contract; remind them once or more instead of silently accepting
+            // an unverifiable completion.
+            messages.push({
+              role: 'user',
+              content:
+                `You have not completed the contractual publication duties. Missing: ${missing.join(' and ')}. ` +
+                'Do not call another tool. Publish the missing blocks now using the exact markers and schemas in the task instruction. ' +
+                'Base the receipt only on commands and evidence already observed; if execution failed, say so truthfully.',
+            });
+            continue;
+          }
           yield {
             type: 'done',
             usage: {
@@ -440,7 +466,11 @@ export class ContainerAgentHarnessAdapter implements AgentHarnessAdapter {
     session.closed = true;
   }
 
-  async #complete(messages: readonly ChatMessage[], signal: AbortSignal): Promise<ChatCompletion> {
+  async #complete(
+    messages: readonly ChatMessage[],
+    signal: AbortSignal,
+    maxOutputTokens: number,
+  ): Promise<ChatCompletion> {
     const response = await fetch(`${this.#provider.baseUrl.replace(/\/$/, '')}/chat/completions`, {
       method: 'POST',
       headers: {
@@ -453,6 +483,7 @@ export class ContainerAgentHarnessAdapter implements AgentHarnessAdapter {
         tools: [SHELL_TOOL],
         tool_choice: 'auto',
         temperature: 0.1,
+        max_tokens: maxOutputTokens,
       }),
       signal,
     });
@@ -468,6 +499,21 @@ export class ContainerAgentHarnessAdapter implements AgentHarnessAdapter {
     if (session === undefined) throw new Error(`unknown session ${sessionId}`);
     return session;
   }
+}
+
+function assistantTranscript(messages: readonly ChatMessage[]): string {
+  return messages
+    .filter((message) => message.role === 'assistant' && typeof message.content === 'string')
+    .map((message) => message.content ?? '')
+    .join('\n');
+}
+
+export function missingPublicationDuties(transcript: string): string[] {
+  const publication = parseHarnessText(transcript);
+  return [
+    ...(publication.plan.length === 0 ? ['a 3-10 step FRANK_PLAN block'] : []),
+    ...(publication.receipt === null ? ['a valid one-line JSON FRANK_RECEIPT block'] : []),
+  ];
 }
 
 function parseShellCommand(raw: string): string {

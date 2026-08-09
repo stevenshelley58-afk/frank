@@ -11,7 +11,43 @@ import {
 
 const POLL_INTERVAL_MS = 2_000;
 const MISSION_STORAGE_KEY = 'frank.current-mission-id';
+const PENDING_COMMAND_STORAGE_KEY = 'frank.pending-mission-command';
 let cachedSnapshot: MissionSnapshot | null = null;
+
+function newCommandId(): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID();
+  return `mission-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
+}
+
+function commandIdFor(objective: string): string {
+  if (typeof window === 'undefined') return newCommandId();
+  try {
+    const raw = window.sessionStorage.getItem(PENDING_COMMAND_STORAGE_KEY);
+    const pending = raw === null ? null : (JSON.parse(raw) as unknown);
+    if (
+      typeof pending === 'object' &&
+      pending !== null &&
+      (pending as { objective?: unknown }).objective === objective &&
+      typeof (pending as { commandId?: unknown }).commandId === 'string'
+    ) {
+      return (pending as { commandId: string }).commandId;
+    }
+  } catch {
+    // Replace malformed browser state with a fresh command below.
+  }
+  const commandId = newCommandId();
+  window.sessionStorage.setItem(
+    PENDING_COMMAND_STORAGE_KEY,
+    JSON.stringify({ objective, commandId }),
+  );
+  return commandId;
+}
+
+function clearPendingCommand(): void {
+  if (typeof window !== 'undefined') {
+    window.sessionStorage.removeItem(PENDING_COMMAND_STORAGE_KEY);
+  }
+}
 
 function rememberSnapshot(snapshot: MissionSnapshot | null): void {
   cachedSnapshot = snapshot;
@@ -102,7 +138,11 @@ export function useMission(): MissionController {
       try {
         // Do not abort mission creation when RoomView unmounts during a room
         // switch: the server command is durable and may already have landed.
-        const created = await createMission(input);
+        const created = await createMission({
+          ...input,
+          commandId: input.commandId ?? commandIdFor(input.objective),
+        });
+        clearPendingCommand();
         rememberSnapshot(created);
         setSnapshot(created);
         return true;

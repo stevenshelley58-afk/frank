@@ -11,6 +11,7 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 interface MissionRequestBody {
+  commandId?: unknown;
   objective?: unknown;
   title?: unknown;
   roomName?: unknown;
@@ -62,6 +63,12 @@ export async function POST(request: Request): Promise<Response> {
           ...(maxAttempts === undefined ? {} : { max_attempts: maxAttempts }),
         };
   const title = typeof input?.title === 'string' && input.title.trim() ? input.title.trim() : undefined;
+  const suppliedCommandId =
+    typeof input?.commandId === 'string' ? input.commandId.trim() : '';
+  const commandId =
+    suppliedCommandId.length >= 8 && suppliedCommandId.length <= 128
+      ? suppliedCommandId
+      : randomUUID();
   const roomName =
     typeof input?.roomName === 'string' && input.roomName.trim()
       ? input.roomName.trim()
@@ -70,8 +77,12 @@ export async function POST(request: Request): Promise<Response> {
   try {
     const result = await missionDomainJson('/v1/missions', {
       method: 'POST',
+      // Planning is a real model call and is deliberately allowed more time
+      // than ordinary domain reads. The command ID remains stable if the
+      // browser disconnects and retries while this request is in flight.
+      timeoutMs: 120_000,
       body: {
-        command_id: randomUUID(),
+        command_id: commandId,
         objective,
         ...(title === undefined ? {} : { title }),
         ...(roomName === undefined ? {} : { room_name: roomName }),

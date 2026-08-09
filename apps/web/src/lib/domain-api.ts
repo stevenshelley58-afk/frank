@@ -56,7 +56,7 @@ export function dropDomainApiToken(): void {
 /** One authenticated JSON call against the domain API. */
 export async function domainApiFetch(
   path: string,
-  init: { method: string; body?: unknown },
+  init: { method: string; body?: unknown; timeoutMs?: number },
 ): Promise<{ status: number; body: Record<string, unknown> | null }> {
   const token = await domainApiToken();
   if (token === null) return { status: 503, body: null };
@@ -67,7 +67,7 @@ export async function domainApiFetch(
       'content-type': 'application/json',
     },
     ...(init.body === undefined ? {} : { body: JSON.stringify(init.body) }),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(init.timeoutMs ?? 15_000),
   });
   if (res.status === 401) dropDomainApiToken();
   const text = await res.text();

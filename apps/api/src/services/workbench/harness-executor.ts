@@ -86,7 +86,7 @@ export class HarnessExecutor {
       workspacePath: '/workspace',
       contextPack: minimalContextPack(record, instruction),
       systemPrompt:
-        'You are a FRANK workbench agent. Follow the publication duties in your task instruction exactly.',
+        'You are a FRANK workbench agent. Follow the publication duties in your task instruction exactly. Your first assistant response must begin with the FRANK_PLAN block before any tool call, and you must end with a valid FRANK_RECEIPT block.',
       ...(taskDef.harness?.provider !== undefined && taskDef.harness?.model !== undefined
         ? { provider: { provider: taskDef.harness.provider, model: taskDef.harness.model } }
         : {}),

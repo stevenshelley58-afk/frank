@@ -1162,7 +1162,8 @@ export class MissionOrchestrator {
         node.instruction,
         '',
         `Verification: ${node.verification}`,
-        'Work only inside /mission-workspace. Leave durable evidence for the verifier.',
+        'The project repository is mounted at /mission-workspace; shell commands start in /workspace.',
+        'Use /mission-workspace for project work and shared dependency inputs. Copy every deliverable into /workspace/out and register only /workspace/out artifact paths so Frank can archive them durably.',
       ].join('\n'),
       mounts: [{ source: this.#workspaceSource, path: '/mission-workspace', mode: 'rw' }],
       harness: {

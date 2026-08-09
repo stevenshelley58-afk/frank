@@ -103,6 +103,9 @@ Rules:
 - Parallelize independent tasks. Add a final integration/review task that depends on all material builders.
 - A verifier must inspect real outputs, not repeat another agent's claims.
 - Do not include destructive, external communication, paid purchase, or production promotion without explicitly making it a verification/approval boundary.
+- The project repository is always mounted at /mission-workspace and shell commands start in /workspace. Use explicit paths such as git -C /mission-workspace.
+- Dependency tasks share /mission-workspace. Every final deliverable must also be copied into /workspace/out and registered there for durable archival.
+- Keep discovery commands narrowly scoped. Never dump an entire repository or large generated directory into model context; cap search output and inspect only relevant files.
 - Never invent credentials or paths. Work only in the workspace provided at runtime.`;
 
 function assertGraph(plan: MissionPlan): void {
