@@ -9,7 +9,10 @@ import type {
 
 export const DEFAULT_MISSION_BUDGET: ResolvedMissionBudget = {
   spendCapUsd: 10,
-  tokenBudget: 250_000,
+  // A mission can contain up to 12 tasks with two bounded attempts each.
+  // 1.2M preserves a practical 50k-token leash per attempt at that maximum;
+  // the USD cap remains the independent hard spend boundary.
+  tokenBudget: 1_200_000,
   wallClockSec: 7_200,
   maxAttempts: 2,
 };

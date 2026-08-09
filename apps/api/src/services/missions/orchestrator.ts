@@ -679,7 +679,11 @@ export class MissionOrchestrator {
         latestByItem.set(workbench.work_item_id, workbench);
         attemptsByItem.set(
           workbench.work_item_id,
-          (attemptsByItem.get(workbench.work_item_id) ?? 0) + Math.max(workbench.attempts, 1),
+          // Mission attempts are distinct delegations. A runner may reclaim
+          // one durable workbench after a process restart; that internal
+          // claim attempt must not consume another mission retry or make the
+          // UI report an impossible attempt count.
+          (attemptsByItem.get(workbench.work_item_id) ?? 0) + 1,
         );
       }
 

@@ -125,7 +125,7 @@ export class ContainerAgentHarnessAdapter implements AgentHarnessAdapter {
     this.#maxTurns = options.maxTurns ?? 24;
     // Tool output is fed back into the next model turn. A tight bound prevents
     // one broad repository scan from consuming an entire per-attempt budget.
-    this.#maxToolOutputBytes = options.maxToolOutputBytes ?? 12 * 1024;
+    this.#maxToolOutputBytes = options.maxToolOutputBytes ?? 4 * 1024;
     this.#now = options.now ?? (() => new Date());
     this.#tokenBudget = options.tokenBudget;
     this.#spendCapUsd = options.spendCapUsd;
@@ -251,8 +251,8 @@ export class ContainerAgentHarnessAdapter implements AgentHarnessAdapter {
       for (let turn = 0; turn < this.#maxTurns; turn += 1) {
         const remainingOutputBudget =
           this.#tokenBudget === undefined
-            ? 4_096
-            : Math.max(1, Math.min(4_096, this.#tokenBudget - session.tokensUsed));
+            ? 2_048
+            : Math.max(1, Math.min(2_048, this.#tokenBudget - session.tokensUsed));
         const completion = await this.#complete(
           messages,
           controller.signal,
