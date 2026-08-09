@@ -7,8 +7,21 @@ import {
   resolveMissionBudget,
   selectModelTier,
 } from './helpers.js';
+import { buildFallbackMissionPlan } from './planner.js';
 
 describe('mission orchestration policy helpers', () => {
+  it('builds a bounded provider-independent recovery graph', () => {
+    const plan = buildFallbackMissionPlan('Inspect the repository and publish evidence.');
+    expect(plan.tasks.map((task) => task.key)).toEqual([
+      'execute-objective',
+      'independent-review',
+      'publish-evidence',
+    ]);
+    expect(plan.tasks[1]?.depends_on).toEqual(['execute-objective']);
+    expect(plan.tasks[2]?.depends_on).toEqual(['independent-review']);
+    expect(plan.tasks.every((task) => task.instruction.includes('/workspace/out'))).toBe(true);
+  });
+
   it('resolves bounded defaults and preserves explicit zero spend/token ceilings', () => {
     expect(resolveMissionBudget(undefined)).toEqual(DEFAULT_MISSION_BUDGET);
     expect(

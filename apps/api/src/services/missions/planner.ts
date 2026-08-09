@@ -36,56 +36,98 @@ export class MissionPlanner {
     this.#baseUrl = options.baseUrl.replace(/\/$/, '');
     this.#apiKey = options.apiKey;
     this.#model = options.model ?? 'deepseek-v4-flash';
-    this.#timeoutMs = options.timeoutMs ?? 90_000;
+    this.#timeoutMs = options.timeoutMs ?? 45_000;
   }
 
   async plan(objective: string): Promise<MissionPlan> {
-    const response = await fetch(`${this.#baseUrl}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${this.#apiKey}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: this.#model,
-        temperature: 0.1,
-        response_format: { type: 'json_object' },
-        messages: [
-          {
-            role: 'system',
-            content: PLANNER_SYSTEM,
-          },
-          {
-            role: 'user',
-            content: `OBJECTIVE\n${objective}`,
-          },
-        ],
-      }),
-      signal: AbortSignal.timeout(this.#timeoutMs),
-    });
-    const body = (await response.json()) as {
-      choices?: readonly { message?: { content?: string | null } }[];
-      error?: { message?: string };
-    };
-    if (!response.ok) {
-      throw new Error(
-        `mission planner provider returned ${String(response.status)}: ${body.error?.message ?? 'request failed'}`,
-      );
-    }
-    const content = body.choices?.[0]?.message?.content;
-    if (typeof content !== 'string' || content.trim() === '') {
-      throw new Error('mission planner returned no plan');
-    }
-    let decoded: unknown;
     try {
-      decoded = JSON.parse(content);
+      const response = await fetch(`${this.#baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${this.#apiKey}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({
+          model: this.#model,
+          temperature: 0.1,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content: PLANNER_SYSTEM,
+            },
+            {
+              role: 'user',
+              content: `OBJECTIVE\n${objective}`,
+            },
+          ],
+        }),
+        signal: AbortSignal.timeout(this.#timeoutMs),
+      });
+      const body = (await response.json()) as {
+        choices?: readonly { message?: { content?: string | null } }[];
+        error?: { message?: string };
+      };
+      if (!response.ok) {
+        throw new Error(
+          `mission planner provider returned ${String(response.status)}: ${body.error?.message ?? 'request failed'}`,
+        );
+      }
+      const content = body.choices?.[0]?.message?.content;
+      if (typeof content !== 'string' || content.trim() === '') {
+        throw new Error('mission planner returned no plan');
+      }
+      const decoded = JSON.parse(content) as unknown;
+      const plan = planSchema.parse(decoded);
+      assertGraph(plan);
+      return plan;
     } catch {
-      throw new Error('mission planner returned invalid JSON');
+      // Objective acceptance must not depend on one planner model call. The
+      // deterministic graph is conservative and still routes execution
+      // through the same fenced, budgeted, reviewed workbenches.
+      return buildFallbackMissionPlan(objective);
     }
-    const plan = planSchema.parse(decoded);
-    assertGraph(plan);
-    return plan;
   }
+}
+
+export function buildFallbackMissionPlan(objective: string): MissionPlan {
+  // Leave headroom for the safety/evidence instructions under the task
+  // schema's 12k bound. The durable mission row still keeps the full input.
+  const normalized = objective.trim().slice(0, 9_000);
+  const plan = planSchema.parse({
+    summary: 'Provider-independent recovery plan: execute safely, review independently, and publish verified evidence.',
+    tasks: [
+      {
+        key: 'execute-objective',
+        title: 'Execute the objective inside the fenced workspace',
+        instruction: `Objective: ${normalized}\n\nWork from /mission-workspace. Complete every reversible, in-fence part of the objective. Do not perform destructive actions, external communication, paid purchases, or production promotion without an explicit approval boundary. Preserve project changes and shared evidence under /mission-workspace. Copy every user-facing deliverable into /workspace/out and register it. Record exact commands, outputs, and remaining blockers truthfully.`,
+        depends_on: [],
+        model_tier: 'cheap',
+        timeout_seconds: 1_800,
+        verification: 'Concrete deliverables or a truthful blocker report exist, and every completion claim cites observed command or file evidence.',
+      },
+      {
+        key: 'independent-review',
+        title: 'Independently review the objective result',
+        instruction: `Objective: ${normalized}\n\nAct as an independent reviewer. Inspect the actual state in /mission-workspace; do not rely on the prior agent's claims. Re-run focused checks appropriate to the objective. Correct reversible defects in-fence when safe. Write /mission-workspace/.frank-fallback-review.md with PASS/FAIL findings and exact evidence, copy it to /workspace/out/review.md, and register that artifact.`,
+        depends_on: ['execute-objective'],
+        model_tier: 'strong',
+        timeout_seconds: 1_200,
+        verification: 'The review contains independent command evidence, explicit PASS/FAIL results, and any discovered material defect was corrected or reported.',
+      },
+      {
+        key: 'publish-evidence',
+        title: 'Publish the verified completion evidence',
+        instruction: `Objective: ${normalized}\n\nRead the actual workspace result and /mission-workspace/.frank-fallback-review.md. Confirm the review passed. Copy all final user-facing deliverables available in /mission-workspace into /workspace/out without overwriting unrelated files. Create /workspace/out/completion-report.md summarizing the objective, work performed, verification commands and results, artifact paths, assumptions, and any genuine blockers. Register every /workspace/out artifact and publish a truthful receipt.`,
+        depends_on: ['independent-review'],
+        model_tier: 'cheap',
+        timeout_seconds: 600,
+        verification: 'completion-report.md exists in durable artifact storage and its claims agree with the independent review evidence.',
+      },
+    ],
+  });
+  assertGraph(plan);
+  return plan;
 }
 
 const PLANNER_SYSTEM = `You are FRANK's mission planner. Return only a JSON object.
