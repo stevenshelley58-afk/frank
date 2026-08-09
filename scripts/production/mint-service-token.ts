@@ -6,7 +6,9 @@
  * a root-owned secret file. Never invoke this without redirecting stdout.
  */
 
-import { LocalSignedSessionProvider } from '@frank/identity';
+// This operator script lives outside a workspace package, so a package-name
+// import would resolve against the root's intentionally minimal dependencies.
+import { LocalSignedSessionProvider } from '../../packages/identity/src/index.js';
 
 function required(name: string): string {
   const value = process.env[name];
