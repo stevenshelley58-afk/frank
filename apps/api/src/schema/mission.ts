@@ -22,7 +22,7 @@ export const missionCreateBodySchema = z
     objective: z
       .string()
       .trim()
-      .min(12, 'objective must describe a substantial outcome of at least 12 characters')
+      .min(1, 'objective must not be empty')
       .max(12_000),
     title: z.string().trim().min(1).max(200).optional(),
     room_name: z.string().trim().min(1).max(120).optional(),
@@ -94,4 +94,3 @@ export const missionResponseSchema = z
     identifiers: identifiersSchema,
   })
   .strict();
-

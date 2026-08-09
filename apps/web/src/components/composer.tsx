@@ -75,15 +75,14 @@ export function Composer({
 
   const submit = () => {
     const text = value.trim();
-    if (!text || disabled || booting || (isCentral && text.length < 12)) return;
+    if (!text || disabled || booting) return;
     onSend(text);
     setValue('');
     onTyping(false);
     taRef.current?.focus();
   };
 
-  const sendActive =
-    value.trim().length >= (isCentral ? 12 : 1) && !disabled && !booting;
+  const sendActive = value.trim().length > 0 && !disabled && !booting;
 
   const textareaProps = {
     ref: taRef,
@@ -113,9 +112,9 @@ export function Composer({
       : editing
         ? 'Rewrite your message…'
         : isCentral
-          ? 'Set a substantial objective for Frank...'
+          ? 'Message Frank...'
           : room.placeholder,
-    'aria-label': isCentral ? 'Mission objective' : `Message ${room.agent}`,
+    'aria-label': isCentral ? 'Message Frank' : `Message ${room.agent}`,
   };
 
   /** Editing banner — sits above either composer variant. */
@@ -182,8 +181,8 @@ export function Composer({
                   type="button"
                   onClick={submit}
                   disabled={!sendActive}
-                  aria-label="Start durable mission"
-                  title="Start a durable mission"
+                  aria-label="Send message"
+                  title="Send message"
                   className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-accent text-[#06111f] transition-all duration-150 hover:scale-[1.05] hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-35"
                 >
                   <IconSend size={17} />
@@ -192,7 +191,7 @@ export function Composer({
             </div>
           </div>
           <p className="px-1 pt-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-muted/70">
-            12+ characters · Enter starts a durable mission · Shift+Enter adds a line
+            Enter sends · Shift+Enter adds a line
           </p>
         </div>
       ) : (

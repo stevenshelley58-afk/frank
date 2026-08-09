@@ -71,9 +71,12 @@ describe('mission wire schemas', () => {
     ).toBe(true);
   });
 
-  it('rejects short objectives, unsafe budget bounds, and unknown fields', () => {
+  it('accepts short messages and rejects empty objectives, unsafe budget bounds, and unknown fields', () => {
     expect(
-      missionCreateBodySchema.safeParse({ command_id: 'command-1', objective: 'too short' }).success,
+      missionCreateBodySchema.safeParse({ command_id: 'command-1', objective: 'hi' }).success,
+    ).toBe(true);
+    expect(
+      missionCreateBodySchema.safeParse({ command_id: 'command-1', objective: '   ' }).success,
     ).toBe(false);
     expect(
       missionCreateBodySchema.safeParse({
@@ -107,4 +110,3 @@ describe('mission wire schemas', () => {
     ).toBe(false);
   });
 });
-

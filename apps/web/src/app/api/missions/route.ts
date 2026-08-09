@@ -34,9 +34,9 @@ export async function POST(request: Request): Promise<Response> {
 
   const input = (await request.json().catch(() => null)) as MissionRequestBody | null;
   const objective = typeof input?.objective === 'string' ? input.objective.trim() : '';
-  if (objective.length < 12) {
+  if (objective.length === 0) {
     return Response.json(
-      { error: 'validation_failed', detail: 'Describe a substantial objective (at least 12 characters).' },
+      { error: 'validation_failed', detail: 'Enter a message for Frank.' },
       { status: 400, headers: { 'Cache-Control': 'no-store' } },
     );
   }
