@@ -342,7 +342,10 @@ export class WorkbenchStore {
               ${artifact.previewUrl ?? null}, ${artifact.sha256 ?? null},
               ${artifact.mediaType ?? null}, ${now})
       on conflict (workbench_id, path) do update
-        set kind = excluded.kind, preview_url = excluded.preview_url
+        set kind = excluded.kind,
+            preview_url = excluded.preview_url,
+            sha256 = excluded.sha256,
+            media_type = excluded.media_type
     `);
   }
 
@@ -512,6 +515,24 @@ export class WorkbenchStore {
     });
     const row = rows?.rows[0];
     return row === undefined ? null : toRecord(row);
+  }
+
+  /** Renew a live claim so restart recovery never duplicates a healthy run. */
+  async heartbeatClaim(
+    workbenchId: string,
+    runnerId: string,
+    now: Date,
+  ): Promise<boolean> {
+    const rows = await this.db.execute(sql`
+      update "frank_domain"."workbench" set
+        claimed_at = ${now},
+        updated_at = ${now}
+      where id = ${workbenchId}
+        and claimed_by = ${runnerId}
+        and state in ('provisioning', 'running')
+      returning id
+    `);
+    return rows.rows.length > 0;
   }
 
   /**

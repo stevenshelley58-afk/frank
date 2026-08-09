@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from 'react';
 import type { Room } from '@/lib/rooms';
 import {
   centralSeed,
-  commandId,
   frankStream,
   roomSeed,
   uid,
@@ -12,6 +11,8 @@ import {
   type TurnInfo,
 } from '@/lib/frank';
 import { AuthErrorCard, useAuth } from '@/components/providers';
+import { MissionPanel } from '@/lib/missions/mission-panel';
+import { useMission } from '@/lib/missions/use-mission';
 import { useDelegations } from '@/lib/use-delegations';
 import { DelegationCard } from './delegation-card';
 import { Thread } from './thread';
@@ -25,12 +26,11 @@ import { Composer } from './composer';
  * the message flow — never appended into `messages` (that was the old design
  * and the source of duplicate receipts on event replay).
  *
- * Chat affordances (this chat / ChatGPT parity): copy lives in Thread,
- * regenerate re-runs the last user turn, and edit-and-resend replaces a
- * user message and everything after it with a fresh run.
+ * Central submits durable missions and renders their returned work graph.
+ * Project-room chat keeps the existing copy/regenerate/edit-and-resend flow.
  */
 export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
-  const { api, status } = useAuth();
+  const { status } = useAuth();
   const [messages, setMessages] = useState<ChatMessage[]>(() =>
     room.isHome ? centralSeed() : roomSeed(room.greeting),
   );
@@ -43,6 +43,8 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   const timerRef = useRef<number | null>(null);
   /** AbortController for the active Frank stream — powers the Stop button. */
   const abortRef = useRef<AbortController | null>(null);
+  const mission = useMission();
+  const missionBusy = mission.restoring || mission.submitting || mission.stopping || mission.active;
 
   useEffect(() => {
     return () => {
@@ -128,7 +130,17 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
 
   async function send(text: string) {
     const trimmed = text.trim();
-    if (!trimmed || sending) return;
+    if (!trimmed || (room.isHome ? missionBusy : sending)) return;
+
+    if (room.isHome) {
+      // Central's primary send is a durable mission, never a transient chat
+      // turn or a fake "working" acknowledgement. The returned mission and
+      // work graph are rendered directly below the thread.
+      setEditing(null);
+      append({ id: uid(), from: 'steve', text: trimmed, at: Date.now() });
+      await mission.submit({ objective: trimmed });
+      return;
+    }
 
     // Edit-and-resend: replace the edited message and drop everything after it.
     if (editing) {
@@ -144,15 +156,6 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
     }
 
     append({ id: uid(), from: 'steve', text: trimmed, at: Date.now() });
-
-    // Central: durability via domain API (fire-and-forget). Fresh sends only —
-    // regenerate/edit must not duplicate the captured command.
-    if (room.isHome) {
-      api?.('/v1/capture', {
-        method: 'POST',
-        body: JSON.stringify({ command_id: commandId(), kind: 'text', text: trimmed }),
-      }).catch(() => {});
-    }
 
     await runTurn(trimmed);
   }
@@ -204,26 +207,42 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
   }
 
   function stop() {
+    if (room.isHome) {
+      void mission.stop('Stopped from the Central mission deck');
+      return;
+    }
     abortRef.current?.abort();
   }
 
   return (
     <div className="flex h-full flex-col">
       {status === 'error' && <AuthErrorCard />}
-      <ModelChip info={turnInfo} />
+      {!room.isHome && <ModelChip info={turnInfo} />}
       <Thread
         messages={messages}
-        typing={typing}
+        typing={room.isHome ? false : typing}
         agentName={room.agent}
         delegations={[...roomDelegations].reverse()}
         delegationView={room.isHome ? 'central' : 'room'}
-        onRegenerate={canRegenerate && !sending ? regenerate : undefined}
-        onEdit={!sending ? startEdit : undefined}
+        onRegenerate={!room.isHome && canRegenerate && !sending ? regenerate : undefined}
+        onEdit={!room.isHome && !sending ? startEdit : undefined}
       />
+      {room.isHome && (
+        <MissionPanel
+          snapshot={mission.snapshot}
+          pendingObjective={mission.pendingObjective}
+          restoring={mission.restoring}
+          submitting={mission.submitting}
+          stopping={mission.stopping}
+          error={mission.error}
+        />
+      )}
       <Composer
         room={room}
-        disabled={sending}
-        running={sending}
+        disabled={room.isHome ? missionBusy : sending}
+        running={room.isHome ? mission.active : sending}
+        submitting={room.isHome ? mission.submitting : false}
+        stopping={room.isHome ? mission.stopping : false}
         editing={editing}
         onSend={send}
         onStop={stop}

@@ -12,6 +12,10 @@ interface ComposerProps {
   booting?: boolean;
   /** Frank is mid-stream — send button becomes a Stop affordance */
   running?: boolean;
+  /** Central is waiting for the durable mission record to be created. */
+  submitting?: boolean;
+  /** Central has durably closed the mission to new work. */
+  stopping?: boolean;
   /** ChatGPT-style edit-and-resend: an existing user message being rewritten. */
   editing?: ChatMessage | null;
   onSend: (text: string) => void;
@@ -23,9 +27,9 @@ interface ComposerProps {
 /**
  * The composer — FRANK Atlantic Design System 1.1.
  *
- * Central is the command deck: a deep Atlantic surface, cool-white text, a mono
- * scope label so you always know a write lands globally, and a signal-orange
- * send. It is the anchor of the shell — quiet, unmistakable, high-contrast.
+ * Central is the mission deck: a deep Atlantic surface, cool-white text, a mono
+ * scope label so you always know the objective becomes durable work, and a
+ * signal-orange send. It is the anchor of the shell.
  *
  * Project rooms: a blue-white box with a faint wash of the room's tint and a
  * tint ring + solid-tint send — identity reads at a glance (DS principle 04:
@@ -36,6 +40,8 @@ export function Composer({
   disabled,
   booting,
   running,
+  submitting,
+  stopping,
   editing,
   onSend,
   onStop,
@@ -65,17 +71,19 @@ export function Composer({
     el.style.height = `${Math.min(el.scrollHeight, 132)}px`;
   }, [value]);
 
+  const isCentral = room.isHome;
+
   const submit = () => {
     const text = value.trim();
-    if (!text || disabled || booting) return;
+    if (!text || disabled || booting || (isCentral && text.length < 12)) return;
     onSend(text);
     setValue('');
     onTyping(false);
     taRef.current?.focus();
   };
 
-  const isCentral = room.isHome;
-  const sendActive = value.trim().length > 0 && !disabled && !booting;
+  const sendActive =
+    value.trim().length >= (isCentral ? 12 : 1) && !disabled && !booting;
 
   const textareaProps = {
     ref: taRef,
@@ -104,8 +112,10 @@ export function Composer({
       ? 'Connecting to Frank…'
       : editing
         ? 'Rewrite your message…'
-        : room.placeholder,
-    'aria-label': `Message ${room.isHome ? 'Frank' : room.agent}`,
+        : isCentral
+          ? 'Set a substantial objective for Frank...'
+          : room.placeholder,
+    'aria-label': isCentral ? 'Mission objective' : `Message ${room.agent}`,
   };
 
   /** Editing banner — sits above either composer variant. */
@@ -143,7 +153,14 @@ export function Composer({
             }`}
           >
             <div className="ds-label px-1 pb-2 text-white/45">
-              Central · Command Deck{editing ? ' · Editing' : ''}
+              Central · Mission Deck
+              {submitting
+                ? ' · Creating mission'
+                : stopping
+                  ? ' · Stopping mission'
+                  : running
+                    ? ' · Mission active'
+                    : ''}
             </div>
             <div className="flex items-end gap-2.5">
               <textarea
@@ -152,18 +169,21 @@ export function Composer({
               />
               {running ? (
                 <button
+                  type="button"
                   onClick={onStop}
-                  aria-label="Stop"
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-white/12 text-white transition-all duration-150 hover:scale-[1.05] hover:bg-white/20 active:scale-95"
+                  disabled={stopping}
+                  aria-label="Stop mission"
+                  className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-white/12 text-white transition-all duration-150 hover:scale-[1.05] hover:bg-white/20 active:scale-95 disabled:pointer-events-none disabled:opacity-40"
                 >
                   <IconStop size={15} />
                 </button>
               ) : (
                 <button
+                  type="button"
                   onClick={submit}
                   disabled={!sendActive}
-                  aria-label={editing ? 'Save and send' : 'Send'}
-                  title={editing ? 'Save and send — replaces later messages' : undefined}
+                  aria-label="Start durable mission"
+                  title="Start a durable mission"
                   className="grid h-10 w-10 shrink-0 place-items-center rounded-[10px] bg-accent text-[#06111f] transition-all duration-150 hover:scale-[1.05] hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-35"
                 >
                   <IconSend size={17} />
@@ -171,6 +191,9 @@ export function Composer({
               )}
             </div>
           </div>
+          <p className="px-1 pt-1.5 font-mono text-[9px] uppercase tracking-[0.08em] text-muted/70">
+            12+ characters · Enter starts a durable mission · Shift+Enter adds a line
+          </p>
         </div>
       ) : (
         /* ---------- Project room: tint-ringed, scope by sight ---------- */

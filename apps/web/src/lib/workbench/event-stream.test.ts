@@ -103,7 +103,7 @@ describe('WorkbenchEventStream', () => {
     stream.start();
 
     const first = FakeEventSource.instances[0];
-    expect(first.url).toBe('/v1/workbenches/wb-1/events');
+    expect(first.url).toBe('/api/workbenches/wb-1/events');
     first.open();
     first.emit('snapshot', SNAP);
     first.emit('message', LIVE[0]); // lastSeq = 3
@@ -195,7 +195,7 @@ describe('mock EventSource factory (dev preview fidelity)', () => {
 
     const snapshots: WorkbenchEvent[][] = [];
     const events: WorkbenchEvent[] = [];
-    const es = factory('/v1/workbenches/wb-1/events') as unknown as {
+    const es = factory('/api/workbenches/wb-1/events') as unknown as {
       addEventListener: (t: string, l: Listener) => void;
       close: () => void;
     };

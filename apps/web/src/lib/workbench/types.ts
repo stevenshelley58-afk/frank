@@ -98,12 +98,16 @@ export interface ArtifactRegisteredPayload {
 export interface WorkbenchReceipt {
   workbenchId?: string;
   workItemId?: string;
+  /** Durable API receipt summary. */
+  summary?: string;
   whatDone?: string;
   found?: string;
   decisions?: string[];
   assumptions?: string[];
   evidence?: string[];
   completedAt?: string;
+  publishedAt?: string;
+  publishedBy?: string;
 }
 
 export interface ReceiptPublishedPayload {
@@ -174,8 +178,50 @@ export function parseWorkbenchEvent(raw: unknown): WorkbenchEvent {
     seq: obj.seq,
     type: obj.type,
     at: obj.at,
-    payload: (obj.payload ?? {}) as never,
+    payload: normalizeWorkbenchPayload(obj.type, obj.payload),
   } as WorkbenchEvent;
+}
+
+/**
+ * Normalize the backend's current payload aliases at the BFF client boundary.
+ * This keeps the event reducer compatible with both the frozen examples and
+ * the durable runner's existing `{seq}` / numeric `{steps}` emissions.
+ */
+function normalizeWorkbenchPayload(
+  type: WorkbenchEventType,
+  value: unknown,
+): Record<string, unknown> {
+  const payload =
+    value !== null && typeof value === 'object' && !Array.isArray(value)
+      ? { ...(value as Record<string, unknown>) }
+      : {};
+
+  if (type === 'plan_published' && typeof payload.steps === 'number') {
+    payload.total = payload.steps;
+    delete payload.steps;
+  }
+  if (type === 'step_updated' && typeof payload.step !== 'number' && typeof payload.seq === 'number') {
+    payload.step = payload.seq;
+  }
+  if (
+    type === 'decision_requested' &&
+    typeof payload.workItemId !== 'string' &&
+    typeof payload.decisionWorkItemId === 'string'
+  ) {
+    payload.workItemId = payload.decisionWorkItemId;
+  }
+  if (type === 'artifact_registered') {
+    if (typeof payload.id !== 'string' && typeof payload.artifactId === 'string') {
+      payload.id = payload.artifactId;
+    }
+    if (typeof payload.name !== 'string' && typeof payload.path === 'string') {
+      payload.name = payload.path.split('/').filter(Boolean).at(-1) ?? payload.path;
+    }
+    if (typeof payload.url !== 'string' && typeof payload.previewUrl === 'string') {
+      payload.url = payload.previewUrl;
+    }
+  }
+  return payload;
 }
 
 /* ------------------------------------------------------------------ */
@@ -209,10 +255,30 @@ export interface WorkbenchRecord {
   roomId?: string | null;
   /** GAP: task title source is not pinned — accept a def object or string. */
   task?: { id?: string; title?: string; goal?: string } | string | null;
+  taskDef?: { instruction: string };
   plan?: unknown;
   receipt?: WorkbenchReceipt | null;
   createdAt?: string;
   created_at?: string;
+  updatedAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  lastError?: string | null;
+  attempts?: number;
+}
+
+export interface WorkbenchPlanStep {
+  seq: number;
+  step: string;
+  state: StepState;
+  note: string | null;
+  updatedAt: string | null;
+}
+
+export interface WorkbenchDetail {
+  workbench: WorkbenchRecord;
+  plan: WorkbenchPlanStep[];
+  receipt: WorkbenchReceipt | null;
 }
 
 /** GET /v1/rooms/:roomId/workbenches — GAP: list item shape not pinned. */
@@ -229,11 +295,13 @@ export function workbenchTaskTitle(wb: WorkbenchRecord): string {
 /** POST /v1/workbenches/:id/stop body (contract: `{ reason }`). */
 export interface StopWorkbenchBody {
   reason: string;
+  command_id?: string;
 }
 
 export const WORKBENCH_API = {
-  listForRoom: (roomId: string) => `/v1/rooms/${encodeURIComponent(roomId)}/workbenches`,
-  get: (id: string) => `/v1/workbenches/${encodeURIComponent(id)}`,
-  events: (id: string) => `/v1/workbenches/${encodeURIComponent(id)}/events`,
-  stop: (id: string) => `/v1/workbenches/${encodeURIComponent(id)}/stop`,
+  listForRoom: (roomId: string) =>
+    `/api/workbenches?roomId=${encodeURIComponent(roomId)}`,
+  get: (id: string) => `/api/workbenches/${encodeURIComponent(id)}`,
+  events: (id: string) => `/api/workbenches/${encodeURIComponent(id)}/events`,
+  stop: (id: string) => `/api/workbenches/${encodeURIComponent(id)}/stop`,
 } as const;

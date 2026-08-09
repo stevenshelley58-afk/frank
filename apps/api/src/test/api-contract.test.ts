@@ -815,6 +815,10 @@ describe('ADR-017 OpenAPI', () => {
       // CH-06: outbox poll/ack for the channels listener.
       '/v1/channels/outbox',
       '/v1/channels/outbox/ack',
+      // Durable autonomous mission create/read/stop contract.
+      '/v1/missions',
+      '/v1/missions/{id}',
+      '/v1/missions/{id}/stop',
       // CH-06: room↔channel bindings (Frank owns the binding).
       '/v1/rooms/{roomId}/channel-bindings',
       '/v1/rooms/{roomId}/channel-bindings/{id}',
@@ -880,7 +884,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(30);
+    expect(operations).toBe(33);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

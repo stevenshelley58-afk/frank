@@ -30,6 +30,8 @@ let cachedToken: string | null = null;
  * legacy in-process path and record the error honestly.
  */
 export async function domainApiToken(): Promise<string | null> {
+  const serviceToken = process.env.FRANK_DOMAIN_SERVICE_TOKEN;
+  if (serviceToken !== undefined && serviceToken !== '') return serviceToken;
   if (cachedToken !== null) return cachedToken;
   try {
     const res = await fetch(`${domainApiBase()}/v1/auth/dev-session`, {

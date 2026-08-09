@@ -4,7 +4,7 @@
  * useWorkbenchEvents — SSE hook for the workbench surfaces (UI-07).
  *
  * Behavior:
- *  - connects to GET /v1/workbenches/:id/events;
+ *  - connects to the same-origin BFF's workbench event stream;
  *  - expects `event: snapshot` (full ordered events) first, then live events;
  *  - on reconnect, replays go through seq-dedupe so a browser refresh shows
  *    the current snapshot WITHOUT duplicate events;
@@ -40,7 +40,6 @@ export interface UseWorkbenchEventsOptions {
   factory?: EventSourceFactory;
   /** Override the SSE URL entirely (dev mock endpoint). */
   url?: string;
-  getToken?: () => string | null;
   /** false pauses the connection (e.g. while a detail panel is closed). */
   enabled?: boolean;
 }
@@ -58,7 +57,7 @@ export interface UseWorkbenchEventsResult {
   isTerminal: boolean;
   /** Events dropped as seq-duplicates (reconnect replay proof). */
   duplicates: number;
-  /** Stop the run: POST /v1/workbenches/:id/stop with { reason }. */
+  /** Stop through the BFF with an idempotent command id + reason. */
   stop(reason: string): Promise<{ ok: boolean; error?: string }>;
   /** Re-open the stream from scratch (debug / manual retry). */
   reconnect(): void;
@@ -78,7 +77,7 @@ export function useWorkbenchEvents(
   workbenchId: string,
   options: UseWorkbenchEventsOptions = {},
 ): UseWorkbenchEventsResult {
-  const { factory, url, getToken, enabled = true } = options;
+  const { factory, url, enabled = true } = options;
   const [state, setState] = useState<WorkbenchRunState>(emptyRunState);
   const [status, setStatus] = useState<StreamStatus>('connecting');
   const [duplicates, setDuplicates] = useState(0);
@@ -97,7 +96,6 @@ export function useWorkbenchEvents(
       workbenchId,
       factory,
       url,
-      getToken,
       callbacks: {
         onSnapshot(events: WorkbenchEvent[]) {
           // Snapshot is authoritative: full ordered events replace state.
@@ -123,8 +121,8 @@ export function useWorkbenchEvents(
     });
     stream.start();
     return () => stream.stop();
-    // factory/getToken/url are expected stable; reconnectKey forces a reopen.
-  }, [workbenchId, enabled, reconnectKey, factory, url, getToken]);
+    // factory/url are expected stable; reconnectKey forces a reopen.
+  }, [workbenchId, enabled, reconnectKey, factory, url]);
 
   const now = useNow();
   const progress = useMemo(() => stepProgress(state), [state]);
@@ -135,7 +133,7 @@ export function useWorkbenchEvents(
   const stop = useCallback(
     async (reason: string): Promise<{ ok: boolean; error?: string }> => {
       try {
-        const body: StopWorkbenchBody = { reason };
+        const body: StopWorkbenchBody = { reason, command_id: crypto.randomUUID() };
         const res = await fetch(WORKBENCH_API.stop(workbenchId), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },

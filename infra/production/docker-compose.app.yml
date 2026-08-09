@@ -1,0 +1,252 @@
+# Production application overlay for the existing /srv/frank/infra/docker-compose.dev.yml
+# stack. Apply this only as the second Compose file; it is not standalone.
+#
+# Compose 2.24.4+ is required for !override and !reset. Those tags are deliberate:
+# stale development environment entries, mounts, or published ports must not survive
+# into the production application definition through normal list/map merging.
+
+services:
+  frank-api:
+    image: "frank-frank-api:${FRANK_RELEASE_IMAGE_TAG:?FRANK_RELEASE_IMAGE_TAG is required}"
+    build:
+      context: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+      dockerfile: apps/api/Dockerfile
+      labels:
+        org.opencontainers.image.revision: "${FRANK_RELEASE_COMMIT:?FRANK_RELEASE_COMMIT is required}"
+        org.opencontainers.image.source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+
+    environment: !override
+      HOME: /tmp
+      NODE_ENV: production
+      FRANK_ENV: production
+      FRANK_CELL_ID: "${FRANK_CELL_ID:?FRANK_CELL_ID is required}"
+      FRANK_API_HOST: 0.0.0.0
+      FRANK_API_PORT: "3000"
+      FRANK_API_AUDIENCE: "${FRANK_API_AUDIENCE:?FRANK_API_AUDIENCE is required}"
+      FRANK_PUBLIC_URL: "${FRANK_PUBLIC_URL:?FRANK_PUBLIC_URL is required}"
+      FRANK_DATABASE_URL: "${FRANK_DATABASE_URL:?FRANK_DATABASE_URL is required}"
+      FRANK_REDIS_URL: "${FRANK_REDIS_URL:?FRANK_REDIS_URL is required}"
+      FRANK_SESSION_SIGNING_KEY: "${FRANK_SESSION_SIGNING_KEY:?FRANK_SESSION_SIGNING_KEY is required}"
+      FRANK_ENVELOPE_SIGNING_KEY: "${FRANK_ENVELOPE_SIGNING_KEY:?FRANK_ENVELOPE_SIGNING_KEY is required}"
+      FRANK_LOG_LEVEL: "${FRANK_LOG_LEVEL:?FRANK_LOG_LEVEL is required}"
+      FRANK_MAX_BODY_BYTES: "${FRANK_MAX_BODY_BYTES:?FRANK_MAX_BODY_BYTES is required}"
+
+      # The API is the sole host-Docker control plane. Per-workbench containers still
+      # run non-root, drop all capabilities, use a read-only rootfs, and receive only
+      # declared mounts. The image reference is both human-readable and digest-pinned.
+      FRANK_WORKBENCH_RUNNER_ENABLED: "${FRANK_WORKBENCH_RUNNER_ENABLED:?FRANK_WORKBENCH_RUNNER_ENABLED is required}"
+      FRANK_WORKBENCH_CONCURRENCY: "${FRANK_WORKBENCH_CONCURRENCY:?FRANK_WORKBENCH_CONCURRENCY is required}"
+      FRANK_WORKBENCH_IMAGE: "${FRANK_WORKBENCH_IMAGE:?FRANK_WORKBENCH_IMAGE is required}"
+      FRANK_WORKBENCH_MODEL_PROVIDER: "${FRANK_WORKBENCH_MODEL_PROVIDER:?FRANK_WORKBENCH_MODEL_PROVIDER is required}"
+      FRANK_WORKBENCH_MODEL_BASE_URL: "${FRANK_WORKBENCH_MODEL_BASE_URL:?FRANK_WORKBENCH_MODEL_BASE_URL is required}"
+      # DEEPSEEK_API_KEY already exists only in the root release environment. It is
+      # renamed into the API control-plane process; model inference happens there,
+      # and the workbench provisioner never copies this value into a sandbox.
+      FRANK_WORKBENCH_MODEL_API_KEY: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}"
+      FRANK_WORKBENCH_MODEL: "${FRANK_WORKBENCH_MODEL:?FRANK_WORKBENCH_MODEL is required}"
+      FRANK_MISSION_ORCHESTRATOR_ENABLED: "${FRANK_MISSION_ORCHESTRATOR_ENABLED:?FRANK_MISSION_ORCHESTRATOR_ENABLED is required}"
+      FRANK_MISSION_WORKSPACE_SOURCE: "${FRANK_MISSION_WORKSPACE_SOURCE:?FRANK_MISSION_WORKSPACE_SOURCE is required}"
+      FRANK_MISSION_PLANNER_MODEL: "${FRANK_MISSION_PLANNER_MODEL:?FRANK_MISSION_PLANNER_MODEL is required}"
+      FRANK_MISSION_CHEAP_MODEL: "${FRANK_MISSION_CHEAP_MODEL:?FRANK_MISSION_CHEAP_MODEL is required}"
+      FRANK_MISSION_STRONG_MODEL: "${FRANK_MISSION_STRONG_MODEL:?FRANK_MISSION_STRONG_MODEL is required}"
+      FRANK_MISSION_SCHEDULER_INTERVAL_MS: "${FRANK_MISSION_SCHEDULER_INTERVAL_MS:-5000}"
+      FRANK_ARTIFACT_ARCHIVE_ROOT: /var/lib/frank/artifacts
+      FRANK_WORKSPACE_SOURCE_ROOT: /srv/frank/repo
+
+    # Numeric application user plus the host socket's group. Docker socket access is
+    # still root-equivalent at the daemon boundary; the runbook treats the API as a
+    # privileged control plane and verifies that no other service receives the socket.
+    user: "10001:10001"
+    group_add: !override
+      - "${FRANK_DOCKER_SOCKET_GID:?FRANK_DOCKER_SOCKET_GID is required}"
+    volumes: !override
+      - type: bind
+        source: /var/run/docker.sock
+        target: /var/run/docker.sock
+      - type: bind
+        source: /srv/frank/infra/docker-compose.dev.yml
+        target: /srv/frank/infra/docker-compose.dev.yml
+        read_only: true
+      - type: bind
+        source: /srv/frank/repo/scripts
+        target: /scripts
+        read_only: true
+      - type: volume
+        source: frank_codegraph_data
+        target: /data/codegraph
+        read_only: true
+      - type: volume
+        source: frank_workbench_artifacts
+        target: /var/lib/frank/artifacts
+      - type: bind
+        source: "${FRANK_WORKSPACE_SOURCE_HOST_PATH:?FRANK_WORKSPACE_SOURCE_HOST_PATH is required}"
+        target: /srv/frank/repo
+        read_only: true
+
+    ports: !reset []
+    expose: !override
+      - "3000"
+    networks: !override
+      - frank
+
+    init: true
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs: !override
+      - /tmp:rw,nosuid,nodev,noexec,mode=1777,size=256m
+    security_opt: !override
+      - no-new-privileges:true
+    cap_drop: !override
+      - ALL
+    mem_limit: "${FRANK_API_MEMORY_LIMIT:?FRANK_API_MEMORY_LIMIT is required}"
+    memswap_limit: "${FRANK_API_MEMORY_LIMIT:?FRANK_API_MEMORY_LIMIT is required}"
+    cpus: "${FRANK_API_CPU_LIMIT:?FRANK_API_CPU_LIMIT is required}"
+    pids_limit: 512
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 8192
+    logging:
+      driver: json-file
+      options:
+        max-size: "${FRANK_LOG_MAX_SIZE:?FRANK_LOG_MAX_SIZE is required}"
+        max-file: "${FRANK_LOG_MAX_FILES:?FRANK_LOG_MAX_FILES is required}"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3000/v1/system/ready')
+          .then(async response => { const body = await response.json();
+          if (!response.ok || body.ready !== true) process.exit(1); })
+          .catch(() => process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 90s
+
+  frank-web:
+    image: "frank-frank-web:${FRANK_RELEASE_IMAGE_TAG:?FRANK_RELEASE_IMAGE_TAG is required}"
+    build:
+      context: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+      dockerfile: apps/web/Dockerfile
+      labels:
+        org.opencontainers.image.revision: "${FRANK_RELEASE_COMMIT:?FRANK_RELEASE_COMMIT is required}"
+        org.opencontainers.image.source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+
+    environment: !override
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+      HOSTNAME: 0.0.0.0
+      PORT: "3001"
+      FRANK_CELL_ID: "${FRANK_CELL_ID:?FRANK_CELL_ID is required}"
+      FRANK_OWNER_ID: "${FRANK_OWNER_ID:?FRANK_OWNER_ID is required}"
+      FRANK_DOMAIN_API_URL: "${FRANK_API_INTERNAL_URL:?FRANK_API_INTERNAL_URL is required}"
+      FRANK_DOMAIN_SERVICE_TOKEN: "${FRANK_DOMAIN_SERVICE_TOKEN:?FRANK_DOMAIN_SERVICE_TOKEN is required}"
+      FRANK_PACK_SIGNING_KEY: "${FRANK_PACK_SIGNING_KEY:?FRANK_PACK_SIGNING_KEY is required}"
+      FRANK_EXPLORER_ROOT: /srv/frank/repo-view
+      FRANK_EXPLORER_CACHE: /var/explorer-cache
+      FRANK_PREVIEWS_ROOT: /srv/frank/preview-view
+      GOOSE_REPO_CWD: /srv/frank/repo
+      GOOSE_ACP_URL: "${GOOSE_ACP_URL:?GOOSE_ACP_URL is required}"
+      GOOSE_ACP_SECRET: "${GOOSE_ACP_SECRET:?GOOSE_ACP_SECRET is required}"
+      GOOSE_PROVIDER: "${GOOSE_PROVIDER:?GOOSE_PROVIDER is required}"
+      GOOSE_MODEL: "${GOOSE_MODEL:?GOOSE_MODEL is required}"
+      FRANK_EXPECTED_MODEL: "${FRANK_EXPECTED_MODEL:?FRANK_EXPECTED_MODEL is required}"
+
+    volumes: !override
+      - type: bind
+        source: /srv/blockwise/main/public/adstudio-samples
+        target: /app/apps/web/public/adstudio-samples
+        read_only: true
+      - type: bind
+        source: /srv/frank/repo
+        target: /srv/frank/repo-view
+        read_only: true
+      - type: volume
+        source: frank_explorer_cache
+        target: /var/explorer-cache
+      - type: bind
+        source: /srv/frank/static/preview
+        target: /srv/frank/preview-view
+        read_only: true
+
+    depends_on:
+      frank-api:
+        condition: service_healthy
+    ports: !reset []
+    expose: !override
+      - "3001"
+    networks: !override
+      - frank
+
+    init: true
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 30s
+    read_only: true
+    tmpfs: !override
+      - /tmp:rw,nosuid,nodev,noexec,mode=1777,size=256m
+      - /app/apps/web/.next/cache:rw,nosuid,nodev,noexec,mode=1777,size=256m
+    security_opt: !override
+      - no-new-privileges:true
+    cap_drop: !override
+      - ALL
+    mem_limit: "${FRANK_WEB_MEMORY_LIMIT:?FRANK_WEB_MEMORY_LIMIT is required}"
+    memswap_limit: "${FRANK_WEB_MEMORY_LIMIT:?FRANK_WEB_MEMORY_LIMIT is required}"
+    cpus: "${FRANK_WEB_CPU_LIMIT:?FRANK_WEB_CPU_LIMIT is required}"
+    pids_limit: 384
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 8192
+    logging:
+      driver: json-file
+      options:
+        max-size: "${FRANK_LOG_MAX_SIZE:?FRANK_LOG_MAX_SIZE is required}"
+        max-file: "${FRANK_LOG_MAX_FILES:?FRANK_LOG_MAX_FILES is required}"
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - >-
+          fetch('http://127.0.0.1:3001/')
+          .then(response => { if (!response.ok) process.exit(1); })
+          .catch(() => process.exit(1))
+      interval: 15s
+      timeout: 5s
+      retries: 8
+      start_period: 90s
+
+  # The base file remains the sole owner of public 80/443 bindings. This overlay only
+  # supplies the required Caddy placeholders and health-aware startup ordering.
+  frank-caddy:
+    environment: !override
+      FRANK_BASIC_AUTH_USER: "${FRANK_BASIC_AUTH_USER:?FRANK_BASIC_AUTH_USER is required}"
+      FRANK_BASIC_AUTH_HASH: "${FRANK_BASIC_AUTH_HASH:?FRANK_BASIC_AUTH_HASH is required}"
+      FRANK_API_INTERNAL_URL: "${FRANK_API_INTERNAL_URL:?FRANK_API_INTERNAL_URL is required}"
+      FRANK_WEB_INTERNAL_URL: "${FRANK_WEB_INTERNAL_URL:?FRANK_WEB_INTERNAL_URL is required}"
+    depends_on:
+      frank-api:
+        condition: service_healthy
+      frank-web:
+        condition: service_healthy
+
+  # Supporting stores remain network-internal. The reset tags make an accidental
+  # development port publication fail closed when this overlay is applied.
+  frank-db:
+    ports: !reset []
+
+  frank-redis:
+    ports: !reset []
+
+  frank-codegraph:
+    ports: !reset []
+
+volumes:
+  frank_workbench_artifacts:
+    name: frank_workbench_artifacts

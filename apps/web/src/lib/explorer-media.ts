@@ -11,6 +11,8 @@ import { mkdir, stat } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
+// @ts-expect-error sharp 0.35.0 ships declarations but omits the `types`
+// condition from its exports map; runtime import resolution is unaffected.
 import sharp from 'sharp';
 
 const execFileP = promisify(execFile);

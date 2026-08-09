@@ -78,7 +78,8 @@ function summarizePayload(e: WorkbenchEvent): string {
       return e.payload.error ?? '';
     case 'plan_published': {
       const steps = e.payload.steps;
-      return Array.isArray(steps) ? `${steps.length} steps` : '';
+      if (Array.isArray(steps)) return `${steps.length} steps`;
+      return typeof e.payload.total === 'number' ? `${e.payload.total} steps` : '';
     }
     default:
       return '';
@@ -118,6 +119,7 @@ export function ReceiptPanel({ state }: { state: WorkbenchRunState }) {
   }
   return (
     <div className="space-y-3 p-4 text-[12.5px]">
+      {receipt.summary && <ReceiptRow label="Summary" value={receipt.summary} />}
       {receipt.whatDone && <ReceiptRow label="What was done" value={receipt.whatDone} />}
       {receipt.found && <ReceiptRow label="What was found" value={receipt.found} />}
       {receipt.decisions && receipt.decisions.length > 0 && (
@@ -137,6 +139,12 @@ export function ReceiptPanel({ state }: { state: WorkbenchRunState }) {
             ))}
           </ul>
         </div>
+      )}
+      {(receipt.publishedAt || receipt.publishedBy) && (
+        <p className="font-mono text-[10px] text-muted/70">
+          Published{receipt.publishedBy ? ` by ${receipt.publishedBy}` : ''}
+          {receipt.publishedAt ? ` at ${receipt.publishedAt}` : ''}
+        </p>
       )}
     </div>
   );

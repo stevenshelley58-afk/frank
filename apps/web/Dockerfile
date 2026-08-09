@@ -2,7 +2,7 @@
 # (@frank/pipeline-graph) resolve. Same shape as apps/api/Dockerfile:
 # COPY the repo, pnpm install, run from source. Build context is the repo
 # root (see infra/docker-compose.dev.yml).
-FROM node:22-alpine
+FROM node:22.23.2-alpine3.23@sha256:46825fbbd4e996a78b7a2cdc08d75e38a5a505bdab95dcda55605359bf124bc6
 
 # ffmpeg = video thumbnail frame grabs for the Console Files module
 # (image thumbnails use `sharp`, a native module pulled by pnpm).
@@ -18,7 +18,7 @@ WORKDIR /app
 COPY . .
 
 # Install dependencies (workspace links included)
-RUN pnpm install --no-frozen-lockfile
+RUN pnpm install --frozen-lockfile
 
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV NODE_ENV=production

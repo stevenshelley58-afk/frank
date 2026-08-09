@@ -4,12 +4,12 @@
  * Workbench console — Running surface + detail view (UI-07).
  *
  * Data flow (frozen contract):
- *  - room picker → GET /v1/rooms/:roomId/workbenches → Running entries;
- *  - each entry opens an SSE stream on GET /v1/workbenches/:id/events
+ *  - room picker -> same-origin BFF list -> Running entries;
+ *  - each entry opens an SSE stream through the same-origin BFF
  *    (snapshot first, then live; seq-dedupe makes reconnects clean);
  *  - opening an entry expands the detail view (raw event log, artifacts,
  *    receipt);
- *  - Stop → POST /v1/workbenches/:id/stop { reason }.
+ *  - Stop -> BFF POST with a command id and reason.
  *
  * The WB backend may not be live yet; fetch failures degrade to a clear
  * "API not reachable" state that links to the fixture-driven dev preview.
@@ -30,6 +30,8 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { DEFAULT_ROOMS } from '@/lib/rooms';
 import { EmptyState, RunningEntry, useListNavigation } from '@/lib/workbench/components';
 import { WorkbenchDetailPanel } from '@/lib/workbench/detail';
+import { mergeWorkbenchDetail } from '@/lib/workbench/run-state';
+import { useWorkbenchDetail } from '@/lib/workbench/use-workbench-detail';
 import { useWorkbenchEvents } from '@/lib/workbench/use-workbench-events';
 import {
   type WorkbenchRecord,
@@ -77,14 +79,48 @@ function LiveRunningEntry({
 /** Detail view for the selected run — raw events + artifacts + receipt. */
 function LiveDetail({ record, roomName }: { record: WorkbenchRecord; roomName: string }) {
   const wb = useWorkbenchEvents(record.id);
-  const title = workbenchTaskTitle(record) || record.id;
+  // Receipt contents live in the durable detail row, not the SSE event
+  // payload. Refresh after a receipt/terminal event instead of polling the
+  // detail endpoint on every step update.
+  const durableRefreshKey = useMemo(() => {
+    let latest: number | null = null;
+    for (const event of wb.state.events) {
+      if (
+        event.type === 'receipt_published' ||
+        event.type === 'completed' ||
+        event.type === 'failed' ||
+        event.type === 'cancelled' ||
+        event.type === 'timed_out'
+      ) {
+        latest = event.seq;
+      }
+    }
+    return latest;
+  }, [wb.state.events]);
+  const durable = useWorkbenchDetail(record.id, durableRefreshKey);
+  const state = useMemo(
+    () => mergeWorkbenchDetail(wb.state, durable.detail),
+    [wb.state, durable.detail],
+  );
+  const title = workbenchTaskTitle(durable.detail?.workbench ?? record) || record.id;
   return (
     <WorkbenchDetailPanel
       title={title}
       roomName={roomName}
-      state={wb.state}
+      state={state}
       streamStatus={wb.status}
-    />
+    >
+      {durable.loading && (
+        <p className="border-t border-line px-4 py-2 text-[11px] text-muted">
+          Loading durable receipt...
+        </p>
+      )}
+      {durable.error && (
+        <p className="border-t border-line px-4 py-2 text-[11px] text-[#b45309]">
+          Durable detail unavailable ({durable.error}). Live events are still shown above.
+        </p>
+      )}
+    </WorkbenchDetailPanel>
   );
 }
 
@@ -92,22 +128,35 @@ function LiveDetail({ record, roomName }: { record: WorkbenchRecord; roomName: s
 /* Console body                                                         */
 /* ------------------------------------------------------------------ */
 
-export function WorkbenchConsole() {
-  const [roomId, setRoomId] = useState('central');
+export function WorkbenchConsole({
+  initialRoomId = 'central',
+  initialWorkbenchId = null,
+}: {
+  initialRoomId?: string;
+  initialWorkbenchId?: string | null;
+}) {
+  const [roomId, setRoomId] = useState(initialRoomId);
   const [filter, setFilter] = useState('');
   const [items, setItems] = useState<WorkbenchRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialWorkbenchId);
+  const isKnownRoom = DEFAULT_ROOMS.some((room) => room.id === roomId);
 
   const roomName = useMemo(
-    () => DEFAULT_ROOMS.find((r) => r.id === roomId)?.name ?? roomId,
+    () =>
+      DEFAULT_ROOMS.find((r) => r.id === roomId)?.name ??
+      `Mission room ${roomId.length > 12 ? roomId.slice(0, 8) : roomId}`,
     [roomId],
   );
 
+  useEffect(() => {
+    setRoomId(initialRoomId);
+  }, [initialRoomId]);
+
   const load = useCallback(async () => {
     try {
-      const res = await fetch(WORKBENCH_API.listForRoom(roomId));
+      const res = await fetch(WORKBENCH_API.listForRoom(roomId), { cache: 'no-store' });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as WorkbenchRecord[] | { workbenches?: WorkbenchRecord[] };
       // GAP: the contract does not pin the list envelope — accept either a
@@ -124,11 +173,11 @@ export function WorkbenchConsole() {
 
   useEffect(() => {
     setLoading(true);
-    setSelectedId(null);
+    setSelectedId(roomId === initialRoomId ? initialWorkbenchId : null);
     load();
     const t = window.setInterval(load, 30_000);
     return () => window.clearInterval(t);
-  }, [load]);
+  }, [initialRoomId, initialWorkbenchId, load, roomId]);
 
   const visible = useMemo(() => {
     const q = filter.trim().toLowerCase();
@@ -160,6 +209,11 @@ export function WorkbenchConsole() {
                 {room.name}
               </SelectItem>
             ))}
+            {!isKnownRoom && (
+              <SelectItem value={roomId} className="text-[13px]">
+                {roomName}
+              </SelectItem>
+            )}
           </SelectContent>
         </Select>
         <Input
@@ -223,7 +277,7 @@ export function WorkbenchConsole() {
 
           {selected && (
             <div className="mt-4">
-              <LiveDetail record={selected} roomName={roomName} />
+              <LiveDetail key={selected.id} record={selected} roomName={roomName} />
             </div>
           )}
         </div>

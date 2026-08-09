@@ -62,12 +62,18 @@ import { provenanceRoutes, registerProvenanceRoutes } from './routes/provenance.
 import { registerTodayRoutes, todayRoutes } from './routes/today.js';
 import { registerWorkRoutes, workRoutes } from './routes/work.js';
 import { registerWorkbenchRoutes, workbenchAllRoutes } from './routes/workbench.js';
+import {
+  missionRoutes,
+  registerMissionRoutes,
+} from './routes/missions.js';
+import type { MissionRouteOrchestrator } from './routes/missions.js';
 import { channelRoutes, registerChannelRoutes } from './routes/channels.js';
 import { registerWorkbenchEventsRoute } from './routes/workbench-events.js';
 import { folderBindingRoutes, registerFolderBindingRoutes } from './routes/folder-binding.js';
 import { RoomFolderBindingStore } from './services/workbench/folder-binding-store.js';
 import { WorkbenchEventBus } from './services/workbench/event-bus.js';
 import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
+import type { WorkbenchRunner } from './services/workbench/runner.js';
 import { WorkbenchDecisionService } from './services/workbench/decision.js';
 import { StagedWriteService } from './services/workbench/staged-write.js';
 import { ChannelPushStore } from './services/workbench/channel-push.js';
@@ -86,6 +92,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...captureRoutes,
   ...workRoutes,
   ...workbenchAllRoutes,
+  ...missionRoutes,
   ...channelRoutes,
   ...folderBindingRoutes,
   ...provenanceRoutes,
@@ -179,6 +186,10 @@ export interface BuildServerOptions {
    * a fake so no ssh ever runs in CI.
    */
   readonly previewDeployer?: PreviewDeployer;
+  /** In-process runner used by Stop to reach the live sandbox immediately. */
+  readonly workbenchRunner?: WorkbenchRunner;
+  /** Durable objective orchestrator. Production composition injects and starts it. */
+  readonly missionOrchestrator?: MissionRouteOrchestrator;
 }
 
 export interface BuiltServer {
@@ -442,10 +453,10 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // route (live delivery) — WB-06.
     const workbenchBus = new WorkbenchEventBus();
     const workbenchFrontDoor = new WorkbenchFrontDoor(options.db, workbenchBus);
-    // WB-07: cancellation service. No live runner is wired into the API
-    // process yet (production runner wiring is WB-09), so stops land durably
-    // in Postgres; when a runner is composed in, pass it here for live stops.
-    const workbenchCancellation = new WorkbenchCancellationService(options.db);
+    const workbenchCancellation = new WorkbenchCancellationService(
+      options.db,
+      options.workbenchRunner,
+    );
     // CH-06: canonical room↔channel bindings + outbox access for the listener.
     const channelPush = new ChannelPushStore(options.db);
     registerChannelRoutes(app, {
@@ -491,6 +502,14 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     });
   }
 
+  if (options.missionOrchestrator !== undefined) {
+    registerMissionRoutes(app, {
+      ...shared,
+      orchestrator: options.missionOrchestrator,
+      actions,
+    });
+  }
+
   // Code intelligence graph — reads from the codegraph service output volume.
   registerCodegraphRoutes(app, shared);
 
@@ -519,8 +538,9 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
 
   /* -------------------------------------------------- self-build --- */
 
-  let rebuildInProgress = false;
-  app.post('/v1/system/rebuild', async (_request, reply) => {
+  if (config.environment === 'development') {
+    let rebuildInProgress = false;
+    app.post('/v1/system/rebuild', async (_request, reply) => {
     if (rebuildInProgress) {
       void reply.code(409);
       return { rebuilding: false, error: 'A rebuild is already in progress.' };
@@ -542,9 +562,9 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
       void reply.code(500);
       return { rebuilding: false, error: 'Failed to start rebuild.' };
     }
-  });
+    });
 
-  app.get('/v1/system/rebuild/status', async () => {
+    app.get('/v1/system/rebuild/status', async () => {
     const { readFileSync } = await import('node:fs');
     try {
       const log = readFileSync('/tmp/frank-rebuild.log', 'utf-8');
@@ -552,7 +572,8 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     } catch {
       return { rebuilding: rebuildInProgress, log: 'No rebuild log found.' };
     }
-  });
+    });
+  }
 
   return { app, identity, enrichment, health, openApiDocument };
 }

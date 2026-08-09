@@ -101,7 +101,13 @@ function ephemeralKey(name: string, environment: FrankEnvironment): Uint8Array {
 }
 
 export function resolveConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
-  const parsed = rawSchema.safeParse(env);
+  // `DATABASE_URL` was used by the first VPS compose. Keep the migration
+  // bridge at the configuration boundary so start.ts and main.ts cannot
+  // disagree about whether persistence is configured.
+  const parsed = rawSchema.safeParse({
+    ...env,
+    FRANK_DATABASE_URL: env.FRANK_DATABASE_URL ?? env.DATABASE_URL,
+  });
   if (!parsed.success) {
     const detail = parsed.error.issues
       .map((issue) => `${issue.path.join('.') || '<root>'}: ${issue.message}`)

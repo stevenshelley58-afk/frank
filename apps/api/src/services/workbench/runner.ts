@@ -88,6 +88,7 @@ export type ExecuteOutcome =
  * carries its canonical record.
  */
 export interface TerminalReporter {
+  reportRunning?(record: WorkbenchRecord): Promise<void>;
   reportTerminal(
     record: WorkbenchRecord,
     outcome:
@@ -160,6 +161,10 @@ export interface WorkbenchRunnerOptions {
    * re-claim after stale recovery) consumes one attempt.
    */
   readonly maxAttempts?: number;
+  /** Claim renewal interval. Must stay comfortably below staleClaimMs. */
+  readonly heartbeatIntervalMs?: number;
+  /** Periodic stale reconciliation interval. */
+  readonly recoveryIntervalMs?: number;
 }
 
 export class WorkbenchRunner {
@@ -176,6 +181,9 @@ export class WorkbenchRunner {
   private readonly defaultWallClockSec: number;
   private readonly stopGraceMs: number;
   private readonly maxAttempts: number;
+  private readonly heartbeatIntervalMs: number;
+  private readonly recoveryIntervalMs: number;
+  private lastRecoveryAt = 0;
 
   private inFlight = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -197,6 +205,8 @@ export class WorkbenchRunner {
     this.defaultWallClockSec = options.defaultWallClockSec ?? 3600;
     this.stopGraceMs = options.stopGraceMs ?? 5000;
     this.maxAttempts = options.maxAttempts ?? 5;
+    this.heartbeatIntervalMs = options.heartbeatIntervalMs ?? 30_000;
+    this.recoveryIntervalMs = options.recoveryIntervalMs ?? 60_000;
   }
 
   /**
@@ -207,6 +217,7 @@ export class WorkbenchRunner {
   async start(): Promise<void> {
     this.stopped = false;
     await this.recover();
+    this.lastRecoveryAt = this.now().getTime();
     this.schedule(0);
   }
 
@@ -368,6 +379,10 @@ export class WorkbenchRunner {
   /** One poll cycle: claim while slots are free. Visible for tests. */
   async pollOnce(): Promise<number> {
     if (this.stopped) return 0;
+    if (this.now().getTime() - this.lastRecoveryAt >= this.recoveryIntervalMs) {
+      await this.recover();
+      this.lastRecoveryAt = this.now().getTime();
+    }
     let claimed = 0;
     while (!this.stopped && this.inFlight < this.concurrency) {
       const record = await this.claimFromAnyCell();
@@ -397,8 +412,17 @@ export class WorkbenchRunner {
 
     const wallClockSec = record.taskDef.leash?.wallClockSec ?? this.defaultWallClockSec;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    const heartbeat = setInterval(() => {
+      void this.store
+        .heartbeatClaim(record.id, this.runnerId, this.now())
+        .catch((error: unknown) => {
+          this.log(`workbench ${record.id}: claim heartbeat failed (${describeError(error)})`);
+        });
+    }, this.heartbeatIntervalMs);
+    heartbeat.unref?.();
 
     try {
+      await this.terminalReporter?.reportRunning?.(record);
       const outcome = await Promise.race([
         this.executor
           .execute(record)
@@ -450,6 +474,7 @@ export class WorkbenchRunner {
       }
     } finally {
       if (timer !== undefined) clearTimeout(timer);
+      clearInterval(heartbeat);
       this.active.delete(record.id);
       this.inFlight -= 1;
     }

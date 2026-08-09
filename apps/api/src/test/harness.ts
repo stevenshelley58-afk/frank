@@ -22,6 +22,7 @@ import { buildServer } from '../server.js';
 import type { BuiltServer } from '../server.js';
 import type { EnrichmentDispatcher } from '../services/enrichment.js';
 import type { DomainStore } from '../services/store.js';
+import type { MissionRouteOrchestrator } from '../routes/missions.js';
 import { FakeDomainStore } from './fake-store.js';
 
 export const TEST_CELL = 'cell-steven';
@@ -79,6 +80,8 @@ export interface BuildTestServerOptions {
   readonly workbenchPollIntervalMs?: number;
   /** FS-05: preview-lane deployer (tests inject FakePreviewDeployer). */
   readonly previewDeployer?: import('../services/workbench/preview-backend.js').PreviewDeployer;
+  /** Mission route port; tests inject a deterministic in-memory fake. */
+  readonly missionOrchestrator?: MissionRouteOrchestrator;
 }
 
 export function buildTestServer(options: BuildTestServerOptions = {}): TestServer {
@@ -105,6 +108,9 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
     ...(options.previewDeployer === undefined
       ? {}
       : { previewDeployer: options.previewDeployer }),
+    ...(options.missionOrchestrator === undefined
+      ? {}
+      : { missionOrchestrator: options.missionOrchestrator }),
     now,
     startedAt: now(),
   });

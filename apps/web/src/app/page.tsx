@@ -1,7 +1,8 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { DEFAULT_ROOMS, roomById, type Room } from '@/lib/rooms';
 import { useRoomStatuses, withStatus } from '@/lib/use-room-statuses';
 import { Rail } from '@/components/rail';
@@ -21,12 +22,22 @@ import { useCommandPalette } from '@/components/command-palette';
  * room header up top, living frame in a sheet, and a mono bottom dock
  * (Home / Rooms / Running / You) — rail hidden.
  */
-export default function Home({ searchParams }: { searchParams?: { room?: string } }) {
+export default function Home() {
+  return (
+    <Suspense fallback={<div className="h-dvh bg-shell" aria-label="Loading Frank" />}>
+      <HomeContent />
+    </Suspense>
+  );
+}
+
+function HomeContent() {
+  const searchParams = useSearchParams();
+  const requestedRoom = searchParams.get('room') ?? undefined;
   const { push } = useToast();
   const [baseRooms, setBaseRooms] = useState<Room[]>(DEFAULT_ROOMS);
   const [activeId, setActiveId] = useState(
-    () => (searchParams?.room && DEFAULT_ROOMS.some((r) => r.id === searchParams.room)
-      ? searchParams.room
+    () => (requestedRoom && DEFAULT_ROOMS.some((r) => r.id === requestedRoom)
+      ? requestedRoom
       : 'central'),
   );
   const [frameOpen, setFrameOpen] = useState(false);
@@ -40,10 +51,10 @@ export default function Home({ searchParams }: { searchParams?: { room?: string 
     registerRooms((roomId: string) => setActiveId(roomId));
   }, [registerRooms]);
   useEffect(() => {
-    if (searchParams?.room && DEFAULT_ROOMS.some((r) => r.id === searchParams.room)) {
-      setActiveId(searchParams.room);
+    if (requestedRoom && DEFAULT_ROOMS.some((r) => r.id === requestedRoom)) {
+      setActiveId(requestedRoom);
     }
-  }, [searchParams?.room]);
+  }, [requestedRoom]);
 
   // Preview zone: expanded by default; the small square toggles it.
   const [expanded, setExpanded] = useState(true);

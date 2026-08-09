@@ -1,5 +1,6 @@
 /**
- * SSE client for GET /v1/workbenches/:id/events (frozen contract).
+ * SSE client for the same-origin Workbench BFF (upstream contract:
+ * GET /v1/workbenches/:id/events).
  *
  * Wire behavior per contract:
  *  - on connect the server sends `event: snapshot` (full ordered events),
@@ -12,7 +13,8 @@
  * re-sends the `Last-Event-ID` header (from server-sent `id:` fields). When
  * the connection dies hard (readyState CLOSED — e.g. non-200), we reopen
  * manually and carry the resume cursor as a `lastEventId` query param too.
- * ASSUMPTION (contract gap): the backend honors either mechanism.
+ * Only the non-secret cursor enters the browser URL; the BFF attaches the
+ * upstream bearer token as an Authorization header.
  */
 
 import type { WorkbenchEvent } from './types';
@@ -46,12 +48,6 @@ export interface WorkbenchStreamOptions {
   factory?: EventSourceFactory;
   /** Override the SSE URL entirely (dev mock endpoint). */
   url?: string;
-  /**
-   * Optional bearer token. ASSUMPTION (contract gap): the contract does not
-   * pin SSE auth; EventSource cannot set headers, so we pass it as a query
-   * param when provided. Omit when the route is cookie/dev-session authed.
-   */
-  getToken?: () => string | null;
   /** Max manual-reconnect backoff in ms. */
   maxBackoffMs?: number;
   /** Injectable timer for tests. */
@@ -66,11 +62,6 @@ function parseSnapshotData(raw: unknown): WorkbenchEvent[] {
 function safeParse(data: string | undefined): unknown {
   if (typeof data !== 'string' || data.length === 0) throw new Error('empty SSE data');
   return JSON.parse(data) as unknown;
-}
-
-/** URL-encode a query param value without naming the global inline. */
-function encodeParam(value: string): string {
-  return globalThis.encodeURIComponent(value);
 }
 
 export class WorkbenchEventStream {
@@ -104,8 +95,6 @@ export class WorkbenchEventStream {
     const base = this.options.url ?? WORKBENCH_API.events(this.options.workbenchId);
     const params: string[] = [];
     if (this.lastSeq !== null) params.push(`lastEventId=${this.lastSeq}`);
-    const token = this.options.getToken?.();
-    if (token) params.push(`access_token=${encodeParam(token)}`);
     return params.length > 0 ? `${base}?${params.join('&')}` : base;
   }
 

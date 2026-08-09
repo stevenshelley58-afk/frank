@@ -13,12 +13,18 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { WorkbenchProvisioner, SshDockerCli } from '../services/workbench/provisioner.js';
+import {
+  LocalDockerCli,
+  WorkbenchProvisioner,
+  SshDockerCli,
+} from '../services/workbench/provisioner.js';
 import type { DockerCli, DockerCliResult } from '../services/workbench/provisioner.js';
 import type { WorkbenchRecord, WorkbenchTaskDef } from '../services/workbench/types.js';
 
 const SMOKE_ENABLED = process.env['FRANK_WB_DOCKER_SMOKE'] === '1';
 const SSH_HOST = process.env['FRANK_WB_DOCKER_SMOKE_HOST'] ?? 'vps';
+const SMOKE_IMAGE =
+  process.env['FRANK_WB_DOCKER_SMOKE_IMAGE'] ?? 'frank-workbench:2026-08-09.1';
 
 /**
  * The smoke test needs a host directory to mount ro. We create it on the
@@ -28,7 +34,10 @@ class SshShellCli implements DockerCli {
   async run(argv: readonly string[]): Promise<DockerCliResult> {
     const { spawn } = await import('node:child_process');
     return new Promise((resolve) => {
-      const child = spawn('ssh', [SSH_HOST, '--', argv.join(' ')], { shell: false });
+      const child =
+        SSH_HOST === 'local'
+          ? spawn('sh', ['-lc', argv.join(' ')], { shell: false })
+          : spawn('ssh', [SSH_HOST, '--', argv.join(' ')], { shell: false });
       let stdout = '';
       let stderr = '';
       child.stdout.on('data', (d) => (stdout += String(d)));
@@ -69,7 +78,7 @@ function smokeRecord(taskDef: WorkbenchTaskDef): WorkbenchRecord {
 describe.skipIf(!SMOKE_ENABLED)(
   'WB-03 docker smoke (FRANK_WB_DOCKER_SMOKE=1 required; uses ssh ' + SSH_HOST + ')',
   () => {
-    const cli = new SshDockerCli(SSH_HOST);
+    const cli = SSH_HOST === 'local' ? new LocalDockerCli() : new SshDockerCli(SSH_HOST);
     const shell = new SshShellCli();
     const roDir = `/tmp/frank-wb-smoke-${SMOKE_ID}`;
     let provisioner: WorkbenchProvisioner;
@@ -84,7 +93,7 @@ describe.skipIf(!SMOKE_ENABLED)(
       provisioner = new WorkbenchProvisioner({
         cli,
         defaults: {
-          image: 'alpine:3.20',
+          image: SMOKE_IMAGE,
           user: '10001:10001',
           cpuQuota: 50_000,
           memoryBytes: 256 * 1024 * 1024,

@@ -45,6 +45,14 @@ export interface HarnessExecutorOptions {
   readonly executorId: string;
   readonly now?: () => Date;
   readonly log?: (message: string) => void;
+  /** Production sandboxes require every model-declared artifact to exist. */
+  readonly requireObservedArtifacts?: boolean;
+  /**
+   * Translate an ephemeral sandbox path into the durable path that will be
+   * archived by the owning executor. Matching still uses the observed
+   * sandbox path, so a model cannot claim an unobserved file.
+   */
+  readonly durableArtifactPath?: (record: WorkbenchRecord, sandboxPath: string) => string;
 }
 
 export class HarnessExecutor {
@@ -53,6 +61,9 @@ export class HarnessExecutor {
   private readonly executorId: string;
   private readonly now: () => Date;
   private readonly log: (message: string) => void;
+  private readonly requireObservedArtifacts: boolean;
+  private readonly durableArtifactPath: (record: WorkbenchRecord, sandboxPath: string) => string;
+  private readonly active = new Map<string, string>();
 
   constructor(options: HarnessExecutorOptions) {
     this.adapter = options.adapter;
@@ -60,6 +71,8 @@ export class HarnessExecutor {
     this.executorId = options.executorId;
     this.now = options.now ?? (() => new Date());
     this.log = options.log ?? ((m) => console.error(m));
+    this.requireObservedArtifacts = options.requireObservedArtifacts ?? false;
+    this.durableArtifactPath = options.durableArtifactPath ?? ((_record, path) => path);
   }
 
   async execute(record: WorkbenchRecord): Promise<ExecuteOutcome> {
@@ -79,6 +92,7 @@ export class HarnessExecutor {
         : {}),
       now: nowIso,
     });
+    this.active.set(record.id, session.id);
 
     await this.store.setState(record.id, 'running', this.executorId, this.now(), {
       startedAt: this.now(),
@@ -140,16 +154,47 @@ export class HarnessExecutor {
       }
     }
 
+    let observedArtifacts: Awaited<ReturnType<AgentHarnessAdapter['collect']>> = [];
+    if (this.requireObservedArtifacts) {
+      try {
+        observedArtifacts = await this.adapter.collect({
+          sessionId: session.id,
+          runId: record.id,
+        });
+      } catch (error) {
+        harnessError =
+          harnessError ??
+          `artifact inspection failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+    }
+
     for (const artifact of output.artifacts) {
+      const observed = observedArtifacts.find((item) => item.path === artifact.path);
+      if (this.requireObservedArtifacts && observed === undefined) {
+        harnessError = harnessError ?? `artifact was not observed in the sandbox: ${artifact.path}`;
+        continue;
+      }
       await this.store.registerArtifact(
         record.id,
-        { id: newId(), path: artifact.path, kind: artifact.kind },
+        {
+          id: newId(),
+          path: this.durableArtifactPath(record, artifact.path),
+          kind: artifact.kind,
+          ...(observed === undefined ? {} : { sha256: observed.sha256 }),
+          mediaType: mediaTypeFor(artifact.path),
+        },
         this.now(),
       );
       await this.store.appendEvent(
         record.id,
         'artifact_registered',
-        { path: artifact.path },
+        {
+          path: this.durableArtifactPath(record, artifact.path),
+          sandboxPath: artifact.path,
+          ...(observed === undefined
+            ? {}
+            : { sha256: observed.sha256, sizeBytes: observed.sizeBytes }),
+        },
         this.now(),
       );
     }
@@ -178,6 +223,8 @@ export class HarnessExecutor {
         );
       });
 
+    this.active.delete(record.id);
+
     if (harnessError !== null) {
       return { kind: 'failed', error: harnessError };
     }
@@ -190,6 +237,16 @@ export class HarnessExecutor {
    */
   async cleanup(_record: WorkbenchRecord): Promise<void> {
     // intentionally empty — see WB-03 WorkbenchProvisioner.deprovision
+  }
+
+  async cancel(record: WorkbenchRecord, reason: string): Promise<void> {
+    const sessionId = this.active.get(record.id);
+    if (sessionId === undefined) return;
+    try {
+      await this.adapter.cancel({ sessionId, reason, now: this.now().toISOString() });
+    } catch {
+      await this.adapter.kill({ sessionId, reason, now: this.now().toISOString() });
+    }
   }
 }
 
@@ -207,6 +264,28 @@ function renderEvent(event: HarnessEvent): string {
       return '';
     case 'done':
       return '';
+  }
+}
+
+function mediaTypeFor(path: string): string {
+  const extension = path.toLowerCase().split('.').pop();
+  switch (extension) {
+    case 'json':
+      return 'application/json';
+    case 'html':
+      return 'text/html';
+    case 'css':
+      return 'text/css';
+    case 'js':
+    case 'mjs':
+      return 'text/javascript';
+    case 'md':
+      return 'text/markdown';
+    case 'txt':
+    case 'log':
+      return 'text/plain';
+    default:
+      return 'application/octet-stream';
   }
 }
 

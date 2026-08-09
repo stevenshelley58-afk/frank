@@ -20,6 +20,7 @@ import { DATA_CLASS_ORDER } from '@frank/contracts';
 
 import { WORK_STATES, legalTransitionPairs } from '../work-state.js';
 import { RUN_STATES, legalRunTransitionPairs } from '../run-state.js';
+import { MISSION_STATES, ROOM_STATES } from './room-mission.js';
 import { DATA_CLASSES, POLICY_RESULTS, TRUST_LABELS, domain } from './shared.js';
 import { SOURCE_LIFECYCLES } from './source.js';
 import { WORK_KINDS, WORK_PRIORITIES } from './work.js';
@@ -51,6 +52,7 @@ function singleMigrationSql(prefix: string): string {
 const SQL = migrationSql();
 const SQL_0001 = singleMigrationSql('0001');
 const SQL_0002 = singleMigrationSql('0002');
+const SQL_0009 = singleMigrationSql('0009');
 
 describe('FRANK-§2.3 vocabulary agrees with @frank/contracts', () => {
   it('lists the data classes in the contract-defined order', () => {
@@ -250,5 +252,61 @@ describe('FRANK-§11.1 identifiers are minted at the domain boundary', () => {
     expect(SQL).not.toMatch(/"id" uuid PRIMARY KEY DEFAULT/i);
     expect(SQL).not.toMatch(/gen_random_uuid\(\)/i);
     expect(SQL).not.toMatch(/uuid_generate_v4\(\)/i);
+  });
+});
+
+describe('autonomous room and mission schema', () => {
+  it('keeps room and mission lifecycle enums aligned with migration 0009', () => {
+    expect([...ROOM_STATES]).toEqual(['active', 'completed', 'failed', 'cancelled']);
+    expect([...MISSION_STATES]).toEqual([
+      'planning',
+      'running',
+      'waiting',
+      'completed',
+      'failed',
+      'cancelled',
+    ]);
+    expect(SQL_0009).toContain(
+      `CREATE TYPE "frank_domain"."room_state" AS ENUM('active', 'completed', 'failed', 'cancelled')`,
+    );
+    expect(SQL_0009).toContain(
+      `CREATE TYPE "frank_domain"."mission_state" AS ENUM('planning', 'running', 'waiting', 'completed', 'failed', 'cancelled')`,
+    );
+  });
+
+  it('links a mission to its room and canonical root work item', () => {
+    expect(SQL_0009).toContain(
+      '"mission_room_id_room_id_fk" FOREIGN KEY ("room_id") REFERENCES "frank_domain"."room"("id") ON DELETE restrict',
+    );
+    expect(SQL_0009).toContain(
+      '"mission_root_work_item_id_work_item_id_fk" FOREIGN KEY ("root_work_item_id") REFERENCES "frank_domain"."work_item"("id") ON DELETE restrict',
+    );
+    expect(SQL_0009).toContain('"mission_root_work_item_uidx"');
+  });
+
+  it('deduplicates mission creation by cell and idempotency key', () => {
+    expect(SQL_0009).toContain(
+      'CREATE UNIQUE INDEX "mission_cell_idempotency_uidx" ON "frank_domain"."mission" USING btree ("cell_id", "idempotency_key")',
+    );
+  });
+
+  it('enforces bounded execution, terminal stop, and optimistic concurrency', () => {
+    for (const constraint of [
+      '"mission_spend_limit_non_negative"',
+      '"mission_token_limit_non_negative"',
+      '"mission_wall_clock_limit_positive"',
+      '"mission_attempt_limit_positive"',
+      '"mission_terminal_finished_paired"',
+      '"mission_terminal_stops_new_work"',
+      '"mission_version_positive"',
+      '"room_version_positive"',
+    ]) {
+      expect(SQL_0009, constraint).toContain(constraint);
+    }
+  });
+
+  it('contains no seed/demo rows or generated identifier defaults', () => {
+    expect(SQL_0009).not.toMatch(/\bINSERT\b/i);
+    expect(SQL_0009).not.toMatch(/gen_random_uuid\(\)|uuid_generate_v4\(\)/i);
   });
 });

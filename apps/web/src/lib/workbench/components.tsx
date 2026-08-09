@@ -8,8 +8,8 @@
  *  - Waiting surface links the decision work item — it NEVER renders a
  *    second approval state machine (resolution lives on the work item via
  *    the command envelope).
- *  - Stop = POST /v1/workbenches/:id/stop with { reason }. We never fake a
- *    terminal state client-side; the backend's SSE events do that.
+ *  - Stop goes through the same-origin BFF with a command id + reason. We
+ *    never fake a terminal state client-side; the backend's SSE events do that.
  *
  * All keyboard-accessible: every interactive element is a real <button> or
  * <a>; the list supports ArrowUp/ArrowDown/Home/End navigation.

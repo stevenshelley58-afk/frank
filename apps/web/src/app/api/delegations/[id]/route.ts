@@ -7,9 +7,9 @@ export const dynamic = 'force-dynamic';
 /** POST { action: 'approve' | 'reject' } */
 export async function POST(
   req: NextRequest,
-  ctx: { params: { id: string } },
+  ctx: { params: Promise<{ id: string }> },
 ) {
-  const id = ctx.params.id;
+  const { id } = await ctx.params;
   const body = await req.json().catch(() => null);
   const action = (body as { action?: string })?.action;
 

@@ -124,7 +124,7 @@ export const PROVISION_DEFAULTS: ProvisionDefaults = {
   // 2 CPUs, 2 GiB, non-root uid that does not collide with host users.
   cpuQuota: 200_000,
   memoryBytes: 2 * 1024 * 1024 * 1024,
-  image: 'frank-workbench:latest',
+  image: 'frank-workbench:2026-08-09.1',
   user: '10001:10001',
 };
 
@@ -241,6 +241,13 @@ export function buildProvisionSpec(
     defaults.user ?? PROVISION_DEFAULTS.user!,
     `--cpu-quota=${String(defaults.cpuQuota ?? PROVISION_DEFAULTS.cpuQuota)}`,
     `--memory=${String(defaults.memoryBytes ?? PROVISION_DEFAULTS.memoryBytes)}`,
+    '--pids-limit=512',
+    '--cap-drop=ALL',
+    '--security-opt=no-new-privileges:true',
+    '--read-only',
+    '--tmpfs=/tmp:rw,noexec,nosuid,nodev,size=256m',
+    '--workdir=/workspace',
+    '--init',
     '--network',
     network === 'restricted' ? 'frank-wb-egress' : network,
     // Scratch volume: the only writable surface besides staged copies.
@@ -313,6 +320,25 @@ export class WorkbenchProvisioner {
       throw new Error(`scratch volume create failed for ${record.id}: ${volume.stderr.trim()}`);
     }
 
+    const initialized = await this.cli.run([
+      'run',
+      '--rm',
+      '--user',
+      '0:0',
+      '--volume',
+      `${spec.scratchVolume}:/workspace`,
+      spec.image,
+      'sh',
+      '-lc',
+      'chown 10001:10001 /workspace && chmod 0750 /workspace',
+    ]);
+    if (initialized.exitCode !== 0) {
+      await this.cli.run(['volume', 'rm', '-f', spec.scratchVolume]);
+      throw new Error(
+        `scratch volume initialization failed for ${record.id}: ${initialized.stderr.trim()}`,
+      );
+    }
+
     const started = await this.cli.run([...spec.dockerArgv]);
     if (started.exitCode !== 0) {
       // Leave no half-provisioned volume behind.
@@ -333,6 +359,24 @@ export class WorkbenchProvisioner {
         await this.deprovision(record);
         throw new Error(
           `staged copy failed for ${record.id} (${staged.source} -> ${dest}): ${copy.stderr.trim()}`,
+        );
+      }
+    }
+
+    if (spec.stagedFiles.length > 0) {
+      const ownership = await this.cli.run([
+        'exec',
+        '--user',
+        '0:0',
+        spec.name,
+        'sh',
+        '-lc',
+        'chown -R 10001:10001 /workspace',
+      ]);
+      if (ownership.exitCode !== 0) {
+        await this.deprovision(record);
+        throw new Error(
+          `staged file ownership failed for ${record.id}: ${ownership.stderr.trim()}`,
         );
       }
     }

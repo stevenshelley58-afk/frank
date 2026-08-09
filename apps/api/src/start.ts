@@ -5,10 +5,10 @@
  * to respect FRANK-§17.2's provider SDK boundary.
  */
 
-const DATABASE_URL = process.env.DATABASE_URL ?? '';
+const DATABASE_URL = process.env.FRANK_DATABASE_URL ?? process.env.DATABASE_URL ?? '';
 
 if (!DATABASE_URL) {
-  console.error('DATABASE_URL is required');
+  console.error('FRANK_DATABASE_URL (or legacy DATABASE_URL) is required');
   process.exit(2);
 }
 

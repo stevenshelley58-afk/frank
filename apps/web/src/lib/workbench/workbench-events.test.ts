@@ -15,6 +15,7 @@ import {
   emptyRunState,
   foldEvents,
   formatElapsed,
+  mergeWorkbenchDetail,
   stepProgress,
 } from './run-state';
 import { parseWorkbenchEvent } from './types';
@@ -118,6 +119,31 @@ describe('run-state derivation', () => {
   it('keeps lifecycle honest for an empty stream', () => {
     expect(deriveLifecycle(emptyRunState())).toBe('unknown');
   });
+
+  it('adds durable plan titles and receipt without regressing live progress', () => {
+    const live = applySnapshot(RUNNING_SNAPSHOT).state;
+    const merged = mergeWorkbenchDetail(live, {
+      workbench: { id: 'wb-1' },
+      plan: Array.from({ length: 5 }, (_, index) => ({
+        seq: index + 1,
+        step: `Durable step ${index + 1}`,
+        state: 'pending' as const,
+        note: null,
+        updatedAt: '2026-08-06T15:00:00Z',
+      })),
+      receipt: {
+        summary: 'Durable completion receipt.',
+        publishedAt: '2026-08-06T15:01:00Z',
+      },
+    });
+
+    expect(merged.planSteps[2]).toMatchObject({
+      index: 3,
+      title: 'Durable step 3',
+      state: 'doing',
+    });
+    expect(merged.receipt?.summary).toBe('Durable completion receipt.');
+  });
 });
 
 describe('parseWorkbenchEvent — contract envelope strictness', () => {
@@ -131,6 +157,47 @@ describe('parseWorkbenchEvent — contract envelope strictness', () => {
     const parsed = parseWorkbenchEvent(raw);
     expect(parsed.type).toBe('step_updated');
     expect(parsed.seq).toBe(12);
+  });
+
+  it('normalizes the durable runner payload aliases', () => {
+    const plan = parseWorkbenchEvent({
+      seq: 4,
+      type: 'plan_published',
+      at: '2026-08-06T15:00:00Z',
+      payload: { steps: 3 },
+    });
+    const step = parseWorkbenchEvent({
+      seq: 5,
+      type: 'step_updated',
+      at: '2026-08-06T15:00:01Z',
+      payload: { seq: 1, state: 'doing' },
+    });
+    const artifact = parseWorkbenchEvent({
+      seq: 6,
+      type: 'artifact_registered',
+      at: '2026-08-06T15:00:02Z',
+      payload: {
+        artifactId: 'artifact-1',
+        path: '/workspace/out/report.md',
+        previewUrl: 'https://preview.frank.fail/report-v1/',
+      },
+    });
+    const decision = parseWorkbenchEvent({
+      seq: 7,
+      type: 'decision_requested',
+      at: '2026-08-06T15:00:03Z',
+      payload: { decisionWorkItemId: 'decision-1', question: 'Publish it?' },
+    });
+
+    expect(plan.payload).toEqual({ total: 3 });
+    expect(step.payload).toEqual({ seq: 1, state: 'doing', step: 1 });
+    expect(artifact.payload).toMatchObject({
+      id: 'artifact-1',
+      name: 'report.md',
+      path: '/workspace/out/report.md',
+      url: 'https://preview.frank.fail/report-v1/',
+    });
+    expect(decision.payload).toMatchObject({ workItemId: 'decision-1' });
   });
 
   it('rejects unknown event types (fixed list is binding)', () => {

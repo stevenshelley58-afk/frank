@@ -15,6 +15,7 @@ import {
   type StepState,
   type WorkbenchEvent,
   type WorkbenchLifecycle,
+  type WorkbenchDetail,
   type WorkbenchReceipt,
   TERMINAL_EVENT_TYPES,
 } from './types';
@@ -207,6 +208,46 @@ export function foldEvents(base: WorkbenchRunState, incoming: WorkbenchEvent[]):
 export function applySnapshot(incoming: WorkbenchEvent[]): FoldResult {
   const ordered = [...incoming].sort((a, b) => a.seq - b.seq);
   return foldEvents(emptyRunState(), ordered);
+}
+
+/**
+ * Overlay the durable detail snapshot on the live event fold. Receipts are
+ * stored outside event payloads by the backend, so this is the authoritative
+ * refresh path after `receipt_published`.
+ */
+export function mergeWorkbenchDetail(
+  state: WorkbenchRunState,
+  detail: WorkbenchDetail | null,
+): WorkbenchRunState {
+  if (detail === null) return state;
+  const liveSteps = new Map(state.planSteps.map((step) => [step.index, step]));
+  const planSteps = detail.plan.map((step) => {
+    const live = liveSteps.get(step.seq);
+    // Events remain authoritative once a step has advanced. The durable
+    // snapshot supplies titles and fills the short window before the matching
+    // SSE event arrives, without later regressing a live step to stale state.
+    const stepState = live === undefined || live.state === 'pending' ? step.state : live.state;
+    const note = live?.note ?? step.note;
+    return {
+      index: step.seq,
+      title: step.step,
+      state: stepState,
+      ...(note === null || note === undefined ? {} : { note }),
+    };
+  });
+  const active = planSteps.find((step) => step.state === 'doing');
+  return {
+    ...state,
+    ...(planSteps.length === 0
+      ? {}
+      : {
+          planSteps,
+          totalSteps: planSteps.length,
+          activeStep: active?.index ?? state.activeStep,
+          activeStepNote: active?.note ?? state.activeStepNote,
+        }),
+    receipt: detail.receipt ?? state.receipt,
+  };
 }
 
 /** Lifecycle derived purely from the event stream (no backend enum needed). */
