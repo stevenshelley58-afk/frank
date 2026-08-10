@@ -78,6 +78,7 @@ import { WorkbenchDecisionService } from './services/workbench/decision.js';
 import { StagedWriteService } from './services/workbench/staged-write.js';
 import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
+import { chatRoutes, registerChatRoutes } from './routes/chats.js';
 import { registerCodegraphRoutes } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
 import { WorkbenchFrontDoor } from './services/workbench/front-door.js';
@@ -99,6 +100,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...todayRoutes,
   ...healthRoutes,
   ...brainRoutes,
+  ...chatRoutes,
 ];
 
 const ENVELOPE_KEY_HANDLE = 'handle:frank.api.envelope-signing-key';
@@ -447,6 +449,9 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   registerHealthRoutes(app, { ...shared, health, serviceName: 'frank-api' });
   if (options.db) {
     registerBrainRoutes(app, { ...shared, db: options.db });
+    // The chat shell's own store — raw SQL on frank_domain (migration 0010),
+    // so like brain it needs a DB handle.
+    registerChatRoutes(app, { ...shared, db: options.db });
     // Workbench routes need Postgres (the front door + store are raw-SQL on
     // frank_domain); like brain, they only register when a DB handle exists.
     // ONE event bus is shared by the store (writer notifications) and the SSE

@@ -78,7 +78,10 @@ describe('FRANK-§2.2 role model', () => {
 
   it('reports a stable capability list per role set', () => {
     expect(capabilitiesOf(['reviewer'])).toEqual([
+      // A reviewer reads the chat shell; approvals are work items, so the
+      // capability that governs them is work.read (ADR-022).
       'brain.search.read',
+      'chat.read',
       'provenance.read',
       'system.health.read',
       'today.read',

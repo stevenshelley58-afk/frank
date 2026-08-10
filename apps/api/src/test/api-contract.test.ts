@@ -815,6 +815,10 @@ describe('ADR-017 OpenAPI', () => {
       // CH-06: outbox poll/ack for the channels listener.
       '/v1/channels/outbox',
       '/v1/channels/outbox/ack',
+      // The chat shell's own store — a chat is the unit of work.
+      '/v1/chats',
+      '/v1/chats/{id}',
+      '/v1/chats/{id}/messages',
       // Durable autonomous mission create/read/stop contract.
       '/v1/missions',
       '/v1/missions/{id}',
@@ -884,7 +888,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(33);
+    expect(operations).toBe(38);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

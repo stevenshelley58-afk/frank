@@ -76,7 +76,9 @@ export type Capability =
   | 'system.health.read'
   | 'system.health.read.detailed'
   | 'brain.search.read'
-  | 'brain.entry.write';
+  | 'brain.entry.write'
+  | 'chat.read'
+  | 'chat.write';
 
 /**
  * Which roles may request which operation.
@@ -107,6 +109,10 @@ export const ROLE_CAPABILITIES: Readonly<Record<Capability, readonly Role[]>> = 
   'system.health.read.detailed': ['owner', 'operator'],
   'brain.search.read': ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
   'brain.entry.write': ['owner', 'operator', 'builder', 'member', 'service_identity'],
+  // The chat shell. A service identity writes here too: a room's Frank appends
+  // its own turns, working cards and receipts to the conversation it was given.
+  'chat.read': ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
+  'chat.write': ['owner', 'operator', 'builder', 'member', 'service_identity'],
 };
 
 const CAPABILITY_SET: ReadonlySet<string> = new Set<string>(Object.keys(ROLE_CAPABILITIES));
