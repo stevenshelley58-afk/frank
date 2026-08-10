@@ -105,9 +105,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const api = useMemo<ApiFetch | null>(() => {
-    if (!session) return null;
+    // In production the dev-session endpoint returns 403 (browser-minted tokens
+    // are disabled). We still create an api — it ships requests without a Bearer
+    // header, and the /api/v1/* BFF proxy re-authenticates them server-side with
+    // the domain service token. The shell's chat streaming continues through the
+    // existing /api/chat SSE bridge (no token needed).
     return makeApiFetch(() => sessionRef.current?.access_token ?? null, reauth);
-  }, [session, reauth]);
+  }, [reauth]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ status, session, error, api, retry: () => setAttempt((n) => n + 1) }),

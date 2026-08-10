@@ -213,6 +213,16 @@ export type ApiFetch = (path: string, init?: RequestInit) => Promise<Response>;
  * once when the token expires (401). All URLs are relative — Caddy routes
  * /v1/* to the API.
  */
+/**
+ * Rewrite /v1/* paths through the Next.js BFF proxy so requests carry the
+ * server-side service token. The browser cannot hold a production bearer token:
+ * Caddy strips Authorization before proxying to the API container.
+ */
+function proxyPath(path: string): string {
+  if (path.startsWith('/v1/')) return `/api/v1/${path.slice(4)}`;
+  return path;
+}
+
 export function makeApiFetch(
   getToken: () => string | null,
   reauth: () => Promise<string>,
@@ -224,7 +234,7 @@ export function makeApiFetch(
       if (init?.body != null && !headers.has('Content-Type')) {
         headers.set('Content-Type', 'application/json');
       }
-      return fetch(path, { ...init, headers });
+      return fetch(proxyPath(path), { ...init, headers });
     };
 
     let res = await run(getToken());
