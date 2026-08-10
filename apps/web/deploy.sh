@@ -12,22 +12,24 @@
 set -euo pipefail
 
 REPO="${FRANK_REPO:-/srv/frank}"
-COMPOSE_FILE="${FRANK_COMPOSE_FILE:-$REPO/infra/compose/docker-compose.yml}"
+COMPOSE_BASE="${FRANK_COMPOSE_BASE:-$REPO/infra/docker-compose.dev.yml}"
+COMPOSE_APP="${FRANK_COMPOSE_APP:-$REPO/repo/infra/production/docker-compose.app.yml}"
+COMPOSE_ARGS=(-f "$COMPOSE_BASE" -f "$COMPOSE_APP")
 
 cd "$REPO"
 
 echo "[deploy] building frank-web + frank-api"
-docker compose -f "$COMPOSE_FILE" build frank-web frank-api
+docker compose "${COMPOSE_ARGS[@]}" build frank-web frank-api
 
 echo "[deploy] restarting"
 # frank-api first: it runs the migrations the new web build expects.
-docker compose -f "$COMPOSE_FILE" up -d --no-deps frank-api
-docker compose -f "$COMPOSE_FILE" up -d --no-deps frank-web
+docker compose "${COMPOSE_ARGS[@]}" up -d --no-deps frank-api
+docker compose "${COMPOSE_ARGS[@]}" up -d --no-deps frank-web
 
 echo "[deploy] waiting for the API to answer"
 for _ in $(seq 1 30); do
-  if docker compose -f "$COMPOSE_FILE" exec -T frank-api \
-      node -e "fetch('http://127.0.0.1:3001/v1/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
+  if docker compose "${COMPOSE_ARGS[@]}" exec -T frank-api \
+      node -e "fetch('http://127.0.0.1:3000/v1/system/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))" 2>/dev/null; then
     echo "[deploy] api ready"
     break
   fi
