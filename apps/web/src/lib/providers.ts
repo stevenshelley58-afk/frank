@@ -14,6 +14,12 @@
 
 import { createSession, streamMessage, gooseHealth, gooseModelInfo } from './goose-server';
 import { ensureAgent, streamLettaMessage, lettaHealth } from './letta-server';
+import {
+  createDeepseekSession,
+  deepseekHealth,
+  deepseekModel,
+  streamDeepseekMessage,
+} from './deepseek-server';
 
 /* ------------------------------------------------------------------ */
 /* Chat provider interface — every harness implements this             */
@@ -82,10 +88,25 @@ const lettaProvider: ChatProvider = {
 };
 
 /* ------------------------------------------------------------------ */
+/* DeepSeek direct — no local harness required                         */
+/* ------------------------------------------------------------------ */
+
+const deepseekProvider: ChatProvider = {
+  id: 'deepseek',
+  label: 'DeepSeek Direct',
+  blurb: 'Direct DeepSeek API over HTTPS — streaming chat with per-room history, no local harness needed.',
+  health: deepseekHealth,
+  createSession: () => createDeepseekSession(),
+  stream: (sessionId, prompt) => streamDeepseekMessage(sessionId, prompt),
+  modelInfo: () => Promise.resolve({ provider: 'deepseek', model: deepseekModel() }),
+};
+
+/* ------------------------------------------------------------------ */
 /* Registry                                                            */
 /* ------------------------------------------------------------------ */
 
 const providers = new Map<string, ChatProvider>();
+providers.set(deepseekProvider.id, deepseekProvider);
 providers.set(gooseProvider.id, gooseProvider);
 providers.set(lettaProvider.id, lettaProvider);
 
@@ -169,9 +190,9 @@ export function setAliasRoute(alias: CapabilityAlias, providerId: string): void 
 /** roomId → providerId. 'auto' means the broker picks. Absent = auto. */
 const roomRoutes = new Map<string, string>();
 
-// Phase 1: Central runs on the Letta memory harness (persistent per-room
-// session wiki). Other rooms stay on Auto (Goose). Hot-swappable via setRoomRoute.
-roomRoutes.set('central', 'letta');
+// No static room pins. Central ran pinned to Letta in Phase 1; that pin is
+// removed until a Letta server actually exists in production. Use
+// setRoomRoute(roomId, providerId) to pin at runtime.
 
 export function setRoomRoute(roomId: string, providerId: string): void {
   if (providerId === 'auto') roomRoutes.delete(roomId);

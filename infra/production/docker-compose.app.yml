@@ -156,6 +156,8 @@ services:
       GOOSE_PROVIDER: "${GOOSE_PROVIDER:?GOOSE_PROVIDER is required}"
       GOOSE_MODEL: "${GOOSE_MODEL:?GOOSE_MODEL is required}"
       FRANK_EXPECTED_MODEL: "${FRANK_EXPECTED_MODEL:?FRANK_EXPECTED_MODEL is required}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}"
+      DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-deepseek-chat}"
 
     volumes: !override
       - type: bind
