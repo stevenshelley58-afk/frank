@@ -38,7 +38,7 @@ between the backup and smoke gates.
   reverse the files or apply the overlay alone. When `FRANK_HARNESS_ENABLED=true`, it is
   the ordered atomic triple: base, app, then `infra/production/docker-compose.harness.yml`.
   A harness release never starts, snapshots, pulls, validates, deploys, smokes, receipts,
-  or rolls back only a subset of its six services.
+  or rolls back only a subset of its four core services.
 
 ## Files
 
@@ -50,15 +50,18 @@ between the backup and smoke gates.
 | `scripts/production/snapshot-codegraph-release.sh` | Captures prior API/web/codegraph images, legacy overlay, Caddyfile, and codegraph volume | Briefly pauses codegraph; writes a complete checksummed root-only rollback set |
 | `scripts/production/rollback-codegraph-release.sh` | Restores the captured application unit, Caddyfile, and codegraph volume | Stops/recreates API, web, codegraph, and Caddy; replaces codegraph volume contents |
 | `infra/production/docker-compose.app.yml` | Authoritative production overrides for API, web, codegraph, and their Caddy dependency | None until passed to `docker compose up` |
-| `infra/production/docker-compose.harness.yml` | Optional reviewed harness third Compose unit (private model, upload, scan, Letta services) | Enable only after evidence/canaries; then it is atomic with base+app, reuses `frank-cell-seaweedfs-data`, and has no public ports. |
+| `infra/production/docker-compose.harness.yml` | Optional reviewed four-service harness unit (LiteLLM, SeaweedFS, tusd, ClamAV) | Enable only after evidence/canaries; then it is atomic with base+app, reuses `frank-cell-seaweedfs-data`, and has no public ports. |
+| `scripts/production/bootstrap-litellm-virtual-key.sh` | Root-only, fail-closed creation/rotation of the restricted Frank API LiteLLM virtual key | Calls the candidate proxy `/key/generate`; writes only the returned virtual key to an explicit root-0600 secret path. |
 | `infra/production/Caddyfile.frank-production` | Replacement `frank.fail` site block with a private UI/control surface | None until merged into the live Caddy candidate and reloaded |
 
 ### Harness external prerequisites
 
-The live base has no SeaweedFS service and uses the already healthy external
-`frank-letta-server:8283`. Before enabling the third unit, create (and record) the external
-`frank-attachments`, `frank-model`, and `frank-hermes-egress` networks plus the existing
-`frank-cell-seaweedfs-data` volume. This is a reversible host prerequisite: removing an
+The live base has no SeaweedFS service and uses the already healthy external, manually
+managed `frank-letta-server:8283`; Letta is not a harness image or promotion slot. Hermes
+remains a later specialist overlay and this release creates no Hermes image slot or network.
+Before enabling the third unit, create (and record) only the external `frank-attachments`
+and `frank-model` networks plus the existing `frank-cell-seaweedfs-data` volume. This is a
+reversible host prerequisite: removing an
 unused network is allowed; volumes are never removed. Render
 `/srv/frank/secrets/seaweedfs/s3.json` through `render-seaweedfs-s3-config.sh` at mode 0600
 before Compose; mounting the repository template or unresolved placeholders is forbidden.
@@ -338,6 +341,42 @@ test "$(stat -c '%u:%g:%a' "$FRANK_CODEGRAPH_CONTROL_TOKEN_FILE")" = '10001:1000
 
 The codegraph token must never enter release evidence or shell tracing. Its rotation
 requires an API/codegraph restart together.
+
+### 2C. Provision the restricted LiteLLM virtual key
+
+This step remains blocked until the exact LiteLLM candidate (not below v1.83.7) has passed
+the isolated hosted canary and is running as a private `frank-litellm` candidate container
+against the durable LiteLLM database. Do not fabricate a successful bootstrap in static
+validation. The current candidate starting points are LiteLLM v1.96.0, SeaweedFS 4.41,
+tusd v2.10.0, and ClamAV clamav-1.5.4; tags never replace reviewed digests and evidence.
+
+The provisioning script uses the admin key only inside the proxy container to call the
+official `/key/generate` contract. Its unique operation alias makes an ambiguous retry fail
+closed rather than create another key. It permits only the four stable Frank model aliases
+and `/chat/completions`, `/v1/chat/completions`, `/responses`, and `/v1/responses`.
+
+```bash
+install -d -o root -g root -m 0700 -- /srv/frank/secrets/litellm
+export FRANK_LITELLM_CONTAINER='frank-litellm'
+export FRANK_LITELLM_VIRTUAL_KEY_FILE='/srv/frank/secrets/litellm/frank-api-virtual-key'
+
+bash "$FRANK_RELEASE_SOURCE/scripts/production/bootstrap-litellm-virtual-key.sh"
+test "$(stat -c '%u:%g:%a' -- "$FRANK_LITELLM_VIRTUAL_KEY_FILE")" = '0:0:600'
+```
+
+The secret is never stdout or release evidence. Inject it into the root release environment
+without tracing as `FRANK_LITELLM_VIRTUAL_KEY`; never inject `LITELLM_ADMIN_KEY` into the
+API. Rotation requires `--rotate`, a unique UTC `FRANK_LITELLM_ROTATION_ID`, and a new
+`FRANK_LITELLM_PREVIOUS_VIRTUAL_KEY_FILE` in the same root-0700 directory. Restart only the
+API with the new key and verify inference receipts. Before old-key revocation, rollback may
+restore that previous file and restart the API. After acceptance, revoke the old key through
+the private admin boundary and remove the previous file; the script never claims revocation.
+
+Receipt reconciliation is OSS-safe: Frank persists the response ID, any provider request ID
+returned in the response/headers, and returned token/usage fields, then correlates them with
+LiteLLM's durable spend logs. LiteLLM retries and fallbacks remain disabled so Frank owns each
+attempt. This is usage reconciliation, not a provider-balance claim, and it does not depend
+on Enterprise-only custom spend metadata.
 
 Optional overrides:
 
@@ -1028,7 +1067,7 @@ export FRANK_BASIC_AUTH_USER='<NON_SECRET_OPERATOR_NAME>'
 ```
 
 `FRANK_DATABASE_URL`, `FRANK_REDIS_URL`, signing keys, `DEEPSEEK_API_KEY`,
-`FRANK_DOMAIN_SERVICE_TOKEN`, `GOOSE_ACP_SECRET`, `FRANK_BASIC_AUTH_HASH`, and
+`FRANK_DOMAIN_SERVICE_TOKEN`, `FRANK_LITELLM_VIRTUAL_KEY`, `GOOSE_ACP_SECRET`, `FRANK_BASIC_AUTH_HASH`, and
 `FRANK_BASIC_AUTH_PASSWORD` are secret material even when a name says "URL" or "hash".
 Inject their values without shell tracing. The Caddyfile accepts only the compatible hash;
 the plaintext password exists only in the root release environment for authenticated smoke.
@@ -1056,6 +1095,10 @@ base_compose='/srv/frank/infra/docker-compose.dev.yml'
 app_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml"
 export FRANK_HARNESS_ENABLED="${FRANK_HARNESS_ENABLED:-false}"
 case "$FRANK_HARNESS_ENABLED" in true|false) ;; *) exit 1;; esac
+export FRANK_LITELLM_VIRTUAL_KEY_FILE="${FRANK_LITELLM_VIRTUAL_KEY_FILE:-/srv/frank/secrets/litellm/frank-api-virtual-key}"
+test "$(stat -c '%u:%g:%a' -- "$FRANK_LITELLM_VIRTUAL_KEY_FILE")" = '0:0:600'
+export FRANK_LITELLM_VIRTUAL_KEY="$(<"$FRANK_LITELLM_VIRTUAL_KEY_FILE")"
+test -n "$FRANK_LITELLM_VIRTUAL_KEY"
 compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
 if test "$FRANK_HARNESS_ENABLED" = true; then
   harness_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.harness.yml"
@@ -1112,6 +1155,8 @@ esac
   (.services["frank-codegraph"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph"]) and
   (.services["frank-codegraph-volume-init"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph.volume_init"]) and
   .services["frank-api"].environment.FRANK_ENV == "production" and
+  (.services["frank-api"].environment.FRANK_LITELLM_VIRTUAL_KEY | length > 0) and
+  (.services["frank-api"].environment | has("LITELLM_ADMIN_KEY") | not) and
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and
   (.services["frank-api"].environment.FRANK_WORKBENCH_IMAGE |
@@ -1274,7 +1319,8 @@ docker image inspect \
   > "$evidence_dir/application-images.promoted.tsv"
 
 if test "$FRANK_HARNESS_ENABLED" = true; then
-  for image_var in FRANK_SEAWEEDFS_CURRENT_IMAGE FRANK_LITELLM_CURRENT_IMAGE FRANK_TUSD_CURRENT_IMAGE FRANK_CLAMAV_CURRENT_IMAGE FRANK_LETTA_CURRENT_IMAGE FRANK_HERMES_CURRENT_IMAGE; do
+  # Exactly the four core harness images. Letta stays external/manual; Hermes is a later overlay.
+  for image_var in FRANK_LITELLM_CURRENT_IMAGE FRANK_SEAWEEDFS_CURRENT_IMAGE FRANK_TUSD_CURRENT_IMAGE FRANK_CLAMAV_CURRENT_IMAGE; do
     image="${!image_var}"; docker pull "$image"; docker image inspect "$image" --format '{{.RepoDigests}}\t{{.Id}}' >> "$evidence_dir/harness-images.promoted.tsv"
   done
   sha256sum "$harness_overlay" "$FRANK_RELEASE_SOURCE/infra/harness/litellm/config.yaml" >> "$evidence_dir/release-inputs.sha256"

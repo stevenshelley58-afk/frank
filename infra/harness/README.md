@@ -32,8 +32,10 @@ capability binds owner/cell/conversation/upload and the hook selects the collisi
 Goose remains the existing externally managed default source for this release; no unused Goose
 image slot is deployed. Frank receives its endpoint/credential policy and an upgrade is a separate
 artifact decision. Promotion is manual: populate a candidate digest only after `cosign verify` against
-the upstream immutable commit/key, SBOM review, and the LiteLLM security floor (never 1.82.7/1.82.8;
-not before 1.83.7),
+the upstream immutable commit/key, SBOM review, and the LiteLLM security floor established by
+GHSA-r75f-5x8p-qvmc (never 1.82.7/1.82.8; not before 1.83.7). Current candidate starting points
+as of 2026-08-11 are LiteLLM v1.96.0, SeaweedFS 4.41, tusd v2.10.0, and ClamAV
+clamav-1.5.4. Tags are not promotion identities and all candidate digest slots remain blank,
 run the isolated hosted candidate probe, copy the verified manifest to CURRENT, and retain the
 previous manifest as ROLLBACK. Revert by restoring the ROLLBACK manifest and recreating only
 these services; never delete attachment volumes. Licenses to record per chosen artifact: LiteLLM

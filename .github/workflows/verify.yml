@@ -47,5 +47,8 @@ jobs:
       - name: Install dependencies (frozen lockfile)
         run: pnpm install --frozen-lockfile
 
+      - name: Verify hosted harness security contracts
+        run: bash infra/harness/tests/gateway-static-security.sh
+
       - name: Run the full verify gate
         run: pnpm run verify

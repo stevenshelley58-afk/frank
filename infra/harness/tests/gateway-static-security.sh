@@ -2,7 +2,11 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
 compose="$root/infra/production/docker-compose.harness.yml"
+app_compose="$root/infra/production/docker-compose.app.yml"
 caddy="$root/infra/production/Caddyfile.frank-production"
+litellm_config="$root/infra/harness/litellm/config.yaml"
+litellm_bootstrap="$root/scripts/production/bootstrap-litellm-virtual-key.sh"
+release_runbook="$root/docs/runbooks/AUTONOMOUS_FRANK_RELEASE.md"
 for token in 'ports:' 'frank-previews' 'FRANK_OPENFGA' 'insecure-skip-verify' 'tls-skip-verify'; do
   if rg -n "$token" "$compose"; then echo "forbidden: $token"; exit 1; fi
 done
@@ -17,6 +21,23 @@ rg -q 'forward_auth always issues GET' "$caddy"
 rg -q 'uri /private/tusd/gate' "$caddy"
 rg -q 'header_up X-Forwarded-Method \{method\}' "$caddy"
 rg -q 'header_up X-Forwarded-Uri \{uri\}' "$caddy"
+rg -q '^  for image_var in FRANK_LITELLM_CURRENT_IMAGE FRANK_SEAWEEDFS_CURRENT_IMAGE FRANK_TUSD_CURRENT_IMAGE FRANK_CLAMAV_CURRENT_IMAGE; do$' "$release_runbook"
+if rg -q 'for image_var.*FRANK_(LETTA|HERMES)_CURRENT_IMAGE' "$release_runbook"; then echo 'stale non-core harness image in executable release path'; exit 1; fi
+rg -q 'disable_spend_logs: false' "$litellm_config"
+rg -q '^router_settings:' "$litellm_config"
+rg -q '^  num_retries: 0$' "$litellm_config"
+rg -q '^  fallbacks: \[\]$' "$litellm_config"
+rg -q 'FRANK_LITELLM_VIRTUAL_KEY:.*restricted LiteLLM virtual key required' "$app_compose"
+if rg -q '^[[:space:]]+LITELLM_ADMIN_KEY:' "$app_compose"; then echo 'LiteLLM admin key leaked into API overlay'; exit 1; fi
+test "$(rg -l 'LITELLM_ADMIN_KEY' "$compose" "$litellm_config" "$litellm_bootstrap" | wc -l)" -eq 3
+rg -q 'http://127\.0\.0\.1:4000/key/generate' "$litellm_bootstrap"
+rg -q "key_type: 'llm_api'" "$litellm_bootstrap"
+rg -q "models: \['frank-openai-direct', 'frank-gemini-direct', 'frank-concentrate', 'frank-deepseek-direct'\]" "$litellm_bootstrap"
+rg -q "allowed_routes: \['/chat/completions', '/v1/chat/completions', '/responses', '/v1/responses'\]" "$litellm_bootstrap"
+rg -q 'provider request ID' "$release_runbook"
+rg -q 'Enterprise-only custom spend metadata' "$release_runbook"
+rg -q 'not before 1\.83\.7' "$root/infra/harness/README.md"
+rg -q 'SeaweedFS 4\.41, tusd v2\.10\.0, and ClamAV' "$root/infra/harness/README.md"
 promote="$root/infra/harness/bin/promote-gateway-candidate.sh"
 state_root="$(mktemp -d)"
 trap 'rm -rf -- "$state_root"' EXIT

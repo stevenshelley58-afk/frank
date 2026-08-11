@@ -53,6 +53,9 @@ services:
       # Harness services are private peers. The API remains the policy/control owner;
       # Letta is manual-only and is never a canonical memory or control authority.
       FRANK_LITELLM_INTERNAL_URL: "${FRANK_LITELLM_INTERNAL_URL:-http://frank-litellm:4000}"
+      # This is a restricted LiteLLM virtual key created by the root-only bootstrap.
+      # The proxy administrator credential must never cross into the API service.
+      FRANK_LITELLM_VIRTUAL_KEY: "${FRANK_LITELLM_VIRTUAL_KEY:?restricted LiteLLM virtual key required}"
       FRANK_LETTA_INTERNAL_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta-server:8283}"
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
       FRANK_CLAMAV_INTERNAL_URL: "${FRANK_CLAMAV_INTERNAL_URL:-tcp://frank-clamav:3310}"

@@ -15,8 +15,10 @@ general_settings:
   # Durable usage records are required for receipts/reconciliation. This records usage,
   # not provider account balances.
   disable_spend_logs: false
+  # Provider credit/balance is not queried or inferred here: unknown remains unknown.
+router_settings:
   # Frank makes every attempt decision; LiteLLM does not select fallbacks or retry.
   num_retries: 0
-  # Provider credit/balance is not queried or inferred here: unknown remains unknown.
+  fallbacks: []
 litellm_settings:
   drop_params: true

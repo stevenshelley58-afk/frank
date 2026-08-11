@@ -63,7 +63,7 @@ services:
 
   frank-tusd:
     image: "${FRANK_TUSD_CURRENT_IMAGE:?reviewed tusd digest required}"
-    # v2.10 evidence is required by the promotion manifest before this command may apply.
+    # v2.10.0 evidence is required by the promotion manifest before this command may apply.
     command: ["-behind-proxy", "-base-path=/v1/uploads/tus/", "-s3-bucket=frank-attachment-staging", "-s3-endpoint=http://frank-seaweedfs:8333", "-s3-force-path-style", "-max-size=2147483648", "-hooks-http=${FRANK_TUSD_HOOK_URL:?required}", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish,post-terminate", "-hooks-http-forward-headers=X-Frank-Tusd-Hook-Secret,X-Frank-Upload-Capability,Upload-Metadata,Tus-Resumable,Upload-Offset,X-Forwarded-Method,X-Forwarded-Uri", "-disable-download", "-disable-concatenation"]
     environment:
       AWS_ACCESS_KEY_ID: "${FRANK_ATTACHMENT_STAGING_ACCESS_KEY:?required}"
