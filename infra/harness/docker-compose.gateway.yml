@@ -23,7 +23,8 @@ services:
     healthcheck: { test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/health/readiness"], interval: 15s, timeout: 5s, retries: 8 }
   frank-clamav:
     image: "${FRANK_CLAMAV_CURRENT_IMAGE:?digest-pinned reviewed ClamAV current image required}"
-    networks: [frank-harness-attachments]
+    # The API owns scan orchestration; ClamAV never reaches object storage directly.
+    networks: [frank]
     volumes: ["frank-clamav-signatures:/var/lib/clamav"]
     read_only: true
     cap_drop: [ALL]
