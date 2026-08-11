@@ -16,6 +16,7 @@ import type { FastifyInstance } from 'fastify';
 
 import { LocalSignedSessionProvider } from '@frank/identity';
 import type { Role } from '@frank/identity';
+import type { Capability } from '@frank/identity';
 
 import type { AppConfig } from '../config.js';
 import { buildServer } from '../server.js';
@@ -23,6 +24,7 @@ import type { BuiltServer } from '../server.js';
 import type { EnrichmentDispatcher } from '../services/enrichment.js';
 import type { DomainStore } from '../services/store.js';
 import type { MissionRouteOrchestrator } from '../routes/missions.js';
+import type { CodegraphRouteDependencies } from '../routes/codegraph.js';
 import { FakeDomainStore } from './fake-store.js';
 
 export const TEST_CELL = 'cell-steven';
@@ -61,7 +63,14 @@ export interface TestServer extends BuiltServer {
   readonly store: DomainStore;
   readonly identityProvider: LocalSignedSessionProvider;
   /** A bearer token for the given roles. */
-  token(roles?: readonly Role[], overrides?: { sessionId?: string; lifetimeSeconds?: number }): string;
+  token(
+    roles?: readonly Role[],
+    overrides?: {
+      sessionId?: string;
+      lifetimeSeconds?: number;
+      capabilities?: readonly Capability[];
+    },
+  ): string;
   /** `Authorization` header value. */
   auth(roles?: readonly Role[]): string;
   close(): Promise<void>;
@@ -83,6 +92,16 @@ export interface BuildTestServerOptions {
   readonly previewDeployer?: import('../services/workbench/preview-backend.js').PreviewDeployer;
   /** Mission route port; tests inject a deterministic in-memory fake. */
   readonly missionOrchestrator?: MissionRouteOrchestrator;
+  /** Isolated codegraph fixtures and service stub for route-contract tests. */
+  readonly codegraph?: Pick<
+    CodegraphRouteDependencies,
+    | 'codegraphOutputDir'
+    | 'codegraphRegistryFile'
+    | 'codegraphServiceUrl'
+    | 'codegraphControlTokenFile'
+    | 'codegraphReadLimit'
+    | 'fetch'
+  >;
 }
 
 export function buildTestServer(options: BuildTestServerOptions = {}): TestServer {
@@ -112,6 +131,7 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
     ...(options.missionOrchestrator === undefined
       ? {}
       : { missionOrchestrator: options.missionOrchestrator }),
+    ...(options.codegraph === undefined ? {} : { codegraph: options.codegraph }),
     now,
     startedAt: now(),
   });
@@ -130,6 +150,9 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
         sessionId: overrides.sessionId ?? `sess-${String(sessionCounter)}`,
         lifetimeSeconds: overrides.lifetimeSeconds ?? 3_600,
         methods: ['passkey'],
+        ...(overrides.capabilities === undefined
+          ? {}
+          : { capabilities: overrides.capabilities }),
       });
     },
     auth(roles = ['owner']) {

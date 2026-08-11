@@ -1,20 +1,23 @@
 # Autonomous FRANK release safety runbook
 
 Runbook ID: `RB-REL-002`  
-Version: 2  
+Version: 3
 Scope: the current single-host FRANK deployment on `vps`  
 Owner: release operator
 
-This runbook adds three fail-closed controls around a release:
+This runbook adds five fail-closed controls around a release:
 
 1. a hosted preflight against the exact reviewed commit;
 2. a timestamped, checksummed PostgreSQL backup set;
-3. a fail-closed production application Compose overlay and hardened edge policy;
-4. public HTTPS liveness, readiness, and web smoke checks after deployment.
+3. an exact API/web/codegraph image and codegraph-volume rollback unit;
+4. a fail-closed production application Compose overlay and hardened edge policy;
+5. public HTTPS liveness, readiness, and web smoke checks after deployment.
 
-The scripts do **not** pull source, build images, run migrations, restart containers,
-or deploy. The production mutation remains an explicit, separately authorized release
-step between the backup and smoke gates.
+The preflight, backup, snapshot, and smoke scripts do **not** pull source, build images,
+run migrations, restart containers, or deploy. Snapshot briefly pauses and always
+unpauses the legacy codegraph writer while archiving its volume. The rollback script is
+an explicit recovery mutation, and the production release remains the bounded step
+between the backup and smoke gates.
 
 ## Safety contract
 
@@ -28,10 +31,11 @@ step between the backup and smoke gates.
   production, and its `localhost:3000` probe does not address the FRANK API.
 - Database restore is never automatic. A failed release normally rolls the application
   images back while preserving forward-compatible schema changes.
-- The production application definition is always the ordered pair
-  `/srv/frank/infra/docker-compose.dev.yml` then
-  `/srv/frank/repo/infra/production/docker-compose.app.yml`. Never reverse them or apply
-  the overlay alone.
+- The candidate production application definition is always the ordered pair
+  `/srv/frank/infra/docker-compose.dev.yml` then the reviewed
+  `$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml`. The release source is a
+  separate clean immutable worktree; it is never the mutable central workspace. Never
+  reverse the files or apply the overlay alone.
 
 ## Files
 
@@ -40,11 +44,14 @@ step between the backup and smoke gates.
 | `scripts/production/hosted-preflight.sh` | Disk, Git, secret-name, Docker, network, Compose, container, and image gates | None |
 | `scripts/production/backup-postgres.sh` | Atomic gzip `pg_dump`, SHA-256 verification, manifest, retention | Writes backup sets and removes expired matching sets |
 | `scripts/production/post-deploy-smoke.sh` | Public `/live`, `/ready`, and web-root checks | None beyond ordinary request logs |
-| `infra/production/docker-compose.app.yml` | Authoritative production overrides for API, web, and their Caddy dependency | None until applied by `docker compose up` |
+| `scripts/production/snapshot-codegraph-release.sh` | Captures prior API/web/codegraph images, legacy overlay, and codegraph volume | Briefly pauses codegraph; writes a checksummed root-only rollback set |
+| `scripts/production/rollback-codegraph-release.sh` | Restores the captured three-service application unit and codegraph volume | Stops/recreates API, web, and codegraph; replaces codegraph volume contents |
+| `infra/production/docker-compose.app.yml` | Authoritative production overrides for API, web, codegraph, and their Caddy dependency | None until passed to `docker compose up` |
 | `infra/production/Caddyfile.frank-production` | Replacement `frank.fail` site block with a private UI/control surface | None until merged into the live Caddy candidate and reloaded |
 
-Required host commands are Bash 4.3+, Docker with Compose, Git, `jq`, `curl`,
-`gzip`, `sha256sum`, `flock`, `find`, `realpath`, and standard GNU coreutils.
+Required host commands are Bash 4.3+, Docker with Compose, Git, GitHub CLI, `jq`,
+`curl`, `gzip`, `openssl`, `sha256sum`, `flock`, `find`, `realpath`, and standard
+GNU coreutils.
 
 ## 1. Create the release evidence directory
 
@@ -55,7 +62,7 @@ set -Eeuo pipefail
 set +x
 umask 077
 
-cd /srv/frank/repo
+cd /srv/frank
 release_id="$(date -u +%Y%m%dT%H%M%SZ)"
 evidence_dir="/srv/frank/release-evidence/$release_id"
 install -d -m 0700 -- "$evidence_dir"
@@ -70,19 +77,103 @@ Set only identifiers and variable **names** in the command history:
 
 ```bash
 export FRANK_EXPECTED_COMMIT='<FULL_40_CHARACTER_REVIEWED_COMMIT>'
-export FRANK_EXPECTED_BRANCH='main'
-export FRANK_REPO_PATH='/srv/frank/repo'
+test "${#FRANK_EXPECTED_COMMIT}" -eq 40
+printf '%s' "$FRANK_EXPECTED_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+release_branch="release-$release_id"
+export FRANK_EXPECTED_BRANCH="$release_branch"
+export FRANK_RELEASE_SOURCE="/srv/frank/releases/${release_id}-${FRANK_EXPECTED_COMMIT:0:12}"
+export FRANK_REPO_PATH="$FRANK_RELEASE_SOURCE"
+export FRANK_RELEASE_COMMIT="$FRANK_EXPECTED_COMMIT"
+export FRANK_CELL_ID='frank'
+export FRANK_API_AUDIENCE='frank.api'
 export FRANK_COMPOSE_FILE='/srv/frank/infra/docker-compose.dev.yml'
 export FRANK_DATA_PATH='/srv/frank'
 export FRANK_MAX_DISK_PERCENT='75'
 export FRANK_MIN_FREE_GIB='20'
 export FRANK_REQUIRED_NETWORK='frank'
+export FRANK_CODEGRAPH_NETWORK='frank-codegraph-internal'
+export FRANK_CODEGRAPH_CONTAINER='frank-codegraph'
 export FRANK_REQUIRED_SECRET_VARS='FRANK_DB_PASSWORD FRANK_DATABASE_URL FRANK_REDIS_URL FRANK_SESSION_SIGNING_KEY FRANK_ENVELOPE_SIGNING_KEY DEEPSEEK_API_KEY FRANK_DOMAIN_SERVICE_TOKEN FRANK_PACK_SIGNING_KEY GOOSE_ACP_SECRET FRANK_BASIC_AUTH_HASH FRANK_BASIC_AUTH_PASSWORD'
 ```
 
-The secret variables named above must then be injected into the current process by the
-accepted secret runtime. Do not paste their values into this runbook, a command log, or
-the evidence directory.
+The secret variables named above, except `FRANK_DOMAIN_SERVICE_TOKEN`, must then be
+injected into the current process by the accepted secret runtime. Step 3B mints and exports
+that service token from the verified API digest before preflight. Do not paste any value into this runbook, a command
+log, or the evidence directory.
+
+### 2A. Materialize the clean exact release worktree
+
+Use a dedicated bare cache. These commands do not read, fetch, reset, clean, or otherwise
+modify `/srv/frank/repo`, so a dirty primary checkout is left untouched. The unique branch
+allows preflight to prove both the exact reviewed commit and zero divergence from
+`origin/main` without relying on detached-HEAD exceptions:
+
+```bash
+release_repo_url='https://github.com/stevenshelley58-afk/frank.git'
+release_cache_root='/srv/frank/release-cache'
+release_git_dir="$release_cache_root/frank.git"
+release_worktrees_root='/srv/frank/releases'
+
+install -d -m 0750 -- "$release_cache_root" "$release_worktrees_root"
+test "$(realpath -e -- "$release_cache_root")" = "$release_cache_root"
+test "$(realpath -e -- "$release_worktrees_root")" = "$release_worktrees_root"
+
+if test ! -e "$release_git_dir"; then
+  git clone --bare -- "$release_repo_url" "$release_git_dir"
+fi
+test "$(git --git-dir="$release_git_dir" rev-parse --is-bare-repository)" = 'true'
+test "$(git --git-dir="$release_git_dir" remote get-url origin)" = "$release_repo_url"
+
+git --git-dir="$release_git_dir" fetch --prune origin \
+  '+refs/heads/main:refs/remotes/origin/main'
+origin_main="$(git --git-dir="$release_git_dir" rev-parse refs/remotes/origin/main)"
+test "$origin_main" = "$FRANK_EXPECTED_COMMIT"
+test ! -e "$FRANK_RELEASE_SOURCE" && test ! -L "$FRANK_RELEASE_SOURCE"
+test -z "$(git --git-dir="$release_git_dir" branch --list "$release_branch")"
+
+git --git-dir="$release_git_dir" worktree add --track -b "$release_branch" \
+  "$FRANK_RELEASE_SOURCE" refs/remotes/origin/main
+
+test "$(realpath -e -- "$FRANK_RELEASE_SOURCE")" = "$FRANK_RELEASE_SOURCE"
+test "$(git -C "$FRANK_RELEASE_SOURCE" rev-parse HEAD)" = "$FRANK_EXPECTED_COMMIT"
+test "$(git -C "$FRANK_RELEASE_SOURCE" symbolic-ref --short HEAD)" = "$FRANK_EXPECTED_BRANCH"
+test "$(git -C "$FRANK_RELEASE_SOURCE" rev-parse --abbrev-ref '@{upstream}')" = 'origin/main'
+test -z "$(git -C "$FRANK_RELEASE_SOURCE" status --porcelain=v1 --untracked-files=normal)"
+test "$(git -C "$FRANK_RELEASE_SOURCE" rev-list --count origin/main..HEAD)" -eq 0
+test "$(git -C "$FRANK_RELEASE_SOURCE" rev-list --count HEAD..origin/main)" -eq 0
+git --git-dir="$release_git_dir" worktree list --porcelain \
+  > "$evidence_dir/release-worktrees.txt"
+```
+
+Retain this exact worktree for as long as any running container bind-mounts it. A later
+retention job may use `git --git-dir="$release_git_dir" worktree remove` only after the
+release is no longer live and no rollback procedure references it. Never delete a mounted
+release directory directly.
+
+### 2B. Provision the codegraph control credential
+
+Provision the shared API/codegraph control token before Compose validation. It is a random
+file-backed secret, not the signed web BFF identity token minted later from the verified API
+artifact:
+
+```bash
+install -d -o root -g root -m 0700 -- /srv/frank/secrets
+control_token_file='/srv/frank/secrets/codegraph-control-token'
+control_token_tmp="$(mktemp /srv/frank/secrets/.codegraph-control-token.XXXXXX)"
+trap 'rm -f -- "${control_token_tmp:-}"' EXIT
+
+openssl rand -hex 32 > "$control_token_tmp"
+chown 10001:10001 "$control_token_tmp"
+chmod 0400 "$control_token_tmp"
+mv -f -- "$control_token_tmp" "$control_token_file"
+trap - EXIT
+
+export FRANK_CODEGRAPH_CONTROL_TOKEN_FILE="$control_token_file"
+test "$(stat -c '%u:%g:%a' "$FRANK_CODEGRAPH_CONTROL_TOKEN_FILE")" = '10001:10001:400'
+```
+
+The codegraph token must never enter release evidence or shell tracing. Its rotation
+requires an API/codegraph restart together.
 
 Optional overrides:
 
@@ -93,24 +184,15 @@ Optional overrides:
 - `FRANK_IMAGE_LOCK_FILE`: absolute path to a non-secret file containing one
   `<image-reference> <sha256:image-id>` pair per line. Use this when immutable image IDs
   have been prepared; a mismatch blocks release.
+- `FRANK_ALLOW_LEGACY_CODEGRAPH_NETWORK=true`: one-time Graphify migration flag when the
+  running legacy Node codegraph still uses the general `frank` network. Record the
+  exception, prove the candidate's dedicated internal network in step 3C, and unset it
+  immediately after the first successful rollout. It must remain false thereafter.
 
-## 3. Run hosted preflight
+## 3. Verify immutable artifacts and run hosted preflight
 
-```bash
-bash scripts/production/hosted-preflight.sh \
-  > "$evidence_dir/preflight.result" \
-  2> "$evidence_dir/preflight.log"
-
-grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
-```
-
-The result records the commit, branch, locally known upstream state, disk state, network,
-and counts of checked containers, images, and secret names. The log contains secret names
-only. A dirty worktree, wrong commit, unsynchronized branch, missing secret, invalid
-Compose model, absent image, unhealthy container, or insufficient disk fails the gate.
-
-The upstream check does not fetch. CI or the release operator must fetch before this step
-and ensure the locally known upstream reference is current.
+Artifact verification must finish before the candidate API image is allowed to mint the
+domain service token and before hosted preflight checks that exact digest.
 
 ### 3A. Download and verify the GitHub release artifact
 
@@ -155,16 +237,18 @@ gh run download "$FRANK_ARTIFACT_RUN_ID" -R "$FRANK_GITHUB_REPOSITORY" \
 manifest="$FRANK_RELEASE_ARTIFACT_DIR/release-manifest.json"
 api_sbom="$FRANK_RELEASE_ARTIFACT_DIR/api.spdx.json"
 web_sbom="$FRANK_RELEASE_ARTIFACT_DIR/web.spdx.json"
+codegraph_sbom="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.spdx.json"
 test -s "$manifest"
 test -s "$api_sbom"
 test -s "$web_sbom"
+test -s "$codegraph_sbom"
 
-node --input-type=module - "$manifest" "$api_sbom" "$web_sbom" \
+node --input-type=module - "$manifest" "$api_sbom" "$web_sbom" "$codegraph_sbom" \
   "$FRANK_RELEASE_COMMIT" "$FRANK_GITHUB_REPOSITORY" <<'NODE'
 import { readFileSync } from 'node:fs';
-const [manifestPath, apiSbomPath, webSbomPath, commit, repository] = process.argv.slice(2);
+const [manifestPath, apiSbomPath, webSbomPath, codegraphSbomPath, commit, repository] = process.argv.slice(2);
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-for (const path of [apiSbomPath, webSbomPath]) {
+for (const path of [apiSbomPath, webSbomPath, codegraphSbomPath]) {
   const sbom = JSON.parse(readFileSync(path, 'utf8'));
   if (!sbom || typeof sbom !== 'object' || !sbom.spdxVersion) throw new Error(`Invalid SPDX JSON: ${path}`);
 }
@@ -173,13 +257,16 @@ const owner = repository.split('/')[0].toLowerCase();
 const expected = {
   api: `ghcr.io/${owner}/frank-api`,
   web: `ghcr.io/${owner}/frank-web`,
+  codegraph: `ghcr.io/${owner}/frank-codegraph`,
 };
 if (manifest.schema_version !== 1 || manifest.commit !== commit ||
     manifest.repository !== repository || manifest.verified_by?.workflow !== 'verify' ||
     !Number.isInteger(manifest.verified_by?.run_id) ||
     manifest.sbom?.api !== 'api.spdx.json' || manifest.sbom?.web !== 'web.spdx.json' ||
+    manifest.sbom?.codegraph !== 'codegraph.spdx.json' ||
     manifest.images?.api?.reference !== expected.api || !digest.test(manifest.images?.api?.digest ?? '') ||
-    manifest.images?.web?.reference !== expected.web || !digest.test(manifest.images?.web?.digest ?? '')) {
+    manifest.images?.web?.reference !== expected.web || !digest.test(manifest.images?.web?.digest ?? '') ||
+    manifest.images?.codegraph?.reference !== expected.codegraph || !digest.test(manifest.images?.codegraph?.digest ?? '')) {
   throw new Error('Manifest does not exactly bind this commit, repository, SBOMs, and immutable GHCR images');
 }
 NODE
@@ -214,10 +301,17 @@ const image = JSON.parse(readFileSync(process.argv[2], 'utf8')).images.web;
 console.log(`${image.reference}@${image.digest}`);
 NODE
 )"
+export FRANK_CODEGRAPH_IMAGE="$(node --input-type=module - "$manifest" <<'NODE'
+import { readFileSync } from 'node:fs';
+const image = JSON.parse(readFileSync(process.argv[2], 'utf8')).images.codegraph;
+console.log(`${image.reference}@${image.digest}`);
+NODE
+)"
 
 printf '%s' "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USERNAME" --password-stdin
 docker pull "$FRANK_API_IMAGE"
 docker pull "$FRANK_WEB_IMAGE"
+docker pull "$FRANK_CODEGRAPH_IMAGE"
 gh attestation verify "oci://$FRANK_API_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
   --source-ref 'refs/heads/main' \
@@ -230,18 +324,77 @@ gh attestation verify "oci://$FRANK_WEB_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
   --format json \
   > "$evidence_dir/web.attestation.verify.json"
-docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" \
+gh attestation verify "oci://$FRANK_CODEGRAPH_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
+  --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
+  --source-ref 'refs/heads/main' \
+  --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
+  --format json \
+  > "$evidence_dir/codegraph.attestation.verify.json"
+docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE" \
   --format '{{.RepoDigests}}\t{{.Id}}' \
   > "$evidence_dir/application-images.pulled.tsv"
+
+gh run list --commit "$FRANK_RELEASE_COMMIT" --workflow codegraph-image-security --limit 1 \
+  --json conclusion,url > "$evidence_dir/codegraph-image-security.json"
+jq -e 'length == 1 and .[0].conclusion == "success"' \
+  "$evidence_dir/codegraph-image-security.json" >/dev/null
 ```
 
 The artifact directory, manifest, parsed SPDX SBOMs, GitHub workflow receipts, verified
 attestation output, and pulled image IDs are release evidence. `GHCR_PULL_TOKEN` and
 `GHCR_PULL_USERNAME` must come from the root-only secret runtime; use `--password-stdin`
-and never enable shell tracing. The two image environment variables must be copied only
+and never enable shell tracing. The three image environment variables must be copied only
 from the validated manifest output above—never composed from a tag or a branch name.
 
-### 3B. Define and validate the production application overlay
+### 3B. Mint the domain service token and run hosted preflight
+
+Mint the web BFF identity token inside the verified API digest. The image contains the
+frozen workspace install and `tsx`; the source worktree remains clean. Docker receives the
+signing key by variable name, not as an argument, and stdout goes directly to a root-only
+temporary file:
+
+```bash
+domain_token_file='/srv/frank/secrets/domain-service-token'
+domain_token_tmp="$(mktemp /srv/frank/secrets/.domain-service-token.XXXXXX)"
+trap 'rm -f -- "${domain_token_tmp:-}"' EXIT
+
+docker run --rm --network none --read-only \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777,size=64m \
+  --env HOME=/tmp \
+  --env FRANK_SESSION_SIGNING_KEY \
+  --env FRANK_API_AUDIENCE \
+  --env FRANK_CELL_ID \
+  --env FRANK_SERVICE_TOKEN_LIFETIME_SECONDS=31536000 \
+  "$FRANK_API_IMAGE" \
+  pnpm --filter @frank/api exec tsx /app/scripts/production/mint-service-token.ts \
+  > "$domain_token_tmp"
+
+test -s "$domain_token_tmp"
+test "$(wc -c < "$domain_token_tmp")" -le 8192
+chown root:root "$domain_token_tmp"
+chmod 0400 "$domain_token_tmp"
+mv -f -- "$domain_token_tmp" "$domain_token_file"
+trap - EXIT
+
+export FRANK_DOMAIN_SERVICE_TOKEN="$(<"$domain_token_file")"
+export FRANK_REQUIRED_IMAGES="$FRANK_API_IMAGE $FRANK_WEB_IMAGE $FRANK_CODEGRAPH_IMAGE"
+test -n "$FRANK_DOMAIN_SERVICE_TOKEN"
+test "$(stat -c '%u:%g:%a' "$domain_token_file")" = '0:0:400'
+
+bash "$FRANK_RELEASE_SOURCE/scripts/production/hosted-preflight.sh" \
+  > "$evidence_dir/preflight.result" \
+  2> "$evidence_dir/preflight.log"
+grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
+```
+
+Never use command substitution around the issuer itself: its only output is the credential.
+The redirected file and exported runtime value must never enter release evidence or shell
+tracing. Rotation requires a coordinated API/web restart. Preflight records the commit,
+branch, locally known upstream state, disk state, network, and counts of checked containers,
+images, and secret names. The preflight itself does not fetch; step 2A already proved the
+release worktree is synchronized with `origin/main`.
+
+### 3C. Define and validate the production application overlay
 
 Set the non-secret release/runtime identifiers. Secret values named in step 2 remain
 injected by the accepted runtime and are not repeated here:
@@ -249,7 +402,6 @@ injected by the accepted runtime and are not repeated here:
 ```bash
 export FRANK_CELL_ID='frank'
 export FRANK_OWNER_ID='steven'
-export FRANK_API_AUDIENCE='frank.api'
 export FRANK_PUBLIC_URL='https://frank.fail'
 export FRANK_API_INTERNAL_URL='http://frank-api:3000'
 export FRANK_WEB_INTERNAL_URL='http://frank-web:3001'
@@ -292,21 +444,25 @@ the plaintext password exists only in the root release environment for authentic
 
 Two values require operational issuance, not an invented repository default:
 
-- `FRANK_DOMAIN_SERVICE_TOKEN` must be a production bearer credential issued for the web
-  BFF with only its required API capabilities. Redirect
-  `scripts/production/mint-service-token.ts` directly into the root-only secret runtime;
-  never print the token or use the development-session route.
+- `FRANK_DOMAIN_SERVICE_TOKEN` is the production bearer credential minted in step 3B for
+  the web BFF with only its reviewed API capabilities. Never print it or use the
+  development-session route.
 - `FRANK_BASIC_AUTH_HASH` must be generated from a separately stored strong password with
   Caddy's bcrypt password tool. Store the hash and its corresponding
   `FRANK_BASIC_AUTH_PASSWORD` in the root-only secret runtime. Neither value belongs in Git,
   the candidate Caddyfile, or release evidence.
+
+The codegraph credential issued in step 2B is one shared random bearer token consumed as a
+Docker file secret by both API and codegraph. Compose file-backed secrets are bind mounts
+in this deployment; its host ownership and mode are therefore part of the contract. A
+missing/unreadable file blocks Compose startup.
 
 Validate formats and the fully merged model without saving or printing the resolved
 Compose document, because it contains injected values:
 
 ```bash
 base_compose='/srv/frank/infra/docker-compose.dev.yml'
-app_overlay='/srv/frank/repo/infra/production/docker-compose.app.yml'
+app_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml"
 compose=(docker compose -f "$base_compose" -f "$app_overlay")
 
 version="$(docker compose version --short)"
@@ -318,8 +474,11 @@ printf '%s' "$FRANK_WORKBENCH_IMAGE" | grep -Eq '^[a-z0-9./_-]+:[A-Za-z0-9._-]+$
 printf '%s' "$FRANK_RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
 printf '%s' "$FRANK_API_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-api@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_WEB_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$'
+printf '%s' "$FRANK_CODEGRAPH_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-codegraph@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_DOCKER_SOCKET_GID" | grep -Eq '^[0-9]+$'
 test "$(realpath -e -- "$FRANK_WORKSPACE_SOURCE_HOST_PATH")" = '/srv/frank/workspaces/central'
+test "$(realpath -e -- "$FRANK_RELEASE_SOURCE")" = "$(realpath -e -- "$FRANK_REPO_PATH")"
+test "$(stat -c '%u:%g:%a' "$FRANK_CODEGRAPH_CONTROL_TOKEN_FILE")" = '10001:10001:400'
 case "$FRANK_BASIC_AUTH_HASH" in
   '$2a$'*|'$2b$'*|'$2y$'*) ;;
   *) printf '%s\n' 'FRANK_BASIC_AUTH_HASH must be a bcrypt hash' >&2; exit 1 ;;
@@ -329,8 +488,12 @@ esac
 "${compose[@]}" config --format json | jq -e '
   (.services["frank-api"].build == null) and
   (.services["frank-web"].build == null) and
+  (.services["frank-codegraph"].build == null) and
+  (.services["frank-codegraph-volume-init"].build == null) and
   (.services["frank-api"].image | test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-api@sha256:[a-f0-9]{64}$")) and
   (.services["frank-web"].image | test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$")) and
+  (.services["frank-codegraph"].image | test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-codegraph@sha256:[a-f0-9]{64}$")) and
+  (.services["frank-codegraph-volume-init"].image == .services["frank-codegraph"].image) and
   .services["frank-api"].environment.FRANK_ENV == "production" and
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and
@@ -345,13 +508,17 @@ esac
   ((.services["frank-db"].ports // []) | length == 0) and
   ((.services["frank-redis"].ports // []) | length == 0) and
   ((.services["frank-codegraph"].ports // []) | length == 0) and
+  ((.services["frank-codegraph"].networks | keys) == ["frank-codegraph-internal"]) and
+  (.networks["frank-codegraph-internal"].internal == true) and
   (.services["frank-api"].healthcheck != null) and
-  (.services["frank-web"].healthcheck != null)
+  (.services["frank-web"].healthcheck != null) and
+  (.services["frank-codegraph"].healthcheck != null) and
+  (.secrets.frank_codegraph_control_token.file == env.FRANK_CODEGRAPH_CONTROL_TOKEN_FILE)
 ' >/dev/null
 
 "${compose[@]}" config --images > "$evidence_dir/compose.images.expected.txt"
 sha256sum "$base_compose" "$app_overlay" \
-  /srv/frank/repo/infra/production/Caddyfile.frank-production \
+  "$FRANK_RELEASE_SOURCE/infra/production/Caddyfile.frank-production" \
   > "$evidence_dir/release-inputs.sha256"
 ```
 
@@ -364,44 +531,51 @@ the reviewed API image may receive it, and no workbench container may ever inher
 uses it for inference and passes only commands through `docker exec`, never the key or a
 provider environment file.
 
-## 4. Capture rollback images and configuration evidence
+## 4. Capture the complete application rollback unit
 
-Capture the exact running image IDs before changing anything:
+Before changing source, overlay, image tags, containers, or the codegraph volume, capture
+the legacy Node codegraph and the API/web images that consume its contract as one unit:
 
 ```bash
-for container in frank-frank-api-1 frank-web frank-codegraph frank-frank-caddy-1; do
-  docker inspect --format '{{.Name}}\t{{.Config.Image}}\t{{.Image}}' "$container"
-done > "$evidence_dir/containers.before.tsv"
+export FRANK_RELEASE_ID="$release_id"
+export FRANK_PRE_RELEASE_OVERLAY='/srv/frank/repo/infra/production/docker-compose.app.yml'
+export FRANK_CODEGRAPH_BACKUP_ROOT='/srv/frank/backups/codegraph'
 
-git -C /srv/frank/repo rev-parse HEAD > "$evidence_dir/git.before.txt"
+bash "$FRANK_RELEASE_SOURCE/scripts/production/snapshot-codegraph-release.sh" \
+  > "$evidence_dir/codegraph-snapshot.result" \
+  2> "$evidence_dir/codegraph-snapshot.log"
+grep -Fx 'snapshot=passed' "$evidence_dir/codegraph-snapshot.result"
+codegraph_snapshot="$(awk -F= '$1 == "snapshot" {print $2}' "$evidence_dir/codegraph-snapshot.result")"
+test -n "$codegraph_snapshot"
+export FRANK_CODEGRAPH_PHYSICAL_VOLUME="$(<"$codegraph_snapshot/codegraph-volume.txt")"
+printf '%s' "$FRANK_CODEGRAPH_PHYSICAL_VOLUME" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$'
+test "$(docker volume inspect --format '{{index .Labels "com.docker.compose.volume"}}' "$FRANK_CODEGRAPH_PHYSICAL_VOLUME")" = 'frank_codegraph_data'
+
+install -m 0600 -- "$codegraph_snapshot/images.tsv" "$evidence_dir/containers.before.tsv"
+install -m 0600 -- "$codegraph_snapshot/codegraph-volume-labels.tsv" \
+  "$evidence_dir/codegraph-volume-labels.tsv"
+
+git -C "$FRANK_RELEASE_SOURCE" rev-parse HEAD > "$evidence_dir/git.candidate.txt"
 sha256sum /srv/frank/infra/docker-compose.dev.yml \
   /srv/frank/infra/Caddyfile \
-  /srv/frank/repo/infra/production/docker-compose.app.yml \
-  /srv/frank/repo/infra/production/Caddyfile.frank-production \
+  "$FRANK_PRE_RELEASE_OVERLAY" \
+  "$FRANK_RELEASE_SOURCE/infra/production/Caddyfile.frank-production" \
   > "$evidence_dir/config.before.sha256"
 
 rollback_config_dir="/srv/frank/config-rollback/$release_id"
 install -d -m 0700 -- "$rollback_config_dir"
 install -m 0600 -- /srv/frank/infra/Caddyfile "$rollback_config_dir/Caddyfile"
-
-docker image tag "$(docker inspect --format '{{.Image}}' frank-frank-api-1)" \
-  "frank-frank-api:rollback-$release_id"
-docker image tag "$(docker inspect --format '{{.Image}}' frank-web)" \
-  "frank-frank-web:rollback-$release_id"
-docker image tag "$(docker inspect --format '{{.Image}}' frank-codegraph)" \
-  "frank-frank-codegraph:rollback-$release_id"
-
-{
-  printf 'export FRANK_API_IMAGE=%q\n' "frank-frank-api:rollback-$release_id"
-  printf 'export FRANK_WEB_IMAGE=%q\n' "frank-frank-web:rollback-$release_id"
-} > "$rollback_config_dir/application-images.env"
-chmod 0600 "$rollback_config_dir/application-images.env"
 ```
 
-Image tags are local recovery pointers retained only for application rollback. The
-immutable image IDs in `containers.before.tsv` are the evidence anchor; subsequent
-releases should also retain their verified manifest digest references with the release
-receipt.
+The root-only snapshot contains the literal pre-release Compose overlay, configured image
+references plus immutable IDs, a Docker image archive for all three services, and a
+checksummed archive of the physical volume currently mounted at `/data/codegraph` (for
+Compose project `frank`, normally `frank_frank_codegraph_data`). The logical-volume label
+must be exactly `frank_codegraph_data`; an optional
+`FRANK_CODEGRAPH_PHYSICAL_VOLUME` override must match the discovered mount. The snapshot
+script fails before deployment if any identity
+or label cannot be verified. Copy the snapshot to the approved encrypted off-cell store
+with the database backup.
 
 ## 5. Create and verify the database backup
 
@@ -414,7 +588,7 @@ export FRANK_DB_CONTAINER='frank-frank-db-1'
 export FRANK_BACKUP_DIR='/srv/frank/backups/postgres'
 export FRANK_BACKUP_RETENTION_DAYS='35'
 
-bash scripts/production/backup-postgres.sh \
+bash "$FRANK_RELEASE_SOURCE/scripts/production/backup-postgres.sh" \
   > "$evidence_dir/backup.result" \
   2> "$evidence_dir/backup.log"
 
@@ -452,10 +626,11 @@ container:
 docker image inspect \
   "$FRANK_API_IMAGE" \
   "$FRANK_WEB_IMAGE" \
+  "$FRANK_CODEGRAPH_IMAGE" \
   --format '{{.RepoTags}}\t{{.Id}}' \
   > "$evidence_dir/application-images.promoted.tsv"
 
-for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE"; do
+for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE"; do
   test "$(docker image inspect "$image" \
     --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" \
     = "$FRANK_RELEASE_COMMIT"
@@ -520,20 +695,27 @@ mutation is:
 ```bash
 install -m 0644 -- "$caddy_candidate" /srv/frank/infra/Caddyfile
 
+codegraph_wait_seconds=1920
+printf 'Starting Graphify-backed services; first extraction may take up to 30 minutes.\n' >&2
 "${compose[@]}" up -d \
   --no-build \
   --wait \
-  --wait-timeout 180 \
-  frank-api frank-web frank-caddy \
-  > "$evidence_dir/compose-up.log" 2>&1
+  --wait-timeout "$codegraph_wait_seconds" \
+  frank-codegraph-volume-init frank-codegraph frank-api frank-web frank-caddy \
+  2>&1 | tee "$evidence_dir/compose-up.log"
 
 "${compose[@]}" ps \
   --format json > "$evidence_dir/compose-after.json"
-docker inspect frank-frank-api-1 frank-web frank-frank-caddy-1 \
+docker inspect frank-codegraph frank-frank-api-1 frank-web frank-frank-caddy-1 \
   --format '{{.Name}}\t{{.Image}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
   > "$evidence_dir/containers.after.tsv"
 sha256sum /srv/frank/infra/Caddyfile > "$evidence_dir/caddy.after.sha256"
 ```
+
+The 1,920-second gate covers the supervisor's 1,800-second Graphify process timeout plus
+health-transition margin. Compose progress remains visible through `tee` while being
+retained as evidence. A timeout is a failed release; inspect the bounded codegraph logs and
+retain the prior atomic `current` release rather than shortening or bypassing readiness.
 
 The deployment receipt must add the following to the same evidence directory:
 
@@ -557,7 +739,7 @@ and objective-entry UI were exposed without the required edge gate.
 export FRANK_PUBLIC_URL='https://frank.fail'
 export FRANK_EXPECTED_SERVICE='frank-api'
 
-bash scripts/production/post-deploy-smoke.sh \
+bash "$FRANK_RELEASE_SOURCE/scripts/production/post-deploy-smoke.sh" \
   > "$evidence_dir/smoke.result" \
   2> "$evidence_dir/smoke.log"
 
@@ -583,32 +765,35 @@ Rollback is required when public smoke checks fail, a required container becomes
 unhealthy, error rates materially increase, or migration compatibility differs from the
 recorded release plan.
 
-### Application-only rollback
+### Coupled application/codegraph rollback
 
 Use this path only when the prior application is compatible with the current database
-schema. Restore the captured local recovery image references and previous Caddyfile, then
-recreate only the application and edge services. This uses no registry pull and no build:
+schema. It restores the exact captured legacy overlay and codegraph volume, then recreates
+codegraph, API, and web together from their archived image references. Do not roll only one
+of these services across the Graphify contract boundary:
 
 ```bash
-source "$rollback_config_dir/application-images.env"
+test -n "$codegraph_snapshot"
+export FRANK_CODEGRAPH_PHYSICAL_VOLUME="$(<"$codegraph_snapshot/codegraph-volume.txt")"
+bash "$FRANK_RELEASE_SOURCE/scripts/production/rollback-codegraph-release.sh" "$codegraph_snapshot" \
+  > "$evidence_dir/codegraph-rollback.result" \
+  2> "$evidence_dir/codegraph-rollback.log"
+grep -Fx 'rollback=passed' "$evidence_dir/codegraph-rollback.result"
+
 install -m 0644 -- "$rollback_config_dir/Caddyfile" /srv/frank/infra/Caddyfile
+docker compose -f /srv/frank/infra/docker-compose.dev.yml \
+  -f "$codegraph_snapshot/pre-release-overlay.yml" \
+  up -d --no-build --no-deps --force-recreate --wait --wait-timeout 180 frank-caddy
 
-"${compose[@]}" up -d \
-  --no-build \
-  --force-recreate \
-  --wait \
-  --wait-timeout 180 \
-  frank-api frank-web frank-caddy
-
-bash scripts/production/post-deploy-smoke.sh \
+bash "$FRANK_RELEASE_SOURCE/scripts/production/post-deploy-smoke.sh" \
   > "$evidence_dir/rollback-smoke.result" \
   2> "$evidence_dir/rollback-smoke.log"
 grep -Fx 'smoke=passed' "$evidence_dir/rollback-smoke.result"
 ```
 
-Record the resulting container image IDs and compare them with
-`containers.before.tsv`, and compare the restored Caddy hash with
-`config.before.sha256`. If they differ, rollback is not complete.
+Record the resulting API/web/codegraph image IDs and compare them with
+`containers.before.tsv`; verify the codegraph snapshot checksums again; and compare the
+restored Caddy hash with `config.before.sha256`. If any differ, rollback is not complete.
 
 ### Database recovery or migration failure
 
@@ -648,20 +833,24 @@ reconciliation method, and explicit release authority.
 Retain these artifacts together:
 
 - `preflight.result` and `preflight.log`;
-- `containers.before.tsv`, Git commit, and configuration hashes;
+- verified release manifest, three SPDX SBOMs, three provenance receipts, and the
+  successful codegraph image-security run receipt;
+- `release-worktrees.txt`, candidate Git commit, and zero-divergence preflight evidence;
+- `containers.before.tsv`, `codegraph-volume-labels.tsv`, and configuration hashes;
+- complete checksummed codegraph snapshot and its encrypted off-cell object/version ID;
 - backup result, backup log, `SHA256SUMS`, `manifest.env`, verification output, and
   encrypted off-cell object/version ID;
 - deployment workflow/command receipt and migration identifiers;
 - post-deploy smoke result/log and observation-window health evidence;
-- on rollback, prior and restored image IDs, rollback smoke output, incident ID, and any
-  isolated restore evidence.
+- on rollback, codegraph rollback result/log, prior and restored image IDs, rollback smoke
+  output, incident ID, and any isolated restore evidence.
 
 ## GitHub build-once artifact evidence
 
 For a release built through GitHub Actions, retain the `release-evidence-<full-commit>`
 artifact from the `release-artifacts` workflow with the release evidence above. Its
 machine-readable `release-manifest.json` binds the verified full commit to the immutable
-GHCR API and web image digests; the accompanying SPDX SBOMs and GitHub OIDC provenance
+GHCR API, web, and codegraph image digests; the accompanying SPDX SBOMs and GitHub OIDC provenance
 attestations are release evidence, not a deployment instruction. Production consumes the
 manifest's digest references only after the existing preflight, backup, and promotion
 gates pass. The workflow never deploys to preview, staging, or production.

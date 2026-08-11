@@ -1,0 +1,51 @@
+name: codegraph-image-security
+
+on:
+  push:
+    paths:
+      - apps/codegraph/**
+      - infra/production/docker-compose.app.yml
+      - .dockerignore
+      - .github/workflows/codegraph-image-security.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codegraph-image-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  final-image:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build the exact final image
+        run: >-
+          docker build
+          --pull
+          --build-arg FRANK_REVISION=${{ github.sha }}
+          --build-arg FRANK_SOURCE_URL=https://github.com/${{ github.repository }}
+          --tag frank-codegraph:security-${{ github.sha }}
+          --file apps/codegraph/Dockerfile
+          .
+
+      - name: Generate final-image CycloneDX SBOM
+        uses: anchore/sbom-action@28d71544de8eaf1b958d335707167c5f783590ad # v0.22.2
+        with:
+          image: frank-codegraph:security-${{ github.sha }}
+          format: cyclonedx-json
+          output-file: frank-codegraph-${{ github.sha }}.cdx.json
+
+      # This is a promotion gate: high/critical findings in the final runtime
+      # image fail before the release runbook permits production promotion.
+      - name: Scan final image for known vulnerabilities
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          image: frank-codegraph:security-${{ github.sha }}
+          fail-build: true
+          severity-cutoff: high
+          only-fixed: false

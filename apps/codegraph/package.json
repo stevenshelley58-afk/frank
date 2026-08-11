@@ -1,26 +1,10 @@
 {
   "name": "@frank/codegraph",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "type": "module",
-  "description": "Background code intelligence: Tree-sitter AST to graph JSON, incremental, zero-latency to Frank.",
-  "main": "./src/index.ts",
+  "description": "Internal Graphify AST-only code intelligence supervisor.",
   "scripts": {
-    "dev": "tsx watch src/index.ts",
-    "start": "tsx src/index.ts",
-    "build": "tsc --noEmit",
-    "typecheck": "tsc --noEmit",
-    "lint": "echo lint: codegraph"
-  },
-  "dependencies": {
-    "chokidar": "^4.0.0",
-    "tree-sitter-wasms": "0.1.13",
-    "web-tree-sitter": "^0.24.0"
-  },
-  "devDependencies": {
-    "@types/node": "22.10.2",
-    "tsx": "^4.19.0",
-    "typescript": "5.7.2"
+    "test": "python -m unittest discover -s tests -p 'test_*.py'"
   },
   "frank": {
     "layer": "app",

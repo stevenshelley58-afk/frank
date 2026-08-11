@@ -50,6 +50,9 @@ services:
       FRANK_MISSION_SCHEDULER_INTERVAL_MS: "${FRANK_MISSION_SCHEDULER_INTERVAL_MS:-5000}"
       FRANK_ARTIFACT_ARCHIVE_ROOT: /var/lib/frank/artifacts
       FRANK_WORKSPACE_SOURCE_ROOT: /srv/frank/repo
+      CODEGRAPH_STATUS_URL: http://frank-codegraph:3002
+      CODEGRAPH_REGISTRY: /etc/frank-codegraph/projects.json
+      CODEGRAPH_CONTROL_TOKEN_FILE: /run/secrets/frank_codegraph_control_token
 
     # Numeric application user plus the host socket's group. Docker socket access is
     # still root-equivalent at the daemon boundary; the runbook treats the API as a
@@ -66,12 +69,16 @@ services:
         target: /srv/frank/infra/docker-compose.dev.yml
         read_only: true
       - type: bind
-        source: /srv/frank/repo/scripts
+        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/scripts"
         target: /scripts
         read_only: true
       - type: volume
         source: frank_codegraph_data
         target: /data/codegraph
+        read_only: true
+      - type: bind
+        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/production/codegraph-projects.json"
+        target: /etc/frank-codegraph/projects.json
         read_only: true
       - type: volume
         source: frank_workbench_artifacts
@@ -81,11 +88,19 @@ services:
         target: /srv/frank/repo
         read_only: true
 
+    secrets: !override
+      - source: frank_codegraph_control_token
+        target: frank_codegraph_control_token
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
+
     ports: !reset []
     expose: !override
       - "3000"
     networks: !override
       - frank
+      - frank-codegraph-internal
 
     init: true
     restart: unless-stopped
@@ -160,7 +175,7 @@ services:
         target: /app/apps/web/public/adstudio-samples
         read_only: true
       - type: bind
-        source: /srv/frank/repo
+        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
         target: /srv/frank/repo-view
         read_only: true
       - type: volume
@@ -241,9 +256,143 @@ services:
   frank-redis:
     ports: !reset []
 
+  # One-shot migration for named volumes created by the legacy root service.
+  # The literal target, no interpolation/globs, no repository mount, and no
+  # network access constrain the privileged operation to /data/codegraph.
+  frank-codegraph-volume-init:
+    image: "${FRANK_CODEGRAPH_IMAGE:?FRANK_CODEGRAPH_IMAGE is required}"
+    build: !reset null
+    user: "0:0"
+    entrypoint: ["/bin/sh", "-eu", "-c"]
+    command:
+      - >-
+        test "$$(readlink -f /data/codegraph)" = /data/codegraph;
+        chown --recursive --no-dereference 10001:10001 /data/codegraph;
+        chmod 0750 /data/codegraph
+    volumes:
+      - type: volume
+        source: frank_codegraph_data
+        target: /data/codegraph
+    network_mode: none
+    restart: "no"
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    mem_limit: 128m
+    memswap_limit: 128m
+    cpus: "0.25"
+    pids_limit: 32
+    logging:
+      driver: json-file
+      options:
+        max-size: "${FRANK_LOG_MAX_SIZE:?FRANK_LOG_MAX_SIZE is required}"
+        max-file: "${FRANK_LOG_MAX_FILES:?FRANK_LOG_MAX_FILES is required}"
+
   frank-codegraph:
+    # This is the third digest-pinned image from the verified release manifest.
+    # Production promotion never rebuilds it on the VPS.
+    image: "${FRANK_CODEGRAPH_IMAGE:?FRANK_CODEGRAPH_IMAGE is required}"
+    build: !reset null
+
+    # The registry is release-controlled operator input. Client requests only
+    # name an opaque project id; repository paths are never API input.
+    environment: !override
+      HOME: /tmp
+      CODEGRAPH_OUTPUT: /data/codegraph
+      CODEGRAPH_REGISTRY: /etc/frank-codegraph/projects.json
+      CODEGRAPH_HOST: 0.0.0.0
+      CODEGRAPH_PORT: "3002"
+      CODEGRAPH_DEBOUNCE_SECONDS: "${FRANK_CODEGRAPH_DEBOUNCE_SECONDS:-2}"
+      CODEGRAPH_LOG_LEVEL: "${FRANK_CODEGRAPH_LOG_LEVEL:-INFO}"
+      CODEGRAPH_CONTROL_TOKEN_FILE: /run/secrets/frank_codegraph_control_token
+    user: "10001:10001"
+    working_dir: /app
+    # Clear any legacy Compose command/entrypoint; this process is the new
+    # Python supervisor even if the base development file still names the old
+    # TypeScript watcher.
+    entrypoint: ["python", "-m", "frank_codegraph"]
+    command: []
+    depends_on: !override
+      frank-codegraph-volume-init:
+        condition: service_completed_successfully
+    volumes: !override
+      - type: volume
+        source: frank_codegraph_data
+        target: /data/codegraph
+      - type: bind
+        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/production/codegraph-projects.json"
+        target: /etc/frank-codegraph/projects.json
+        read_only: true
+      - type: bind
+        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+        target: /repositories/frank
+        read_only: true
+    secrets: !override
+      - source: frank_codegraph_control_token
+        target: frank_codegraph_control_token
+        uid: "10001"
+        gid: "10001"
+        mode: 0400
     ports: !reset []
+    expose: !override
+      - "3002"
+    networks: !override
+      - frank-codegraph-internal
+    init: true
+    restart: unless-stopped
+    stop_signal: SIGTERM
+    stop_grace_period: 45s
+    read_only: true
+    tmpfs: !override
+      - /tmp:rw,nosuid,nodev,noexec,mode=1777,size=128m
+    security_opt: !override
+      - no-new-privileges:true
+    cap_drop: !override
+      - ALL
+    mem_limit: "${FRANK_CODEGRAPH_MEMORY_LIMIT:-2g}"
+    memswap_limit: "${FRANK_CODEGRAPH_MEMORY_LIMIT:-2g}"
+    cpus: "${FRANK_CODEGRAPH_CPU_LIMIT:-1.0}"
+    pids_limit: 256
+    ulimits:
+      nofile:
+        soft: 8192
+        hard: 8192
+    logging:
+      driver: json-file
+      options:
+        max-size: "${FRANK_LOG_MAX_SIZE:?FRANK_LOG_MAX_SIZE is required}"
+        max-file: "${FRANK_LOG_MAX_FILES:?FRANK_LOG_MAX_FILES is required}"
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          response = urllib.request.urlopen('http://127.0.0.1:3002/health', timeout=3);
+          assert response.status == 200 and json.load(response)['ready'] is True
+      interval: 20s
+      timeout: 5s
+      retries: 12
+      start_period: 120s
 
 volumes:
   frank_workbench_artifacts:
     name: frank_workbench_artifacts
+
+secrets:
+  # Compose implements file-backed secrets as bind mounts, so the host file is
+  # provisioned UID/GID 10001 and mode 0400 before `compose up`.
+  frank_codegraph_control_token:
+    file: "${FRANK_CODEGRAPH_CONTROL_TOKEN_FILE:-/srv/frank/secrets/codegraph-control-token}"
+
+networks:
+  frank-codegraph-internal:
+    name: frank-codegraph-internal
+    internal: true

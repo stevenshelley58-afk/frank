@@ -78,7 +78,9 @@ export type Capability =
   | 'brain.search.read'
   | 'brain.entry.write'
   | 'chat.read'
-  | 'chat.write';
+  | 'chat.write'
+  | 'codegraph.read'
+  | 'codegraph.refresh';
 
 /**
  * Which roles may request which operation.
@@ -113,6 +115,10 @@ export const ROLE_CAPABILITIES: Readonly<Record<Capability, readonly Role[]>> = 
   // its own turns, working cards and receipts to the conversation it was given.
   'chat.read': ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
   'chat.write': ['owner', 'operator', 'builder', 'member', 'service_identity'],
+  // Code structure is internal reconnaissance data. Human access is limited
+  // to owner/operator/builder; scoped services require signed explicit claims.
+  'codegraph.read': ['owner', 'operator', 'builder'],
+  'codegraph.refresh': ['owner', 'operator'],
 };
 
 const CAPABILITY_SET: ReadonlySet<string> = new Set<string>(Object.keys(ROLE_CAPABILITIES));

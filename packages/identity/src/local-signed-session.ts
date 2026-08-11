@@ -48,10 +48,11 @@ import type {
   PresentedCredential,
   Principal,
 } from './provider.js';
-import { isRole } from './roles.js';
-import type { Role } from './roles.js';
+import { isCapability, isRole } from './roles.js';
+import type { Capability, Role } from './roles.js';
 
 const TOKEN_PREFIX = 'frank-session.v1.';
+const MAX_EXPLICIT_CAPABILITIES = 32;
 
 /** The claims a session token carries. Serialized with sorted keys before MAC. */
 export interface SessionClaims {
@@ -60,6 +61,8 @@ export interface SessionClaims {
   /** FRANK-§2.4 cell scope. */
   readonly cell: string;
   readonly roles: readonly string[];
+  /** Explicit grants for a narrowly scoped service identity. */
+  readonly caps?: readonly string[];
   /** Session id, for the FRANK-§15.2 inventory. */
   readonly sid: string;
   /** Seconds since the epoch. */
@@ -91,6 +94,7 @@ function canonicalClaims(claims: SessionClaims): string {
     ...(claims.act === undefined ? {} : { act: claims.act }),
     amr: [...claims.amr],
     aud: claims.aud,
+    ...(claims.caps === undefined ? {} : { caps: [...claims.caps] }),
     cell: claims.cell,
     exp: claims.exp,
     iat: claims.iat,
@@ -158,7 +162,23 @@ export class LocalSignedSessionProvider implements IdentityProvider {
     readonly lifetimeSeconds: number;
     readonly methods?: readonly AuthenticationMethod[];
     readonly delegatedActorId?: string;
+    readonly capabilities?: readonly Capability[];
   }): string {
+    if (
+      input.capabilities !== undefined &&
+      (input.capabilities.length > MAX_EXPLICIT_CAPABILITIES ||
+        new Set(input.capabilities).size !== input.capabilities.length ||
+        input.capabilities.some((capability) => !isCapability(capability)))
+    ) {
+      throw new TypeError(`Explicit service capabilities must be unique and limited to ${MAX_EXPLICIT_CAPABILITIES}.`);
+    }
+    if (
+      input.capabilities !== undefined &&
+      input.capabilities.length > 0 &&
+      !input.roles.includes('service_identity')
+    ) {
+      throw new TypeError('Explicit capabilities may be issued only to a service_identity.');
+    }
     const nowSeconds = Math.floor(this.#now().getTime() / 1000);
     const claims: SessionClaims = {
       sub: input.principalId,
@@ -170,6 +190,7 @@ export class LocalSignedSessionProvider implements IdentityProvider {
       exp: nowSeconds + input.lifetimeSeconds,
       aud: this.#audience,
       amr: [...(input.methods ?? ['local_signed_session'])],
+      ...(input.capabilities === undefined ? {} : { caps: [...input.capabilities] }),
       ...(input.delegatedActorId === undefined ? {} : { act: input.delegatedActorId }),
     };
     const payload = base64url(Buffer.from(canonicalClaims(claims), 'utf8'));
@@ -303,6 +324,35 @@ export class LocalSignedSessionProvider implements IdentityProvider {
     }
 
     const methods = claims.amr.filter(isAuthenticationMethod);
+    const capabilities: Capability[] = [];
+    const claimedCapabilities = claims.caps ?? [];
+    if (
+      claimedCapabilities.length > MAX_EXPLICIT_CAPABILITIES ||
+      new Set(claimedCapabilities).size !== claimedCapabilities.length
+    ) {
+      return {
+        authenticated: false,
+        reason: 'unknown_capability',
+        detail: 'token carries a duplicate or excessive explicit capability set',
+      };
+    }
+    for (const capability of claimedCapabilities) {
+      if (!isCapability(capability)) {
+        return {
+          authenticated: false,
+          reason: 'unknown_capability',
+          detail: `token carries unknown capability ${JSON.stringify(capability)}`,
+        };
+      }
+      capabilities.push(capability);
+    }
+    if (capabilities.length > 0 && !roles.includes('service_identity')) {
+      return {
+        authenticated: false,
+        reason: 'unknown_capability',
+        detail: 'explicit capabilities require a service_identity role',
+      };
+    }
 
     const principal: Principal = {
       principalId: claims.sub,
@@ -313,6 +363,7 @@ export class LocalSignedSessionProvider implements IdentityProvider {
       expiresAt: new Date(claims.exp * 1000),
       authenticationMethods: methods.length > 0 ? methods : ['local_signed_session'],
       providerId: this.providerId,
+      ...(capabilities.length === 0 ? {} : { capabilities }),
       ...(claims.act === undefined ? {} : { delegatedActorId: claims.act }),
     };
 
@@ -358,6 +409,7 @@ function parseClaims(value: unknown): SessionClaims | undefined {
 
   const roles = strings(raw['roles']);
   const amr = strings(raw['amr']);
+  const caps = raw['caps'] === undefined ? undefined : strings(raw['caps']);
   if (
     typeof raw['sub'] !== 'string' ||
     typeof raw['cell'] !== 'string' ||
@@ -367,7 +419,8 @@ function parseClaims(value: unknown): SessionClaims | undefined {
     typeof raw['exp'] !== 'number' ||
     typeof raw['nbf'] !== 'number' ||
     roles === undefined ||
-    amr === undefined
+    amr === undefined ||
+    (raw['caps'] !== undefined && caps === undefined)
   ) {
     return undefined;
   }
@@ -384,6 +437,7 @@ function parseClaims(value: unknown): SessionClaims | undefined {
     nbf: raw['nbf'],
     aud: raw['aud'],
     amr,
+    ...(caps === undefined ? {} : { caps }),
     ...(act === undefined ? {} : { act }),
   };
 }
