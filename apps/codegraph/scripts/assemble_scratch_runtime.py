@@ -71,6 +71,37 @@ def copy_entry(root: Path, source: Path, allowed_roots: tuple[Path, ...]) -> Non
     target.chmod(stat.S_IMODE(metadata.st_mode) & 0o777)
 
 
+def copy_os_release(
+    root: Path,
+    *,
+    canonical_source: Path = Path("/usr/lib/os-release"),
+    fallback_source: Path = Path("/etc/os-release"),
+) -> None:
+    """Install os-release as bytes in a normalized regular file, never a link."""
+    source = canonical_source
+    allowed_root = canonical_source.parent.resolve(strict=True)
+    if os.path.lexists(source):
+        canonical_metadata = source.lstat()
+        if not stat.S_ISREG(canonical_metadata.st_mode):
+            fail(f"canonical os-release must be a real regular file: {source}")
+    else:
+        source = fallback_source
+        allowed_root = fallback_source.parent.resolve(strict=True)
+        fallback_metadata = source.lstat()
+        if not stat.S_ISREG(fallback_metadata.st_mode):
+            fail(f"fallback os-release must be a real regular file: {source}")
+    resolved, _metadata = validated_regular(source, (allowed_root,))
+    target = root / "etc/os-release"
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if os.path.lexists(target):
+        fail(f"assembled os-release destination already exists: {target}")
+    shutil.copyfile(resolved, target, follow_symlinks=False)
+    target.chmod(0o644)
+    final = target.lstat()
+    if not stat.S_ISREG(final.st_mode) or stat.S_ISLNK(final.st_mode) or stat.S_IMODE(final.st_mode) != 0o644:
+        fail("assembled /etc/os-release is not a normalized regular file")
+
+
 def copy_tree(
     root: Path,
     source: Path,
@@ -265,7 +296,7 @@ def main() -> None:
 
     for loader in sorted(Path("/lib").glob("ld-musl-*.so.1")):
         copy_entry(root, loader, system_roots)
-    copy_entry(root, Path("/etc/os-release"), (Path("/etc").resolve(strict=True),))
+    copy_os_release(root)
     system_licenses = Path("/usr/share/licenses")
     if system_licenses.is_dir():
         copy_tree(root, system_licenses)
