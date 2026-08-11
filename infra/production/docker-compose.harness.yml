@@ -35,8 +35,13 @@ services:
     networks: [frank, frank-model]
     volumes: ["${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/harness/litellm/config.yaml:/etc/litellm/config.yaml:ro"]
     environment:
-      LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?required}"
+      LITELLM_ADMIN_KEY: "${LITELLM_ADMIN_KEY:?required; distinct from scoped API key}"
+      LITELLM_API_KEY: "${LITELLM_API_KEY:?required; scoped application key}"
       FRANK_LITELLM_ENABLE_MODELS: "${FRANK_LITELLM_ENABLE_MODELS:?comma-separated reviewed aliases required}"
+      FRANK_LITELLM_OPENAI_MODEL: "${FRANK_LITELLM_OPENAI_MODEL:?required}"
+      FRANK_LITELLM_GEMINI_MODEL: "${FRANK_LITELLM_GEMINI_MODEL:?required}"
+      FRANK_LITELLM_CONCENTRATE_MODEL: "${FRANK_LITELLM_CONCENTRATE_MODEL:?required}"
+      FRANK_LITELLM_DEEPSEEK_MODEL: "${FRANK_LITELLM_DEEPSEEK_MODEL:?required}"
       OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       CONCENTRATE_API_BASE: "${CONCENTRATE_API_BASE:-}"
@@ -92,44 +97,10 @@ services:
     expose: ["3310"]
     healthcheck: { test: ["CMD-SHELL", "clamdscan --version >/dev/null"], interval: 30s, timeout: 10s, retries: 12, start_period: 120s }
 
-  frank-letta:
-    image: "${FRANK_LETTA_CURRENT_IMAGE:?reviewed Letta digest required}"
-    profiles: [harness-manual-memory]
-    environment: { LETTA_MANUAL_ONLY: "true", LETTA_SERVER_HOST: "0.0.0.0", LETTA_SERVER_PORT: "8283" }
-    networks: [frank]
-    init: true
-    restart: unless-stopped
-    read_only: true
-    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: 768m
-    cpus: "0.75"
-    pids_limit: 256
-    expose: ["8283"]
-    # Command and health contract remain candidate evidence fields; do not guess either.
-
-  frank-hermes:
-    image: "${FRANK_HERMES_CURRENT_IMAGE:?reviewed Hermes digest required}"
-    profiles: [harness-specialist]
-    networks: [frank-model, frank-hermes-egress]
-    environment: { HERMES_API_SEAM_URL: "${FRANK_HERMES_API_SEAM_URL:?required}", OPENAI_BASE_URL: "http://frank-litellm:4000/v1", HERMES_BROWSER_PROFILE: "research-constrained", HERMES_DISABLE_SCHEDULER: "true", HERMES_DISABLE_CHILD_AGENTS: "true" }
-    init: true
-    restart: unless-stopped
-    read_only: true
-    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: 1024m
-    cpus: "1.0"
-    pids_limit: 256
-    # Command and health contract remain candidate evidence fields; do not guess either.
-
 networks:
   frank: { external: true, name: frank }
   frank-model: { internal: true, name: frank-model }
   frank-attachments: { internal: true, name: frank-attachments }
-  frank-hermes-egress: { external: true, name: frank-hermes-egress }
 volumes:
   frank-cell-seaweedfs-data: { external: true, name: frank-cell-seaweedfs-data }
   frank-clamav-signatures: { name: frank-clamav-signatures }

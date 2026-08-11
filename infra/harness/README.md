@@ -22,8 +22,9 @@ must stay lake-local: it joins neither network and receives no attachment creden
 has no public port, scheduler, durable/child-agent authority, or Night Watch access.
 
 Bucket bootstrap is a reviewed idempotent one-shot operation using a temporary bucket-admin
-credential held outside Compose. It creates exactly the three listed buckets, applies a 24h
-incomplete-upload/quarantine abort lifecycle, then revokes its credential. The API reserves
+credential held outside Compose. It creates the three attachment buckets without enumerating
+or changing later lake buckets, and applies a 24h incomplete-upload lifecycle only to staging.
+The credential is removed from the bootstrap process; external credential retirement is separately evidenced. The API reserves
 2 GiB per file and enforces 10 GiB/10,000 aggregate limits before issuing a capability. That
 capability binds owner/cell/conversation/upload and the hook selects the collision-safe key
 `<cell_id>/<upload_id>/<part-or-object>`; no deployment-wide S3 key prefix is used.
