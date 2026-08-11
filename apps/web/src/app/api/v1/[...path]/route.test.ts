@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   hasStrictBrowserMutationProvenance,
   isAllowedBrowserOperation,
-} from './route';
+} from './policy';
 
 describe('browser Domain API allowlist', () => {
   it('permits only the shell and Console operation surface', () => {
