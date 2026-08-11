@@ -97,11 +97,11 @@ frank.fail {
             # It must fail closed and retain Authorization/Tus headers; the tusd hook bearer
             # is a separate service credential and is never a client capability.
             forward_auth {$FRANK_UPLOAD_GATE_INTERNAL_URL} {
+                # Caddy forward_auth always issues GET. The API gate contract is therefore
+                # GET /private/tusd/gate and reads the original method/URI forwarded below.
                 uri /private/tusd/gate
                 header_up X-Tusd-Gate-Secret {$FRANK_TUSD_GATE_SECRET}
                 header_up -Authorization
-                header_up X-Forwarded-Method {http.request.method}
-                header_up X-Forwarded-Uri {http.request.uri}
                 header_up X-Frank-Upload-Capability {http.request.header.X-Frank-Upload-Capability}
                 header_up Upload-Metadata {http.request.header.Upload-Metadata}
                 header_up Tus-Resumable {http.request.header.Tus-Resumable}
