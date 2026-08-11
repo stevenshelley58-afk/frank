@@ -5,6 +5,7 @@ import type { ObjectStorage } from './types.js';
 export const STAGING_BUCKET = 'frank-attachment-staging';
 export const OBJECTS_BUCKET = 'frank-objects';
 export const PREVIEWS_BUCKET = 'frank-object-previews';
+export function seaweedEndpoint(input: string): URL { const endpoint = new URL(input); if (endpoint.protocol !== 'http:' || endpoint.hostname !== 'frank-seaweedfs' || endpoint.port !== '8333' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== '/') throw new Error('invalid_private_seaweed_endpoint'); return endpoint; }
 
 export function stagingKey(cellId: string, uploadId: string, part = 'object'): string { return `${cellId}/${uploadId}/${part}`; }
 export function objectKey(sha256: string): string { if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error('invalid sha256'); return `sha256/${sha256.slice(0, 2)}/${sha256}`; }
