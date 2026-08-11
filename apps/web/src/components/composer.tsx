@@ -163,7 +163,7 @@ export function Composer({
                     : ''}
             </div>
             <div className="flex items-end gap-2.5">
-              <SharedRichComposer disabled={disabled || Boolean(booting)} dark />
+              <SharedRichComposer disabled={disabled || Boolean(booting)} dark pasteTargetRef={taRef} />
               <textarea
                 {...textareaProps}
                 className="max-h-[132px] min-h-[42px] flex-1 resize-none border-none bg-transparent px-1 py-2 text-[14px] leading-[1.5] text-white outline-none placeholder:text-white/40"
@@ -211,7 +211,7 @@ export function Composer({
             }}
           >
             {/* room identity chip — tint lives here, concentrated not spread */}
-            <SharedRichComposer disabled={disabled || Boolean(booting)} />
+            <SharedRichComposer disabled={disabled || Boolean(booting)} pasteTargetRef={taRef} />
             <span
               className="mb-1 grid h-6 w-6 shrink-0 place-items-center rounded-lg font-display text-[10px] font-bold text-white shadow-sm"
               style={{ background: room.tint }}

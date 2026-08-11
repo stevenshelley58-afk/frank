@@ -229,7 +229,7 @@ export function ComposerBar({
           </div>
 
           <div className="flex items-end gap-2">
-            <SharedRichComposer disabled={disabled} dark={isDeck} />
+            <SharedRichComposer disabled={disabled} dark={isDeck} pasteTargetRef={taRef} />
             <textarea
               ref={taRef}
               rows={1}
