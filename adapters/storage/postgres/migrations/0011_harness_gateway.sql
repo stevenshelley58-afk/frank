@@ -5,6 +5,8 @@ CREATE UNIQUE INDEX "chat_conversation_id_cell_uidx" ON "frank_domain"."chat_con
 CREATE UNIQUE INDEX "chat_message_id_cell_uidx" ON "frank_domain"."chat_message" ("id", "cell_id");--> statement-breakpoint
 CREATE INDEX "chat_conversation_cell_project_idx" ON "frank_domain"."chat_conversation" ("cell_id", "project_id");--> statement-breakpoint
 CREATE INDEX "chat_message_cell_conversation_idx" ON "frank_domain"."chat_message" ("cell_id", "conversation_id", "created_at");--> statement-breakpoint
+ALTER TABLE "frank_domain"."chat_conversation" ADD CONSTRAINT "chat_conversation_identity_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("owner_id")) > 0 AND length(btrim("project_id")) > 0 AND length(btrim("agent")) > 0);--> statement-breakpoint
+ALTER TABLE "frank_domain"."chat_message" ADD CONSTRAINT "chat_message_identity_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("kind")) > 0);--> statement-breakpoint
 
 CREATE TABLE "frank_domain"."harness_config_revision" (
   "id" uuid PRIMARY KEY NOT NULL, "cell_id" text NOT NULL, "harness_id" text NOT NULL,
