@@ -238,17 +238,19 @@ manifest="$FRANK_RELEASE_ARTIFACT_DIR/release-manifest.json"
 api_sbom="$FRANK_RELEASE_ARTIFACT_DIR/api.spdx.json"
 web_sbom="$FRANK_RELEASE_ARTIFACT_DIR/web.spdx.json"
 codegraph_sbom="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.spdx.json"
+workbench_sbom="$FRANK_RELEASE_ARTIFACT_DIR/workbench.spdx.json"
 test -s "$manifest"
 test -s "$api_sbom"
 test -s "$web_sbom"
 test -s "$codegraph_sbom"
+test -s "$workbench_sbom"
 
-node --input-type=module - "$manifest" "$api_sbom" "$web_sbom" "$codegraph_sbom" \
+node --input-type=module - "$manifest" "$api_sbom" "$web_sbom" "$codegraph_sbom" "$workbench_sbom" \
   "$FRANK_RELEASE_COMMIT" "$FRANK_GITHUB_REPOSITORY" <<'NODE'
 import { readFileSync } from 'node:fs';
-const [manifestPath, apiSbomPath, webSbomPath, codegraphSbomPath, commit, repository] = process.argv.slice(2);
+const [manifestPath, apiSbomPath, webSbomPath, codegraphSbomPath, workbenchSbomPath, commit, repository] = process.argv.slice(2);
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-for (const path of [apiSbomPath, webSbomPath, codegraphSbomPath]) {
+for (const path of [apiSbomPath, webSbomPath, codegraphSbomPath, workbenchSbomPath]) {
   const sbom = JSON.parse(readFileSync(path, 'utf8'));
   if (!sbom || typeof sbom !== 'object' || !sbom.spdxVersion) throw new Error(`Invalid SPDX JSON: ${path}`);
 }
@@ -258,15 +260,18 @@ const expected = {
   api: `ghcr.io/${owner}/frank-api`,
   web: `ghcr.io/${owner}/frank-web`,
   codegraph: `ghcr.io/${owner}/frank-codegraph`,
+  workbench: `ghcr.io/${owner}/frank-workbench`,
 };
 if (manifest.schema_version !== 1 || manifest.commit !== commit ||
     manifest.repository !== repository || manifest.verified_by?.workflow !== 'verify' ||
     !Number.isInteger(manifest.verified_by?.run_id) ||
     manifest.sbom?.api !== 'api.spdx.json' || manifest.sbom?.web !== 'web.spdx.json' ||
     manifest.sbom?.codegraph !== 'codegraph.spdx.json' ||
+    manifest.sbom?.workbench !== 'workbench.spdx.json' ||
     manifest.images?.api?.reference !== expected.api || !digest.test(manifest.images?.api?.digest ?? '') ||
     manifest.images?.web?.reference !== expected.web || !digest.test(manifest.images?.web?.digest ?? '') ||
-    manifest.images?.codegraph?.reference !== expected.codegraph || !digest.test(manifest.images?.codegraph?.digest ?? '')) {
+    manifest.images?.codegraph?.reference !== expected.codegraph || !digest.test(manifest.images?.codegraph?.digest ?? '') ||
+    manifest.images?.workbench?.reference !== expected.workbench || !digest.test(manifest.images?.workbench?.digest ?? '')) {
   throw new Error('Manifest does not exactly bind this commit, repository, SBOMs, and immutable GHCR images');
 }
 NODE
@@ -307,11 +312,18 @@ const image = JSON.parse(readFileSync(process.argv[2], 'utf8')).images.codegraph
 console.log(`${image.reference}@${image.digest}`);
 NODE
 )"
+export FRANK_WORKBENCH_IMAGE="$(node --input-type=module - "$manifest" <<'NODE'
+import { readFileSync } from 'node:fs';
+const image = JSON.parse(readFileSync(process.argv[2], 'utf8')).images.workbench;
+console.log(`${image.reference}@${image.digest}`);
+NODE
+)"
 
 printf '%s' "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USERNAME" --password-stdin
 docker pull "$FRANK_API_IMAGE"
 docker pull "$FRANK_WEB_IMAGE"
 docker pull "$FRANK_CODEGRAPH_IMAGE"
+docker pull "$FRANK_WORKBENCH_IMAGE"
 gh attestation verify "oci://$FRANK_API_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
   --source-ref 'refs/heads/main' \
@@ -330,7 +342,13 @@ gh attestation verify "oci://$FRANK_CODEGRAPH_IMAGE" -R "$FRANK_GITHUB_REPOSITOR
   --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
   --format json \
   > "$evidence_dir/codegraph.attestation.verify.json"
-docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE" \
+gh attestation verify "oci://$FRANK_WORKBENCH_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
+  --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
+  --source-ref 'refs/heads/main' \
+  --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
+  --format json \
+  > "$evidence_dir/workbench.attestation.verify.json"
+docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE" "$FRANK_WORKBENCH_IMAGE" \
   --format '{{.RepoDigests}}\t{{.Id}}' \
   > "$evidence_dir/application-images.pulled.tsv"
 
@@ -343,7 +361,7 @@ jq -e 'length == 1 and .[0].conclusion == "success"' \
 The artifact directory, manifest, parsed SPDX SBOMs, GitHub workflow receipts, verified
 attestation output, and pulled image IDs are release evidence. `GHCR_PULL_TOKEN` and
 `GHCR_PULL_USERNAME` must come from the root-only secret runtime; use `--password-stdin`
-and never enable shell tracing. The three image environment variables must be copied only
+and never enable shell tracing. The four image environment variables must be copied only
 from the validated manifest output above—never composed from a tag or a branch name.
 
 ### 3B. Mint the domain service token and run hosted preflight
@@ -377,7 +395,7 @@ mv -f -- "$domain_token_tmp" "$domain_token_file"
 trap - EXIT
 
 export FRANK_DOMAIN_SERVICE_TOKEN="$(<"$domain_token_file")"
-export FRANK_REQUIRED_IMAGES="$FRANK_API_IMAGE $FRANK_WEB_IMAGE $FRANK_CODEGRAPH_IMAGE"
+export FRANK_REQUIRED_IMAGES="$FRANK_API_IMAGE $FRANK_WEB_IMAGE $FRANK_CODEGRAPH_IMAGE $FRANK_WORKBENCH_IMAGE"
 test -n "$FRANK_DOMAIN_SERVICE_TOKEN"
 test "$(stat -c '%u:%g:%a' "$domain_token_file")" = '0:0:400'
 
@@ -410,7 +428,6 @@ export FRANK_MAX_BODY_BYTES='1048576'
 
 export FRANK_WORKBENCH_RUNNER_ENABLED='true'
 export FRANK_WORKBENCH_CONCURRENCY='2'
-export FRANK_WORKBENCH_IMAGE='frank-workbench:<REVIEWED_IMMUTABLE_TAG>'
 export FRANK_WORKBENCH_MODEL_PROVIDER='<REVIEWED_PROVIDER_ID>'
 export FRANK_WORKBENCH_MODEL_BASE_URL='<REVIEWED_HTTPS_PROVIDER_BASE_URL>'
 export FRANK_WORKBENCH_MODEL='<REVIEWED_MODEL_ID>'
@@ -470,7 +487,7 @@ test "$(printf '%s\n' '2.24.4' "$version" | sort -V | head -n1)" = '2.24.4'
 test "$FRANK_WORKBENCH_RUNNER_ENABLED" = 'true'
 test "$FRANK_WORKBENCH_CONCURRENCY" -ge 1
 test "$FRANK_WORKBENCH_CONCURRENCY" -le 8
-printf '%s' "$FRANK_WORKBENCH_IMAGE" | grep -Eq '^[a-z0-9./_-]+:[A-Za-z0-9._-]+$'
+printf '%s' "$FRANK_WORKBENCH_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-workbench@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
 printf '%s' "$FRANK_API_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-api@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_WEB_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$'
@@ -498,7 +515,7 @@ esac
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and
   (.services["frank-api"].environment.FRANK_WORKBENCH_IMAGE |
-    test("^[a-z0-9./_-]+:[A-Za-z0-9._-]+$")) and
+    test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-workbench@sha256:[a-f0-9]{64}$")) and
   ([.services | to_entries[] |
     select(any(.value.volumes[]?;
       .type == "bind" and .source == "/var/run/docker.sock")) |
@@ -627,10 +644,11 @@ docker image inspect \
   "$FRANK_API_IMAGE" \
   "$FRANK_WEB_IMAGE" \
   "$FRANK_CODEGRAPH_IMAGE" \
+  "$FRANK_WORKBENCH_IMAGE" \
   --format '{{.RepoTags}}\t{{.Id}}' \
   > "$evidence_dir/application-images.promoted.tsv"
 
-for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE"; do
+for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE" "$FRANK_WORKBENCH_IMAGE"; do
   test "$(docker image inspect "$image" \
     --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" \
     = "$FRANK_RELEASE_COMMIT"
@@ -638,10 +656,6 @@ for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE"; do
     --format '{{ index .Config.Labels "org.opencontainers.image.source" }}')" \
     = "https://github.com/$FRANK_GITHUB_REPOSITORY"
 done
-
-docker image inspect "$FRANK_WORKBENCH_IMAGE" \
-  --format '{{.RepoTags}}\t{{.Id}}' \
-  > "$evidence_dir/workbench-image.resolved.tsv"
 
 # One-time/repair-safe ownership initialization for the persistent artifact volume.
 # The API then runs as uid/gid 10001 and archives /workspace/out here before teardown.
@@ -833,7 +847,7 @@ reconciliation method, and explicit release authority.
 Retain these artifacts together:
 
 - `preflight.result` and `preflight.log`;
-- verified release manifest, three SPDX SBOMs, three provenance receipts, and the
+- verified release manifest, four SPDX SBOMs, four provenance receipts, and the
   successful codegraph image-security run receipt;
 - `release-worktrees.txt`, candidate Git commit, and zero-divergence preflight evidence;
 - `containers.before.tsv`, `codegraph-volume-labels.tsv`, and configuration hashes;
@@ -850,7 +864,7 @@ Retain these artifacts together:
 For a release built through GitHub Actions, retain the `release-evidence-<full-commit>`
 artifact from the `release-artifacts` workflow with the release evidence above. Its
 machine-readable `release-manifest.json` binds the verified full commit to the immutable
-GHCR API, web, and codegraph image digests; the accompanying SPDX SBOMs and GitHub OIDC provenance
+GHCR API, web, codegraph, and workbench image digests; the accompanying SPDX SBOMs and GitHub OIDC provenance
 attestations are release evidence, not a deployment instruction. Production consumes the
 manifest's digest references only after the existing preflight, backup, and promotion
 gates pass. The workflow never deploys to preview, staging, or production.

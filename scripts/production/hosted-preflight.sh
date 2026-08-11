@@ -53,6 +53,7 @@ readonly required_secret_vars_raw="${FRANK_REQUIRED_SECRET_VARS:-FRANK_DB_PASSWO
 readonly required_containers_raw="${FRANK_REQUIRED_CONTAINERS:-frank-frank-db-1 frank-frank-redis-1 frank-frank-api-1 frank-web frank-codegraph frank-frank-caddy-1}"
 readonly required_images_raw="${FRANK_REQUIRED_IMAGES:-postgres:17-alpine valkey/valkey:8-alpine caddy:2.8-alpine frank-frank-api frank-frank-web frank-frank-codegraph}"
 readonly image_lock_file="${FRANK_IMAGE_LOCK_FILE:-}"
+readonly workbench_image="${FRANK_WORKBENCH_IMAGE:-}"
 
 [[ "$repo_path" == /* ]] || die "FRANK_REPO_PATH must be absolute"
 [[ "$compose_file" == /* ]] || die "FRANK_COMPOSE_FILE must be absolute"
@@ -68,6 +69,7 @@ readonly image_lock_file="${FRANK_IMAGE_LOCK_FILE:-}"
 (( max_disk_percent >= 1 && max_disk_percent <= 99 )) || die "FRANK_MAX_DISK_PERCENT must be between 1 and 99"
 (( min_free_gib >= 1 )) || die "FRANK_MIN_FREE_GIB must be at least 1"
 [[ "$require_upstream_sync" == "true" || "$require_upstream_sync" == "false" ]] || die "FRANK_REQUIRE_UPSTREAM_SYNC must be true or false"
+[[ "$workbench_image" =~ ^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-workbench@sha256:[a-f0-9]{64}$ ]] || die "FRANK_WORKBENCH_IMAGE must be a digest-pinned GHCR frank-workbench image"
 
 repo_real="$(realpath -e -- "$repo_path")" || die "repository path does not exist"
 compose_real="$(realpath -e -- "$compose_file")" || die "Compose file does not exist"
@@ -170,14 +172,19 @@ done
 
 IFS=', ' read -r -a required_images <<< "$required_images_raw"
 checked_image_count=0
+workbench_image_checked=false
 for image_reference in "${required_images[@]}"; do
   [[ -n "$image_reference" ]] || continue
   image_id="$(docker image inspect --format '{{.Id}}' "$image_reference" 2>/dev/null || true)"
   [[ "$image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die "required Docker image is unavailable: $image_reference"
+  if [[ "$image_reference" == "$workbench_image" ]]; then
+    workbench_image_checked=true
+  fi
   ((checked_image_count += 1))
   log INFO "image check passed: $image_reference (${image_id:7:12})"
 done
 (( checked_image_count > 0 )) || die "FRANK_REQUIRED_IMAGES did not contain any image references"
+[[ "$workbench_image_checked" == "true" ]] || die "FRANK_REQUIRED_IMAGES must include FRANK_WORKBENCH_IMAGE"
 
 if [[ -n "$image_lock_file" ]]; then
   [[ "$image_lock_file" == /* ]] || die "FRANK_IMAGE_LOCK_FILE must be absolute"

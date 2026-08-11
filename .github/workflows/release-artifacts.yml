@@ -32,7 +32,7 @@ jobs:
       id-token: write
       attestations: write
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     env:
       COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
     steps:
@@ -57,6 +57,7 @@ jobs:
           printf 'IMAGE_API=ghcr.io/%s/frank-api\n' "$owner" >> "$GITHUB_ENV"
           printf 'IMAGE_WEB=ghcr.io/%s/frank-web\n' "$owner" >> "$GITHUB_ENV"
           printf 'IMAGE_CODEGRAPH=ghcr.io/%s/frank-codegraph\n' "$owner" >> "$GITHUB_ENV"
+          printf 'IMAGE_WORKBENCH=ghcr.io/%s/frank-workbench\n' "$owner" >> "$GITHUB_ENV"
 
       - name: Set up Buildx
         uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
@@ -115,17 +116,36 @@ jobs:
           provenance: mode=max
           sbom: true
 
+      - name: Build and push workbench image
+        id: workbench
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        with:
+          context: .
+          file: infra/workbench/Dockerfile
+          push: true
+          tags: ${{ env.IMAGE_WORKBENCH }}:${{ env.COMMIT_SHA }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ env.COMMIT_SHA }}
+          provenance: mode=max
+          sbom: true
+
       - name: Validate immutable build digests
         shell: bash
         env:
           API_DIGEST: ${{ steps.api.outputs.digest }}
           WEB_DIGEST: ${{ steps.web.outputs.digest }}
           CODEGRAPH_DIGEST: ${{ steps.codegraph.outputs.digest }}
+          WORKBENCH_DIGEST: ${{ steps.workbench.outputs.digest }}
         run: |
           set -euo pipefail
-          for digest in "$API_DIGEST" "$WEB_DIGEST" "$CODEGRAPH_DIGEST"; do
+          for digest in "$API_DIGEST" "$WEB_DIGEST" "$CODEGRAPH_DIGEST" "$WORKBENCH_DIGEST"; do
             printf '%s' "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
           done
+
+      - name: Create SBOM evidence directory
+        shell: bash
+        run: mkdir -p evidence
 
       - name: Generate API SBOM evidence
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
@@ -154,6 +174,15 @@ jobs:
           upload-artifact: false
           upload-release-assets: false
 
+      - name: Generate workbench SBOM evidence
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.IMAGE_WORKBENCH }}@${{ steps.workbench.outputs.digest }}
+          format: spdx-json
+          output-file: evidence/workbench.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
       - name: Validate SBOM evidence
         shell: bash
         run: |
@@ -161,10 +190,11 @@ jobs:
           test -s evidence/api.spdx.json
           test -s evidence/web.spdx.json
           test -s evidence/codegraph.spdx.json
+          test -s evidence/workbench.spdx.json
           node <<'NODE'
           import { readFileSync } from 'node:fs';
 
-          for (const path of ['evidence/api.spdx.json', 'evidence/web.spdx.json', 'evidence/codegraph.spdx.json']) {
+          for (const path of ['evidence/api.spdx.json', 'evidence/web.spdx.json', 'evidence/codegraph.spdx.json', 'evidence/workbench.spdx.json']) {
             const sbom = JSON.parse(readFileSync(path, 'utf8'));
             if (!sbom || typeof sbom !== 'object' || !sbom.spdxVersion) {
               throw new Error(`${path} is not an SPDX JSON document`);
@@ -196,20 +226,27 @@ jobs:
           subject-digest: ${{ steps.codegraph.outputs.digest }}
           push-to-registry: true
 
+      - name: Attest workbench build provenance
+        uses: actions/attest-build-provenance@96b4a1ef7235a096b17240c259729fdd70c83d45 # v2
+        with:
+          subject-name: ${{ env.IMAGE_WORKBENCH }}
+          subject-digest: ${{ steps.workbench.outputs.digest }}
+          push-to-registry: true
+
       - name: Write release manifest
         shell: bash
         env:
           API_DIGEST: ${{ steps.api.outputs.digest }}
           WEB_DIGEST: ${{ steps.web.outputs.digest }}
           CODEGRAPH_DIGEST: ${{ steps.codegraph.outputs.digest }}
+          WORKBENCH_DIGEST: ${{ steps.workbench.outputs.digest }}
           VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
-          mkdir -p evidence
           node <<'NODE'
           import { writeFileSync } from 'node:fs';
 
-          const required = ['COMMIT_SHA', 'IMAGE_API', 'IMAGE_WEB', 'IMAGE_CODEGRAPH', 'API_DIGEST', 'WEB_DIGEST', 'CODEGRAPH_DIGEST', 'GITHUB_REPOSITORY', 'VERIFY_RUN_ID'];
+          const required = ['COMMIT_SHA', 'IMAGE_API', 'IMAGE_WEB', 'IMAGE_CODEGRAPH', 'IMAGE_WORKBENCH', 'API_DIGEST', 'WEB_DIGEST', 'CODEGRAPH_DIGEST', 'WORKBENCH_DIGEST', 'GITHUB_REPOSITORY', 'VERIFY_RUN_ID'];
           for (const key of required) {
             if (!process.env[key]) throw new Error(`Missing ${key}`);
           }
@@ -225,11 +262,13 @@ jobs:
               api: { reference: process.env.IMAGE_API, digest: process.env.API_DIGEST },
               web: { reference: process.env.IMAGE_WEB, digest: process.env.WEB_DIGEST },
               codegraph: { reference: process.env.IMAGE_CODEGRAPH, digest: process.env.CODEGRAPH_DIGEST },
+              workbench: { reference: process.env.IMAGE_WORKBENCH, digest: process.env.WORKBENCH_DIGEST },
             },
             sbom: {
               api: 'api.spdx.json',
               web: 'web.spdx.json',
               codegraph: 'codegraph.spdx.json',
+              workbench: 'workbench.spdx.json',
             },
             provenance: 'GitHub OIDC attestation attached to each registry digest',
           };
@@ -242,6 +281,7 @@ jobs:
           API_DIGEST: ${{ steps.api.outputs.digest }}
           WEB_DIGEST: ${{ steps.web.outputs.digest }}
           CODEGRAPH_DIGEST: ${{ steps.codegraph.outputs.digest }}
+          WORKBENCH_DIGEST: ${{ steps.workbench.outputs.digest }}
           VERIFY_RUN_ID: ${{ github.event.workflow_run.id }}
         run: |
           set -euo pipefail
@@ -258,9 +298,10 @@ jobs:
             api: { reference: process.env.IMAGE_API, digest: process.env.API_DIGEST },
             web: { reference: process.env.IMAGE_WEB, digest: process.env.WEB_DIGEST },
             codegraph: { reference: process.env.IMAGE_CODEGRAPH, digest: process.env.CODEGRAPH_DIGEST },
+            workbench: { reference: process.env.IMAGE_WORKBENCH, digest: process.env.WORKBENCH_DIGEST },
           };
           if (!/^[0-9a-f]{40}$/.test(expected.commit)) throw new Error('Invalid verified commit');
-          for (const image of [expected.api, expected.web, expected.codegraph]) {
+          for (const image of [expected.api, expected.web, expected.codegraph, expected.workbench]) {
             if (!digest.test(image.digest)) throw new Error('Invalid build digest');
           }
           if (
@@ -275,9 +316,12 @@ jobs:
             manifest.images?.web?.digest !== expected.web.digest ||
             manifest.images?.codegraph?.reference !== expected.codegraph.reference ||
             manifest.images?.codegraph?.digest !== expected.codegraph.digest ||
+            manifest.images?.workbench?.reference !== expected.workbench.reference ||
+            manifest.images?.workbench?.digest !== expected.workbench.digest ||
             manifest.sbom?.api !== 'api.spdx.json' ||
             manifest.sbom?.web !== 'web.spdx.json' ||
-            manifest.sbom?.codegraph !== 'codegraph.spdx.json'
+            manifest.sbom?.codegraph !== 'codegraph.spdx.json' ||
+            manifest.sbom?.workbench !== 'workbench.spdx.json'
           ) {
             throw new Error('Release manifest does not exactly bind the verified commit and image evidence');
           }

@@ -34,7 +34,9 @@ services:
       # declared mounts. The image reference is both human-readable and digest-pinned.
       FRANK_WORKBENCH_RUNNER_ENABLED: "${FRANK_WORKBENCH_RUNNER_ENABLED:?FRANK_WORKBENCH_RUNNER_ENABLED is required}"
       FRANK_WORKBENCH_CONCURRENCY: "${FRANK_WORKBENCH_CONCURRENCY:?FRANK_WORKBENCH_CONCURRENCY is required}"
-      FRANK_WORKBENCH_IMAGE: "${FRANK_WORKBENCH_IMAGE:?FRANK_WORKBENCH_IMAGE is required}"
+      # Resolved only from the verified release manifest; step 3C validates its
+      # ghcr.io/.../frank-workbench@sha256:<digest> form before Compose mutation.
+      FRANK_WORKBENCH_IMAGE: "${FRANK_WORKBENCH_IMAGE:?digest-pinned FRANK_WORKBENCH_IMAGE is required}"
       FRANK_WORKBENCH_MODEL_PROVIDER: "${FRANK_WORKBENCH_MODEL_PROVIDER:?FRANK_WORKBENCH_MODEL_PROVIDER is required}"
       FRANK_WORKBENCH_MODEL_BASE_URL: "${FRANK_WORKBENCH_MODEL_BASE_URL:?FRANK_WORKBENCH_MODEL_BASE_URL is required}"
       # DEEPSEEK_API_KEY already exists only in the root release environment. It is
