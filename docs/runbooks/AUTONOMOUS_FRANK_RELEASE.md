@@ -90,11 +90,42 @@ export FRANK_COMPOSE_FILE='/srv/frank/infra/docker-compose.dev.yml'
 export FRANK_DATA_PATH='/srv/frank'
 export FRANK_MAX_DISK_PERCENT='75'
 export FRANK_MIN_FREE_GIB='20'
+export FRANK_DISK_GATE_MODE='absolute'
+export FRANK_RELEASE_REQUIRED_BYTES='21932447888'
+export FRANK_ROLLBACK_HEADROOM_BYTES='23862108519'
 export FRANK_REQUIRED_NETWORK='frank'
 export FRANK_CODEGRAPH_NETWORK='frank-codegraph-internal'
 export FRANK_CODEGRAPH_CONTAINER='frank-codegraph'
 export FRANK_REQUIRED_SECRET_VARS='FRANK_DB_PASSWORD FRANK_DATABASE_URL FRANK_REDIS_URL FRANK_SESSION_SIGNING_KEY FRANK_ENVELOPE_SIGNING_KEY DEEPSEEK_API_KEY FRANK_DOMAIN_SERVICE_TOKEN FRANK_PACK_SIGNING_KEY GOOSE_ACP_SECRET FRANK_BASIC_AUTH_HASH FRANK_BASIC_AUTH_PASSWORD'
 ```
+
+The explicit absolute disk gate replaces the percentage decision for this release without
+creating a bypass: `FRANK_DISK_GATE_MODE=absolute` requires both positive canonical-decimal
+byte inputs, still enforces the independent 20 GiB minimum-free floor, rejects a signed
+64-bit overflow, and requires available bytes to cover their sum. The default mode remains
+the existing 75% gate for callers that do not opt into an audited absolute budget.
+
+The `45,794,556,407`-byte requirement is deliberately conservative and was calculated from
+audited candidate registry manifests and current committed limits. The fresh signed release
+manifest is verified separately before deployment:
+
+| Capacity held before mutation | Exact bytes |
+|---|---:|
+| Candidate image pull, nine-times compressed allowance for expanded layers, and one pull-staging copy | 10,234,814,980 |
+| PostgreSQL backup plus transient output | 86,748,518 |
+| CodeGraph volume snapshot plus transient output | 22,022,438 |
+| Five coexisting Graphify releases at the committed 2 GiB limit | 10,737,418,240 |
+| Bounded service logs and release evidence | 851,443,712 |
+| **Release-required subtotal** | **21,932,447,888** |
+| Retained rollback images and image archive | 1,850,401,127 |
+| CodeGraph service minimum-free guard | 536,870,912 |
+| Explicit operational safety reserve (20 GiB) | 21,474,836,480 |
+| **Rollback-headroom subtotal** | **23,862,108,519** |
+| **Total required free capacity** | **45,794,556,407** |
+
+Recalculate and review both byte inputs whenever image sizes, the Graphify release limit or
+retention count, database/volume sizes, log bounds, or the safety reserve changes. Never
+lower them merely to pass preflight.
 
 The secret variables named above, except `FRANK_DOMAIN_SERVICE_TOKEN`, must then be
 injected into the current process by the accepted secret runtime. Step 3C mints and exports
@@ -688,6 +719,10 @@ bash "$FRANK_RELEASE_SOURCE/scripts/production/hosted-preflight.sh" \
   2> "$evidence_dir/preflight.log"
 
 grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
+grep -Fx 'disk_gate_mode=absolute' "$evidence_dir/preflight.result"
+grep -Fx 'release_required_bytes=21932447888' "$evidence_dir/preflight.result"
+grep -Fx 'rollback_headroom_bytes=23862108519' "$evidence_dir/preflight.result"
+grep -Fx 'release_total_required_bytes=45794556407' "$evidence_dir/preflight.result"
 ```
 
 Preflight records the commit, branch, locally known upstream state, disk state, network,
