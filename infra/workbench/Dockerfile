@@ -1,5 +1,3 @@
-# syntax=docker/dockerfile:1.7
-
 # Node 22 on Debian/glibc so the host-supplied Goose binary can execute.
 # Both the immutable version tag and the linux/amd64 image digest are pinned.
 # The target VPS is x86_64 and supplies an amd64 Goose binary, so an image built
