@@ -91,6 +91,7 @@ networks:
   frank: { name: frank }
 volumes:
   frank_codegraph_data: {}
+  frank_explorer_cache: {}
 YAML
 digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 export FRANK_API_IMAGE="ghcr.io/example/frank-api@$digest"
