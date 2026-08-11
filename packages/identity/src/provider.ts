@@ -31,7 +31,7 @@
  * site changes, which is the requirement.
  */
 
-import type { Role } from './roles.js';
+import type { Capability, Role } from './roles.js';
 
 /**
  * An authenticated principal.
@@ -47,6 +47,12 @@ export interface Principal {
   readonly cellId: string;
   /** FRANK-§2.2. At least one; the cell's owner holds several in Slice 1. */
   readonly roles: readonly Role[];
+  /**
+   * Explicit operation grants carried by a workload identity. Human sessions
+   * derive authority from roles; service identities must be scoped narrowly at
+   * issuance instead of inheriting every capability of their generic role.
+   */
+  readonly capabilities?: readonly Capability[];
   /**
    * FRANK-§7.5 delegation. Set when a human's session is being exercised by an
    * agent or service on their behalf. The *delegate* is what authorization
@@ -88,6 +94,7 @@ export type AuthenticationFailureReason =
   | 'wrong_audience'
   | 'wrong_cell'
   | 'unknown_role'
+  | 'unknown_capability'
   | 'revoked';
 
 export type AuthenticationResult =

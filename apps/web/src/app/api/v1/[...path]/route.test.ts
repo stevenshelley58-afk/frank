@@ -19,6 +19,22 @@ describe('browser Domain API allowlist', () => {
     expect(isAllowedBrowserOperation('POST', '/v1/system/rebuild')).toBe(false);
   });
 
+  it('exposes only bounded codegraph reads with validated identifiers', () => {
+    const jobId = '0123456789abcdef0123456789abcdef';
+
+    expect(isAllowedBrowserOperation('GET', '/v1/codegraph/frank/overview')).toBe(true);
+    expect(isAllowedBrowserOperation('GET', `/v1/codegraph/frank/jobs/${jobId}`)).toBe(true);
+    expect(isAllowedBrowserOperation('GET', '/v1/codegraph/frank/status')).toBe(true);
+
+    expect(isAllowedBrowserOperation('GET', '/v1/codegraph/Frank/overview')).toBe(false);
+    expect(isAllowedBrowserOperation('GET', '/v1/codegraph/1frank/overview')).toBe(false);
+    expect(isAllowedBrowserOperation('GET', `/v1/codegraph/frank/jobs/${jobId.toUpperCase()}`)).toBe(false);
+    expect(isAllowedBrowserOperation('GET', `/v1/codegraph/frank/jobs/${jobId.slice(1)}`)).toBe(false);
+    expect(isAllowedBrowserOperation('GET', '/v1/codegraph/frank/jobs')).toBe(false);
+    expect(isAllowedBrowserOperation('GET', '/v1/codegraph/frank/raw')).toBe(false);
+    expect(isAllowedBrowserOperation('GET', '/v1/codegraph/frank/expand')).toBe(false);
+  });
+
   it('requires matching Origin or same-origin Fetch Metadata for mutations', () => {
     const base = 'http://web:3001/api/v1/chats';
     const forwarded = { 'x-forwarded-host': 'frank.fail', 'x-forwarded-proto': 'https' };

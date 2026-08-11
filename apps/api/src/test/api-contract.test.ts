@@ -819,6 +819,14 @@ describe('ADR-017 OpenAPI', () => {
       '/v1/chats',
       '/v1/chats/{id}',
       '/v1/chats/{id}/messages',
+      // Authenticated, bounded Graphify views and rebuild control.
+      '/v1/codegraph/projects',
+      '/v1/codegraph/{project}/jobs/{job}',
+      '/v1/codegraph/{project}/nodes/{node}/expand',
+      '/v1/codegraph/{project}/overview',
+      '/v1/codegraph/{project}/refresh',
+      '/v1/codegraph/{project}/spec',
+      '/v1/codegraph/{project}/status',
       // Durable autonomous mission create/read/stop contract.
       '/v1/missions',
       '/v1/missions/{id}',
@@ -858,6 +866,52 @@ describe('ADR-017 OpenAPI', () => {
       // WB-07: first-class Stop (leash + cancellation).
       '/v1/workbenches/{id}/stop',
     ]);
+
+    const readRoles = ['owner', 'operator', 'builder', 'service_identity'];
+    const codegraphContracts = [
+      ['/v1/codegraph/projects', 'get', 'codegraphProjects'],
+      ['/v1/codegraph/{project}/jobs/{job}', 'get', 'codegraphJob'],
+      ['/v1/codegraph/{project}/nodes/{node}/expand', 'get', 'codegraphNodeExpand'],
+      ['/v1/codegraph/{project}/overview', 'get', 'codegraphOverview'],
+      ['/v1/codegraph/{project}/spec', 'get', 'codegraphSpec'],
+      ['/v1/codegraph/{project}/status', 'get', 'codegraphStatus'],
+    ] as const;
+    for (const [path, method, operationId] of codegraphContracts) {
+      const methods = document.paths[path];
+      if (methods === undefined) throw new Error(`Missing generated OpenAPI path ${path}`);
+      expect(Object.keys(methods)).toEqual([method]);
+      const operation = methods[method];
+      if (operation === undefined) throw new Error(`Missing generated ${method.toUpperCase()} ${path}`);
+      expect(operation['operationId']).toBe(operationId);
+      expect(operation['security']).toEqual([{ frankSession: [] }]);
+      expect(operation['x-frank-capability']).toBe('codegraph.read');
+      expect(operation['x-frank-actor-roles']).toEqual(readRoles);
+      expect(operation['x-frank-data-classes']).toEqual(['internal']);
+      expect(operation['x-frank-idempotency']).toBe('safe');
+      expect(operation['x-frank-error-catalogue']).toEqual(
+        expect.arrayContaining(['unauthenticated', 'forbidden', 'rate_limited']),
+      );
+      expect(operation['responses']).toHaveProperty('200');
+      expect(operation).not.toHaveProperty('requestBody');
+    }
+
+    const refreshMethods = document.paths['/v1/codegraph/{project}/refresh'];
+    if (refreshMethods === undefined) throw new Error('Missing generated codegraph refresh path');
+    expect(Object.keys(refreshMethods)).toEqual(['post']);
+    const refresh = refreshMethods['post'];
+    if (refresh === undefined) throw new Error('Missing generated POST codegraph refresh operation');
+    expect(refresh['operationId']).toBe('codegraphRefresh');
+    expect(refresh['security']).toEqual([{ frankSession: [] }]);
+    expect(refresh['x-frank-capability']).toBe('codegraph.refresh');
+    expect(refresh['x-frank-actor-roles']).toEqual(['owner', 'operator', 'service_identity']);
+    expect(refresh['x-frank-data-classes']).toEqual(['internal']);
+    expect(refresh['x-frank-idempotency']).toBe('required_key');
+    expect(refresh['x-frank-audit-obligations']).toEqual(['refresh']);
+    expect(refresh['x-frank-error-catalogue']).toEqual(
+      expect.arrayContaining(['unauthenticated', 'forbidden', 'rate_limited']),
+    );
+    expect(refresh['responses']).toHaveProperty('202');
+    expect(refresh).toHaveProperty('requestBody');
   });
 
   it('declares everything FRANK-§12.2 requires on every operation', async () => {
@@ -888,7 +942,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(39);
+    expect(operations).toBe(46);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

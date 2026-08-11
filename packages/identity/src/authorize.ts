@@ -84,7 +84,10 @@ export function authorize(input: AuthorizeInput): AuthorizationVerdict {
     };
   }
 
-  if (!rolesGrant(input.principal.roles, input.capability)) {
+  const explicitlyScopedService =
+    input.principal.roles.includes('service_identity') &&
+    input.principal.capabilities?.includes(input.capability) === true;
+  if (!rolesGrant(input.principal.roles, input.capability) && !explicitlyScopedService) {
     return {
       authorized: false,
       refusal: 'capability_not_granted',

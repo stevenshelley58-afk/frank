@@ -75,6 +75,11 @@ export const PROBLEM_TYPES = {
     title: 'Idempotency key reused with different parameters',
     status: 409,
   },
+  rate_limited: {
+    type: 'https://frank.fail/problems/rate-limited',
+    title: 'Rate limit exceeded',
+    status: 429,
+  },
   unsupported_capture_kind: {
     type: 'https://frank.fail/problems/unsupported-capture-kind',
     title: 'Capture kind not available in this slice',

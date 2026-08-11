@@ -80,7 +80,8 @@ import { StagedWriteService } from './services/workbench/staged-write.js';
 import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { chatRoutes, registerChatRoutes } from './routes/chats.js';
-import { registerCodegraphRoutes } from './routes/codegraph.js';
+import { codegraphRoutes, registerCodegraphRoutes } from './routes/codegraph.js';
+import type { CodegraphRouteDependencies } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
 import { WorkbenchFrontDoor } from './services/workbench/front-door.js';
 import type { PreviewDeployer } from './services/workbench/preview-backend.js';
@@ -103,6 +104,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...healthRoutes,
   ...brainRoutes,
   ...chatRoutes,
+  ...codegraphRoutes,
 ];
 
 const ENVELOPE_KEY_HANDLE = 'handle:frank.api.envelope-signing-key';
@@ -194,6 +196,16 @@ export interface BuildServerOptions {
   readonly workbenchRunner?: WorkbenchRunner;
   /** Durable objective orchestrator. Production composition injects and starts it. */
   readonly missionOrchestrator?: MissionRouteOrchestrator;
+  /** Codegraph storage/service ports; tests provide isolated fixtures. */
+  readonly codegraph?: Pick<
+    CodegraphRouteDependencies,
+    | 'codegraphOutputDir'
+    | 'codegraphRegistryFile'
+    | 'codegraphServiceUrl'
+    | 'codegraphControlTokenFile'
+    | 'codegraphReadLimit'
+    | 'fetch'
+  >;
 }
 
 export interface BuiltServer {
@@ -524,7 +536,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   }
 
   // Code intelligence graph — reads from the codegraph service output volume.
-  registerCodegraphRoutes(app, shared);
+  registerCodegraphRoutes(app, { ...shared, ...(options.codegraph ?? {}) });
 
   const openApiDocument = buildOpenApiDocument(activeRoutes, {
     title: 'FRANK Domain API',

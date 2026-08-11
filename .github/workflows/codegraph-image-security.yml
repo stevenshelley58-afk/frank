@@ -1,0 +1,151 @@
+name: codegraph-image-security
+
+on:
+  pull_request:
+    paths:
+      - apps/codegraph/**
+      - infra/production/docker-compose.app.yml
+      - .dockerignore
+      - .github/workflows/codegraph-image-security.yml
+      - .github/workflows/release-artifacts.yml
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: codegraph-image-security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      LOCAL_IMAGE: frank-codegraph:diagnostic-${{ github.sha }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Build local scratch diagnostic image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p diagnostic
+          docker build \
+            --pull \
+            --build-arg FRANK_REVISION=${{ github.sha }} \
+            --build-arg FRANK_SOURCE_URL=https://github.com/${{ github.repository }} \
+            --tag "$LOCAL_IMAGE" \
+            --file apps/codegraph/Dockerfile \
+            .
+
+      - name: Generate diagnostic SPDX SBOM
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        with:
+          image: ${{ env.LOCAL_IMAGE }}
+          format: spdx-json
+          output-file: diagnostic/codegraph.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Exercise local scratch runtime and supervisor
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(docker image inspect --format '{{.Config.User}}' "$LOCAL_IMAGE")" = '10001:10001'
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$LOCAL_IMAGE")" = '["/usr/local/bin/python3","-P","-m","frank_codegraph"]'
+          jq -e '
+            [(.packages // [])[]?.name | ascii_downcase |
+              select(. == "pip" or . == "setuptools" or . == "wheel")] | length == 0
+          ' diagnostic/codegraph.spdx.json >/dev/null
+
+          container_id="$(docker create "$LOCAL_IMAGE")"
+          trap 'docker rm -f "$container_id" >/dev/null 2>&1 || true; rm -f rootfs.tar' EXIT
+          docker export "$container_id" --output rootfs.tar
+          if tar -tf rootfs.tar | grep -Eq '(^|/)(bin/(a|ba|da|z)?sh|sbin/apk|usr/(local/)?bin/pip([0-9.]*)?)(/|$)'; then
+            echo 'scratch runtime unexpectedly contains a shell, apk, or pip' >&2
+            exit 1
+          fi
+          if tar -tf rootfs.tar | grep -Eq '(^|/)usr/local/lib/python3\.14/(tarfile\.py|html/parser\.py|lib-dynload/_tkinter[^/]*\.so|.*\.py[co])$|(^|/)usr/local/lib/python3\.14/(tkinter|idlelib|turtledemo)(/|$)|(^|/)__pycache__(/|$)'; then
+            echo 'removed stdlib modules or bytecode remain in scratch runtime' >&2
+            exit 1
+          fi
+
+          mkdir -p runtime-acceptance/project runtime-acceptance/output
+          chmod 0777 runtime-acceptance/output
+          printf 'def answer() -> int:\n    return 42\n' > runtime-acceptance/project/sample.py
+          docker run --rm \
+            --entrypoint /usr/local/bin/python3 \
+            --volume "$PWD/runtime-acceptance/project:/acceptance/project:ro" \
+            --volume "$PWD/runtime-acceptance/output:/acceptance/output" \
+            "$LOCAL_IMAGE" -P -c '
+          import importlib.util
+          import json
+          import sys
+          from pathlib import Path
+          from frank_codegraph.service import Project, Supervisor
+          import graphify
+          assert sys.version_info[:3] == (3, 14, 6)
+          assert importlib.util.find_spec("tarfile") is None
+          assert importlib.util.find_spec("html.parser") is None
+          assert importlib.util.find_spec("_tkinter") is None
+          assert importlib.util.find_spec("tkinter") is None
+          project = Project("acceptance", "Acceptance", Path("/acceptance/project"), ())
+          Supervisor(Path("/acceptance/output"), [project])._build_and_publish(project)
+          graph = json.loads(Path("/acceptance/output/acceptance/current/graphify-out/graph.json").read_text())
+          assert isinstance(graph.get("nodes"), list) and graph["nodes"]
+          assert isinstance(graph.get("links", graph.get("edges")), list)
+          '
+
+      - name: Scan local diagnostic with newest raw Grype database
+        uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+        with:
+          image: ${{ env.LOCAL_IMAGE }}
+          fail-build: false
+          severity-cutoff: high
+          only-fixed: false
+          by-cve: true
+          cache-db: false
+          output-format: json
+          output-file: diagnostic/codegraph-grype-raw.json
+
+      - name: Enforce diagnostic unsuppressed finding contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          jq -e '
+            [
+              (.ignoredMatches // [])[] |
+              select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")
+            ] | length == 0
+          ' diagnostic/codegraph-grype-raw.json >/dev/null
+          jq -e '
+            [(.matches // [])[] | select(.vulnerability.severity == "Critical")] | length == 0
+          ' diagnostic/codegraph-grype-raw.json >/dev/null
+          jq -e '
+            [
+              (.matches // [])[] |
+              select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical") |
+              .vulnerability.id
+            ] | unique | sort == ["CVE-2026-11940", "CVE-2026-11972", "CVE-2026-15308"]
+          ' diagnostic/codegraph-grype-raw.json >/dev/null
+          jq -e '
+            [
+              (.matches // [])[] |
+              select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical") |
+              select(
+                .artifact.name != "python" or
+                .artifact.version != "3.14.6" or
+                .artifact.purl != "pkg:generic/python@3.14.6" or
+                ([.matchDetails[]?.searchedBy.package? | select(.name == "python" and .version == "3.14.6")] | length == 0)
+              )
+            ] | length == 0
+          ' diagnostic/codegraph-grype-raw.json >/dev/null
+
+      - name: Upload diagnostic evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: codegraph-diagnostic-${{ github.sha }}
+          path: diagnostic/
+          if-no-files-found: error
+          retention-days: 14

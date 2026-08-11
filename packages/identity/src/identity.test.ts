@@ -76,6 +76,13 @@ describe('FRANK-§2.2 role model', () => {
     expect(rolesGrant(['member'], 'system.health.read.detailed')).toBe(false);
   });
 
+  it('does not grant codegraph reconnaissance to broad member or service roles', () => {
+    expect(ROLE_CAPABILITIES['codegraph.read']).toEqual(['owner', 'operator', 'builder']);
+    expect(rolesGrant(['member'], 'codegraph.read')).toBe(false);
+    expect(rolesGrant(['reviewer'], 'codegraph.read')).toBe(false);
+    expect(rolesGrant(['service_identity'], 'codegraph.read')).toBe(false);
+  });
+
   it('reports a stable capability list per role set', () => {
     expect(capabilitiesOf(['reviewer'])).toEqual([
       // A reviewer reads the chat shell; approvals are work items, so the
@@ -102,6 +109,38 @@ describe('LocalSignedSessionProvider', () => {
     expect(result.principal.cellId).toBe(CELL);
     expect(result.principal.roles).toEqual(['owner']);
     expect(result.principal.providerId).toBe('frank.local-signed-session');
+  });
+
+  it('round-trips an explicit service capability inside the signed claims', async () => {
+    const provider = buildProvider();
+    const token = issue(provider, {
+      principalId: 'service/codegraph-reader',
+      roles: ['service_identity'],
+      capabilities: ['codegraph.read'],
+    });
+    const result = await provider.authenticate({ scheme: 'Bearer', value: token });
+    expect(result.authenticated).toBe(true);
+    if (!result.authenticated) return;
+    expect(result.principal.capabilities).toEqual(['codegraph.read']);
+    expect(
+      authorize({
+        principal: result.principal,
+        capability: 'codegraph.read',
+        cellId: CELL,
+        now: NOW,
+      }).authorized,
+    ).toBe(true);
+  });
+
+  it('refuses explicit capability claims on human roles or duplicate service grants', () => {
+    const provider = buildProvider();
+    expect(() => issue(provider, { capabilities: ['codegraph.read'] })).toThrow(
+      /only to a service_identity/,
+    );
+    expect(() => issue(provider, {
+      roles: ['service_identity'],
+      capabilities: ['codegraph.read', 'codegraph.read'],
+    })).toThrow(/unique/);
   });
 
   it('rejects a tampered payload', async () => {
@@ -231,7 +270,7 @@ describe('LocalSignedSessionProvider', () => {
       expect(result.authenticated).toBe(false);
       if (result.authenticated) continue;
       expect(result.detail).not.toContain('SUPER-SECRET');
-      expect(result.detail).not.toContain(value.slice(0, 24) || ' never');
+      expect(result.detail).not.toContain(value.slice(0, 24) || 'never');
     }
   });
 
@@ -299,6 +338,22 @@ describe('authorize (FRANK-§3.8)', () => {
     });
     expect(verdict.authorized).toBe(false);
     expect(verdict.authorized === false && verdict.refusal).toBe('capability_not_granted');
+  });
+
+  it('requires an explicit capability for service identities', () => {
+    const service = { ...base, roles: ['service_identity'] as const };
+    expect(
+      authorize({ principal: service, capability: 'codegraph.read', cellId: CELL, now: NOW })
+        .authorized,
+    ).toBe(false);
+    expect(
+      authorize({
+        principal: { ...service, capabilities: ['codegraph.read'] },
+        capability: 'codegraph.read',
+        cellId: CELL,
+        now: NOW,
+      }).authorized,
+    ).toBe(true);
   });
 
   it('refuses a principal from another cell', () => {

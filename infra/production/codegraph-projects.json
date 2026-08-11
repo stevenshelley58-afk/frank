@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "projects": [
+    {
+      "id": "frank",
+      "name": "Frank Monorepo",
+      "mount": "/repositories/frank",
+      "source": "manual",
+      "ignore": [
+        ".git",
+        "node_modules",
+        "dist",
+        "build",
+        ".next",
+        ".turbo",
+        "coverage",
+        "__pycache__"
+      ]
+    }
+  ]
+}
