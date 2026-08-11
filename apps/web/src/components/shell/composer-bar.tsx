@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ThinkingMode } from '@/lib/chat-api';
+import { SharedRichComposer } from '@/components/shared-rich-composer';
 
 /* ------------------------------------------------------------------ */
 /* Options                                                             */
@@ -228,6 +229,7 @@ export function ComposerBar({
           </div>
 
           <div className="flex items-end gap-2">
+            <SharedRichComposer disabled={disabled} dark={isDeck} />
             <textarea
               ref={taRef}
               rows={1}

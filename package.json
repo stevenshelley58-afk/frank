@@ -16,7 +16,7 @@
     "registry:check": "node tools/registry/generate-registry.mjs --check",
     "deps:check": "node tools/lint/dependency-direction.mjs",
     "env:validate": "node tools/lint/validate-environments.mjs",
-    "verify": "pnpm run deps:check && pnpm run contracts:validate && pnpm run env:validate && pnpm run registry:check && turbo run typecheck lint test"
+    "verify": "pnpm run deps:check && pnpm run contracts:validate && pnpm run env:validate && pnpm run registry:check && pnpm --filter @frank/web run guard:chat-composers && turbo run typecheck lint test"
   },
   "devDependencies": {
     "@types/node": "22.10.2",
