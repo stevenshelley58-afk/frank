@@ -71,10 +71,6 @@ frank.fail {
         }
     }
 
-    request_body {
-        max_size 8MB
-    }
-
     # Public machine health remains credential-free for external monitors.
     @frank_public_health path /v1/system/live /v1/system/ready
     route {
@@ -92,15 +88,16 @@ frank.fail {
         # no download handler; the API issues and verifies the upload capability.
         handle /v1/uploads/tus/* {
             import frank_production_basic_auth
+            # Upload capability is distinct from Basic auth and hook credentials.
             # API gate verifies the persisted capability/reservation for every tus method.
             # It must fail closed and retain Authorization/Tus headers; the tusd hook bearer
             # is a separate service credential and is never a client capability.
             forward_auth {$FRANK_UPLOAD_GATE_INTERNAL_URL} {
                 uri /private/tusd/gate
                 header_up X-Tusd-Gate-Secret {$FRANK_TUSD_GATE_SECRET}
-                header_up X-Tusd-Original-Method {http.request.method}
-                header_up X-Tusd-Original-Uri {http.request.uri}
-                header_up Authorization {http.request.header.Authorization}
+                header_up X-Forwarded-Method {http.request.method}
+                header_up X-Forwarded-Uri {http.request.uri}
+                header_up X-Frank-Upload-Capability {http.request.header.X-Frank-Upload-Capability}
                 header_up Upload-Metadata {http.request.header.Upload-Metadata}
                 header_up Tus-Resumable {http.request.header.Tus-Resumable}
                 header_up Upload-Offset {http.request.header.Upload-Offset}
@@ -109,8 +106,9 @@ frank.fail {
                 header_up Host {host}
                 header_up X-Real-IP {remote_host}
                 header_up X-Forwarded-Proto https
-                # The signed upload capability reaches tusd's private hook unchanged.
-                header_up Authorization {http.request.header.Authorization}
+                header_up -X-Frank-Tusd-Hook-Secret
+                header_up X-Frank-Tusd-Hook-Secret {$FRANK_TUSD_HOOK_SECRET}
+                header_up X-Frank-Upload-Capability {http.request.header.X-Frank-Upload-Capability}
                 header_up Upload-Metadata {http.request.header.Upload-Metadata}
                 header_up Tus-Resumable {http.request.header.Tus-Resumable}
                 header_up Upload-Offset {http.request.header.Upload-Offset}
@@ -120,11 +118,13 @@ frank.fail {
 
         handle /v1/* {
             import frank_production_basic_auth
+            request_body { max_size 8MB }
             import frank_production_api_proxy
         }
 
         handle {
             import frank_production_basic_auth
+            request_body { max_size 8MB }
             import frank_production_web_proxy
         }
     }

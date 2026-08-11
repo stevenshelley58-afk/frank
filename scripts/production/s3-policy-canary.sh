@@ -1,16 +1,17 @@
 #!/usr/bin/env bash
-# Hosted disposable canary: the operator injects scoped test credentials, never an admin.
-set -Eeuo pipefail
-set +x
-: "${FRANK_S3_ENDPOINT:?}" "${FRANK_S3_CANARY_ACCESS_KEY:?}" "${FRANK_S3_CANARY_SECRET_KEY:?}"
-key="canary/$(openssl rand -hex 32)"; [[ "$key" =~ ^canary/[a-f0-9]{64}$ ]]
-export AWS_ACCESS_KEY_ID="$FRANK_S3_CANARY_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$FRANK_S3_CANARY_SECRET_KEY" AWS_DEFAULT_REGION=us-east-1
-aws=(aws --endpoint-url "$FRANK_S3_ENDPOINT")
-"${aws[@]}" s3api put-object --bucket frank-attachment-staging --key "$key" --body /dev/null
-"${aws[@]}" s3api head-object --bucket frank-attachment-staging --key "$key" >/dev/null
-"${aws[@]}" s3api delete-object --bucket frank-attachment-staging --key "$key"
-# Explicit callers supply the denied commands for promoter/preview/lake roles. They must fail.
-for denied in "${FRANK_S3_DENY_STAGING_PROMOTER:?}" "${FRANK_S3_DENY_PREVIEW:?}" "${FRANK_S3_DENY_LAKE_WORKER:?}" "${FRANK_S3_DENY_LAKE_QUERY:?}"; do
-  if eval "$denied"; then echo 'scoped S3 denial unexpectedly allowed' >&2; exit 1; fi
+# Hosted disposable policy canary. All identities are scoped S3 credentials; never admin.
+set -Eeuo pipefail; set +x
+: "${FRANK_S3_ENDPOINT:?}" "${FRANK_STAGING_ACCESS_KEY:?}" "${FRANK_STAGING_SECRET_KEY:?}" "${FRANK_PROMOTER_ACCESS_KEY:?}" "${FRANK_PROMOTER_SECRET_KEY:?}" "${FRANK_DOWNLOADER_ACCESS_KEY:?}" "${FRANK_DOWNLOADER_SECRET_KEY:?}"
+export AWS_DEFAULT_REGION=us-east-1 AWS_EC2_METADATA_DISABLED=true
+key="frank/$(openssl rand -hex 32)/part"; hash="$(openssl rand -hex 32)"; object="sha256/${hash:0:2}/$hash"; preview="$hash/thumb/$hash"
+aws_for() { AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" aws --endpoint-url "$FRANK_S3_ENDPOINT" s3api "${@:3}"; }
+aws_for "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY" put-object --bucket frank-attachment-staging --key "$key" --body /dev/null
+aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" copy-object --bucket frank-objects --key "$object" --copy-source "frank-attachment-staging/$key"
+aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" put-object --bucket frank-object-previews --key "$preview" --body /dev/null
+aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" head-object --bucket frank-objects --key "$object" >/dev/null
+for spec in "frank-objects:$object" "frank-object-previews:$preview" "lake-private:$key"; do
+  b="${spec%%:*}"; k="${spec#*:}"; if aws_for "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY" head-object --bucket "$b" --key "$k" >/dev/null 2>&1; then echo 'staging overreach' >&2; exit 1; fi
 done
-echo 's3-policy-canary=passed; disposable-key=deleted; no-admin-credential-used'
+if aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" put-object --bucket frank-objects --key "$object" --body /dev/null 2>&1; then echo 'downloader write overreach' >&2; exit 1; fi
+aws_for "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY" delete-object --bucket frank-attachment-staging --key "$key"
+echo 's3-policy-canary=passed; scoped identities verified; disposable keys deleted'

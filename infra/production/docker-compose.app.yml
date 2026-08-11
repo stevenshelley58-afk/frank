@@ -53,7 +53,7 @@ services:
       # Harness services are private peers. The API remains the policy/control owner;
       # Letta is manual-only and is never a canonical memory or control authority.
       FRANK_LITELLM_INTERNAL_URL: "${FRANK_LITELLM_INTERNAL_URL:-http://frank-litellm:4000}"
-      FRANK_LETTA_INTERNAL_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta:8283}"
+      FRANK_LETTA_INTERNAL_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta-server:8283}"
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
       FRANK_CLAMAV_INTERNAL_URL: "${FRANK_CLAMAV_INTERNAL_URL:-tcp://frank-clamav:3310}"
       FRANK_SEAWEEDFS_INTERNAL_URL: "${FRANK_SEAWEEDFS_INTERNAL_URL:-http://frank-seaweedfs:8333}"
@@ -188,7 +188,7 @@ services:
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}"
       DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-deepseek-chat}"
       # Transitional adapter only. The API uses FRANK_LETTA_INTERNAL_URL.
-      LETTA_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta:8283}"
+      LETTA_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta-server:8283}"
 
     volumes: !override
       - type: bind
@@ -266,6 +266,7 @@ services:
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
       FRANK_UPLOAD_GATE_INTERNAL_URL: "${FRANK_UPLOAD_GATE_INTERNAL_URL:-http://frank-api:3000}"
       FRANK_TUSD_GATE_SECRET: "${FRANK_TUSD_GATE_SECRET:?distinct Caddy-to-gate credential required}"
+      FRANK_TUSD_HOOK_SECRET: "${FRANK_TUSD_HOOK_SECRET:?Caddy-to-tusd hook credential required}"
     depends_on:
       frank-api:
         condition: service_healthy

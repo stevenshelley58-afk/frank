@@ -53,6 +53,18 @@ between the backup and smoke gates.
 | `infra/production/docker-compose.harness.yml` | Optional reviewed harness third Compose unit (private model, upload, scan, Letta services) | Enable only after evidence/canaries; then it is atomic with base+app, reuses `frank-cell-seaweedfs-data`, and has no public ports. |
 | `infra/production/Caddyfile.frank-production` | Replacement `frank.fail` site block with a private UI/control surface | None until merged into the live Caddy candidate and reloaded |
 
+### Harness external prerequisites
+
+The live base has no SeaweedFS service and uses the already healthy external
+`frank-letta-server:8283`. Before enabling the third unit, create (and record) the external
+`frank-attachments`, `frank-model`, and `frank-hermes-egress` networks plus the existing
+`frank-cell-seaweedfs-data` volume. This is a reversible host prerequisite: removing an
+unused network is allowed; volumes are never removed. Render
+`/srv/frank/secrets/seaweedfs/s3.json` through `render-seaweedfs-s3-config.sh` at mode 0600
+before Compose; mounting the repository template or unresolved placeholders is forbidden.
+The temporary bootstrap identity is absent from that rendered configuration, so the first
+Seaweed recreate revokes it. Canonical objects and previews never receive an expiry rule.
+
 Required host commands are Bash 4.3+, Docker with Compose, Git, GitHub CLI, `jq`,
 `curl`, `gzip`, `openssl`, `sha256sum`, `flock`, `find`, `realpath`, `tar`, and standard
 GNU coreutils.
@@ -1340,9 +1352,9 @@ printf 'Starting Graphify-backed services; first extraction may take up to 30 mi
 
 if test "$FRANK_HARNESS_ENABLED" = true; then
   "${compose[@]}" up -d --no-build --wait --wait-timeout 180 \
-    frank-seaweedfs frank-litellm frank-tusd frank-clamav frank-letta frank-hermes \
+    frank-seaweedfs frank-litellm frank-tusd frank-clamav \
     2>&1 | tee "$evidence_dir/harness-compose-up.log"
-  docker inspect frank-seaweedfs frank-litellm frank-tusd frank-clamav frank-letta frank-hermes \
+  docker inspect frank-seaweedfs frank-litellm frank-tusd frank-clamav \
     --format '{{.Name}}\t{{.Image}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
     > "$evidence_dir/harness-containers.after.tsv"
 fi

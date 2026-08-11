@@ -18,8 +18,10 @@ node --input-type=module - "$rendered" <<'NODE'
 import { readFileSync } from 'node:fs';
 const c = JSON.parse(readFileSync(process.argv[2], 'utf8'));
 const required = ['frank-seaweedfs','frank-litellm','frank-tusd','frank-clamav','frank-letta','frank-hermes'];
+const started = ['frank-seaweedfs','frank-litellm','frank-tusd','frank-clamav'];
 for (const n of required) { const s=c.services?.[n]; if (!s?.image?.match(/@sha256:[a-f0-9]{64}$/) || s.ports?.length) throw new Error(`unsafe/missing harness service: ${n}`); }
-for (const n of required) if (!c.services[n].read_only || !c.services[n].cap_drop?.includes('ALL') || !c.services[n].healthcheck || !c.services[n].restart || !c.services[n].init) throw new Error(`hardening incomplete: ${n}`);
+for (const n of required) if (!c.services[n].read_only || !c.services[n].cap_drop?.includes('ALL') || !c.services[n].restart || !c.services[n].init) throw new Error(`hardening incomplete: ${n}`);
+for (const n of started) if (!c.services[n].healthcheck) throw new Error(`healthcheck incomplete: ${n}`);
 const has=(n,net)=>{ const v=c.services[n]?.networks; return Array.isArray(v) ? v.includes(net) : Boolean(v?.[net]); };
 if (!has('frank-api','frank-model')||!has('frank-api','frank-attachments')||!has('frank-caddy','frank-attachments')) throw new Error('API/Caddy seam missing');
 if (has('frank-tusd','frank')||has('frank-hermes','frank')) throw new Error('private network denial violated');

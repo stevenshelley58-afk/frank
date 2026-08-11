@@ -12,7 +12,7 @@ services:
         source: frank-cell-seaweedfs-data
         target: /data
       - type: bind
-        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/compose/seaweedfs/s3.json.tmpl"
+        source: /srv/frank/secrets/seaweedfs/s3.json
         target: /etc/seaweedfs/s3.json
         read_only: true
     networks: !override [frank-attachments]
@@ -56,13 +56,12 @@ services:
 
   frank-tusd:
     image: "${FRANK_TUSD_CURRENT_IMAGE:?reviewed tusd digest required}"
-    command: ["-base-path=/v1/uploads/tus/", "-s3-bucket=frank-attachment-staging", "-s3-endpoint=http://frank-seaweedfs:8333", "-s3-force-path-style", "-max-size=2147483648", "-hooks-http=${FRANK_TUSD_HOOK_URL:?required}", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish", "-hooks-http-forward-headers=Authorization,Upload-Metadata,Tus-Resumable,Upload-Offset,X-Forwarded-Method,X-Forwarded-Uri", "-disable-download", "-disable-concatenation"]
+    command: ["-base-path=/v1/uploads/tus/", "-s3-bucket=frank-attachment-staging", "-s3-endpoint=http://frank-seaweedfs:8333", "-s3-force-path-style", "-max-size=2147483648", "-hooks-http=${FRANK_TUSD_HOOK_URL:?required}", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish,post-terminate", "-hooks-http-forward-headers=X-Frank-Tusd-Hook-Secret,X-Frank-Upload-Capability,Upload-Metadata,Tus-Resumable,Upload-Offset,X-Forwarded-Method,X-Forwarded-Uri", "-disable-download", "-disable-concatenation"]
     environment:
       AWS_ACCESS_KEY_ID: "${FRANK_ATTACHMENT_STAGING_ACCESS_KEY:?required}"
       AWS_SECRET_ACCESS_KEY: "${FRANK_ATTACHMENT_STAGING_SECRET_KEY:?required}"
       AWS_REGION: us-east-1
       AWS_S3_FORCE_PATH_STYLE: "true"
-      FRANK_TUSD_HOOK_BEARER: "${FRANK_TUSD_HOOK_BEARER:?distinct hook bearer required}"
     networks: [frank-attachments]
     depends_on: { frank-seaweedfs: { condition: service_healthy } }
     init: true
@@ -96,7 +95,6 @@ services:
   frank-letta:
     image: "${FRANK_LETTA_CURRENT_IMAGE:?reviewed Letta digest required}"
     profiles: [harness-manual-memory]
-    command: ["letta", "server", "--host", "0.0.0.0", "--port", "8283"]
     environment: { LETTA_MANUAL_ONLY: "true", LETTA_SERVER_HOST: "0.0.0.0", LETTA_SERVER_PORT: "8283" }
     networks: [frank]
     init: true
@@ -109,7 +107,7 @@ services:
     cpus: "0.75"
     pids_limit: 256
     expose: ["8283"]
-    healthcheck: { test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8283/v1/health"], interval: 15s, timeout: 5s, retries: 8 }
+    # Command and health contract remain candidate evidence fields; do not guess either.
 
   frank-hermes:
     image: "${FRANK_HERMES_CURRENT_IMAGE:?reviewed Hermes digest required}"
@@ -125,7 +123,7 @@ services:
     mem_limit: 1024m
     cpus: "1.0"
     pids_limit: 256
-    healthcheck: { test: ["CMD-SHELL", "test -n \"$HERMES_API_SEAM_URL\""], interval: 30s, timeout: 5s, retries: 3 }
+    # Command and health contract remain candidate evidence fields; do not guess either.
 
 networks:
   frank: { external: true, name: frank }
