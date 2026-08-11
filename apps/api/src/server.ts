@@ -80,6 +80,7 @@ import { StagedWriteService } from './services/workbench/staged-write.js';
 import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { chatRoutes, registerChatRoutes } from './routes/chats.js';
+import { harnessControlRoutes, registerHarnessControlRoutes } from './routes/harness-control.js';
 import { codegraphRoutes, registerCodegraphRoutes } from './routes/codegraph.js';
 import type { CodegraphRouteDependencies } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
@@ -104,6 +105,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...healthRoutes,
   ...brainRoutes,
   ...chatRoutes,
+  ...harnessControlRoutes,
   ...codegraphRoutes,
 ];
 
@@ -471,6 +473,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // The chat shell's own store — raw SQL on frank_domain (migration 0010),
     // so like brain it needs a DB handle.
     registerChatRoutes(app, { ...shared, db: options.db });
+    registerHarnessControlRoutes(app, { ...shared, db: options.db });
     registerFrameRoutes(app, { ...shared, store, db: options.db });
     // Workbench routes need Postgres (the front door + store are raw-SQL on
     // frank_domain); like brain, they only register when a DB handle exists.
