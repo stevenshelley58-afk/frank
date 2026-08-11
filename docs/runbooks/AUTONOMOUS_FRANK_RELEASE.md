@@ -94,6 +94,7 @@ export FRANK_DATA_PATH='/srv/frank'
 export FRANK_MAX_DISK_PERCENT='75'
 export FRANK_MIN_FREE_GIB='20'
 export FRANK_DISK_GATE_MODE='absolute'
+export FRANK_DISK_GATE_PHASE='pre-pull'
 export FRANK_RELEASE_REQUIRED_BYTES='21932447888'
 export FRANK_ROLLBACK_HEADROOM_BYTES='23862108519'
 export FRANK_REQUIRED_NETWORK='frank'
@@ -125,6 +126,14 @@ manifest is verified separately before deployment:
 | Explicit operational safety reserve (20 GiB) | 21,474,836,480 |
 | **Rollback-headroom subtotal** | **23,862,108,519** |
 | **Total required free capacity** | **45,794,556,407** |
+
+Run the full `45,794,556,407`-byte gate before any candidate image pull. After all four
+manifest-bound digest references have been pulled and their exact local image IDs recorded,
+the post-pull release requirement is `11,697,632,908` bytes and the unchanged rollback
+headroom is `23,862,108,519` bytes, for `35,559,741,427` bytes total. Only the
+`10,234,814,980`-byte image pull/layer/transient reservation may be removed in that phase.
+The independent 20 GiB minimum-free floor remains active in both phases. A missing or
+mismatched four-image proof blocks post-pull mode; it never reduces the full requirement.
 
 Recalculate and review both byte inputs whenever image sizes, the Graphify release limit or
 retention count, database/volume sizes, log bounds, or the safety reserve changes. Never
@@ -375,6 +384,7 @@ gh run download "$FRANK_ARTIFACT_RUN_ID" -R "$FRANK_GITHUB_REPOSITORY" \
   --dir "$FRANK_RELEASE_ARTIFACT_DIR"
 
 manifest="$FRANK_RELEASE_ARTIFACT_DIR/release-manifest.json"
+export FRANK_RELEASE_MANIFEST_FILE="$manifest"
 api_sbom="$FRANK_RELEASE_ARTIFACT_DIR/api.spdx.json"
 web_sbom="$FRANK_RELEASE_ARTIFACT_DIR/web.spdx.json"
 codegraph_sbom="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.spdx.json"
@@ -578,6 +588,15 @@ console.log(`${image.reference}@${image.digest}`);
 NODE
 )"
 
+bash "$FRANK_RELEASE_SOURCE/scripts/production/hosted-preflight.sh" \
+  > "$evidence_dir/pre-pull-capacity.result" \
+  2> "$evidence_dir/pre-pull-capacity.log"
+grep -Fx 'capacity_preflight=passed' "$evidence_dir/pre-pull-capacity.result"
+grep -Fx 'disk_gate_phase=pre-pull' "$evidence_dir/pre-pull-capacity.result"
+grep -Fx 'release_required_bytes=21932447888' "$evidence_dir/pre-pull-capacity.result"
+grep -Fx 'rollback_headroom_bytes=23862108519' "$evidence_dir/pre-pull-capacity.result"
+grep -Fx 'release_total_required_bytes=45794556407' "$evidence_dir/pre-pull-capacity.result"
+
 (
   anonymous_docker_config="$(mktemp -d)"
   trap 'rm -rf -- "$anonymous_docker_config"' EXIT
@@ -673,9 +692,18 @@ gh attestation verify "oci://$FRANK_WORKBENCH_IMAGE" -R "$FRANK_GITHUB_REPOSITOR
   --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
   --format json \
   > "$evidence_dir/workbench.attestation.verify.json"
-docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE" "$FRANK_WORKBENCH_IMAGE" \
-  --format '{{.RepoDigests}}\t{{.Id}}' \
-  > "$evidence_dir/application-images.pulled.tsv"
+export FRANK_POST_PULL_IMAGE_PROOF_FILE="$evidence_dir/application-images.pulled.tsv"
+post_pull_proof_tmp="$(mktemp "$evidence_dir/.application-images.pulled.XXXXXX")"
+trap 'rm -f -- "${post_pull_proof_tmp:-}"' EXIT
+for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE" "$FRANK_WORKBENCH_IMAGE"; do
+  image_id="$(docker image inspect --format '{{.Id}}' "$image")"
+  printf '%s' "$image_id" | grep -Eq '^sha256:[a-f0-9]{64}$'
+  printf '%s\t%s\n' "$image" "$image_id"
+done > "$post_pull_proof_tmp"
+test "$(wc -l < "$post_pull_proof_tmp")" -eq 4
+chmod 0600 "$post_pull_proof_tmp"
+mv -f -- "$post_pull_proof_tmp" "$FRANK_POST_PULL_IMAGE_PROOF_FILE"
+trap - EXIT
 test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$FRANK_CODEGRAPH_IMAGE")" = \
   '["/usr/local/bin/python3","-P","-m","frank_codegraph"]'
 
@@ -859,15 +887,18 @@ tracing. Rotation requires a coordinated API/web restart.
 ### 3D. Run hosted preflight
 
 ```bash
+export FRANK_DISK_GATE_PHASE='post-pull'
+export FRANK_RELEASE_REQUIRED_BYTES='11697632908'
 bash "$FRANK_RELEASE_SOURCE/scripts/production/hosted-preflight.sh" \
   > "$evidence_dir/preflight.result" \
   2> "$evidence_dir/preflight.log"
 
 grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
 grep -Fx 'disk_gate_mode=absolute' "$evidence_dir/preflight.result"
-grep -Fx 'release_required_bytes=21932447888' "$evidence_dir/preflight.result"
+grep -Fx 'disk_gate_phase=post-pull' "$evidence_dir/preflight.result"
+grep -Fx 'release_required_bytes=11697632908' "$evidence_dir/preflight.result"
 grep -Fx 'rollback_headroom_bytes=23862108519' "$evidence_dir/preflight.result"
-grep -Fx 'release_total_required_bytes=45794556407' "$evidence_dir/preflight.result"
+grep -Fx 'release_total_required_bytes=35559741427' "$evidence_dir/preflight.result"
 ```
 
 Preflight records the commit, branch, locally known upstream state, disk state, network,

@@ -54,16 +54,25 @@ readonly codegraph_network="${FRANK_CODEGRAPH_NETWORK:-frank-codegraph-internal}
 readonly codegraph_container="${FRANK_CODEGRAPH_CONTAINER:-frank-codegraph}"
 readonly allow_legacy_codegraph_network="${FRANK_ALLOW_LEGACY_CODEGRAPH_NETWORK:-false}"
 readonly disk_gate_mode="${FRANK_DISK_GATE_MODE:-percent}"
+readonly disk_gate_phase="${FRANK_DISK_GATE_PHASE:-full}"
 readonly max_disk_percent="${FRANK_MAX_DISK_PERCENT:-75}"
 readonly min_free_gib="${FRANK_MIN_FREE_GIB:-20}"
 readonly release_required_bytes_raw="${FRANK_RELEASE_REQUIRED_BYTES:-}"
 readonly rollback_headroom_bytes_raw="${FRANK_ROLLBACK_HEADROOM_BYTES:-}"
+readonly release_manifest_file="${FRANK_RELEASE_MANIFEST_FILE:-}"
+readonly post_pull_image_proof_file="${FRANK_POST_PULL_IMAGE_PROOF_FILE:-}"
 readonly require_upstream_sync="${FRANK_REQUIRE_UPSTREAM_SYNC:-true}"
 readonly required_secret_vars_raw="${FRANK_REQUIRED_SECRET_VARS:-FRANK_DB_PASSWORD FRANK_SESSION_SIGNING_KEY FRANK_ENVELOPE_SIGNING_KEY GOOSE_ACP_SECRET}"
 readonly required_containers_raw="${FRANK_REQUIRED_CONTAINERS:-frank-frank-db-1 frank-frank-redis-1 frank-frank-api-1 frank-web frank-codegraph frank-frank-caddy-1}"
 readonly required_images_raw="${FRANK_REQUIRED_IMAGES:-postgres:17-alpine valkey/valkey:8-alpine caddy:2.8-alpine frank-frank-api frank-frank-web frank-frank-codegraph}"
 readonly image_lock_file="${FRANK_IMAGE_LOCK_FILE:-}"
+readonly api_image="${FRANK_API_IMAGE:-}"
+readonly web_image="${FRANK_WEB_IMAGE:-}"
+readonly codegraph_image="${FRANK_CODEGRAPH_IMAGE:-}"
 readonly workbench_image="${FRANK_WORKBENCH_IMAGE:-}"
+readonly pre_pull_release_required_bytes=21932447888
+readonly post_pull_release_required_bytes=11697632908
+readonly production_rollback_headroom_bytes=23862108519
 
 [[ "$repo_path" == /* ]] || die "FRANK_REPO_PATH must be absolute"
 [[ "$compose_file" == /* ]] || die "FRANK_COMPOSE_FILE must be absolute"
@@ -75,6 +84,7 @@ readonly workbench_image="${FRANK_WORKBENCH_IMAGE:-}"
 [[ "$codegraph_container" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "FRANK_CODEGRAPH_CONTAINER is invalid"
 [[ "$allow_legacy_codegraph_network" == "true" || "$allow_legacy_codegraph_network" == "false" ]] || die "FRANK_ALLOW_LEGACY_CODEGRAPH_NETWORK must be true or false"
 [[ "$disk_gate_mode" == "percent" || "$disk_gate_mode" == "absolute" ]] || die "FRANK_DISK_GATE_MODE must be percent or absolute"
+[[ "$disk_gate_phase" == "full" || "$disk_gate_phase" == "pre-pull" || "$disk_gate_phase" == "post-pull" ]] || die "FRANK_DISK_GATE_PHASE must be full, pre-pull, or post-pull"
 [[ "$max_disk_percent" =~ ^[0-9]+$ ]] || die "FRANK_MAX_DISK_PERCENT must be an integer"
 [[ "$min_free_gib" =~ ^[0-9]+$ ]] || die "FRANK_MIN_FREE_GIB must be an integer"
 (( max_disk_percent >= 1 && max_disk_percent <= 99 )) || die "FRANK_MAX_DISK_PERCENT must be between 1 and 99"
@@ -115,15 +125,19 @@ read -r disk_total_kib disk_used_kib disk_available_kib disk_used_percent disk_m
 [[ "$disk_used_percent" =~ ^[0-9]+$ ]] || die "could not parse disk usage"
 [[ "$disk_available_kib" =~ ^(0|[1-9][0-9]{0,15})$ ]] || die "could not parse free disk space"
 decimal_lte "$disk_available_kib" 9007199254740991 || die "free disk space exceeds the signed 64-bit byte range"
+disk_available_bytes="$(df -B1 --output=avail -- "$data_real" | awk 'NR == 2 {gsub(/[[:space:]]/, "", $0); print}')"
+[[ "$disk_available_bytes" =~ ^(0|[1-9][0-9]{0,18})$ ]] || die "could not parse exact free disk bytes"
+decimal_lte "$disk_available_bytes" 9223372036854775807 || die "exact free disk bytes exceed the signed 64-bit range"
 
 readonly min_free_kib="$((min_free_gib * 1024 * 1024))"
-readonly disk_available_bytes="$((disk_available_kib * 1024))"
+readonly disk_available_bytes
 
 release_required_bytes=0
 rollback_headroom_bytes=0
 release_total_required_bytes=0
 case "$disk_gate_mode" in
   percent)
+    [[ "$disk_gate_phase" == "full" ]] || die "phase-specific disk gates require FRANK_DISK_GATE_MODE=absolute"
     [[ -z "$release_required_bytes_raw" && -z "$rollback_headroom_bytes_raw" ]] || \
       die "absolute byte inputs require FRANK_DISK_GATE_MODE=absolute"
     (( disk_used_percent <= max_disk_percent )) || \
@@ -143,6 +157,18 @@ case "$disk_gate_mode" in
     (( rollback_headroom_bytes <= 9223372036854775807 - release_required_bytes )) || \
       die "release disk byte requirement overflows the signed 64-bit range"
     release_total_required_bytes="$((release_required_bytes + rollback_headroom_bytes))"
+    case "$disk_gate_phase" in
+      full|pre-pull)
+        (( release_required_bytes == pre_pull_release_required_bytes )) || \
+          die "pre-pull release requirement must be ${pre_pull_release_required_bytes} bytes"
+        ;;
+      post-pull)
+        (( release_required_bytes == post_pull_release_required_bytes )) || \
+          die "post-pull release requirement must be ${post_pull_release_required_bytes} bytes"
+        ;;
+    esac
+    (( rollback_headroom_bytes == production_rollback_headroom_bytes )) || \
+      die "rollback headroom must remain ${production_rollback_headroom_bytes} bytes"
     ;;
 esac
 readonly release_required_bytes rollback_headroom_bytes release_total_required_bytes
@@ -151,6 +177,60 @@ readonly release_required_bytes rollback_headroom_bytes release_total_required_b
 if [[ "$disk_gate_mode" == "absolute" ]]; then
   (( disk_available_bytes >= release_total_required_bytes )) || \
     die "free disk bytes ${disk_available_bytes} are below release requirement ${release_total_required_bytes}"
+fi
+
+if [[ "$disk_gate_phase" == "pre-pull" ]]; then
+  log INFO "pre-pull capacity gate passed"
+  printf 'capacity_preflight=passed\n'
+  printf 'disk_gate_mode=%s\n' "$disk_gate_mode"
+  printf 'disk_gate_phase=%s\n' "$disk_gate_phase"
+  printf 'disk_available_bytes=%s\n' "$disk_available_bytes"
+  printf 'release_required_bytes=%s\n' "$release_required_bytes"
+  printf 'rollback_headroom_bytes=%s\n' "$rollback_headroom_bytes"
+  printf 'release_total_required_bytes=%s\n' "$release_total_required_bytes"
+  exit 0
+fi
+
+if [[ "$disk_gate_phase" == "post-pull" ]]; then
+  [[ "$release_manifest_file" == /* ]] || die "FRANK_RELEASE_MANIFEST_FILE must be absolute for post-pull"
+  [[ "$post_pull_image_proof_file" == /* ]] || die "FRANK_POST_PULL_IMAGE_PROOF_FILE must be absolute for post-pull"
+  release_manifest_real="$(realpath -e -- "$release_manifest_file")" || die "release manifest does not exist"
+  post_pull_image_proof_real="$(realpath -e -- "$post_pull_image_proof_file")" || die "post-pull image proof does not exist"
+  [[ "$release_manifest_real" == "$release_manifest_file" ]] || die "release manifest path must not contain links"
+  [[ "$post_pull_image_proof_real" == "$post_pull_image_proof_file" ]] || die "post-pull image proof path must not contain links"
+  [[ -f "$release_manifest_real" && ! -L "$release_manifest_file" ]] || die "release manifest must be a real file"
+  [[ -f "$post_pull_image_proof_real" && ! -L "$post_pull_image_proof_file" ]] || die "post-pull image proof must be a real file"
+
+  declare -a manifest_services=(api web codegraph workbench)
+  declare -a expected_images=("$api_image" "$web_image" "$codegraph_image" "$workbench_image")
+  declare -A expected_image_ids=()
+  for image_index in "${!manifest_services[@]}"; do
+    service_name="${manifest_services[$image_index]}"
+    expected_image="${expected_images[$image_index]}"
+    manifest_image="$(jq -er --arg service "$service_name" \
+      '.images[$service] | .reference + "@" + .digest' "$release_manifest_real")" || \
+      die "release manifest is missing image: $service_name"
+    [[ "$expected_image" == "$manifest_image" ]] || die "post-pull image is not bound to release manifest: $service_name"
+    actual_image_id="$(docker image inspect --format '{{.Id}}' "$expected_image" 2>/dev/null || true)"
+    [[ "$actual_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die "post-pull image is unavailable: $service_name"
+    expected_image_ids["$expected_image"]="$actual_image_id"
+  done
+
+  declare -A proven_image_ids=()
+  proven_image_count=0
+  while IFS=$'\t' read -r proven_reference proven_image_id proven_extra || [[ -n "$proven_reference" ]]; do
+    [[ -n "$proven_reference" && -n "$proven_image_id" && -z "$proven_extra" ]] || \
+      die "post-pull image proof entries must contain exactly one reference and image ID"
+    [[ -z "${proven_image_ids[$proven_reference]+present}" ]] || die "post-pull image proof contains a duplicate reference"
+    [[ "$proven_image_id" =~ ^sha256:[0-9a-f]{64}$ ]] || die "post-pull image proof contains an invalid image ID"
+    proven_image_ids["$proven_reference"]="$proven_image_id"
+    ((proven_image_count += 1))
+  done < "$post_pull_image_proof_real"
+  (( proven_image_count == 4 )) || die "post-pull image proof must contain exactly four images"
+  for expected_image in "${expected_images[@]}"; do
+    [[ "${proven_image_ids[$expected_image]:-}" == "${expected_image_ids[$expected_image]}" ]] || \
+      die "post-pull image proof does not match the local manifest-bound image: $expected_image"
+  done
 fi
 
 IFS=', ' read -r -a required_secret_vars <<< "$required_secret_vars_raw"
@@ -264,6 +344,7 @@ printf 'ahead=%s\n' "$ahead_count"
 printf 'behind=%s\n' "$behind_count"
 printf 'disk_mount=%s\n' "$disk_mount"
 printf 'disk_gate_mode=%s\n' "$disk_gate_mode"
+printf 'disk_gate_phase=%s\n' "$disk_gate_phase"
 printf 'disk_used_percent=%s\n' "$disk_used_percent"
 printf 'disk_available_gib=%s\n' "$disk_available_gib"
 printf 'disk_available_bytes=%s\n' "$disk_available_bytes"
