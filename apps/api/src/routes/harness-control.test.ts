@@ -19,7 +19,7 @@ const request = {
   allowed_tools: ['browser.search' as const], egress_profile: 'research-public' as const,
 };
 const representation = {
-  job_id: '00000000-0000-0000-0000-000000000001', status: 'queued' as const,
+  job_id: '550e8400-e29b-41d4-a716-446655440000', status: 'queued' as const,
   created_at: '2026-08-11T00:00:00.000Z', updated_at: '2026-08-11T00:00:00.000Z',
   finished_at: null, cancelled_at: null, artifacts: [], source_refs: [],
 };
