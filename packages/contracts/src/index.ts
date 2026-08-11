@@ -21,3 +21,6 @@ export * from './buzz.js';
 export * from './channel.js';
 export * from './context-pack.js';
 export * from './harness.js';
+export * from './object-manifest.js';
+export * from './chat-turn.js';
+export * from './harness-control.js';

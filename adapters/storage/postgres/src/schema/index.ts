@@ -20,3 +20,4 @@ export * from './notification.js';
 export * from './audit.js';
 export * from './cost.js';
 export * from './outbox.js';
+export * from './harness-control.js';

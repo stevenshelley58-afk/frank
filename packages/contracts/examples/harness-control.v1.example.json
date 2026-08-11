@@ -1,0 +1,1 @@
+{"harness":"hermes","task_type":"browser-research","idempotency_key":"job-01","scope":{"cell_id":"cell_01","room_id":"00000000-0000-0000-0000-000000000001"},"input":{"query":"Frank"},"allowed_tools":["browser"],"egress_profile":"research"}
