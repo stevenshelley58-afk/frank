@@ -56,9 +56,11 @@ between the backup and smoke gates.
 
 ### Harness external prerequisites
 
-The live base has no SeaweedFS service and uses the already healthy external, manually
-managed `frank-letta-server:8283`; Letta is not a harness image or promotion slot. Hermes
-remains a later specialist overlay and this release creates no Hermes image slot or network.
+The live base has no SeaweedFS service and uses the external, manually managed
+`frank-letta-server:8283`; Letta is not a harness image or promotion slot. Every release
+must nevertheless match that running container to a reviewed OCI digest and pass the real
+private `/v1/health/` probe from `frank-web`. Hermes remains a later specialist overlay and
+this release creates no Hermes image slot or network.
 Before enabling the third unit, create (and record) only the external `frank-attachments`
 and `frank-model` networks plus the existing `frank-cell-seaweedfs-data` volume. This is a
 reversible host prerequisite: removing an
@@ -1057,6 +1059,9 @@ export FRANK_OWNER_ID='steven'
 export FRANK_PUBLIC_URL='https://frank.fail'
 export FRANK_API_INTERNAL_URL='http://frank-api:3000'
 export FRANK_WEB_INTERNAL_URL='http://frank-web:3001'
+export FRANK_LETTA_INTERNAL_URL='http://frank-letta-server:8283'
+export FRANK_LETTA_CONTAINER='frank-letta-server'
+export FRANK_LETTA_EXPECTED_IMAGE='<REVIEWED_LETTA_REPOSITORY>@sha256:<64_HEX_DIGEST>'
 export FRANK_LOG_LEVEL='info'
 export FRANK_MAX_BODY_BYTES='1048576'
 
@@ -1153,6 +1158,8 @@ printf '%s' "$FRANK_RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
 printf '%s' "$FRANK_API_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-api@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_WEB_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_CODEGRAPH_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-codegraph@sha256:[a-f0-9]{64}$'
+printf '%s' "$FRANK_LETTA_EXPECTED_IMAGE" | grep -Eq '^[a-z0-9./:_-]+@sha256:[a-f0-9]{64}$'
+test "$FRANK_LETTA_CONTAINER" = 'frank-letta-server'
 printf '%s' "$FRANK_DOCKER_SOCKET_GID" | grep -Eq '^[0-9]+$'
 test "$(realpath -e -- "$FRANK_WORKSPACE_SOURCE_HOST_PATH")" = '/srv/frank/workspaces/central'
 test "$(realpath -e -- "$FRANK_RELEASE_SOURCE")" = "$(realpath -e -- "$FRANK_REPO_PATH")"
@@ -1165,6 +1172,13 @@ test "$(sha256sum -- "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH" | awk '{print $1}')" 
   "$(sha256sum -- "$FRANK_RELEASE_SOURCE/infra/production/codegraph-projects.json" | awk '{print $1}')"
 test ! -e "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH/.git" && \
   test ! -L "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH/.git"
+letta_running_image_id="$(docker inspect --type container --format '{{.Image}}' "$FRANK_LETTA_CONTAINER")"
+test "$(docker inspect --type container --format '{{.State.Running}}' "$FRANK_LETTA_CONTAINER")" = 'true'
+test "$letta_running_image_id" = "$(docker image inspect --format '{{.Id}}' "$FRANK_LETTA_EXPECTED_IMAGE")"
+docker inspect --type container --format '{{json .NetworkSettings.Networks}}' "$FRANK_LETTA_CONTAINER" |
+  jq -e 'has("frank")' >/dev/null
+printf '%s\t%s\t%s\n' "$FRANK_LETTA_CONTAINER" "$FRANK_LETTA_EXPECTED_IMAGE" "$letta_running_image_id" \
+  > "$evidence_dir/letta-external.before.tsv"
 case "$FRANK_BASIC_AUTH_HASH" in
   '$2a$'*|'$2b$'*|'$2y$'*) ;;
   *) printf '%s\n' 'FRANK_BASIC_AUTH_HASH must be a bcrypt hash' >&2; exit 1 ;;
@@ -1202,6 +1216,8 @@ esac
     (.services["frank-api"].environment | has("FRANK_ATTACHMENT_PROMOTER_BEARER") | not)
   end) and
   (.services["frank-api"].environment | has("LITELLM_ADMIN_KEY") | not) and
+  .services["frank-api"].environment.FRANK_LETTA_INTERNAL_URL == "http://frank-letta-server:8283" and
+  .services["frank-web"].environment.LETTA_URL == "http://frank-letta-server:8283" and
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and
   (.services["frank-api"].environment.FRANK_WORKBENCH_IMAGE |
@@ -1403,7 +1419,9 @@ manifest is published; a new source commit requires a new verified release artif
 The Caddy file in `infra/production` is the authoritative replacement for only the existing
 `frank.fail` site block. The live Caddyfile also owns unrelated hostnames, so replacing the
 whole file with this fragment is forbidden. Assemble a root-owned candidate by preserving
-every other live block and replacing exactly the old `frank.fail` block. The candidate must
+every other live block, including the active Pavone route, and replacing exactly the old
+`frank.fail` block. Graphify stays private behind `frank-api`; do not add a public route for
+it. The candidate must
 contain no credential value: it retains `{$FRANK_BASIC_AUTH_USER}` and
 `{$FRANK_BASIC_AUTH_HASH}` placeholders.
 
@@ -1446,6 +1464,19 @@ printf 'Starting Graphify-backed services; first extraction may take up to 30 mi
   --wait-timeout "$codegraph_wait_seconds" \
   frank-codegraph-volume-init frank-codegraph frank-api frank-web frank-caddy \
   2>&1 | tee "$evidence_dir/compose-up.log"
+
+frank_web_id="$("${compose[@]}" ps -q frank-web)"
+test -n "$frank_web_id"
+docker exec "$frank_web_id" node --input-type=module --eval '
+  const base = process.env.LETTA_URL;
+  if (base !== "http://frank-letta-server:8283") throw new Error("unexpected LETTA_URL");
+  const response = await fetch(`${base}/v1/health/`, {
+    redirect: "error", signal: AbortSignal.timeout(10000)
+  });
+  if (response.status !== 200) throw new Error(`Letta health returned ${response.status}`);
+  process.stdout.write(`letta_private_health_http=${response.status}\n`);
+' > "$evidence_dir/letta-private-health.result"
+grep -Fx 'letta_private_health_http=200' "$evidence_dir/letta-private-health.result"
 
 if test "$FRANK_HARNESS_ENABLED" = true; then
   # The bootstrap credential exists only for this bounded first-start operation and is
@@ -1681,6 +1712,7 @@ Retain these artifacts together:
 - backup result, backup log, `SHA256SUMS`, `manifest.env`, verification output, and
   encrypted off-cell object/version ID;
 - deployment workflow/command receipt and migration identifiers;
+- external Letta reviewed OCI digest/image ID match and private health-probe receipt;
 - post-deploy smoke result/log and observation-window health evidence;
 - on rollback, codegraph rollback result/log, prior and restored image IDs, rollback smoke
   output, incident ID, and any isolated restore evidence.

@@ -4,6 +4,8 @@ root="$(cd "$(dirname "$0")/../../.." && pwd)"
 compose="$root/infra/production/docker-compose.harness.yml"
 app_compose="$root/infra/production/docker-compose.app.yml"
 caddy="$root/infra/production/Caddyfile.frank-production"
+foundation_compose="$root/infra/compose/docker-compose.yml"
+seaweed_template="$root/infra/compose/seaweedfs/s3.json.tmpl"
 litellm_config="$root/infra/harness/litellm/config.yaml"
 litellm_bootstrap="$root/scripts/production/bootstrap-litellm-virtual-key.sh"
 bucket_bootstrap="$root/scripts/production/bootstrap-attachment-buckets.sh"
@@ -16,6 +18,15 @@ for token in 'frank-previews' 'FRANK_OPENFGA' 'insecure-skip-verify' 'tls-skip-v
   if grep -En "$token" "$compose"; then echo "forbidden: $token"; exit 1; fi
 done
 grep -Eq 'FRANK_LETTA_INTERNAL_URL.*frank-letta-server:8283' "$root/infra/production/docker-compose.app.yml"
+grep -Eq 'LETTA_URL:.*frank-letta-server:8283' "$app_compose"
+grep -Fq "export FRANK_LETTA_EXPECTED_IMAGE='<REVIEWED_LETTA_REPOSITORY>@sha256:<64_HEX_DIGEST>'" "$release_runbook"
+grep -Fq 'fetch(`${base}/v1/health/`' "$release_runbook"
+grep -Fq 'letta_private_health_http=200' "$release_runbook"
+grep -Fq 'Letta is not a harness image or promotion slot' "$release_runbook"
+grep -Fq 'Hermes has no Wave 1 runtime or image slot' "$root/infra/harness/README.md"
+grep -Fq 'every other live block, including the active Pavone route' "$release_runbook"
+grep -Fq 'release_total_required_bytes=45794556407' "$release_runbook"
+grep -Fq 'release_total_required_bytes=35559741427' "$release_runbook"
 grep -Eq '@frank_tusd_upload path /v1/uploads/tus /v1/uploads/tus/ /v1/uploads/tus/\*' "$caddy"
 grep -Eq 'handle @frank_tusd_upload' "$caddy"
 grep -Eq 'disable-download' "$compose"
@@ -66,6 +77,29 @@ grep -Fq 'render-seaweedfs-s3-config.sh"' "$bucket_bootstrap"
 grep -Fq -- '--force-recreate --no-deps --wait' "$bucket_bootstrap"
 grep -Fq 'temporary Seaweed bootstrap credential survived scoped recreate' "$bucket_bootstrap"
 grep -Fq 'FRANK_ROOT_RUNTIME_ENV' "$bucket_bootstrap"
+for credential in STAGING PROMOTER DOWNLOADER; do
+  grep -Fq "__ATTACHMENT_${credential}_ACCESS_KEY__" "$seaweed_template"
+  grep -Fq "__ATTACHMENT_${credential}_SECRET_KEY__" "$seaweed_template"
+  grep -Fq "FRANK_ATTACHMENT_${credential}_ACCESS_KEY" "$foundation_compose"
+  grep -Fq "FRANK_ATTACHMENT_${credential}_SECRET_KEY" "$foundation_compose"
+done
+if grep -Eq '"(Read|Write|List|Tagging|Admin)"|"name"[[:space:]]*:[[:space:]]*"frank-cell"|"(Read|Write|List|Tagging):[^"]*lake-' "$seaweed_template"; then echo 'shared Seaweed attachment policy overreaches'; exit 1; fi
+grep -Fq 'partially configured lake credentials cannot prove mutual denial' "$s3_canary"
+grep -Fq 'must_deny_lake' "$s3_canary"
+grep -Fq 'must_deny_attachments' "$s3_canary"
+grep -Fq 'for bucket in frank-attachment-staging frank-objects frank-object-previews; do' "$bucket_bootstrap"
+grep -Fq 'put-bucket-lifecycle-configuration --bucket frank-attachment-staging' "$bucket_bootstrap"
+if env -u FRANK_LAKE_WORKER_ACCESS_KEY -u FRANK_LAKE_WORKER_SECRET_KEY \
+  -u FRANK_LAKE_QUERY_ACCESS_KEY -u FRANK_LAKE_QUERY_SECRET_KEY \
+  FRANK_S3_ENDPOINT='http://evidence.invalid' \
+  FRANK_STAGING_ACCESS_KEY='staging' FRANK_STAGING_SECRET_KEY='staging-secret' \
+  FRANK_PROMOTER_ACCESS_KEY='promoter' FRANK_PROMOTER_SECRET_KEY='promoter-secret' \
+  FRANK_DOWNLOADER_ACCESS_KEY='downloader' FRANK_DOWNLOADER_SECRET_KEY='downloader-secret' \
+  FRANK_LAKE_BUCKET='partial-lake' \
+  bash "$s3_canary" >/dev/null 2>"$scratch/partial-lake.log"; then
+  echo 'partial lake configuration did not fail closed'; exit 1
+fi
+grep -Fq 'partially configured lake credentials cannot prove mutual denial' "$scratch/partial-lake.log"
 if grep -Eq '(^|[[:space:]])rg([[:space:]]|$)' "$root/infra/harness/bin/validate-gateway-candidate.sh"; then echo 'candidate validator requires unavailable ripgrep'; exit 1; fi
 test "$(grep -Ec 'delete-object --bucket frank-(attachment-staging|objects|object-previews)' "$s3_canary")" -eq 3
 grep -Fq 'object canary cleanup failed' "$s3_canary"
@@ -120,6 +154,8 @@ export FRANK_LOG_MAX_SIZE='10m' FRANK_LOG_MAX_FILES='3'
 export FRANK_BASIC_AUTH_USER='validation' FRANK_BASIC_AUTH_HASH='validation-only-hash'
 export FRANK_API_INTERNAL_URL='http://frank-api:3000' FRANK_WEB_INTERNAL_URL='http://frank-web:3001'
 export FRANK_CODEGRAPH_CONTROL_TOKEN_FILE="$scratch/codegraph-control-token"
+export FRANK_CODEGRAPH_REGISTRY_HOST_PATH="$scratch/projects.json"
+export FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH="$scratch/repository"
 unset FRANK_ATTACHMENT_PROMOTER_BEARER FRANK_LITELLM_VIRTUAL_KEY FRANK_TUSD_GATE_SECRET FRANK_TUSD_HOOK_SECRET FRANK_TUSD_HOOK_URL
 disabled_render="$scratch/disabled.json"
 docker compose -f "$compose_base" -f "$app_compose" config --format json > "$disabled_render"
@@ -147,6 +183,14 @@ for (const name of ['FRANK_LITELLM_VIRTUAL_KEY', 'FRANK_TUSD_GATE_SECRET', 'FRAN
 }
 if (disabled.services['frank-tusd']) throw new Error('disabled render retained tusd');
 if (Object.hasOwn(disabled.services['frank-caddy'].environment, 'FRANK_TUSD_GATE_SECRET')) throw new Error('disabled Caddy retained tusd gate secret');
+if (disabled.services['frank-api'].environment.FRANK_LETTA_INTERNAL_URL !== 'http://frank-letta-server:8283') throw new Error('disabled API Letta seam drifted');
+if (disabled.services['frank-web'].environment.LETTA_URL !== 'http://frank-letta-server:8283') throw new Error('disabled web Letta probe seam drifted');
+for (const model of [disabled, enabled]) {
+  if (model.services['frank-letta-server'] || model.services['frank-hermes']) throw new Error('external/later harness duplicated in Wave 1');
+  for (const service of ['frank-api', 'frank-codegraph']) {
+    if (!model.services[service].volumes.some((volume) => volume.source === process.env.FRANK_CODEGRAPH_REGISTRY_HOST_PATH)) throw new Error(`${service} lost staged Graphify registry`);
+  }
+}
 const command = enabled.services['frank-tusd'].command;
 if (!Array.isArray(command) || !command.includes('-hooks-http=http://frank-api:3000/private/tusd/hooks')) throw new Error('enabled tusd private hook URL missing');
 if (enabled.services['frank-api'].environment.FRANK_TUSD_GATE_SECRET !== enabled.services['frank-caddy'].environment.FRANK_TUSD_GATE_SECRET) throw new Error('enabled gate secrets differ');

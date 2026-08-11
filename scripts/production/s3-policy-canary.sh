@@ -3,6 +3,12 @@
 set -Eeuo pipefail; set +x
 : "${FRANK_S3_ENDPOINT:?}" "${FRANK_STAGING_ACCESS_KEY:?}" "${FRANK_STAGING_SECRET_KEY:?}" "${FRANK_PROMOTER_ACCESS_KEY:?}" "${FRANK_PROMOTER_SECRET_KEY:?}" "${FRANK_DOWNLOADER_ACCESS_KEY:?}" "${FRANK_DOWNLOADER_SECRET_KEY:?}"
 export AWS_DEFAULT_REGION=us-east-1 AWS_EC2_METADATA_DISABLED=true
+lake_vars=(FRANK_LAKE_BUCKET FRANK_LAKE_WORKER_ACCESS_KEY FRANK_LAKE_WORKER_SECRET_KEY FRANK_LAKE_QUERY_ACCESS_KEY FRANK_LAKE_QUERY_SECRET_KEY)
+lake_values=0
+for lake_var in "${lake_vars[@]}"; do [[ -n "${!lake_var:-}" ]] && ((lake_values += 1)); done
+if ((lake_values != 0 && lake_values != ${#lake_vars[@]})); then
+  echo 'partially configured lake credentials cannot prove mutual denial' >&2; exit 1
+fi
 cell="cell-$(openssl rand -hex 8)"; upload="$(uuidgen | tr '[:upper:]' '[:lower:]')"; key="$cell/$upload/object"; hash="$(openssl rand -hex 32)"; object="sha256/${hash:0:2}/$hash"; preview="$hash/thumb/$hash"
 aws_for() { AWS_ACCESS_KEY_ID="$1" AWS_SECRET_ACCESS_KEY="$2" aws --endpoint-url "$FRANK_S3_ENDPOINT" s3api "${@:3}"; }
 must_deny_lake() { local access="$1" secret="$2"; for action in "head-object --bucket $FRANK_LAKE_BUCKET --key $lake_key" "list-objects-v2 --bucket $FRANK_LAKE_BUCKET" "put-object --bucket $FRANK_LAKE_BUCKET --key $lake_key --body /dev/null"; do if aws_for "$access" "$secret" $action >/dev/null 2>&1; then echo 'attachment lake overreach' >&2; exit 1; fi; done; }
@@ -18,7 +24,7 @@ aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" head-object --
 if aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" list-objects-v2 --bucket frank-attachment-staging >/dev/null 2>&1; then echo 'promoter staging-list overreach' >&2; exit 1; fi
 if aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" head-object --bucket frank-attachment-staging --key "$key" >/dev/null 2>&1; then echo 'downloader staging-read overreach' >&2; exit 1; fi
 if aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" put-object --bucket frank-objects --key "$object" --body /dev/null 2>&1; then echo 'downloader write overreach' >&2; exit 1; fi
-if [[ -n "${FRANK_LAKE_BUCKET:-}" && -n "${FRANK_LAKE_WORKER_ACCESS_KEY:-}" && -n "${FRANK_LAKE_WORKER_SECRET_KEY:-}" && -n "${FRANK_LAKE_QUERY_ACCESS_KEY:-}" && -n "${FRANK_LAKE_QUERY_SECRET_KEY:-}" ]]; then
+if ((lake_values == ${#lake_vars[@]})); then
   lake_key="canary/$hash"
   aws_for "$FRANK_LAKE_WORKER_ACCESS_KEY" "$FRANK_LAKE_WORKER_SECRET_KEY" put-object --bucket "$FRANK_LAKE_BUCKET" --key "$lake_key" --body /dev/null
   aws_for "$FRANK_LAKE_QUERY_ACCESS_KEY" "$FRANK_LAKE_QUERY_SECRET_KEY" head-object --bucket "$FRANK_LAKE_BUCKET" --key "$lake_key" >/dev/null

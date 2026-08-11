@@ -41,3 +41,10 @@ previous manifest as ROLLBACK. Revert by restoring the ROLLBACK manifest and rec
 these services; never delete attachment volumes. Licenses to record per chosen artifact: LiteLLM
 MIT, SeaweedFS Apache-2.0, tusd MIT, ClamAV GPL-2.0-only, Goose Apache-2.0, Hermes upstream
 license pending review, Letta Apache-2.0. No promotion is automatic.
+
+External evidence boundary: Letta v0.16.8 is the reviewed manual-service starting point,
+but its exact running OCI digest remains a release blocker until the original VPS exposes
+and matches it through `FRANK_LETTA_EXPECTED_IMAGE`; the release runbook then performs a
+real private `/v1/health/` probe from `frank-web`. Hermes has no Wave 1 runtime or image slot.
+Its v2026.8.3 tag is only a Wave 2 review starting point; exact OCI digest, SBOM, provenance,
+configuration, and typed-adapter canary evidence remain intentionally unavailable here.
