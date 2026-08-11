@@ -6,12 +6,16 @@ app_compose="$root/infra/production/docker-compose.app.yml"
 caddy="$root/infra/production/Caddyfile.frank-production"
 litellm_config="$root/infra/harness/litellm/config.yaml"
 litellm_bootstrap="$root/scripts/production/bootstrap-litellm-virtual-key.sh"
+bucket_bootstrap="$root/scripts/production/bootstrap-attachment-buckets.sh"
+s3_canary="$root/scripts/production/s3-policy-canary.sh"
+seaweed_renderer="$root/scripts/production/render-seaweedfs-s3-config.sh"
 release_runbook="$root/docs/runbooks/AUTONOMOUS_FRANK_RELEASE.md"
 for token in 'frank-previews' 'FRANK_OPENFGA' 'insecure-skip-verify' 'tls-skip-verify'; do
   if grep -En "$token" "$compose"; then echo "forbidden: $token"; exit 1; fi
 done
 grep -Eq 'FRANK_LETTA_INTERNAL_URL.*frank-letta-server:8283' "$root/infra/production/docker-compose.app.yml"
-grep -Eq 'handle /v1/uploads/tus/\*' "$caddy"
+grep -Eq '@frank_tusd_upload path /v1/uploads/tus /v1/uploads/tus/ /v1/uploads/tus/\*' "$caddy"
+grep -Eq 'handle @frank_tusd_upload' "$caddy"
 grep -Eq 'disable-download' "$compose"
 grep -Eq 'max-size=2147483648' "$compose"
 grep -Eq 'http://frank-seaweedfs:8333' "$compose"
@@ -33,6 +37,8 @@ grep -Eq 'FRANK_TUSD_HOOK_SECRET:.*Caddy-to-tusd hook credential required' "$com
 test "$(grep -Ec '^[[:space:]]+FRANK_TUSD_GATE_SECRET:' "$compose")" -eq 2
 test "$(grep -Ec '^[[:space:]]+FRANK_TUSD_HOOK_SECRET:' "$compose")" -eq 2
 if grep -Eq 'FRANK_LITELLM_VIRTUAL_KEY|FRANK_TUSD_(GATE|HOOK)_SECRET|^[[:space:]]+- frank-(model|attachments)$' "$app_compose"; then echo 'harness-only secret or network blocks the disabled app render path'; exit 1; fi
+grep -Fq 'if $harness then' "$release_runbook"
+grep -Fq 'has("FRANK_LITELLM_VIRTUAL_KEY") | not' "$release_runbook"
 if grep -Eq '^[[:space:]]+LITELLM_ADMIN_KEY:' "$app_compose"; then echo 'LiteLLM admin key leaked into API overlay'; exit 1; fi
 test "$(grep -El 'LITELLM_ADMIN_KEY' "$compose" "$litellm_config" "$litellm_bootstrap" | wc -l)" -eq 3
 grep -Eq 'http://127\.0\.0\.1:4000/key/generate' "$litellm_bootstrap"
@@ -43,13 +49,30 @@ grep -Eq 'provider request ID' "$release_runbook"
 grep -Eq 'Enterprise-only custom spend metadata' "$release_runbook"
 grep -Eq 'test "\$FRANK_TUSD_GATE_SECRET" != "\$FRANK_TUSD_HOOK_SECRET"' "$release_runbook"
 grep -Eq 'Required host commands are Bash 4\.3\+, Node\.js 22' "$release_runbook"
+grep -Fq "actions:['Admin']" "$seaweed_renderer"
+grep -Fq 'render-seaweedfs-s3-config.sh"' "$bucket_bootstrap"
+grep -Fq -- '--force-recreate --no-deps --wait' "$bucket_bootstrap"
+grep -Fq 'temporary Seaweed bootstrap credential survived scoped recreate' "$bucket_bootstrap"
+grep -Fq 'FRANK_ROOT_RUNTIME_ENV' "$bucket_bootstrap"
+if grep -Eq '(^|[[:space:]])rg([[:space:]]|$)' "$root/infra/harness/bin/validate-gateway-candidate.sh"; then echo 'candidate validator requires unavailable ripgrep'; exit 1; fi
+test "$(grep -Ec 'delete-object --bucket frank-(attachment-staging|objects|object-previews)' "$s3_canary")" -eq 3
+grep -Fq 'object canary cleanup failed' "$s3_canary"
+grep -Fq 'preview canary cleanup failed' "$s3_canary"
 grep -Eq 'not before 1\.83\.7' "$root/infra/harness/README.md"
 grep -Eq 'SeaweedFS 4\.41, tusd v2\.10\.0, and ClamAV' "$root/infra/harness/README.md"
+harness_up_line="$(grep -n 'harness-compose-up.log' "$release_runbook" | cut -d: -f1)"
+bucket_bootstrap_line="$(grep -n 'bootstrap-attachment-buckets.sh' "$release_runbook" | cut -d: -f1)"
+test "$bucket_bootstrap_line" -gt "$harness_up_line"
 promote="$root/infra/harness/bin/promote-gateway-candidate.sh"
 state_root="$(mktemp -d)"
 trap 'rm -rf -- "$state_root"' EXIT
 candidate="$state_root/candidate.env"; current="$state_root/current.env"; rollback="$state_root/rollback.env"; manifest="$state_root/evidence-manifest.json"
 digest="sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+export FRANK_LITELLM_CURRENT_IMAGE="example.invalid/litellm@$digest"
+export FRANK_SEAWEEDFS_CURRENT_IMAGE="example.invalid/seaweedfs@$digest"
+export FRANK_TUSD_CURRENT_IMAGE="example.invalid/tusd@$digest"
+export FRANK_CLAMAV_CURRENT_IMAGE="example.invalid/clamav@$digest"
+"$root/infra/harness/bin/validate-gateway-candidate.sh" >/dev/null
 for service in LITELLM SEAWEEDFS TUSD CLAMAV; do printf 'FRANK_%s_CANDIDATE_IMAGE=example.invalid/%s@%s\n' "$service" "${service,,}" "$digest" >> "$candidate"; done
 : > "$current"; : > "$rollback"
 write_manifest() {

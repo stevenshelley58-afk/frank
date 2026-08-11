@@ -25,7 +25,13 @@ if [[ -n "${FRANK_LAKE_BUCKET:-}" && -n "${FRANK_LAKE_WORKER_ACCESS_KEY:-}" && -
   must_deny_lake "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY"; must_deny_lake "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY"; must_deny_lake "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY"
   must_deny_attachments "$FRANK_LAKE_WORKER_ACCESS_KEY" "$FRANK_LAKE_WORKER_SECRET_KEY"; must_deny_attachments "$FRANK_LAKE_QUERY_ACCESS_KEY" "$FRANK_LAKE_QUERY_SECRET_KEY"
   aws_for "$FRANK_LAKE_WORKER_ACCESS_KEY" "$FRANK_LAKE_WORKER_SECRET_KEY" delete-object --bucket "$FRANK_LAKE_BUCKET" --key "$lake_key"
+  if aws_for "$FRANK_LAKE_QUERY_ACCESS_KEY" "$FRANK_LAKE_QUERY_SECRET_KEY" head-object --bucket "$FRANK_LAKE_BUCKET" --key "$lake_key" >/dev/null 2>&1; then echo 'lake canary cleanup failed' >&2; exit 1; fi
   lake_result='lake-mutual-denial=passed'
 else lake_result='lake-mutual-denial=skipped-no-real-lake-credentials'; fi
 aws_for "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY" delete-object --bucket frank-attachment-staging --key "$key"
+aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" delete-object --bucket frank-objects --key "$object"
+aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" delete-object --bucket frank-object-previews --key "$preview"
+if aws_for "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY" head-object --bucket frank-attachment-staging --key "$key" >/dev/null 2>&1; then echo 'staging canary cleanup failed' >&2; exit 1; fi
+if aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" head-object --bucket frank-objects --key "$object" >/dev/null 2>&1; then echo 'object canary cleanup failed' >&2; exit 1; fi
+if aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" head-object --bucket frank-object-previews --key "$preview" >/dev/null 2>&1; then echo 'preview canary cleanup failed' >&2; exit 1; fi
 echo "s3-policy-canary=passed; scoped identities verified; disposable objects deleted; $lake_result"

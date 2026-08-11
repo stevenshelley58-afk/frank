@@ -65,11 +65,15 @@ reversible host prerequisite: removing an
 unused network is allowed; volumes are never removed. Render
 `/srv/frank/secrets/seaweedfs/s3.json` through `render-seaweedfs-s3-config.sh` at mode 0600
 before Compose; mounting the repository template or unresolved placeholders is forbidden.
-The temporary bootstrap identity is absent from that rendered configuration, so the first
-Seaweed recreate revokes it. Canonical objects and previews never receive an expiry rule.
+Immediately before the first Seaweed start, the release procedure renders a temporary
+bootstrap identity alongside those scoped identities. After bucket/lifecycle creation it
+atomically re-renders scoped-only policy, recreates only Seaweed, proves a scoped identity
+still works, and proves the old bootstrap identity is denied. Canonical objects and previews
+never receive an expiry rule.
 
-Required host commands are Bash 4.3+, Node.js 22, Docker with Compose, Git, GitHub CLI, `jq`,
-`curl`, `gzip`, `openssl`, `sha256sum`, `flock`, `find`, `realpath`, `tar`, and standard
+Required host commands are Bash 4.3+, Node.js 22, Docker with Compose, Git, GitHub CLI,
+AWS CLI v2, `jq`, `curl`, `gzip`, `openssl`, `uuidgen`, `sha256sum`, `flock`, `find`,
+`realpath`, `tar`, and standard
 GNU coreutils.
 
 ## 1. Create the release evidence directory
@@ -1114,6 +1118,8 @@ export FRANK_HARNESS_ENABLED="${FRANK_HARNESS_ENABLED:-false}"
 case "$FRANK_HARNESS_ENABLED" in true|false) ;; *) exit 1;; esac
 compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
 if test "$FRANK_HARNESS_ENABLED" = true; then
+  export FRANK_SEAWEEDFS_S3_TEMPLATE="$FRANK_RELEASE_SOURCE/infra/compose/seaweedfs/s3.json.tmpl"
+  export FRANK_SEAWEEDFS_S3_CONFIG='/srv/frank/secrets/seaweedfs/s3.json'
   export FRANK_LITELLM_VIRTUAL_KEY_FILE="${FRANK_LITELLM_VIRTUAL_KEY_FILE:-/srv/frank/secrets/litellm/frank-api-virtual-key}"
   tusd_gate_file='/srv/frank/secrets/tusd/gate-secret'
   tusd_hook_file='/srv/frank/secrets/tusd/hook-secret'
@@ -1129,14 +1135,10 @@ if test "$FRANK_HARNESS_ENABLED" = true; then
   test "$FRANK_TUSD_GATE_SECRET" != "$FRANK_TUSD_HOOK_SECRET"
   harness_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.harness.yml"
   compose+=( -f "$harness_overlay" )
-  export FRANK_BASE_COMPOSE="$base_compose" FRANK_APP_OVERLAY="$app_overlay" FRANK_HARNESS_OVERLAY="$harness_overlay"
+  export FRANK_BASE_COMPOSE="$base_compose" FRANK_APP_OVERLAY="$app_overlay" FRANK_HARNESS_OVERLAY="$harness_overlay" FRANK_ROOT_RUNTIME_ENV="$root_runtime_env"
   bash "$FRANK_RELEASE_SOURCE/scripts/production/validate-harness-release.sh" \
     > "$evidence_dir/harness-config.result" 2> "$evidence_dir/harness-config.log"
   grep -Fx 'harness-release-config=passed; attachment pool=50GiB reserved; free floor=30GiB; third unit atomic' "$evidence_dir/harness-config.result"
-  bash "$FRANK_RELEASE_SOURCE/scripts/production/bootstrap-attachment-buckets.sh" \
-    > "$evidence_dir/attachment-bootstrap.result" 2> "$evidence_dir/attachment-bootstrap.log"
-  bash "$FRANK_RELEASE_SOURCE/scripts/production/s3-policy-canary.sh" \
-    > "$evidence_dir/s3-policy-canary.result" 2> "$evidence_dir/s3-policy-canary.log"
 fi
 
 version="$(docker compose version --short)"
@@ -1167,7 +1169,7 @@ case "$FRANK_BASIC_AUTH_HASH" in
 esac
 
 "${compose[@]}" config --quiet
-"${compose[@]}" config --format json | jq -e '
+"${compose[@]}" config --format json | jq -e --argjson harness "$FRANK_HARNESS_ENABLED" '
   (.services["frank-api"].build == null) and
   (.services["frank-web"].build == null) and
   (.services["frank-codegraph"].build == null) and
@@ -1181,7 +1183,20 @@ esac
   (.services["frank-codegraph"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph"]) and
   (.services["frank-codegraph-volume-init"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph.volume_init"]) and
   .services["frank-api"].environment.FRANK_ENV == "production" and
-  (.services["frank-api"].environment.FRANK_LITELLM_VIRTUAL_KEY | length > 0) and
+  (if $harness then
+    ((.services["frank-api"].environment.FRANK_LITELLM_VIRTUAL_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET // "") | length > 0) and
+    (.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET != .services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET) and
+    (.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET == .services["frank-caddy"].environment.FRANK_TUSD_GATE_SECRET) and
+    (.services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET == .services["frank-caddy"].environment.FRANK_TUSD_HOOK_SECRET)
+  else
+    (.services["frank-api"].environment | has("FRANK_LITELLM_VIRTUAL_KEY") | not) and
+    (.services["frank-api"].environment | has("FRANK_TUSD_GATE_SECRET") | not) and
+    (.services["frank-api"].environment | has("FRANK_TUSD_HOOK_SECRET") | not) and
+    (.services["frank-caddy"].environment | has("FRANK_TUSD_GATE_SECRET") | not) and
+    (.services["frank-caddy"].environment | has("FRANK_TUSD_HOOK_SECRET") | not)
+  end) and
   (.services["frank-api"].environment | has("LITELLM_ADMIN_KEY") | not) and
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and
@@ -1423,12 +1438,45 @@ printf 'Starting Graphify-backed services; first extraction may take up to 30 mi
   2>&1 | tee "$evidence_dir/compose-up.log"
 
 if test "$FRANK_HARNESS_ENABLED" = true; then
+  # The bootstrap credential exists only for this bounded first-start operation and is
+  # never written to evidence or a repository/runtime environment file.
+  export FRANK_S3_BOOTSTRAP_ACCESS_KEY="$(openssl rand -hex 16)"
+  export FRANK_S3_BOOTSTRAP_SECRET_KEY="$(openssl rand -hex 32)"
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/render-seaweedfs-s3-config.sh" --with-bootstrap
   "${compose[@]}" up -d --no-build --wait --wait-timeout 180 \
     frank-seaweedfs frank-litellm frank-tusd frank-clamav \
     2>&1 | tee "$evidence_dir/harness-compose-up.log"
-  docker inspect frank-seaweedfs frank-litellm frank-tusd frank-clamav \
-    --format '{{.Name}}\t{{.Image}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
-    > "$evidence_dir/harness-containers.after.tsv"
+  : > "$evidence_dir/harness-containers.after.tsv"
+  for service in frank-seaweedfs frank-litellm frank-tusd frank-clamav; do
+    service_id="$("${compose[@]}" ps -q "$service")"
+    test -n "$service_id"
+    docker inspect "$service_id" \
+      --format '{{.Name}}\t{{.Image}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+      >> "$evidence_dir/harness-containers.after.tsv"
+  done
+  # These require the promoted Seaweed endpoint to be healthy. Any failure stops the
+  # release and enters the normal atomic rollback path.
+  seaweed_id="$("${compose[@]}" ps -q frank-seaweedfs)"
+  seaweed_ip="$(docker inspect --format '{{with index .NetworkSettings.Networks "frank-attachments"}}{{.IPAddress}}{{end}}' "$seaweed_id")"
+  printf '%s' "$seaweed_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+  export FRANK_S3_ENDPOINT="http://$seaweed_ip:8333"
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/bootstrap-attachment-buckets.sh" \
+    > "$evidence_dir/attachment-bootstrap.result" 2> "$evidence_dir/attachment-bootstrap.log"
+  grep -Fx 'attachment-buckets=bootstrapped; lifecycle=staging-only; scoped-recreate=passed; temporary-admin=denied' "$evidence_dir/attachment-bootstrap.result"
+  unset FRANK_S3_BOOTSTRAP_ACCESS_KEY FRANK_S3_BOOTSTRAP_SECRET_KEY
+  seaweed_id="$("${compose[@]}" ps -q frank-seaweedfs)"
+  seaweed_ip="$(docker inspect --format '{{with index .NetworkSettings.Networks "frank-attachments"}}{{.IPAddress}}{{end}}' "$seaweed_id")"
+  printf '%s' "$seaweed_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+  export FRANK_S3_ENDPOINT="http://$seaweed_ip:8333"
+  export FRANK_STAGING_ACCESS_KEY="$FRANK_ATTACHMENT_STAGING_ACCESS_KEY"
+  export FRANK_STAGING_SECRET_KEY="$FRANK_ATTACHMENT_STAGING_SECRET_KEY"
+  export FRANK_PROMOTER_ACCESS_KEY="$FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY"
+  export FRANK_PROMOTER_SECRET_KEY="$FRANK_ATTACHMENT_PROMOTER_SECRET_KEY"
+  export FRANK_DOWNLOADER_ACCESS_KEY="$FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY"
+  export FRANK_DOWNLOADER_SECRET_KEY="$FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY"
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/s3-policy-canary.sh" \
+    > "$evidence_dir/s3-policy-canary.result" 2> "$evidence_dir/s3-policy-canary.log"
+  grep -E '^s3-policy-canary=passed; scoped identities verified; disposable objects deleted; ' "$evidence_dir/s3-policy-canary.result"
 fi
 
 "${compose[@]}" ps \
