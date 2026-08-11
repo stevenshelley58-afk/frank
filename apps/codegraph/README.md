@@ -87,6 +87,19 @@ licenses/notices, `/etc/os-release`, numeric user records and the recursively
 resolved ELF/musl closure. Dependency discovery reads only bounded
 `DT_NEEDED`/`RUNPATH` metadata through the pinned build-only `scanelf`; it
 never executes target ELF objects or treats undefined symbols as libraries.
+Resolution mirrors musl loader order: the requesting object's validated
+RUNPATH/RPATH directories are checked in declaration order, followed by each
+bounded `needed_by` ancestor's paths in order, then `/lib`, `/usr/local/lib`,
+and `/usr/lib`. Directories are canonical-deduplicated across that chain.
+Canonical object identity preserves deterministic first-load ancestry and
+terminates dependency cycles. Package vendor directories such as
+`numpy.libs` and `rapidfuzz.libs` are reachable only when that object declares
+them itself or inherits them through its loader ancestry; they are never mixed
+into a global search pool or seeded as independent loader roots. Importable
+extensions and non-vendor runtime ELFs remain deterministic roots. The image
+retains a bounded `/app/sbom/elf-resolution.json` audit of every source object,
+search-tier owner, declared/expanded path, selected directory, and canonical
+candidate.
 It physically excludes `tarfile.py`, `html/parser.py`, the unused Tk GUI surface
 (`_tkinter`, `tkinter`, `idlelib`, and `turtledemo`), bytecode caches, pip,
 setuptools, wheel, shells and package managers. Tk removal is explicit rather

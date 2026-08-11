@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import re
 import shutil
@@ -15,6 +16,9 @@ from typing import Callable
 ELF_MAGIC = b"\x7fELF"
 SAFE_SONAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$")
 MAX_ELF_OBJECTS = 4096
+MAX_ELF_RESOLUTIONS = 16_384
+MAX_NEEDED_BY_DEPTH = 64
+MAX_ELF_AUDIT_BYTES = 8 * 1024 * 1024
 MAX_NEEDED_PER_ELF = 256
 MAX_RUNPATHS_PER_ELF = 128
 MAX_SCANELF_OUTPUT = 65_536
@@ -26,12 +30,82 @@ SYSTEM_ELF_ROOTS = (
     Path("/usr/local/lib"),
     Path("/usr/local"),
 )
+MUSL_DEFAULT_ELF_DIRECTORIES = (
+    Path("/lib"),
+    Path("/usr/local/lib"),
+    Path("/usr/lib"),
+)
 
 
 @dataclass(frozen=True)
 class ElfMetadata:
     needed: tuple[str, ...]
     runpaths: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class ElfRunpathOwner:
+    source: Path
+    canonical_source: Path
+    declared_runpaths: tuple[str, ...]
+    expanded_runpaths: tuple[Path, ...]
+
+    def audit_record(self) -> dict[str, object]:
+        return {
+            "source": str(self.source),
+            "canonicalSource": str(self.canonical_source),
+            "declaredRunpaths": list(self.declared_runpaths),
+            "expandedRunpaths": [str(path) for path in self.expanded_runpaths],
+        }
+
+
+@dataclass(frozen=True)
+class ElfSearchTier:
+    tier: str
+    owner: ElfRunpathOwner | None
+    directories: tuple[Path, ...]
+
+    def audit_record(self, order: int) -> dict[str, object]:
+        return {
+            "order": order,
+            "tier": self.tier,
+            "owner": None if self.owner is None else self.owner.audit_record(),
+            "searchedDirectories": [str(path) for path in self.directories],
+        }
+
+
+@dataclass(frozen=True)
+class ElfResolution:
+    source: Path
+    soname: str
+    search_tiers: tuple[ElfSearchTier, ...]
+    selected_tier_index: int
+    directory: Path
+    candidate: Path
+    canonical_candidate: Path
+
+    @property
+    def tier(self) -> str:
+        return self.search_tiers[self.selected_tier_index].tier
+
+    @property
+    def expanded_runpaths(self) -> tuple[Path, ...]:
+        owner = self.search_tiers[0].owner
+        return () if owner is None else owner.expanded_runpaths
+
+    def audit_record(self) -> dict[str, object]:
+        selected_tier = self.search_tiers[self.selected_tier_index]
+        return {
+            "source": str(self.source),
+            "soname": self.soname,
+            "searchTiers": [tier.audit_record(order) for order, tier in enumerate(self.search_tiers)],
+            "selectionTier": selected_tier.tier,
+            "selectionTierOrder": self.selected_tier_index,
+            "selectionOwner": None if selected_tier.owner is None else selected_tier.owner.audit_record(),
+            "selectedDirectory": str(self.directory),
+            "selectedCandidate": str(self.candidate),
+            "canonicalCandidate": str(self.canonical_candidate),
+        }
 
 
 def fail(message: str) -> None:
@@ -251,48 +325,115 @@ def expand_runpaths(origin: Path, runpaths: tuple[str, ...], allowed_roots: tupl
     return tuple(expanded)
 
 
+def make_runpath_owner(
+    source: Path,
+    origin: Path,
+    runpaths: tuple[str, ...],
+    allowed_roots: tuple[Path, ...],
+) -> ElfRunpathOwner:
+    resolved_source, _metadata = validated_regular(source, allowed_roots)
+    return ElfRunpathOwner(
+        source=Path(os.path.abspath(source)),
+        canonical_source=resolved_source,
+        declared_runpaths=runpaths,
+        expanded_runpaths=expand_runpaths(origin, runpaths, allowed_roots),
+    )
+
+
+def validate_needed_by_chain(current: ElfRunpathOwner, needed_by: tuple[ElfRunpathOwner, ...]) -> None:
+    if len(needed_by) > MAX_NEEDED_BY_DEPTH:
+        fail("ELF needed_by ancestry exceeds depth limit")
+    canonical_sources = [current.canonical_source, *(owner.canonical_source for owner in needed_by)]
+    if len(set(canonical_sources)) != len(canonical_sources):
+        fail("ELF needed_by ancestry contains a cycle")
+
+
+def ancestry_for_child(
+    current: ElfRunpathOwner,
+    needed_by: tuple[ElfRunpathOwner, ...],
+    child_canonical_source: Path,
+) -> tuple[ElfRunpathOwner, ...] | None:
+    validate_needed_by_chain(current, needed_by)
+    ancestry = (current, *needed_by)
+    if child_canonical_source in {owner.canonical_source for owner in ancestry}:
+        return None
+    if len(ancestry) > MAX_NEEDED_BY_DEPTH:
+        fail("ELF needed_by ancestry exceeds depth limit")
+    return ancestry
+
+
+def is_loader_root(source: Path, target_packages: Path) -> bool:
+    """Treat importable extensions as roots, but load package vendor DSOs only through an edge."""
+    lexical_source = Path(os.path.abspath(source))
+    lexical_packages = Path(os.path.abspath(target_packages))
+    if not lexical_source.is_relative_to(lexical_packages):
+        return True
+    relative = lexical_source.relative_to(lexical_packages)
+    return not any(part.endswith(".libs") for part in relative.parts[:-1])
+
+
 def resolve_needed_library(
     soname: str,
     *,
+    source: Path,
     origin: Path,
     runpaths: tuple[str, ...],
-    search_directories: tuple[Path, ...],
+    needed_by: tuple[ElfRunpathOwner, ...] = (),
+    system_default_directories: tuple[Path, ...],
     allowed_roots: tuple[Path, ...],
-) -> Path:
+) -> ElfResolution:
     if not SAFE_SONAME.fullmatch(soname):
         fail(f"unsafe DT_NEEDED value: {soname}")
-    directories = (*expand_runpaths(origin, runpaths, allowed_roots), *search_directories)
-    candidates: dict[Path, list[Path]] = {}
-    for directory in directories:
+    current = make_runpath_owner(source, origin, runpaths, allowed_roots)
+    validate_needed_by_chain(current, needed_by)
+
+    # Match musl's load_library order: the requesting object's RUNPATH/RPATH,
+    # then each needed_by ancestor's path, then the ordered system defaults.
+    # An exact SONAME lookup yields one lexical candidate per directory; later
+    # directories must not make an earlier loader-selected candidate ambiguous.
+    owner_tiers = (("current-runpath", current),) + tuple(
+        ("needed-by-runpath", owner) for owner in needed_by
+    )
+    seen_directories: set[Path] = set()
+    search_tiers: list[ElfSearchTier] = []
+    for tier_name, owner in owner_tiers:
+        searched_directories: list[Path] = []
+        for directory in owner.expanded_runpaths:
+            canonical_directory = contained_directory(directory, allowed_roots)
+            if canonical_directory in seen_directories:
+                continue
+            seen_directories.add(canonical_directory)
+            searched_directories.append(canonical_directory)
+        search_tiers.append(ElfSearchTier(tier_name, owner, tuple(searched_directories)))
+
+    default_directories: list[Path] = []
+    for directory in system_default_directories:
         canonical_directory = contained_directory(directory, allowed_roots)
-        candidate = canonical_directory / soname
-        if not os.path.lexists(candidate):
+        if canonical_directory in seen_directories:
             continue
-        resolved, _metadata = validated_regular(candidate, allowed_roots)
-        candidates.setdefault(resolved, []).append(candidate)
-    if not candidates:
-        fail(f"missing ELF DT_NEEDED dependency {soname}")
-    if len(candidates) != 1:
-        detail = sorted(str(path) for paths in candidates.values() for path in paths)
-        fail(f"ambiguous ELF DT_NEEDED dependency {soname}: {detail}")
-    return sorted(next(iter(candidates.values())), key=lambda path: (len(path.parts), str(path)))[0]
+        seen_directories.add(canonical_directory)
+        default_directories.append(canonical_directory)
+    search_tiers.append(ElfSearchTier("system-default", None, tuple(default_directories)))
+
+    for tier_index, tier in enumerate(search_tiers):
+        for canonical_directory in tier.directories:
+            candidate = canonical_directory / soname
+            if not os.path.lexists(candidate):
+                continue
+            resolved, _metadata = validated_regular(candidate, allowed_roots)
+            return ElfResolution(
+                source=current.canonical_source,
+                soname=soname,
+                search_tiers=tuple(search_tiers),
+                selected_tier_index=tier_index,
+                directory=canonical_directory,
+                candidate=candidate,
+                canonical_candidate=resolved,
+            )
+    fail(f"missing ELF DT_NEEDED dependency {soname} for {current.canonical_source}")
 
 
-def package_search_directories(target_packages: Path, allowed_roots: tuple[Path, ...]) -> tuple[Path, ...]:
-    directories = {target_packages.resolve(strict=True)}
-    for directory, child_directories, _files in os.walk(target_packages, followlinks=False):
-        current = Path(directory)
-        unsafe = [name for name in child_directories if (current / name).is_symlink()]
-        if unsafe:
-            fail(f"target package search tree contains directory symlinks: {unsafe}")
-        child_directories[:] = sorted(child_directories)
-        directories.add(contained_directory(current, allowed_roots))
-        if len(directories) > MAX_ELF_OBJECTS:
-            fail("target package ELF search directory count exceeds limit")
-    return tuple(sorted(directories, key=str))
-
-
-def copy_elf_closure(root: Path, target_packages: Path) -> None:
+def copy_elf_closure(root: Path, target_packages: Path) -> tuple[ElfResolution, ...]:
     scanelf_path = Path("/usr/bin/scanelf")
     scanelf_info = scanelf_path.lstat()
     if not stat.S_ISREG(scanelf_info.st_mode) or stat.S_ISLNK(scanelf_info.st_mode) or not os.access(scanelf_path, os.X_OK):
@@ -301,42 +442,74 @@ def copy_elf_closure(root: Path, target_packages: Path) -> None:
     allowed_roots = tuple(path.resolve(strict=True) for path in SYSTEM_ELF_ROOTS) + (
         target_packages.resolve(strict=True),
     )
-    search_directories = tuple(path.resolve(strict=True) for path in SYSTEM_ELF_ROOTS[:3]) + package_search_directories(
-        target_packages,
-        allowed_roots,
-    )
+    system_default_directories = tuple(path.resolve(strict=True) for path in MUSL_DEFAULT_ELF_DIRECTORIES)
 
     queued: set[Path] = set()
-    queue: deque[Path] = deque()
-    for runtime_path in root.rglob("*"):
+    queue: deque[tuple[Path, tuple[ElfRunpathOwner, ...]]] = deque()
+    resolutions: list[ElfResolution] = []
+    for runtime_path in sorted(root.rglob("*"), key=str):
         if runtime_path.is_file() and is_elf(runtime_path):
             source = source_for(root, runtime_path)
+            if not is_loader_root(source, target_packages):
+                continue
             resolved, _metadata = validated_regular(source, allowed_roots)
             if resolved not in queued:
                 queued.add(resolved)
-                queue.append(source)
+                queue.append((source, ()))
 
     while queue:
         if len(queued) > MAX_ELF_OBJECTS:
             fail("ELF dependency closure exceeds object limit")
-        source = queue.popleft()
+        source, needed_by = queue.popleft()
         resolved_source, _metadata = validated_regular(source, allowed_roots)
         metadata = scanelf_metadata(resolved_source, scanelf, allowed_roots)
+        current_owner = make_runpath_owner(
+            source,
+            source.parent.resolve(strict=True),
+            metadata.runpaths,
+            allowed_roots,
+        )
+        validate_needed_by_chain(current_owner, needed_by)
         for soname in metadata.needed:
-            dependency = resolve_needed_library(
+            resolution = resolve_needed_library(
                 soname,
+                source=source,
                 origin=source.parent.resolve(strict=True),
                 runpaths=metadata.runpaths,
-                search_directories=search_directories,
+                needed_by=needed_by,
+                system_default_directories=system_default_directories,
                 allowed_roots=allowed_roots,
             )
+            resolutions.append(resolution)
+            if len(resolutions) > MAX_ELF_RESOLUTIONS:
+                fail("ELF dependency resolution audit exceeds limit")
+            dependency = resolution.candidate
             copy_entry(root, dependency, allowed_roots)
             resolved_dependency, _dependency_metadata = validated_regular(dependency, allowed_roots)
             if not is_elf(resolved_dependency):
                 fail(f"DT_NEEDED candidate is not an ELF object: {dependency}")
+            child_ancestry = ancestry_for_child(current_owner, needed_by, resolved_dependency)
             if resolved_dependency not in queued:
+                if child_ancestry is None:
+                    fail("unvisited ELF dependency unexpectedly forms an ancestry cycle")
                 queued.add(resolved_dependency)
-                queue.append(dependency)
+                queue.append((dependency, child_ancestry))
+    return tuple(resolutions)
+
+
+def write_elf_resolution_audit(destination: Path, resolutions: tuple[ElfResolution, ...]) -> None:
+    payload = {
+        "schemaVersion": 1,
+        "resolver": "scanelf-dynamic-loader-order",
+        "systemDefaultDirectories": [str(path) for path in MUSL_DEFAULT_ELF_DIRECTORIES],
+        "resolutions": [resolution.audit_record() for resolution in resolutions],
+    }
+    encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    if len(encoded) > MAX_ELF_AUDIT_BYTES:
+        fail("ELF dependency resolution audit exceeds byte limit")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(encoded)
+    destination.chmod(0o644)
 
 
 def remove_if_present(path: Path) -> None:
@@ -440,7 +613,7 @@ def main() -> None:
     if certificate_bundle.is_file():
         copy_entry(root, certificate_bundle, (Path("/etc/ssl").resolve(strict=True),))
 
-    copy_elf_closure(root, target_packages)
+    elf_resolutions = copy_elf_closure(root, target_packages)
 
     etc = root / "etc"
     etc.mkdir(parents=True, exist_ok=True)
@@ -461,6 +634,7 @@ def main() -> None:
         path.chmod(mode)
     for path in (root / "data/codegraph", root / "etc/frank-codegraph"):
         os.chown(path, 10001, 10001)
+    write_elf_resolution_audit(root / "app/sbom/elf-resolution.json", elf_resolutions)
 
     forbidden = [
         *(runtime_stdlib / relative for relative in REMOVED_STDLIB_FILES),

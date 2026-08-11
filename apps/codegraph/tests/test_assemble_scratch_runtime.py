@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import stat
 import sys
 import tempfile
@@ -169,37 +170,262 @@ class ElfMetadataTests(unittest.TestCase):
             origin = target / "extension"
             package_lib = origin / ".libs"
             package_lib.mkdir(parents=True)
+            source = origin / "extension.so"
+            source.write_bytes(b"\x7fELFextension")
             dependency = package_lib / "libexample.so.1"
             dependency.write_bytes(b"\x7fELFdependency")
             allowed = (target.resolve(),)
 
             resolved = ASSEMBLER.resolve_needed_library(
                 "libexample.so.1",
+                source=source,
                 origin=origin,
                 runpaths=("$ORIGIN/.libs",),
-                search_directories=(),
+                system_default_directories=(),
                 allowed_roots=allowed,
             )
 
-            self.assertEqual(resolved, dependency.resolve())
+            self.assertEqual(resolved.candidate, dependency.resolve())
+            self.assertEqual(resolved.tier, "current-runpath")
+            self.assertEqual(resolved.audit_record()["source"], str(source.resolve()))
 
-    def test_rejects_ambiguous_dependency_candidates(self) -> None:
+    def test_origin_runpath_selects_matching_numpy_and_rapidfuzz_vendor_library(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "site-packages"
+            numpy_origin = target / "numpy/core"
+            rapidfuzz_origin = target / "rapidfuzz"
+            numpy_libs = target / "numpy.libs"
+            rapidfuzz_libs = target / "rapidfuzz.libs"
+            for path in (numpy_origin, rapidfuzz_origin, numpy_libs, rapidfuzz_libs):
+                path.mkdir(parents=True)
+            numpy_source = numpy_origin / "_multiarray.so"
+            rapidfuzz_source = rapidfuzz_origin / "fuzz.so"
+            numpy_source.write_bytes(b"\x7fELFnumpy")
+            rapidfuzz_source.write_bytes(b"\x7fELFrapidfuzz")
+            numpy_dependency = numpy_libs / "libduplicate.so"
+            rapidfuzz_dependency = rapidfuzz_libs / "libduplicate.so"
+            numpy_dependency.write_bytes(b"numpy-vendor")
+            rapidfuzz_dependency.write_bytes(b"rapidfuzz-vendor")
+            allowed = (target.resolve(),)
+
+            numpy_resolution = ASSEMBLER.resolve_needed_library(
+                "libduplicate.so",
+                source=numpy_source,
+                origin=numpy_origin,
+                runpaths=("$ORIGIN/../../numpy.libs",),
+                system_default_directories=(),
+                allowed_roots=allowed,
+            )
+            rapidfuzz_resolution = ASSEMBLER.resolve_needed_library(
+                "libduplicate.so",
+                source=rapidfuzz_source,
+                origin=rapidfuzz_origin,
+                runpaths=("$ORIGIN/../rapidfuzz.libs",),
+                system_default_directories=(),
+                allowed_roots=allowed,
+            )
+
+            self.assertEqual(numpy_resolution.candidate, numpy_dependency.resolve())
+            self.assertEqual(rapidfuzz_resolution.candidate, rapidfuzz_dependency.resolve())
+
+    def test_ordered_runpath_uses_first_directory_with_soname(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            origin = root / "extension"
             first = root / "first"
             second = root / "second"
-            first.mkdir()
-            second.mkdir()
-            (first / "libduplicate.so").write_bytes(b"first")
+            for path in (origin, first, second):
+                path.mkdir()
+            source = origin / "extension.so"
+            source.write_bytes(b"\x7fELFextension")
+            first_dependency = first / "libduplicate.so"
+            first_dependency.write_bytes(b"first")
             (second / "libduplicate.so").write_bytes(b"second")
-            with self.assertRaisesRegex(RuntimeError, "ambiguous"):
+
+            resolution = ASSEMBLER.resolve_needed_library(
+                "libduplicate.so",
+                source=source,
+                origin=origin,
+                runpaths=("$ORIGIN/../first", "$ORIGIN/../second"),
+                system_default_directories=(),
+                allowed_roots=(root.resolve(),),
+            )
+
+            self.assertEqual(resolution.candidate, first_dependency.resolve())
+            self.assertEqual(resolution.directory, first.resolve())
+
+    def test_canonical_duplicate_runpath_directory_is_deduplicated(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            origin = root / "extension"
+            libs = origin / "libs"
+            libs.mkdir(parents=True)
+            source = origin / "extension.so"
+            source.write_bytes(b"\x7fELFextension")
+            dependency = libs / "libsame.so"
+            dependency.write_bytes(b"same")
+
+            resolution = ASSEMBLER.resolve_needed_library(
+                "libsame.so",
+                source=source,
+                origin=origin,
+                runpaths=("$ORIGIN/libs", "$ORIGIN/libs/../libs"),
+                system_default_directories=(),
+                allowed_roots=(root.resolve(),),
+            )
+
+            self.assertEqual(resolution.candidate, dependency.resolve())
+            self.assertEqual(resolution.expanded_runpaths, (libs.resolve(),))
+
+    def test_canonical_directory_is_deduplicated_across_owner_tiers(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            origin = root / "extension"
+            libs = origin / "libs"
+            libs.mkdir(parents=True)
+            source = origin / "extension.so"
+            parent_source = root / "parent.so"
+            source.write_bytes(b"\x7fELFextension")
+            parent_source.write_bytes(b"\x7fELFparent")
+            dependency = libs / "libsame.so"
+            dependency.write_bytes(b"same")
+            parent = ASSEMBLER.ElfRunpathOwner(
+                parent_source.resolve(),
+                parent_source.resolve(),
+                ("/declared/by/parent",),
+                (libs.resolve(),),
+            )
+
+            resolution = ASSEMBLER.resolve_needed_library(
+                dependency.name,
+                source=source,
+                origin=origin,
+                runpaths=("$ORIGIN/libs",),
+                needed_by=(parent,),
+                system_default_directories=(),
+                allowed_roots=(root.resolve(),),
+            )
+
+            self.assertEqual(resolution.search_tiers[0].directories, (libs.resolve(),))
+            self.assertEqual(resolution.search_tiers[1].directories, ())
+
+    def test_package_vendor_dso_is_not_seeded_as_loader_root(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            packages = Path(directory) / "site-packages"
+            extension = packages / "numpy/core/_multiarray.so"
+            vendor = packages / "numpy.libs/libopenblas.so"
+            extension.parent.mkdir(parents=True)
+            vendor.parent.mkdir(parents=True)
+
+            self.assertTrue(ASSEMBLER.is_loader_root(extension, packages))
+            self.assertFalse(ASSEMBLER.is_loader_root(vendor, packages))
+
+    def test_no_runpath_does_not_search_distinct_package_vendor_directories(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            target = Path(directory) / "site-packages"
+            target.mkdir()
+            source = target / "extension.so"
+            source.write_bytes(b"\x7fELFextension")
+            for name in ("numpy.libs", "rapidfuzz.libs"):
+                vendor = target / name
+                vendor.mkdir()
+                (vendor / "libduplicate.so").write_bytes(name.encode("ascii"))
+
+            with self.assertRaisesRegex(RuntimeError, "missing"):
                 ASSEMBLER.resolve_needed_library(
                     "libduplicate.so",
-                    origin=first,
+                    source=source,
+                    origin=target,
                     runpaths=(),
-                    search_directories=(first, second),
-                    allowed_roots=(root.resolve(),),
+                    system_default_directories=(),
+                    allowed_roots=(target.resolve(),),
                 )
+
+    def test_transitive_dependency_uses_needed_by_ancestor_runpath(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            parent_dir = root / "parent"
+            child_dir = root / "child"
+            vendor_dir = parent_dir / ".libs"
+            for path in (parent_dir, child_dir, vendor_dir):
+                path.mkdir(parents=True, exist_ok=True)
+            parent_source = parent_dir / "parent.so"
+            child_source = child_dir / "child.so"
+            dependency = vendor_dir / "libtransitive.so"
+            parent_source.write_bytes(b"\x7fELFparent")
+            child_source.write_bytes(b"\x7fELFchild")
+            dependency.write_bytes(b"transitive")
+            allowed = (root.resolve(),)
+            parent_owner = ASSEMBLER.make_runpath_owner(
+                parent_source,
+                parent_dir,
+                ("$ORIGIN/.libs",),
+                allowed,
+            )
+
+            resolution = ASSEMBLER.resolve_needed_library(
+                dependency.name,
+                source=child_source,
+                origin=child_dir,
+                runpaths=(),
+                needed_by=(parent_owner,),
+                system_default_directories=(),
+                allowed_roots=allowed,
+            )
+            record = resolution.audit_record()
+
+            self.assertEqual(resolution.candidate, dependency.resolve())
+            self.assertEqual(resolution.tier, "needed-by-runpath")
+            self.assertEqual(record["selectionOwner"]["source"], str(parent_source.resolve()))
+            self.assertEqual(record["selectionOwner"]["declaredRunpaths"], ["$ORIGIN/.libs"])
+            self.assertEqual(record["selectionOwner"]["expandedRunpaths"], [str(vendor_dir.resolve())])
+
+    def test_needed_by_cycle_is_terminated_by_canonical_visited_identity(self) -> None:
+        root = Path("/synthetic")
+        parent = ASSEMBLER.ElfRunpathOwner(root / "parent.so", root / "parent.so", (), ())
+        current = ASSEMBLER.ElfRunpathOwner(root / "current.so", root / "current.so", (), ())
+
+        ancestry = ASSEMBLER.ancestry_for_child(current, (parent,), parent.canonical_source)
+
+        self.assertIsNone(ancestry)
+
+    def test_needed_by_ancestry_depth_is_bounded(self) -> None:
+        root = Path("/synthetic")
+        current = ASSEMBLER.ElfRunpathOwner(root / "current.so", root / "current.so", (), ())
+        needed_by = tuple(
+            ASSEMBLER.ElfRunpathOwner(root / f"ancestor-{index}.so", root / f"ancestor-{index}.so", (), ())
+            for index in range(ASSEMBLER.MAX_NEEDED_BY_DEPTH)
+        )
+
+        with self.assertRaisesRegex(RuntimeError, "depth"):
+            ASSEMBLER.ancestry_for_child(current, needed_by, root / "new-child.so")
+
+    def test_writes_bounded_loader_selection_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "extension.so"
+            dependency = root / "libexample.so"
+            source.write_bytes(b"\x7fELFextension")
+            dependency.write_bytes(b"dependency")
+            owner = ASSEMBLER.ElfRunpathOwner(source, source, ("$ORIGIN",), (root,))
+            tier = ASSEMBLER.ElfSearchTier("current-runpath", owner, (root,))
+            resolution = ASSEMBLER.ElfResolution(
+                source=source,
+                soname=dependency.name,
+                search_tiers=(tier,),
+                selected_tier_index=0,
+                directory=root,
+                candidate=dependency,
+                canonical_candidate=dependency,
+            )
+            audit = root / "sbom/elf-resolution.json"
+
+            ASSEMBLER.write_elf_resolution_audit(audit, (resolution,))
+            payload = json.loads(audit.read_text(encoding="utf-8"))
+
+            self.assertEqual(payload["resolver"], "scanelf-dynamic-loader-order")
+            self.assertEqual(payload["resolutions"][0]["source"], str(source))
+            self.assertEqual(payload["resolutions"][0]["selectedCandidate"], str(dependency))
 
     def test_rejects_escaping_runpath(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -207,25 +433,31 @@ class ElfMetadataTests(unittest.TestCase):
             allowed_root = root / "allowed"
             origin = allowed_root / "extension"
             origin.mkdir(parents=True)
+            source = origin / "extension.so"
+            source.write_bytes(b"\x7fELFextension")
             outside = root / "outside"
             outside.mkdir()
             with self.assertRaisesRegex(RuntimeError, "escapes"):
                 ASSEMBLER.resolve_needed_library(
                     "libescape.so",
+                    source=source,
                     origin=origin,
                     runpaths=("$ORIGIN/../../outside",),
-                    search_directories=(),
+                    system_default_directories=(),
                     allowed_roots=(allowed_root.resolve(),),
                 )
 
     def test_rejects_missing_dependency(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
+            source = root / "extension.so"
+            source.write_bytes(b"\x7fELFextension")
             with self.assertRaisesRegex(RuntimeError, "missing"):
                 ASSEMBLER.resolve_needed_library(
                     "libmissing.so",
+                    source=source,
                     origin=root,
                     runpaths=(),
-                    search_directories=(root,),
+                    system_default_directories=(root,),
                     allowed_roots=(root.resolve(),),
                 )
