@@ -7,13 +7,10 @@
 
 services:
   frank-api:
-    image: "frank-frank-api:${FRANK_RELEASE_IMAGE_TAG:?FRANK_RELEASE_IMAGE_TAG is required}"
-    build:
-      context: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
-      dockerfile: apps/api/Dockerfile
-      labels:
-        org.opencontainers.image.revision: "${FRANK_RELEASE_COMMIT:?FRANK_RELEASE_COMMIT is required}"
-        org.opencontainers.image.source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+    # Set only from a verified release-manifest.json: ghcr.io/.../frank-api@sha256:...
+    # Production promotion pulls this immutable artifact and must never build here.
+    image: "${FRANK_API_IMAGE:?FRANK_API_IMAGE is required}"
+    build: !reset null
 
     environment: !override
       HOME: /tmp
@@ -130,13 +127,10 @@ services:
       start_period: 90s
 
   frank-web:
-    image: "frank-frank-web:${FRANK_RELEASE_IMAGE_TAG:?FRANK_RELEASE_IMAGE_TAG is required}"
-    build:
-      context: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
-      dockerfile: apps/web/Dockerfile
-      labels:
-        org.opencontainers.image.revision: "${FRANK_RELEASE_COMMIT:?FRANK_RELEASE_COMMIT is required}"
-        org.opencontainers.image.source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+    # Set only from a verified release-manifest.json: ghcr.io/.../frank-web@sha256:...
+    # Production promotion pulls this immutable artifact and must never build here.
+    image: "${FRANK_WEB_IMAGE:?FRANK_WEB_IMAGE is required}"
+    build: !reset null
 
     environment: !override
       NODE_ENV: production
