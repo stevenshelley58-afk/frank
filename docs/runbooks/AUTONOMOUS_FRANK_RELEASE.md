@@ -251,12 +251,21 @@ a tag or a branch name.
 Before preflight or any Compose command, update only `FRANK_WORKBENCH_IMAGE` in the
 root-owned runtime environment. This fails if the file is not a regular root-owned file or
 contains zero or multiple assignments, preserves every other line plus owner and mode, and
-uses a same-directory atomic rename. It writes only a public digest, metadata, and a hash
-of the runtime file to evidence; it never prints the runtime contents.
+uses a same-directory atomic rename. A root-owned exclusive lock covers the complete
+read/transform/verify/rename/receipt sequence. It writes only a public digest, metadata,
+and a hash of the runtime file to evidence; it never prints the runtime contents.
 
 ```bash
 root_runtime_env='/srv/frank/secrets/production.env'
+root_runtime_lock='/srv/frank/secrets/production.env.lock'
 test "$(id -u)" -eq 0
+if [[ ! -e "$root_runtime_lock" ]]; then
+  install -o root -g root -m 0600 /dev/null "$root_runtime_lock"
+fi
+test -f "$root_runtime_lock" && test ! -L "$root_runtime_lock"
+test "$(stat -c '%u:%g:%a' -- "$root_runtime_lock")" = '0:0:600'
+exec {runtime_lock_fd}>"$root_runtime_lock"
+flock -x "$runtime_lock_fd"
 test -f "$root_runtime_env" && test ! -L "$root_runtime_env"
 test "$(stat -c '%u' -- "$root_runtime_env")" -eq 0
 
@@ -292,6 +301,8 @@ test "$persisted_workbench_image" = "$FRANK_WORKBENCH_IMAGE"
   printf 'runtime_env_sha256=%s\n' "$(sha256sum "$root_runtime_env" | awk '{print $1}')"
 } > "$evidence_dir/runtime-workbench-image.update.receipt"
 chmod 0600 "$evidence_dir/runtime-workbench-image.update.receipt"
+flock -u "$runtime_lock_fd"
+exec {runtime_lock_fd}>&-
 ```
 
 All subsequent promotion Compose commands use this exact runtime file as their only
