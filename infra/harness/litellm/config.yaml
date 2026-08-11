@@ -1,0 +1,20 @@
+# Transport only: Frank API owns automatic policy and authorization. Credentials enter at
+# deploy time; aliases keep provider choice stable for callers and expose no balance claim.
+model_list:
+  - model_name: frank-openai-direct
+    litellm_params: { model: openai/gpt-4.1, api_key: os.environ/OPENAI_API_KEY }
+  - model_name: frank-gemini-direct
+    litellm_params: { model: gemini/gemini-2.5-pro, api_key: os.environ/GEMINI_API_KEY }
+  - model_name: frank-concentrate
+    litellm_params: { model: openai/concentrate-default, api_base: os.environ/CONCENTRATE_API_BASE, api_key: os.environ/CONCENTRATE_API_KEY }
+  - model_name: frank-deepseek-direct
+    litellm_params: { model: deepseek/deepseek-chat, api_key: os.environ/DEEPSEEK_API_KEY }
+router_settings:
+  routing_strategy: least-busy
+  num_retries: 1
+general_settings:
+  master_key: os.environ/LITELLM_MASTER_KEY
+  disable_spend_logs: false
+  # Provider credit/balance is not queried or inferred here: unknown remains unknown.
+litellm_settings:
+  drop_params: true

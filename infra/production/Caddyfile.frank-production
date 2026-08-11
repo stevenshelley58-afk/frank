@@ -88,6 +88,19 @@ frank.fail {
         # Direct API/control requests and every application UI path require the coarse edge gate.
         # Application authorization remains mandatory behind it; Basic Auth is not a
         # replacement for FRANK sessions or capability checks.
+        # Capability-bound resumable upload ingress only. tusd has no public route and
+        # no download handler; the API issues and verifies the upload capability.
+        handle /v1/uploads/* {
+            import frank_production_basic_auth
+            reverse_proxy {$FRANK_TUSD_INTERNAL_URL} {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                flush_interval -1
+            }
+        }
+
         handle /v1/* {
             import frank_production_basic_auth
             import frank_production_api_proxy

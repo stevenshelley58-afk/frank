@@ -50,6 +50,11 @@ services:
       FRANK_MISSION_CHEAP_MODEL: "${FRANK_MISSION_CHEAP_MODEL:?FRANK_MISSION_CHEAP_MODEL is required}"
       FRANK_MISSION_STRONG_MODEL: "${FRANK_MISSION_STRONG_MODEL:?FRANK_MISSION_STRONG_MODEL is required}"
       FRANK_MISSION_SCHEDULER_INTERVAL_MS: "${FRANK_MISSION_SCHEDULER_INTERVAL_MS:-5000}"
+      # Harness services are private peers. The API remains the policy/control owner;
+      # Letta is manual-only and is never a canonical memory or control authority.
+      FRANK_LITELLM_INTERNAL_URL: "${FRANK_LITELLM_INTERNAL_URL:-http://frank-litellm:4000}"
+      FRANK_LETTA_INTERNAL_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta:8283}"
+      FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
       FRANK_ARTIFACT_ARCHIVE_ROOT: /var/lib/frank/artifacts
       FRANK_WORKSPACE_SOURCE_ROOT: /srv/frank/repo
       CODEGRAPH_STATUS_URL: http://frank-codegraph:3002
@@ -244,6 +249,7 @@ services:
       FRANK_BASIC_AUTH_HASH: "${FRANK_BASIC_AUTH_HASH:?FRANK_BASIC_AUTH_HASH is required}"
       FRANK_API_INTERNAL_URL: "${FRANK_API_INTERNAL_URL:?FRANK_API_INTERNAL_URL is required}"
       FRANK_WEB_INTERNAL_URL: "${FRANK_WEB_INTERNAL_URL:?FRANK_WEB_INTERNAL_URL is required}"
+      FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
     depends_on:
       frank-api:
         condition: service_healthy
