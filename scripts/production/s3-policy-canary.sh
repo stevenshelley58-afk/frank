@@ -12,8 +12,9 @@ aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" head-objec
 for spec in "frank-objects:$object" "frank-object-previews:$preview"; do
   b="${spec%%:*}"; k="${spec#*:}"; if aws_for "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY" head-object --bucket "$b" --key "$k" >/dev/null 2>&1; then echo 'staging overreach' >&2; exit 1; fi
 done
-if aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" head-object --bucket frank-attachment-staging --key "$key" >/dev/null 2>&1; then echo 'promoter staging-read overreach' >&2; exit 1; fi
+aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" head-object --bucket frank-attachment-staging --key "$key" >/dev/null
+if aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" list-objects-v2 --bucket frank-attachment-staging >/dev/null 2>&1; then echo 'promoter staging-list overreach' >&2; exit 1; fi
 if aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" head-object --bucket frank-attachment-staging --key "$key" >/dev/null 2>&1; then echo 'downloader staging-read overreach' >&2; exit 1; fi
 if aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" put-object --bucket frank-objects --key "$object" --body /dev/null 2>&1; then echo 'downloader write overreach' >&2; exit 1; fi
 aws_for "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY" delete-object --bucket frank-attachment-staging --key "$key"
-echo 's3-policy-canary=passed; scoped identities verified; disposable keys deleted'
+echo 's3-policy-canary=passed; scoped identities verified; disposable objects deleted'

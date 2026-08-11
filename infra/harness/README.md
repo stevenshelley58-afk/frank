@@ -12,7 +12,7 @@ less than **30 GiB free**. Buckets and prefixes are literal:
 
 `frank-previews` is reserved for preview.frank.fail and is forbidden here. SeaweedFS has no
 public route. tusd is reachable only through Caddy's authenticated `/v1/uploads/tus/*` route;
-the API issues capability credentials and the private HTTPS hook performs scan/promotion.
+the API issues capability credentials; its private HTTP hook only validates/enqueues durable processing, and a worker later scans/promotes.
 TLS verification is never disabled. Quarantine scans precede promotion; freshness/readiness
 of ClamAV signatures is a hard dependency.
 
@@ -23,7 +23,7 @@ has no public port, scheduler, durable/child-agent authority, or Night Watch acc
 
 Bucket bootstrap is a reviewed idempotent one-shot operation using a temporary bucket-admin
 credential held outside Compose. It creates the three attachment buckets without enumerating
-or changing later lake buckets, and applies a 24h incomplete-upload lifecycle only to staging.
+or changing later lake buckets, and applies a 24h object and incomplete-upload lifecycle only to staging.
 The credential is removed from the bootstrap process; external credential retirement is separately evidenced. The API reserves
 2 GiB per file and enforces 10 GiB/10,000 aggregate limits before issuing a capability. That
 capability binds owner/cell/conversation/upload and the hook selects the collision-safe key
