@@ -102,6 +102,10 @@ frank.fail {
                 uri /private/tusd/gate
                 header_up X-Tusd-Gate-Secret {$FRANK_TUSD_GATE_SECRET}
                 header_up -Authorization
+                # These are Caddy's documented forward_auth expanded-form fields:
+                # the auth request is GET, while these preserve the original upload request.
+                header_up X-Forwarded-Method {method}
+                header_up X-Forwarded-Uri {uri}
                 header_up X-Frank-Upload-Capability {http.request.header.X-Frank-Upload-Capability}
                 header_up Upload-Metadata {http.request.header.Upload-Metadata}
                 header_up Tus-Resumable {http.request.header.Tus-Resumable}
