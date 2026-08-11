@@ -97,9 +97,9 @@ export FRANK_REQUIRED_SECRET_VARS='FRANK_DB_PASSWORD FRANK_DATABASE_URL FRANK_RE
 ```
 
 The secret variables named above, except `FRANK_DOMAIN_SERVICE_TOKEN`, must then be
-injected into the current process by the accepted secret runtime. Step 3B mints and exports
-that service token from the verified API digest before preflight. Do not paste any value into this runbook, a command
-log, or the evidence directory.
+injected into the current process by the accepted secret runtime. Step 3C mints and exports
+that service token from the verified API digest before preflight. Do not paste any value
+into this runbook, a command log, or the evidence directory.
 
 ### 2A. Materialize the clean exact release worktree
 
@@ -186,13 +186,14 @@ Optional overrides:
   have been prepared; a mismatch blocks release.
 - `FRANK_ALLOW_LEGACY_CODEGRAPH_NETWORK=true`: one-time Graphify migration flag when the
   running legacy Node codegraph still uses the general `frank` network. Record the
-  exception, prove the candidate's dedicated internal network in step 3C, and unset it
+  exception, prove the candidate's dedicated internal network in step 3E, and unset it
   immediately after the first successful rollout. It must remain false thereafter.
 
-## 3. Verify immutable artifacts and run hosted preflight
+## 3. Verify immutable artifacts, persist runtime state, and run hosted preflight
 
-Artifact verification must finish before the candidate API image is allowed to mint the
-domain service token and before hosted preflight checks that exact digest.
+Artifact verification must finish before the workbench digest is persisted. Persistence
+must finish before the candidate API image mints the domain service token, and token
+issuance must finish before hosted preflight checks the exact digest set.
 
 ### 3A. Download and verify the GitHub release artifact
 
@@ -204,9 +205,9 @@ workflow checks that `main` is the repository default branch but cannot create o
 the branch-protection rule itself.
 
 Download the evidence artifact for the exact approved full commit. Use a GitHub CLI
-identity with read access to the repository attestations and a GHCR credential with only
-`read:packages` if the package is private. Neither credential is written to evidence or
-printed:
+identity with read access to the repository attestations. The release workflow verifies
+anonymous digest pulls, so the VPS must not require or retain a GHCR credential. Neither
+credential material nor image pull state is written to evidence or printed:
 
 ```bash
 export FRANK_RELEASE_COMMIT="$FRANK_EXPECTED_COMMIT"
@@ -262,7 +263,7 @@ const expected = {
   codegraph: `ghcr.io/${owner}/frank-codegraph`,
   workbench: `ghcr.io/${owner}/frank-workbench`,
 };
-if (manifest.schema_version !== 1 || manifest.commit !== commit ||
+if (manifest.schema_version !== 2 || manifest.commit !== commit ||
     manifest.repository !== repository || manifest.verified_by?.workflow !== 'verify' ||
     !Number.isInteger(manifest.verified_by?.run_id) ||
     manifest.sbom?.api !== 'api.spdx.json' || manifest.sbom?.web !== 'web.spdx.json' ||
@@ -319,11 +320,15 @@ console.log(`${image.reference}@${image.digest}`);
 NODE
 )"
 
-printf '%s' "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USERNAME" --password-stdin
-docker pull "$FRANK_API_IMAGE"
-docker pull "$FRANK_WEB_IMAGE"
-docker pull "$FRANK_CODEGRAPH_IMAGE"
-docker pull "$FRANK_WORKBENCH_IMAGE"
+(
+  anonymous_docker_config="$(mktemp -d)"
+  trap 'rm -rf -- "$anonymous_docker_config"' EXIT
+  export DOCKER_CONFIG="$anonymous_docker_config"
+  docker pull "$FRANK_API_IMAGE"
+  docker pull "$FRANK_WEB_IMAGE"
+  docker pull "$FRANK_CODEGRAPH_IMAGE"
+  docker pull "$FRANK_WORKBENCH_IMAGE"
+)
 gh attestation verify "oci://$FRANK_API_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
   --source-ref 'refs/heads/main' \
@@ -359,12 +364,96 @@ jq -e 'length == 1 and .[0].conclusion == "success"' \
 ```
 
 The artifact directory, manifest, parsed SPDX SBOMs, GitHub workflow receipts, verified
-attestation output, and pulled image IDs are release evidence. `GHCR_PULL_TOKEN` and
-`GHCR_PULL_USERNAME` must come from the root-only secret runtime; use `--password-stdin`
-and never enable shell tracing. The four image environment variables must be copied only
-from the validated manifest output above—never composed from a tag or a branch name.
+attestation output, and pulled image IDs are release evidence. The four image environment
+variables must be copied only from the validated manifest output above—never composed from
+a tag or a branch name.
 
-### 3B. Mint the domain service token and run hosted preflight
+### 3B. Atomically persist the manifest workbench digest
+
+Before preflight or any Compose command, update only `FRANK_WORKBENCH_IMAGE` in the
+root-owned runtime environment. This fails if the file is not a regular root-owned file or
+contains zero or multiple assignments, preserves every other line plus owner and mode, and
+uses a same-directory atomic rename. A root-owned exclusive lock covers the complete
+read/transform/verify/rename/receipt sequence. It writes only a public digest, metadata,
+and a hash of the runtime file to evidence; it never prints the runtime contents.
+
+```bash
+root_runtime_env='/srv/frank/secrets/production.env'
+root_runtime_lock='/srv/frank/secrets/production.env.lock'
+test "$(id -u)" -eq 0
+if [[ ! -e "$root_runtime_lock" ]]; then
+  install -o root -g root -m 0600 /dev/null "$root_runtime_lock"
+fi
+test -f "$root_runtime_lock" && test ! -L "$root_runtime_lock"
+test "$(stat -c '%u:%g:%a' -- "$root_runtime_lock")" = '0:0:600'
+exec {runtime_lock_fd}>"$root_runtime_lock"
+flock -x "$runtime_lock_fd"
+test -f "$root_runtime_env" && test ! -L "$root_runtime_env"
+test "$(stat -c '%u' -- "$root_runtime_env")" -eq 0
+
+rollback_config_dir="/srv/frank/config-rollback/$release_id"
+test ! -e "$rollback_config_dir"
+install -d -o root -g root -m 0700 -- "$rollback_config_dir"
+prior_workbench_image="$(awk -F= '
+  /^FRANK_WORKBENCH_IMAGE=/ { count += 1; value = substr($0, index($0, "=") + 1) }
+  END { if (count != 1) exit 42; print value }
+' "$root_runtime_env")"
+printf '%s' "$prior_workbench_image" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-workbench@sha256:[a-f0-9]{64}$'
+docker image inspect "$prior_workbench_image" >/dev/null
+prior_workbench_image_id="$(docker image inspect "$prior_workbench_image" --format '{{.Id}}')"
+printf '%s' "$prior_workbench_image_id" | grep -Eq '^sha256:[a-f0-9]{64}$'
+printf 'FRANK_WORKBENCH_IMAGE=%s\n' "$prior_workbench_image" \
+  > "$rollback_config_dir/production.env.workbench.before"
+printf 'reference\timage_id\n%s\t%s\n' "$prior_workbench_image" "$prior_workbench_image_id" \
+  > "$rollback_config_dir/workbench-image.before.tsv"
+chmod 0600 \
+  "$rollback_config_dir/production.env.workbench.before" \
+  "$rollback_config_dir/workbench-image.before.tsv"
+
+runtime_tmp="$(mktemp "${root_runtime_env}.tmp.XXXXXX")"
+trap 'rm -f -- "$runtime_tmp"' EXIT
+awk -v image="$FRANK_WORKBENCH_IMAGE" '
+  /^FRANK_WORKBENCH_IMAGE=/ {
+    count += 1
+    print "FRANK_WORKBENCH_IMAGE=" image
+    next
+  }
+  { print }
+  END { exit count == 1 ? 0 : 42 }
+' "$root_runtime_env" > "$runtime_tmp"
+cmp -s \
+  <(sed '/^FRANK_WORKBENCH_IMAGE=/d' "$root_runtime_env") \
+  <(sed '/^FRANK_WORKBENCH_IMAGE=/d' "$runtime_tmp")
+chown --reference="$root_runtime_env" "$runtime_tmp"
+chmod --reference="$root_runtime_env" "$runtime_tmp"
+mv -f -- "$runtime_tmp" "$root_runtime_env"
+trap - EXIT
+
+persisted_workbench_image="$(awk -F= '
+  /^FRANK_WORKBENCH_IMAGE=/ { count += 1; value = substr($0, index($0, "=") + 1) }
+  END { if (count != 1) exit 42; print value }
+' "$root_runtime_env")"
+test "$persisted_workbench_image" = "$FRANK_WORKBENCH_IMAGE"
+{
+  printf 'runtime_env=%s\n' "$root_runtime_env"
+  printf 'owner_uid_gid=%s\n' "$(stat -c '%u:%g' -- "$root_runtime_env")"
+  printf 'mode=%s\n' "$(stat -c '%a' -- "$root_runtime_env")"
+  printf 'prior_frank_workbench_image=%s\n' "$prior_workbench_image"
+  printf 'frank_workbench_image=%s\n' "$FRANK_WORKBENCH_IMAGE"
+  printf 'runtime_env_sha256=%s\n' "$(sha256sum "$root_runtime_env" | awk '{print $1}')"
+} > "$evidence_dir/runtime-workbench-image.update.receipt"
+chmod 0600 "$evidence_dir/runtime-workbench-image.update.receipt"
+flock -u "$runtime_lock_fd"
+exec {runtime_lock_fd}>&-
+```
+
+All subsequent promotion Compose commands use this exact runtime file as their only
+env-file, so they cannot silently restore the prior workbench digest. The root-only
+rollback directory records that prior digest reference and its locally available immutable
+image ID before the assignment changes. Removing that image before the release and
+observation window ends makes rollback unavailable and blocks promotion.
+
+### 3C. Mint the domain service token
 
 Mint the web BFF identity token inside the verified API digest. The image contains the
 frozen workspace install and `tsx`; the source worktree remains clean. Docker receives the
@@ -398,21 +487,30 @@ export FRANK_DOMAIN_SERVICE_TOKEN="$(<"$domain_token_file")"
 export FRANK_REQUIRED_IMAGES="$FRANK_API_IMAGE $FRANK_WEB_IMAGE $FRANK_CODEGRAPH_IMAGE $FRANK_WORKBENCH_IMAGE"
 test -n "$FRANK_DOMAIN_SERVICE_TOKEN"
 test "$(stat -c '%u:%g:%a' "$domain_token_file")" = '0:0:400'
-
-bash "$FRANK_RELEASE_SOURCE/scripts/production/hosted-preflight.sh" \
-  > "$evidence_dir/preflight.result" \
-  2> "$evidence_dir/preflight.log"
-grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
 ```
 
 Never use command substitution around the issuer itself: its only output is the credential.
 The redirected file and exported runtime value must never enter release evidence or shell
-tracing. Rotation requires a coordinated API/web restart. Preflight records the commit,
-branch, locally known upstream state, disk state, network, and counts of checked containers,
-images, and secret names. The preflight itself does not fetch; step 2A already proved the
-release worktree is synchronized with `origin/main`.
+tracing. Rotation requires a coordinated API/web restart.
 
-### 3C. Define and validate the production application overlay
+### 3D. Run hosted preflight
+
+```bash
+bash "$FRANK_RELEASE_SOURCE/scripts/production/hosted-preflight.sh" \
+  > "$evidence_dir/preflight.result" \
+  2> "$evidence_dir/preflight.log"
+
+grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
+```
+
+Preflight records the commit, branch, locally known upstream state, disk state, network,
+and counts of checked containers, images, and secret names. Its log contains secret names
+only. A dirty worktree, wrong commit, unsynchronized branch, missing secret, invalid
+Compose model, absent image, unhealthy container, or insufficient disk fails the gate.
+The preflight does not fetch; step 2A already proved the release worktree is synchronized
+with `origin/main`.
+
+### 3E. Define and validate the production application overlay
 
 Set the non-secret release/runtime identifiers. Secret values named in step 2 remain
 injected by the accepted runtime and are not repeated here:
@@ -461,7 +559,7 @@ the plaintext password exists only in the root release environment for authentic
 
 Two values require operational issuance, not an invented repository default:
 
-- `FRANK_DOMAIN_SERVICE_TOKEN` is the production bearer credential minted in step 3B for
+- `FRANK_DOMAIN_SERVICE_TOKEN` is the production bearer credential minted in step 3C for
   the web BFF with only its reviewed API capabilities. Never print it or use the
   development-session route.
 - `FRANK_BASIC_AUTH_HASH` must be generated from a separately stored strong password with
@@ -480,7 +578,7 @@ Compose document, because it contains injected values:
 ```bash
 base_compose='/srv/frank/infra/docker-compose.dev.yml'
 app_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml"
-compose=(docker compose -f "$base_compose" -f "$app_overlay")
+compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
 
 version="$(docker compose version --short)"
 test "$(printf '%s\n' '2.24.4' "$version" | sort -V | head -n1)" = '2.24.4'
@@ -580,7 +678,26 @@ sha256sum /srv/frank/infra/docker-compose.dev.yml \
   > "$evidence_dir/config.before.sha256"
 
 rollback_config_dir="/srv/frank/config-rollback/$release_id"
-install -d -m 0700 -- "$rollback_config_dir"
+test -d "$rollback_config_dir" && test ! -L "$rollback_config_dir"
+test "$(stat -c '%u:%g:%a' -- "$rollback_config_dir")" = '0:0:700'
+test -s "$rollback_config_dir/production.env.workbench.before"
+test -s "$rollback_config_dir/workbench-image.before.tsv"
+for rollback_file in \
+  "$rollback_config_dir/production.env.workbench.before" \
+  "$rollback_config_dir/workbench-image.before.tsv"; do
+  test -f "$rollback_file" && test ! -L "$rollback_file"
+  test "$(stat -c '%u:%g:%a' -- "$rollback_file")" = '0:0:600'
+done
+prior_workbench_assignment="$(<"$rollback_config_dir/production.env.workbench.before")"
+case "$prior_workbench_assignment" in
+  FRANK_WORKBENCH_IMAGE=*) prior_workbench_image="${prior_workbench_assignment#FRANK_WORKBENCH_IMAGE=}" ;;
+  *) printf '%s\n' 'invalid prior workbench assignment' >&2; exit 1 ;;
+esac
+printf '%s' "$prior_workbench_image" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-workbench@sha256:[a-f0-9]{64}$'
+prior_workbench_image_id="$(awk -F '\t' 'NR == 2 { print $2 }' "$rollback_config_dir/workbench-image.before.tsv")"
+test "$(awk -F '\t' 'NR == 2 { print $1 }' "$rollback_config_dir/workbench-image.before.tsv")" = "$prior_workbench_image"
+printf '%s' "$prior_workbench_image_id" | grep -Eq '^sha256:[a-f0-9]{64}$'
+test "$(docker image inspect "$prior_workbench_image" --format '{{.Id}}')" = "$prior_workbench_image_id"
 install -m 0600 -- /srv/frank/infra/Caddyfile "$rollback_config_dir/Caddyfile"
 ```
 
@@ -590,8 +707,10 @@ checksummed archive of the physical volume currently mounted at `/data/codegraph
 Compose project `frank`, normally `frank_frank_codegraph_data`). The logical-volume label
 must be exactly `frank_codegraph_data`; an optional
 `FRANK_CODEGRAPH_PHYSICAL_VOLUME` override must match the discovered mount. The snapshot
-script fails before deployment if any identity
-or label cannot be verified. Copy the snapshot to the approved encrypted off-cell store
+script fails before deployment if any identity or label cannot be verified. The root-only
+rollback directory separately captures the prior workbench digest reference and immutable
+image ID, and the availability check above proves that exact image remains local. Copy the
+snapshot to the approved encrypted off-cell store
 with the database backup.
 
 ## 5. Create and verify the database backup
@@ -788,14 +907,69 @@ of these services across the Graphify contract boundary:
 
 ```bash
 test -n "$codegraph_snapshot"
+root_runtime_env='/srv/frank/secrets/production.env'
+root_runtime_lock='/srv/frank/secrets/production.env.lock'
+rollback_config_dir="/srv/frank/config-rollback/$release_id"
+test -d "$rollback_config_dir" && test ! -L "$rollback_config_dir"
+test "$(stat -c '%u:%g:%a' -- "$rollback_config_dir")" = '0:0:700'
+test -f "$root_runtime_lock" && test ! -L "$root_runtime_lock"
+test "$(stat -c '%u:%g:%a' -- "$root_runtime_lock")" = '0:0:600'
+test -f "$root_runtime_env" && test ! -L "$root_runtime_env"
+test "$(stat -c '%u' -- "$root_runtime_env")" -eq 0
+exec {runtime_lock_fd}>"$root_runtime_lock"
+flock -x "$runtime_lock_fd"
+
+for rollback_file in \
+  "$rollback_config_dir/production.env.workbench.before" \
+  "$rollback_config_dir/workbench-image.before.tsv"; do
+  test -f "$rollback_file" && test ! -L "$rollback_file"
+  test "$(stat -c '%u:%g:%a' -- "$rollback_file")" = '0:0:600'
+done
+prior_workbench_assignment="$(<"$rollback_config_dir/production.env.workbench.before")"
+case "$prior_workbench_assignment" in
+  FRANK_WORKBENCH_IMAGE=*) prior_workbench_image="${prior_workbench_assignment#FRANK_WORKBENCH_IMAGE=}" ;;
+  *) printf '%s\n' 'invalid prior workbench assignment' >&2; exit 1 ;;
+esac
+printf '%s' "$prior_workbench_image" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-workbench@sha256:[a-f0-9]{64}$'
+prior_workbench_image_id="$(awk -F '\t' 'NR == 2 { print $2 }' "$rollback_config_dir/workbench-image.before.tsv")"
+test "$(awk -F '\t' 'NR == 2 { print $1 }' "$rollback_config_dir/workbench-image.before.tsv")" = "$prior_workbench_image"
+printf '%s' "$prior_workbench_image_id" | grep -Eq '^sha256:[a-f0-9]{64}$'
+test "$(docker image inspect "$prior_workbench_image" --format '{{.Id}}')" = "$prior_workbench_image_id"
+
+runtime_restore_tmp="$(mktemp "${root_runtime_env}.rollback.XXXXXX")"
+trap 'rm -f -- "${runtime_restore_tmp:-}"' EXIT
+awk -v image="$prior_workbench_image" '
+  /^FRANK_WORKBENCH_IMAGE=/ {
+    count += 1
+    print "FRANK_WORKBENCH_IMAGE=" image
+    next
+  }
+  { print }
+  END { exit count == 1 ? 0 : 42 }
+' "$root_runtime_env" > "$runtime_restore_tmp"
+cmp -s \
+  <(sed '/^FRANK_WORKBENCH_IMAGE=/d' "$root_runtime_env") \
+  <(sed '/^FRANK_WORKBENCH_IMAGE=/d' "$runtime_restore_tmp")
+chown --reference="$root_runtime_env" "$runtime_restore_tmp"
+chmod --reference="$root_runtime_env" "$runtime_restore_tmp"
+mv -f -- "$runtime_restore_tmp" "$root_runtime_env"
+trap - EXIT
+test "$(awk -F= '
+  /^FRANK_WORKBENCH_IMAGE=/ { count += 1; value = substr($0, index($0, "=") + 1) }
+  END { if (count != 1) exit 42; print value }
+' "$root_runtime_env")" = "$prior_workbench_image"
+export FRANK_WORKBENCH_IMAGE="$prior_workbench_image"
+
 export FRANK_CODEGRAPH_PHYSICAL_VOLUME="$(<"$codegraph_snapshot/codegraph-volume.txt")"
 bash "$FRANK_RELEASE_SOURCE/scripts/production/rollback-codegraph-release.sh" "$codegraph_snapshot" \
   > "$evidence_dir/codegraph-rollback.result" \
   2> "$evidence_dir/codegraph-rollback.log"
 grep -Fx 'rollback=passed' "$evidence_dir/codegraph-rollback.result"
+flock -u "$runtime_lock_fd"
+exec {runtime_lock_fd}>&-
 
 install -m 0644 -- "$rollback_config_dir/Caddyfile" /srv/frank/infra/Caddyfile
-docker compose -f /srv/frank/infra/docker-compose.dev.yml \
+docker compose --env-file "$root_runtime_env" -f /srv/frank/infra/docker-compose.dev.yml \
   -f "$codegraph_snapshot/pre-release-overlay.yml" \
   up -d --no-build --no-deps --force-recreate --wait --wait-timeout 180 frank-caddy
 

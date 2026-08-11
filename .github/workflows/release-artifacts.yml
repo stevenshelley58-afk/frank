@@ -122,6 +122,7 @@ jobs:
         with:
           context: .
           file: infra/workbench/Dockerfile
+          platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE_WORKBENCH }}:${{ env.COMMIT_SHA }}
           labels: |
@@ -142,10 +143,7 @@ jobs:
           for digest in "$API_DIGEST" "$WEB_DIGEST" "$CODEGRAPH_DIGEST" "$WORKBENCH_DIGEST"; do
             printf '%s' "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
           done
-
-      - name: Create SBOM evidence directory
-        shell: bash
-        run: mkdir -p evidence
+          mkdir -p evidence
 
       - name: Generate API SBOM evidence
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
@@ -251,7 +249,7 @@ jobs:
             if (!process.env[key]) throw new Error(`Missing ${key}`);
           }
           const manifest = {
-            schema_version: 1,
+            schema_version: 2,
             commit: process.env.COMMIT_SHA,
             repository: process.env.GITHUB_REPOSITORY,
             verified_by: {
@@ -305,7 +303,7 @@ jobs:
             if (!digest.test(image.digest)) throw new Error('Invalid build digest');
           }
           if (
-            manifest.schema_version !== 1 ||
+            manifest.schema_version !== 2 ||
             manifest.commit !== expected.commit ||
             manifest.repository !== expected.repository ||
             manifest.verified_by?.workflow !== 'verify' ||
@@ -326,6 +324,28 @@ jobs:
             throw new Error('Release manifest does not exactly bind the verified commit and image evidence');
           }
           NODE
+
+      # Public registry access is a release property, not an operator-side
+      # assumption. An empty CLI config ensures these are anonymous pulls.
+      - name: Verify anonymous immutable image pulls
+        shell: bash
+        env:
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          CODEGRAPH_DIGEST: ${{ steps.codegraph.outputs.digest }}
+          WORKBENCH_DIGEST: ${{ steps.workbench.outputs.digest }}
+        run: |
+          set -euo pipefail
+          anonymous_docker_config="$(mktemp -d)"
+          trap 'rm -rf -- "$anonymous_docker_config"' EXIT
+          export DOCKER_CONFIG="$anonymous_docker_config"
+          for image in \
+            "$IMAGE_API@$API_DIGEST" \
+            "$IMAGE_WEB@$WEB_DIGEST" \
+            "$IMAGE_CODEGRAPH@$CODEGRAPH_DIGEST" \
+            "$IMAGE_WORKBENCH@$WORKBENCH_DIGEST"; do
+            docker pull "$image"
+          done
 
       - name: Upload release evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
