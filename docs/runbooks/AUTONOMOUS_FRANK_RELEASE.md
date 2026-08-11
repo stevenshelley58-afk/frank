@@ -94,23 +94,7 @@ Optional overrides:
   `<image-reference> <sha256:image-id>` pair per line. Use this when immutable image IDs
   have been prepared; a mismatch blocks release.
 
-## 3. Run hosted preflight
-
-```bash
-bash scripts/production/hosted-preflight.sh \
-  > "$evidence_dir/preflight.result" \
-  2> "$evidence_dir/preflight.log"
-
-grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
-```
-
-The result records the commit, branch, locally known upstream state, disk state, network,
-and counts of checked containers, images, and secret names. The log contains secret names
-only. A dirty worktree, wrong commit, unsynchronized branch, missing secret, invalid
-Compose model, absent image, unhealthy container, or insufficient disk fails the gate.
-
-The upstream check does not fetch. CI or the release operator must fetch before this step
-and ensure the locally known upstream reference is current.
+## 3. Resolve the release artifact and persist the immutable runtime image
 
 ### 3A. Download and verify the GitHub release artifact
 
@@ -122,9 +106,9 @@ workflow checks that `main` is the repository default branch but cannot create o
 the branch-protection rule itself.
 
 Download the evidence artifact for the exact approved full commit. Use a GitHub CLI
-identity with read access to the repository attestations and a GHCR credential with only
-`read:packages` if the package is private. Neither credential is written to evidence or
-printed:
+identity with read access to the repository attestations. The release workflow verifies
+anonymous digest pulls, so the VPS must not require or retain a GHCR credential. Neither
+credential material nor image pull state is written to evidence or printed:
 
 ```bash
 export FRANK_RELEASE_COMMIT="$FRANK_EXPECTED_COMMIT"
@@ -155,16 +139,18 @@ gh run download "$FRANK_ARTIFACT_RUN_ID" -R "$FRANK_GITHUB_REPOSITORY" \
 manifest="$FRANK_RELEASE_ARTIFACT_DIR/release-manifest.json"
 api_sbom="$FRANK_RELEASE_ARTIFACT_DIR/api.spdx.json"
 web_sbom="$FRANK_RELEASE_ARTIFACT_DIR/web.spdx.json"
+workbench_sbom="$FRANK_RELEASE_ARTIFACT_DIR/workbench.spdx.json"
 test -s "$manifest"
 test -s "$api_sbom"
 test -s "$web_sbom"
+test -s "$workbench_sbom"
 
-node --input-type=module - "$manifest" "$api_sbom" "$web_sbom" \
+node --input-type=module - "$manifest" "$api_sbom" "$web_sbom" "$workbench_sbom" \
   "$FRANK_RELEASE_COMMIT" "$FRANK_GITHUB_REPOSITORY" <<'NODE'
 import { readFileSync } from 'node:fs';
-const [manifestPath, apiSbomPath, webSbomPath, commit, repository] = process.argv.slice(2);
+const [manifestPath, apiSbomPath, webSbomPath, workbenchSbomPath, commit, repository] = process.argv.slice(2);
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
-for (const path of [apiSbomPath, webSbomPath]) {
+for (const path of [apiSbomPath, webSbomPath, workbenchSbomPath]) {
   const sbom = JSON.parse(readFileSync(path, 'utf8'));
   if (!sbom || typeof sbom !== 'object' || !sbom.spdxVersion) throw new Error(`Invalid SPDX JSON: ${path}`);
 }
@@ -173,13 +159,16 @@ const owner = repository.split('/')[0].toLowerCase();
 const expected = {
   api: `ghcr.io/${owner}/frank-api`,
   web: `ghcr.io/${owner}/frank-web`,
+  workbench: `ghcr.io/${owner}/frank-workbench`,
 };
-if (manifest.schema_version !== 1 || manifest.commit !== commit ||
+if (manifest.schema_version !== 2 || manifest.commit !== commit ||
     manifest.repository !== repository || manifest.verified_by?.workflow !== 'verify' ||
     !Number.isInteger(manifest.verified_by?.run_id) ||
     manifest.sbom?.api !== 'api.spdx.json' || manifest.sbom?.web !== 'web.spdx.json' ||
+    manifest.sbom?.workbench !== 'workbench.spdx.json' ||
     manifest.images?.api?.reference !== expected.api || !digest.test(manifest.images?.api?.digest ?? '') ||
-    manifest.images?.web?.reference !== expected.web || !digest.test(manifest.images?.web?.digest ?? '')) {
+    manifest.images?.web?.reference !== expected.web || !digest.test(manifest.images?.web?.digest ?? '') ||
+    manifest.images?.workbench?.reference !== expected.workbench || !digest.test(manifest.images?.workbench?.digest ?? '')) {
   throw new Error('Manifest does not exactly bind this commit, repository, SBOMs, and immutable GHCR images');
 }
 NODE
@@ -214,10 +203,21 @@ const image = JSON.parse(readFileSync(process.argv[2], 'utf8')).images.web;
 console.log(`${image.reference}@${image.digest}`);
 NODE
 )"
+export FRANK_WORKBENCH_IMAGE="$(node --input-type=module - "$manifest" <<'NODE'
+import { readFileSync } from 'node:fs';
+const image = JSON.parse(readFileSync(process.argv[2], 'utf8')).images.workbench;
+console.log(`${image.reference}@${image.digest}`);
+NODE
+)"
 
-printf '%s' "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USERNAME" --password-stdin
-docker pull "$FRANK_API_IMAGE"
-docker pull "$FRANK_WEB_IMAGE"
+(
+  anonymous_docker_config="$(mktemp -d)"
+  trap 'rm -rf -- "$anonymous_docker_config"' EXIT
+  export DOCKER_CONFIG="$anonymous_docker_config"
+  docker pull "$FRANK_API_IMAGE"
+  docker pull "$FRANK_WEB_IMAGE"
+  docker pull "$FRANK_WORKBENCH_IMAGE"
+)
 gh attestation verify "oci://$FRANK_API_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
   --source-ref 'refs/heads/main' \
@@ -230,18 +230,103 @@ gh attestation verify "oci://$FRANK_WEB_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
   --format json \
   > "$evidence_dir/web.attestation.verify.json"
-docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" \
+gh attestation verify "oci://$FRANK_WORKBENCH_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
+  --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
+  --source-ref 'refs/heads/main' \
+  --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
+  --format json \
+  > "$evidence_dir/workbench.attestation.verify.json"
+docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_WORKBENCH_IMAGE" \
   --format '{{.RepoDigests}}\t{{.Id}}' \
   > "$evidence_dir/application-images.pulled.tsv"
 ```
 
 The artifact directory, manifest, parsed SPDX SBOMs, GitHub workflow receipts, verified
-attestation output, and pulled image IDs are release evidence. `GHCR_PULL_TOKEN` and
-`GHCR_PULL_USERNAME` must come from the root-only secret runtime; use `--password-stdin`
-and never enable shell tracing. The two image environment variables must be copied only
-from the validated manifest output above—never composed from a tag or a branch name.
+attestation output, and pulled image IDs are release evidence. The three image environment
+variables must be copied only from the validated manifest output above—never composed from
+a tag or a branch name.
 
-### 3B. Define and validate the production application overlay
+### 3B. Atomically persist the manifest workbench digest
+
+Before preflight or any Compose command, update only `FRANK_WORKBENCH_IMAGE` in the
+root-owned runtime environment. This fails if the file is not a regular root-owned file or
+contains zero or multiple assignments, preserves every other line plus owner and mode, and
+uses a same-directory atomic rename. A root-owned exclusive lock covers the complete
+read/transform/verify/rename/receipt sequence. It writes only a public digest, metadata,
+and a hash of the runtime file to evidence; it never prints the runtime contents.
+
+```bash
+root_runtime_env='/srv/frank/secrets/production.env'
+root_runtime_lock='/srv/frank/secrets/production.env.lock'
+test "$(id -u)" -eq 0
+if [[ ! -e "$root_runtime_lock" ]]; then
+  install -o root -g root -m 0600 /dev/null "$root_runtime_lock"
+fi
+test -f "$root_runtime_lock" && test ! -L "$root_runtime_lock"
+test "$(stat -c '%u:%g:%a' -- "$root_runtime_lock")" = '0:0:600'
+exec {runtime_lock_fd}>"$root_runtime_lock"
+flock -x "$runtime_lock_fd"
+test -f "$root_runtime_env" && test ! -L "$root_runtime_env"
+test "$(stat -c '%u' -- "$root_runtime_env")" -eq 0
+
+runtime_tmp="$(mktemp "${root_runtime_env}.tmp.XXXXXX")"
+trap 'rm -f -- "$runtime_tmp"' EXIT
+awk -v image="$FRANK_WORKBENCH_IMAGE" '
+  /^FRANK_WORKBENCH_IMAGE=/ {
+    count += 1
+    print "FRANK_WORKBENCH_IMAGE=" image
+    next
+  }
+  { print }
+  END { exit count == 1 ? 0 : 42 }
+' "$root_runtime_env" > "$runtime_tmp"
+cmp -s \
+  <(sed '/^FRANK_WORKBENCH_IMAGE=/d' "$root_runtime_env") \
+  <(sed '/^FRANK_WORKBENCH_IMAGE=/d' "$runtime_tmp")
+chown --reference="$root_runtime_env" "$runtime_tmp"
+chmod --reference="$root_runtime_env" "$runtime_tmp"
+mv -f -- "$runtime_tmp" "$root_runtime_env"
+trap - EXIT
+
+persisted_workbench_image="$(awk -F= '
+  /^FRANK_WORKBENCH_IMAGE=/ { count += 1; value = substr($0, index($0, "=") + 1) }
+  END { if (count != 1) exit 42; print value }
+' "$root_runtime_env")"
+test "$persisted_workbench_image" = "$FRANK_WORKBENCH_IMAGE"
+{
+  printf 'runtime_env=%s\n' "$root_runtime_env"
+  printf 'owner_uid_gid=%s\n' "$(stat -c '%u:%g' -- "$root_runtime_env")"
+  printf 'mode=%s\n' "$(stat -c '%a' -- "$root_runtime_env")"
+  printf 'frank_workbench_image=%s\n' "$FRANK_WORKBENCH_IMAGE"
+  printf 'runtime_env_sha256=%s\n' "$(sha256sum "$root_runtime_env" | awk '{print $1}')"
+} > "$evidence_dir/runtime-workbench-image.update.receipt"
+chmod 0600 "$evidence_dir/runtime-workbench-image.update.receipt"
+flock -u "$runtime_lock_fd"
+exec {runtime_lock_fd}>&-
+```
+
+All subsequent promotion Compose commands use this exact runtime file as their only
+env-file, so they cannot silently restore the former local or floating workbench tag.
+
+### 3C. Run hosted preflight
+
+```bash
+bash scripts/production/hosted-preflight.sh \
+  > "$evidence_dir/preflight.result" \
+  2> "$evidence_dir/preflight.log"
+
+grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
+```
+
+The result records the commit, branch, locally known upstream state, disk state, network,
+and counts of checked containers, images, and secret names. The log contains secret names
+only. A dirty worktree, wrong commit, unsynchronized branch, missing secret, invalid
+Compose model, absent image, unhealthy container, or insufficient disk fails the gate.
+
+The upstream check does not fetch. CI or the release operator must fetch before this step
+and ensure the locally known upstream reference is current.
+
+### 3D. Define and validate the production application overlay
 
 Set the non-secret release/runtime identifiers. Secret values named in step 2 remain
 injected by the accepted runtime and are not repeated here:
@@ -258,7 +343,6 @@ export FRANK_MAX_BODY_BYTES='1048576'
 
 export FRANK_WORKBENCH_RUNNER_ENABLED='true'
 export FRANK_WORKBENCH_CONCURRENCY='2'
-export FRANK_WORKBENCH_IMAGE='frank-workbench:<REVIEWED_IMMUTABLE_TAG>'
 export FRANK_WORKBENCH_MODEL_PROVIDER='<REVIEWED_PROVIDER_ID>'
 export FRANK_WORKBENCH_MODEL_BASE_URL='<REVIEWED_HTTPS_PROVIDER_BASE_URL>'
 export FRANK_WORKBENCH_MODEL='<REVIEWED_MODEL_ID>'
@@ -307,14 +391,14 @@ Compose document, because it contains injected values:
 ```bash
 base_compose='/srv/frank/infra/docker-compose.dev.yml'
 app_overlay='/srv/frank/repo/infra/production/docker-compose.app.yml'
-compose=(docker compose -f "$base_compose" -f "$app_overlay")
+compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
 
 version="$(docker compose version --short)"
 test "$(printf '%s\n' '2.24.4' "$version" | sort -V | head -n1)" = '2.24.4'
 test "$FRANK_WORKBENCH_RUNNER_ENABLED" = 'true'
 test "$FRANK_WORKBENCH_CONCURRENCY" -ge 1
 test "$FRANK_WORKBENCH_CONCURRENCY" -le 8
-printf '%s' "$FRANK_WORKBENCH_IMAGE" | grep -Eq '^[a-z0-9./_-]+:[A-Za-z0-9._-]+$'
+printf '%s' "$FRANK_WORKBENCH_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-workbench@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
 printf '%s' "$FRANK_API_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-api@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_WEB_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$'
@@ -335,7 +419,7 @@ esac
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and
   (.services["frank-api"].environment.FRANK_WORKBENCH_IMAGE |
-    test("^[a-z0-9./_-]+:[A-Za-z0-9._-]+$")) and
+    test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-workbench@sha256:[a-f0-9]{64}$")) and
   ([.services | to_entries[] |
     select(any(.value.volumes[]?;
       .type == "bind" and .source == "/var/run/docker.sock")) |
@@ -452,10 +536,11 @@ container:
 docker image inspect \
   "$FRANK_API_IMAGE" \
   "$FRANK_WEB_IMAGE" \
+  "$FRANK_WORKBENCH_IMAGE" \
   --format '{{.RepoTags}}\t{{.Id}}' \
   > "$evidence_dir/application-images.promoted.tsv"
 
-for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE"; do
+for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_WORKBENCH_IMAGE"; do
   test "$(docker image inspect "$image" \
     --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" \
     = "$FRANK_RELEASE_COMMIT"
@@ -463,10 +548,6 @@ for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE"; do
     --format '{{ index .Config.Labels "org.opencontainers.image.source" }}')" \
     = "https://github.com/$FRANK_GITHUB_REPOSITORY"
 done
-
-docker image inspect "$FRANK_WORKBENCH_IMAGE" \
-  --format '{{.RepoTags}}\t{{.Id}}' \
-  > "$evidence_dir/workbench-image.resolved.tsv"
 
 # One-time/repair-safe ownership initialization for the persistent artifact volume.
 # The API then runs as uid/gid 10001 and archives /workspace/out here before teardown.
@@ -661,7 +742,7 @@ Retain these artifacts together:
 For a release built through GitHub Actions, retain the `release-evidence-<full-commit>`
 artifact from the `release-artifacts` workflow with the release evidence above. Its
 machine-readable `release-manifest.json` binds the verified full commit to the immutable
-GHCR API and web image digests; the accompanying SPDX SBOMs and GitHub OIDC provenance
+GHCR API, web, and workbench image digests; the accompanying SPDX SBOMs and GitHub OIDC provenance
 attestations are release evidence, not a deployment instruction. Production consumes the
 manifest's digest references only after the existing preflight, backup, and promotion
 gates pass. The workflow never deploys to preview, staging, or production.
