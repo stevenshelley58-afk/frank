@@ -8,19 +8,73 @@
  * GET/DELETE: forwarded with query string intact.
  * POST/PUT/PATCH: body is read and forwarded as JSON.
  */
+import { randomUUID } from 'node:crypto';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { domainApiBase, domainApiToken } from '@/lib/domain-api';
+import { requestPublicOrigin } from '@/lib/same-origin';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+type AllowedOperation = { method: string; path: RegExp };
+
+// The service token is intentionally never a general browser credential.
+const ALLOWED_OPERATIONS: readonly AllowedOperation[] = [
+  { method: 'GET', path: /^\/v1\/(?:today|work|frame|missions|chats)$/ },
+  { method: 'GET', path: /^\/v1\/(?:missions|chats)\/[^/]+$/ },
+  { method: 'POST', path: /^\/v1\/chats$/ },
+  { method: 'PATCH', path: /^\/v1\/chats\/[^/]+$/ },
+  { method: 'GET', path: /^\/v1\/chats\/[^/]+\/messages$/ },
+  { method: 'POST', path: /^\/v1\/chats\/[^/]+\/messages$/ },
+  { method: 'POST', path: /^\/v1\/work\/[^/]+\/commands\/(?:start|pause|resume|ready|complete|cancel|approve|decline)$/ },
+  { method: 'GET', path: /^\/v1\/rooms\/[^/]+\/(?:folder-bindings|files|channel-bindings)$/ },
+  { method: 'POST', path: /^\/v1\/rooms\/[^/]+\/(?:folder-bindings|channel-bindings)$/ },
+  { method: 'DELETE', path: /^\/v1\/rooms\/[^/]+\/(?:folder-bindings|channel-bindings)\/[^/]+$/ },
+  { method: 'POST', path: /^\/v1\/workbenches\/[^/]+\/artifacts\/[^/]+\/preview$/ },
+  { method: 'GET', path: /^\/v1\/codegraph\/projects$/ },
+  { method: 'GET', path: /^\/v1\/codegraph\/[^/]+\/(?:spec|status)$/ },
+  { method: 'POST', path: /^\/v1\/codegraph\/[^/]+\/refresh$/ },
+];
+
+export function isAllowedBrowserOperation(method: string, pathname: string): boolean {
+  return ALLOWED_OPERATIONS.some((operation) => operation.method === method && operation.path.test(pathname));
+}
+
+/** Strict provenance for service-token mutations; absent browser headers fail. */
+export function hasStrictBrowserMutationProvenance(request: Request): boolean {
+  const origin = request.headers.get('origin');
+  if (origin !== null) {
+    try {
+      if (new URL(origin).origin === requestPublicOrigin(request)) return true;
+    } catch {
+      // An invalid Origin cannot establish provenance; Sec-Fetch may still.
+    }
+  }
+  return request.headers.get('sec-fetch-site') === 'same-origin';
+}
+
 async function proxy(req: NextRequest): Promise<NextResponse> {
-  const path = req.nextUrl.pathname.replace(/^\/api\/v1/, '/v1') + req.nextUrl.search;
+  const pathname = req.nextUrl.pathname.replace(/^\/api\/v1/, '/v1');
+  if (!isAllowedBrowserOperation(req.method, pathname)) {
+    return NextResponse.json(
+      { error: 'operation_not_allowed', detail: 'This browser API operation is not exposed.' },
+      { status: 403, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method) && !hasStrictBrowserMutationProvenance(req)) {
+    return NextResponse.json(
+      { error: 'forbidden', detail: 'Domain API mutations require browser same-origin provenance.' },
+      { status: 403, headers: { 'Cache-Control': 'no-store' } },
+    );
+  }
+  const path = pathname + req.nextUrl.search;
+
   const token = await domainApiToken();
   if (token === null) {
     return NextResponse.json(
       { error: 'domain_api_unavailable', detail: 'Could not authenticate with the Frank API.' },
-      { status: 503 },
+      { status: 503, headers: { 'Cache-Control': 'no-store' } },
     );
   }
 
@@ -32,6 +86,8 @@ async function proxy(req: NextRequest): Promise<NextResponse> {
   // Forward relevant original headers
   const idempotencyKey = req.headers.get('idempotency-key');
   if (idempotencyKey) headers['idempotency-key'] = idempotencyKey;
+  const ifNoneMatch = req.headers.get('if-none-match');
+  if (ifNoneMatch) headers['if-none-match'] = ifNoneMatch;
 
   let body: string | undefined;
   if (req.method !== 'GET' && req.method !== 'DELETE' && req.method !== 'HEAD') {
@@ -50,25 +106,48 @@ async function proxy(req: NextRequest): Promise<NextResponse> {
       signal: AbortSignal.timeout(30_000),
     });
 
+    const responseHeaders: Record<string, string> = { 'Cache-Control': 'no-store' };
+    const etag = upstream.headers.get('etag');
+    if (etag) responseHeaders.etag = etag;
+
+    // A conditional GET must remain a bodyless 304. JSON-wrapping it turns a
+    // cache hit into an invalid response and loses the upstream validator.
+    if (upstream.status === 304) {
+      return new NextResponse(null, { status: 304, headers: responseHeaders });
+    }
+
     const responseBody = await upstream.text();
     let json: unknown;
     try {
       json = JSON.parse(responseBody);
     } catch {
-      json = { raw: responseBody };
+      return NextResponse.json(
+        upstream.status >= 400
+          ? { error: 'domain_api_error', detail: `The Frank API returned HTTP ${upstream.status}.` }
+          : { error: 'domain_api_invalid_response', detail: 'The Frank API returned an invalid response.' },
+        { status: upstream.status >= 400 ? upstream.status : 502, headers: responseHeaders },
+      );
     }
 
     return NextResponse.json(json, {
       status: upstream.status,
-      headers: { 'Cache-Control': 'no-store' },
+      headers: responseHeaders,
     });
   } catch (err) {
+    const correlationId = randomUUID();
+    console.error('[domain-api-proxy] upstream request failed', {
+      correlationId,
+      method: req.method,
+      pathname,
+      error: err,
+    });
     return NextResponse.json(
       {
         error: 'domain_api_unreachable',
-        detail: err instanceof Error ? err.message : 'Could not reach the Frank API.',
+        detail: 'Could not reach the Frank API.',
+        correlation_id: correlationId,
       },
-      { status: 502 },
+      { status: 502, headers: { 'Cache-Control': 'no-store' } },
     );
   }
 }

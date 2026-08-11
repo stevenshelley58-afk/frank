@@ -43,10 +43,13 @@ export async function POST(
       headers: { 'Cache-Control': 'no-store' },
     });
   } catch (error) {
+    const correlationId = randomUUID();
+    console.error('[mission-stop] domain request failed', { correlationId, error });
     return Response.json(
       {
-        error: 'domain_api_invalid_response',
-        detail: error instanceof Error ? error.message : String(error),
+        error: 'domain_api_unavailable',
+        detail: 'The Frank API could not complete the mission stop request.',
+        correlation_id: correlationId,
       },
       { status: 502, headers: { 'Cache-Control': 'no-store' } },
     );

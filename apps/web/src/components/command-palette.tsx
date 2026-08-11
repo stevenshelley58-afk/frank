@@ -37,13 +37,13 @@ import { consoleModules } from '@/app/console/registry';
 interface CommandPaletteContextValue {
   open: boolean;
   setOpen: (open: boolean) => void;
-  registerRooms: (select: (roomId: string) => void) => void;
+  registerRooms: (select: (roomId: string) => void) => () => void;
 }
 
 const CommandPaletteContext = createContext<CommandPaletteContextValue>({
   open: false,
   setOpen: () => {},
-  registerRooms: () => {},
+  registerRooms: () => () => {},
 });
 
 export const useCommandPalette = () => useContext(CommandPaletteContext);
@@ -55,6 +55,9 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
 
   const registerRooms = useCallback((select: (roomId: string) => void) => {
     roomSelectRef.current = select;
+    return () => {
+      if (roomSelectRef.current === select) roomSelectRef.current = null;
+    };
   }, []);
 
   /* Global hotkey: Cmd/Ctrl+K from anywhere. */

@@ -52,10 +52,13 @@ export async function POST(
       headers: { 'Cache-Control': 'no-store' },
     });
   } catch (error) {
+    const correlationId = randomUUID();
+    console.error('[workbench-stop] domain request failed', { correlationId, error });
     return Response.json(
       {
         error: 'domain_api_unavailable',
-        detail: error instanceof Error ? error.message : String(error),
+        detail: 'The Frank API could not complete the workbench stop request.',
+        correlation_id: correlationId,
       },
       { status: 503, headers: { 'Cache-Control': 'no-store' } },
     );

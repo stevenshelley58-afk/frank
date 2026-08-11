@@ -1,12 +1,13 @@
 /**
  * POST /api/chat — SSE bridge from Frank web to the harness registry.
  *
- * Body: { message: string, roomId?: string, roomName?: string, agentName?: string }
+ * Body: { message: string, roomId?: canonical room id, model?: string }
  * Response: text/event-stream with `data: {"text":"..."}` chunks
  *           and a final `data: {"done":true}` event.
  *
  * The harness is resolved per-room through the provider registry (spec §8.4):
- * a room may be pinned to a named harness or left on Auto. Server-side only.
+ * a room may be pinned to a named harness or left on Auto. Room identity is
+ * derived from the canonical server registry, never caller-provided labels.
  *
  * Context pack (FRANK-§7.4): before each turn, the kernel assembles a signed,
  * hash-addressed, minimized context pack. Recalled memories land in the pack's
@@ -23,7 +24,9 @@ import { NextRequest } from 'next/server';
 import { randomUUID } from 'node:crypto';
 
 import { runTurn, dropSession } from '@/lib/harness-session';
-import { expectedModel, modelMismatch } from '@/lib/providers';
+import { ModelSelectionError, resolveHarness } from '@/lib/providers';
+import { DEFAULT_ROOMS } from '@/lib/rooms';
+import { isSameOriginMutation } from '@/lib/same-origin';
 import { getMemory } from '@/lib/memory-server';
 import { memoryScope, deploymentScope } from '@/lib/memory-scope';
 import { getAssembler, PACK_KEY_HANDLE, PACK_SIGNER_ID } from '@/lib/kernel';
@@ -35,6 +38,31 @@ export const dynamic = 'force-dynamic';
 
 /** How many recalled memories the pack carries (the minimization budget). */
 const RECALL_TOP_K = 5;
+const REQUEST_WINDOW_MS = 60_000;
+const MAX_REQUESTS_PER_WINDOW = 12;
+const MAX_TRACKED_CLIENTS = 500;
+const requestTimesByClient = new Map<string, number[]>();
+
+/** Small process-local brake on expensive turns. Canonical rooms bound sessions. */
+function requestAllowed(request: Request, now = Date.now()): boolean {
+  const forwarded = request.headers.get('x-forwarded-for')?.split(',', 1)[0]?.trim();
+  const client = forwarded || request.headers.get('x-real-ip') || 'unknown';
+  const existing = requestTimesByClient.get(client);
+  if (existing === undefined && requestTimesByClient.size >= MAX_TRACKED_CLIENTS) {
+    for (const [key, timestamps] of requestTimesByClient) {
+      if (timestamps.every((at) => now - at >= REQUEST_WINDOW_MS)) requestTimesByClient.delete(key);
+    }
+    if (requestTimesByClient.size >= MAX_TRACKED_CLIENTS) return false;
+  }
+  const recent = (existing ?? []).filter((at) => now - at < REQUEST_WINDOW_MS);
+  if (recent.length >= MAX_REQUESTS_PER_WINDOW) {
+    requestTimesByClient.set(client, recent);
+    return false;
+  }
+  recent.push(now);
+  requestTimesByClient.set(client, recent);
+  return true;
+}
 
 /** A packed turn: the labelled recall block + the pack's content hash. */
 interface PackedTurn {
@@ -101,17 +129,51 @@ async function packForTurn(message: string, roomId: string): Promise<PackedTurn>
 }
 
 export async function POST(req: NextRequest) {
+  if (!isSameOriginMutation(req)) {
+    return Response.json({ error: 'same_origin_required' }, { status: 403 });
+  }
+  if (!requestAllowed(req)) {
+    return Response.json({ error: 'chat_rate_limited' }, { status: 429, headers: { 'Retry-After': '60' } });
+  }
   const body = await req.json().catch(() => null);
-  const message = (body as { message?: string })?.message?.trim();
-  const roomId = (body as { roomId?: string })?.roomId ?? 'central';
-  const roomName = (body as { roomName?: string })?.roomName ?? 'Central';
-  const agentName = (body as { agentName?: string })?.agentName ?? 'Frank';
+  const rawMessage = (body as { message?: unknown })?.message;
+  const message = typeof rawMessage === 'string' ? rawMessage.trim() : '';
+  const requestedRoomId = (body as { roomId?: unknown })?.roomId ?? 'central';
+  const room = typeof requestedRoomId === 'string'
+    ? DEFAULT_ROOMS.find((candidate) => candidate.id === requestedRoomId)
+    : undefined;
+  if (!room) {
+    return Response.json({ error: 'unknown_room' }, { status: 400 });
+  }
+  // Room name and agent identity are server-owned. Deliberately ignore legacy
+  // body fields so callers cannot inject a fabricated room persona.
+  const roomId = room.id;
+  const roomName = room.name;
+  const agentName = room.agent;
+  const requestedModel = (body as { model?: unknown })?.model;
+  const model = typeof requestedModel === 'string' && requestedModel !== 'auto' ? requestedModel : undefined;
 
   if (!message) {
     return new Response(JSON.stringify({ error: 'message required' }), {
       status: 400,
       headers: { 'Content-Type': 'application/json' },
     });
+  }
+
+  if (requestedModel !== undefined && (typeof requestedModel !== 'string' || requestedModel.length > 100)) {
+    return Response.json({ error: 'unsupported_model' }, { status: 422 });
+  }
+  try {
+    // Validate explicit selections before opening an SSE response. Auto remains
+    // room-routed and is resolved again by runTurn at execution time.
+    if (model !== undefined) await resolveHarness(roomId, model);
+  } catch (error) {
+    if (error instanceof ModelSelectionError) {
+      return Response.json({ error: error.code, detail: error.message }, {
+        status: error.code === 'unsupported_model' ? 422 : 503,
+      });
+    }
+    throw error;
   }
 
   // Session cache, harness resolution, and identity priming live in runTurn
@@ -139,6 +201,7 @@ export async function POST(req: NextRequest) {
           agentName,
           prompt: promptText,
           onChunk: (chunk) => send({ text: chunk }),
+          model,
         });
 
         let fullText = text;
@@ -152,10 +215,11 @@ export async function POST(req: NextRequest) {
           harness: meta.harness,
           reason: meta.reason,
           packHash,
-          model: meta.modelInfo.model,
-          modelProvider: meta.modelInfo.provider,
-          expectedModel: expectedModel(),
-          modelMismatch: modelMismatch(meta.modelInfo.model),
+          requestedModel: meta.requestedModel,
+          model: meta.actualModel,
+          modelProvider: meta.modelProvider,
+          expectedModel: meta.expectedModel,
+          modelMismatch: meta.modelMismatch,
         });
 
         getMemory()
@@ -168,7 +232,15 @@ export async function POST(req: NextRequest) {
           })
           .catch(() => {});
       } catch (err) {
-        send({ error: String(err) });
+        const correlationId = randomUUID();
+        // Provider diagnostics can contain upstream response bodies. Keep them
+        // server-side and give the browser only a stable, non-sensitive shape.
+        console.error('[chat] turn failed', { correlationId, roomId, error: err });
+        send({
+          error: 'chat_turn_failed',
+          message: 'The selected harness could not complete this turn.',
+          correlationId,
+        });
         dropSession(roomId);
       } finally {
         controller.close();

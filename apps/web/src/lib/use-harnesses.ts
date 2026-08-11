@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** Live view of the harness registry + per-room routes (spec §8.4). */
 
@@ -14,6 +14,8 @@ export interface ProviderInfo {
   modelProvider?: string | null;
   expectedModel?: string | null;
   modelMismatch?: boolean;
+  /** Explicit selections this provider can execute for the current health state. */
+  models?: Array<{ id: string; name: string; short: string; sub: string }>;
 }
 
 interface ProvidersResponse {
@@ -25,34 +27,38 @@ export function useHarnesses(): {
   providers: ProviderInfo[];
   routes: Record<string, string>;
   loading: boolean;
+  refresh: () => Promise<boolean>;
 } {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [routes, setRoutes] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
+  const mounted = useRef(true);
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const res = await fetch('/api/providers');
-        if (!res.ok) throw new Error('bad status');
-        const data = (await res.json()) as ProvidersResponse;
-        if (!alive) return;
-        setProviders(data.providers);
-        setRoutes(data.routes);
-      } catch {
-        /* leave empty */
-      } finally {
-        if (alive) setLoading(false);
-      }
-    };
-    load();
-    const t = window.setInterval(load, 20_000);
-    return () => {
-      alive = false;
-      window.clearInterval(t);
-    };
+  const refresh = useCallback(async () => {
+    try {
+      const res = await fetch('/api/providers', { cache: 'no-store' });
+      if (!res.ok) return false;
+      const data = (await res.json()) as ProvidersResponse;
+      if (!mounted.current) return false;
+      setProviders(data.providers);
+      setRoutes(data.routes);
+      return true;
+    } catch {
+      return false;
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
   }, []);
 
-  return { providers, routes, loading };
+  useEffect(() => {
+    mounted.current = true;
+    void refresh();
+    const t = window.setInterval(() => { void refresh(); }, 20_000);
+    return () => {
+      mounted.current = false;
+      window.clearInterval(t);
+    };
+  }, [refresh]);
+
+  return { providers, routes, loading, refresh };
 }

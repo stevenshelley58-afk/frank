@@ -2,8 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 
 import { useAuth, useData } from '@/components/providers';
+import { useCommandPalette } from '@/components/command-palette';
 import { DEFAULT_ROOMS, type Room } from '@/lib/rooms';
 import { frankStream, StreamAbortedError } from '@/lib/frank';
 import {
@@ -11,17 +13,20 @@ import {
   createConversation,
   listConversations,
   listMessages,
-  listPendingDecisions,
   patchConversation,
   resolveDecision,
   type ChatMessageRow,
   type Conversation,
   type PendingDecision,
-  type ThinkingMode,
 } from '@/lib/chat-api';
+import { getFrame, type FrameResponse } from '@/lib/frame';
+import { stopMission } from '@/lib/missions/client';
+import { WORKBENCH_API } from '@/lib/workbench/types';
 import { ChatThread } from './chat-thread';
-import { ComposerBar } from './composer-bar';
+import { ComposerBar, type ModelOption } from './composer-bar';
 import { LivingFrame } from './living-frame';
+import { useHarnesses } from '@/lib/use-harnesses';
+import { useCalendar } from '@/lib/use-calendar';
 
 /* ------------------------------------------------------------------ */
 /* Projects — the rooms model, read as the shell's project list        */
@@ -43,7 +48,10 @@ const CONTEXT_BUDGET_CHARS = 180_000;
 
 export function FrankShell() {
   const { api, status } = useAuth();
-  const { today } = useData();
+  const { today, todayError, refresh: refreshToday } = useData();
+  const { events: calendarEvents, status: calendarStatus, loading: calendarLoading, error: calendarError, refresh: refreshCalendar } = useCalendar(24);
+  const { registerRooms } = useCommandPalette();
+  const searchParams = useSearchParams();
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
@@ -56,8 +64,12 @@ export function FrankShell() {
   const [railOpen, setRailOpen] = useState(false);
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [draftModel, setDraftModel] = useState('auto');
-  const [draftThinking, setDraftThinking] = useState<ThinkingMode>('off');
+  const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
+  const [frame, setFrame] = useState<FrameResponse | null>(null);
+  const [frameError, setFrameError] = useState<string | null>(null);
+  const frameEtag = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const { providers: harnessProviders } = useHarnesses();
 
   const active = useMemo(
     () => conversations.find((c) => c.id === activeId) ?? null,
@@ -65,6 +77,8 @@ export function FrankShell() {
   );
   const currentProjectId = active?.project_id ?? homeProject;
   const currentProject = projectOf(currentProjectId);
+  const selectedModel = active?.model ?? draftModel;
+  const effectiveModel = availableModels.some((option) => option.id === selectedModel) ? selectedModel : 'auto';
 
   /* ---------------- loading ---------------- */
 
@@ -77,25 +91,41 @@ export function FrankShell() {
     }
   }, [api]);
 
-  const refreshDecisions = useCallback(async () => {
+  // Shares the Console's 20-second live provider snapshot, so recovered
+  // models appear and unhealthy selections disappear without a page reload.
+  useEffect(() => {
+    setAvailableModels(
+      harnessProviders.flatMap((provider) => provider.healthy ? (provider.models ?? []) : []),
+    );
+  }, [harnessProviders]);
+
+  const refreshFrame = useCallback(async () => {
     if (!api) return;
     try {
-      setDecisions(await listPendingDecisions(api));
-    } catch {
-      /* quiet */
+      const result = await getFrame(api, frameEtag.current);
+      frameEtag.current = result.etag;
+      if (result.kind === 'data') {
+        setFrame(result.frame);
+        setDecisions(result.frame.waiting
+          .filter((item) => item.kind === 'decision')
+          .map((item) => ({ id: item.id, title: item.title, whyNow: item.guidance?.why_now ?? '', version: item.version, updatedAt: item.updated_at })));
+      }
+      setFrameError(null);
+    } catch (error) {
+      setFrameError(error instanceof Error ? error.message : 'The Living Frame could not be refreshed.');
     }
   }, [api]);
 
   useEffect(() => {
     if (status !== 'ready') return;
     void refreshConversations();
-    void refreshDecisions();
+    void refreshFrame();
     const timer = window.setInterval(() => {
       void refreshConversations();
-      void refreshDecisions();
+      void refreshFrame();
     }, 20_000);
     return () => window.clearInterval(timer);
-  }, [status, refreshConversations, refreshDecisions]);
+  }, [status, refreshConversations, refreshFrame]);
 
   useEffect(() => {
     if (!api || activeId === null) {
@@ -128,22 +158,6 @@ export function FrankShell() {
     [conversations],
   );
 
-  const running = useMemo(() => conversations.filter((c) => c.running), [conversations]);
-
-  const receipts = useMemo(
-    () =>
-      messages
-        .filter((m) => m.kind === 'receipt')
-        .slice(-4)
-        .map((m) => ({
-          id: m.id,
-          title: m.body.slice(0, 80),
-          sub: new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-          conversationId: m.conversation_id,
-        })),
-    [messages],
-  );
-
   const contextUsed = useMemo(() => {
     const chars = messages.reduce((n, m) => n + m.body.length, 0);
     return Math.min(1, chars / CONTEXT_BUDGET_CHARS);
@@ -159,17 +173,23 @@ export function FrankShell() {
     if (convo) {
       setExpanded((prev) => new Set(prev).add(convo.project_id));
       setDraftModel(convo.model);
-      setDraftThinking((convo.thinking as ThinkingMode) ?? 'off');
     }
     setRailOpen(false);
   };
 
-  const openHome = (projectId: string) => {
+  const openHome = useCallback((projectId: string) => {
     setHomeProject(projectId);
     setActiveId(null);
     setExpanded((prev) => new Set(prev).add(projectId));
     setRailOpen(false);
-  };
+  }, []);
+
+  useEffect(() => registerRooms(openHome), [openHome, registerRooms]);
+
+  useEffect(() => {
+    const roomId = searchParams.get('room');
+    if (roomId && DEFAULT_ROOMS.some((room) => room.id === roomId)) openHome(roomId);
+  }, [openHome, searchParams]);
 
   const startChat = async (projectId: string, firstMessage?: string) => {
     if (!api) return null;
@@ -182,8 +202,8 @@ export function FrankShell() {
           ? `${firstMessage.slice(0, 48).trimEnd()}…`
           : firstMessage
         : 'New chat',
-      model: draftModel,
-      thinking: draftThinking,
+      model: effectiveModel,
+      thinking: 'off',
     });
     setConversations((prev) => [created, ...prev]);
     setActiveId(created.id);
@@ -202,6 +222,7 @@ export function FrankShell() {
     setConversations((prev) =>
       prev.map((c) => (c.id === conversation.id ? { ...c, running: true } : c)),
     );
+    void refreshFrame();
 
     const controller = new AbortController();
     abortRef.current = controller;
@@ -226,6 +247,7 @@ export function FrankShell() {
       currentProject.name,
       currentProject.agent,
       controller.signal,
+      effectiveModel !== 'auto' ? effectiveModel : undefined,
     ).catch((err: unknown) => {
       if (!(err instanceof StreamAbortedError)) {
         accumulated = accumulated || 'The stream dropped before I could answer.';
@@ -246,11 +268,36 @@ export function FrankShell() {
           : c,
       ),
     );
+    void refreshFrame();
   };
 
   const stop = () => {
     abortRef.current?.abort();
     abortRef.current = null;
+    void refreshFrame();
+  };
+
+  const stopWorkbench = async (id: string) => {
+    try {
+      const response = await fetch(WORKBENCH_API.stop(id), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reason: 'Stopped from Living Frame', command_id: crypto.randomUUID() }),
+      });
+      if (!response.ok) throw new Error(`Workbench stop failed (${response.status}).`);
+      void refreshFrame();
+    } catch (error) {
+      setFrameError(error instanceof Error ? error.message : 'Workbench stop failed.');
+    }
+  };
+
+  const stopFrameMission = async (id: string) => {
+    try {
+      await stopMission(id, 'Stopped from Living Frame');
+      void refreshFrame();
+    } catch (error) {
+      setFrameError(error instanceof Error ? error.message : 'Mission stop failed.');
+    }
   };
 
   const changeModel = async (model: string) => {
@@ -258,14 +305,6 @@ export function FrankShell() {
     if (api && active) {
       await patchConversation(api, active.id, { model });
       setConversations((prev) => prev.map((c) => (c.id === active.id ? { ...c, model } : c)));
-    }
-  };
-
-  const changeThinking = async (thinking: ThinkingMode) => {
-    setDraftThinking(thinking);
-    if (api && active) {
-      await patchConversation(api, active.id, { thinking });
-      setConversations((prev) => prev.map((c) => (c.id === active.id ? { ...c, thinking } : c)));
     }
   };
 
@@ -280,9 +319,9 @@ export function FrankShell() {
     try {
       await resolveDecision(api, decision, outcome);
     } catch {
-      void refreshDecisions();
+      void refreshFrame();
     }
-    void refreshDecisions();
+    void refreshFrame();
   };
 
   /* ---------------- render ---------------- */
@@ -453,12 +492,13 @@ export function FrankShell() {
           </span>
           <Link
             href="/console"
-            className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium text-muted transition-colors hover:bg-hover hover:text-ink"
             aria-label="Console"
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
               <path d="m4 17 6-6-6-6M12 19h8" />
             </svg>
+            <span>Console</span>
           </Link>
         </div>
       </nav>
@@ -526,28 +566,41 @@ export function FrankShell() {
           rgb={currentProject.isHome ? null : currentProject.rgb}
           streaming={streamingText !== null}
           disabled={status !== 'ready'}
-          model={active?.model ?? draftModel}
-          thinking={(active?.thinking as ThinkingMode) ?? draftThinking}
+          model={effectiveModel}
+          models={availableModels}
+          thinking="off"
           contextUsed={contextUsed}
           onSend={(text) => void send(text)}
           onStop={stop}
           onModelChange={(m) => void changeModel(m)}
-          onThinkingChange={(t) => void changeThinking(t)}
+          onThinkingChange={() => {}}
           onCompact={() => void startChat(currentProjectId)}
           onNewChat={() => void startChat(currentProjectId)}
         />
       </main>
 
-      <LivingFrame
-        open={frameOpen}
-        decisions={decisions}
-        running={running}
-        today={today}
-        receipts={receipts}
-        projectName={projectName}
+        <LivingFrame
+          open={frameOpen}
+          decisions={decisions}
+          frame={frame}
+          frameError={frameError}
+          today={today}
+          todayError={todayError}
+          calendarEvents={calendarEvents}
+          calendarStatus={calendarStatus}
+          calendarLoading={calendarLoading}
+          calendarError={calendarError}
+          projectName={projectName}
         onToggle={() => setFrameOpen((v) => !v)}
         onOpenConversation={openConversation}
-        onResolve={(d, outcome) => void onResolveDecision(d, outcome)}
+          onResolve={(d, outcome) => void onResolveDecision(d, outcome)}
+          onRetry={() => void refreshFrame()}
+          onRetryToday={() => { void refreshToday(); void refreshCalendar(); }}
+          onStopActiveChat={stop}
+          activeChatId={activeId}
+          activeChatStreaming={streamingText !== null}
+          onStopWorkbench={(id) => void stopWorkbench(id)}
+          onStopMission={(id) => void stopFrameMission(id)}
       />
     </div>
   );

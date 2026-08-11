@@ -99,4 +99,4 @@ export function shortStamp(iso: string | null | undefined): string {
   return `${day} · ${clockTime(iso)}`;
 }
 
-export const TIME_ZONE = 'Australia/Melbourne';
+export const TIME_ZONE = 'Australia/Perth';

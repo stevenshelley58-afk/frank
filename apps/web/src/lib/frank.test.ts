@@ -61,4 +61,20 @@ describe('frankStream done/error guards (Bug 1 regressions)', () => {
     expect(cb.onDone).not.toHaveBeenCalled();
     vi.unstubAllGlobals();
   });
+
+  it('sends the selected model and exposes execution metadata from the done frame', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(sseResponse([
+      '{"done":true,"requestedModel":"deepseek-reasoner","model":"deepseek-reasoner","modelProvider":"deepseek","expectedModel":"deepseek-reasoner","modelMismatch":false}',
+    ]));
+    vi.stubGlobal('fetch', fetchMock);
+    const cb = callbacks();
+    await frankStream('hello', 'central', cb, undefined, undefined, undefined, 'deepseek-reasoner');
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toMatchObject({ model: 'deepseek-reasoner' });
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).not.toHaveProperty('roomName');
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).not.toHaveProperty('agentName');
+    expect(cb.onDone).toHaveBeenCalledWith(expect.objectContaining({
+      model: 'deepseek-reasoner', modelProvider: 'deepseek', modelMismatch: false,
+    }));
+    vi.unstubAllGlobals();
+  });
 });

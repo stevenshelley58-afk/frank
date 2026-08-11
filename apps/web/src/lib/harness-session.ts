@@ -6,12 +6,12 @@
  * never import this from a 'use client' module.
  */
 
-import { resolveHarness } from './providers';
+import { expectedModel, modelMismatch, resolveHarness } from './providers';
 import { identityForRoom } from './rooms-identity';
 import { startRoomTurn, endRoomTurn } from './room-activity';
 
 // roomId → { providerId, sessionId }
-const sessions = new Map<string, { providerId: string; sessionId: string }>();
+const sessions = new Map<string, { selectionKey: string; sessionId: string }>();
 // Rooms whose session has already received the identity primer.
 const primed = new Set<string>();
 
@@ -19,7 +19,11 @@ export interface TurnMeta {
   harness: string;
   reason: string;
   /** What model the harness reports it is running (cheap per-turn read). */
-  modelInfo: { provider: string | null; model: string | null };
+  requestedModel: string | null;
+  actualModel: string | null;
+  modelProvider: string | null;
+  expectedModel: string | null;
+  modelMismatch: boolean;
 }
 
 export interface RunTurnArgs {
@@ -29,6 +33,8 @@ export interface RunTurnArgs {
   /** Text sent to the model. Callers fold in memory/pack blocks themselves. */
   prompt: string;
   onChunk: (text: string) => void;
+  /** Optional model override for this turn. Provider must support it. */
+  model?: string;
 }
 
 /** Reset a room's session (used when a turn errors). */
@@ -42,9 +48,10 @@ export function dropSession(roomId: string): void {
  * Throws on session-create or stream failure.
  */
 export async function runTurn(args: RunTurnArgs): Promise<{ text: string; meta: TurnMeta }> {
-  const { roomId, roomName, agentName, prompt, onChunk } = args;
+  const { roomId, roomName, agentName, prompt, onChunk, model } = args;
 
-  const { provider, reason } = await resolveHarness(roomId);
+  const { provider, reason } = await resolveHarness(roomId, model);
+  const selectionKey = `${provider.id}:${model ?? 'auto'}`;
 
   let identityText: string | null = null;
   if (!primed.has(roomId)) {
@@ -52,11 +59,11 @@ export async function runTurn(args: RunTurnArgs): Promise<{ text: string; meta: 
   }
 
   let entry = sessions.get(roomId);
-  if (!entry || entry.providerId !== provider.id) {
+  if (!entry || entry.selectionKey !== selectionKey) {
     const sessionArg =
       provider.id === 'letta' ? `${roomId}|${identityText ?? ''}` : '/srv/frank/repo';
     const sessionId = await provider.createSession(sessionArg);
-    entry = { providerId: provider.id, sessionId };
+    entry = { selectionKey, sessionId };
     sessions.set(roomId, entry);
     primed.delete(roomId);
   }
@@ -70,14 +77,29 @@ export async function runTurn(args: RunTurnArgs): Promise<{ text: string; meta: 
   startRoomTurn(roomId);
   let fullText = '';
   try {
-    for await (const chunk of provider.stream(entry.sessionId, promptText)) {
+    for await (const chunk of provider.stream(entry.sessionId, promptText, { model })) {
       fullText += chunk;
       onChunk(chunk);
     }
     endRoomTurn(roomId, { snippet: fullText });
     // Cheap per-turn read — lets the UI show the real model behind the harness.
-    const modelInfo = await provider.modelInfo().catch(() => ({ provider: null, model: null }));
-    return { text: fullText, meta: { harness: provider.id, reason, modelInfo } };
+    const modelInfo = await provider.modelInfo(entry.sessionId).catch(() => ({ provider: null, model: null }));
+    // A request is not confirmation: adapters may return null if their
+    // provider did not report the model used for this turn.
+    const actualModel = modelInfo.model;
+    const expected = model ?? expectedModel();
+    return {
+      text: fullText,
+      meta: {
+        harness: provider.id,
+        reason,
+        requestedModel: model ?? null,
+        actualModel,
+        modelProvider: modelInfo.provider ?? provider.id,
+        expectedModel: expected,
+        modelMismatch: modelMismatch(actualModel, expected),
+      },
+    };
   } catch (err) {
     endRoomTurn(roomId, { error: String(err) });
     dropSession(roomId);

@@ -19,18 +19,14 @@ export interface ModelOption {
  * Goose or Letta (spec §8.4), so the honest default is "let Frank pick" and the
  * rest are overrides for one chat.
  */
-export const MODELS: ModelOption[] = [
-  { id: 'auto', name: 'Auto', sub: 'let the harness registry choose', short: 'Auto' },
-  { id: 'opus', name: 'Claude Opus', sub: 'deepest reasoning · slowest', short: 'Opus' },
-  { id: 'sonnet', name: 'Claude Sonnet', sub: 'balanced · the daily driver', short: 'Sonnet' },
-  { id: 'haiku', name: 'Claude Haiku', sub: 'fast · cheap · shallow', short: 'Haiku' },
-  { id: 'goose', name: 'Goose · local', sub: 'runs on your VPS · no egress', short: 'Goose' },
-];
+const AUTO_MODEL: ModelOption = { id: 'auto', name: 'Auto', sub: 'let the harness registry choose', short: 'Auto' };
 
+// Retained only to render historical state safely if a stale DOM event arrives;
+// no visible control exposes this until a provider supports an effective depth.
 const THINKING: Record<ThinkingMode, { label: string; short: string; sub: string }> = {
   off: { label: 'Thinking off', short: 'Thinking', sub: 'answers straight away' },
-  think: { label: 'Think', short: 'Think', sub: 'a short reasoning pass' },
-  deep: { label: 'Think harder', short: 'Think harder', sub: 'long reasoning · slower, better' },
+  think: { label: 'Think', short: 'Think', sub: 'not currently supported by a provider' },
+  deep: { label: 'Think harder', short: 'Think harder', sub: 'not currently supported by a provider' },
 };
 
 /* ------------------------------------------------------------------ */
@@ -72,6 +68,8 @@ interface ComposerBarProps {
   streaming: boolean;
   disabled?: boolean;
   model: string;
+  models: ModelOption[];
+  /** Historical conversation setting; no provider currently executes it. */
   thinking: ThinkingMode;
   /** Fraction of the context window in use, 0–1. */
   contextUsed: number;
@@ -95,6 +93,7 @@ export function ComposerBar({
   streaming,
   disabled = false,
   model,
+  models,
   thinking,
   contextUsed,
   onSend,
@@ -184,8 +183,9 @@ export function ComposerBar({
 
   const pct = Math.min(100, Math.round(contextUsed * 100));
   const circumference = 2 * Math.PI * 7;
-  const selectedModel = MODELS.find((m) => m.id === model) ?? MODELS[0]!;
-  const think = THINKING[thinking];
+  const availableModels = [AUTO_MODEL, ...models];
+  const selectedModel = availableModels.find((m) => m.id === model) ?? AUTO_MODEL;
+  const think = { short: 'Thinking' };
 
   const toolClass = isDeck
     ? 'text-white/55 hover:bg-white/10 hover:text-white'
@@ -352,7 +352,7 @@ export function ComposerBar({
 
             <button
               onClick={() => setMenu(menu === 'thinking' ? null : 'thinking')}
-              className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-colors ${
+              className={`hidden h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-colors ${
                 thinking === 'off' ? toolClass : 'bg-accent/10 text-accent'
               }`}
             >
@@ -407,7 +407,7 @@ export function ComposerBar({
         {/* menus */}
         {menu === 'model' && (
           <Menu label="Model for this chat" className="left-0">
-            {MODELS.map((m) => (
+            {availableModels.map((m) => (
               <MenuItem
                 key={m.id}
                 title={m.name}

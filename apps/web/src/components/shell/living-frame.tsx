@@ -1,20 +1,35 @@
 'use client';
 
-import type { Conversation, PendingDecision } from '@/lib/chat-api';
+import type { PendingDecision } from '@/lib/chat-api';
 import type { TodayResponse } from '@/lib/api';
+import type { FrameResponse, FrameRunning, FrameReceipt } from '@/lib/frame';
+import type { CalendarEvent } from '@/lib/use-calendar';
+import { clockTime, TIME_ZONE } from '@/lib/time';
 
 /* ------------------------------------------------------------------ */
 
 interface LivingFrameProps {
   open: boolean;
   decisions: PendingDecision[];
-  running: Conversation[];
+  frame: FrameResponse | null;
+  frameError: string | null;
   today: TodayResponse | null;
-  receipts: Array<{ id: string; title: string; sub: string; conversationId: string | null }>;
+  todayError: string | null;
+  calendarEvents: CalendarEvent[];
+  calendarStatus: 'connected' | 'not_connected' | 'error';
+  calendarLoading: boolean;
+  calendarError: string | null;
   projectName: (projectId: string) => string;
   onToggle: () => void;
   onOpenConversation: (id: string) => void;
   onResolve: (decision: PendingDecision, outcome: 'ready' | 'cancel') => void;
+  onRetry: () => void;
+  onRetryToday: () => void;
+  activeChatId: string | null;
+  activeChatStreaming: boolean;
+  onStopActiveChat: () => void;
+  onStopWorkbench: (id: string) => void;
+  onStopMission: (id: string) => void;
 }
 
 /**
@@ -27,14 +42,28 @@ interface LivingFrameProps {
 export function LivingFrame({
   open,
   decisions,
-  running,
+  frame,
+  frameError,
   today,
-  receipts,
+  todayError,
+  calendarEvents,
+  calendarStatus,
+  calendarLoading,
+  calendarError,
   projectName,
   onToggle,
   onOpenConversation,
   onResolve,
+  onRetry,
+  onRetryToday,
+  activeChatId,
+  activeChatStreaming,
+  onStopActiveChat,
+  onStopWorkbench,
+  onStopMission,
 }: LivingFrameProps) {
+  const running = frame?.running ?? [];
+  const receipts = frame?.receipts ?? [];
   if (!open) {
     return (
       <aside className="hidden w-[47px] shrink-0 flex-col border-l border-line bg-rail lg:flex">
@@ -86,6 +115,12 @@ export function LivingFrame({
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+        {frameError && (
+          <div role="status" className="rounded-[14px] border border-warning/30 bg-warning/5 px-3.5 py-3 text-[12px] text-warning">
+            Living Frame is unavailable — {frameError}
+            <button onClick={onRetry} className="ml-2 font-semibold underline">Retry</button>
+          </div>
+        )}
         <Card title="Waiting on you" count={decisions.length}>
           {decisions.length === 0 ? (
             <Empty>Nothing needs your decision.</Empty>
@@ -122,50 +157,26 @@ export function LivingFrame({
         </Card>
 
         <Card title="Running now" count={running.length}>
-          {running.length === 0 ? (
+          {frame === null && !frameError ? (
+            <Empty>Loading the authoritative frame…</Empty>
+          ) : running.length === 0 ? (
             <Empty>Nothing mid-flight.</Empty>
           ) : (
-            running.map((c) => (
-              <button
-                key={c.id}
-                onClick={() => onOpenConversation(c.id)}
-                className="flex w-full items-center gap-2.5 border-b border-line py-2 text-left last:border-b-0"
-              >
-                <span className="animate-pip h-2 w-2 shrink-0 rounded-full bg-running" aria-hidden />
-                <span className="min-w-0 flex-1">
-                  <b className="block truncate text-[12.5px] font-semibold text-ink">{c.title}</b>
-                  <span className="mt-px block font-mono text-[9.5px] text-muted">
-                    {projectName(c.project_id)} · working
-                  </span>
-                </span>
-              </button>
-            ))
+            running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} onStopWorkbench={onStopWorkbench} onStopMission={onStopMission} />)
           )}
         </Card>
 
         <Card title="Today">
-          <TodayList today={today} />
+          <TodayList today={today} todayError={todayError} calendarEvents={calendarEvents} calendarStatus={calendarStatus} calendarLoading={calendarLoading} calendarError={calendarError} onRetry={onRetryToday} />
         </Card>
 
         <Card title="Receipts">
-          {receipts.length === 0 ? (
+          {frame === null && !frameError ? (
+            <Empty>Loading the authoritative frame…</Empty>
+          ) : receipts.length === 0 ? (
             <Empty>Nothing finished yet today.</Empty>
           ) : (
-            receipts.slice(0, 4).map((r) => (
-              <button
-                key={r.id}
-                onClick={() => r.conversationId && onOpenConversation(r.conversationId)}
-                className="flex w-full items-center gap-2.5 border-b border-line py-2 text-left last:border-b-0"
-              >
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-success">
-                  <path d="M20 6 9 17l-5-5" />
-                </svg>
-                <span className="min-w-0 flex-1">
-                  <b className="block truncate text-[12.5px] font-semibold text-ink">{r.title}</b>
-                  <span className="mt-px block font-mono text-[9.5px] text-muted">{r.sub}</span>
-                </span>
-              </button>
-            ))
+            receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.kind === 'chat' ? receipt.message_id : receipt.workbench_id} receipt={receipt} onOpenConversation={onOpenConversation} />)
           )}
         </Card>
       </div>
@@ -175,23 +186,92 @@ export function LivingFrame({
 
 /* ------------------------------------------------------------------ */
 
-function TodayList({ today }: { today: TodayResponse | null }) {
+function RunningRow({ item, projectName, onOpenConversation, activeChatId, activeChatStreaming, onStopActiveChat, onStopWorkbench, onStopMission }: {
+  item: FrameRunning;
+  projectName: (projectId: string) => string;
+  onOpenConversation: (id: string) => void;
+  activeChatId: string | null;
+  activeChatStreaming: boolean;
+  onStopActiveChat: () => void;
+  onStopWorkbench: (id: string) => void;
+  onStopMission: (id: string) => void;
+}) {
+  const title = item.kind === 'chat' ? item.title : item.kind === 'mission' ? item.objective : `Workbench ${item.work_item_id}`;
+  const sub = item.kind === 'chat' ? `${projectName(item.project_id)} · chat` : item.kind === 'mission' ? `${item.room_name} · ${item.state}` : `${item.state} · workbench`;
+  const canOpen = item.kind === 'chat';
+  const stop = item.kind === 'workbench' ? () => onStopWorkbench(item.id) : item.kind === 'mission' ? () => onStopMission(item.id) : item.id === activeChatId && activeChatStreaming ? onStopActiveChat : null;
+  return <div className="flex items-center gap-2.5 border-b border-line py-2 last:border-b-0">
+    <span className="animate-pip h-2 w-2 shrink-0 rounded-full bg-running" aria-hidden />
+    <button disabled={!canOpen} onClick={() => canOpen && onOpenConversation(item.id)} className="min-w-0 flex-1 text-left disabled:cursor-default">
+      <b className="block truncate text-[12.5px] font-semibold text-ink">{title}</b>
+      <span className="mt-px block font-mono text-[9.5px] text-muted">{sub}</span>
+    </button>
+    {stop && <button onClick={stop} className="rounded border border-line px-2 py-1 text-[10px] text-muted hover:border-danger hover:text-danger">Stop</button>}
+  </div>;
+}
+
+function ReceiptRow({ receipt, onOpenConversation }: { receipt: FrameReceipt; onOpenConversation: (id: string) => void }) {
+  const isChat = receipt.kind === 'chat';
+  const title = receipt.kind === 'chat' ? receipt.body : receipt.summary;
+  const sub = receipt.kind === 'chat' ? 'chat receipt' : `workbench · ${receipt.published_by}`;
+  const open = () => { if (receipt.kind === 'chat') onOpenConversation(receipt.conversation_id); };
+  return <button disabled={!isChat} onClick={open} className="flex w-full items-center gap-2.5 border-b border-line py-2 text-left last:border-b-0 disabled:cursor-default">
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-success"><path d="M20 6 9 17l-5-5" /></svg>
+    <span className="min-w-0 flex-1"><b className="block truncate text-[12.5px] font-semibold text-ink">{title}</b><span className="mt-px block font-mono text-[9.5px] text-muted">{sub}</span></span>
+  </button>;
+}
+
+function TodayList({ today, todayError, calendarEvents, calendarStatus, calendarLoading, calendarError, onRetry }: {
+  today: TodayResponse | null;
+  todayError: string | null;
+  calendarEvents: CalendarEvent[];
+  calendarStatus: 'connected' | 'not_connected' | 'error';
+  calendarLoading: boolean;
+  calendarError: string | null;
+  onRetry: () => void;
+}) {
   const cards = (today?.sections ?? []).flatMap((s) => s.cards);
-  const open = cards.filter((c) => c.state !== 'done' && c.state !== 'cancelled').slice(0, 4);
+  const entries = [
+    ...cards
+      .filter((card) => card.state !== 'done' && card.state !== 'cancelled')
+      .map((card) => ({
+        id: `work-${card.id}`,
+        title: card.title,
+        detail: card.scheduled_for ? `${clockTime(card.scheduled_for, TIME_ZONE)} · ${card.state}` : `unscheduled · ${card.state}`,
+        sortAt: card.scheduled_for ? Date.parse(card.scheduled_for) : Number.POSITIVE_INFINITY,
+        kind: 'work' as const,
+      })),
+    ...calendarEvents.map((event) => ({
+      id: `calendar-${event.id}`,
+      title: event.title,
+      detail: event.allDay ? 'all day' : clockTime(event.start, TIME_ZONE),
+      sortAt: Number.isNaN(Date.parse(event.start)) ? Number.POSITIVE_INFINITY : Date.parse(event.start),
+      kind: 'calendar' as const,
+    })),
+  ].sort((left, right) => left.sortAt - right.sortAt || left.title.localeCompare(right.title));
 
-  if (today === null) return <Empty>Warming up…</Empty>;
-  if (open.length === 0) return <Empty>Clear board — nothing tracked for today.</Empty>;
+  const calendarCoverage = calendarLoading
+    ? 'Checking calendar…'
+    : calendarStatus === 'connected'
+      ? `${calendarEvents.length} calendar event${calendarEvents.length === 1 ? '' : 's'} connected`
+      : calendarStatus === 'not_connected'
+        ? 'Calendar not connected'
+        : `Calendar degraded${calendarError ? ` — ${calendarError}` : ''}`;
 
+  if (todayError) {
+    return <div><p className="text-[12px] text-warning">Today is unavailable — {todayError}</p><p className="mt-1 font-mono text-[9.5px] text-muted/80">{calendarCoverage}</p><button onClick={onRetry} className="mt-1 text-[11px] font-semibold underline">Retry</button></div>;
+  }
+  if (today === null) return <Empty>Loading the day…</Empty>;
   return (
     <>
-      {open.map((c) => (
-        <div key={c.id} className="flex items-center gap-2.5 border-b border-line py-2 last:border-b-0">
-          <span className="min-w-0 flex-1">
-            <b className="block truncate text-[12.5px] font-semibold text-ink">{c.title}</b>
-            <span className="mt-px block font-mono text-[9.5px] text-muted">{c.state}</span>
-          </span>
+      {entries.slice(0, 4).map((entry) => (
+        <div key={entry.id} className="flex items-center gap-2.5 border-b border-line py-2 last:border-b-0">
+          {entry.kind === 'calendar' && <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-[#4285F4]" title="Calendar" />}
+          <span className="min-w-0 flex-1"><b className="block truncate text-[12.5px] font-semibold text-ink">{entry.title}</b><span className="mt-px block font-mono text-[9.5px] text-muted">{entry.detail}</span></span>
         </div>
       ))}
+      {entries.length === 0 && <Empty>Clear board — nothing tracked for today.</Empty>}
+      <p className="pt-2 font-mono text-[9.5px] text-muted/80">{calendarCoverage}</p>
     </>
   );
 }

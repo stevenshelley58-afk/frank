@@ -65,6 +65,7 @@ export function roomSeed(greeting: string): ChatMessage[] {
 export interface TurnInfo {
   harness?: string;
   reason?: string;
+  requestedModel?: string | null;
   model?: string | null;
   modelProvider?: string | null;
   expectedModel?: string | null;
@@ -87,9 +88,10 @@ export async function frankStream(
   message: string,
   roomId: string,
   callbacks: StreamCallbacks,
-  roomName?: string,
-  agentName?: string,
+  _roomName?: string,
+  _agentName?: string,
   signal?: AbortSignal,
+  model?: string,
 ): Promise<void> {
   let doneFired = false;
   let errorFired = false;
@@ -110,7 +112,9 @@ export async function frankStream(
     const res = await fetch('/api/chat', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message, roomId, roomName, agentName }),
+      // Identity is derived server-side from the canonical room id. Keep the
+      // legacy arguments for callers while never trusting them over the wire.
+      body: JSON.stringify({ message, roomId, model }),
       signal,
     });
 

@@ -140,6 +140,7 @@ export async function* streamLettaMessage(
   roomId: string,
   persona: string,
   userMessage: string,
+  _opts?: { model?: string },
 ): AsyncGenerator<string, void, unknown> {
   const agentId = await ensureAgent(roomId, persona);
 

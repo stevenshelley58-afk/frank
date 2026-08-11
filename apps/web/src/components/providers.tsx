@@ -213,12 +213,16 @@ interface DataContextValue {
   today: TodayResponse | null;
   work: WorkListResponse | null;
   loading: boolean;
+  todayError: string | null;
+  refresh: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextValue>({
   today: null,
   work: null,
   loading: true,
+  todayError: null,
+  refresh: async () => {},
 });
 
 export function DataProvider({ children }: { children: ReactNode }) {
@@ -226,6 +230,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [today, setToday] = useState<TodayResponse | null>(null);
   const [work, setWork] = useState<WorkListResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [todayError, setTodayError] = useState<string | null>(null);
+  const loadRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     if (status !== 'ready') return;
@@ -250,23 +256,31 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setToday(t);
         setWork(w);
-      } catch {
+        setTodayError(null);
+      } catch (error) {
+        if (!cancelled) setTodayError(error instanceof Error ? error.message : 'Today could not be loaded.');
         // quiet — the frame shows its warm-up state; the chat keeps working
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
+    loadRef.current = load;
     setLoading(true);
     load();
     const timer = window.setInterval(load, 60_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      if (loadRef.current === load) loadRef.current = null;
     };
   }, [api, status]);
 
-  const value = useMemo(() => ({ today, work, loading }), [today, work, loading]);
+  const refresh = useCallback(async () => { await loadRef.current?.(); }, []);
+  const value = useMemo(
+    () => ({ today, work, loading, todayError, refresh }),
+    [today, work, loading, todayError, refresh],
+  );
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }
 

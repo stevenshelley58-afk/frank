@@ -242,7 +242,7 @@ export function makeApiFetch(
       const fresh = await reauth();
       res = await run(fresh);
     }
-    if (!res.ok) {
+    if (!res.ok && res.status !== 304) {
       let problem: ProblemDetail | null = null;
       try {
         problem = (await res.clone().json()) as ProblemDetail;
