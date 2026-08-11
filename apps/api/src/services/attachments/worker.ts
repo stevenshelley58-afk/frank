@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { Transform } from 'node:stream';
+import { Writable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { objectKey, stagingKey } from './storage.js';
 import type { AttachmentOutbox, AttachmentPersistencePort, AttachmentPromoterStorage, ContentSandboxPort, ExtractionRunner, MalwareScanner, ObjectManifest } from './types.js';
@@ -24,4 +24,4 @@ export class AttachmentOutboxWorker {
   private async cleanup(item: AttachmentOutbox, signal?: AbortSignal): Promise<void> { const attachment = await this.persistence.getAttachmentForWork(item.cellId, item.attachmentId); if (attachment) await this.storage.removeStaging(stagingKey(attachment.cellId, attachment.uploadId), signal); }
   private async reject(item: AttachmentOutbox, reason: 'content_rejected' | 'scan_infected'): Promise<void> { await this.persistence.rejectWork({ cellId: item.cellId, attachmentId: item.attachmentId, reason }); }
 }
-async function hashReadable(source: import('node:stream').Readable, signal?: AbortSignal): Promise<{ sha256: string; bytes: bigint }> { const hash = createHash('sha256'); let bytes = 0n; await pipeline(source, new Transform({ transform(chunk, _encoding, done) { bytes += BigInt(chunk.length); if (bytes > MAX_FILE_BYTES) return done(new Error('file_limit')); hash.update(chunk); done(); } }), ...(signal ? [{ signal }] : [])); return { sha256: hash.digest('hex'), bytes }; }
+async function hashReadable(source: import('node:stream').Readable, signal?: AbortSignal): Promise<{ sha256: string; bytes: bigint }> { const hash = createHash('sha256'); let bytes = 0n; await pipeline(source, new Writable({ write(chunk, _encoding, done) { bytes += BigInt(chunk.length); if (bytes > MAX_FILE_BYTES) return done(new Error('file_limit')); hash.update(chunk); done(); } }), ...(signal ? [{ signal }] : [])); return { sha256: hash.digest('hex'), bytes }; }
