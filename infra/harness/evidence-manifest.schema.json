@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "type": "object",
-  "required": ["service", "release_url", "tag", "oci_digest", "license", "provenance_method", "sbom_sha256", "server_command", "hosted_canary_url"],
+  "required": ["service", "release_url", "tag", "oci_digest", "license", "provenance_method", "sbom_sha256", "server_command", "hosted_canary_url", "config_sha256"],
   "properties": {
     "service": {"type":"string"}, "release_url": {"type":"string","format":"uri"},
     "tag": {"type":"string","minLength":1}, "oci_digest": {"type":"string","pattern":"^sha256:[a-f0-9]{64}$"},
     "license": {"type":"string","minLength":1}, "provenance_method": {"type":"string","minLength":1},
     "sbom_sha256": {"type":"string","pattern":"^sha256:[a-f0-9]{64}$"}, "server_command": {"type":"string","minLength":1},
-    "hosted_canary_url": {"type":"string","format":"uri"}
+    "hosted_canary_url": {"type":"string","format":"uri"}, "config_sha256": {"type":"string","pattern":"^sha256:[a-f0-9]{64}$"}
   }, "additionalProperties": false
 }

@@ -54,9 +54,16 @@ services:
       # Letta is manual-only and is never a canonical memory or control authority.
       FRANK_LITELLM_INTERNAL_URL: "${FRANK_LITELLM_INTERNAL_URL:-http://frank-litellm:4000}"
       FRANK_LETTA_INTERNAL_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta:8283}"
-      # Transitional web health adapter retains this historical name until cutover.
-      LETTA_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta:8283}"
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
+      FRANK_CLAMAV_INTERNAL_URL: "${FRANK_CLAMAV_INTERNAL_URL:-tcp://frank-clamav:3310}"
+      FRANK_SEAWEEDFS_INTERNAL_URL: "${FRANK_SEAWEEDFS_INTERNAL_URL:-http://frank-seaweedfs:8333}"
+      FRANK_ATTACHMENT_PROMOTER_BEARER: "${FRANK_ATTACHMENT_PROMOTER_BEARER:?required}"
+      # Goose remains the existing externally managed default for one rollback release;
+      # Frank owns only its endpoint/credential policy, never an unused image slot.
+      GOOSE_ACP_URL: "${GOOSE_ACP_URL:?required}"
+      GOOSE_ACP_SECRET: "${GOOSE_ACP_SECRET:?required}"
+      GOOSE_PROVIDER: "${GOOSE_PROVIDER:?required}"
+      GOOSE_MODEL: "${GOOSE_MODEL:?required}"
       FRANK_UPLOAD_GATE_INTERNAL_URL: "${FRANK_UPLOAD_GATE_INTERNAL_URL:-http://frank-api:3000}"
       FRANK_ARTIFACT_ARCHIVE_ROOT: /var/lib/frank/artifacts
       FRANK_WORKSPACE_SOURCE_ROOT: /srv/frank/repo
@@ -111,6 +118,8 @@ services:
     networks: !override
       - frank
       - frank-codegraph-internal
+      - frank-model
+      - frank-attachments
 
     init: true
     restart: unless-stopped
@@ -178,6 +187,8 @@ services:
       FRANK_EXPECTED_MODEL: "${FRANK_EXPECTED_MODEL:?FRANK_EXPECTED_MODEL is required}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}"
       DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-deepseek-chat}"
+      # Transitional adapter only. The API uses FRANK_LETTA_INTERNAL_URL.
+      LETTA_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta:8283}"
 
     volumes: !override
       - type: bind
@@ -254,11 +265,15 @@ services:
       FRANK_WEB_INTERNAL_URL: "${FRANK_WEB_INTERNAL_URL:?FRANK_WEB_INTERNAL_URL is required}"
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
       FRANK_UPLOAD_GATE_INTERNAL_URL: "${FRANK_UPLOAD_GATE_INTERNAL_URL:-http://frank-api:3000}"
+      FRANK_TUSD_GATE_SECRET: "${FRANK_TUSD_GATE_SECRET:?distinct Caddy-to-gate credential required}"
     depends_on:
       frank-api:
         condition: service_healthy
       frank-web:
         condition: service_healthy
+    networks: !override
+      - frank
+      - frank-attachments
 
   # Supporting stores remain network-internal. The reset tags make an accidental
   # development port publication fail closed when this overlay is applied.

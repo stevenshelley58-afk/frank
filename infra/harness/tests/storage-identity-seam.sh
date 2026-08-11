@@ -2,7 +2,7 @@
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
 policy="$root/infra/compose/seaweedfs/s3.json.tmpl"
-overlay="$root/infra/harness/docker-compose.gateway.yml"
+overlay="$root/infra/production/docker-compose.harness.yml"
 ! rg -n 'frank-cell|FRANK_S3_ACCESS_KEY|FRANK_S3_SECRET_KEY|FRANK_OPENFGA|lake-' "$policy" "$overlay"
 rg -q 'attachment-staging' "$policy"
 rg -q 'attachment-promoter' "$policy"

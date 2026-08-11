@@ -97,7 +97,13 @@ frank.fail {
             # is a separate service credential and is never a client capability.
             forward_auth {$FRANK_UPLOAD_GATE_INTERNAL_URL} {
                 uri /private/tusd/gate
-                copy_headers Authorization,Tus-Resumable,Upload-Offset,Upload-Metadata
+                header_up X-Tusd-Gate-Secret {$FRANK_TUSD_GATE_SECRET}
+                header_up X-Tusd-Original-Method {http.request.method}
+                header_up X-Tusd-Original-Uri {http.request.uri}
+                header_up Authorization {http.request.header.Authorization}
+                header_up Upload-Metadata {http.request.header.Upload-Metadata}
+                header_up Tus-Resumable {http.request.header.Tus-Resumable}
+                header_up Upload-Offset {http.request.header.Upload-Offset}
             }
             reverse_proxy {$FRANK_TUSD_INTERNAL_URL} {
                 header_up Host {host}
@@ -105,6 +111,9 @@ frank.fail {
                 header_up X-Forwarded-Proto https
                 # The signed upload capability reaches tusd's private hook unchanged.
                 header_up Authorization {http.request.header.Authorization}
+                header_up Upload-Metadata {http.request.header.Upload-Metadata}
+                header_up Tus-Resumable {http.request.header.Tus-Resumable}
+                header_up Upload-Offset {http.request.header.Upload-Offset}
                 flush_interval -1
             }
         }

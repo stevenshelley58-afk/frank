@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 root="$(cd "$(dirname "$0")/../../.." && pwd)"
-compose="$root/infra/harness/docker-compose.gateway.yml"
+compose="$root/infra/production/docker-compose.harness.yml"
 caddy="$root/infra/production/Caddyfile.frank-production"
 for token in 'ports:' 'frank-previews' 'FRANK_OPENFGA' 'insecure-skip-verify' 'tls-skip-verify'; do
   if rg -n "$token" "$compose"; then echo "forbidden: $token"; exit 1; fi
@@ -12,5 +12,6 @@ rg -q 'handle /v1/uploads/tus/\*' "$caddy"
 rg -q 'disable-download' "$compose"
 rg -q 'max-size=2147483648' "$compose"
 rg -q 'http://frank-seaweedfs:8333' "$compose"
-rg -q 'frank-harness-model' "$compose"
+rg -q 'frank-model' "$compose"
+rg -q 'X-Tusd-Gate-Secret|X-Tusd-Original-Method|X-Tusd-Original-Uri' "$root/infra/production/Caddyfile.frank-production"
 echo 'gateway static security assertions passed'

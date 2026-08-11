@@ -16,8 +16,8 @@ the API issues capability credentials and the private HTTPS hook performs scan/p
 TLS verification is never disabled. Quarantine scans precede promotion; freshness/readiness
 of ClamAV signatures is a hard dependency.
 
-Trust boundary: `frank-model` is LiteLLM/Hermes only. `frank-attachments` is
-SeaweedFS/tusd only. The API joins `frank` as the controlled seam. Dashboard OpenFGA
+Trust boundary: `frank-model` is LiteLLM/Hermes plus the API control seam. `frank-attachments` is
+SeaweedFS/tusd/ClamAV plus API and narrowly scoped Caddy ingress. The API joins `frank` as the controlled seam. Dashboard OpenFGA
 must stay lake-local: it joins neither network and receives no attachment credential. Hermes
 has no public port, scheduler, durable/child-agent authority, or Night Watch access.
 
@@ -28,7 +28,11 @@ incomplete-upload/quarantine abort lifecycle, then revokes its credential. The A
 capability binds owner/cell/conversation/upload and the hook selects the collision-safe key
 `<cell_id>/<upload_id>/<part-or-object>`; no deployment-wide S3 key prefix is used.
 
-Promotion is manual: populate a candidate digest only after `cosign verify` and SBOM review,
+Goose remains the existing externally managed default source for this release; no unused Goose
+image slot is deployed. Frank receives its endpoint/credential policy and an upgrade is a separate
+artifact decision. Promotion is manual: populate a candidate digest only after `cosign verify` against
+the upstream immutable commit/key, SBOM review, and the LiteLLM security floor (never 1.82.7/1.82.8;
+not before 1.83.7),
 run the isolated hosted candidate probe, copy the verified manifest to CURRENT, and retain the
 previous manifest as ROLLBACK. Revert by restoring the ROLLBACK manifest and recreating only
 these services; never delete attachment volumes. Licenses to record per chosen artifact: LiteLLM

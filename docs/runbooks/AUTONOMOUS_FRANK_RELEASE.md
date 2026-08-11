@@ -5,7 +5,7 @@ Version: 3
 Scope: the current single-host FRANK deployment on `vps`  
 Owner: release operator
 
-This runbook adds five fail-closed controls around a release:
+This runbook adds fail-closed controls around a release:
 
 1. a hosted preflight against the exact reviewed commit;
 2. a timestamped, checksummed PostgreSQL backup set;
@@ -35,7 +35,10 @@ between the backup and smoke gates.
   `/srv/frank/infra/docker-compose.dev.yml` then the reviewed
   `$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml`. The release source is a
   separate clean immutable worktree; it is never the mutable central workspace. Never
-  reverse the files or apply the overlay alone.
+  reverse the files or apply the overlay alone. When `FRANK_HARNESS_ENABLED=true`, it is
+  the ordered atomic triple: base, app, then `infra/production/docker-compose.harness.yml`.
+  A harness release never starts, snapshots, pulls, validates, deploys, smokes, receipts,
+  or rolls back only a subset of its six services.
 
 ## Files
 
@@ -47,7 +50,7 @@ between the backup and smoke gates.
 | `scripts/production/snapshot-codegraph-release.sh` | Captures prior API/web/codegraph images, legacy overlay, Caddyfile, and codegraph volume | Briefly pauses codegraph; writes a complete checksummed root-only rollback set |
 | `scripts/production/rollback-codegraph-release.sh` | Restores the captured application unit, Caddyfile, and codegraph volume | Stops/recreates API, web, codegraph, and Caddy; replaces codegraph volume contents |
 | `infra/production/docker-compose.app.yml` | Authoritative production overrides for API, web, codegraph, and their Caddy dependency | None until passed to `docker compose up` |
-| `infra/production/docker-compose.harness.yml` | Optional reviewed harness third Compose unit (private model, upload, scan, Letta services) | Never include until all current image evidence manifests and hosted canaries are accepted; it reuses `frank-cell-seaweedfs-data` and has no public ports. |
+| `infra/production/docker-compose.harness.yml` | Optional reviewed harness third Compose unit (private model, upload, scan, Letta services) | Enable only after evidence/canaries; then it is atomic with base+app, reuses `frank-cell-seaweedfs-data`, and has no public ports. |
 | `infra/production/Caddyfile.frank-production` | Replacement `frank.fail` site block with a private UI/control surface | None until merged into the live Caddy candidate and reloaded |
 
 Required host commands are Bash 4.3+, Docker with Compose, Git, GitHub CLI, `jq`,
@@ -1039,7 +1042,21 @@ Compose document, because it contains injected values:
 ```bash
 base_compose='/srv/frank/infra/docker-compose.dev.yml'
 app_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml"
+export FRANK_HARNESS_ENABLED="${FRANK_HARNESS_ENABLED:-false}"
+case "$FRANK_HARNESS_ENABLED" in true|false) ;; *) exit 1;; esac
 compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
+if test "$FRANK_HARNESS_ENABLED" = true; then
+  harness_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.harness.yml"
+  compose+=( -f "$harness_overlay" )
+  export FRANK_BASE_COMPOSE="$base_compose" FRANK_APP_OVERLAY="$app_overlay" FRANK_HARNESS_OVERLAY="$harness_overlay"
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/validate-harness-release.sh" \
+    > "$evidence_dir/harness-config.result" 2> "$evidence_dir/harness-config.log"
+  grep -Fx 'harness-release-config=passed; attachment pool=50GiB reserved; free floor=30GiB; third unit atomic' "$evidence_dir/harness-config.result"
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/bootstrap-attachment-buckets.sh" \
+    > "$evidence_dir/attachment-bootstrap.result" 2> "$evidence_dir/attachment-bootstrap.log"
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/s3-policy-canary.sh" \
+    > "$evidence_dir/s3-policy-canary.result" 2> "$evidence_dir/s3-policy-canary.log"
+fi
 
 version="$(docker compose version --short)"
 test "$(printf '%s\n' '2.24.4' "$version" | sort -V | head -n1)" = '2.24.4'
@@ -1244,6 +1261,13 @@ docker image inspect \
   --format '{{.RepoTags}}\t{{.Id}}' \
   > "$evidence_dir/application-images.promoted.tsv"
 
+if test "$FRANK_HARNESS_ENABLED" = true; then
+  for image_var in FRANK_SEAWEEDFS_CURRENT_IMAGE FRANK_LITELLM_CURRENT_IMAGE FRANK_TUSD_CURRENT_IMAGE FRANK_CLAMAV_CURRENT_IMAGE FRANK_LETTA_CURRENT_IMAGE FRANK_HERMES_CURRENT_IMAGE; do
+    image="${!image_var}"; docker pull "$image"; docker image inspect "$image" --format '{{.RepoDigests}}\t{{.Id}}' >> "$evidence_dir/harness-images.promoted.tsv"
+  done
+  sha256sum "$harness_overlay" "$FRANK_RELEASE_SOURCE/infra/harness/litellm/config.yaml" >> "$evidence_dir/release-inputs.sha256"
+fi
+
 for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE" "$FRANK_WORKBENCH_IMAGE"; do
   test "$(docker image inspect "$image" \
     --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" \
@@ -1313,6 +1337,15 @@ printf 'Starting Graphify-backed services; first extraction may take up to 30 mi
   --wait-timeout "$codegraph_wait_seconds" \
   frank-codegraph-volume-init frank-codegraph frank-api frank-web frank-caddy \
   2>&1 | tee "$evidence_dir/compose-up.log"
+
+if test "$FRANK_HARNESS_ENABLED" = true; then
+  "${compose[@]}" up -d --no-build --wait --wait-timeout 180 \
+    frank-seaweedfs frank-litellm frank-tusd frank-clamav frank-letta frank-hermes \
+    2>&1 | tee "$evidence_dir/harness-compose-up.log"
+  docker inspect frank-seaweedfs frank-litellm frank-tusd frank-clamav frank-letta frank-hermes \
+    --format '{{.Name}}\t{{.Image}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+    > "$evidence_dir/harness-containers.after.tsv"
+fi
 
 "${compose[@]}" ps \
   --format json > "$evidence_dir/compose-after.json"
