@@ -638,14 +638,19 @@ observation window ends makes rollback unavailable and blocks promotion.
 ### 3C. Mint the domain service token
 
 Mint the web BFF identity token inside the verified API digest. The image contains the
-frozen workspace install and `tsx`; the source worktree remains clean. Docker receives the
-signing key by variable name, not as an argument, and stdout goes directly to a root-only
-temporary file:
+frozen workspace install and the exact bundled `tsx` executable; the source worktree
+remains clean. The executable is invoked directly by its immutable in-image path without a
+package-manager shim. Docker receives the signing key by variable name, not as an argument,
+and stdout goes directly to a root-only temporary file. Shell tracing is disabled before
+any credential material is generated or read:
 
 ```bash
+{ set +x; } 2>/dev/null
+umask 077
 domain_token_file='/srv/frank/secrets/domain-service-token'
 domain_token_tmp="$(mktemp /srv/frank/secrets/.domain-service-token.XXXXXX)"
 trap 'rm -f -- "${domain_token_tmp:-}"' EXIT
+test "$(stat -c '%u:%g:%a' "$domain_token_tmp")" = '0:0:600'
 
 docker run --rm --network none --read-only \
   --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777,size=64m \
@@ -655,7 +660,7 @@ docker run --rm --network none --read-only \
   --env FRANK_CELL_ID \
   --env FRANK_SERVICE_TOKEN_LIFETIME_SECONDS=31536000 \
   "$FRANK_API_IMAGE" \
-  pnpm --filter @frank/api exec tsx /app/scripts/production/mint-service-token.ts \
+  /app/apps/api/node_modules/.bin/tsx /app/scripts/production/mint-service-token.ts \
   > "$domain_token_tmp"
 
 test -s "$domain_token_tmp"
