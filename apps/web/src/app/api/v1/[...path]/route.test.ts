@@ -22,17 +22,22 @@ describe('browser Domain API allowlist', () => {
   it('requires matching Origin or same-origin Fetch Metadata for mutations', () => {
     const base = 'http://web:3001/api/v1/chats';
     const forwarded = { 'x-forwarded-host': 'frank.fail', 'x-forwarded-proto': 'https' };
-    expect(hasStrictBrowserMutationProvenance(new Request(base, {
+    const matchingOrigin = new Request(base, {
       headers: { ...forwarded, origin: 'https://frank.fail' },
-    }))).toBe(true);
-    expect(hasStrictBrowserMutationProvenance(new Request(base, {
+    });
+    const sameOriginFetch = new Request(base, {
       headers: { ...forwarded, 'sec-fetch-site': 'same-origin' },
-    }))).toBe(true);
-    expect(hasStrictBrowserMutationProvenance(new Request(base, {
+    });
+    const missingProvenance = new Request(base, {
       headers: forwarded,
-    })).toBe(false);
-    expect(hasStrictBrowserMutationProvenance(new Request(base, {
+    });
+    const attackerOrigin = new Request(base, {
       headers: { ...forwarded, origin: 'https://attacker.example' },
-    }))).toBe(false);
+    });
+
+    expect(hasStrictBrowserMutationProvenance(matchingOrigin)).toBe(true);
+    expect(hasStrictBrowserMutationProvenance(sameOriginFetch)).toBe(true);
+    expect(hasStrictBrowserMutationProvenance(missingProvenance)).toBe(false);
+    expect(hasStrictBrowserMutationProvenance(attackerOrigin)).toBe(false);
   });
 });
