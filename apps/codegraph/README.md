@@ -84,7 +84,10 @@ amd64 child digest is recorded in the Dockerfile and final OCI metadata.
 The final stage starts from `scratch`. A build-time assembler copies only the
 Python standard library, target-installed runtime dependencies, application,
 licenses/notices, `/etc/os-release`, numeric user records and the recursively
-resolved ELF/musl closure. It physically excludes `tarfile.py`,
+resolved ELF/musl closure. Dependency discovery reads only bounded
+`DT_NEEDED`/`RUNPATH` metadata through the pinned build-only `scanelf`; it
+never executes target ELF objects or treats undefined symbols as libraries.
+It physically excludes `tarfile.py`,
 `html/parser.py`, bytecode caches, pip, setuptools, wheel, shells and package
 managers. The scratch image runs `/usr/local/bin/python3 -m frank_codegraph`
 as UID/GID 10001. Every build verifies the removed modules cannot be imported

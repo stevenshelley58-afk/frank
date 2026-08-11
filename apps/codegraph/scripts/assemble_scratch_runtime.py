@@ -7,18 +7,29 @@ import stat
 import subprocess
 import sys
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable
 
 
 ELF_MAGIC = b"\x7fELF"
-ABSOLUTE_LIBRARY = re.compile(r"(?:=>\s+)?(/[^\s(]+)")
+SAFE_SONAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._+-]{0,255}$")
+MAX_ELF_OBJECTS = 4096
+MAX_NEEDED_PER_ELF = 256
+MAX_RUNPATHS_PER_ELF = 128
+MAX_SCANELF_OUTPUT = 65_536
 SYSTEM_ELF_ROOTS = (
     Path("/lib"),
     Path("/usr/lib"),
     Path("/usr/local/lib"),
     Path("/usr/local"),
 )
+
+
+@dataclass(frozen=True)
+class ElfMetadata:
+    needed: tuple[str, ...]
+    runpaths: tuple[str, ...]
 
 
 def fail(message: str) -> None:
@@ -165,35 +176,117 @@ def source_for(root: Path, runtime_path: Path) -> Path:
     return Path("/") / runtime_path.relative_to(root)
 
 
-def dynamic_dependencies(source: Path, ldd: str, allowed_roots: tuple[Path, ...]) -> set[Path]:
+def parse_scanelf_metadata(output: str) -> ElfMetadata:
+    if len(output) > MAX_SCANELF_OUTPUT:
+        fail("scanelf metadata output exceeds limit")
+    lines = [line.strip() for line in output.splitlines() if line.strip()]
+    if len(lines) != 1 or lines[0].count(";") != 1:
+        fail(f"unexpected scanelf metadata output: {output!r}")
+    needed_field, runpath_field = lines[0].split(";", 1)
+    needed = tuple(value.strip() for value in needed_field.split(",") if value.strip() and value.strip() != "-")
+    runpaths = tuple(value.strip() for value in runpath_field.split(":") if value.strip() and value.strip() != "-")
+    if len(needed) > MAX_NEEDED_PER_ELF:
+        fail("ELF object exceeds DT_NEEDED limit")
+    if len(runpaths) > MAX_RUNPATHS_PER_ELF:
+        fail("ELF object exceeds RUNPATH limit")
+    if any(not SAFE_SONAME.fullmatch(value) for value in needed):
+        fail(f"ELF object contains unsafe DT_NEEDED value: {needed}")
+    return ElfMetadata(needed=needed, runpaths=runpaths)
+
+
+def scanelf_metadata(source: Path, scanelf: str, allowed_roots: tuple[Path, ...]) -> ElfMetadata:
     validated_regular(source, allowed_roots)
+    if not is_elf(source):
+        fail(f"scanelf input is not an ELF object: {source}")
     result = subprocess.run(
-        [ldd, str(source)],
+        [scanelf, "-BF", "%n;%r", str(source)],
         check=False,
         stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
+        stderr=subprocess.PIPE,
         text=True,
     )
-    output = result.stdout
-    if "not found" in output:
-        fail(f"unresolved ELF dependency for {source}:\n{output}")
     if result.returncode != 0:
-        lowered = output.lower()
-        if "not a dynamic executable" in lowered or "statically linked" in lowered:
-            return set()
-        fail(f"ldd failed for {source}:\n{output}")
-    dependencies = {Path(match) for match in ABSOLUTE_LIBRARY.findall(output)}
-    for dependency in dependencies:
-        validated_regular(dependency, allowed_roots)
-    return dependencies
+        fail(f"scanelf could not read ELF metadata for {source}: {result.stderr[:512]}")
+    if result.stderr.strip():
+        fail(f"scanelf emitted diagnostics for {source}: {result.stderr[:512]}")
+    return parse_scanelf_metadata(result.stdout)
+
+
+def contained_directory(path: Path, allowed_roots: tuple[Path, ...]) -> Path:
+    canonical = path.resolve(strict=True)
+    if not canonical.is_dir() or not any(canonical == root or canonical.is_relative_to(root) for root in allowed_roots):
+        fail(f"ELF search directory escapes its allowlist: {path}")
+    return canonical
+
+
+def expand_runpaths(origin: Path, runpaths: tuple[str, ...], allowed_roots: tuple[Path, ...]) -> tuple[Path, ...]:
+    expanded: list[Path] = []
+    for raw in runpaths:
+        value = raw.replace("${ORIGIN}", str(origin)).replace("$ORIGIN", str(origin))
+        if "$" in value:
+            fail(f"ELF RUNPATH contains an unsupported variable: {raw}")
+        candidate = Path(value)
+        if not candidate.is_absolute():
+            fail(f"ELF RUNPATH must be absolute or anchored at $ORIGIN: {raw}")
+        canonical = contained_directory(candidate, allowed_roots)
+        if canonical not in expanded:
+            expanded.append(canonical)
+    return tuple(expanded)
+
+
+def resolve_needed_library(
+    soname: str,
+    *,
+    origin: Path,
+    runpaths: tuple[str, ...],
+    search_directories: tuple[Path, ...],
+    allowed_roots: tuple[Path, ...],
+) -> Path:
+    if not SAFE_SONAME.fullmatch(soname):
+        fail(f"unsafe DT_NEEDED value: {soname}")
+    directories = (*expand_runpaths(origin, runpaths, allowed_roots), *search_directories)
+    candidates: dict[Path, list[Path]] = {}
+    for directory in directories:
+        canonical_directory = contained_directory(directory, allowed_roots)
+        candidate = canonical_directory / soname
+        if not os.path.lexists(candidate):
+            continue
+        resolved, _metadata = validated_regular(candidate, allowed_roots)
+        candidates.setdefault(resolved, []).append(candidate)
+    if not candidates:
+        fail(f"missing ELF DT_NEEDED dependency {soname}")
+    if len(candidates) != 1:
+        detail = sorted(str(path) for paths in candidates.values() for path in paths)
+        fail(f"ambiguous ELF DT_NEEDED dependency {soname}: {detail}")
+    return sorted(next(iter(candidates.values())), key=lambda path: (len(path.parts), str(path)))[0]
+
+
+def package_search_directories(target_packages: Path, allowed_roots: tuple[Path, ...]) -> tuple[Path, ...]:
+    directories = {target_packages.resolve(strict=True)}
+    for directory, child_directories, _files in os.walk(target_packages, followlinks=False):
+        current = Path(directory)
+        unsafe = [name for name in child_directories if (current / name).is_symlink()]
+        if unsafe:
+            fail(f"target package search tree contains directory symlinks: {unsafe}")
+        child_directories[:] = sorted(child_directories)
+        directories.add(contained_directory(current, allowed_roots))
+        if len(directories) > MAX_ELF_OBJECTS:
+            fail("target package ELF search directory count exceeds limit")
+    return tuple(sorted(directories, key=str))
 
 
 def copy_elf_closure(root: Path, target_packages: Path) -> None:
-    ldd = shutil.which("ldd")
-    if not ldd:
-        fail("builder does not provide ldd")
+    scanelf_path = Path("/usr/bin/scanelf")
+    scanelf_info = scanelf_path.lstat()
+    if not stat.S_ISREG(scanelf_info.st_mode) or stat.S_ISLNK(scanelf_info.st_mode) or not os.access(scanelf_path, os.X_OK):
+        fail("builder does not provide the pinned regular /usr/bin/scanelf")
+    scanelf = str(scanelf_path)
     allowed_roots = tuple(path.resolve(strict=True) for path in SYSTEM_ELF_ROOTS) + (
         target_packages.resolve(strict=True),
+    )
+    search_directories = tuple(path.resolve(strict=True) for path in SYSTEM_ELF_ROOTS[:3]) + package_search_directories(
+        target_packages,
+        allowed_roots,
     )
 
     queued: set[Path] = set()
@@ -201,16 +294,31 @@ def copy_elf_closure(root: Path, target_packages: Path) -> None:
     for runtime_path in root.rglob("*"):
         if runtime_path.is_file() and is_elf(runtime_path):
             source = source_for(root, runtime_path)
-            validated_regular(source, allowed_roots)
-            queued.add(source)
-            queue.append(source)
+            resolved, _metadata = validated_regular(source, allowed_roots)
+            if resolved not in queued:
+                queued.add(resolved)
+                queue.append(source)
 
     while queue:
+        if len(queued) > MAX_ELF_OBJECTS:
+            fail("ELF dependency closure exceeds object limit")
         source = queue.popleft()
-        for dependency in dynamic_dependencies(source, ldd, allowed_roots):
+        resolved_source, _metadata = validated_regular(source, allowed_roots)
+        metadata = scanelf_metadata(resolved_source, scanelf, allowed_roots)
+        for soname in metadata.needed:
+            dependency = resolve_needed_library(
+                soname,
+                origin=source.parent.resolve(strict=True),
+                runpaths=metadata.runpaths,
+                search_directories=search_directories,
+                allowed_roots=allowed_roots,
+            )
             copy_entry(root, dependency, allowed_roots)
-            if dependency not in queued and is_elf(dependency):
-                queued.add(dependency)
+            resolved_dependency, _dependency_metadata = validated_regular(dependency, allowed_roots)
+            if not is_elf(resolved_dependency):
+                fail(f"DT_NEEDED candidate is not an ELF object: {dependency}")
+            if resolved_dependency not in queued:
+                queued.add(resolved_dependency)
                 queue.append(dependency)
 
 

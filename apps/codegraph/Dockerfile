@@ -20,7 +20,8 @@ COPY apps/codegraph/frank_codegraph ./frank_codegraph
 COPY apps/codegraph/THIRD_PARTY_NOTICES.md ./THIRD_PARTY_NOTICES.md
 COPY apps/codegraph/LICENSES ./LICENSES
 
-RUN python3 -m venv /opt/frank-build-venv \
+RUN apk add --no-cache scanelf=1.3.9-r1 \
+    && python3 -m venv /opt/frank-build-venv \
     && /opt/frank-build-venv/bin/pip install --require-hashes -r build-requirements.lock \
     && /opt/frank-build-venv/bin/pip install --no-build-isolation --require-hashes \
         --target /opt/frank-codegraph/site-packages -r requirements.lock \
