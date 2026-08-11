@@ -75,10 +75,44 @@ class OsReleaseAssemblyTests(unittest.TestCase):
 class ElfMetadataTests(unittest.TestCase):
     def test_parses_needed_and_origin_runpath_without_undefined_symbols(self) -> None:
         metadata = ASSEMBLER.parse_scanelf_metadata(
-            "libpython3.14.so.1.0,libc.musl-x86_64.so.1;$ORIGIN/.libs:/usr/local/lib\n"
+            f"libpython3.14.so.1.0,libc.musl-x86_64.so.1;$ORIGIN/.libs:/usr/local/lib;{SCRIPT.resolve()}\n",
+            SCRIPT,
         )
         self.assertEqual(metadata.needed, ("libpython3.14.so.1.0", "libc.musl-x86_64.so.1"))
         self.assertEqual(metadata.runpaths, ("$ORIGIN/.libs", "/usr/local/lib"))
+
+    def test_normalizes_padded_no_runpath_marker(self) -> None:
+        metadata = ASSEMBLER.parse_scanelf_metadata(
+            f"  libc.musl-x86_64.so.1 ;   -   ; {SCRIPT.resolve()} \n",
+            SCRIPT,
+        )
+        self.assertEqual(metadata.needed, ("libc.musl-x86_64.so.1",))
+        self.assertEqual(metadata.runpaths, ())
+
+    def test_normalizes_padded_no_needed_marker_and_whitespace(self) -> None:
+        metadata = ASSEMBLER.parse_scanelf_metadata(
+            f" \t-\t ;  $ORIGIN/.libs : /usr/local/lib  ; {SCRIPT.resolve()} \n",
+            SCRIPT,
+        )
+        self.assertEqual(metadata.needed, ())
+        self.assertEqual(metadata.runpaths, ("$ORIGIN/.libs", "/usr/local/lib"))
+
+    def test_normalizes_both_none_markers_but_rejects_multiple_lines(self) -> None:
+        self.assertEqual(
+            ASSEMBLER.parse_scanelf_metadata(f"  - ; - ; {SCRIPT.resolve()} \n", SCRIPT),
+            ASSEMBLER.ElfMetadata((), ()),
+        )
+        with self.assertRaisesRegex(RuntimeError, "unexpected scanelf metadata"):
+            ASSEMBLER.parse_scanelf_metadata(
+                f"libc.so.1;-;{SCRIPT.resolve()}\nlibm.so.1;-;{SCRIPT.resolve()}\n",
+                SCRIPT,
+            )
+
+    def test_rejects_reported_filename_mismatch_and_extra_field(self) -> None:
+        with self.assertRaisesRegex(RuntimeError, "does not match"):
+            ASSEMBLER.parse_scanelf_metadata(f"libc.so.1;-;{Path(__file__).resolve()}\n", SCRIPT)
+        with self.assertRaisesRegex(RuntimeError, "unexpected scanelf metadata"):
+            ASSEMBLER.parse_scanelf_metadata(f"libc.so.1;-;{SCRIPT.resolve()};extra\n", SCRIPT)
 
     def test_python_extension_scan_never_invokes_ldd(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -87,14 +121,14 @@ class ElfMetadataTests(unittest.TestCase):
             allowed = (Path(directory).resolve(),)
             completed = mock.Mock(
                 returncode=0,
-                stdout="libpython3.14.so.1.0;-\n",
+                stdout=f"libpython3.14.so.1.0;-;{source.resolve()}\n",
                 stderr="",
             )
             with mock.patch.object(ASSEMBLER.subprocess, "run", return_value=completed) as run:
                 metadata = ASSEMBLER.scanelf_metadata(source, "/usr/bin/scanelf", allowed)
             self.assertEqual(metadata.needed, ("libpython3.14.so.1.0",))
             command = run.call_args.args[0]
-            self.assertEqual(command[:3], ["/usr/bin/scanelf", "-BF", "%n;%r"])
+            self.assertEqual(command[:3], ["/usr/bin/scanelf", "-BF", "%n;%r;%F"])
             self.assertNotIn("ldd", command)
 
     def test_resolves_dependency_from_contained_origin_runpath(self) -> None:

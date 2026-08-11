@@ -176,15 +176,30 @@ def source_for(root: Path, runtime_path: Path) -> Path:
     return Path("/") / runtime_path.relative_to(root)
 
 
-def parse_scanelf_metadata(output: str) -> ElfMetadata:
+def parse_scanelf_metadata(output: str, expected_source: Path) -> ElfMetadata:
     if len(output) > MAX_SCANELF_OUTPUT:
         fail("scanelf metadata output exceeds limit")
     lines = [line.strip() for line in output.splitlines() if line.strip()]
-    if len(lines) != 1 or lines[0].count(";") != 1:
+    if len(lines) != 1 or lines[0].count(";") != 2:
         fail(f"unexpected scanelf metadata output: {output!r}")
-    needed_field, runpath_field = lines[0].split(";", 1)
-    needed = tuple(value.strip() for value in needed_field.split(",") if value.strip() and value.strip() != "-")
-    runpaths = tuple(value.strip() for value in runpath_field.split(":") if value.strip() and value.strip() != "-")
+    needed_field, runpath_field, filename_field = lines[0].split(";", 2)
+
+    def values(field: str, separator: str, label: str) -> tuple[str, ...]:
+        normalized = field.strip()
+        if normalized in {"", "-"}:
+            return ()
+        parsed = tuple(value.strip() for value in normalized.split(separator))
+        if any(not value or value == "-" for value in parsed):
+            fail(f"scanelf {label} field mixes an empty/none marker with values")
+        return parsed
+
+    needed = values(needed_field, ",", "DT_NEEDED")
+    runpaths = values(runpath_field, ":", "RUNPATH")
+    reported_source = Path(filename_field.strip())
+    if not reported_source.is_absolute():
+        fail(f"scanelf reported a non-absolute source filename: {filename_field!r}")
+    if reported_source.resolve(strict=True) != expected_source.resolve(strict=True):
+        fail(f"scanelf source filename does not match requested object: {reported_source}")
     if len(needed) > MAX_NEEDED_PER_ELF:
         fail("ELF object exceeds DT_NEEDED limit")
     if len(runpaths) > MAX_RUNPATHS_PER_ELF:
@@ -199,7 +214,7 @@ def scanelf_metadata(source: Path, scanelf: str, allowed_roots: tuple[Path, ...]
     if not is_elf(source):
         fail(f"scanelf input is not an ELF object: {source}")
     result = subprocess.run(
-        [scanelf, "-BF", "%n;%r", str(source)],
+        [scanelf, "-BF", "%n;%r;%F", str(source)],
         check=False,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -209,7 +224,7 @@ def scanelf_metadata(source: Path, scanelf: str, allowed_roots: tuple[Path, ...]
         fail(f"scanelf could not read ELF metadata for {source}: {result.stderr[:512]}")
     if result.stderr.strip():
         fail(f"scanelf emitted diagnostics for {source}: {result.stderr[:512]}")
-    return parse_scanelf_metadata(result.stdout)
+    return parse_scanelf_metadata(result.stdout, source)
 
 
 def contained_directory(path: Path, allowed_roots: tuple[Path, ...]) -> Path:
