@@ -86,8 +86,12 @@ frank.fail {
         # replacement for FRANK sessions or capability checks.
         # Capability-bound resumable upload ingress only. tusd has no public route and
         # no download handler; the API issues and verifies the upload capability.
-        handle /v1/uploads/tus/* {
+        @frank_tusd_upload path /v1/uploads/tus /v1/uploads/tus/ /v1/uploads/tus/*
+        handle @frank_tusd_upload {
             import frank_production_basic_auth
+            # 2 GiB is enforced again by tusd; this edge limit must not truncate a
+            # resumable PATCH at the generic 8 MiB application-request limit.
+            request_body { max_size 2147483648 }
             # Upload capability is distinct from Basic auth and hook credentials.
             # API gate verifies the persisted capability/reservation for every tus method.
             # It must fail closed and retain Authorization/Tus headers; the tusd hook bearer
@@ -95,6 +99,7 @@ frank.fail {
             forward_auth {$FRANK_UPLOAD_GATE_INTERNAL_URL} {
                 uri /private/tusd/gate
                 header_up X-Tusd-Gate-Secret {$FRANK_TUSD_GATE_SECRET}
+                header_up -Authorization
                 header_up X-Forwarded-Method {http.request.method}
                 header_up X-Forwarded-Uri {http.request.uri}
                 header_up X-Frank-Upload-Capability {http.request.header.X-Frank-Upload-Capability}
@@ -103,6 +108,9 @@ frank.fail {
                 header_up Upload-Offset {http.request.header.Upload-Offset}
             }
             reverse_proxy {$FRANK_TUSD_INTERNAL_URL} {
+                # Basic auth ends at Caddy. tusd receives only the capability and its
+                # injected hook credential, never a browser-supplied Authorization value.
+                header_up -Authorization
                 header_up Host {host}
                 header_up X-Real-IP {remote_host}
                 header_up X-Forwarded-Proto https
