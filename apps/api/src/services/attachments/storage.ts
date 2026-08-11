@@ -12,13 +12,14 @@ export function objectKey(sha256: string): string { if (!/^[a-f0-9]{64}$/.test(s
 export function constantTimeEqual(a: string, b: string): boolean { const left = Buffer.from(a); const right = Buffer.from(b); return left.length === right.length && timingSafeEqual(left, right); }
 /** Adapter boundary only: SeaweedFS is accessed via a private, allowlisted S3 endpoint. */
 export class S3ObjectStorage implements ObjectStorage {
-  constructor(endpoint: URL, allowedHosts: readonly string[], private readonly client: { head(bucket: string, key: string, signal?: AbortSignal): Promise<{ size: bigint } | undefined>; read(bucket: string, key: string, range?: { start: bigint; end?: bigint }, signal?: AbortSignal): Promise<Readable>; copy(source: { bucket: string; key: string }, target: { bucket: string; key: string }, signal?: AbortSignal): Promise<void>; remove(bucket: string, key: string, signal?: AbortSignal): Promise<void> }) {
-    if (endpoint.protocol !== 'https:' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== '/' || !allowedHosts.includes(endpoint.hostname)) throw new Error('storage endpoint is not allowlisted');
-    if (/^(localhost|127\.|0\.0\.0\.0|169\.254\.|\[::1\])/.test(endpoint.hostname) && !allowedHosts.includes(endpoint.hostname)) throw new Error('storage endpoint is not SSRF-safe');
+  constructor(endpoint: URL, private readonly client: { head(bucket: string, key: string, signal?: AbortSignal): Promise<{ size: bigint } | undefined>; read(bucket: string, key: string, range?: { start: bigint; end?: bigint }, signal?: AbortSignal): Promise<Readable>; copy(source: { bucket: string; key: string }, target: { bucket: string; key: string }, signal?: AbortSignal): Promise<void>; remove(bucket: string, key: string, signal?: AbortSignal): Promise<void> }) {
+    // Object traffic is only ever inside the compose network. There is deliberately
+    // no general host allowlist: accepting one recreates an SSRF primitive.
+    if (endpoint.protocol !== 'http:' || endpoint.hostname !== 'frank-seaweedfs' || endpoint.port !== '8333' || endpoint.username || endpoint.password || endpoint.search || endpoint.hash || endpoint.pathname !== '/') throw new Error('invalid_private_seaweed_endpoint');
   }
-  private bucket(bucket: string) { if (![STAGING_BUCKET, OBJECTS_BUCKET, PREVIEWS_BUCKET].includes(bucket)) throw new Error('bucket_not_allowlisted'); }
-  head(bucket: string, key: string, signal?: AbortSignal) { this.bucket(bucket); return this.client.head(bucket, key, signal); }
-  read(bucket: string, key: string, range?: { start: bigint; end?: bigint }, signal?: AbortSignal) { this.bucket(bucket); return this.client.read(bucket, key, range, signal); }
-  copy(source: { bucket: string; key: string }, target: { bucket: string; key: string }, signal?: AbortSignal) { this.bucket(source.bucket); this.bucket(target.bucket); return this.client.copy(source, target, signal); }
-  remove(bucket: string, key: string, signal?: AbortSignal) { this.bucket(bucket); return this.client.remove(bucket, key, signal); }
+  private bucket(bucket: string, key: string) { if (![STAGING_BUCKET, OBJECTS_BUCKET, PREVIEWS_BUCKET].includes(bucket)) throw new Error('bucket_not_allowlisted'); const ok = bucket === STAGING_BUCKET ? /^[0-9a-f-]{36}\/[0-9a-f-]{36}\/object$/i.test(key) : bucket === OBJECTS_BUCKET ? /^sha256\/[a-f0-9]{2}\/[a-f0-9]{64}$/.test(key) : /^preview\/[0-9a-f-]{36}\/[a-z0-9._-]{1,128}$/i.test(key); if (!ok) throw new Error('invalid_object_key'); }
+  head(bucket: string, key: string, signal?: AbortSignal) { this.bucket(bucket, key); return this.client.head(bucket, key, signal); }
+  read(bucket: string, key: string, range?: { start: bigint; end?: bigint }, signal?: AbortSignal) { this.bucket(bucket, key); return this.client.read(bucket, key, range, signal); }
+  copy(source: { bucket: string; key: string }, target: { bucket: string; key: string }, signal?: AbortSignal) { this.bucket(source.bucket, source.key); this.bucket(target.bucket, target.key); return this.client.copy(source, target, signal); }
+  remove(bucket: string, key: string, signal?: AbortSignal) { this.bucket(bucket, key); return this.client.remove(bucket, key, signal); }
 }
