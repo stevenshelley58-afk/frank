@@ -11,7 +11,7 @@ export function normalizeSourceRef(input: { kind: string; id: string; version?: 
   const version = input.version === undefined ? undefined : String(input.version);
   return version === undefined ? { kind: input.kind, id: input.id } : { kind: input.kind, id: input.id, version };
 }
-export interface AttachmentRecord { attachment_id: string; cell_id: string; owner_id: string; conversation_id?: string; message_id?: string; turn_id?: string; object_id?: string; upload_state: 'staging'|'promoted'|'rejected'; name: string; relative_path?: string; size_bytes: number; media_type: string; digest?: Sha256; scan_state: 'pending'|'clean'|'blocked'|'failed'; extraction_state: 'none'|'pending'|'complete'|'failed'; source_ref: SourceRef; created_at: IsoDateTime; updated_at: IsoDateTime }
+export interface AttachmentRecord { attachment_id: string; cell_id: string; owner_id: string; conversation_id?: string; message_id?: string; turn_id?: string; reservation_id: string; upload_id: string; object_id?: string; state: 'staging'|'scanning'|'ready'|'promoted'|'rejected'|'cancelled'|'expired'; name: string; relative_path?: string; size_bytes: number; media_type: string; digest?: Sha256; scan_state: 'pending'|'clean'|'blocked'|'failed'; extraction_state: 'none'|'pending'|'complete'|'failed'; source_ref: SourceRef; created_at: IsoDateTime; updated_at: IsoDateTime }
 
 /** `schema://frank.object-manifest/v1`: immutable object-storage evidence. */
 export interface ObjectManifest {
