@@ -1,4 +1,5 @@
 import type { IsoDateTime, Sha256 } from './common.js';
+export type { Sha256 } from './common.js';
 export interface SourceRef { kind: string; id: string; version?: string }
 
 /**
