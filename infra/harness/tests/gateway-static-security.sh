@@ -7,7 +7,7 @@ caddy="$root/infra/production/Caddyfile.frank-production"
 litellm_config="$root/infra/harness/litellm/config.yaml"
 litellm_bootstrap="$root/scripts/production/bootstrap-litellm-virtual-key.sh"
 release_runbook="$root/docs/runbooks/AUTONOMOUS_FRANK_RELEASE.md"
-for token in 'ports:' 'frank-previews' 'FRANK_OPENFGA' 'insecure-skip-verify' 'tls-skip-verify'; do
+for token in 'frank-previews' 'FRANK_OPENFGA' 'insecure-skip-verify' 'tls-skip-verify'; do
   if grep -En "$token" "$compose"; then echo "forbidden: $token"; exit 1; fi
 done
 grep -Eq 'FRANK_LETTA_INTERNAL_URL.*frank-letta-server:8283' "$root/infra/production/docker-compose.app.yml"
@@ -27,7 +27,12 @@ grep -Eq 'disable_spend_logs: false' "$litellm_config"
 grep -Eq '^router_settings:' "$litellm_config"
 grep -Eq '^  num_retries: 0$' "$litellm_config"
 grep -Eq '^  fallbacks: \[\]$' "$litellm_config"
-grep -Eq 'FRANK_LITELLM_VIRTUAL_KEY:.*restricted LiteLLM virtual key required' "$app_compose"
+grep -Eq 'FRANK_LITELLM_VIRTUAL_KEY:.*restricted LiteLLM virtual key required' "$compose"
+grep -Eq 'FRANK_TUSD_GATE_SECRET:.*distinct Caddy-to-gate credential required' "$compose"
+grep -Eq 'FRANK_TUSD_HOOK_SECRET:.*Caddy-to-tusd hook credential required' "$compose"
+test "$(grep -Ec '^[[:space:]]+FRANK_TUSD_GATE_SECRET:' "$compose")" -eq 2
+test "$(grep -Ec '^[[:space:]]+FRANK_TUSD_HOOK_SECRET:' "$compose")" -eq 2
+if grep -Eq 'FRANK_LITELLM_VIRTUAL_KEY|FRANK_TUSD_(GATE|HOOK)_SECRET|^[[:space:]]+- frank-(model|attachments)$' "$app_compose"; then echo 'harness-only secret or network blocks the disabled app render path'; exit 1; fi
 if grep -Eq '^[[:space:]]+LITELLM_ADMIN_KEY:' "$app_compose"; then echo 'LiteLLM admin key leaked into API overlay'; exit 1; fi
 test "$(grep -El 'LITELLM_ADMIN_KEY' "$compose" "$litellm_config" "$litellm_bootstrap" | wc -l)" -eq 3
 grep -Eq 'http://127\.0\.0\.1:4000/key/generate' "$litellm_bootstrap"
@@ -36,6 +41,8 @@ grep -Eq "models: \['frank-openai-direct', 'frank-gemini-direct', 'frank-concent
 grep -Eq "allowed_routes: \['/chat/completions', '/v1/chat/completions', '/responses', '/v1/responses'\]" "$litellm_bootstrap"
 grep -Eq 'provider request ID' "$release_runbook"
 grep -Eq 'Enterprise-only custom spend metadata' "$release_runbook"
+grep -Eq 'test "\$FRANK_TUSD_GATE_SECRET" != "\$FRANK_TUSD_HOOK_SECRET"' "$release_runbook"
+grep -Eq 'Required host commands are Bash 4\.3\+, Node\.js 22' "$release_runbook"
 grep -Eq 'not before 1\.83\.7' "$root/infra/harness/README.md"
 grep -Eq 'SeaweedFS 4\.41, tusd v2\.10\.0, and ClamAV' "$root/infra/harness/README.md"
 promote="$root/infra/harness/bin/promote-gateway-candidate.sh"

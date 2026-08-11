@@ -1,6 +1,21 @@
 # Authoritative third production Compose unit. It is optional to enable, but atomic when
 # enabled: always render dev + app + this file together. No service publishes a port.
 services:
+  frank-api:
+    environment:
+      # Required only when the atomic harness overlay is enabled. The API never receives
+      # LiteLLM's administrator credential.
+      FRANK_LITELLM_VIRTUAL_KEY: "${FRANK_LITELLM_VIRTUAL_KEY:?restricted LiteLLM virtual key required}"
+      FRANK_TUSD_GATE_SECRET: "${FRANK_TUSD_GATE_SECRET:?distinct Caddy-to-gate credential required}"
+      FRANK_TUSD_HOOK_SECRET: "${FRANK_TUSD_HOOK_SECRET:?Caddy-to-tusd hook credential required}"
+    networks: [frank, frank-codegraph-internal, frank-model, frank-attachments]
+
+  frank-caddy:
+    environment:
+      FRANK_TUSD_GATE_SECRET: "${FRANK_TUSD_GATE_SECRET:?distinct Caddy-to-gate credential required}"
+      FRANK_TUSD_HOOK_SECRET: "${FRANK_TUSD_HOOK_SECRET:?Caddy-to-tusd hook credential required}"
+    networks: [frank, frank-attachments]
+
   frank-seaweedfs:
     image: "${FRANK_SEAWEEDFS_CURRENT_IMAGE:?reviewed SeaweedFS digest required}"
     command: !override ["server", "-dir=/data", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-ip.bind=0.0.0.0"]

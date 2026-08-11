@@ -68,7 +68,7 @@ before Compose; mounting the repository template or unresolved placeholders is f
 The temporary bootstrap identity is absent from that rendered configuration, so the first
 Seaweed recreate revokes it. Canonical objects and previews never receive an expiry rule.
 
-Required host commands are Bash 4.3+, Docker with Compose, Git, GitHub CLI, `jq`,
+Required host commands are Bash 4.3+, Node.js 22, Docker with Compose, Git, GitHub CLI, `jq`,
 `curl`, `gzip`, `openssl`, `sha256sum`, `flock`, `find`, `realpath`, `tar`, and standard
 GNU coreutils.
 
@@ -362,6 +362,23 @@ export FRANK_LITELLM_VIRTUAL_KEY_FILE='/srv/frank/secrets/litellm/frank-api-virt
 
 bash "$FRANK_RELEASE_SOURCE/scripts/production/bootstrap-litellm-virtual-key.sh"
 test "$(stat -c '%u:%g:%a' -- "$FRANK_LITELLM_VIRTUAL_KEY_FILE")" = '0:0:600'
+```
+
+Provision the two distinct tus control credentials only for an enabled harness. Refuse to
+replace an existing credential here; rotate both through a separately recorded, coordinated
+Caddy/API/tusd restart.
+
+```bash
+install -d -o root -g root -m 0700 -- /srv/frank/secrets/tusd
+tusd_gate_file='/srv/frank/secrets/tusd/gate-secret'
+tusd_hook_file='/srv/frank/secrets/tusd/hook-secret'
+test ! -e "$tusd_gate_file" && test ! -L "$tusd_gate_file"
+test ! -e "$tusd_hook_file" && test ! -L "$tusd_hook_file"
+openssl rand -hex 32 | install -o root -g root -m 0600 /dev/stdin "$tusd_gate_file"
+openssl rand -hex 32 | install -o root -g root -m 0600 /dev/stdin "$tusd_hook_file"
+test "$(stat -c '%u:%g:%a' -- "$tusd_gate_file")" = '0:0:600'
+test "$(stat -c '%u:%g:%a' -- "$tusd_hook_file")" = '0:0:600'
+test "$(<"$tusd_gate_file")" != "$(<"$tusd_hook_file")"
 ```
 
 The secret is never stdout or release evidence. Inject it into the root release environment
@@ -1095,12 +1112,21 @@ base_compose='/srv/frank/infra/docker-compose.dev.yml'
 app_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml"
 export FRANK_HARNESS_ENABLED="${FRANK_HARNESS_ENABLED:-false}"
 case "$FRANK_HARNESS_ENABLED" in true|false) ;; *) exit 1;; esac
-export FRANK_LITELLM_VIRTUAL_KEY_FILE="${FRANK_LITELLM_VIRTUAL_KEY_FILE:-/srv/frank/secrets/litellm/frank-api-virtual-key}"
-test "$(stat -c '%u:%g:%a' -- "$FRANK_LITELLM_VIRTUAL_KEY_FILE")" = '0:0:600'
-export FRANK_LITELLM_VIRTUAL_KEY="$(<"$FRANK_LITELLM_VIRTUAL_KEY_FILE")"
-test -n "$FRANK_LITELLM_VIRTUAL_KEY"
 compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
 if test "$FRANK_HARNESS_ENABLED" = true; then
+  export FRANK_LITELLM_VIRTUAL_KEY_FILE="${FRANK_LITELLM_VIRTUAL_KEY_FILE:-/srv/frank/secrets/litellm/frank-api-virtual-key}"
+  tusd_gate_file='/srv/frank/secrets/tusd/gate-secret'
+  tusd_hook_file='/srv/frank/secrets/tusd/hook-secret'
+  for secret_file in "$FRANK_LITELLM_VIRTUAL_KEY_FILE" "$tusd_gate_file" "$tusd_hook_file"; do
+    test -f "$secret_file" && test ! -L "$secret_file"
+    test "$(stat -c '%u:%g:%a' -- "$secret_file")" = '0:0:600'
+  done
+  export FRANK_LITELLM_VIRTUAL_KEY="$(<"$FRANK_LITELLM_VIRTUAL_KEY_FILE")"
+  export FRANK_TUSD_GATE_SECRET="$(<"$tusd_gate_file")"
+  export FRANK_TUSD_HOOK_SECRET="$(<"$tusd_hook_file")"
+  test -n "$FRANK_LITELLM_VIRTUAL_KEY"
+  test -n "$FRANK_TUSD_GATE_SECRET" && test -n "$FRANK_TUSD_HOOK_SECRET"
+  test "$FRANK_TUSD_GATE_SECRET" != "$FRANK_TUSD_HOOK_SECRET"
   harness_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.harness.yml"
   compose+=( -f "$harness_overlay" )
   export FRANK_BASE_COMPOSE="$base_compose" FRANK_APP_OVERLAY="$app_overlay" FRANK_HARNESS_OVERLAY="$harness_overlay"

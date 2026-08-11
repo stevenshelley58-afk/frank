@@ -53,9 +53,6 @@ services:
       # Harness services are private peers. The API remains the policy/control owner;
       # Letta is manual-only and is never a canonical memory or control authority.
       FRANK_LITELLM_INTERNAL_URL: "${FRANK_LITELLM_INTERNAL_URL:-http://frank-litellm:4000}"
-      # This is a restricted LiteLLM virtual key created by the root-only bootstrap.
-      # The proxy administrator credential must never cross into the API service.
-      FRANK_LITELLM_VIRTUAL_KEY: "${FRANK_LITELLM_VIRTUAL_KEY:?restricted LiteLLM virtual key required}"
       FRANK_LETTA_INTERNAL_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta-server:8283}"
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
       FRANK_CLAMAV_INTERNAL_URL: "${FRANK_CLAMAV_INTERNAL_URL:-tcp://frank-clamav:3310}"
@@ -121,8 +118,6 @@ services:
     networks: !override
       - frank
       - frank-codegraph-internal
-      - frank-model
-      - frank-attachments
 
     init: true
     restart: unless-stopped
@@ -268,8 +263,6 @@ services:
       FRANK_WEB_INTERNAL_URL: "${FRANK_WEB_INTERNAL_URL:?FRANK_WEB_INTERNAL_URL is required}"
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
       FRANK_UPLOAD_GATE_INTERNAL_URL: "${FRANK_UPLOAD_GATE_INTERNAL_URL:-http://frank-api:3000}"
-      FRANK_TUSD_GATE_SECRET: "${FRANK_TUSD_GATE_SECRET:?distinct Caddy-to-gate credential required}"
-      FRANK_TUSD_HOOK_SECRET: "${FRANK_TUSD_HOOK_SECRET:?Caddy-to-tusd hook credential required}"
     depends_on:
       frank-api:
         condition: service_healthy
@@ -277,7 +270,6 @@ services:
         condition: service_healthy
     networks: !override
       - frank
-      - frank-attachments
 
   # Supporting stores remain network-internal. The reset tags make an accidental
   # development port publication fail closed when this overlay is applied.

@@ -4,6 +4,7 @@ set +x
 umask 077
 
 [[ "$(id -u)" -eq 0 ]] || { echo 'LiteLLM virtual-key provisioning must run as root' >&2; exit 77; }
+command -v node >/dev/null 2>&1 || { echo 'Node.js is required for fail-closed key contract validation' >&2; exit 69; }
 [[ $# -le 1 ]] || { echo "usage: $0 [--rotate]" >&2; exit 64; }
 mode="${1:-bootstrap}"
 case "$mode" in bootstrap|--rotate) ;; *) echo "usage: $0 [--rotate]" >&2; exit 64;; esac
