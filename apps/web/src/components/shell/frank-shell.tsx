@@ -7,7 +7,7 @@ import { useSearchParams } from 'next/navigation';
 import { useAuth, useData } from '@/components/providers';
 import { useCommandPalette } from '@/components/command-palette';
 import { DEFAULT_ROOMS, type Room } from '@/lib/rooms';
-import { frankStream, StreamAbortedError } from '@/lib/frank';
+import { frankStream, StreamAbortedError, turnInfoToMessageMeta, type TurnInfo } from '@/lib/frank';
 import {
   appendMessage,
   createConversation,
@@ -60,7 +60,11 @@ export function FrankShell() {
   const [homeProject, setHomeProject] = useState<string>('central');
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['central']));
   const [filter, setFilter] = useState('');
-  const [frameOpen, setFrameOpen] = useState(true);
+  // Desktop and mobile represent the frame differently: the desktop rail can
+  // be expanded/collapsed, while mobile uses a modal Sheet. Keeping these
+  // states independent prevents a breakpoint change from opening the Sheet.
+  const [desktopFrameOpen, setDesktopFrameOpen] = useState(true);
+  const [mobileFrameOpen, setMobileFrameOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
   const [streamingText, setStreamingText] = useState<string | null>(null);
   const [draftModel, setDraftModel] = useState('auto');
@@ -69,6 +73,7 @@ export function FrankShell() {
   const [frameError, setFrameError] = useState<string | null>(null);
   const frameEtag = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const wasMobile = useRef<boolean | null>(null);
   const { providers: harnessProviders } = useHarnesses();
 
   const active = useMemo(
@@ -187,6 +192,25 @@ export function FrankShell() {
   useEffect(() => registerRooms(openHome), [openHome, registerRooms]);
 
   useEffect(() => {
+    const query = window.matchMedia('(max-width: 1023px)');
+    const syncViewport = () => {
+      const leavingMobile = wasMobile.current === true && !query.matches;
+      wasMobile.current = query.matches;
+      if (leavingMobile) {
+        setMobileFrameOpen((wasOpen) => {
+          // The mobile trigger is display:none after this breakpoint change,
+          // so return focus to the workspace rather than a hidden control.
+          if (wasOpen) window.setTimeout(() => document.getElementById('frank-workspace')?.focus(), 0);
+          return false;
+        });
+      }
+    };
+    syncViewport();
+    query.addEventListener('change', syncViewport);
+    return () => query.removeEventListener('change', syncViewport);
+  }, []);
+
+  useEffect(() => {
     const roomId = searchParams.get('room');
     if (roomId && DEFAULT_ROOMS.some((room) => room.id === roomId)) openHome(roomId);
   }, [openHome, searchParams]);
@@ -228,6 +252,8 @@ export function FrankShell() {
     abortRef.current = controller;
     setStreamingText('');
     let accumulated = '';
+    let turnInfo: TurnInfo = {};
+    let cancelled = false;
 
     await frankStream(
       text,
@@ -237,8 +263,8 @@ export function FrankShell() {
           accumulated += chunk;
           setStreamingText(accumulated);
         },
-        onDone: () => {
-          /* handled below */
+        onDone: (info) => {
+          turnInfo = info;
         },
         onError: (err) => {
           accumulated = accumulated || `I couldn't reach my brain just then — ${err}`;
@@ -249,7 +275,9 @@ export function FrankShell() {
       controller.signal,
       effectiveModel !== 'auto' ? effectiveModel : undefined,
     ).catch((err: unknown) => {
-      if (!(err instanceof StreamAbortedError)) {
+      if (err instanceof StreamAbortedError) {
+        cancelled = true;
+      } else {
         accumulated = accumulated || 'The stream dropped before I could answer.';
       }
     });
@@ -257,8 +285,31 @@ export function FrankShell() {
     setStreamingText(null);
     abortRef.current = null;
 
+    if (cancelled) {
+      setConversations((prev) =>
+        prev.map((c) => (c.id === conversation.id ? { ...c, running: false } : c)),
+      );
+      // The local shell must stop immediately. The durable flag is a
+      // best-effort reconciliation: a failed patch must not turn Stop into an
+      // unhandled send failure or write an artificial assistant reply.
+      try {
+        await patchConversation(api, conversation.id, { running: false });
+      } catch {
+        // The authoritative Frame refresh below will reconcile a failed write.
+      }
+      void refreshFrame();
+      return;
+    }
+
     const body = accumulated.trim() || 'Acknowledged.';
-    const agentRow = await appendMessage(api, conversation.id, { kind: 'agent', body });
+    const agentRow = await appendMessage(api, conversation.id, {
+      kind: 'agent',
+      body,
+      // These are terminal facts supplied by /api/chat's SSE event.  Keep the
+      // wire names stable in persisted chat history, rather than deriving a
+      // route from the conversation preference after the fact.
+      meta: turnInfoToMessageMeta(turnInfo),
+    });
     setMessages((prev) => [...prev, agentRow]);
     await patchConversation(api, conversation.id, { running: false });
     setConversations((prev) =>
@@ -512,7 +563,7 @@ export function FrankShell() {
       )}
 
       {/* workspace */}
-      <main className="flex min-w-0 flex-1 flex-col overflow-hidden bg-shell">
+      <main id="frank-workspace" tabIndex={-1} className="flex min-w-0 flex-1 flex-col overflow-hidden bg-shell">
         <header className="flex h-[54px] shrink-0 items-center gap-2.5 border-b border-line px-4">
           <button
             onClick={() => setRailOpen(true)}
@@ -534,8 +585,17 @@ export function FrankShell() {
           <span className="hidden font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted/80 sm:inline">
             {currentProject.agent}
           </span>
+          <Link
+            href="/console"
+            className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-muted transition-colors hover:bg-hover hover:text-ink lg:hidden"
+          >
+            Console
+          </Link>
           <button
-            onClick={() => setFrameOpen((v) => !v)}
+            onClick={() => setMobileFrameOpen((v) => !v)}
+            id="living-frame-trigger"
+            aria-controls="living-frame-sheet"
+            aria-expanded={mobileFrameOpen}
             className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-muted transition-colors hover:bg-hover hover:text-ink lg:hidden"
           >
             Frame
@@ -580,7 +640,8 @@ export function FrankShell() {
       </main>
 
         <LivingFrame
-          open={frameOpen}
+          desktopOpen={desktopFrameOpen}
+          mobileOpen={mobileFrameOpen}
           decisions={decisions}
           frame={frame}
           frameError={frameError}
@@ -591,7 +652,8 @@ export function FrankShell() {
           calendarLoading={calendarLoading}
           calendarError={calendarError}
           projectName={projectName}
-        onToggle={() => setFrameOpen((v) => !v)}
+        onDesktopToggle={() => setDesktopFrameOpen((v) => !v)}
+        onMobileOpenChange={setMobileFrameOpen}
         onOpenConversation={openConversation}
           onResolve={(d, outcome) => void onResolveDecision(d, outcome)}
           onRetry={() => void refreshFrame()}

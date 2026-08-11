@@ -334,6 +334,8 @@ export function ComposerBar({
 
             <button
               onClick={() => setMenu(menu === 'model' ? null : 'model')}
+              aria-expanded={menu === 'model'}
+              aria-label={`Route for this chat: ${selectedModel.short}`}
               className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[11.5px] font-medium transition-colors ${toolClass}`}
             >
               <svg
@@ -406,7 +408,7 @@ export function ComposerBar({
 
         {/* menus */}
         {menu === 'model' && (
-          <Menu label="Model for this chat" className="left-0">
+          <Menu label="Route for this chat" hint="Saved with this chat. Other chats keep their own route." className="left-0">
             {availableModels.map((m) => (
               <MenuItem
                 key={m.id}
@@ -479,10 +481,12 @@ export function ComposerBar({
 
 function Menu({
   label,
+  hint,
   className,
   children,
 }: {
   label: string;
+  hint?: string;
   className: string;
   children: React.ReactNode;
 }) {
@@ -494,6 +498,7 @@ function Menu({
       <div className="px-2.5 pb-1 pt-2 font-mono text-[9.5px] font-semibold uppercase tracking-[0.16em] text-muted/80">
         {label}
       </div>
+      {hint && <p className="px-2.5 pb-1 text-[10px] leading-snug text-muted">{hint}</p>}
       {children}
     </div>
   );

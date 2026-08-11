@@ -4,6 +4,16 @@ import { useEffect, useRef, useState } from 'react';
 import { Markdown } from '@/components/markdown';
 import type { ChatMessageRow, DelegationMeta, WorkingMeta } from '@/lib/chat-api';
 
+type TurnProof = {
+  requested_model?: unknown;
+  model?: unknown;
+  model_provider?: unknown;
+  expected_model?: unknown;
+  model_mismatch?: unknown;
+  harness?: unknown;
+  pack_hash?: unknown;
+};
+
 interface ChatThreadProps {
   messages: ChatMessageRow[];
   /** Text arriving from the SSE bridge for a reply that has not landed yet. */
@@ -99,12 +109,14 @@ function MessageRow({
   }
 
   if (message.kind === 'agent') {
+    const proof = message.meta as TurnProof;
     return (
       <div className="animate-msg-in flex flex-col gap-1.5 self-stretch">
         <AgentLabel label={agentLabel} tint={tint} />
         <div className="text-[14px] leading-[1.62] text-ink">
           <Markdown text={message.body} />
         </div>
+        <TurnProofCard proof={proof} />
       </div>
     );
   }
@@ -149,6 +161,39 @@ function MessageRow({
         <path d="M20 6 9 17l-5-5" />
       </svg>
       <span>{message.body}</span>
+    </div>
+  );
+}
+
+function text(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() !== '' ? value : null;
+}
+
+/** A completed-turn receipt: it reports the terminal SSE facts only. */
+function TurnProofCard({ proof }: { proof: TurnProof }) {
+  const requested = text(proof.requested_model);
+  const model = text(proof.model);
+  const provider = text(proof.model_provider);
+  const harness = text(proof.harness);
+  const packHash = text(proof.pack_hash);
+  const expected = text(proof.expected_model);
+  const mismatch = proof.model_mismatch === true;
+
+  if (!requested && !model && !harness && !packHash) return null;
+
+  const actual = [model, provider].filter(Boolean).join(' · ');
+  return (
+    <div
+      className={`mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg border px-2.5 py-1.5 font-mono text-[9.5px] ${
+        mismatch ? 'border-warning/40 bg-warning/5 text-warning' : 'border-line bg-subtle text-muted'
+      }`}
+    >
+      <span className="font-semibold uppercase tracking-[0.08em]">Route proof</span>
+      {requested && <span>requested {requested}</span>}
+      {actual && <span>ran {actual}</span>}
+      {harness && <span>via {harness}</span>}
+      {packHash && <span title={packHash}>pack {packHash.slice(0, 12)}</span>}
+      {mismatch && <span className="font-semibold" role="status" aria-live="polite">Model mismatch{expected ? ` — expected ${expected}` : ''}</span>}
     </div>
   );
 }

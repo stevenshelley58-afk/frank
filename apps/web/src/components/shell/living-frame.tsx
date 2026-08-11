@@ -1,5 +1,8 @@
 'use client';
 
+import { useEffect, useState } from 'react';
+
+import { Sheet, SheetContent, SheetDescription, SheetTitle } from '@/components/ui/sheet';
 import type { PendingDecision } from '@/lib/chat-api';
 import type { TodayResponse } from '@/lib/api';
 import type { FrameResponse, FrameRunning, FrameReceipt } from '@/lib/frame';
@@ -9,7 +12,8 @@ import { clockTime, TIME_ZONE } from '@/lib/time';
 /* ------------------------------------------------------------------ */
 
 interface LivingFrameProps {
-  open: boolean;
+  desktopOpen: boolean;
+  mobileOpen: boolean;
   decisions: PendingDecision[];
   frame: FrameResponse | null;
   frameError: string | null;
@@ -20,7 +24,8 @@ interface LivingFrameProps {
   calendarLoading: boolean;
   calendarError: string | null;
   projectName: (projectId: string) => string;
-  onToggle: () => void;
+  onDesktopToggle: () => void;
+  onMobileOpenChange: (open: boolean) => void;
   onOpenConversation: (id: string) => void;
   onResolve: (decision: PendingDecision, outcome: 'ready' | 'cancel') => void;
   onRetry: () => void;
@@ -39,8 +44,10 @@ interface LivingFrameProps {
  * running, what just finished. Collapsed it keeps only the counts, so quiet
  * costs 47px instead of going blind.
  */
-export function LivingFrame({
-  open,
+export function LivingFrame(props: LivingFrameProps) {
+  const {
+  desktopOpen,
+  mobileOpen,
   decisions,
   frame,
   frameError,
@@ -51,7 +58,8 @@ export function LivingFrame({
   calendarLoading,
   calendarError,
   projectName,
-  onToggle,
+  onDesktopToggle,
+  onMobileOpenChange,
   onOpenConversation,
   onResolve,
   onRetry,
@@ -61,15 +69,16 @@ export function LivingFrame({
   onStopActiveChat,
   onStopWorkbench,
   onStopMission,
-}: LivingFrameProps) {
+  } = props;
   const running = frame?.running ?? [];
   const receipts = frame?.receipts ?? [];
-  if (!open) {
+  if (!desktopOpen) {
     return (
+      <>
       <aside className="hidden w-[47px] shrink-0 flex-col border-l border-line bg-rail lg:flex">
         <div className="flex h-[54px] shrink-0 items-center justify-center border-b border-line">
           <button
-            onClick={onToggle}
+            onClick={onDesktopToggle}
             aria-label="Expand the living frame"
             className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
           >
@@ -80,30 +89,35 @@ export function LivingFrame({
           </button>
         </div>
         <div className="flex flex-col items-center gap-2 py-3">
-          <MiniSignal label="Waiting on you" count={decisions.length} onClick={onToggle}>
+          <MiniSignal label="Waiting on you" count={decisions.length} onClick={onDesktopToggle}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
               <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
             </svg>
           </MiniSignal>
-          <MiniSignal label="Running" pulse={running.length > 0} onClick={onToggle}>
+          <MiniSignal label="Running" pulse={running.length > 0} onClick={onDesktopToggle}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
             </svg>
           </MiniSignal>
         </div>
       </aside>
+      <LivingFrameMobileSheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
+        <FrameContent props={props} />
+      </LivingFrameMobileSheet>
+      </>
     );
   }
 
   return (
+    <>
     <aside className="hidden w-[318px] shrink-0 flex-col border-l border-line bg-rail lg:flex">
       <div className="flex h-[54px] shrink-0 items-center gap-2 border-b border-line px-3">
         <span className="flex-1 font-mono text-[10px] font-semibold uppercase tracking-[0.16em] text-muted/80">
           Living frame
         </span>
         <button
-          onClick={onToggle}
+          onClick={onDesktopToggle}
           aria-label="Collapse the living frame"
           className="rounded-lg p-1.5 text-muted transition-colors hover:bg-hover hover:text-ink"
         >
@@ -181,6 +195,92 @@ export function LivingFrame({
         </Card>
       </div>
     </aside>
+    <LivingFrameMobileSheet open={mobileOpen} onOpenChange={onMobileOpenChange}>
+      <FrameContent props={props} />
+    </LivingFrameMobileSheet>
+    </>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+
+function LivingFrameMobileSheet({
+  open,
+  onOpenChange,
+  children,
+}: {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  children: React.ReactNode;
+}) {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const query = window.matchMedia('(max-width: 1023px)');
+    const update = () => setIsMobile(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+
+  const close = () => {
+    if (open) onOpenChange(false);
+    window.setTimeout(() => document.getElementById('living-frame-trigger')?.focus(), 0);
+  };
+
+  if (!isMobile) return null;
+
+  return (
+    <Sheet open={open} onOpenChange={(nextOpen) => { if (!nextOpen) close(); else onOpenChange(true); }}>
+        <SheetContent id="living-frame-sheet" side="right" aria-label="Living frame" className="flex flex-col w-[min(22rem,calc(100vw-1rem))] border-line bg-rail p-0">
+          <SheetTitle className="sr-only">Living frame</SheetTitle>
+          <SheetDescription className="sr-only">Current decisions, running work, today, and receipts.</SheetDescription>
+          {children}
+        </SheetContent>
+      </Sheet>
+  );
+}
+
+function FrameContent({ props }: { props: LivingFrameProps }) {
+  const {
+    decisions, frame, frameError, today, todayError, calendarEvents, calendarStatus,
+    calendarLoading, calendarError, projectName, onOpenConversation, onResolve, onRetry,
+    onRetryToday, activeChatId, activeChatStreaming, onStopActiveChat, onStopWorkbench,
+    onStopMission,
+  } = props;
+  const running = frame?.running ?? [];
+  const receipts = frame?.receipts ?? [];
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
+      {frameError && (
+        <div role="status" className="rounded-[14px] border border-warning/30 bg-warning/5 px-3.5 py-3 text-[12px] text-warning">
+          Living Frame is unavailable — {frameError}
+          <button onClick={onRetry} className="ml-2 font-semibold underline">Retry</button>
+        </div>
+      )}
+      <Card title="Waiting on you" count={decisions.length}>
+        {decisions.length === 0 ? <Empty>Nothing needs your decision.</Empty> : decisions.map((decision) => (
+          <div key={decision.id} className="border-b border-line py-2 last:border-b-0">
+            <div className="flex items-center gap-2.5">
+              <span className="min-w-0 flex-1">
+                <b className="block truncate text-[12.5px] font-semibold text-ink">{decision.title}</b>
+                {decision.whyNow !== '' && <span className="mt-px block truncate font-mono text-[9.5px] text-muted">{decision.whyNow}</span>}
+              </span>
+              <button onClick={() => onResolve(decision, 'ready')} className="h-[26px] shrink-0 rounded-[7px] bg-accent px-2.5 text-[11px] font-semibold text-white transition-[filter] hover:brightness-110">Approve</button>
+              <button onClick={() => onResolve(decision, 'cancel')} title="Decline" aria-label={`Decline ${decision.title}`} className="h-[26px] shrink-0 rounded-[7px] border border-line px-2 text-[11px] font-medium text-muted transition-colors hover:border-danger hover:text-danger">No</button>
+            </div>
+          </div>
+        ))}
+      </Card>
+      <Card title="Running now" count={running.length}>
+        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : running.length === 0 ? <Empty>Nothing mid-flight.</Empty> : running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} onStopWorkbench={onStopWorkbench} onStopMission={onStopMission} />)}
+      </Card>
+      <Card title="Today"><TodayList today={today} todayError={todayError} calendarEvents={calendarEvents} calendarStatus={calendarStatus} calendarLoading={calendarLoading} calendarError={calendarError} onRetry={onRetryToday} /></Card>
+      <Card title="Receipts">
+        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : receipts.length === 0 ? <Empty>Nothing finished yet today.</Empty> : receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.kind === 'chat' ? receipt.message_id : receipt.workbench_id} receipt={receipt} onOpenConversation={onOpenConversation} />)}
+      </Card>
+    </div>
   );
 }
 
@@ -211,11 +311,18 @@ function RunningRow({ item, projectName, onOpenConversation, activeChatId, activ
 }
 
 function ReceiptRow({ receipt, onOpenConversation }: { receipt: FrameReceipt; onOpenConversation: (id: string) => void }) {
-  const isChat = receipt.kind === 'chat';
   const title = receipt.kind === 'chat' ? receipt.body : receipt.summary;
   const sub = receipt.kind === 'chat' ? 'chat receipt' : `workbench · ${receipt.published_by}`;
-  const open = () => { if (receipt.kind === 'chat') onOpenConversation(receipt.conversation_id); };
-  return <button disabled={!isChat} onClick={open} className="flex w-full items-center gap-2.5 border-b border-line py-2 text-left last:border-b-0 disabled:cursor-default">
+  const open = () => {
+    if (receipt.kind === 'chat') onOpenConversation(receipt.conversation_id);
+    else {
+      const query = receipt.room_id === null
+        ? `workbenchId=${encodeURIComponent(receipt.workbench_id)}`
+        : `roomId=${encodeURIComponent(receipt.room_id)}&workbenchId=${encodeURIComponent(receipt.workbench_id)}`;
+      window.location.assign(`/console/workbench?${query}`);
+    }
+  };
+  return <button onClick={open} className="flex w-full items-center gap-2.5 border-b border-line py-2 text-left last:border-b-0">
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-success"><path d="M20 6 9 17l-5-5" /></svg>
     <span className="min-w-0 flex-1"><b className="block truncate text-[12.5px] font-semibold text-ink">{title}</b><span className="mt-px block font-mono text-[9.5px] text-muted">{sub}</span></span>
   </button>;

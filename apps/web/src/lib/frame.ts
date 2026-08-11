@@ -6,7 +6,7 @@ export type FrameRunning =
   | { kind: 'chat'; id: string; project_id: string; agent: string; title: string; model: string; thinking: string; running: true; last_message_at: string };
 
 export type FrameReceipt =
-  | { kind: 'workbench'; workbench_id: string; work_item_id: string; summary: string; published_at: string; published_by: string }
+  | { kind: 'workbench'; workbench_id: string; work_item_id: string; room_id: string | null; summary: string; published_at: string; published_by: string }
   | { kind: 'chat'; message_id: string; conversation_id: string; project_id: string; body: string; created_at: string };
 
 export interface FrameResponse {

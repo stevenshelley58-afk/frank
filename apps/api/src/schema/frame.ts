@@ -53,6 +53,7 @@ const frameWorkbenchReceiptSchema = z
     kind: z.literal('workbench'),
     workbench_id: z.string(),
     work_item_id: z.string(),
+    room_id: z.string().nullable(),
     summary: z.string(),
     published_at: z.string(),
     published_by: z.string(),

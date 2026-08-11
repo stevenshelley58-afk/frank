@@ -4,8 +4,6 @@ import type { Dirent } from 'node:fs';
 import { open, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
-import { ConsoleHeader } from '../components/console-header';
-import { moduleById } from '../registry';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -130,7 +128,6 @@ function lifecycleClass(lifecycle: Skill['lifecycle']) {
 }
 
 export default async function SkillsPage({ searchParams }: { searchParams?: Promise<{ skill?: string | string[] }> }) {
-  const module = moduleById('skills')!;
   const selectedId = (await searchParams)?.skill;
   const selected = Array.isArray(selectedId) ? selectedId[0] : selectedId;
 
@@ -146,7 +143,6 @@ export default async function SkillsPage({ searchParams }: { searchParams?: Prom
 
   return (
     <div className="flex h-full flex-col">
-      <ConsoleHeader module={module} />
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-5xl px-6 py-10">
           <div className="mb-8">

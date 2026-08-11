@@ -152,9 +152,9 @@ export function registerFrameRoutes(app: FastifyInstance, dependencies: FrameRou
         limit 100
       `),
       dependencies.db.execute<{
-        workbench_id: string; work_item_id: string; summary: string; published_at: Timestamp; published_by: string;
+        workbench_id: string; work_item_id: string; room_id: string | null; summary: string; published_at: Timestamp; published_by: string;
       }>(sql`
-        select r.workbench_id, wb.work_item_id, r.summary, r.published_at, r.published_by
+        select r.workbench_id, wb.work_item_id, wb.room_id, r.summary, r.published_at, r.published_by
         from frank_domain.workbench_receipt r
         join frank_domain.workbench wb on wb.id = r.workbench_id
         where wb.cell_id = ${context.cellId} and r.published_at >= ${dayStart}
@@ -181,7 +181,7 @@ export function registerFrameRoutes(app: FastifyInstance, dependencies: FrameRou
       ...chats.rows.map((row) => ({ kind: 'chat' as const, id: row.id, project_id: row.project_id, agent: row.agent, title: row.title, model: row.model, thinking: row.thinking, running: true as const, last_message_at: iso(row.last_message_at) })),
     ];
     const receipts = [
-      ...workbenchReceipts.rows.map((row) => ({ kind: 'workbench' as const, workbench_id: row.workbench_id, work_item_id: row.work_item_id, summary: row.summary, published_at: iso(row.published_at), published_by: row.published_by })),
+      ...workbenchReceipts.rows.map((row) => ({ kind: 'workbench' as const, workbench_id: row.workbench_id, work_item_id: row.work_item_id, room_id: row.room_id, summary: row.summary, published_at: iso(row.published_at), published_by: row.published_by })),
       ...chatReceipts.rows.map((row) => ({ kind: 'chat' as const, message_id: row.message_id, conversation_id: row.conversation_id, project_id: row.project_id, body: row.body, created_at: iso(row.created_at) })),
     ].sort((a, b) => {
       const left = a.kind === 'workbench' ? a.published_at : a.created_at;

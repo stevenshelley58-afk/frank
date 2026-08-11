@@ -90,12 +90,12 @@ describe.skipIf(requiresDatabase)(`Living Frame feed against PostgreSQL (${SKIP_
     const frame = first.json() as {
       waiting: unknown[];
       running: Array<{ kind: string; id?: string }>;
-      receipts: Array<{ kind: string; summary?: string; body?: string }>;
+      receipts: Array<{ kind: string; room_id?: string | null; summary?: string; body?: string }>;
       generated_at: string;
     };
     expect(frame.waiting).toEqual([]);
     expect(frame.running).toContainEqual(expect.objectContaining({ kind: 'workbench', id: workbench.workbench.id }));
-    expect(frame.receipts).toContainEqual(expect.objectContaining({ kind: 'workbench', summary: 'Published from the durable workbench receipt.' }));
+    expect(frame.receipts).toContainEqual(expect.objectContaining({ kind: 'workbench', room_id: 'room:frame', summary: 'Published from the durable workbench receipt.' }));
     expect(frame.receipts).toContainEqual(expect.objectContaining({ kind: 'chat', body: 'Published from the persisted chat receipt.' }));
     expect(frame.generated_at).toMatch(/Z$/);
     expect(first.headers.etag).toMatch(/^W\//);

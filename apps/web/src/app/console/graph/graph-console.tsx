@@ -10,8 +10,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { ConsoleHeader } from "../components/console-header";
-import { moduleById } from "../registry";
 import { useAuth } from "@/components/providers";
 
 // PipelineGraph uses React Flow which needs the browser — dynamic import
@@ -129,8 +127,6 @@ export default function GraphConsolePage() {
 
   return (
     <div className="flex h-full flex-col">
-      <ConsoleHeader module={moduleById('graph')} />
-
       {/* Project selector + status bar */}
       <div className="flex items-center gap-3 border-b border-line px-4 py-2">
         <select

@@ -73,6 +73,24 @@ export interface TurnInfo {
   packHash?: string | null;
 }
 
+function isAbort(error: unknown): boolean {
+  return error instanceof StreamAbortedError ||
+    (error instanceof Error && error.name === 'AbortError');
+}
+
+/** Stable, persisted proof shape for a completed chat turn. */
+export function turnInfoToMessageMeta(info: TurnInfo): Record<string, string | boolean | null> {
+  return {
+    requested_model: info.requestedModel ?? null,
+    model: info.model ?? null,
+    model_provider: info.modelProvider ?? null,
+    expected_model: info.expectedModel ?? null,
+    model_mismatch: info.modelMismatch === true,
+    harness: info.harness ?? null,
+    pack_hash: info.packHash ?? null,
+  };
+}
+
 export interface StreamCallbacks {
   onChunk: (text: string) => void;
   onDone: (info: TurnInfo) => void;
@@ -174,6 +192,11 @@ export async function frankStream(
     // If no done event was received, fire it
     fireDone();
   } catch (err) {
+    // Stop is a user action, not an agent failure. Preserve it for the shell
+    // so it can clear its running state without writing an error reply.
+    if (isAbort(err)) {
+      throw err instanceof StreamAbortedError ? err : new StreamAbortedError();
+    }
     fireError(String(err));
   }
 }
