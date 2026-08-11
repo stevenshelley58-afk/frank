@@ -72,6 +72,38 @@ class OsReleaseAssemblyTests(unittest.TestCase):
                 ASSEMBLER.copy_os_release(root, canonical_source=missing, fallback_source=fallback)
 
 
+class RemovedStdlibTests(unittest.TestCase):
+    def test_manifest_excludes_optional_tk_gui_surface(self) -> None:
+        for relative in (
+            Path("lib-dynload/_tkinter.cpython-314-x86_64-linux-musl.so"),
+            Path("tkinter/__init__.py"),
+            Path("idlelib/__main__.py"),
+            Path("turtledemo/__main__.py"),
+            Path("tkinter/__pycache__/__init__.cpython-314.pyc"),
+        ):
+            with self.subTest(relative=relative):
+                self.assertTrue(ASSEMBLER.stdlib_excluded(relative))
+
+    def test_prunes_tk_files_before_elf_dependency_closure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            stdlib = Path(directory)
+            for relative in (
+                Path("lib-dynload/_tkinter.cpython-314-x86_64-linux-musl.so"),
+                Path("tkinter/__init__.py"),
+                Path("idlelib/__main__.py"),
+                Path("turtledemo/__main__.py"),
+            ):
+                path = stdlib / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(b"removed")
+
+            ASSEMBLER.prune_removed_stdlib(stdlib)
+
+            self.assertFalse(any(stdlib.rglob("_tkinter*.so")))
+            for name in ASSEMBLER.REMOVED_STDLIB_DIRECTORIES:
+                self.assertFalse((stdlib / name).exists())
+
+
 class ElfMetadataTests(unittest.TestCase):
     def test_parses_needed_and_origin_runpath_without_undefined_symbols(self) -> None:
         metadata = ASSEMBLER.parse_scanelf_metadata(

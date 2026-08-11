@@ -18,6 +18,8 @@ MAX_ELF_OBJECTS = 4096
 MAX_NEEDED_PER_ELF = 256
 MAX_RUNPATHS_PER_ELF = 128
 MAX_SCANELF_OUTPUT = 65_536
+REMOVED_STDLIB_FILES = ("tarfile.py", "html/parser.py")
+REMOVED_STDLIB_DIRECTORIES = ("tkinter", "idlelib", "turtledemo")
 SYSTEM_ELF_ROOTS = (
     Path("/lib"),
     Path("/usr/lib"),
@@ -344,6 +346,30 @@ def remove_if_present(path: Path) -> None:
         path.unlink()
 
 
+def stdlib_excluded(relative: Path) -> bool:
+    parts = relative.parts
+    return bool(
+        parts
+        and (
+            parts[0] in {"site-packages", "ensurepip", *REMOVED_STDLIB_DIRECTORIES}
+            or parts[0].startswith("config-")
+            or relative.as_posix() in REMOVED_STDLIB_FILES
+            or (relative.name.startswith("_tkinter") and relative.suffix == ".so")
+            or "__pycache__" in parts
+            or relative.suffix in {".pyc", ".pyo"}
+        )
+    )
+
+
+def prune_removed_stdlib(runtime_stdlib: Path) -> None:
+    for relative in REMOVED_STDLIB_FILES:
+        remove_if_present(runtime_stdlib / relative)
+    for name in REMOVED_STDLIB_DIRECTORIES:
+        remove_if_present(runtime_stdlib / name)
+    for extension in list(runtime_stdlib.rglob("_tkinter*.so")):
+        remove_if_present(extension)
+
+
 def audit_runtime_root(root: Path) -> None:
     canonical_root = root.resolve(strict=True)
     for path in root.rglob("*"):
@@ -388,30 +414,17 @@ def main() -> None:
     copy_entry(root, Path("/usr/local/bin/python3"), system_roots)
     for library in sorted(Path("/usr/local/lib").glob("libpython3.14.so*")):
         copy_entry(root, library, system_roots)
-    def exclude_stdlib(relative: Path) -> bool:
-        parts = relative.parts
-        return bool(
-            parts
-            and (
-                parts[0] in {"site-packages", "ensurepip"}
-                or parts[0].startswith("config-")
-                or relative.as_posix() in {"tarfile.py", "html/parser.py"}
-                or "__pycache__" in parts
-                or relative.suffix in {".pyc", ".pyo"}
-            )
-        )
 
     def exclude_cache(relative: Path) -> bool:
         return "__pycache__" in relative.parts or relative.suffix in {".pyc", ".pyo"}
 
-    copy_tree(root, Path("/usr/local/lib/python3.14"), excluded=exclude_stdlib)
+    copy_tree(root, Path("/usr/local/lib/python3.14"), excluded=stdlib_excluded)
     copy_tree(root, target_packages, excluded=exclude_cache)
 
     runtime_stdlib = root / "usr/local/lib/python3.14"
     remove_if_present(runtime_stdlib / "site-packages")
     remove_if_present(runtime_stdlib / "ensurepip")
-    remove_if_present(runtime_stdlib / "tarfile.py")
-    remove_if_present(runtime_stdlib / "html/parser.py")
+    prune_removed_stdlib(runtime_stdlib)
     for cache in list(root.rglob("__pycache__")):
         remove_if_present(cache)
     for bytecode in list(root.rglob("*.py[co]")):
@@ -450,8 +463,8 @@ def main() -> None:
         os.chown(path, 10001, 10001)
 
     forbidden = [
-        runtime_stdlib / "tarfile.py",
-        runtime_stdlib / "html/parser.py",
+        *(runtime_stdlib / relative for relative in REMOVED_STDLIB_FILES),
+        *(runtime_stdlib / name for name in REMOVED_STDLIB_DIRECTORIES),
         runtime_stdlib / "ensurepip",
         root / "sbin/apk",
         root / "bin/sh",
@@ -461,6 +474,8 @@ def main() -> None:
     present = [str(path) for path in forbidden if path.exists() or path.is_symlink()]
     if present:
         fail(f"forbidden runtime paths remain: {present}")
+    if any(runtime_stdlib.rglob("_tkinter*.so")):
+        fail("forbidden _tkinter extension remains in scratch root")
     if any(root.rglob("__pycache__")) or any(root.rglob("*.py[co]")):
         fail("bytecode or cache files remain in scratch root")
     audit_runtime_root(root)

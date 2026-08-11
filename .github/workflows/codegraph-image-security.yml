@@ -66,8 +66,8 @@ jobs:
             echo 'scratch runtime unexpectedly contains a shell, apk, or pip' >&2
             exit 1
           fi
-          if tar -tf rootfs.tar | grep -Eq '(^|/)usr/local/lib/python3\.14/(tarfile\.py|html/parser\.py|.*\.py[co])$|(^|/)__pycache__(/|$)'; then
-            echo 'removed vulnerable modules or bytecode remain in scratch runtime' >&2
+          if tar -tf rootfs.tar | grep -Eq '(^|/)usr/local/lib/python3\.14/(tarfile\.py|html/parser\.py|lib-dynload/_tkinter[^/]*\.so|.*\.py[co])$|(^|/)usr/local/lib/python3\.14/(tkinter|idlelib|turtledemo)(/|$)|(^|/)__pycache__(/|$)'; then
+            echo 'removed stdlib modules or bytecode remain in scratch runtime' >&2
             exit 1
           fi
 
@@ -88,6 +88,8 @@ jobs:
           assert sys.version_info[:3] == (3, 14, 6)
           assert importlib.util.find_spec("tarfile") is None
           assert importlib.util.find_spec("html.parser") is None
+          assert importlib.util.find_spec("_tkinter") is None
+          assert importlib.util.find_spec("tkinter") is None
           project = Project("acceptance", "Acceptance", Path("/acceptance/project"), ())
           Supervisor(Path("/acceptance/output"), [project])._build_and_publish(project)
           graph = json.loads(Path("/acceptance/output/acceptance/current/graphify-out/graph.json").read_text())

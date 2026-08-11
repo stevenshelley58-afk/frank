@@ -53,6 +53,10 @@ RUN apk add --no-cache scanelf=1.3.9-r1 \
     && find /opt/frank-runtime-root -type f \( -name '*.pyc' -o -name '*.pyo' \) -delete \
     && test ! -e /opt/frank-runtime-root/usr/local/lib/python3.14/tarfile.py \
     && test ! -e /opt/frank-runtime-root/usr/local/lib/python3.14/html/parser.py \
+    && test ! -e /opt/frank-runtime-root/usr/local/lib/python3.14/tkinter \
+    && test ! -e /opt/frank-runtime-root/usr/local/lib/python3.14/idlelib \
+    && test ! -e /opt/frank-runtime-root/usr/local/lib/python3.14/turtledemo \
+    && test -z "$(find /opt/frank-runtime-root/usr/local/lib/python3.14 -type f -name '_tkinter*.so' -print -quit)" \
     && test -z "$(find /opt/frank-runtime-root -type d -name __pycache__ -print -quit)" \
     && test -z "$(find /opt/frank-runtime-root -type f \( -name '*.pyc' -o -name '*.pyo' \) -print -quit)" \
     && python3 assemble_scratch_runtime.py --finalize /opt/frank-runtime-root

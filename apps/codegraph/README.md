@@ -87,9 +87,11 @@ licenses/notices, `/etc/os-release`, numeric user records and the recursively
 resolved ELF/musl closure. Dependency discovery reads only bounded
 `DT_NEEDED`/`RUNPATH` metadata through the pinned build-only `scanelf`; it
 never executes target ELF objects or treats undefined symbols as libraries.
-It physically excludes `tarfile.py`,
-`html/parser.py`, bytecode caches, pip, setuptools, wheel, shells and package
-managers. The scratch image runs `/usr/local/bin/python3 -m frank_codegraph`
+It physically excludes `tarfile.py`, `html/parser.py`, the unused Tk GUI surface
+(`_tkinter`, `tkinter`, `idlelib`, and `turtledemo`), bytecode caches, pip,
+setuptools, wheel, shells and package managers. Tk removal is explicit rather
+than a generic missing-library exception: every other unresolved `DT_NEEDED`
+entry still fails the build. The scratch image runs `/usr/local/bin/python3 -m frank_codegraph`
 as UID/GID 10001. Every build verifies the removed modules cannot be imported
 and completes a real Graphify extraction before publication.
 
