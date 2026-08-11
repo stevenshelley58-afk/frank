@@ -1415,6 +1415,12 @@ grep -Fq '{$FRANK_BASIC_AUTH_HASH}' "$caddy_candidate"
 docker run --rm \
   -e FRANK_BASIC_AUTH_USER \
   -e FRANK_BASIC_AUTH_HASH \
+  -e FRANK_API_INTERNAL_URL \
+  -e FRANK_WEB_INTERNAL_URL \
+  -e FRANK_TUSD_INTERNAL_URL=http://frank-tusd:1080 \
+  -e FRANK_UPLOAD_GATE_INTERNAL_URL=http://frank-api:3000 \
+  -e FRANK_TUSD_GATE_SECRET=validation-only-gate-sentinel \
+  -e FRANK_TUSD_HOOK_SECRET=validation-only-hook-sentinel \
   -v "$caddy_candidate:/etc/caddy/Caddyfile:ro" \
   caddy:2.8-alpine \
   caddy validate --config /etc/caddy/Caddyfile \
