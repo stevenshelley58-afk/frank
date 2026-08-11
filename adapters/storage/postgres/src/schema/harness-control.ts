@@ -2,8 +2,6 @@
 import { sql } from 'drizzle-orm';
 import { bigint, boolean, check, index, integer, jsonb, primaryKey, text, timestamp, uniqueIndex, uuid } from 'drizzle-orm/pg-core';
 import { domain } from './shared.js';
-import { room } from './room-mission.js';
-import { } from './conversation.js';
 
 const time = (name:string) => timestamp(name, { withTimezone:true, mode:'date' });
 const nonEmptyObject = (column: any) => sql`jsonb_typeof(${column}) = 'object' and ${column} <> '{}'::jsonb`;
