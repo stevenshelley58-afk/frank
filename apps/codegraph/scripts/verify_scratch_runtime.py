@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import importlib
 import importlib.util
 import json
 import os
@@ -12,6 +13,72 @@ from pathlib import Path
 MAX_STATIC_FILES = 10_000
 MAX_STATIC_BYTES = 32 * 1024 * 1024
 TK_MODULES = {"tkinter", "_tkinter"}
+TRUSTED_PYTHONPATH = "/app:/opt/frank-codegraph/site-packages"
+TRUSTED_IMPORT_ROOTS = (Path("/app"), Path("/opt/frank-codegraph/site-packages"))
+
+
+def assert_trusted_pythonpath(
+    *,
+    path_entries: tuple[str, ...] | None = None,
+    safe_path: bool | None = None,
+    no_user_site: bool | None = None,
+    cwd: Path | None = None,
+    trusted_roots: tuple[Path, ...] | None = None,
+    repositories_root: Path = Path("/repositories"),
+) -> None:
+    if os.environ.get("PYTHONPATH") != TRUSTED_PYTHONPATH:
+        raise RuntimeError("scratch runtime PYTHONPATH does not match the fixed trusted path")
+    if os.environ.get("PYTHONSAFEPATH") != "1" or not (
+        bool(sys.flags.safe_path) if safe_path is None else safe_path
+    ):
+        raise RuntimeError("scratch runtime safe-path mode is not active")
+    if os.environ.get("PYTHONNOUSERSITE") != "1" or not (
+        bool(sys.flags.no_user_site) if no_user_site is None else no_user_site
+    ):
+        raise RuntimeError("scratch runtime user-site loading is not disabled")
+    active_entries = tuple(sys.path if path_entries is None else path_entries)
+    if any(not entry for entry in active_entries):
+        raise RuntimeError("scratch runtime contains an empty sys.path entry")
+    if any(not Path(entry).is_absolute() for entry in active_entries):
+        raise RuntimeError("scratch runtime contains a relative sys.path entry")
+    canonical_entries = tuple(Path(entry).resolve(strict=False) for entry in active_entries)
+    positions: list[int] = []
+    active_trusted_roots = TRUSTED_IMPORT_ROOTS if trusted_roots is None else trusted_roots
+    for root in active_trusted_roots:
+        canonical_root = root.resolve(strict=True)
+        try:
+            positions.append(canonical_entries.index(canonical_root))
+        except ValueError as error:
+            raise RuntimeError(f"trusted import root is absent from sys.path: {root}") from error
+        if canonical_entries.count(canonical_root) != 1:
+            raise RuntimeError(f"trusted import root is duplicated in sys.path: {root}")
+    if positions != sorted(positions) or len(set(positions)) != len(positions):
+        raise RuntimeError("trusted import roots are not present in fixed order")
+    active_cwd = (Path.cwd() if cwd is None else cwd).resolve(strict=True)
+    canonical_trusted_roots = tuple(root.resolve(strict=True) for root in active_trusted_roots)
+    if active_cwd not in canonical_trusted_roots and active_cwd in canonical_entries:
+        raise RuntimeError("scratch runtime working directory leaked into sys.path")
+    repositories = repositories_root.resolve(strict=False)
+    if any(entry == repositories or entry.is_relative_to(repositories) for entry in canonical_entries):
+        raise RuntimeError("scratch runtime repository path leaked into sys.path")
+
+
+def import_module_from_root(module_name: str, trusted_root: Path) -> object:
+    root = trusted_root.resolve(strict=True)
+    spec = importlib.util.find_spec(module_name)
+    if spec is None or spec.origin is None:
+        raise RuntimeError(f"trusted module is not importable: {module_name}")
+    origin = Path(spec.origin).resolve(strict=True)
+    if origin != root and not origin.is_relative_to(root):
+        raise RuntimeError(f"module resolves outside trusted root: {module_name} -> {origin}")
+    module = importlib.import_module(module_name)
+    module_file = getattr(module, "__file__", None)
+    if not isinstance(module_file, str) or not module_file:
+        raise RuntimeError(f"trusted module has no regular import origin: {module_name}")
+    imported_path = Path(module_file).resolve(strict=True)
+    if imported_path != origin:
+        raise RuntimeError(f"imported module origin changed during import: {module_name}")
+    return module
 
 
 def assert_no_tk_imports(roots: tuple[Path, ...]) -> None:
@@ -61,6 +128,8 @@ def assert_no_tk_imports(roots: tuple[Path, ...]) -> None:
 
 
 def main() -> None:
+    assert Path.cwd() == Path("/tmp")
+    assert_trusted_pythonpath()
     assert sys.version_info[:3] == (3, 14, 6)
     assert version("graphifyy") == "0.9.39"
     assert importlib.util.find_spec("tarfile") is None
@@ -70,8 +139,12 @@ def main() -> None:
 
     graphify_spec = importlib.util.find_spec("graphify")
     assert graphify_spec is not None and graphify_spec.origin is not None
+    graphify_origin = Path(graphify_spec.origin).resolve(strict=True)
+    graphify_root = TRUSTED_IMPORT_ROOTS[1].resolve(strict=True)
+    assert graphify_origin.is_relative_to(graphify_root)
     assert_no_tk_imports((Path("/app/frank_codegraph"), Path(graphify_spec.origin).parent))
 
+    import_module_from_root("frank_codegraph", Path("/app"))
     import graphify  # noqa: F401
     from frank_codegraph.service import Project, Supervisor
 

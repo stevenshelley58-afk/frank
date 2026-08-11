@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -10,6 +11,7 @@ from unittest.mock import patch
 from frank_codegraph.service import (
     Project,
     Supervisor,
+    TRUSTED_PYTHONPATH,
     authorized,
     build_overlay,
     graph_summary,
@@ -51,9 +53,62 @@ class GraphifyContractTests(unittest.TestCase):
     def test_graphify_command_forwards_validated_excludes(self) -> None:
         project = Project("frank", "Frank", Path("/repositories/frank"), (".git", "node_modules", "generated/**"))
         command = graphify_command(project, Path("/data/stage"))
-        self.assertEqual(command[:4], [sys.executable, "-m", "graphify", "extract"])
+        self.assertEqual(command[:5], [sys.executable, "-P", "-m", "graphify", "extract"])
         self.assertEqual(command.count("--exclude"), 3)
         self.assertIn(["--exclude", "generated/**"], [command[index:index + 2] for index in range(len(command) - 1)])
+
+    def test_safe_path_ignores_repo_local_graphify_module_and_package(self) -> None:
+        for shadow_kind in ("module", "package"):
+            with self.subTest(shadow_kind=shadow_kind), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                repository = root / "repository"
+                target = root / "opt/frank-codegraph/site-packages"
+                trusted = target / "graphify"
+                repository.mkdir()
+                trusted.mkdir(parents=True)
+                trusted_init = trusted / "__init__.py"
+                trusted_init.write_text("TRUSTED = True\n", encoding="utf-8")
+                (trusted / "__main__.py").write_text(
+                    "import graphify, json, sys\n"
+                    "from pathlib import Path\n"
+                    "print(json.dumps({'origin': str(Path(graphify.__file__).resolve()), 'path': sys.path}))\n",
+                    encoding="utf-8",
+                )
+                shadow_code = (
+                    "from pathlib import Path\n"
+                    "Path('shadow-executed').write_text('unsafe', encoding='utf-8')\n"
+                    "raise RuntimeError('repository shadow executed')\n"
+                )
+                if shadow_kind == "module":
+                    (repository / "graphify.py").write_text(shadow_code, encoding="utf-8")
+                else:
+                    shadow = repository / "graphify"
+                    shadow.mkdir()
+                    (shadow / "__init__.py").write_text(shadow_code, encoding="utf-8")
+                    (shadow / "__main__.py").write_text(shadow_code, encoding="utf-8")
+
+                environment = {
+                    "PYTHONPATH": str(target),
+                    "PYTHONSAFEPATH": "1",
+                    "PYTHONNOUSERSITE": "1",
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                }
+                completed = subprocess.run(
+                    [sys.executable, "-P", "-m", "graphify"],
+                    cwd=repository,
+                    env=environment,
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+
+                self.assertEqual(completed.returncode, 0, completed.stderr)
+                result = json.loads(completed.stdout)
+                self.assertEqual(Path(result["origin"]), trusted_init.resolve())
+                self.assertNotIn("", result["path"])
+                self.assertNotIn(str(repository.resolve()), result["path"])
+                self.assertFalse((repository / "shadow-executed").exists())
 
     def test_control_authorization_is_exact_bearer_token(self) -> None:
         token = "a" * 32
@@ -105,7 +160,10 @@ class PublicationTests(unittest.TestCase):
 
             def fake_extract(command: list[str], _cwd: Path, environment: dict[str, str]) -> tuple[int, str]:
                 self.assertEqual(environment["PATH"], "/usr/local/bin")
-                self.assertEqual(environment["PYTHONPATH"], "/opt/frank-codegraph/site-packages")
+                self.assertEqual(TRUSTED_PYTHONPATH, "/app:/opt/frank-codegraph/site-packages")
+                self.assertEqual(environment["PYTHONPATH"], TRUSTED_PYTHONPATH)
+                self.assertEqual(environment["PYTHONNOUSERSITE"], "1")
+                self.assertEqual(environment["PYTHONSAFEPATH"], "1")
                 self.assertEqual(environment["PYTHONDONTWRITEBYTECODE"], "1")
                 output = Path(command[command.index("--out") + 1]) / "graphify-out"
                 output.mkdir(parents=True)

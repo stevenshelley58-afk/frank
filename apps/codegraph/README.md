@@ -105,7 +105,15 @@ It physically excludes `tarfile.py`, `html/parser.py`, the unused Tk GUI surface
 setuptools, wheel, shells and package managers. Tk removal is explicit rather
 than a generic missing-library exception: every other unresolved `DT_NEEDED`
 entry still fails the build. The scratch image runs `/usr/local/bin/python3 -m frank_codegraph`
-as UID/GID 10001. Every build verifies the removed modules cannot be imported
+as UID/GID 10001. Its only configured Python module roots are the fixed trusted
+`/app:/opt/frank-codegraph/site-packages` path; supervisor extraction children
+receive the same exact value, explicit `-P`, `PYTHONSAFEPATH=1`, and disabled
+user-site loading. The runtime startup policy fails closed unless safe-path is
+active, the trusted roots occur exactly once in order, neither the current
+repository nor any `/repositories` path is importable, and Frank/Graphify
+resolve below `/app` and the pinned target site-packages respectively. Every
+build runs the verifier from `/tmp`, proving Frank imports do not depend on
+`/app` as the working directory, verifies the removed modules cannot be imported,
 and completes a real Graphify extraction before publication.
 
 CI generates the final SBOM, signs it, verifies the exact returned bundle and

@@ -34,6 +34,7 @@ from watchdog.observers import Observer
 
 
 LOG = logging.getLogger("frank-codegraph")
+TRUSTED_PYTHONPATH = "/app:/opt/frank-codegraph/site-packages"
 PROJECT_ID = re.compile(r"^[a-z][a-z0-9-]{0,62}$")
 MAX_CONTROL_BODY = 16 * 1024
 MAX_REGISTRY_BYTES = 1024 * 1024
@@ -516,7 +517,7 @@ def graph_summary(path: Path) -> dict[str, int]:
 
 def graphify_command(project: Project, stage: Path) -> list[str]:
     command = [
-        sys.executable, "-m", "graphify", "extract", str(project.mount), "--code-only", "--no-cluster",
+        sys.executable, "-P", "-m", "graphify", "extract", str(project.mount), "--code-only", "--no-cluster",
         "--out", str(stage),
     ]
     for pattern in project.ignore:
@@ -1004,7 +1005,9 @@ class Supervisor:
             # intentionally absent from the untrusted repository extraction child.
             environment = {
                 "PATH": "/usr/local/bin",
-                "PYTHONPATH": "/opt/frank-codegraph/site-packages",
+                "PYTHONPATH": TRUSTED_PYTHONPATH,
+                "PYTHONNOUSERSITE": "1",
+                "PYTHONSAFEPATH": "1",
                 "HOME": "/tmp",
                 "PYTHONUNBUFFERED": "1",
                 "PYTHONDONTWRITEBYTECODE": "1",

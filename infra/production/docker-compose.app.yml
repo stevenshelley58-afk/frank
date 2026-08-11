@@ -270,8 +270,10 @@ services:
     user: "0:0"
     environment: !override
       HOME: /tmp
-      PYTHONPATH: /opt/frank-codegraph/site-packages
-    entrypoint: ["/usr/local/bin/python3", "-m", "frank_codegraph.volume_init"]
+      PYTHONPATH: /app:/opt/frank-codegraph/site-packages
+      PYTHONNOUSERSITE: "1"
+      PYTHONSAFEPATH: "1"
+    entrypoint: ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph.volume_init"]
     command: []
     volumes:
       - type: volume
@@ -308,6 +310,9 @@ services:
     # name an opaque project id; repository paths are never API input.
     environment: !override
       HOME: /tmp
+      PYTHONPATH: /app:/opt/frank-codegraph/site-packages
+      PYTHONNOUSERSITE: "1"
+      PYTHONSAFEPATH: "1"
       CODEGRAPH_OUTPUT: /data/codegraph
       CODEGRAPH_REGISTRY: /etc/frank-codegraph/projects.json
       CODEGRAPH_HOST: 0.0.0.0
@@ -320,7 +325,7 @@ services:
     # Clear any legacy Compose command/entrypoint; this process is the new
     # Python supervisor even if the base development file still names the old
     # TypeScript watcher.
-    entrypoint: ["/usr/local/bin/python3", "-m", "frank_codegraph"]
+    entrypoint: ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph"]
     command: []
     depends_on: !override
       frank-codegraph-volume-init:
