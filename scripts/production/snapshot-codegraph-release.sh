@@ -13,6 +13,7 @@ done
 readonly backup_root="${FRANK_CODEGRAPH_BACKUP_ROOT:-/srv/frank/backups/codegraph}"
 readonly release_id="${FRANK_RELEASE_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
 readonly overlay="${FRANK_PRE_RELEASE_OVERLAY:-/srv/frank/repo/infra/production/docker-compose.app.yml}"
+readonly caddyfile="${FRANK_PRE_RELEASE_CADDYFILE:-/srv/frank/infra/Caddyfile}"
 readonly volume_override="${FRANK_CODEGRAPH_PHYSICAL_VOLUME:-}"
 readonly logical_volume="${FRANK_CODEGRAPH_LOGICAL_VOLUME:-frank_codegraph_data}"
 readonly compose_project="${FRANK_COMPOSE_PROJECT_NAME:-frank}"
@@ -26,6 +27,8 @@ readonly codegraph_container="${FRANK_CODEGRAPH_CONTAINER:-frank-codegraph}"
 [[ "$compose_project" == 'frank' ]] || die "refusing unexpected Compose project"
 [[ -z "$volume_override" || "$volume_override" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$ ]] || die "invalid physical volume override"
 [[ -f "$overlay" && ! -L "$overlay" ]] || die "pre-release overlay must be a regular non-linked file"
+[[ "$caddyfile" == '/srv/frank/infra/Caddyfile' ]] || die "refusing unexpected pre-release Caddyfile"
+[[ -f "$caddyfile" && ! -L "$caddyfile" ]] || die "pre-release Caddyfile must be a regular non-linked file"
 
 declare -a matching_volumes=()
 while IFS= read -r candidate_volume; do
@@ -56,6 +59,7 @@ readonly snapshot_real="$(realpath -e -- "$snapshot")"
 [[ "$snapshot_real" == "$backup_root_real/$release_id" ]] || die "snapshot escaped backup root"
 
 install -m 0600 -- "$overlay" "$snapshot_real/pre-release-overlay.yml"
+install -m 0600 -- "$caddyfile" "$snapshot_real/pre-release-Caddyfile"
 printf 'service\tcontainer\tconfigured_image\timage_id\n' > "$snapshot_real/images.tsv"
 
 declare -a image_references=()
@@ -103,10 +107,13 @@ docker unpause "$codegraph_container" >/dev/null
 paused=false
 trap - EXIT
 
+printf 'schema_version=2\n' > "$snapshot_real/SNAPSHOT_COMPLETE"
+
 (
   cd -- "$snapshot_real"
   sha256sum application-images.tar codegraph-volume.tar.gz images.tsv \
-    pre-release-overlay.yml codegraph-volume.txt codegraph-volume-labels.tsv > SHA256SUMS
+    pre-release-overlay.yml pre-release-Caddyfile codegraph-volume.txt \
+    codegraph-volume-labels.tsv SNAPSHOT_COMPLETE > SHA256SUMS
   sha256sum --check SHA256SUMS >/dev/null
 )
 

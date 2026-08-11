@@ -44,8 +44,8 @@ between the backup and smoke gates.
 | `scripts/production/hosted-preflight.sh` | Disk, Git, secret-name, Docker, network, Compose, container, and image gates | None |
 | `scripts/production/backup-postgres.sh` | Atomic gzip `pg_dump`, SHA-256 verification, manifest, retention | Writes backup sets and removes expired matching sets |
 | `scripts/production/post-deploy-smoke.sh` | Public `/live`, `/ready`, and web-root checks | None beyond ordinary request logs |
-| `scripts/production/snapshot-codegraph-release.sh` | Captures prior API/web/codegraph images, legacy overlay, and codegraph volume | Briefly pauses codegraph; writes a checksummed root-only rollback set |
-| `scripts/production/rollback-codegraph-release.sh` | Restores the captured three-service application unit and codegraph volume | Stops/recreates API, web, and codegraph; replaces codegraph volume contents |
+| `scripts/production/snapshot-codegraph-release.sh` | Captures prior API/web/codegraph images, legacy overlay, Caddyfile, and codegraph volume | Briefly pauses codegraph; writes a complete checksummed root-only rollback set |
+| `scripts/production/rollback-codegraph-release.sh` | Restores the captured application unit, Caddyfile, and codegraph volume | Stops/recreates API, web, codegraph, and Caddy; replaces codegraph volume contents |
 | `infra/production/docker-compose.app.yml` | Authoritative production overrides for API, web, codegraph, and their Caddy dependency | None until passed to `docker compose up` |
 | `infra/production/Caddyfile.frank-production` | Replacement `frank.fail` site block with a private UI/control surface | None until merged into the live Caddy candidate and reloaded |
 
@@ -754,9 +754,30 @@ promotion authority. The four image environment
 variables must be copied only from the validated manifest output above—never composed from
 a tag or a branch name.
 
-### 3B. Atomically persist the manifest workbench digest
+### 3B. Capture rollback state, then atomically persist the manifest workbench digest
 
-Before preflight or any Compose command, update only `FRANK_WORKBENCH_IMAGE` in the
+Before the first production configuration mutation, capture the complete application,
+CodeGraph volume, and Caddy rollback unit. The snapshot must reach its checksummed
+completeness marker before the runtime environment can be changed:
+
+```bash
+export FRANK_RELEASE_ID="$release_id"
+export FRANK_PRE_RELEASE_OVERLAY='/srv/frank/repo/infra/production/docker-compose.app.yml'
+export FRANK_PRE_RELEASE_CADDYFILE='/srv/frank/infra/Caddyfile'
+export FRANK_CODEGRAPH_BACKUP_ROOT='/srv/frank/backups/codegraph'
+
+bash "$FRANK_RELEASE_SOURCE/scripts/production/snapshot-codegraph-release.sh" \
+  > "$evidence_dir/codegraph-snapshot.result" \
+  2> "$evidence_dir/codegraph-snapshot.log"
+grep -Fx 'snapshot=passed' "$evidence_dir/codegraph-snapshot.result"
+codegraph_snapshot="$(awk -F= '$1 == "snapshot" {print $2}' "$evidence_dir/codegraph-snapshot.result")"
+test -n "$codegraph_snapshot"
+export FRANK_CODEGRAPH_PHYSICAL_VOLUME="$(<"$codegraph_snapshot/codegraph-volume.txt")"
+printf '%s' "$FRANK_CODEGRAPH_PHYSICAL_VOLUME" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$'
+test "$(docker volume inspect --format '{{index .Labels "com.docker.compose.volume"}}' "$FRANK_CODEGRAPH_PHYSICAL_VOLUME")" = 'frank_codegraph_data'
+```
+
+Only after that guard passes, update only `FRANK_WORKBENCH_IMAGE` in the
 root-owned runtime environment. This fails if the file is not a regular root-owned file or
 contains zero or multiple assignments, preserves every other line plus owner and mode, and
 uses a same-directory atomic rename. A root-owned exclusive lock covers the complete
@@ -1109,25 +1130,16 @@ the reviewed API image may receive it, and no workbench container may ever inher
 uses it for inference and passes only commands through `docker exec`, never the key or a
 provider environment file.
 
-## 4. Capture the complete application rollback unit
+## 4. Seal the already captured application rollback evidence
 
-Before changing source, overlay, image tags, containers, or the codegraph volume, capture
-the legacy Node codegraph and the API/web images that consume its contract as one unit:
+The pre-mutation snapshot from section 3B already captured the legacy Node codegraph,
+API/web images, live Caddyfile, and physical volume. Copy its bounded manifests into the
+release evidence and re-check the captured identities:
 
 ```bash
-export FRANK_RELEASE_ID="$release_id"
-export FRANK_PRE_RELEASE_OVERLAY='/srv/frank/repo/infra/production/docker-compose.app.yml'
-export FRANK_CODEGRAPH_BACKUP_ROOT='/srv/frank/backups/codegraph'
-
-bash "$FRANK_RELEASE_SOURCE/scripts/production/snapshot-codegraph-release.sh" \
-  > "$evidence_dir/codegraph-snapshot.result" \
-  2> "$evidence_dir/codegraph-snapshot.log"
-grep -Fx 'snapshot=passed' "$evidence_dir/codegraph-snapshot.result"
-codegraph_snapshot="$(awk -F= '$1 == "snapshot" {print $2}' "$evidence_dir/codegraph-snapshot.result")"
 test -n "$codegraph_snapshot"
-export FRANK_CODEGRAPH_PHYSICAL_VOLUME="$(<"$codegraph_snapshot/codegraph-volume.txt")"
-printf '%s' "$FRANK_CODEGRAPH_PHYSICAL_VOLUME" | grep -Eq '^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$'
-test "$(docker volume inspect --format '{{index .Labels "com.docker.compose.volume"}}' "$FRANK_CODEGRAPH_PHYSICAL_VOLUME")" = 'frank_codegraph_data'
+(cd "$codegraph_snapshot" && sha256sum --check SHA256SUMS)
+test "$(<"$codegraph_snapshot/SNAPSHOT_COMPLETE")" = 'schema_version=2'
 
 install -m 0600 -- "$codegraph_snapshot/images.tsv" "$evidence_dir/containers.before.tsv"
 install -m 0600 -- "$codegraph_snapshot/codegraph-volume-labels.tsv" \
@@ -1161,16 +1173,17 @@ prior_workbench_image_id="$(awk -F '\t' 'NR == 2 { print $2 }' "$rollback_config
 test "$(awk -F '\t' 'NR == 2 { print $1 }' "$rollback_config_dir/workbench-image.before.tsv")" = "$prior_workbench_image"
 printf '%s' "$prior_workbench_image_id" | grep -Eq '^sha256:[a-f0-9]{64}$'
 test "$(docker image inspect "$prior_workbench_image" --format '{{.Id}}')" = "$prior_workbench_image_id"
-install -m 0600 -- /srv/frank/infra/Caddyfile "$rollback_config_dir/Caddyfile"
 ```
 
 The root-only snapshot contains the literal pre-release Compose overlay, configured image
 references plus immutable IDs, a Docker image archive for all three services, and a
-checksummed archive of the physical volume currently mounted at `/data/codegraph` (for
+checksummed copy of the live Caddyfile plus an archive of the physical volume currently
+mounted at `/data/codegraph` (for
 Compose project `frank`, normally `frank_frank_codegraph_data`). The logical-volume label
 must be exactly `frank_codegraph_data`; an optional
 `FRANK_CODEGRAPH_PHYSICAL_VOLUME` override must match the discovered mount. The snapshot
-script fails before deployment if any identity or label cannot be verified. The root-only
+script fails before deployment if any identity, label, or completeness checksum cannot be
+verified. The root-only
 rollback directory separately captures the prior workbench digest reference and immutable
 image ID, and the availability check above proves that exact image remains local. Copy the
 snapshot to the approved encrypted off-cell store
@@ -1431,18 +1444,15 @@ grep -Fx 'rollback=passed' "$evidence_dir/codegraph-rollback.result"
 flock -u "$runtime_lock_fd"
 exec {runtime_lock_fd}>&-
 
-install -m 0644 -- "$rollback_config_dir/Caddyfile" /srv/frank/infra/Caddyfile
-docker compose --env-file "$root_runtime_env" -f /srv/frank/infra/docker-compose.dev.yml \
-  -f "$codegraph_snapshot/pre-release-overlay.yml" \
-  up -d --no-build --no-deps --force-recreate --wait --wait-timeout 180 frank-caddy
-
 bash "$FRANK_RELEASE_SOURCE/scripts/production/post-deploy-smoke.sh" \
   > "$evidence_dir/rollback-smoke.result" \
   2> "$evidence_dir/rollback-smoke.log"
 grep -Fx 'smoke=passed' "$evidence_dir/rollback-smoke.result"
 ```
 
-Record the resulting API/web/codegraph image IDs and compare them with
+The rollback script validates the completeness marker and every checksum, restores the
+captured Caddyfile by same-directory atomic rename, and then recreates Caddy together with
+the API/web/codegraph unit. Record the resulting API/web/codegraph image IDs and compare them with
 `containers.before.tsv`; verify the codegraph snapshot checksums again; and compare the
 restored Caddy hash with `config.before.sha256`. If any differ, rollback is not complete.
 
