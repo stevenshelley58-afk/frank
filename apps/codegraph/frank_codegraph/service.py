@@ -41,6 +41,7 @@ MAX_REGISTRY_BYTES = 1024 * 1024
 MAX_PROJECTS = 100
 MAX_IGNORE_PATTERNS = 256
 DEFAULT_IGNORE = (".git", "node_modules", "dist", "build", ".next", ".turbo", "coverage", "__pycache__")
+CONTENT_EVENT_TYPES = frozenset({"created", "modified", "deleted", "moved"})
 RELEASE_NAME = re.compile(r"^\d{8}T\d{6}Z-[a-f0-9]{12}$")
 PRIOR_RELEASES_TO_KEEP = 3
 COMMAND_ID = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
@@ -1108,12 +1109,19 @@ class DebouncedProjectEvents(FileSystemEventHandler):
     def __init__(self, supervisor: Supervisor, project: Project) -> None:
         self.supervisor = supervisor
         self.project = project
+        self._mount = Path(os.path.abspath(project.mount))
+        self._publication_root = Path(os.path.abspath(supervisor.output_root / project.id))
+        self._ignored = set(project.ignore)
         self._timer: threading.Timer | None = None
         self._lock = threading.Lock()
 
     def on_any_event(self, event: FileSystemEvent) -> None:
-        path = Path(event.src_path)
-        if is_ignored(path, self.project.mount, set(self.project.ignore)):
+        if event.event_type not in CONTENT_EVENT_TYPES:
+            return
+        paths = [Path(event.src_path)]
+        if event.event_type == "moved" and getattr(event, "dest_path", None):
+            paths.append(Path(event.dest_path))
+        if not any(self._is_project_content(path) for path in paths):
             return
         with self._lock:
             if self._timer:
@@ -1122,6 +1130,14 @@ class DebouncedProjectEvents(FileSystemEventHandler):
             self._timer = threading.Timer(seconds, self._queue)
             self._timer.daemon = True
             self._timer.start()
+
+    def _is_project_content(self, path: Path) -> bool:
+        absolute = Path(os.path.abspath(path))
+        try:
+            absolute.relative_to(self._publication_root)
+            return False
+        except ValueError:
+            return not is_ignored(absolute, self._mount, self._ignored)
 
     def _queue(self) -> None:
         self.supervisor.request_rebuild(self.project.id, "filesystem-change")

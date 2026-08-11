@@ -6,9 +6,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from frank_codegraph.service import (
+    DebouncedProjectEvents,
     Project,
     Supervisor,
     TRUSTED_PYTHONPATH,
@@ -133,6 +135,87 @@ class OverlayTests(unittest.TestCase):
 
 
 class PublicationTests(unittest.TestCase):
+    def test_scan_activity_quiesces_and_content_changes_debounce_once(self) -> None:
+        class ManualTimer:
+            instances: list["ManualTimer"] = []
+
+            def __init__(self, _seconds: float, callback) -> None:
+                self.callback = callback
+                self.cancelled = False
+                self.fired = False
+                self.daemon = False
+                self.instances.append(self)
+
+            def start(self) -> None:
+                return
+
+            def cancel(self) -> None:
+                self.cancelled = True
+
+            def fire(self) -> None:
+                if self.cancelled or self.fired:
+                    return
+                self.fired = True
+                self.callback()
+
+        with tempfile.TemporaryDirectory() as directory:
+            repository = Path(directory) / "repo"
+            repository.mkdir()
+            source = repository / "source.py"
+            source.write_text("VALUE = 1\n", encoding="utf-8")
+            output = repository / ".codegraph-output"
+            project = Project("example", "Example", repository, ())
+            supervisor = Supervisor(output, [project])
+            state = supervisor.states[project.id]
+            state.building = True
+            supervisor.request_rebuild(project.id, "initial")
+            with patch.object(supervisor, "_build_and_publish", return_value=("release-a", {"nodes": 1, "edges": 0})):
+                supervisor._run_project(state)
+
+            ready, _health = supervisor.health()
+            self.assertTrue(ready)
+            self.assertEqual([job["state"] for job in state.jobs.values()], ["succeeded"])
+
+            handler = DebouncedProjectEvents(supervisor, project)
+            publication_paths = (
+                output / project.id / ".staging" / "candidate" / "graphify-out" / "graph.json",
+                output / project.id / "releases" / "release-a" / "status.json",
+                output / project.id / "current" / "frank-overlay.json",
+            )
+            with patch("frank_codegraph.service.threading.Timer", ManualTimer):
+                for event_type in ("opened", "read", "closed", "closed_no_write"):
+                    handler.on_any_event(SimpleNamespace(event_type=event_type, src_path=str(source)))
+                for event_type, path in zip(("created", "modified", "deleted"), publication_paths, strict=True):
+                    handler.on_any_event(SimpleNamespace(event_type=event_type, src_path=str(path)))
+                handler.on_any_event(SimpleNamespace(
+                    event_type="moved",
+                    src_path=str(publication_paths[0]),
+                    dest_path=str(publication_paths[1]),
+                ))
+
+                self.assertEqual(ManualTimer.instances, [])
+                self.assertEqual(len(state.jobs), 1)
+
+                handler.on_any_event(SimpleNamespace(event_type="created", src_path=str(repository / "new.py")))
+                handler.on_any_event(SimpleNamespace(event_type="modified", src_path=str(source)))
+                handler.on_any_event(SimpleNamespace(event_type="deleted", src_path=str(repository / "old.py")))
+                handler.on_any_event(SimpleNamespace(
+                    event_type="moved",
+                    src_path=str(repository / "before.py"),
+                    dest_path=str(repository / "after.py"),
+                ))
+
+                self.assertEqual(len(ManualTimer.instances), 4)
+                self.assertTrue(all(timer.cancelled for timer in ManualTimer.instances[:-1]))
+                state.building = True
+                for timer in ManualTimer.instances:
+                    timer.fire()
+                self.assertEqual(len(state.jobs), 2)
+                self.assertEqual(sum(job["state"] == "queued" for job in state.jobs.values()), 1)
+                for timer in ManualTimer.instances:
+                    timer.fire()
+                self.assertEqual(len(state.jobs), 2)
+
     def test_publication_switches_current_only_after_complete_release(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "repo"
