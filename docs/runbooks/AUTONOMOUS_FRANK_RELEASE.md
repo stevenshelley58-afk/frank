@@ -155,6 +155,10 @@ fi
 test "$(git --git-dir="$release_git_dir" rev-parse --is-bare-repository)" = 'true'
 test "$(git --git-dir="$release_git_dir" remote get-url origin)" = "$release_repo_url"
 
+git --git-dir="$release_git_dir" config remote.origin.fetch \
+  '+refs/heads/main:refs/remotes/origin/main'
+test "$(git --git-dir="$release_git_dir" config --get-all remote.origin.fetch)" = \
+  '+refs/heads/main:refs/remotes/origin/main'
 git --git-dir="$release_git_dir" fetch --prune origin \
   '+refs/heads/main:refs/remotes/origin/main'
 origin_main="$(git --git-dir="$release_git_dir" rev-parse refs/remotes/origin/main)"
