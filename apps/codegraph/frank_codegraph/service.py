@@ -689,7 +689,12 @@ def prune_releases(project_root: Path, keep_prior: int = PRIOR_RELEASES_TO_KEEP)
         if resolved.parent == releases_root:
             candidates.append(resolved)
     keep = {current_target}
-    keep.update(candidate for candidate in sorted(candidates, key=lambda path: path.name, reverse=True) if candidate != current_target][:keep_prior])
+    prior_candidates = [
+        candidate
+        for candidate in sorted(candidates, key=lambda path: path.name, reverse=True)
+        if candidate != current_target
+    ]
+    keep.update(prior_candidates[:keep_prior])
     removed: list[str] = []
     for candidate in candidates:
         if candidate in keep:

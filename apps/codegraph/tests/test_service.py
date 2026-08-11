@@ -144,6 +144,7 @@ class PublicationTests(unittest.TestCase):
             (project / "current").symlink_to(Path("releases") / names[-1], target_is_directory=True)
             removed = prune_releases(project)
             self.assertEqual(removed, names[:2])
+            self.assertEqual(sorted(path.name for path in releases.iterdir()), names[2:])
             self.assertTrue((project / "current").resolve().is_dir())
 
     def test_retention_refuses_absolute_current_symlink(self) -> None:
