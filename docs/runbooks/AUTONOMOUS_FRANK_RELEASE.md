@@ -50,7 +50,7 @@ between the backup and smoke gates.
 | `infra/production/Caddyfile.frank-production` | Replacement `frank.fail` site block with a private UI/control surface | None until merged into the live Caddy candidate and reloaded |
 
 Required host commands are Bash 4.3+, Docker with Compose, Git, GitHub CLI, `jq`,
-`curl`, `gzip`, `openssl`, `sha256sum`, `flock`, `find`, `realpath`, and standard
+`curl`, `gzip`, `openssl`, `sha256sum`, `flock`, `find`, `realpath`, `tar`, and standard
 GNU coreutils.
 
 ## 1. Create the release evidence directory
@@ -83,6 +83,9 @@ release_branch="release-$release_id"
 export FRANK_EXPECTED_BRANCH="$release_branch"
 export FRANK_RELEASE_SOURCE="/srv/frank/releases/${release_id}-${FRANK_EXPECTED_COMMIT:0:12}"
 export FRANK_REPO_PATH="$FRANK_RELEASE_SOURCE"
+export FRANK_CODEGRAPH_INPUTS_HOST_PATH="/srv/frank/codegraph-inputs/${release_id}-${FRANK_EXPECTED_COMMIT:0:12}"
+export FRANK_CODEGRAPH_REGISTRY_HOST_PATH="$FRANK_CODEGRAPH_INPUTS_HOST_PATH/projects.json"
+export FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH="$FRANK_CODEGRAPH_INPUTS_HOST_PATH/repository"
 export FRANK_RELEASE_COMMIT="$FRANK_EXPECTED_COMMIT"
 export FRANK_CELL_ID='frank'
 export FRANK_API_AUDIENCE='frank.api'
@@ -185,7 +188,108 @@ retention job may use `git --git-dir="$release_git_dir" worktree remove` only af
 release is no longer live and no rollback procedure references it. Never delete a mounted
 release directory directly.
 
-### 2B. Provision the codegraph control credential
+### 2B. Stage non-root codegraph inputs
+
+Keep the reviewed release worktree and its bare cache root-only. Stage only the tracked
+project tree needed by Graphify, without `.git`, secret-shaped paths, or build outputs, and
+the validated operator registry. The complete per-release input directory is published by
+a same-filesystem atomic rename. UID/GID 10001 receives group read/traverse permission but
+no write permission; unrelated users receive no access:
+
+```bash
+test "$(id -u)" -eq 0
+test "$(realpath -e -- /srv/frank)" = '/srv/frank'
+test ! -L /srv/frank
+
+registry_source="$FRANK_RELEASE_SOURCE/infra/production/codegraph-projects.json"
+test "$(realpath -e -- "$FRANK_RELEASE_SOURCE")" = "$FRANK_RELEASE_SOURCE"
+git -C "$FRANK_RELEASE_SOURCE" ls-files --error-unmatch -- \
+  infra/production/codegraph-projects.json >/dev/null
+test -f "$registry_source" && test ! -L "$registry_source"
+test "$(realpath -e -- "$registry_source")" = "$registry_source"
+test "$(git -C "$FRANK_RELEASE_SOURCE" rev-parse HEAD)" = "$FRANK_EXPECTED_COMMIT"
+test -z "$(git -C "$FRANK_RELEASE_SOURCE" status --porcelain=v1 --untracked-files=normal)"
+git -C "$FRANK_RELEASE_SOURCE" cat-file -e \
+  "$FRANK_EXPECTED_COMMIT:infra/production/codegraph-projects.json"
+jq -e '
+  .schema_version == 1 and
+  ([.projects[] | select(.id == "frank" and .mount == "/repositories/frank")] | length == 1)
+' "$registry_source" >/dev/null
+git -C "$FRANK_RELEASE_SOURCE" ls-files -s | awk '
+  $1 != "100644" && $1 != "100755" { exit 42 }
+'
+
+codegraph_inputs_parent='/srv/frank/codegraph-inputs'
+codegraph_staging_parent="$codegraph_inputs_parent/.staging"
+test "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH" = "$FRANK_CODEGRAPH_INPUTS_HOST_PATH/projects.json"
+test "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH" = "$FRANK_CODEGRAPH_INPUTS_HOST_PATH/repository"
+test ! -e "$FRANK_CODEGRAPH_INPUTS_HOST_PATH" && test ! -L "$FRANK_CODEGRAPH_INPUTS_HOST_PATH"
+test ! -L "$codegraph_inputs_parent" && test ! -L "$codegraph_staging_parent"
+install -d -o root -g 10001 -m 0750 -- "$codegraph_inputs_parent"
+install -d -o root -g root -m 0700 -- "$codegraph_staging_parent"
+test "$(realpath -e -- "$codegraph_inputs_parent")" = "$codegraph_inputs_parent"
+test "$(realpath -e -- "$codegraph_staging_parent")" = "$codegraph_staging_parent"
+
+codegraph_inputs_tmp="$(mktemp -d "$codegraph_staging_parent/.inputs.XXXXXX")"
+trap 'rm -rf -- "${codegraph_inputs_tmp:-}"' EXIT
+install -d -o root -g root -m 0700 -- "$codegraph_inputs_tmp/repository"
+registry_source_sha256_before="$(sha256sum -- "$registry_source" | awk '{print $1}')"
+install -o root -g root -m 0600 -- "$registry_source" "$codegraph_inputs_tmp/projects.json"
+
+git -C "$FRANK_RELEASE_SOURCE" archive --format=tar "$FRANK_EXPECTED_COMMIT" -- . \
+  ':(exclude)**/.env' ':(exclude)**/.env.*' ':(exclude)**/secrets/**' \
+  ':(exclude)**/*.key' ':(exclude)**/*.pem' ':(exclude)**/*.p12' ':(exclude)**/*.pfx' \
+  ':(exclude)**/node_modules/**' ':(exclude)**/dist/**' ':(exclude)**/build/**' \
+  ':(exclude)**/.next/**' ':(exclude)**/.turbo/**' ':(exclude)**/coverage/**' \
+  ':(exclude)**/__pycache__/**' ':(exclude)**/.pytest_cache/**' \
+  > "$codegraph_inputs_tmp/repository.tar"
+repository_archive_sha256="$(sha256sum -- "$codegraph_inputs_tmp/repository.tar" | awk '{print $1}')"
+tar --extract --file "$codegraph_inputs_tmp/repository.tar" \
+  --directory "$codegraph_inputs_tmp/repository" --no-same-owner --no-same-permissions
+rm -f -- "$codegraph_inputs_tmp/repository.tar"
+
+test -z "$(find "$codegraph_inputs_tmp/repository" -mindepth 1 ! -type d ! -type f -print -quit)"
+test -z "$(find "$codegraph_inputs_tmp/repository" -mindepth 1 \( \
+  -name .git -o -name .env -o -name '.env.*' -o -name secrets -o \
+  -name node_modules -o -name dist -o -name build -o -name .next -o \
+  -name .turbo -o -name coverage -o -name __pycache__ -o -name .pytest_cache \
+  \) -print -quit)"
+test -f "$registry_source" && test ! -L "$registry_source"
+test "$(realpath -e -- "$registry_source")" = "$registry_source"
+registry_source_sha256_after="$(sha256sum -- "$registry_source" | awk '{print $1}')"
+registry_staged_sha256="$(sha256sum -- "$codegraph_inputs_tmp/projects.json" | awk '{print $1}')"
+test "$registry_source_sha256_before" = "$registry_source_sha256_after"
+test "$registry_source_sha256_before" = "$registry_staged_sha256"
+
+chown -R root:10001 -- "$codegraph_inputs_tmp"
+find "$codegraph_inputs_tmp" -type d -exec chmod 0750 -- {} +
+find "$codegraph_inputs_tmp" -type f -exec chmod 0640 -- {} +
+test -z "$(find "$codegraph_inputs_tmp" \( -type d -o -type f \) -perm /0022 -print -quit)"
+mv -T -- "$codegraph_inputs_tmp" "$FRANK_CODEGRAPH_INPUTS_HOST_PATH"
+trap - EXIT
+
+test "$(realpath -e -- "$FRANK_CODEGRAPH_INPUTS_HOST_PATH")" = "$FRANK_CODEGRAPH_INPUTS_HOST_PATH"
+test "$(stat -c '%u:%g:%a' -- "$FRANK_CODEGRAPH_INPUTS_HOST_PATH")" = '0:10001:750'
+test "$(stat -c '%u:%g:%a' -- "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH")" = '0:10001:640'
+test "$(stat -c '%u:%g:%a' -- "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH")" = '0:10001:750'
+test "$(sha256sum -- "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH" | awk '{print $1}')" = \
+  "$registry_source_sha256_before"
+test ! -e "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH/.git" && \
+  test ! -L "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH/.git"
+{
+  printf 'release_commit=%s\n' "$FRANK_EXPECTED_COMMIT"
+  printf 'release_tree=%s\n' "$(git -C "$FRANK_RELEASE_SOURCE" rev-parse "$FRANK_EXPECTED_COMMIT^{tree}")"
+  printf 'repository_archive_sha256=%s\n' "$repository_archive_sha256"
+  printf 'registry_sha256=%s\n' "$registry_source_sha256_before"
+} > "$evidence_dir/codegraph-inputs.receipt"
+chmod 0600 "$evidence_dir/codegraph-inputs.receipt"
+```
+
+Retain this staged directory while any API or codegraph container bind-mounts it. Cleanup
+must target only a reviewed, inactive per-release directory; never mutate the private
+release worktree or bare cache to make a container readable.
+
+### 2C. Provision the codegraph control credential
 
 Provision the shared API/codegraph control token before Compose validation. It is a random
 file-backed secret, not the signed web BFF identity token minted later from the verified API
@@ -575,6 +679,43 @@ docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMA
 test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$FRANK_CODEGRAPH_IMAGE")" = \
   '["/usr/local/bin/python3","-P","-m","frank_codegraph"]'
 
+docker run --rm --network none --read-only --user 10001:10001 --cap-drop ALL \
+  --security-opt no-new-privileges:true --entrypoint /usr/local/bin/python3 \
+  --mount "type=bind,src=$FRANK_CODEGRAPH_REGISTRY_HOST_PATH,dst=/input/projects.json,readonly" \
+  --mount "type=bind,src=$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH,dst=/input/repository,readonly" \
+  "$FRANK_CODEGRAPH_IMAGE" -P -c '
+import errno, json
+with open("/input/projects.json", "r", encoding="utf-8") as handle:
+    registry = json.load(handle)
+assert registry["projects"]
+with open("/input/repository/package.json", "rb") as handle:
+    assert handle.read(1)
+for target in ("/input/projects.json", "/input/repository/.write-probe"):
+    try:
+        with open(target, "ab"):
+            pass
+    except OSError as error:
+        assert error.errno in (errno.EACCES, errno.EPERM, errno.EROFS)
+    else:
+        raise RuntimeError(f"UID 10001 unexpectedly wrote {target}")
+'
+
+docker run --rm --network none --read-only --user 10002:10002 --cap-drop ALL \
+  --security-opt no-new-privileges:true --entrypoint /usr/local/bin/python3 \
+  --mount "type=bind,src=$FRANK_CODEGRAPH_REGISTRY_HOST_PATH,dst=/input/projects.json,readonly" \
+  --mount "type=bind,src=$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH,dst=/input/repository,readonly" \
+  "$FRANK_CODEGRAPH_IMAGE" -P -c '
+import errno
+for target in ("/input/projects.json", "/input/repository/package.json"):
+    try:
+        with open(target, "rb"):
+            pass
+    except OSError as error:
+        assert error.errno in (errno.EACCES, errno.EPERM)
+    else:
+        raise RuntimeError(f"unrelated UID unexpectedly read {target}")
+'
+
 ```
 
 The artifact directory, manifest, parsed SPDX SBOMs, digest-bound OpenVEX, GitHub workflow
@@ -793,7 +934,7 @@ Two values require operational issuance, not an invented repository default:
   `FRANK_BASIC_AUTH_PASSWORD` in the root-only secret runtime. Neither value belongs in Git,
   the candidate Caddyfile, or release evidence.
 
-The codegraph credential issued in step 2B is one shared random bearer token consumed as a
+The codegraph credential issued in step 2C is one shared random bearer token consumed as a
 Docker file secret by both API and codegraph. Compose file-backed secrets are bind mounts
 in this deployment; its host ownership and mode are therefore part of the contract. A
 missing/unreadable file blocks Compose startup.
@@ -820,6 +961,14 @@ printf '%s' "$FRANK_DOCKER_SOCKET_GID" | grep -Eq '^[0-9]+$'
 test "$(realpath -e -- "$FRANK_WORKSPACE_SOURCE_HOST_PATH")" = '/srv/frank/workspaces/central'
 test "$(realpath -e -- "$FRANK_RELEASE_SOURCE")" = "$(realpath -e -- "$FRANK_REPO_PATH")"
 test "$(stat -c '%u:%g:%a' "$FRANK_CODEGRAPH_CONTROL_TOKEN_FILE")" = '10001:10001:400'
+test "$(realpath -e -- "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH")" = "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH"
+test "$(realpath -e -- "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH")" = "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH"
+test "$(stat -c '%u:%g:%a' -- "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH")" = '0:10001:640'
+test "$(stat -c '%u:%g:%a' -- "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH")" = '0:10001:750'
+test "$(sha256sum -- "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH" | awk '{print $1}')" = \
+  "$(sha256sum -- "$FRANK_RELEASE_SOURCE/infra/production/codegraph-projects.json" | awk '{print $1}')"
+test ! -e "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH/.git" && \
+  test ! -L "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH/.git"
 case "$FRANK_BASIC_AUTH_HASH" in
   '$2a$'*|'$2b$'*|'$2y$'*) ;;
   *) printf '%s\n' 'FRANK_BASIC_AUTH_HASH must be a bcrypt hash' >&2; exit 1 ;;
@@ -835,6 +984,8 @@ esac
   (.services["frank-web"].image | test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$")) and
   (.services["frank-codegraph"].image | test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-codegraph@sha256:[a-f0-9]{64}$")) and
   (.services["frank-codegraph-volume-init"].image == .services["frank-codegraph"].image) and
+  (.services["frank-api"].user == "10001:10001") and
+  (.services["frank-codegraph"].user == "10001:10001") and
   (.services["frank-codegraph"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph"]) and
   (.services["frank-codegraph-volume-init"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph.volume_init"]) and
   .services["frank-api"].environment.FRANK_ENV == "production" and
@@ -846,6 +997,15 @@ esac
     select(any(.value.volumes[]?;
       .type == "bind" and .source == "/var/run/docker.sock")) |
     .key] == ["frank-api"]) and
+  (any(.services["frank-api"].volumes[]?;
+    .type == "bind" and .source == env.FRANK_CODEGRAPH_REGISTRY_HOST_PATH and
+    .target == "/etc/frank-codegraph/projects.json" and .read_only == true)) and
+  (any(.services["frank-codegraph"].volumes[]?;
+    .type == "bind" and .source == env.FRANK_CODEGRAPH_REGISTRY_HOST_PATH and
+    .target == "/etc/frank-codegraph/projects.json" and .read_only == true)) and
+  (any(.services["frank-codegraph"].volumes[]?;
+    .type == "bind" and .source == env.FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH and
+    .target == "/repositories/frank" and .read_only == true)) and
   ((.services["frank-api"].ports // []) | length == 0) and
   ((.services["frank-web"].ports // []) | length == 0) and
   ((.services["frank-db"].ports // []) | length == 0) and
@@ -862,6 +1022,9 @@ esac
 "${compose[@]}" config --images > "$evidence_dir/compose.images.expected.txt"
 sha256sum "$base_compose" "$app_overlay" \
   "$FRANK_RELEASE_SOURCE/infra/production/Caddyfile.frank-production" \
+  "$FRANK_RELEASE_SOURCE/infra/production/codegraph-projects.json" \
+  "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH" \
+  "$evidence_dir/codegraph-inputs.receipt" \
   > "$evidence_dir/release-inputs.sha256"
 ```
 

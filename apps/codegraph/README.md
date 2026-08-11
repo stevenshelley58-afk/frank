@@ -72,9 +72,11 @@ network. The codegraph service has no general egress network. A one-shot,
 networkless init service performs a bounded, no-follow migration of a legacy
 `/data/codegraph` tree before the UID 10001 service starts, refusing special
 files, hard-link anomalies and every symlink except the exact contained
-`<project>/current -> releases/<release>` selector. Repository and registry binds both
-come from `FRANK_RELEASE_SOURCE`, ensuring the image, registry and indexed tree
-belong to the same release.
+`<project>/current -> releases/<release>` selector. Production keeps the reviewed release
+worktree and bare cache private. The runbook atomically stages a `.git`/secret/build-free
+tracked snapshot and its hash-matched registry in a root-owned, group-10001 read-only
+directory; explicit production bind paths ensure both inputs belong to the same reviewed
+commit without making the private Git source readable to the container or unrelated users.
 
 The runtime dependency set is hash-locked and the Graphify archive is pinned by
 commit and SHA-256. The credential-free builder is official Python 3.14.6 on
