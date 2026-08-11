@@ -217,7 +217,9 @@ export function registerMissionRoutes(
   });
 
   registerRoute(app, dependencies, missionListRoute, async ({ query, context }) => ({
-    missions: await dependencies.orchestrator.list(context.cellId, query.limit),
+    // The domain collection remains readonly; HTTP schemas deliberately expose
+    // ordinary arrays, so copy only at this serialization boundary.
+    missions: [...(await dependencies.orchestrator.list(context.cellId, query.limit))],
     identifiers: identifiersOf(context),
   }));
 
