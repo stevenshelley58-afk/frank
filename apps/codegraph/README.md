@@ -104,7 +104,7 @@ It physically excludes `tarfile.py`, `html/parser.py`, the unused Tk GUI surface
 (`_tkinter`, `tkinter`, `idlelib`, and `turtledemo`), bytecode caches, pip,
 setuptools, wheel, shells and package managers. Tk removal is explicit rather
 than a generic missing-library exception: every other unresolved `DT_NEEDED`
-entry still fails the build. The scratch image runs `/usr/local/bin/python3 -m frank_codegraph`
+entry still fails the build. The scratch image runs `/usr/local/bin/python3 -P -m frank_codegraph`
 as UID/GID 10001. Its only configured Python module roots are the fixed trusted
 `/app:/opt/frank-codegraph/site-packages` path; supervisor extraction children
 receive the same exact value, explicit `-P`, `PYTHONSAFEPATH=1`, and disabled

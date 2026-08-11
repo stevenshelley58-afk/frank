@@ -537,6 +537,8 @@ gh attestation verify "oci://$FRANK_WORKBENCH_IMAGE" -R "$FRANK_GITHUB_REPOSITOR
 docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE" "$FRANK_WORKBENCH_IMAGE" \
   --format '{{.RepoDigests}}\t{{.Id}}' \
   > "$evidence_dir/application-images.pulled.tsv"
+test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$FRANK_CODEGRAPH_IMAGE")" = \
+  '["/usr/local/bin/python3","-P","-m","frank_codegraph"]'
 
 ```
 
@@ -789,6 +791,8 @@ esac
   (.services["frank-web"].image | test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$")) and
   (.services["frank-codegraph"].image | test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-codegraph@sha256:[a-f0-9]{64}$")) and
   (.services["frank-codegraph-volume-init"].image == .services["frank-codegraph"].image) and
+  (.services["frank-codegraph"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph"]) and
+  (.services["frank-codegraph-volume-init"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph.volume_init"]) and
   .services["frank-api"].environment.FRANK_ENV == "production" and
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and

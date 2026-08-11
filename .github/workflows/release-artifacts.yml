@@ -212,7 +212,7 @@ jobs:
           exact_image="$IMAGE_CODEGRAPH@$CODEGRAPH_DIGEST"
           docker pull "$exact_image"
           test "$(docker image inspect --format '{{.Config.User}}' "$exact_image")" = '10001:10001'
-          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$exact_image")" = '["/usr/local/bin/python3","-m","frank_codegraph"]'
+          test "$(docker image inspect --format '{{json .Config.Entrypoint}}' "$exact_image")" = '["/usr/local/bin/python3","-P","-m","frank_codegraph"]'
           jq -e '
             [(.packages // [])[]?.name | ascii_downcase |
               select(. == "pip" or . == "setuptools" or . == "wheel")] | length == 0
@@ -237,7 +237,7 @@ jobs:
             --entrypoint /usr/local/bin/python3 \
             --volume "$PWD/runtime-acceptance/project:/acceptance/project:ro" \
             --volume "$PWD/runtime-acceptance/output:/acceptance/output" \
-            "$exact_image" -c '
+            "$exact_image" -P -c '
           import importlib.util
           import json
           import sys

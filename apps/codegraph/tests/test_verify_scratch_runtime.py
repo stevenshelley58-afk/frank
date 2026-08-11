@@ -27,6 +27,33 @@ POLICY_SPEC.loader.exec_module(IMPORT_POLICY)
 
 
 class TkImportStaticCheckTests(unittest.TestCase):
+    def test_release_surfaces_require_exact_safe_entrypoints(self) -> None:
+        repository = Path(__file__).parents[3]
+        image_entrypoint = '["/usr/local/bin/python3","-P","-m","frank_codegraph"]'
+        old_entrypoint = '["/usr/local/bin/python3","-m","frank_codegraph"]'
+        for relative in (
+            ".github/workflows/codegraph-image-security.yml",
+            ".github/workflows/release-artifacts.yml",
+            "docs/runbooks/AUTONOMOUS_FRANK_RELEASE.md",
+        ):
+            content = (repository / relative).read_text(encoding="utf-8")
+            self.assertIn(image_entrypoint, content)
+            self.assertNotIn(old_entrypoint, content)
+
+        dockerfile = (repository / "apps/codegraph/Dockerfile").read_text(encoding="utf-8")
+        self.assertIn('ENTRYPOINT ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph"]', dockerfile)
+        self.assertIn('chroot /opt/frank-runtime-root /usr/local/bin/python3 -P -c', dockerfile)
+
+        compose = (repository / "infra/production/docker-compose.app.yml").read_text(encoding="utf-8")
+        self.assertIn(
+            'entrypoint: ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph"]',
+            compose,
+        )
+        self.assertIn(
+            'entrypoint: ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph.volume_init"]',
+            compose,
+        )
+
     def test_runtime_sitecustomize_enforces_safe_fixed_roots(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
