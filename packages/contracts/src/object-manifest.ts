@@ -37,6 +37,8 @@ export interface UploadCapabilityTokenPort {
 }
 
 export const MAX_UPLOAD_CAPABILITY_TOKEN_BYTES = 2048;
+/** Signed capability lifetime; the separate upload reservation remains resumable for 24 hours. */
+export const MAX_UPLOAD_CAPABILITY_TTL_SECONDS = 900;
 
 export type AttachmentState = 'staging'|'scanning'|'ready'|'promoted'|'rejected'|'cancelled'|'expired';
 export type AttachmentOutboxKind = 'hash_scan_promote'|'extract'|'cleanup'|'reconcile';

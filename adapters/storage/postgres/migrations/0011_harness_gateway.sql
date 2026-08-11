@@ -23,23 +23,25 @@ CREATE TABLE "frank_domain"."harness_config_revision" (
 CREATE UNIQUE INDEX "harness_config_revision_active_uidx" ON "frank_domain"."harness_config_revision"("cell_id","harness_id") WHERE "status" = 'active';--> statement-breakpoint
 
 CREATE TABLE "frank_domain"."room_route_policy" (
-  "id" uuid PRIMARY KEY NOT NULL, "cell_id" text NOT NULL, "room_id" uuid NOT NULL, "revision" integer NOT NULL,
+  "id" uuid PRIMARY KEY NOT NULL, "cell_id" text NOT NULL, "subject_kind" text NOT NULL CHECK ("subject_kind" IN ('central','project','room')), "subject_id" text NOT NULL, "room_id" uuid, "revision" integer NOT NULL,
   "profile" text NOT NULL, "aliases" jsonb NOT NULL, "shadow_mode" boolean NOT NULL DEFAULT false,
   "active" boolean NOT NULL DEFAULT true, "created_at" timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT "room_route_policy_revision_uidx" UNIQUE("cell_id","room_id","revision"),
+  CONSTRAINT "room_route_policy_revision_uidx" UNIQUE("cell_id","subject_kind","subject_id","revision"),
   CONSTRAINT "room_route_policy_room_cell_fk" FOREIGN KEY("room_id","cell_id") REFERENCES "frank_domain"."room"("id","cell_id") ON DELETE RESTRICT,
-  CONSTRAINT "room_route_policy_positive" CHECK ("revision" >= 1),
+  CONSTRAINT "room_route_policy_subject_consistent" CHECK (("subject_kind" = 'room') = ("room_id" IS NOT NULL)), CONSTRAINT "room_route_policy_positive" CHECK ("revision" >= 1),
   CONSTRAINT "room_route_policy_aliases_object" CHECK (jsonb_typeof("aliases") = 'object' AND "aliases" <> '{}'::jsonb),
-  CONSTRAINT "room_route_policy_ids_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("profile")) > 0)
+  CONSTRAINT "room_route_policy_ids_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("subject_id")) > 0 AND length(btrim("profile")) > 0)
 );--> statement-breakpoint
-CREATE UNIQUE INDEX "room_route_policy_active_uidx" ON "frank_domain"."room_route_policy"("cell_id","room_id") WHERE "active";--> statement-breakpoint
+CREATE UNIQUE INDEX "room_route_policy_active_uidx" ON "frank_domain"."room_route_policy"("cell_id","subject_kind","subject_id") WHERE "active";--> statement-breakpoint
 
 CREATE TABLE "frank_domain"."harness_session_lineage" (
-  "id" uuid PRIMARY KEY NOT NULL, "cell_id" text NOT NULL, "harness_id" text NOT NULL, "parent_session_id" uuid,
+  "id" uuid PRIMARY KEY NOT NULL, "cell_id" text NOT NULL, "harness_id" text NOT NULL, "parent_session_id" uuid, "conversation_id" uuid, "room_id" uuid, "turn_id" uuid,
   "external_session_id" text, "checkpoint" jsonb, "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT "harness_session_lineage_id_cell_harness_uidx" UNIQUE("id","cell_id","harness_id"),
   CONSTRAINT "harness_session_lineage_parent_fk" FOREIGN KEY("parent_session_id","cell_id","harness_id") REFERENCES "frank_domain"."harness_session_lineage"("id","cell_id","harness_id") ON DELETE RESTRICT,
-  CONSTRAINT "harness_session_lineage_checkpoint_object" CHECK ("checkpoint" IS NULL OR jsonb_typeof("checkpoint") = 'object'),
+  CONSTRAINT "harness_session_lineage_conversation_cell_fk" FOREIGN KEY("conversation_id","cell_id") REFERENCES "frank_domain"."chat_conversation"("id","cell_id") ON DELETE RESTRICT,
+  CONSTRAINT "harness_session_lineage_room_cell_fk" FOREIGN KEY("room_id","cell_id") REFERENCES "frank_domain"."room"("id","cell_id") ON DELETE RESTRICT,
+  CONSTRAINT "harness_session_lineage_checkpoint_object" CHECK ("checkpoint" IS NULL OR jsonb_typeof("checkpoint") = 'object'), CONSTRAINT "harness_session_lineage_scope_present" CHECK ("conversation_id" IS NOT NULL OR "room_id" IS NOT NULL),
   CONSTRAINT "harness_session_lineage_ids_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("harness_id")) > 0 AND ("external_session_id" IS NULL OR length(btrim("external_session_id")) > 0))
 );--> statement-breakpoint
 

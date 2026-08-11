@@ -17,6 +17,7 @@ CREATE TABLE "frank_domain"."chat_turn" (
   CONSTRAINT "chat_turn_finished_after_created" CHECK ("finished_at" IS NULL OR "finished_at" >= "created_at")
 );--> statement-breakpoint
 CREATE UNIQUE INDEX "chat_turn_id_cell_uidx" ON "frank_domain"."chat_turn"("id","cell_id");--> statement-breakpoint
+ALTER TABLE "frank_domain"."harness_session_lineage" ADD CONSTRAINT "harness_session_lineage_turn_cell_fk" FOREIGN KEY("turn_id","cell_id") REFERENCES "frank_domain"."chat_turn"("id","cell_id") ON DELETE RESTRICT;--> statement-breakpoint
 CREATE TABLE "frank_domain"."chat_turn_event" (
   "turn_id" uuid NOT NULL, "cell_id" text NOT NULL, "cursor" integer NOT NULL, "kind" text NOT NULL, "payload" jsonb NOT NULL, "created_at" timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY("turn_id","cursor"),
@@ -49,7 +50,7 @@ CREATE TABLE "frank_domain"."harness_job" (
   "cancelled_at" timestamptz, "finished_at" timestamptz, "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT "harness_job_room_cell_fk" FOREIGN KEY("room_id","cell_id") REFERENCES "frank_domain"."room"("id","cell_id") ON DELETE RESTRICT,
   CONSTRAINT "harness_job_idempotency_uidx" UNIQUE("cell_id","idempotency_key"),
-  CONSTRAINT "harness_job_request_hash" CHECK ("request_hash" ~ '^[a-f0-9]{64}$'), CONSTRAINT "harness_job_scope_object" CHECK (jsonb_typeof("scope") = 'object' AND "scope" <> '{}'::jsonb AND "scope"->>'cell_id' = "cell_id" AND "scope"->>'owner_id' = "owner_id"),
+  CONSTRAINT "harness_job_request_hash" CHECK ("request_hash" ~ '^[a-f0-9]{64}$'), CONSTRAINT "harness_job_scope_object" CHECK (jsonb_typeof("scope") = 'object' AND "scope" ? 'cell_id' AND "scope" ? 'owner_id' AND jsonb_typeof("scope"->'cell_id') = 'string' AND jsonb_typeof("scope"->'owner_id') = 'string' AND length(btrim("scope"->>'cell_id')) > 0 AND length(btrim("scope"->>'owner_id')) > 0 AND "scope"->>'cell_id' = "cell_id" AND "scope"->>'owner_id' = "owner_id" AND (NOT ("scope" ? 'project_id') OR (jsonb_typeof("scope"->'project_id') = 'string' AND length(btrim("scope"->>'project_id')) > 0)) AND (NOT ("scope" ? 'room_id') OR (jsonb_typeof("scope"->'room_id') = 'string' AND length(btrim("scope"->>'room_id')) > 0))),
   CONSTRAINT "harness_job_input_object" CHECK (jsonb_typeof("input") = 'object' AND "input" <> '{}'::jsonb), CONSTRAINT "harness_job_tools_array" CHECK (jsonb_typeof("allowed_tools") = 'array' AND jsonb_array_length("allowed_tools") > 0),
   CONSTRAINT "harness_job_ids_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("owner_id")) > 0 AND length(btrim("idempotency_key")) > 0),
   CONSTRAINT "harness_job_terminal_finished_paired" CHECK (("status" IN ('completed','failed','cancelled')) = ("finished_at" IS NOT NULL)), CONSTRAINT "harness_job_cancelled_state_paired" CHECK (("status" = 'cancelled') = ("cancelled_at" IS NOT NULL)), CONSTRAINT "harness_job_finished_after_created" CHECK ("finished_at" IS NULL OR "finished_at" >= "created_at")
