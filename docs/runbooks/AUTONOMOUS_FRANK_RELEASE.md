@@ -40,7 +40,7 @@ step between the backup and smoke gates.
 | `scripts/production/hosted-preflight.sh` | Disk, Git, secret-name, Docker, network, Compose, container, and image gates | None |
 | `scripts/production/backup-postgres.sh` | Atomic gzip `pg_dump`, SHA-256 verification, manifest, retention | Writes backup sets and removes expired matching sets |
 | `scripts/production/post-deploy-smoke.sh` | Public `/live`, `/ready`, and web-root checks | None beyond ordinary request logs |
-| `infra/production/docker-compose.app.yml` | Authoritative production overrides for API, web, and their Caddy dependency | None until passed to `docker compose up` or `build` |
+| `infra/production/docker-compose.app.yml` | Authoritative production overrides for API, web, and their Caddy dependency | None until applied by `docker compose up` |
 | `infra/production/Caddyfile.frank-production` | Replacement `frank.fail` site block with a private UI/control surface | None until merged into the live Caddy candidate and reloaded |
 
 Required host commands are Bash 4.3+, Docker with Compose, Git, `jq`, `curl`,
@@ -112,14 +112,141 @@ Compose model, absent image, unhealthy container, or insufficient disk fails the
 The upstream check does not fetch. CI or the release operator must fetch before this step
 and ensure the locally known upstream reference is current.
 
-### 3A. Define and validate the production application overlay
+### 3A. Download and verify the GitHub release artifact
+
+`release-artifacts` publishes only after a successful `verify` run for a push to the
+protected `main` branch. Its first artifact is created by the first successful verify
+following a merge to `main`; it does not publish release images for feature branches or
+backfill an already-verified commit. Repository settings must keep `main` protected; the
+workflow checks that `main` is the repository default branch but cannot create or verify
+the branch-protection rule itself.
+
+Download the evidence artifact for the exact approved full commit. Use a GitHub CLI
+identity with read access to the repository attestations and a GHCR credential with only
+`read:packages` if the package is private. Neither credential is written to evidence or
+printed:
+
+```bash
+export FRANK_RELEASE_COMMIT="$FRANK_EXPECTED_COMMIT"
+export FRANK_GITHUB_REPOSITORY='stevenshelley58-afk/frank'
+export FRANK_ARTIFACT_RUN_ID='<SUCCESSFUL_RELEASE_ARTIFACTS_RUN_ID>'
+export FRANK_RELEASE_ARTIFACT_DIR="$evidence_dir/github-release-artifact"
+
+rm -rf -- "$FRANK_RELEASE_ARTIFACT_DIR"
+mkdir -p -- "$FRANK_RELEASE_ARTIFACT_DIR"
+
+gh run view "$FRANK_ARTIFACT_RUN_ID" -R "$FRANK_GITHUB_REPOSITORY" \
+  --json conclusion,headBranch,headSha,workflowName \
+  > "$evidence_dir/release-artifacts-run.json"
+node --input-type=module - "$evidence_dir/release-artifacts-run.json" "$FRANK_RELEASE_COMMIT" <<'NODE'
+import { readFileSync } from 'node:fs';
+const [path, commit] = process.argv.slice(2);
+const run = JSON.parse(readFileSync(path, 'utf8'));
+if (run.conclusion !== 'success' || run.workflowName !== 'release-artifacts' ||
+    run.headBranch !== 'main' || run.headSha !== commit) {
+  throw new Error('Release artifact workflow run is not the successful main build for this commit');
+}
+NODE
+
+gh run download "$FRANK_ARTIFACT_RUN_ID" -R "$FRANK_GITHUB_REPOSITORY" \
+  --name "release-evidence-$FRANK_RELEASE_COMMIT" \
+  --dir "$FRANK_RELEASE_ARTIFACT_DIR"
+
+manifest="$FRANK_RELEASE_ARTIFACT_DIR/release-manifest.json"
+api_sbom="$FRANK_RELEASE_ARTIFACT_DIR/api.spdx.json"
+web_sbom="$FRANK_RELEASE_ARTIFACT_DIR/web.spdx.json"
+test -s "$manifest"
+test -s "$api_sbom"
+test -s "$web_sbom"
+
+node --input-type=module - "$manifest" "$api_sbom" "$web_sbom" \
+  "$FRANK_RELEASE_COMMIT" "$FRANK_GITHUB_REPOSITORY" <<'NODE'
+import { readFileSync } from 'node:fs';
+const [manifestPath, apiSbomPath, webSbomPath, commit, repository] = process.argv.slice(2);
+const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+for (const path of [apiSbomPath, webSbomPath]) {
+  const sbom = JSON.parse(readFileSync(path, 'utf8'));
+  if (!sbom || typeof sbom !== 'object' || !sbom.spdxVersion) throw new Error(`Invalid SPDX JSON: ${path}`);
+}
+const digest = /^sha256:[a-f0-9]{64}$/;
+const owner = repository.split('/')[0].toLowerCase();
+const expected = {
+  api: `ghcr.io/${owner}/frank-api`,
+  web: `ghcr.io/${owner}/frank-web`,
+};
+if (manifest.schema_version !== 1 || manifest.commit !== commit ||
+    manifest.repository !== repository || manifest.verified_by?.workflow !== 'verify' ||
+    !Number.isInteger(manifest.verified_by?.run_id) ||
+    manifest.sbom?.api !== 'api.spdx.json' || manifest.sbom?.web !== 'web.spdx.json' ||
+    manifest.images?.api?.reference !== expected.api || !digest.test(manifest.images?.api?.digest ?? '') ||
+    manifest.images?.web?.reference !== expected.web || !digest.test(manifest.images?.web?.digest ?? '')) {
+  throw new Error('Manifest does not exactly bind this commit, repository, SBOMs, and immutable GHCR images');
+}
+NODE
+
+verify_run_id="$(node --input-type=module - "$manifest" <<'NODE'
+import { readFileSync } from 'node:fs';
+console.log(JSON.parse(readFileSync(process.argv[2], 'utf8')).verified_by.run_id);
+NODE
+)"
+gh run view "$verify_run_id" -R "$FRANK_GITHUB_REPOSITORY" \
+  --json conclusion,event,headBranch,headSha,workflowName \
+  > "$evidence_dir/verify-run.json"
+node --input-type=module - "$evidence_dir/verify-run.json" "$FRANK_RELEASE_COMMIT" <<'NODE'
+import { readFileSync } from 'node:fs';
+const [path, commit] = process.argv.slice(2);
+const run = JSON.parse(readFileSync(path, 'utf8'));
+if (run.conclusion !== 'success' || run.workflowName !== 'verify' || run.event !== 'push' ||
+    run.headBranch !== 'main' || run.headSha !== commit) {
+  throw new Error('Manifest verify run is not the successful main push verification for this commit');
+}
+NODE
+
+export FRANK_API_IMAGE="$(node --input-type=module - "$manifest" <<'NODE'
+import { readFileSync } from 'node:fs';
+const image = JSON.parse(readFileSync(process.argv[2], 'utf8')).images.api;
+console.log(`${image.reference}@${image.digest}`);
+NODE
+)"
+export FRANK_WEB_IMAGE="$(node --input-type=module - "$manifest" <<'NODE'
+import { readFileSync } from 'node:fs';
+const image = JSON.parse(readFileSync(process.argv[2], 'utf8')).images.web;
+console.log(`${image.reference}@${image.digest}`);
+NODE
+)"
+
+printf '%s' "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USERNAME" --password-stdin
+docker pull "$FRANK_API_IMAGE"
+docker pull "$FRANK_WEB_IMAGE"
+gh attestation verify "oci://$FRANK_API_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
+  --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
+  --source-ref 'refs/heads/main' \
+  --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
+  --format json \
+  > "$evidence_dir/api.attestation.verify.json"
+gh attestation verify "oci://$FRANK_WEB_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
+  --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
+  --source-ref 'refs/heads/main' \
+  --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
+  --format json \
+  > "$evidence_dir/web.attestation.verify.json"
+docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" \
+  --format '{{.RepoDigests}}\t{{.Id}}' \
+  > "$evidence_dir/application-images.pulled.tsv"
+```
+
+The artifact directory, manifest, parsed SPDX SBOMs, GitHub workflow receipts, verified
+attestation output, and pulled image IDs are release evidence. `GHCR_PULL_TOKEN` and
+`GHCR_PULL_USERNAME` must come from the root-only secret runtime; use `--password-stdin`
+and never enable shell tracing. The two image environment variables must be copied only
+from the validated manifest output above—never composed from a tag or a branch name.
+
+### 3B. Define and validate the production application overlay
 
 Set the non-secret release/runtime identifiers. Secret values named in step 2 remain
 injected by the accepted runtime and are not repeated here:
 
 ```bash
-export FRANK_RELEASE_COMMIT="$FRANK_EXPECTED_COMMIT"
-export FRANK_RELEASE_IMAGE_TAG="$FRANK_EXPECTED_COMMIT"
 export FRANK_CELL_ID='frank'
 export FRANK_OWNER_ID='steven'
 export FRANK_API_AUDIENCE='frank.api'
@@ -189,6 +316,8 @@ test "$FRANK_WORKBENCH_CONCURRENCY" -ge 1
 test "$FRANK_WORKBENCH_CONCURRENCY" -le 8
 printf '%s' "$FRANK_WORKBENCH_IMAGE" | grep -Eq '^[a-z0-9./_-]+:[A-Za-z0-9._-]+$'
 printf '%s' "$FRANK_RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+printf '%s' "$FRANK_API_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-api@sha256:[a-f0-9]{64}$'
+printf '%s' "$FRANK_WEB_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_DOCKER_SOCKET_GID" | grep -Eq '^[0-9]+$'
 test "$(realpath -e -- "$FRANK_WORKSPACE_SOURCE_HOST_PATH")" = '/srv/frank/workspaces/central'
 case "$FRANK_BASIC_AUTH_HASH" in
@@ -198,8 +327,10 @@ esac
 
 "${compose[@]}" config --quiet
 "${compose[@]}" config --format json | jq -e '
-  .services["frank-api"].build.context == "/srv/frank/repo" and
-  .services["frank-web"].build.context == "/srv/frank/repo" and
+  (.services["frank-api"].build == null) and
+  (.services["frank-web"].build == null) and
+  (.services["frank-api"].image | test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-api@sha256:[a-f0-9]{64}$")) and
+  (.services["frank-web"].image | test("^ghcr\\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$")) and
   .services["frank-api"].environment.FRANK_ENV == "production" and
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and
@@ -259,10 +390,18 @@ docker image tag "$(docker inspect --format '{{.Image}}' frank-web)" \
   "frank-frank-web:rollback-$release_id"
 docker image tag "$(docker inspect --format '{{.Image}}' frank-codegraph)" \
   "frank-frank-codegraph:rollback-$release_id"
+
+{
+  printf 'export FRANK_API_IMAGE=%q\n' "frank-frank-api:rollback-$release_id"
+  printf 'export FRANK_WEB_IMAGE=%q\n' "frank-frank-web:rollback-$release_id"
+} > "$rollback_config_dir/application-images.env"
+chmod 0600 "$rollback_config_dir/application-images.env"
 ```
 
-Image tags are local recovery pointers. The immutable image IDs in
-`containers.before.tsv` are the evidence anchor.
+Image tags are local recovery pointers retained only for application rollback. The
+immutable image IDs in `containers.before.tsv` are the evidence anchor; subsequent
+releases should also retain their verified manifest digest references with the release
+receipt.
 
 ## 5. Create and verify the database backup
 
@@ -300,22 +439,30 @@ before a state-changing release.
 
 ## 6. Deployment boundary
 
-Only after preflight, overlay validation, rollback-image capture, local backup verification,
-and off-cell copy evidence are complete may the approved deployment mechanism run. Never
-substitute a `git pull`, an unrecorded mutable build, or the legacy rebuild script.
+Only after preflight, manifest/attestation verification, overlay validation, rollback-image
+capture, local backup verification, and off-cell copy evidence are complete may the
+approved deployment mechanism run. Never substitute a `git pull`, an unrecorded mutable
+build, or the legacy rebuild script. `docker compose build` is forbidden on the VPS for a
+release: production promotes only the already verified GHCR digest references.
 
-The application overlay builds from the exact checked-out repository. Build and record the
-two image IDs before changing a running container:
+Record the pulled immutable images and their OCI commit labels before changing a running
+container:
 
 ```bash
-"${compose[@]}" build --pull frank-api frank-web \
-  > "$evidence_dir/build.log" 2>&1
-
 docker image inspect \
-  "frank-frank-api:$FRANK_RELEASE_IMAGE_TAG" \
-  "frank-frank-web:$FRANK_RELEASE_IMAGE_TAG" \
+  "$FRANK_API_IMAGE" \
+  "$FRANK_WEB_IMAGE" \
   --format '{{.RepoTags}}\t{{.Id}}' \
-  > "$evidence_dir/application-images.built.tsv"
+  > "$evidence_dir/application-images.promoted.tsv"
+
+for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE"; do
+  test "$(docker image inspect "$image" \
+    --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" \
+    = "$FRANK_RELEASE_COMMIT"
+  test "$(docker image inspect "$image" \
+    --format '{{ index .Config.Labels "org.opencontainers.image.source" }}')" \
+    = "https://github.com/$FRANK_GITHUB_REPOSITORY"
+done
 
 docker image inspect "$FRANK_WORKBENCH_IMAGE" \
   --format '{{.RepoTags}}\t{{.Id}}' \
@@ -330,18 +477,16 @@ docker volume create \
 docker run --rm \
   --user 0:0 \
   --mount type=volume,source=frank_workbench_artifacts,target=/var/lib/frank/artifacts \
-  "frank-frank-api:$FRANK_RELEASE_IMAGE_TAG" \
+  "$FRANK_API_IMAGE" \
   sh -ceu 'mkdir -p /var/lib/frank/artifacts; chown 10001:10001 /var/lib/frank/artifacts; chmod 0750 /var/lib/frank/artifacts'
 docker volume inspect frank_workbench_artifacts \
   --format '{{.Name}}\t{{json .Labels}}' \
   > "$evidence_dir/artifact-volume.inspect.tsv"
 ```
 
-The present application Dockerfiles still resolve a mutable `node:22-alpine` base and the
-API installs dependencies without a frozen lockfile. Until those separate application-image
-gaps are closed or the resulting images are promoted to an approved immutable registry,
-the image IDs in `application-images.built.tsv` are mandatory evidence and a rebuild is a
-new artifact, not the same release.
+The production host does not rebuild images. Any Dockerfile base-image or dependency
+reproducibility concern is resolved in the GitHub build-and-attestation lane before the
+manifest is published; a new source commit requires a new verified release artifact.
 
 The Caddy file in `infra/production` is the authoritative replacement for only the existing
 `frank.fail` site block. The live Caddyfile also owns unrelated hostnames, so replacing the
@@ -441,11 +586,11 @@ recorded release plan.
 ### Application-only rollback
 
 Use this path only when the prior application is compatible with the current database
-schema. Retag the captured prior images under the overlay's rollback tag, restore the
-previous Caddyfile, then recreate only the application and edge services:
+schema. Restore the captured local recovery image references and previous Caddyfile, then
+recreate only the application and edge services. This uses no registry pull and no build:
 
 ```bash
-export FRANK_RELEASE_IMAGE_TAG="rollback-$release_id"
+source "$rollback_config_dir/application-images.env"
 install -m 0644 -- "$rollback_config_dir/Caddyfile" /srv/frank/infra/Caddyfile
 
 "${compose[@]}" up -d \
@@ -510,6 +655,16 @@ Retain these artifacts together:
 - post-deploy smoke result/log and observation-window health evidence;
 - on rollback, prior and restored image IDs, rollback smoke output, incident ID, and any
   isolated restore evidence.
+
+## GitHub build-once artifact evidence
+
+For a release built through GitHub Actions, retain the `release-evidence-<full-commit>`
+artifact from the `release-artifacts` workflow with the release evidence above. Its
+machine-readable `release-manifest.json` binds the verified full commit to the immutable
+GHCR API and web image digests; the accompanying SPDX SBOMs and GitHub OIDC provenance
+attestations are release evidence, not a deployment instruction. Production consumes the
+manifest's digest references only after the existing preflight, backup, and promotion
+gates pass. The workflow never deploys to preview, staging, or production.
 
 Never place secret values, `.env` files, raw session tokens, database contents, or private
 keys in the release evidence directory.

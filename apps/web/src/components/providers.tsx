@@ -44,11 +44,16 @@ const AuthContext = createContext<AuthContextValue>({
   retry: () => {},
 });
 
+export function shouldMintBrowserDevSession(nodeEnv = process.env.NODE_ENV): boolean {
+  return nodeEnv === 'development';
+}
+
 async function mintSession(): Promise<DevSession | null> {
+  // Browser bearer tokens are a local-development compatibility path only.
+  // Hosted traffic uses /api/v1/*, where the server attaches its service token.
+  if (!shouldMintBrowserDevSession()) return null;
   const res = await fetch('/v1/auth/dev-session', { method: 'POST' });
-  // Production deliberately disables browser-minted bearer tokens. Mission
-  // and Workbench use authenticated same-origin BFF routes, so this response
-  // means "server-owned session", not an unavailable Frank cell.
+  // A disabled local endpoint still leaves the server-owned BFF available.
   if (res.status === 403) return null;
   if (!res.ok) {
     throw new Error(`Session request failed (${res.status})`);
@@ -87,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [attempt]);
 
-  /** Re-mint (single-flight). Used by the api fetcher on 401. */
+  /** Re-mint locally (single-flight). Production never issues this request. */
   const reauth = useCallback(async (): Promise<string> => {
     if (!minting.current) {
       minting.current = mintSession()
@@ -105,9 +110,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const api = useMemo<ApiFetch | null>(() => {
-    if (!session) return null;
+    // Production requests have no browser bearer token. The /api/v1/* BFF
+    // authenticates them server-side with the domain service token; the shell's
+    // chat streaming remains on the existing /api/chat SSE bridge.
     return makeApiFetch(() => sessionRef.current?.access_token ?? null, reauth);
-  }, [session, reauth]);
+  }, [reauth]);
 
   const value = useMemo<AuthContextValue>(
     () => ({ status, session, error, api, retry: () => setAttempt((n) => n + 1) }),
@@ -209,12 +216,16 @@ interface DataContextValue {
   today: TodayResponse | null;
   work: WorkListResponse | null;
   loading: boolean;
+  todayError: string | null;
+  refresh: () => Promise<void>;
 }
 
 const DataContext = createContext<DataContextValue>({
   today: null,
   work: null,
   loading: true,
+  todayError: null,
+  refresh: async () => {},
 });
 
 export function DataProvider({ children }: { children: ReactNode }) {
@@ -222,6 +233,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [today, setToday] = useState<TodayResponse | null>(null);
   const [work, setWork] = useState<WorkListResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [todayError, setTodayError] = useState<string | null>(null);
+  const loadRef = useRef<(() => Promise<void>) | null>(null);
 
   useEffect(() => {
     if (status !== 'ready') return;
@@ -246,23 +259,31 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (cancelled) return;
         setToday(t);
         setWork(w);
-      } catch {
+        setTodayError(null);
+      } catch (error) {
+        if (!cancelled) setTodayError(error instanceof Error ? error.message : 'Today could not be loaded.');
         // quiet — the frame shows its warm-up state; the chat keeps working
       } finally {
         if (!cancelled) setLoading(false);
       }
     };
 
+    loadRef.current = load;
     setLoading(true);
     load();
     const timer = window.setInterval(load, 60_000);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      if (loadRef.current === load) loadRef.current = null;
     };
   }, [api, status]);
 
-  const value = useMemo(() => ({ today, work, loading }), [today, work, loading]);
+  const refresh = useCallback(async () => { await loadRef.current?.(); }, []);
+  const value = useMemo(
+    () => ({ today, work, loading, todayError, refresh }),
+    [today, work, loading, todayError, refresh],
+  );
   return <DataContext.Provider value={value}>{children}</DataContext.Provider>;
 }
 

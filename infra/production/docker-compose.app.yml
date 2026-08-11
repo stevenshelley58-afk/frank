@@ -7,19 +7,17 @@
 
 services:
   frank-api:
-    image: "frank-frank-api:${FRANK_RELEASE_IMAGE_TAG:?FRANK_RELEASE_IMAGE_TAG is required}"
-    build:
-      context: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
-      dockerfile: apps/api/Dockerfile
-      labels:
-        org.opencontainers.image.revision: "${FRANK_RELEASE_COMMIT:?FRANK_RELEASE_COMMIT is required}"
-        org.opencontainers.image.source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+    # Set only from a verified release-manifest.json: ghcr.io/.../frank-api@sha256:...
+    # Production promotion pulls this immutable artifact and must never build here.
+    image: "${FRANK_API_IMAGE:?FRANK_API_IMAGE is required}"
+    build: !reset null
 
     environment: !override
       HOME: /tmp
       NODE_ENV: production
       FRANK_ENV: production
       FRANK_CELL_ID: "${FRANK_CELL_ID:?FRANK_CELL_ID is required}"
+      FRANK_CELL_TIMEZONE: "${FRANK_CELL_TIMEZONE:-Australia/Perth}"
       FRANK_API_HOST: 0.0.0.0
       FRANK_API_PORT: "3000"
       FRANK_API_AUDIENCE: "${FRANK_API_AUDIENCE:?FRANK_API_AUDIENCE is required}"
@@ -129,13 +127,10 @@ services:
       start_period: 90s
 
   frank-web:
-    image: "frank-frank-web:${FRANK_RELEASE_IMAGE_TAG:?FRANK_RELEASE_IMAGE_TAG is required}"
-    build:
-      context: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
-      dockerfile: apps/web/Dockerfile
-      labels:
-        org.opencontainers.image.revision: "${FRANK_RELEASE_COMMIT:?FRANK_RELEASE_COMMIT is required}"
-        org.opencontainers.image.source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+    # Set only from a verified release-manifest.json: ghcr.io/.../frank-web@sha256:...
+    # Production promotion pulls this immutable artifact and must never build here.
+    image: "${FRANK_WEB_IMAGE:?FRANK_WEB_IMAGE is required}"
+    build: !reset null
 
     environment: !override
       NODE_ENV: production
@@ -156,6 +151,8 @@ services:
       GOOSE_PROVIDER: "${GOOSE_PROVIDER:?GOOSE_PROVIDER is required}"
       GOOSE_MODEL: "${GOOSE_MODEL:?GOOSE_MODEL is required}"
       FRANK_EXPECTED_MODEL: "${FRANK_EXPECTED_MODEL:?FRANK_EXPECTED_MODEL is required}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}"
+      DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-deepseek-chat}"
 
     volumes: !override
       - type: bind

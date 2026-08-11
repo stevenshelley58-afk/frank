@@ -10,8 +10,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import dynamic from "next/dynamic";
-import { ConsoleHeader } from "../components/console-header";
-import { moduleById } from "../registry";
+import { useAuth } from "@/components/providers";
 
 // PipelineGraph uses React Flow which needs the browser — dynamic import
 const PipelineGraph = dynamic(
@@ -57,9 +56,8 @@ type GraphStatus = {
   errorCount: number;
 };
 
-const API_BASE = typeof window !== "undefined" ? "" : "http://frank-api:3000";
-
 export default function GraphConsolePage() {
+  const { api } = useAuth();
   const [projects, setProjects] = useState<ProjectInfo[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [spec, setSpec] = useState<PipelineSpec | null>(null);
@@ -69,7 +67,8 @@ export default function GraphConsolePage() {
 
   // Load project list on mount
   useEffect(() => {
-    fetch(`${API_BASE}/v1/codegraph/projects`)
+    if (!api) return;
+    api('/v1/codegraph/projects')
       .then((r) => r.json())
       .then((data) => {
         const projs = data.projects ?? [];
@@ -79,21 +78,21 @@ export default function GraphConsolePage() {
         if (first) setSelected(first.id);
       })
       .catch(() => setError("Cannot reach the codegraph API."));
-  }, []);
+  }, [api]);
 
   // Load spec + status when a project is selected
   useEffect(() => {
-    if (!selected) return;
+    if (!api || !selected) return;
     setLoading(true);
     setError(null);
     setSpec(null);
     setStatus(null);
 
     Promise.all([
-      fetch(`${API_BASE}/v1/codegraph/${selected}/spec`).then((r) =>
+      api(`/v1/codegraph/${encodeURIComponent(selected)}/spec`).then((r) =>
         r.ok ? r.json() : Promise.reject(new Error("No spec")),
       ),
-      fetch(`${API_BASE}/v1/codegraph/${selected}/status`).then((r) =>
+      api(`/v1/codegraph/${encodeURIComponent(selected)}/status`).then((r) =>
         r.ok ? r.json() : Promise.reject(new Error("No status")),
       ),
     ])
@@ -103,32 +102,31 @@ export default function GraphConsolePage() {
       })
       .catch((err) => setError(err.message))
       .finally(() => setLoading(false));
-  }, [selected]);
+  }, [api, selected]);
 
   const handleRefresh = useCallback(() => {
     if (!selected) return;
-    fetch(`${API_BASE}/v1/codegraph/${selected}/refresh`, { method: "POST" })
+    if (!api) return;
+    api(`/v1/codegraph/${encodeURIComponent(selected)}/refresh`, { method: "POST" })
       .then((r) => r.json())
       .then(() => {
         // Re-fetch after a short delay to let the rebuild finish
         setTimeout(() => {
-          fetch(`${API_BASE}/v1/codegraph/${selected}/spec`)
+          api(`/v1/codegraph/${encodeURIComponent(selected)}/spec`)
             .then((r) => r.json())
             .then(setSpec)
             .catch(() => {});
-          fetch(`${API_BASE}/v1/codegraph/${selected}/status`)
+          api(`/v1/codegraph/${encodeURIComponent(selected)}/status`)
             .then((r) => r.json())
             .then(setStatus)
             .catch(() => {});
         }, 3000);
       })
-      .catch(() => {});
-  }, [selected]);
+      .catch((err) => setError(err instanceof Error ? err.message : 'Code graph refresh failed.'));
+  }, [api, selected]);
 
   return (
     <div className="flex h-full flex-col">
-      <ConsoleHeader module={moduleById('graph')} />
-
       {/* Project selector + status bar */}
       <div className="flex items-center gap-3 border-b border-line px-4 py-2">
         <select

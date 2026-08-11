@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /** Live calendar events for the Living Frame Today widget. */
 
@@ -25,30 +25,46 @@ export function useCalendar(hours = 24): {
   events: CalendarEvent[];
   status: CalendarResponse['status'];
   loading: boolean;
+  error: string | null;
+  refresh: () => Promise<void>;
 } {
   const [events, setEvents] = useState<CalendarEvent[]>([]);
   const [status, setStatus] = useState<CalendarResponse['status']>('not_connected');
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const mounted = useRef(true);
 
-  useEffect(() => {
-    let alive = true;
-    const load = async () => {
-      try {
-        const res = await fetch(`/api/calendar?hours=${hours}`);
-        const data = (await res.json()) as CalendarResponse;
-        if (!alive) return;
-        setStatus(data.status);
-        setEvents(data.events ?? []);
-      } catch {
-        if (alive) setStatus('error');
-      } finally {
-        if (alive) setLoading(false);
+  const load = useCallback(async () => {
+    try {
+      const res = await fetch(`/api/calendar?hours=${hours}`, { cache: 'no-store' });
+      const data = (await res.json().catch(() => null)) as CalendarResponse | null;
+      if (!res.ok || data?.status === 'error') {
+        throw new Error(data?.error ?? data?.message ?? `Calendar request failed (${res.status}).`);
       }
-    };
-    load();
-    const t = window.setInterval(load, 60_000);
-    return () => { alive = false; window.clearInterval(t); };
+      if (mounted.current) {
+        setStatus(data?.status ?? 'error');
+        setEvents(data?.events ?? []);
+        setError(null);
+      }
+    } catch (err) {
+      if (mounted.current) {
+        setStatus('error');
+        setEvents([]);
+        setError(err instanceof Error ? err.message : 'Calendar could not be loaded.');
+      }
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
   }, [hours]);
 
-  return { events, status, loading };
+  useEffect(() => {
+    mounted.current = true;
+    let alive = true;
+    const refresh = async () => { if (alive) await load(); };
+    void refresh();
+    const t = window.setInterval(() => { void refresh(); }, 60_000);
+    return () => { alive = false; mounted.current = false; window.clearInterval(t); };
+  }, [load]);
+
+  return { events, status, loading, error, refresh: load };
 }

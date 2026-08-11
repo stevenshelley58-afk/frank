@@ -269,6 +269,7 @@ export async function createSession(
 export async function* streamMessage(
   sessionId: string,
   message: string,
+  _opts?: { model?: string },
 ): AsyncGenerator<string> {
   yield* client.prompt(sessionId, message);
 }

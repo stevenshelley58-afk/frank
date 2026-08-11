@@ -22,6 +22,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import {
   Select,
@@ -222,6 +223,7 @@ function ArtifactRow({
 /* ------------------------------------------------------------------ */
 
 export function FilesConsole() {
+  const { api } = useAuth();
   const [roomId, setRoomId] = useState('central');
   const [bindings, setBindings] = useState<FolderBinding[]>([]);
   const [files, setFiles] = useState<RoomFile[]>([]);
@@ -237,10 +239,15 @@ export function FilesConsole() {
   );
 
   const load = useCallback(async () => {
+    if (!api) {
+      setBindingsError('The authenticated API bridge is unavailable.');
+      setFilesError('The authenticated API bridge is unavailable.');
+      setLoading(false);
+      return true;
+    }
     let anyError = false;
     try {
-      const res = await fetch(FILES_API.bindings(roomId));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await api(FILES_API.bindings(roomId));
       const data = (await res.json()) as { bindings?: FolderBinding[] };
       setBindings(Array.isArray(data.bindings) ? data.bindings : []);
       setBindingsError(null);
@@ -250,8 +257,7 @@ export function FilesConsole() {
       anyError = true;
     }
     try {
-      const res = await fetch(FILES_API.files(roomId));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const res = await api(FILES_API.files(roomId));
       const data = (await res.json()) as { files?: RoomFile[] };
       setFiles(Array.isArray(data.files) ? data.files : []);
       setFilesError(null);
@@ -262,7 +268,7 @@ export function FilesConsole() {
     }
     setLoading(false);
     return anyError;
-  }, [roomId]);
+  }, [api, roomId]);
 
   useEffect(() => {
     setLoading(true);
@@ -276,7 +282,8 @@ export function FilesConsole() {
     setPublishingId(id);
     setPublishError(null);
     try {
-      const res = await fetch(FILES_API.publishPreview(file.workbench_id, id), {
+      if (!api) throw new Error('The authenticated API bridge is unavailable.');
+      const res = await api(FILES_API.publishPreview(file.workbench_id, id), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -284,7 +291,6 @@ export function FilesConsole() {
         },
         body: JSON.stringify({}),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data = (await res.json()) as { preview_url?: string | null };
       // Reflect the published URL immediately; a full reload keeps it honest.
       setFiles((cur) =>

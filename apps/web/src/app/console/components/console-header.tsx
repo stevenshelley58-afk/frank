@@ -9,12 +9,15 @@ import type { ConsoleModule } from '../registry';
  * launcher it shows the console identity.
  */
 export function ConsoleHeader({ module }: { module?: ConsoleModule }) {
+  const backHref = module ? '/console' : '/';
+  const backLabel = module ? 'Back to Console' : 'Back to Frank';
+
   return (
     <header className="flex h-12 shrink-0 items-center gap-3 border-b border-line bg-rail px-4">
       <Link
-        href="/console"
+        href={backHref}
         className="grid h-7 w-7 place-items-center rounded-[8px] text-muted transition-colors hover:bg-hover hover:text-ink"
-        aria-label="Back to console"
+        aria-label={backLabel}
       >
         <ConsoleIcon name="arrow" size={16} />
       </Link>

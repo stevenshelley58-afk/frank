@@ -13,6 +13,8 @@ import { defineRoute } from '../schema/registry.js';
 import {
   missionCreateBodySchema,
   missionIdParamsSchema,
+  missionListQuerySchema,
+  missionListResponseSchema,
   missionResponseSchema,
   missionStopBodySchema,
 } from '../schema/mission.js';
@@ -85,6 +87,28 @@ export const missionGetRoute = defineRoute({
   successStatus: 200,
 });
 
+export const missionListRoute = defineRoute({
+  operationId: 'missionList',
+  method: 'GET',
+  path: '/v1/missions',
+  group: '/v1/missions',
+  summary: 'List missions',
+  description: 'Returns newest-first mission lifecycle summaries. Read an individual mission for its durable work graph.',
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
+  capability: 'work.read',
+  dataClasses: ['internal', 'private'],
+  standingPolicyEligible: false,
+  policyOperation: 'work.read',
+  idempotency: 'safe',
+  consistency: 'read_own_writes',
+  errors: ['validation_failed', 'unauthenticated', 'forbidden', 'internal_error'],
+  rateLimit: { requestsPerMinute: 600, burst: 60 },
+  auditObligations: [],
+  query: missionListQuerySchema,
+  response: missionListResponseSchema,
+  successStatus: 200,
+});
+
 export const missionStopRoute = defineRoute({
   operationId: 'missionStop',
   method: 'POST',
@@ -119,11 +143,12 @@ export const missionStopRoute = defineRoute({
   successStatus: 200,
 });
 
-export const missionRoutes = [missionCreateRoute, missionGetRoute, missionStopRoute];
+export const missionRoutes = [missionCreateRoute, missionListRoute, missionGetRoute, missionStopRoute];
 
 /** Narrow port so route tests do not need a database-backed orchestrator instance. */
 export interface MissionRouteOrchestrator {
   create(input: CreateMissionInput): Promise<MissionView>;
+  list(cellId: string, limit: number): Promise<readonly MissionView['mission'][]>;
   get(cellId: string, missionId: string): Promise<MissionView | null>;
   stop(input: StopMissionInput): Promise<MissionView>;
 }
@@ -190,6 +215,13 @@ export function registerMissionRoutes(
 
     return missionResponse(mission, identifiersOf(context));
   });
+
+  registerRoute(app, dependencies, missionListRoute, async ({ query, context }) => ({
+    // The domain collection remains readonly; HTTP schemas deliberately expose
+    // ordinary arrays, so copy only at this serialization boundary.
+    missions: [...(await dependencies.orchestrator.list(context.cellId, query.limit))],
+    identifiers: identifiersOf(context),
+  }));
 
   registerRoute(app, dependencies, missionGetRoute, async ({ params, context }) => {
     if (!UUID_RE.test(params.id)) {

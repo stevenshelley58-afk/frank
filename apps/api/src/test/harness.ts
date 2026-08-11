@@ -36,6 +36,7 @@ export function testConfig(overrides: Partial<AppConfig> = {}): AppConfig {
   const base = {
     environment: 'test' as const,
     cellId: TEST_CELL,
+    cellTimeZone: 'Australia/Perth',
     host: '127.0.0.1',
     port: 0,
     audience: TEST_AUDIENCE,

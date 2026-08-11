@@ -14,6 +14,27 @@
 
 import { createSession, streamMessage, gooseHealth, gooseModelInfo } from './goose-server';
 import { ensureAgent, streamLettaMessage, lettaHealth } from './letta-server';
+import {
+  createDeepseekSession,
+  deepseekHealth,
+  deepseekModel,
+  deepseekReportedModel,
+  streamDeepseekMessage,
+} from './deepseek-server';
+
+export interface PublicModelOption {
+  id: string;
+  name: string;
+  short: string;
+  sub: string;
+}
+
+export class ModelSelectionError extends Error {
+  constructor(readonly code: 'unsupported_model' | 'model_unavailable', message: string) {
+    super(message);
+    this.name = 'ModelSelectionError';
+  }
+}
 
 /* ------------------------------------------------------------------ */
 /* Chat provider interface — every harness implements this             */
@@ -26,14 +47,16 @@ export interface ChatProvider {
   label: string;
   /** one-line description for the UI */
   blurb: string;
+  /** Explicit per-turn model selections this provider can truthfully execute. */
+  models: readonly PublicModelOption[];
   /** live liveness probe */
   health(): Promise<boolean>;
   /** open a session rooted at a working dir; returns opaque session id */
   createSession(workdir: string): Promise<string>;
-  /** stream text chunks for one turn */
-  stream(sessionId: string, prompt: string): AsyncGenerator<string, void, unknown>;
+  /** stream text chunks for one turn. opts.model overrides the provider's default. */
+  stream(sessionId: string, prompt: string, opts?: { model?: string }): AsyncGenerator<string, void, unknown>;
   /** What model is actually behind this harness right now. */
-  modelInfo(): Promise<{ provider: string | null; model: string | null }>;
+  modelInfo(sessionId?: string): Promise<{ provider: string | null; model: string | null }>;
 }
 
 /* ------------------------------------------------------------------ */
@@ -42,11 +65,12 @@ export interface ChatProvider {
 
 const gooseProvider: ChatProvider = {
   id: 'goose',
+  models: [],
   label: 'Goose ACP',
   blurb: 'Open general-purpose harness over the Agent Client Protocol. Reads + writes, tool use, streaming.',
   health: gooseHealth,
   createSession: (workdir) => createSession(workdir),
-  stream: (sessionId, prompt) => streamMessage(sessionId, prompt),
+  stream: (sessionId, prompt, opts) => streamMessage(sessionId, prompt, opts),
   modelInfo: gooseModelInfo,
 };
 
@@ -61,6 +85,7 @@ const lettaPersonaByRoom = new Map<string, string>();
 
 const lettaProvider: ChatProvider = {
   id: 'letta',
+  models: [],
   label: 'Letta Memory',
   blurb: 'Persistent agent memory — keeps a per-room session wiki that grows over time. DeepSeek backbone.',
   health: lettaHealth,
@@ -73,11 +98,35 @@ const lettaProvider: ChatProvider = {
     if (persona) lettaPersonaByRoom.set(roomId, persona);
     return Promise.resolve(roomId);
   },
-  stream: (roomId, prompt) =>
-    streamLettaMessage(roomId, lettaPersonaByRoom.get(roomId) ?? '', prompt),
+  stream: (roomId, prompt, opts) =>
+    streamLettaMessage(roomId, lettaPersonaByRoom.get(roomId) ?? '', prompt, opts),
   modelInfo: async () => ({
     provider: 'letta',
     model: process.env.LETTA_DEFAULT_MODEL ?? 'deepseek/deepseek-chat',
+  }),
+};
+
+/* ------------------------------------------------------------------ */
+/* DeepSeek direct — no local harness required                         */
+/* ------------------------------------------------------------------ */
+
+const deepseekProvider: ChatProvider = {
+  id: 'deepseek',
+  models: [
+    { id: 'deepseek-chat', name: 'DeepSeek Chat', short: 'DS Chat', sub: 'fast · general-purpose' },
+    { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', short: 'Reasoner', sub: 'deep reasoning · slower, thoughtful' },
+  ],
+  label: 'DeepSeek Direct',
+  blurb: 'Direct DeepSeek API over HTTPS — streaming chat with per-room history, no local harness needed.',
+  health: deepseekHealth,
+  createSession: () => createDeepseekSession(),
+  stream: (sessionId, prompt, opts) =>
+    streamDeepseekMessage(sessionId, prompt, opts),
+  modelInfo: (sessionId) => Promise.resolve({
+    provider: 'deepseek',
+    // Registry status reports configured default; turns report only provider
+    // confirmation from stream frames, never the requested model.
+    model: sessionId === undefined ? deepseekModel() : deepseekReportedModel(sessionId),
   }),
 };
 
@@ -87,14 +136,19 @@ const lettaProvider: ChatProvider = {
 
 const providers = new Map<string, ChatProvider>();
 providers.set(gooseProvider.id, gooseProvider);
+providers.set(deepseekProvider.id, deepseekProvider);
 providers.set(lettaProvider.id, lettaProvider);
+const autoProviders: readonly ChatProvider[] = [gooseProvider, deepseekProvider, lettaProvider];
+
+/** Stable Auto preference: local Goose first, direct DeepSeek only on failure. */
+export const AUTO_PROVIDER_IDS = autoProviders.map((provider) => provider.id);
 
 export function registerProvider(p: ChatProvider): void {
   providers.set(p.id, p);
 }
 
 export function listProviders(): Array<Omit<ChatProvider, 'stream' | 'createSession' | 'health' | 'modelInfo'>> {
-  return [...providers.values()].map((p) => ({ id: p.id, label: p.label, blurb: p.blurb }));
+  return [...providers.values()].map((p) => ({ id: p.id, label: p.label, blurb: p.blurb, models: p.models }));
 }
 
 export function getProvider(id: string): ChatProvider | undefined {
@@ -114,8 +168,8 @@ export function expectedModel(): string | null {
   return process.env.FRANK_EXPECTED_MODEL ?? null;
 }
 
-export function modelMismatch(actual: string | null): boolean {
-  const exp = expectedModel();
+export function modelMismatch(actual: string | null, expected = expectedModel()): boolean {
+  const exp = expected;
   if (!exp || !actual) return false;
   // Compare basenames: Goose reports 'deepseek-chat' while Letta reports
   // 'deepseek/deepseek-chat' — same model, different harness spelling.
@@ -169,9 +223,9 @@ export function setAliasRoute(alias: CapabilityAlias, providerId: string): void 
 /** roomId → providerId. 'auto' means the broker picks. Absent = auto. */
 const roomRoutes = new Map<string, string>();
 
-// Phase 1: Central runs on the Letta memory harness (persistent per-room
-// session wiki). Other rooms stay on Auto (Goose). Hot-swappable via setRoomRoute.
-roomRoutes.set('central', 'letta');
+// No static room pins. Central ran pinned to Letta in Phase 1; that pin is
+// removed until a Letta server actually exists in production. Use
+// setRoomRoute(roomId, providerId) to pin at runtime.
 
 export function setRoomRoute(roomId: string, providerId: string): void {
   if (providerId === 'auto') roomRoutes.delete(roomId);
@@ -186,17 +240,30 @@ export function getRoomRoute(roomId: string): string {
  * Resolve the harness for a room. Auto → first healthy provider (Goose for
  * now). Named → that provider, with a plain-language reason either way.
  */
-export async function resolveHarness(roomId: string): Promise<{
+export async function resolveHarness(roomId: string, requestedModel?: string): Promise<{
   provider: ChatProvider;
   reason: string;
 }> {
+  if (requestedModel !== undefined && requestedModel !== 'auto') {
+    const provider = [...providers.values()].find((candidate) =>
+      candidate.models.some((model) => model.id === requestedModel),
+    );
+    if (!provider) throw new ModelSelectionError('unsupported_model', `Model "${requestedModel}" is not available.`);
+    if (!(await provider.health().catch(() => false))) {
+      throw new ModelSelectionError('model_unavailable', `${provider.label} is unavailable.`);
+    }
+    return { provider, reason: `Selected ${requestedModel}; using ${provider.label}.` };
+  }
   const route = getRoomRoute(roomId);
   if (route !== 'auto') {
     const p = providers.get(route) ?? gooseProvider;
+    if (!(await p.health().catch(() => false))) {
+      throw new ModelSelectionError('model_unavailable', `${p.label} is unavailable.`);
+    }
     return { provider: p, reason: `Pinned to ${p.label} for this room.` };
   }
   // Auto: prefer health, fall back to Goose.
-  for (const p of providers.values()) {
+  for (const p of autoProviders) {
     if (await p.health().catch(() => false)) {
       return { provider: p, reason: `Auto — ${p.label} is healthy and general-purpose.` };
     }
@@ -218,6 +285,7 @@ export interface ProviderStatus {
   modelProvider: string | null;
   expectedModel: string | null;
   modelMismatch: boolean;
+  models: readonly PublicModelOption[];
 }
 
 export async function providerStatuses(): Promise<ProviderStatus[]> {
@@ -234,6 +302,7 @@ export async function providerStatuses(): Promise<ProviderStatus[]> {
       modelProvider: mi.provider,
       expectedModel: expectedModel(),
       modelMismatch: modelMismatch(mi.model),
+      models: p.models,
     });
   }
   return out;

@@ -23,7 +23,8 @@ function isConfigured(): boolean {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const hours = Math.min(parseInt(searchParams.get('hours') ?? '24', 10), 72);
+  const requestedHours = Number.parseInt(searchParams.get('hours') ?? '24', 10);
+  const hours = Number.isFinite(requestedHours) ? Math.min(Math.max(requestedHours, 1), 72) : 24;
 
   if (!isConfigured()) {
     return NextResponse.json({
@@ -64,8 +65,9 @@ export async function GET(req: Request) {
       range: { start: now.toISOString(), end: timeMax.toISOString() },
     });
   } catch (err) {
+    console.error('[calendar] connector probe failed', err);
     return NextResponse.json(
-      { status: 'error', events: [], error: String(err) },
+      { status: 'error', events: [], error: 'Calendar connection could not be checked.' },
       { status: 502 },
     );
   }
