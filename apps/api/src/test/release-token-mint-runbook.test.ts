@@ -14,6 +14,19 @@ function tokenMintSection(): string {
 }
 
 describe('offline production service-token mint contract', () => {
+  it('exports the exact production cell before the mint environment or command', () => {
+    const section = tokenMintSection();
+    const assignment = section.indexOf("export FRANK_CELL_ID='frank'");
+    const assertion = section.indexOf(`test "$FRANK_CELL_ID" = 'frank'`);
+    const cellEnvironment = section.indexOf('--env FRANK_CELL_ID');
+    const mintCommand = section.indexOf('/app/scripts/production/mint-service-token.ts');
+
+    expect(assignment).toBeGreaterThan(0);
+    expect(assignment).toBeLessThan(assertion);
+    expect(assertion).toBeLessThan(cellEnvironment);
+    expect(cellEnvironment).toBeLessThan(mintCommand);
+  });
+
   it('uses the exact bundled tsx binary without a package-manager shim', () => {
     const section = tokenMintSection();
     const invocation = [
@@ -43,5 +56,34 @@ describe('offline production service-token mint contract', () => {
     expect(section).toContain('chmod 0400 "$domain_token_tmp"');
     expect(section).toContain('mv -f -- "$domain_token_tmp" "$domain_token_file"');
     expect(section).not.toContain('cat "$domain_token_file"');
+  });
+
+  it('verifies signature and exact cell through trusted API tooling before installation', () => {
+    const section = tokenMintSection();
+    const minted = section.indexOf('> "$domain_token_tmp"');
+    const verifier = section.indexOf(
+      'import { LocalSignedSessionProvider } from "/app/packages/identity/src/index.ts";',
+    );
+    const authentication = section.indexOf('const result = await provider.authenticate({');
+    const scopeGuard = section.indexOf(
+      'if (!result.authenticated || result.principal.cellId !== "frank")',
+    );
+    const installed = section.indexOf('mv -f -- "$domain_token_tmp" "$domain_token_file"');
+
+    expect(minted).toBeGreaterThan(0);
+    expect(minted).toBeLessThan(verifier);
+    expect(verifier).toBeLessThan(authentication);
+    expect(authentication).toBeLessThan(scopeGuard);
+    expect(scopeGuard).toBeLessThan(installed);
+    expect(section).toContain('if (expectedCell !== "frank")');
+    expect(section).toContain('--read-only --user 10001:10001');
+    expect(section).toContain('dst=/run/secrets/domain-service-token,readonly');
+
+    const acceptsProductionScope = (authenticated: boolean, cellId?: string): boolean =>
+      authenticated && cellId === 'frank';
+    expect(acceptsProductionScope(true, 'frank')).toBe(true);
+    expect(acceptsProductionScope(true, 'another-cell')).toBe(false);
+    expect(acceptsProductionScope(true, undefined)).toBe(false);
+    expect(acceptsProductionScope(false, 'frank')).toBe(false);
   });
 });
