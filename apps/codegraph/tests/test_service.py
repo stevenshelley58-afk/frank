@@ -20,6 +20,7 @@ from frank_codegraph.service import (
     graphify_command,
     ensure_project_layout,
     load_registry,
+    normalize_graph_for_publication,
     prune_releases,
 )
 
@@ -133,8 +134,115 @@ class OverlayTests(unittest.TestCase):
             self.assertNotIn("tool:example:guessed-tool", node_ids)
             self.assertEqual([edge for edge in overlay["edges"] if edge["type"] == "skill_uses_tool"], [{"type": "skill_uses_tool", "source": "skill:example:example", "target": "tool:example:safe-tool"}])
 
+    def test_identical_duplicate_skill_declarations_coalesce_with_canonical_source(self) -> None:
+        duplicate_names = ("code-review", "frank-debug", "frank-tdd", "preview-deploy", "to-tickets", "verify-preview")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for name in duplicate_names:
+                content = f"---\nname: {name}\ndescription: {name} skill\n---\n"
+                for prefix in (Path("plugin/skills"), Path("skills/engineering")):
+                    skill_dir = root / prefix / name
+                    skill_dir.mkdir(parents=True)
+                    (skill_dir / "SKILL.md").write_text(content, encoding="utf-8")
+
+            overlay = build_overlay(Project("frank", "Frank", root, ()), "2026-08-12T00:00:00Z")
+            skills = [node for node in overlay["nodes"] if node["type"] == "Skill"]
+            self.assertEqual(len(skills), 6)
+            self.assertEqual(len({node["id"] for node in skills}), 6)
+            for node in skills:
+                name = node["name"]
+                self.assertEqual(node["source_file"], f"skills/engineering/{name}/SKILL.md")
+                self.assertEqual(node["source_files"], [
+                    f"plugin/skills/{name}/SKILL.md",
+                    f"skills/engineering/{name}/SKILL.md",
+                ])
+
+    def test_conflicting_duplicate_skill_declarations_fail_closed(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for prefix, description in ((Path("plugin/skills"), "one"), (Path("skills/engineering"), "two")):
+                skill_dir = root / prefix / "code-review"
+                skill_dir.mkdir(parents=True)
+                (skill_dir / "SKILL.md").write_text(
+                    f"---\nname: code-review\ndescription: {description}\n---\n",
+                    encoding="utf-8",
+                )
+            with self.assertRaisesRegex(RuntimeError, "conflicting skill declarations"):
+                build_overlay(Project("frank", "Frank", root, ()), "2026-08-12T00:00:00Z")
+
 
 class PublicationTests(unittest.TestCase):
+    def test_publication_normalizes_api_rejected_dangling_duplicate_and_self_edges(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            graph_path = Path(directory) / "graph.json"
+            duplicate = {"id": "same", "source": "a", "target": "b", "relation": "imports"}
+            graph_path.write_text(json.dumps({
+                "nodes": [{"id": "a"}, {"id": "b"}],
+                "links": [
+                    duplicate,
+                    dict(duplicate),
+                    {"source": "a", "target": "ref_vitest", "relation": "imports_from"},
+                    {"source": "a", "target": "a", "relation": "calls"},
+                ],
+            }), encoding="utf-8")
+            overlay = {"nodes": [{"id": "project:example"}], "edges": []}
+
+            summary, audit = normalize_graph_for_publication(graph_path, overlay)
+
+            self.assertEqual(summary, {"nodes": 2, "edges": 1})
+            self.assertEqual(audit["dropped_dangling_edges"], 1)
+            self.assertEqual(audit["dropped_duplicate_edges"], 1)
+            self.assertEqual(audit["dropped_self_edges"], 1)
+            self.assertEqual(audit["dangling_samples"], [{
+                "source": "a",
+                "target": "ref_vitest",
+                "relation": "imports_from",
+            }])
+            published = json.loads(graph_path.read_text(encoding="utf-8"))
+            self.assertEqual(len(published["links"]), 1)
+            self.assertEqual(graph_summary(graph_path), summary)
+
+    def test_publication_coalesces_skills_and_records_dangling_edge_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            for prefix in (Path("plugin/skills"), Path("skills/engineering")):
+                skill_dir = root / prefix / "code-review"
+                skill_dir.mkdir(parents=True)
+                (skill_dir / "SKILL.md").write_text(
+                    "---\nname: code-review\ndescription: Review code\n---\n",
+                    encoding="utf-8",
+                )
+            supervisor = Supervisor(Path(directory) / "output", [Project("example", "Example", root, ())])
+
+            def fake_extract(command: list[str], *_: object) -> tuple[int, str]:
+                output = Path(command[command.index("--out") + 1]) / "graphify-out"
+                output.mkdir(parents=True)
+                (output / "graph.json").write_text(json.dumps({
+                    "nodes": [{"id": "source"}, {"id": "target"}],
+                    "links": [
+                        {"source": "source", "target": "target", "relation": "imports"},
+                        {"source": "source", "target": "ref_vitest", "relation": "imports_from"},
+                    ],
+                }), encoding="utf-8")
+                return 0, ""
+
+            with patch("frank_codegraph.service.run_graphify", side_effect=fake_extract):
+                supervisor._build_and_publish(supervisor.states["example"].project)
+
+            current = supervisor.output_root / "example" / "current"
+            graph = json.loads((current / "graphify-out" / "graph.json").read_text(encoding="utf-8"))
+            overlay = json.loads((current / "frank-overlay.json").read_text(encoding="utf-8"))
+            status = json.loads((current / "status.json").read_text(encoding="utf-8"))
+            all_nodes = [*graph["nodes"], *overlay["nodes"]]
+            all_edges = [*graph["links"], *overlay["edges"]]
+            node_ids = {node["id"] for node in all_nodes}
+            self.assertEqual(len(node_ids), len(all_nodes))
+            self.assertTrue(all(edge["source"] in node_ids and edge["target"] in node_ids for edge in all_edges))
+            self.assertEqual(status["graphify"]["normalization"]["dropped_dangling_edges"], 1)
+            self.assertEqual([node["source_file"] for node in overlay["nodes"] if node["type"] == "Skill"], [
+                "skills/engineering/code-review/SKILL.md",
+            ])
+
     def test_scan_activity_quiesces_and_content_changes_debounce_once(self) -> None:
         class ManualTimer:
             instances: list["ManualTimer"] = []

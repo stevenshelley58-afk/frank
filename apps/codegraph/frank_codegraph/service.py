@@ -13,6 +13,7 @@ import hmac
 import fnmatch
 import itertools
 import logging
+import math
 import os
 import re
 import shutil
@@ -59,6 +60,12 @@ MAX_GRAPH_NODES = 50_000
 MAX_GRAPH_EDGES = 200_000
 MAX_GRAPH_STRING_CHARS = 32_768
 MAX_GRAPH_VALUES_INSPECTED = 5_000_000
+MAX_ITEM_PROPERTIES = 64
+MAX_NESTED_PROPERTIES = 256
+MAX_ATTRIBUTE_DEPTH = 4
+MAX_ATTRIBUTE_ARRAY = 256
+MAX_NORMALIZATION_SAMPLES = 8
+MAX_NORMALIZATION_SAMPLE_STRING = 256
 MAX_RELEASE_BYTES = 2 * 1024 * 1024 * 1024
 MAX_RELEASE_FILES = 500_000
 MIN_FREE_BYTES = 512 * 1024 * 1024
@@ -456,19 +463,51 @@ def build_overlay(project: Project, generated_at: str) -> dict[str, Any]:
             add_tool(declaration, path, owner)
     for path, declaration, owner in explicit_tools:
         add_tool(declaration, path, owner)
+    skills_by_id: dict[str, dict[str, Any]] = {}
     for path, metadata, rel in skill_specs:
         name = metadata.get("name") if isinstance(metadata.get("name"), str) else path.parent.name
         skill_id = f"skill:{project.id}:{safe_name(name)}"
-        nodes.append({"id": skill_id, "type": "Skill", "name": name, "source_file": rel})
-        edges.append({"type": "contains", "source": project_node, "target": skill_id})
         tools = metadata.get("tools")
         if isinstance(tools, str):
             tools = [tools]
-        if isinstance(tools, list):
-            for tool_name in sorted(value for value in tools if isinstance(value, str)):
-                tool_id = f"tool:{project.id}:{safe_name(tool_name)}"
-                if tool_id in tool_nodes:
-                    edges.append({"type": "skill_uses_tool", "source": skill_id, "target": tool_id})
+        declared_tools = tuple(sorted({value for value in tools if isinstance(value, str)})) if isinstance(tools, list) else ()
+        description = metadata.get("description") if isinstance(metadata.get("description"), str) else None
+        semantic_metadata = {**metadata, "name": name}
+        if "tools" in semantic_metadata:
+            semantic_metadata["tools"] = declared_tools
+        signature = json.dumps(semantic_metadata, sort_keys=True, separators=(",", ":"))
+        existing = skills_by_id.get(skill_id)
+        if existing is None:
+            skills_by_id[skill_id] = {
+                "name": name,
+                "description": description,
+                "tools": declared_tools,
+                "signature": signature,
+                "sources": [rel],
+            }
+        elif existing["signature"] == signature:
+            existing["sources"].append(rel)
+        else:
+            raise RuntimeError(f"conflicting skill declarations normalize to {skill_id}")
+    for skill_id in sorted(skills_by_id):
+        declaration = skills_by_id[skill_id]
+        sources = sorted(set(declaration["sources"]))
+        canonical_source = min(sources, key=lambda value: (not value.startswith("skills/"), value))
+        node = {
+            "id": skill_id,
+            "type": "Skill",
+            "name": declaration["name"],
+            "source_file": canonical_source,
+            "source_files": sources,
+        }
+        if declaration["description"] is not None:
+            node["description"] = declaration["description"]
+        nodes.append(node)
+        edges.append({"type": "contains", "source": project_node, "target": skill_id})
+        for tool_name in declaration["tools"]:
+            tool_id = f"tool:{project.id}:{safe_name(tool_name)}"
+            if tool_id in tool_nodes:
+                edges.append({"type": "skill_uses_tool", "source": skill_id, "target": tool_id})
     unique_edges = {(edge["type"], edge["source"], edge["target"]): edge for edge in edges}
     if len(nodes) > MAX_OVERLAY_NODES or len(unique_edges) > MAX_OVERLAY_EDGES:
         raise RuntimeError("Frank overlay exceeds node or edge safety limits")
@@ -486,10 +525,82 @@ def build_overlay(project: Project, generated_at: str) -> dict[str, Any]:
     }
 
 
-def graph_summary(path: Path) -> dict[str, int]:
-    graph = read_json_object(path, MAX_GRAPH_FILE_BYTES)
-    if graph is None:
-        raise RuntimeError("Graphify did not produce a valid graph.json")
+def _json_id(value: Any) -> str | None:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return str(value)
+    if not isinstance(value, float) or not math.isfinite(value):
+        return None
+    if value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _attributes_are_bounded(record: dict[str, Any]) -> bool:
+    if len(record) > MAX_ITEM_PROPERTIES:
+        return False
+    stack: list[tuple[Any, int]] = [(record, 0)]
+    property_count = 0
+    while stack:
+        value, depth = stack.pop()
+        if isinstance(value, str):
+            if len(value) > MAX_GRAPH_STRING_CHARS:
+                return False
+        elif isinstance(value, list):
+            if len(value) > MAX_ATTRIBUTE_ARRAY or depth >= MAX_ATTRIBUTE_DEPTH:
+                return False
+            stack.extend((item, depth + 1) for item in value)
+        elif isinstance(value, dict):
+            if any(len(key) > MAX_GRAPH_STRING_CHARS for key in value):
+                return False
+            property_count += len(value)
+            if property_count > MAX_NESTED_PROPERTIES or depth >= MAX_ATTRIBUTE_DEPTH:
+                return False
+            stack.extend((item, depth + 1) for item in value.values())
+    return True
+
+
+def _node_id(node: Any, index: int) -> str:
+    if not isinstance(node, dict):
+        raise RuntimeError("Graphify graph contains a non-object node")
+    if not _attributes_are_bounded(node):
+        raise RuntimeError("Graphify graph contains attributes outside API bounds")
+    value = node.get("id", node.get("key", f"node-{index}"))
+    node_id = _json_id(value)
+    if node_id is None or not node_id or len(node_id) > MAX_GRAPH_STRING_CHARS:
+        raise RuntimeError("Graphify graph contains an invalid node id")
+    return node_id
+
+
+def _endpoint_id(value: Any, node_ids: list[str], known: set[str]) -> str | None:
+    scalar = _json_id(value)
+    if scalar is None:
+        return None
+    if scalar in known:
+        return scalar
+    if isinstance(value, int) and not isinstance(value, bool):
+        index = value
+        if 0 <= index < len(node_ids):
+            return node_ids[index]
+    elif isinstance(value, float) and math.isfinite(value) and value.is_integer():
+        index = int(value)
+        if 0 <= index < len(node_ids):
+            return node_ids[index]
+    return scalar
+
+
+def _edge_relation(edge: dict[str, Any]) -> str:
+    value = edge.get("relation", edge.get("type", edge.get("label")))
+    if not isinstance(value, str):
+        return "relates to"
+    normalized = re.sub(r"[\r\n\t]+", " ", value).strip()
+    return (normalized or "relates to")[:80]
+
+
+def _normalize_graph_data(graph: dict[str, Any]) -> tuple[dict[str, Any], dict[str, int], dict[str, Any]]:
     nodes = graph.get("nodes")
     # Graphify's NetworkX node-link form uses `links`; raw/no-cluster output
     # may use `edges`. Accept both without rewriting the upstream artifact.
@@ -513,7 +624,89 @@ def graph_summary(path: Path) -> dict[str, int]:
                 stack.extend(value.values())
             elif isinstance(value, (list, tuple)):
                 stack.extend(value)
-    return {"nodes": len(nodes), "edges": len(edges)}
+    node_ids = [_node_id(node, index) for index, node in enumerate(nodes)]
+    if len(node_ids) != len(set(node_ids)):
+        raise RuntimeError("Graphify graph contains duplicate node ids")
+    known = set(node_ids)
+    normalized_edges: list[dict[str, Any]] = []
+    seen_edges: set[tuple[str, str, str, str]] = set()
+    dangling_samples: list[dict[str, str]] = []
+    dropped_dangling = 0
+    dropped_duplicates = 0
+    dropped_self_edges = 0
+    for index, edge in enumerate(edges):
+        if not isinstance(edge, dict):
+            raise RuntimeError("Graphify graph contains a non-object edge")
+        if not _attributes_are_bounded(edge):
+            raise RuntimeError("Graphify graph contains attributes outside API bounds")
+        source = _endpoint_id(edge.get("source"), node_ids, known)
+        target = _endpoint_id(edge.get("target"), node_ids, known)
+        if source is None or target is None:
+            raise RuntimeError("Graphify graph contains an invalid edge endpoint")
+        relation = _edge_relation(edge)
+        explicit_id = edge.get("id")
+        edge_id = explicit_id if isinstance(explicit_id, str) and len(explicit_id) <= MAX_GRAPH_STRING_CHARS else str(index)
+        edge_key = (source, target, relation, edge_id)
+        if source not in known or target not in known:
+            dropped_dangling += 1
+            if len(dangling_samples) < MAX_NORMALIZATION_SAMPLES:
+                dangling_samples.append({
+                    "source": source[:MAX_NORMALIZATION_SAMPLE_STRING],
+                    "target": target[:MAX_NORMALIZATION_SAMPLE_STRING],
+                    "relation": relation[:MAX_NORMALIZATION_SAMPLE_STRING],
+                })
+            continue
+        if source == target:
+            dropped_self_edges += 1
+            continue
+        if edge_key in seen_edges:
+            dropped_duplicates += 1
+            continue
+        seen_edges.add(edge_key)
+        normalized_edges.append(edge)
+    normalized = dict(graph)
+    normalized["links" if isinstance(graph.get("links"), list) else "edges"] = normalized_edges
+    return normalized, {"nodes": len(nodes), "edges": len(normalized_edges)}, {
+        "dropped_dangling_edges": dropped_dangling,
+        "dropped_duplicate_edges": dropped_duplicates,
+        "dropped_self_edges": dropped_self_edges,
+        "dangling_samples": dangling_samples,
+    }
+
+
+def normalize_graph_for_publication(path: Path, overlay: dict[str, Any]) -> tuple[dict[str, int], dict[str, Any]]:
+    graph = read_json_object(path, MAX_GRAPH_FILE_BYTES)
+    if graph is None:
+        raise RuntimeError("Graphify did not produce a valid graph.json")
+    normalized, summary, audit = _normalize_graph_data(graph)
+    if normalized != graph:
+        json_write_atomic(path, normalized)
+    _validate_combined_graph(normalized, overlay)
+    return summary, audit
+
+
+def _validate_combined_graph(graph: dict[str, Any], overlay: dict[str, Any]) -> None:
+    combined = {
+        "nodes": [*graph["nodes"], *overlay["nodes"]],
+        "edges": [*graph.get("links", graph.get("edges", [])), *overlay["edges"]],
+    }
+    if len(combined["nodes"]) > MAX_GRAPH_NODES or len(combined["edges"]) > MAX_GRAPH_EDGES:
+        raise RuntimeError("combined Graphify and Frank overlay node or edge limit exceeded")
+    _, _, combined_audit = _normalize_graph_data(combined)
+    if any(combined_audit[key] for key in (
+        "dropped_dangling_edges", "dropped_duplicate_edges", "dropped_self_edges",
+    )):
+        raise RuntimeError("combined Graphify and Frank overlay graph is not publication-safe")
+
+
+def graph_summary(path: Path) -> dict[str, int]:
+    graph = read_json_object(path, MAX_GRAPH_FILE_BYTES)
+    if graph is None:
+        raise RuntimeError("Graphify did not produce a valid graph.json")
+    _, summary, audit = _normalize_graph_data(graph)
+    if any(audit[key] for key in ("dropped_dangling_edges", "dropped_duplicate_edges", "dropped_self_edges")):
+        raise RuntimeError("published Graphify graph is not normalized")
+    return summary
 
 
 def graphify_command(project: Project, stage: Path) -> list[str]:
@@ -872,6 +1065,10 @@ class Supervisor:
                     or status.get("project") != state.project.id or status.get("release") != current.name
                 ):
                     raise RuntimeError("published release contract is invalid")
+                graph = read_json_object(current / "graphify-out" / "graph.json", MAX_GRAPH_FILE_BYTES)
+                if graph is None or overlay is None:
+                    raise RuntimeError("published release graph is unavailable")
+                _validate_combined_graph(graph, overlay)
                 bounded_tree_size(current)
                 state.current_release = current.name
                 state.initial_complete = True
@@ -1017,9 +1214,9 @@ class Supervisor:
             if return_code != 0:
                 raise RuntimeError(f"Graphify extract exited {return_code}: {detail}")
             graph_path = stage / "graphify-out" / "graph.json"
-            summary = graph_summary(graph_path)
             generated_at = utc_now()
             overlay = build_overlay(project, generated_at)
+            summary, normalization = normalize_graph_for_publication(graph_path, overlay)
             if summary["nodes"] + len(overlay["nodes"]) > MAX_GRAPH_NODES:
                 raise RuntimeError("combined Graphify and Frank overlay node limit exceeded")
             if summary["edges"] + len(overlay["edges"]) > MAX_GRAPH_EDGES:
@@ -1031,7 +1228,13 @@ class Supervisor:
                 "project": project.id,
                 "generated_at": generated_at,
                 "release": release,
-                "graphify": {"package": "graphifyy", "version": "0.9.39", "commit": "50556baaea803e191947fdfcc2e0c22e2d4eb74d", **summary},
+                "graphify": {
+                    "package": "graphifyy",
+                    "version": "0.9.39",
+                    "commit": "50556baaea803e191947fdfcc2e0c22e2d4eb74d",
+                    **summary,
+                    "normalization": normalization,
+                },
                 "overlay": {"nodes": len(overlay["nodes"]), "edges": len(overlay["edges"])},
                 "mode": "code-only-no-cluster",
             }
