@@ -30,7 +30,7 @@ export interface HarnessJobView {
   readonly source_refs: SourceRef[];
 }
 
-interface JobRow {
+interface JobRow extends Record<string, unknown> {
   id: string;
   status: HarnessJobStatus;
   request_hash: string;
@@ -42,7 +42,7 @@ interface JobRow {
   inserted?: boolean;
 }
 
-interface EventRow {
+interface EventRow extends Record<string, unknown> {
   job_id: string;
   cursor: number;
   kind: HarnessJobEvent['kind'];

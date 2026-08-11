@@ -73,7 +73,22 @@ export function registerHarnessControlRoutes(app: FastifyInstance, dependencies:
   const store = new HarnessJobStore(dependencies.db);
   registerRoute(app, dependencies, harnessJobCreateRoute, async ({ body, context, principal }) => {
     try {
-      const result = await store.create({ cellId: context.cellId, ownerId: principal.principalId, request: body });
+      const result = await store.create({
+        cellId: context.cellId,
+        ownerId: principal.principalId,
+        request: {
+          ...body,
+          scope: {
+            ...(body.scope.project_id === undefined ? {} : { project_id: body.scope.project_id }),
+            ...(body.scope.room_id === undefined ? {} : { room_id: body.scope.room_id }),
+          },
+          input: {
+            query: body.input.query,
+            max_sources: body.input.max_sources,
+            ...(body.input.locale === undefined ? {} : { locale: body.input.locale }),
+          },
+        },
+      });
       return { ...result.job, replayed: result.replayed, identifiers: identifiersOf(context) };
     } catch (error) { return rethrowStoreError(error); }
   });
@@ -89,7 +104,7 @@ export function registerHarnessControlRoutes(app: FastifyInstance, dependencies:
   });
   registerRoute(app, dependencies, harnessJobCancelRoute, async ({ params, body, context, principal }) => {
     try {
-      const result = await store.cancel({ cellId: context.cellId, ownerId: principal.principalId, jobId: params.id, requestedBy: principal.principalId, request: body });
+      const result = await store.cancel({ cellId: context.cellId, ownerId: principal.principalId, jobId: params.id, requestedBy: principal.principalId, request: { idempotency_key: body.idempotency_key, ...(body.reason === undefined ? {} : { reason: body.reason }) } });
       return { ...result.job, replayed: result.replayed, identifiers: identifiersOf(context) };
     } catch (error) { return rethrowStoreError(error); }
   });

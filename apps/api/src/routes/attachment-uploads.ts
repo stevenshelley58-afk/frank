@@ -35,7 +35,7 @@ export const attachmentUploadRoutes = [attachmentUploadStatusRoute] as const;
 
 export interface AttachmentUploadRouteDependencies extends RouteHandlerDependencies { readonly db: FrankDatabase }
 
-interface UploadRow {
+interface UploadRow extends Record<string, unknown> {
   upload_id: string;
   reservation_state: z.infer<typeof reservationState>;
   attachment_id: string | null;
