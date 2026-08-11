@@ -11,15 +11,22 @@ less than **30 GiB free**. Buckets and prefixes are literal:
 | `frank-object-previews` | `<object_id>/<variant>/<digest-or-name>` |
 
 `frank-previews` is reserved for preview.frank.fail and is forbidden here. SeaweedFS has no
-public route. tusd is reachable only through Caddy's authenticated `/v1/uploads/*` route;
+public route. tusd is reachable only through Caddy's authenticated `/v1/uploads/tus/*` route;
 the API issues capability credentials and the private HTTPS hook performs scan/promotion.
 TLS verification is never disabled. Quarantine scans precede promotion; freshness/readiness
 of ClamAV signatures is a hard dependency.
 
-Trust boundary: `frank-harness-model` is LiteLLM/Hermes only. `frank-harness-attachments` is
-SeaweedFS/ClamAV/tusd only. The API joins `frank` as the controlled seam. Dashboard OpenFGA
+Trust boundary: `frank-model` is LiteLLM/Hermes only. `frank-attachments` is
+SeaweedFS/tusd only. The API joins `frank` as the controlled seam. Dashboard OpenFGA
 must stay lake-local: it joins neither network and receives no attachment credential. Hermes
 has no public port, scheduler, durable/child-agent authority, or Night Watch access.
+
+Bucket bootstrap is a reviewed idempotent one-shot operation using a temporary bucket-admin
+credential held outside Compose. It creates exactly the three listed buckets, applies a 24h
+incomplete-upload/quarantine abort lifecycle, then revokes its credential. The API reserves
+2 GiB per file and enforces 10 GiB/10,000 aggregate limits before issuing a capability. That
+capability binds owner/cell/conversation/upload and the hook selects the collision-safe key
+`<cell_id>/<upload_id>/<part-or-object>`; no deployment-wide S3 key prefix is used.
 
 Promotion is manual: populate a candidate digest only after `cosign verify` and SBOM review,
 run the isolated hosted candidate probe, copy the verified manifest to CURRENT, and retain the

@@ -92,6 +92,13 @@ frank.fail {
         # no download handler; the API issues and verifies the upload capability.
         handle /v1/uploads/tus/* {
             import frank_production_basic_auth
+            # API gate verifies the persisted capability/reservation for every tus method.
+            # It must fail closed and retain Authorization/Tus headers; the tusd hook bearer
+            # is a separate service credential and is never a client capability.
+            forward_auth {$FRANK_UPLOAD_GATE_INTERNAL_URL} {
+                uri /private/tusd/gate
+                copy_headers Authorization,Tus-Resumable,Upload-Offset,Upload-Metadata
+            }
             reverse_proxy {$FRANK_TUSD_INTERNAL_URL} {
                 header_up Host {host}
                 header_up X-Real-IP {remote_host}

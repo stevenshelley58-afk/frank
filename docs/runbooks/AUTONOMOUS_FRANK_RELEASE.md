@@ -47,6 +47,7 @@ between the backup and smoke gates.
 | `scripts/production/snapshot-codegraph-release.sh` | Captures prior API/web/codegraph images, legacy overlay, Caddyfile, and codegraph volume | Briefly pauses codegraph; writes a complete checksummed root-only rollback set |
 | `scripts/production/rollback-codegraph-release.sh` | Restores the captured application unit, Caddyfile, and codegraph volume | Stops/recreates API, web, codegraph, and Caddy; replaces codegraph volume contents |
 | `infra/production/docker-compose.app.yml` | Authoritative production overrides for API, web, codegraph, and their Caddy dependency | None until passed to `docker compose up` |
+| `infra/production/docker-compose.harness.yml` | Optional reviewed harness third Compose unit (private model, upload, scan, Letta services) | Never include until all current image evidence manifests and hosted canaries are accepted; it reuses `frank-cell-seaweedfs-data` and has no public ports. |
 | `infra/production/Caddyfile.frank-production` | Replacement `frank.fail` site block with a private UI/control surface | None until merged into the live Caddy candidate and reloaded |
 
 Required host commands are Bash 4.3+, Docker with Compose, Git, GitHub CLI, `jq`,

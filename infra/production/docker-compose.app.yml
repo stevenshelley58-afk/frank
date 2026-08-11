@@ -57,6 +57,7 @@ services:
       # Transitional web health adapter retains this historical name until cutover.
       LETTA_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta:8283}"
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
+      FRANK_UPLOAD_GATE_INTERNAL_URL: "${FRANK_UPLOAD_GATE_INTERNAL_URL:-http://frank-api:3000}"
       FRANK_ARTIFACT_ARCHIVE_ROOT: /var/lib/frank/artifacts
       FRANK_WORKSPACE_SOURCE_ROOT: /srv/frank/repo
       CODEGRAPH_STATUS_URL: http://frank-codegraph:3002
@@ -252,6 +253,7 @@ services:
       FRANK_API_INTERNAL_URL: "${FRANK_API_INTERNAL_URL:?FRANK_API_INTERNAL_URL is required}"
       FRANK_WEB_INTERNAL_URL: "${FRANK_WEB_INTERNAL_URL:?FRANK_WEB_INTERNAL_URL is required}"
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
+      FRANK_UPLOAD_GATE_INTERNAL_URL: "${FRANK_UPLOAD_GATE_INTERNAL_URL:-http://frank-api:3000}"
     depends_on:
       frank-api:
         condition: service_healthy
