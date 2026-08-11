@@ -1120,6 +1120,8 @@ compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$a
 if test "$FRANK_HARNESS_ENABLED" = true; then
   export FRANK_SEAWEEDFS_S3_TEMPLATE="$FRANK_RELEASE_SOURCE/infra/compose/seaweedfs/s3.json.tmpl"
   export FRANK_SEAWEEDFS_S3_CONFIG='/srv/frank/secrets/seaweedfs/s3.json'
+  # Private Compose DNS route implemented by the API attachment hook contract.
+  export FRANK_TUSD_HOOK_URL='http://frank-api:3000/private/tusd/hooks'
   export FRANK_LITELLM_VIRTUAL_KEY_FILE="${FRANK_LITELLM_VIRTUAL_KEY_FILE:-/srv/frank/secrets/litellm/frank-api-virtual-key}"
   tusd_gate_file='/srv/frank/secrets/tusd/gate-secret'
   tusd_hook_file='/srv/frank/secrets/tusd/hook-secret'
@@ -1189,13 +1191,15 @@ esac
     ((.services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET // "") | length > 0) and
     (.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET != .services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET) and
     (.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET == .services["frank-caddy"].environment.FRANK_TUSD_GATE_SECRET) and
-    (.services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET == .services["frank-caddy"].environment.FRANK_TUSD_HOOK_SECRET)
+    (.services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET == .services["frank-caddy"].environment.FRANK_TUSD_HOOK_SECRET) and
+    (.services["frank-tusd"].command | index("-hooks-http=http://frank-api:3000/private/tusd/hooks") != null)
   else
     (.services["frank-api"].environment | has("FRANK_LITELLM_VIRTUAL_KEY") | not) and
     (.services["frank-api"].environment | has("FRANK_TUSD_GATE_SECRET") | not) and
     (.services["frank-api"].environment | has("FRANK_TUSD_HOOK_SECRET") | not) and
     (.services["frank-caddy"].environment | has("FRANK_TUSD_GATE_SECRET") | not) and
-    (.services["frank-caddy"].environment | has("FRANK_TUSD_HOOK_SECRET") | not)
+    (.services["frank-caddy"].environment | has("FRANK_TUSD_HOOK_SECRET") | not) and
+    (.services["frank-api"].environment | has("FRANK_ATTACHMENT_PROMOTER_BEARER") | not)
   end) and
   (.services["frank-api"].environment | has("LITELLM_ADMIN_KEY") | not) and
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and

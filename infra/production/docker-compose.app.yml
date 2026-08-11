@@ -57,7 +57,6 @@ services:
       FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
       FRANK_CLAMAV_INTERNAL_URL: "${FRANK_CLAMAV_INTERNAL_URL:-tcp://frank-clamav:3310}"
       FRANK_SEAWEEDFS_INTERNAL_URL: "${FRANK_SEAWEEDFS_INTERNAL_URL:-http://frank-seaweedfs:8333}"
-      FRANK_ATTACHMENT_PROMOTER_BEARER: "${FRANK_ATTACHMENT_PROMOTER_BEARER:?required}"
       # Goose remains the existing externally managed default for one rollback release;
       # Frank owns only its endpoint/credential policy, never an unused image slot.
       GOOSE_ACP_URL: "${GOOSE_ACP_URL:?required}"
