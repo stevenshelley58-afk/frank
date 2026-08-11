@@ -348,7 +348,8 @@ export interface CodegraphRouteDependencies extends RouteHandlerDependencies {
 }
 
 type ReadResult =
-  | { kind: 'missing' | 'invalid' }
+  | { kind: 'missing' }
+  | { kind: 'invalid' }
   | { kind: 'ok'; value: unknown };
 type RegistryProject = { id: string; name: string };
 type GraphNode = {
@@ -1273,7 +1274,7 @@ export function registerCodegraphRoutes(
     const active = liveProject.jobs
       .filter((job) => job.state === 'running' || job.state === 'queued')
       .sort((left, right) => (left.state === 'running' ? -1 : right.state === 'running' ? 1 : 0))[0] ?? null;
-    const state = liveProject.hasError
+    const state: z.infer<typeof statusResponseSchema>['state'] = liveProject.hasError
       ? 'degraded'
       : liveProject.building
         ? 'building'
