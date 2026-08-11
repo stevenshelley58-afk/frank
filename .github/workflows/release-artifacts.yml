@@ -104,6 +104,7 @@ jobs:
         with:
           context: .
           file: infra/workbench/Dockerfile
+          platforms: linux/amd64
           push: true
           tags: ${{ env.IMAGE_WORKBENCH }}:${{ env.COMMIT_SHA }}
           labels: |
@@ -280,6 +281,26 @@ jobs:
             throw new Error('Release manifest does not exactly bind the verified commit and image evidence');
           }
           NODE
+
+      # Public registry access is a release property, not an operator-side
+      # assumption. An empty CLI config ensures these are anonymous pulls.
+      - name: Verify anonymous immutable image pulls
+        shell: bash
+        env:
+          API_DIGEST: ${{ steps.api.outputs.digest }}
+          WEB_DIGEST: ${{ steps.web.outputs.digest }}
+          WORKBENCH_DIGEST: ${{ steps.workbench.outputs.digest }}
+        run: |
+          set -euo pipefail
+          anonymous_docker_config="$(mktemp -d)"
+          trap 'rm -rf -- "$anonymous_docker_config"' EXIT
+          export DOCKER_CONFIG="$anonymous_docker_config"
+          for image in \
+            "$IMAGE_API@$API_DIGEST" \
+            "$IMAGE_WEB@$WEB_DIGEST" \
+            "$IMAGE_WORKBENCH@$WORKBENCH_DIGEST"; do
+            docker pull "$image"
+          done
 
       - name: Upload release evidence
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

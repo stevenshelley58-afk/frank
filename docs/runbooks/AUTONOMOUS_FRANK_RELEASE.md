@@ -94,23 +94,7 @@ Optional overrides:
   `<image-reference> <sha256:image-id>` pair per line. Use this when immutable image IDs
   have been prepared; a mismatch blocks release.
 
-## 3. Run hosted preflight
-
-```bash
-bash scripts/production/hosted-preflight.sh \
-  > "$evidence_dir/preflight.result" \
-  2> "$evidence_dir/preflight.log"
-
-grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
-```
-
-The result records the commit, branch, locally known upstream state, disk state, network,
-and counts of checked containers, images, and secret names. The log contains secret names
-only. A dirty worktree, wrong commit, unsynchronized branch, missing secret, invalid
-Compose model, absent image, unhealthy container, or insufficient disk fails the gate.
-
-The upstream check does not fetch. CI or the release operator must fetch before this step
-and ensure the locally known upstream reference is current.
+## 3. Resolve the release artifact and persist the immutable runtime image
 
 ### 3A. Download and verify the GitHub release artifact
 
@@ -122,9 +106,9 @@ workflow checks that `main` is the repository default branch but cannot create o
 the branch-protection rule itself.
 
 Download the evidence artifact for the exact approved full commit. Use a GitHub CLI
-identity with read access to the repository attestations and a GHCR credential with only
-`read:packages` if the package is private. Neither credential is written to evidence or
-printed:
+identity with read access to the repository attestations. The release workflow verifies
+anonymous digest pulls, so the VPS must not require or retain a GHCR credential. Neither
+credential material nor image pull state is written to evidence or printed:
 
 ```bash
 export FRANK_RELEASE_COMMIT="$FRANK_EXPECTED_COMMIT"
@@ -226,10 +210,14 @@ console.log(`${image.reference}@${image.digest}`);
 NODE
 )"
 
-printf '%s' "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "$GHCR_PULL_USERNAME" --password-stdin
-docker pull "$FRANK_API_IMAGE"
-docker pull "$FRANK_WEB_IMAGE"
-docker pull "$FRANK_WORKBENCH_IMAGE"
+(
+  anonymous_docker_config="$(mktemp -d)"
+  trap 'rm -rf -- "$anonymous_docker_config"' EXIT
+  export DOCKER_CONFIG="$anonymous_docker_config"
+  docker pull "$FRANK_API_IMAGE"
+  docker pull "$FRANK_WEB_IMAGE"
+  docker pull "$FRANK_WORKBENCH_IMAGE"
+)
 gh attestation verify "oci://$FRANK_API_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
   --source-ref 'refs/heads/main' \
@@ -254,12 +242,80 @@ docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_WORKBENCH_IMA
 ```
 
 The artifact directory, manifest, parsed SPDX SBOMs, GitHub workflow receipts, verified
-attestation output, and pulled image IDs are release evidence. `GHCR_PULL_TOKEN` and
-`GHCR_PULL_USERNAME` must come from the root-only secret runtime; use `--password-stdin`
-and never enable shell tracing. The three image environment variables must be copied only
-from the validated manifest output above—never composed from a tag or a branch name.
+attestation output, and pulled image IDs are release evidence. The three image environment
+variables must be copied only from the validated manifest output above—never composed from
+a tag or a branch name.
 
-### 3B. Define and validate the production application overlay
+### 3B. Atomically persist the manifest workbench digest
+
+Before preflight or any Compose command, update only `FRANK_WORKBENCH_IMAGE` in the
+root-owned runtime environment. This fails if the file is not a regular root-owned file or
+contains zero or multiple assignments, preserves every other line plus owner and mode, and
+uses a same-directory atomic rename. It writes only a public digest, metadata, and a hash
+of the runtime file to evidence; it never prints the runtime contents.
+
+```bash
+root_runtime_env='/srv/frank/secrets/production.env'
+test "$(id -u)" -eq 0
+test -f "$root_runtime_env" && test ! -L "$root_runtime_env"
+test "$(stat -c '%u' -- "$root_runtime_env")" -eq 0
+
+runtime_tmp="$(mktemp "${root_runtime_env}.tmp.XXXXXX")"
+trap 'rm -f -- "$runtime_tmp"' EXIT
+awk -v image="$FRANK_WORKBENCH_IMAGE" '
+  /^FRANK_WORKBENCH_IMAGE=/ {
+    count += 1
+    print "FRANK_WORKBENCH_IMAGE=" image
+    next
+  }
+  { print }
+  END { exit count == 1 ? 0 : 42 }
+' "$root_runtime_env" > "$runtime_tmp"
+cmp -s \
+  <(sed '/^FRANK_WORKBENCH_IMAGE=/d' "$root_runtime_env") \
+  <(sed '/^FRANK_WORKBENCH_IMAGE=/d' "$runtime_tmp")
+chown --reference="$root_runtime_env" "$runtime_tmp"
+chmod --reference="$root_runtime_env" "$runtime_tmp"
+mv -f -- "$runtime_tmp" "$root_runtime_env"
+trap - EXIT
+
+persisted_workbench_image="$(awk -F= '
+  /^FRANK_WORKBENCH_IMAGE=/ { count += 1; value = substr($0, index($0, "=") + 1) }
+  END { if (count != 1) exit 42; print value }
+' "$root_runtime_env")"
+test "$persisted_workbench_image" = "$FRANK_WORKBENCH_IMAGE"
+{
+  printf 'runtime_env=%s\n' "$root_runtime_env"
+  printf 'owner_uid_gid=%s\n' "$(stat -c '%u:%g' -- "$root_runtime_env")"
+  printf 'mode=%s\n' "$(stat -c '%a' -- "$root_runtime_env")"
+  printf 'frank_workbench_image=%s\n' "$FRANK_WORKBENCH_IMAGE"
+  printf 'runtime_env_sha256=%s\n' "$(sha256sum "$root_runtime_env" | awk '{print $1}')"
+} > "$evidence_dir/runtime-workbench-image.update.receipt"
+chmod 0600 "$evidence_dir/runtime-workbench-image.update.receipt"
+```
+
+All subsequent promotion Compose commands use this exact runtime file as their only
+env-file, so they cannot silently restore the former local or floating workbench tag.
+
+### 3C. Run hosted preflight
+
+```bash
+bash scripts/production/hosted-preflight.sh \
+  > "$evidence_dir/preflight.result" \
+  2> "$evidence_dir/preflight.log"
+
+grep -Fx 'preflight=passed' "$evidence_dir/preflight.result"
+```
+
+The result records the commit, branch, locally known upstream state, disk state, network,
+and counts of checked containers, images, and secret names. The log contains secret names
+only. A dirty worktree, wrong commit, unsynchronized branch, missing secret, invalid
+Compose model, absent image, unhealthy container, or insufficient disk fails the gate.
+
+The upstream check does not fetch. CI or the release operator must fetch before this step
+and ensure the locally known upstream reference is current.
+
+### 3D. Define and validate the production application overlay
 
 Set the non-secret release/runtime identifiers. Secret values named in step 2 remain
 injected by the accepted runtime and are not repeated here:
@@ -324,7 +380,7 @@ Compose document, because it contains injected values:
 ```bash
 base_compose='/srv/frank/infra/docker-compose.dev.yml'
 app_overlay='/srv/frank/repo/infra/production/docker-compose.app.yml'
-compose=(docker compose -f "$base_compose" -f "$app_overlay")
+compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
 
 version="$(docker compose version --short)"
 test "$(printf '%s\n' '2.24.4' "$version" | sort -V | head -n1)" = '2.24.4'
