@@ -90,13 +90,14 @@ frank.fail {
         # replacement for FRANK sessions or capability checks.
         # Capability-bound resumable upload ingress only. tusd has no public route and
         # no download handler; the API issues and verifies the upload capability.
-        handle /v1/uploads/* {
+        handle /v1/uploads/tus/* {
             import frank_production_basic_auth
             reverse_proxy {$FRANK_TUSD_INTERNAL_URL} {
                 header_up Host {host}
                 header_up X-Real-IP {remote_host}
                 header_up X-Forwarded-Proto https
-                header_up -Authorization
+                # The signed upload capability reaches tusd's private hook unchanged.
+                header_up Authorization {http.request.header.Authorization}
                 flush_interval -1
             }
         }

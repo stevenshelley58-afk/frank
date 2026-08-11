@@ -8,9 +8,9 @@ for token in 'ports:' 'frank-previews' 'FRANK_OPENFGA' 'insecure-skip-verify' 't
 done
 rg -q 'FRANK_LETTA_INTERNAL_URL.*http://frank-letta:8283' "$root/infra/production/docker-compose.app.yml"
 rg -q 'http://127.0.0.1:8283/v1/health' "$compose"
-rg -q 'handle /v1/uploads/\*' "$caddy"
+rg -q 'handle /v1/uploads/tus/\*' "$caddy"
 rg -q 'disable-download' "$compose"
 rg -q 'max-size=2147483648' "$compose"
-rg -q 'frank-harness-attachments' "$compose"
+rg -q 'http://frank-seaweedfs:8333' "$compose"
 rg -q 'frank-harness-model' "$compose"
 echo 'gateway static security assertions passed'

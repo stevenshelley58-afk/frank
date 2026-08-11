@@ -8,11 +8,11 @@ services:
     volumes: ["./litellm/config.yaml:/etc/litellm/config.yaml:ro"]
     environment:
       LITELLM_MASTER_KEY: "${LITELLM_MASTER_KEY:?required}"
-      OPENAI_API_KEY: "${OPENAI_API_KEY:?required}"
-      GEMINI_API_KEY: "${GEMINI_API_KEY:?required}"
-      CONCENTRATE_API_BASE: "${CONCENTRATE_API_BASE:?required}"
-      CONCENTRATE_API_KEY: "${CONCENTRATE_API_KEY:?required}"
-      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:?required}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      CONCENTRATE_API_BASE: "${CONCENTRATE_API_BASE:-}"
+      CONCENTRATE_API_KEY: "${CONCENTRATE_API_KEY:-}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
     read_only: true
     tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
     cap_drop: [ALL]
@@ -21,31 +21,6 @@ services:
     cpus: "0.75"
     pids_limit: 256
     healthcheck: { test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/health/readiness"], interval: 15s, timeout: 5s, retries: 8 }
-  frank-seaweedfs-attachments:
-    image: "${FRANK_SEAWEEDFS_CURRENT_IMAGE:?digest-pinned reviewed SeaweedFS current image required}"
-    entrypoint: ["/bin/sh", "-ec"]
-    command: >-
-      sed -e "s|__STAGING_KEY__|$$FRANK_ATTACHMENT_STAGING_ACCESS_KEY|g"
-      -e "s|__STAGING_SECRET__|$$FRANK_ATTACHMENT_STAGING_SECRET_KEY|g"
-      -e "s|__PROMOTER_KEY__|$$FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY|g"
-      -e "s|__PROMOTER_SECRET__|$$FRANK_ATTACHMENT_PROMOTER_SECRET_KEY|g"
-      /etc/seaweedfs/s3-attachments.json.tmpl > /run/s3.json &&
-      exec weed server -dir=/data -s3 -s3.port=8333 -s3.config=/run/s3.json -ip=frank-seaweedfs-attachments
-    networks: [frank-harness-attachments]
-    environment:
-      FRANK_ATTACHMENT_STAGING_ACCESS_KEY: "${FRANK_ATTACHMENT_STAGING_ACCESS_KEY:?required}"
-      FRANK_ATTACHMENT_STAGING_SECRET_KEY: "${FRANK_ATTACHMENT_STAGING_SECRET_KEY:?required}"
-      FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY: "${FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY:?required}"
-      FRANK_ATTACHMENT_PROMOTER_SECRET_KEY: "${FRANK_ATTACHMENT_PROMOTER_SECRET_KEY:?required}"
-    volumes: ["frank-attachment-pool:/data", "./seaweedfs/s3-attachments.json.tmpl:/etc/seaweedfs/s3-attachments.json.tmpl:ro"]
-    read_only: true
-    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m", "/run:rw,nosuid,nodev,noexec,size=1m"]
-    cap_drop: [ALL]
-    security_opt: [no-new-privileges:true]
-    mem_limit: 1024m
-    cpus: "0.75"
-    pids_limit: 384
-    healthcheck: { test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:9333/cluster/status"], interval: 15s, timeout: 5s, retries: 10 }
   frank-clamav:
     image: "${FRANK_CLAMAV_CURRENT_IMAGE:?digest-pinned reviewed ClamAV current image required}"
     networks: [frank-harness-attachments]
@@ -59,15 +34,14 @@ services:
     healthcheck: { test: ["CMD-SHELL", "clamdscan --version >/dev/null && test -s /var/lib/clamav/daily.cvd -o -s /var/lib/clamav/daily.cld"], interval: 30s, timeout: 10s, retries: 12, start_period: 120s }
   frank-tusd:
     image: "${FRANK_TUSD_CURRENT_IMAGE:?digest-pinned reviewed tusd current image required}"
-    command: ["-s3-bucket=frank-attachment-staging", "-s3-object-prefix=${FRANK_CELL_ID:?required}/", "-max-size=2147483648", "-hooks-http=${FRANK_TUSD_HOOK_URL:?private HTTPS hook required}", "-hooks-http-forward-headers=Upload-Metadata", "-disable-download", "-disable-termination", "-disable-concatenation"]
+    command: ["-base-path=/v1/uploads/tus/", "-s3-bucket=frank-attachment-staging", "-max-size=2147483648", "-hooks-http=${FRANK_TUSD_HOOK_URL:?signed private HTTPS hook required}", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish", "-hooks-http-forward-headers=Authorization,Upload-Metadata,Upload-Offset,Tus-Resumable", "-disable-download", "-disable-concatenation"]
     environment:
       AWS_ACCESS_KEY_ID: "${FRANK_ATTACHMENT_STAGING_ACCESS_KEY:?required}"
       AWS_SECRET_ACCESS_KEY: "${FRANK_ATTACHMENT_STAGING_SECRET_KEY:?required}"
-      AWS_ENDPOINT: "http://frank-seaweedfs-attachments:8333"
-    networks: [frank, frank-harness-attachments]
+      AWS_ENDPOINT: "http://frank-seaweedfs:8333"
+    networks: [frank]
     depends_on:
       frank-clamav: { condition: service_healthy }
-      frank-seaweedfs-attachments: { condition: service_healthy }
     read_only: true
     tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
     cap_drop: [ALL]
@@ -102,8 +76,5 @@ services:
 networks:
   frank: { external: true, name: frank }
   frank-harness-model: { internal: true, name: frank-harness-model }
-  frank-harness-attachments: { internal: true, name: frank-harness-attachments }
 volumes:
-  # Planned only: capacity gate refuses deployment below 30 GiB free. Do not allocate here.
-  frank-attachment-pool: { name: frank-attachment-pool }
   frank-clamav-signatures: { name: frank-clamav-signatures }
