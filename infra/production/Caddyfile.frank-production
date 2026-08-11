@@ -94,8 +94,8 @@ frank.fail {
             request_body { max_size 2147483648 }
             # Upload capability is distinct from Basic auth and hook credentials.
             # API gate verifies the persisted capability/reservation for every tus method.
-            # It must fail closed and retain Authorization/Tus headers; the tusd hook bearer
-            # is a separate service credential and is never a client capability.
+            # It must fail closed and retain only Tus/capability headers. Browser Basic
+            # Authorization is stripped; the tusd hook bearer is service-injected.
             forward_auth {$FRANK_UPLOAD_GATE_INTERNAL_URL} {
                 # Caddy forward_auth always issues GET. The API gate contract is therefore
                 # GET /private/tusd/gate and reads the original method/URI forwarded below.
