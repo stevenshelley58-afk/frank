@@ -107,6 +107,7 @@ jobs:
           for digest in "$API_DIGEST" "$WEB_DIGEST"; do
             printf '%s' "$digest" | grep -Eq '^sha256:[a-f0-9]{64}$'
           done
+          mkdir -p evidence
 
       - name: Generate API SBOM evidence
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
