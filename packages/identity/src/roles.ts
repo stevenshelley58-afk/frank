@@ -99,7 +99,7 @@ export const ROLE_CAPABILITIES: Readonly<Record<Capability, readonly Role[]>> = 
   // WORK-004 transitions change state. A reviewer reviews; it does not drive.
   'work.transition': ['owner', 'operator', 'builder', 'member', 'service_identity'],
   'work.assign': ['owner', 'operator', 'builder', 'member'],
-  'today.read': ['owner', 'operator', 'builder', 'member', 'reviewer'],
+  'today.read': ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
   // The provenance walk is the audit surface; a reviewer needs it by definition
   // (FRANK-§2.2: "Evidence review").
   'provenance.read': ['owner', 'operator', 'builder', 'member', 'reviewer'],
