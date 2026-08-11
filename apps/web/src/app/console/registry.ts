@@ -22,7 +22,7 @@ export type ConsoleModule = {
   title: string;
   description: string;
   /** icon key resolved by <ConsoleIcon /> */
-  icon: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks' | 'folder' | 'terminal' | 'channels';
+  icon: 'grid' | 'chart' | 'bot' | 'brain' | 'tasks' | 'folder' | 'terminal' | 'channels' | 'skill' | 'plug';
   status: ModuleStatus;
   /** owning system, shown as a muted tag */
   system: string;
@@ -31,7 +31,7 @@ export type ConsoleModule = {
 export const consoleModules: ConsoleModule[] = [
   {
     id: 'explorer',
-    title: 'Files',
+    title: 'Repository Explorer',
     description:
       'Browse the Frank monorepo like a file explorer — skills, flows, projects, agents, prompts, docs, contracts, config. Read-only; pin what matters.',
     icon: 'folder',
@@ -58,9 +58,9 @@ export const consoleModules: ConsoleModule[] = [
   },
   {
     id: 'agent',
-    title: 'Agent Runtime',
+    title: 'Harness & Gateway',
     description:
-      'Goose run-state, sessions, and provider/model swaps across central and mini-Franks.',
+      'Live harness health, room routes, model drift, and gateway timing across every room.',
     icon: 'bot',
     status: 'live',
     system: 'Frank',
@@ -101,10 +101,42 @@ export const consoleModules: ConsoleModule[] = [
   },
   {
     id: 'files',
-    title: 'Files',
+    title: 'Room Files',
     description:
       'A room’s folders and artifacts — folder bindings, sync direction, mount mode, write-back state, and every artifact with its preview.',
     icon: 'folder',
+    status: 'live',
+    system: 'Frank',
+  },
+  {
+    id: 'graph',
+    title: 'Code Graph',
+    description: 'Explore the live structural graph for each registered codebase.',
+    icon: 'chart',
+    status: 'live',
+    system: 'Frank',
+  },
+  {
+    id: 'previews',
+    title: 'Previews',
+    description: 'Browse every hosted preview, grouped by topic and version.',
+    icon: 'grid',
+    status: 'live',
+    system: 'Frank',
+  },
+  {
+    id: 'skills',
+    title: 'Skills',
+    description: 'Read the installed skill registry, its lifecycle, instructions, and linked references.',
+    icon: 'skill',
+    status: 'live',
+    system: 'Frank',
+  },
+  {
+    id: 'tools',
+    title: 'Tools & Connectors',
+    description: 'Inspect the real web-facing connectors and hand off to the owning Console modules.',
+    icon: 'plug',
     status: 'live',
     system: 'Frank',
   },

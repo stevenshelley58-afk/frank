@@ -5,7 +5,7 @@ import { useHarnesses, type ProviderInfo } from '@/lib/use-harnesses';
 import { DEFAULT_ROOMS } from '@/lib/rooms';
 
 /* ------------------------------------------------------------------ */
-/* Agent Runtime console — Goose health, sessions, provider routes.    */
+/* Harness & Gateway console — live provider health and room routes.    */
 /* ------------------------------------------------------------------ */
 
 interface SessionInfo {
@@ -31,9 +31,10 @@ const ROOM_LABELS: Record<string, string> = {
 };
 
 export function AgentConsole() {
-  const { providers, routes, loading } = useHarnesses();
+  const { providers, routes, loading, refresh } = useHarnesses();
   const [latency, setLatency] = useState<number | null>(null);
   const [swapping, setSwapping] = useState<string | null>(null);
+  const [routeError, setRouteError] = useState<string | null>(null);
   const [lastCheck, setLastCheck] = useState(Date.now());
 
   // Measure Goose latency via the providers endpoint.
@@ -58,14 +59,23 @@ export function AgentConsole() {
 
   async function swapRoute(roomId: string, providerId: string) {
     setSwapping(roomId);
+    setRouteError(null);
     try {
-      await fetch('/api/providers', {
+      const response = await fetch('/api/providers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ roomId, providerId }),
       });
-    } catch {
-      /* toast would go here */
+      const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+      if (!response.ok) {
+        const detail = typeof payload?.error === 'string' ? payload.error : `HTTP ${response.status}`;
+        throw new Error(detail);
+      }
+      if (!(await refresh())) {
+        setRouteError('Route was accepted, but the current provider state could not be refreshed. Re-probe to reconcile it.');
+      }
+    } catch (error) {
+      setRouteError(`Route change failed — ${error instanceof Error ? error.message : 'unknown error'}.`);
     } finally {
       setSwapping(null);
       probe();
@@ -95,7 +105,7 @@ export function AgentConsole() {
           <span className={`h-3 w-3 rounded-full ${goose?.healthy ? 'bg-success' : 'bg-[#DC2626]'} animate-pip`} />
         </span>
         <div>
-          <h1 className="font-display text-xl font-bold text-ink">Agent Runtime</h1>
+          <h1 className="font-display text-xl font-bold text-ink">Harness &amp; Gateway</h1>
           <p className="text-[12.5px] text-muted">
             {goose?.healthy ? 'Goose ACP is healthy' : 'Goose ACP is unreachable'}
             {latency !== null && ` · ${latency}ms round-trip`}
@@ -117,7 +127,7 @@ export function AgentConsole() {
 
       {/* providers */}
       <section className="mb-8">
-        <SectionTitle>Registered Providers</SectionTitle>
+        <SectionTitle>Live Harness Registry</SectionTitle>
         <div className="space-y-2">
           {providers.map((p) => (
             <div
@@ -162,11 +172,19 @@ export function AgentConsole() {
             <p className="text-[12.5px] text-muted">No providers registered.</p>
           )}
         </div>
+        {routeError && (
+          <p role="alert" className="mt-3 rounded-lg border border-danger/30 bg-danger/5 px-3 py-2 text-[12px] text-danger">
+            {routeError}
+          </p>
+        )}
+        <p className="mt-3 text-[11.5px] text-muted">
+          Route pins are process-local. They reset if this web process restarts or deploys; no durable routing or session record is exposed here.
+        </p>
       </section>
 
       {/* room routes */}
       <section className="mb-8">
-        <SectionTitle>Room → Harness Routes</SectionTitle>
+        <SectionTitle>Canonical Room Routes</SectionTitle>
         <p className="mb-3 text-[12px] leading-relaxed text-muted">
           Each room resolves its harness via the broker. &ldquo;Auto&rdquo; picks the first
           healthy provider. Pin a room to a named harness to override.
@@ -187,6 +205,9 @@ export function AgentConsole() {
                 />
                 <b className="text-[13px] font-semibold text-ink">{label}</b>
                 <span className="font-mono text-[11px] text-muted">{room?.agent}</span>
+                <span className={`rounded-full px-2 py-0.5 font-mono text-[10px] uppercase tracking-wide ${providers.find((p) => p.id === route)?.healthy === false ? 'bg-[#DC2626]/10 text-[#DC2626]' : 'bg-subtle text-muted'}`}>
+                  {route === 'auto' ? 'broker selected' : providers.find((p) => p.id === route)?.healthy ? 'route healthy' : providers.some((p) => p.id === route) ? 'route down' : 'route unknown'}
+                </span>
                 <div className="ml-auto flex items-center gap-1.5">
                   {providers.map((p) => (
                     <button
@@ -236,8 +257,11 @@ export function AgentConsole() {
             endpoint. The broker explains its selection in plain language (spec §8.4).
           </p>
           <p className="mt-2 text-muted">
-            Sessions persist server-side per room. A harness swap re-creates the session and
-            re-primes the room identity on the next turn.
+            The route registry is process-local today. This surface reports provider health and route pins; it does not claim a durable session or route record.
+          </p>
+          <p className="mt-2 text-muted">
+            Spend is not shown here: this Console has no cost or usage endpoint yet, so no cost is
+            estimated from model names, latency, or provider marketing data.
           </p>
         </div>
       </section>

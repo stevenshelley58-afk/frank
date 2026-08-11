@@ -34,6 +34,7 @@ import {
 } from '@/components/ui/table';
 import { cn } from '@/lib/utils';
 import { ChevronDown } from '@/components/ui/icons';
+import { useAuth } from '@/components/providers';
 
 /* ------------------------------------------------------------------ */
 /* Tasks console — Frank's work board (API) + Plane + Google Tasks.    */
@@ -88,6 +89,7 @@ function relTime(iso: string): string {
 }
 
 export function TasksConsole() {
+  const { api, status } = useAuth();
   const [items, setItems] = useState<WorkItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -99,19 +101,12 @@ export function TasksConsole() {
   const [rowSelection, setRowSelection] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
+    if (status !== 'ready') return;
     let alive = true;
     async function load() {
       try {
-        // Get a dev session first
-        const authRes = await fetch('/v1/auth/dev-session', { method: 'POST' });
-        if (!authRes.ok) throw new Error('auth failed');
-        const session = await authRes.json();
-        const token = session.access_token;
-
-        const res = await fetch('/v1/work?limit=50&sort=updated_at&order=desc', {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        if (!api) throw new Error('The authenticated API bridge is unavailable.');
+        const res = await api('/v1/work?limit=50&sort=updated_at&order=desc');
         const data = await res.json();
         if (alive) {
           setItems(data.items ?? []);
@@ -129,7 +124,7 @@ export function TasksConsole() {
       alive = false;
       window.clearInterval(t);
     };
-  }, []);
+  }, [api, status]);
 
   const columns = useMemo<ColumnDef<WorkItem>[]>(
     () => [

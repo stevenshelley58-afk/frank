@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
+import { useAuth } from '@/components/providers';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -115,6 +116,7 @@ function formatStamp(iso: string | null): string {
 /* ------------------------------------------------------------------ */
 
 export function ChannelsConsole() {
+  const { api } = useAuth();
   const [roomId, setRoomId] = useState('central');
   const [bindings, setBindings] = useState<ChannelBinding[]>([]);
   const [loading, setLoading] = useState(true);
@@ -135,8 +137,8 @@ export function ChannelsConsole() {
 
   const load = useCallback(async () => {
     try {
-      const res = await fetch(CHANNELS_API.listForRoom(roomId));
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!api) throw new Error('The authenticated API bridge is unavailable.');
+      const res = await api(CHANNELS_API.listForRoom(roomId));
       const data = (await res.json()) as { bindings?: ChannelBinding[] };
       setBindings(Array.isArray(data.bindings) ? data.bindings : []);
       setError(null);
@@ -146,7 +148,7 @@ export function ChannelsConsole() {
     } finally {
       setLoading(false);
     }
-  }, [roomId]);
+  }, [api, roomId]);
 
   useEffect(() => {
     setLoading(true);
@@ -168,7 +170,8 @@ export function ChannelsConsole() {
     setActionError(null);
     setActionNotice(null);
     try {
-      const res = await fetch(CHANNELS_API.bind(roomId), {
+      if (!api) throw new Error('The authenticated API bridge is unavailable.');
+      await api(CHANNELS_API.bind(roomId), {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -179,10 +182,6 @@ export function ChannelsConsole() {
           platform_conversation_id: convId,
         }),
       });
-      if (!res.ok) {
-        const detail = await problemDetail(res);
-        throw new Error(detail ?? `HTTP ${res.status}`);
-      }
       setActionNotice(`Bound ${roomName} to ${platform}:${convId}.`);
       setConversationId('');
       await load();
@@ -198,14 +197,11 @@ export function ChannelsConsole() {
     setActionError(null);
     setActionNotice(null);
     try {
-      const res = await fetch(CHANNELS_API.revoke(roomId, bindingId), {
+      if (!api) throw new Error('The authenticated API bridge is unavailable.');
+      await api(CHANNELS_API.revoke(roomId, bindingId), {
         method: 'DELETE',
         headers: { 'Idempotency-Key': crypto.randomUUID() },
       });
-      if (!res.ok) {
-        const detail = await problemDetail(res);
-        throw new Error(detail ?? `HTTP ${res.status}`);
-      }
       setActionNotice('Binding revoked — it routes nothing now.');
       await load();
     } catch (err) {
