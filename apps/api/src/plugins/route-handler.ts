@@ -109,7 +109,9 @@ function resolveIdempotencyKey(
   const bodyKey =
     typeof body === 'object' && body !== null && 'command_id' in body
       ? (body as { command_id?: unknown }).command_id
-      : undefined;
+      : typeof body === 'object' && body !== null && 'idempotency_key' in body
+        ? (body as { idempotency_key?: unknown }).idempotency_key
+        : undefined;
 
   const fromBody = typeof bodyKey === 'string' ? bodyKey : undefined;
 
