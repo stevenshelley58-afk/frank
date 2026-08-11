@@ -45,7 +45,7 @@ export const harnessJobBody = z.object({
   // Tenant and owner are never public input; the handler injects both.
   scope: z.object({ project_id: z.string().trim().min(1).max(200).optional(), room_id: id.optional() }).strict(),
   input: z.object({ query: z.string().trim().min(1).max(4096), max_sources: z.number().int().min(1).max(50), locale: z.string().trim().min(2).max(35).optional() }).strict(),
-  allowed_tools: z.array(z.enum(['browser.search', 'browser.open', 'browser.extract'])).min(1).max(3),
+  allowed_tools: z.array(z.enum(['browser.search', 'browser.open', 'browser.extract'])).min(1).max(3).refine((tools) => new Set(tools).size === tools.length, 'allowed_tools must be unique'),
   egress_profile: z.enum(['research-public', 'research-allowlist']),
 }).strict();
 

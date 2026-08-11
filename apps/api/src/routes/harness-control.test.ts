@@ -30,6 +30,7 @@ describe('Night Watch public route contracts', () => {
     expect(harnessJobBody.safeParse({ ...request, cell_id: 'forged' }).success).toBe(false);
     expect(harnessJobBody.safeParse({ ...request, owner_id: 'forged' }).success).toBe(false);
     expect(harnessJobBody.safeParse({ ...request, scope: { ...request.scope, cell_id: 'forged' } }).success).toBe(false);
+    expect(harnessJobBody.safeParse({ ...request, allowed_tools: ['browser.search', 'browser.search'] }).success).toBe(false);
   });
 
   it('publishes operation-specific create and status representations', () => {

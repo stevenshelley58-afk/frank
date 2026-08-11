@@ -3,19 +3,19 @@
   "$id": "schema://frank.attachment-upload/v1",
   "oneOf": [
     { "$ref": "#/$defs/authorization_response" },
-    { "$ref": "#/$defs/pending_status" },
-    { "$ref": "#/$defs/materialized_status" }
+    { "$ref": "#/$defs/status_response" }
   ],
   "$defs": {
     "reservation_state": { "enum": ["authorized", "uploading", "completed", "terminating", "cancelled", "expired", "rejected"] },
     "authorization_response": {
       "type": "object", "additionalProperties": false,
-      "required": ["upload_id", "reservation_id", "tus_creation_url", "tus_headers", "tus_metadata", "capability_expires_at", "reservation_expires_at"],
+      "required": ["upload_id", "reservation_id", "tus_creation_url", "tus_headers", "tus_metadata", "tus_allowed_meta_fields", "capability_expires_at", "reservation_expires_at"],
       "properties": {
         "upload_id": { "type": "string", "minLength": 1 }, "reservation_id": { "type": "string", "format": "uuid" },
         "tus_creation_url": { "type": "string", "format": "uri" },
-        "tus_headers": { "type": "object", "additionalProperties": false, "required": ["Authorization", "Tus-Resumable"], "properties": { "Authorization": { "type": "string", "pattern": "^Bearer .+$", "maxLength": 2055 }, "Tus-Resumable": { "const": "1.0.0" } } },
-        "tus_metadata": { "type": "object", "additionalProperties": false, "required": ["upload_id", "reservation_id"], "properties": { "upload_id": { "type": "string", "minLength": 1 }, "reservation_id": { "type": "string", "format": "uuid" } } },
+        "tus_headers": { "type": "object", "additionalProperties": false, "required": ["Upload-Metadata", "X-Frank-Upload-Capability"], "properties": { "Upload-Metadata": { "type": "string", "minLength": 1 }, "X-Frank-Upload-Capability": { "type": "string", "minLength": 1, "maxLength": 2048 } } },
+        "tus_metadata": { "type": "object", "additionalProperties": false, "required": ["upload_id", "cell_id", "conversation_id"], "properties": { "upload_id": { "type": "string", "minLength": 1 }, "cell_id": { "type": "string", "minLength": 1 }, "conversation_id": { "type": "string", "format": "uuid" } } },
+        "tus_allowed_meta_fields": { "const": ["upload_id", "cell_id", "conversation_id"] },
         "capability_expires_at": { "type": "string", "format": "date-time" }, "reservation_expires_at": { "type": "string", "format": "date-time" }
       }
     },
@@ -31,6 +31,8 @@
         "attachment_id": { "type": "string", "format": "uuid" }, "attachment_state": { "enum": ["staging", "scanning", "ready", "promoted", "rejected", "cancelled", "expired"] },
         "scan_state": { "enum": ["pending", "clean", "blocked", "failed"] }, "extraction_state": { "enum": ["none", "pending", "complete", "failed"] }
       }
-    }
+    },
+    "identifiers": { "type": "object", "additionalProperties": false, "required": ["cell_id", "actor_id", "request_id", "correlation_id", "trace_id", "policy_version"], "properties": { "cell_id": { "type": "string", "minLength": 1 }, "actor_id": { "type": "string", "minLength": 1 }, "request_id": { "type": "string", "minLength": 1 }, "correlation_id": { "type": "string", "minLength": 1 }, "trace_id": { "type": "string", "minLength": 1 }, "policy_version": { "type": "string", "minLength": 1 } } },
+    "status_response": { "type": "object", "additionalProperties": false, "required": ["upload", "identifiers"], "properties": { "upload": { "oneOf": [{ "$ref": "#/$defs/pending_status" }, { "$ref": "#/$defs/materialized_status" }] }, "identifiers": { "$ref": "#/$defs/identifiers" } } }
   }
 }

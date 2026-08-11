@@ -45,8 +45,9 @@ export interface AttachmentUploadAuthorizationResponse {
   upload_id: string;
   reservation_id: string;
   tus_creation_url: string;
-  tus_headers: { Authorization: string; 'Tus-Resumable': '1.0.0' };
-  tus_metadata: { upload_id: string; reservation_id: string };
+  tus_headers: { 'Upload-Metadata': string; 'X-Frank-Upload-Capability': string };
+  tus_metadata: { upload_id: string; cell_id: string; conversation_id: string };
+  tus_allowed_meta_fields: ['upload_id', 'cell_id', 'conversation_id'];
   capability_expires_at: IsoDateTime;
   reservation_expires_at: IsoDateTime;
 }
@@ -55,6 +56,10 @@ export type UploadReservationStatus = 'authorized'|'uploading'|'completed'|'term
 export type AttachmentUploadStatus =
   | { upload_id:string; reservation_state:UploadReservationStatus; attachment_id?:never; attachment_state?:never; scan_state?:never; extraction_state?:never }
   | { upload_id:string; reservation_state:UploadReservationStatus; attachment_id:string; attachment_state:AttachmentState; scan_state:'pending'|'clean'|'blocked'|'failed'; extraction_state:'none'|'pending'|'complete'|'failed' };
+export interface AttachmentUploadStatusResponse {
+  upload: AttachmentUploadStatus;
+  identifiers: { cell_id:string; actor_id:string; request_id:string; correlation_id:string; trace_id:string; policy_version:string };
+}
 
 export type AttachmentState = 'staging'|'scanning'|'ready'|'promoted'|'rejected'|'cancelled'|'expired';
 export type AttachmentOutboxKind = 'hash_scan_promote'|'extract'|'cleanup'|'reconcile';

@@ -13,12 +13,13 @@ export interface HarnessJobInput { harness: 'hermes'; task_type: 'browser-resear
 export interface PersistedHarnessJobInput extends Omit<HarnessJobInput, 'scope'> { scope: HarnessJobScope; request_hash: string }
 export type HarnessJobStatus = 'queued'|'running'|'completed'|'failed'|'cancelled';
 export interface HarnessArtifact { object_id:string; source_ref:SourceRef }
+export interface HarnessResponseIdentifiers { cell_id:string; actor_id:string; request_id:string; correlation_id:string; trace_id:string; policy_version:string }
 export type HarnessJobEvent =
   | { job_id:string; cursor:number; kind:'progress'; occurred_at:IsoDateTime; payload:{summary:string} }
   | { job_id:string; cursor:number; kind:'artifact'; occurred_at:IsoDateTime; payload:HarnessArtifact }
   | { job_id:string; cursor:number; kind:'error'; occurred_at:IsoDateTime; payload:{summary:string} }
   | { job_id:string; cursor:number; kind:'terminal'; occurred_at:IsoDateTime; payload:{status:Extract<HarnessJobStatus,'completed'|'failed'|'cancelled'>;summary?:string} };
-export interface HarnessJobRepresentation { job_id:string; status:HarnessJobStatus; created_at:IsoDateTime; updated_at:IsoDateTime; finished_at:IsoDateTime|null; cancelled_at:IsoDateTime|null; artifacts:HarnessArtifact[]; source_refs:SourceRef[] }
+export interface HarnessJobRepresentation { job_id:string; status:HarnessJobStatus; created_at:IsoDateTime; updated_at:IsoDateTime; finished_at:IsoDateTime|null; cancelled_at:IsoDateTime|null; artifacts:HarnessArtifact[]; source_refs:SourceRef[]; identifiers:HarnessResponseIdentifiers }
 export interface HarnessJobCreateResponse extends HarnessJobRepresentation { replayed:boolean }
 export type HarnessJobStatusResponse = HarnessJobRepresentation;
 export interface HarnessJobEventsResponse extends HarnessJobRepresentation { events:HarnessJobEvent[]; next_cursor:number|null }

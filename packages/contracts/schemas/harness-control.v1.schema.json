@@ -20,6 +20,7 @@
       "type": "object", "additionalProperties": false, "required": ["object_id", "source_ref"],
       "properties": { "object_id": { "type": "string", "minLength": 1 }, "source_ref": { "$ref": "#/$defs/source_ref" } }
     },
+    "identifiers": { "type": "object", "additionalProperties": false, "required": ["cell_id", "actor_id", "request_id", "correlation_id", "trace_id", "policy_version"], "properties": { "cell_id": { "type": "string", "minLength": 1 }, "actor_id": { "type": "string", "minLength": 1 }, "request_id": { "type": "string", "minLength": 1 }, "correlation_id": { "type": "string", "minLength": 1 }, "trace_id": { "type": "string", "minLength": 1 }, "policy_version": { "type": "string", "minLength": 1 } } },
     "job_request": {
       "type": "object", "additionalProperties": false,
       "required": ["harness", "task_type", "idempotency_key", "scope", "input", "allowed_tools", "egress_profile"],
@@ -44,33 +45,33 @@
     "job_cancel_response": { "$ref": "#/$defs/job_mutation_response" },
     "job_mutation_response": {
       "type": "object", "additionalProperties": false,
-      "required": ["job_id", "status", "created_at", "updated_at", "finished_at", "cancelled_at", "artifacts", "source_refs", "replayed"],
+      "required": ["job_id", "status", "created_at", "updated_at", "finished_at", "cancelled_at", "artifacts", "source_refs", "replayed", "identifiers"],
       "properties": {
         "job_id": { "type": "string", "format": "uuid" }, "status": { "$ref": "#/$defs/job_status" },
         "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" },
         "finished_at": { "type": ["string", "null"], "format": "date-time" }, "cancelled_at": { "type": ["string", "null"], "format": "date-time" },
-        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } }, "source_refs": { "type": "array", "items": { "$ref": "#/$defs/source_ref" } }, "replayed": { "type": "boolean" }
+        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } }, "source_refs": { "type": "array", "items": { "$ref": "#/$defs/source_ref" } }, "replayed": { "type": "boolean" }, "identifiers": { "$ref": "#/$defs/identifiers" }
       }
     },
     "job_status_response": {
       "type": "object", "additionalProperties": false,
-      "required": ["job_id", "status", "created_at", "updated_at", "finished_at", "cancelled_at", "artifacts", "source_refs"],
+      "required": ["job_id", "status", "created_at", "updated_at", "finished_at", "cancelled_at", "artifacts", "source_refs", "identifiers"],
       "properties": {
         "job_id": { "type": "string", "format": "uuid" }, "status": { "$ref": "#/$defs/job_status" },
         "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" },
         "finished_at": { "type": ["string", "null"], "format": "date-time" }, "cancelled_at": { "type": ["string", "null"], "format": "date-time" },
-        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } }, "source_refs": { "type": "array", "items": { "$ref": "#/$defs/source_ref" } }
+        "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } }, "source_refs": { "type": "array", "items": { "$ref": "#/$defs/source_ref" } }, "identifiers": { "$ref": "#/$defs/identifiers" }
       }
     },
     "job_events_response": {
       "type": "object", "additionalProperties": false,
-      "required": ["job_id", "status", "created_at", "updated_at", "finished_at", "cancelled_at", "artifacts", "source_refs", "events", "next_cursor"],
+      "required": ["job_id", "status", "created_at", "updated_at", "finished_at", "cancelled_at", "artifacts", "source_refs", "events", "next_cursor", "identifiers"],
       "properties": {
         "job_id": { "type": "string", "format": "uuid" }, "status": { "$ref": "#/$defs/job_status" },
         "created_at": { "type": "string", "format": "date-time" }, "updated_at": { "type": "string", "format": "date-time" },
         "finished_at": { "type": ["string", "null"], "format": "date-time" }, "cancelled_at": { "type": ["string", "null"], "format": "date-time" },
         "artifacts": { "type": "array", "items": { "$ref": "#/$defs/artifact" } }, "source_refs": { "type": "array", "items": { "$ref": "#/$defs/source_ref" } },
-        "events": { "type": "array", "items": { "$ref": "#/$defs/job_event" } }, "next_cursor": { "type": ["integer", "null"], "minimum": 0 }
+        "events": { "type": "array", "items": { "$ref": "#/$defs/job_event" } }, "next_cursor": { "type": ["integer", "null"], "minimum": 0 }, "identifiers": { "$ref": "#/$defs/identifiers" }
       }
     },
     "job_cancel_request": {
