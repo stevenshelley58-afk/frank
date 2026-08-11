@@ -1,6 +1,6 @@
 import type { IsoDateTime } from './common.js';
 import type { SourceRef } from './object-manifest.js';
-export interface HarnessConfigRevision { id: string; harness_id: string; revision: number; config: Record<string, unknown>; status: 'draft' | 'active' | 'superseded' | 'rolled_back'; created_at: IsoDateTime; created_by: string; rollback_of?: string; }
+export interface HarnessConfigRevision { id: string; cell_id: string; harness_id: string; revision: number; config: Record<string, unknown>; status: 'draft' | 'active' | 'superseded' | 'rolled_back'; created_at: IsoDateTime; created_by: string; rollback_of?: string; }
 export interface RoutePolicy { id: string; cell_id: string; room_id: string; revision: number; profile: string; aliases: Record<string, string[]>; shadow_mode: boolean; active: boolean; created_at: IsoDateTime; }
 export type BrowserResearchInput = { query: string; max_sources: number; locale?: string };
 export type HermesAllowedTool = 'browser.search'|'browser.open'|'browser.extract';
