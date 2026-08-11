@@ -44,11 +44,16 @@ const AuthContext = createContext<AuthContextValue>({
   retry: () => {},
 });
 
+export function shouldMintBrowserDevSession(nodeEnv = process.env.NODE_ENV): boolean {
+  return nodeEnv === 'development';
+}
+
 async function mintSession(): Promise<DevSession | null> {
+  // Browser bearer tokens are a local-development compatibility path only.
+  // Hosted traffic uses /api/v1/*, where the server attaches its service token.
+  if (!shouldMintBrowserDevSession()) return null;
   const res = await fetch('/v1/auth/dev-session', { method: 'POST' });
-  // Production deliberately disables browser-minted bearer tokens. Mission
-  // and Workbench use authenticated same-origin BFF routes, so this response
-  // means "server-owned session", not an unavailable Frank cell.
+  // A disabled local endpoint still leaves the server-owned BFF available.
   if (res.status === 403) return null;
   if (!res.ok) {
     throw new Error(`Session request failed (${res.status})`);
@@ -87,7 +92,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, [attempt]);
 
-  /** Re-mint (single-flight). Used by the api fetcher on 401. */
+  /** Re-mint locally (single-flight). Production never issues this request. */
   const reauth = useCallback(async (): Promise<string> => {
     if (!minting.current) {
       minting.current = mintSession()
@@ -105,11 +110,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const api = useMemo<ApiFetch | null>(() => {
-    // In production the dev-session endpoint returns 403 (browser-minted tokens
-    // are disabled). We still create an api — it ships requests without a Bearer
-    // header, and the /api/v1/* BFF proxy re-authenticates them server-side with
-    // the domain service token. The shell's chat streaming continues through the
-    // existing /api/chat SSE bridge (no token needed).
+    // Production requests have no browser bearer token. The /api/v1/* BFF
+    // authenticates them server-side with the domain service token; the shell's
+    // chat streaming remains on the existing /api/chat SSE bridge.
     return makeApiFetch(() => sessionRef.current?.access_token ?? null, reauth);
   }, [reauth]);
 
