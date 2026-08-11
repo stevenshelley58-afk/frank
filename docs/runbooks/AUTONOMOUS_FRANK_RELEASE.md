@@ -851,6 +851,8 @@ any credential material is generated or read:
 ```bash
 { set +x; } 2>/dev/null
 umask 077
+export FRANK_CELL_ID='frank'
+test "$FRANK_CELL_ID" = 'frank'
 domain_token_file='/srv/frank/secrets/domain-service-token'
 domain_token_tmp="$(mktemp /srv/frank/secrets/.domain-service-token.XXXXXX)"
 trap 'rm -f -- "${domain_token_tmp:-}"' EXIT
@@ -869,6 +871,45 @@ docker run --rm --network none --read-only \
 
 test -s "$domain_token_tmp"
 test "$(wc -c < "$domain_token_tmp")" -le 8192
+chown 10001:10001 "$domain_token_tmp"
+chmod 0400 "$domain_token_tmp"
+
+docker run --rm --network none --read-only --user 10001:10001 \
+  --tmpfs /tmp:rw,nosuid,nodev,noexec,mode=1777,size=64m \
+  --env HOME=/tmp \
+  --env FRANK_SESSION_SIGNING_KEY \
+  --env FRANK_API_AUDIENCE \
+  --env FRANK_CELL_ID \
+  --mount "type=bind,src=$domain_token_tmp,dst=/run/secrets/domain-service-token,readonly" \
+  "$FRANK_API_IMAGE" \
+  /app/apps/api/node_modules/.bin/tsx --eval '
+import { readFileSync } from "node:fs";
+import { LocalSignedSessionProvider } from "/app/packages/identity/src/index.ts";
+const fail = () => { process.exitCode = 1; };
+const decodeKey = (value) => {
+  if (typeof value !== "string" || value.length === 0) throw new Error("missing signing key");
+  const bytes = /^[0-9a-fA-F]+$/.test(value) ? Buffer.from(value, "hex") : Buffer.from(value, "base64");
+  if (bytes.length < 32) throw new Error("invalid signing key");
+  return Uint8Array.from(bytes);
+};
+void (async () => {
+  const expectedCell = process.env.FRANK_CELL_ID;
+  if (expectedCell !== "frank") throw new Error("production cell scope is not frank");
+  const provider = new LocalSignedSessionProvider({
+    signingKey: decodeKey(process.env.FRANK_SESSION_SIGNING_KEY),
+    audience: process.env.FRANK_API_AUDIENCE ?? "frank.api",
+    cellId: expectedCell,
+  });
+  const result = await provider.authenticate({
+    scheme: "Bearer",
+    value: readFileSync("/run/secrets/domain-service-token", "utf8"),
+  });
+  if (!result.authenticated || result.principal.cellId !== "frank") {
+    throw new Error("domain token does not authenticate in production cell");
+  }
+})().catch(fail);
+'
+
 chown root:root "$domain_token_tmp"
 chmod 0400 "$domain_token_tmp"
 mv -f -- "$domain_token_tmp" "$domain_token_file"
