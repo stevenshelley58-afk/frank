@@ -16,10 +16,10 @@ the API issues capability credentials; its private HTTP hook only validates/enqu
 TLS verification is never disabled. Quarantine scans precede promotion; freshness/readiness
 of ClamAV signatures is a hard dependency.
 
-Trust boundary: `frank-model` is LiteLLM/Hermes plus the API control seam. `frank-attachments` is
+Trust boundary: `frank-model` is LiteLLM plus the API control seam. `frank-attachments` is
 SeaweedFS/tusd/ClamAV plus API and narrowly scoped Caddy ingress. The API joins `frank` as the controlled seam. Dashboard OpenFGA
-must stay lake-local: it joins neither network and receives no attachment credential. Hermes
-has no public port, scheduler, durable/child-agent authority, or Night Watch access.
+must stay lake-local: it joins neither network and receives no attachment credential. Hermes is
+a later specialist overlay with separate evidence; it is not part of this four-service packet.
 
 Bucket bootstrap is a reviewed idempotent one-shot operation using a temporary bucket-admin
 credential held outside Compose. It creates the three attachment buckets without enumerating

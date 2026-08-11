@@ -38,6 +38,8 @@ services:
       # Admin key is mounted only in LiteLLM. Application virtual-key bootstrap is
       # external evidence; no runtime service receives this credential in this overlay.
       LITELLM_ADMIN_KEY: "${LITELLM_ADMIN_KEY:?required}"
+      # Separate LiteLLM database/role; never point this at Frank domain tables.
+      LITELLM_DATABASE_URL: "${LITELLM_DATABASE_URL:?required; separate LiteLLM database role}"
       FRANK_LITELLM_OPENAI_MODEL: "${FRANK_LITELLM_OPENAI_MODEL:?required}"
       FRANK_LITELLM_GEMINI_MODEL: "${FRANK_LITELLM_GEMINI_MODEL:?required}"
       FRANK_LITELLM_CONCENTRATE_MODEL: "${FRANK_LITELLM_CONCENTRATE_MODEL:?required}"
@@ -61,7 +63,8 @@ services:
 
   frank-tusd:
     image: "${FRANK_TUSD_CURRENT_IMAGE:?reviewed tusd digest required}"
-    command: ["-base-path=/v1/uploads/tus/", "-s3-bucket=frank-attachment-staging", "-s3-endpoint=http://frank-seaweedfs:8333", "-s3-force-path-style", "-max-size=2147483648", "-hooks-http=${FRANK_TUSD_HOOK_URL:?required}", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish,post-terminate", "-hooks-http-forward-headers=X-Frank-Tusd-Hook-Secret,X-Frank-Upload-Capability,Upload-Metadata,Tus-Resumable,Upload-Offset,X-Forwarded-Method,X-Forwarded-Uri", "-disable-download", "-disable-concatenation"]
+    # v2.10 evidence is required by the promotion manifest before this command may apply.
+    command: ["-behind-proxy", "-base-path=/v1/uploads/tus/", "-s3-bucket=frank-attachment-staging", "-s3-endpoint=http://frank-seaweedfs:8333", "-s3-force-path-style", "-max-size=2147483648", "-hooks-http=${FRANK_TUSD_HOOK_URL:?required}", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish,post-terminate", "-hooks-http-forward-headers=X-Frank-Tusd-Hook-Secret,X-Frank-Upload-Capability,Upload-Metadata,Tus-Resumable,Upload-Offset,X-Forwarded-Method,X-Forwarded-Uri", "-disable-download", "-disable-concatenation"]
     environment:
       AWS_ACCESS_KEY_ID: "${FRANK_ATTACHMENT_STAGING_ACCESS_KEY:?required}"
       AWS_SECRET_ACCESS_KEY: "${FRANK_ATTACHMENT_STAGING_SECRET_KEY:?required}"

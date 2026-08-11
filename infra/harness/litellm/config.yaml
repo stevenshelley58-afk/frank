@@ -11,6 +11,7 @@ model_list:
     litellm_params: { model: os.environ/FRANK_LITELLM_DEEPSEEK_MODEL, api_key: os.environ/DEEPSEEK_API_KEY }
 general_settings:
   master_key: os.environ/LITELLM_ADMIN_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL
   # Durable usage records are required for receipts/reconciliation. This records usage,
   # not provider account balances.
   disable_spend_logs: false

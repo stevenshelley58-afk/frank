@@ -16,5 +16,12 @@ aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" head-object --
 if aws_for "$FRANK_PROMOTER_ACCESS_KEY" "$FRANK_PROMOTER_SECRET_KEY" list-objects-v2 --bucket frank-attachment-staging >/dev/null 2>&1; then echo 'promoter staging-list overreach' >&2; exit 1; fi
 if aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" head-object --bucket frank-attachment-staging --key "$key" >/dev/null 2>&1; then echo 'downloader staging-read overreach' >&2; exit 1; fi
 if aws_for "$FRANK_DOWNLOADER_ACCESS_KEY" "$FRANK_DOWNLOADER_SECRET_KEY" put-object --bucket frank-objects --key "$object" --body /dev/null 2>&1; then echo 'downloader write overreach' >&2; exit 1; fi
+if [[ -n "${FRANK_LAKE_BUCKET:-}" && -n "${FRANK_LAKE_WORKER_ACCESS_KEY:-}" && -n "${FRANK_LAKE_WORKER_SECRET_KEY:-}" ]]; then
+  lake_key="canary/$hash"
+  aws_for "$FRANK_LAKE_WORKER_ACCESS_KEY" "$FRANK_LAKE_WORKER_SECRET_KEY" put-object --bucket "$FRANK_LAKE_BUCKET" --key "$lake_key" --body /dev/null
+  if aws_for "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY" head-object --bucket "$FRANK_LAKE_BUCKET" --key "$lake_key" >/dev/null 2>&1; then echo 'staging lake overreach' >&2; exit 1; fi
+  aws_for "$FRANK_LAKE_WORKER_ACCESS_KEY" "$FRANK_LAKE_WORKER_SECRET_KEY" delete-object --bucket "$FRANK_LAKE_BUCKET" --key "$lake_key"
+  lake_result='lake-mutual-denial=passed'
+else lake_result='lake-mutual-denial=skipped-no-real-lake-credentials'; fi
 aws_for "$FRANK_STAGING_ACCESS_KEY" "$FRANK_STAGING_SECRET_KEY" delete-object --bucket frank-attachment-staging --key "$key"
-echo 's3-policy-canary=passed; scoped identities verified; disposable objects deleted'
+echo "s3-policy-canary=passed; scoped identities verified; disposable objects deleted; $lake_result"
