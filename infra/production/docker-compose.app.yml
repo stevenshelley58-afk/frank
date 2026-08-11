@@ -79,7 +79,7 @@ services:
         target: /data/codegraph
         read_only: true
       - type: bind
-        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/production/codegraph-projects.json"
+        source: "${FRANK_CODEGRAPH_REGISTRY_HOST_PATH:?FRANK_CODEGRAPH_REGISTRY_HOST_PATH is required}"
         target: /etc/frank-codegraph/projects.json
         read_only: true
       - type: volume
@@ -335,11 +335,11 @@ services:
         source: frank_codegraph_data
         target: /data/codegraph
       - type: bind
-        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/production/codegraph-projects.json"
+        source: "${FRANK_CODEGRAPH_REGISTRY_HOST_PATH:?FRANK_CODEGRAPH_REGISTRY_HOST_PATH is required}"
         target: /etc/frank-codegraph/projects.json
         read_only: true
       - type: bind
-        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
+        source: "${FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH:?FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH is required}"
         target: /repositories/frank
         read_only: true
     secrets: !override
