@@ -9,14 +9,15 @@ CREATE TABLE "frank_domain"."object_manifest" (
 CREATE UNIQUE INDEX "object_manifest_id_cell_uidx" ON "frank_domain"."object_manifest"("object_id","cell_id");--> statement-breakpoint
 CREATE TABLE "frank_domain"."upload_reservation" (
   "id" uuid PRIMARY KEY NOT NULL, "cell_id" text NOT NULL, "owner_id" text NOT NULL, "conversation_id" uuid NOT NULL, "draft_message_id" uuid NOT NULL, "idempotency_key" text NOT NULL,
-  "request_hash" text NOT NULL CHECK ("request_hash" ~ '^[a-f0-9]{64}$'), "upload_id" text NOT NULL,
-  "state" text NOT NULL CHECK ("state" IN ('authorized','uploading','completed','cancelled','expired','rejected')),
+  "request_hash" text NOT NULL CHECK ("request_hash" ~ '^[a-f0-9]{64}$'), "upload_id" text NOT NULL, "original_name" text NOT NULL, "relative_path" text, "media_type" text NOT NULL,
+  "state" text NOT NULL CHECK ("state" IN ('authorized','uploading','completed','terminating','cancelled','expired','rejected')),
   "reserved_bytes" bigint NOT NULL CHECK ("reserved_bytes" >= 0 AND "reserved_bytes" <= 2147483648), "reserved_count" integer NOT NULL DEFAULT 1 CHECK ("reserved_count" = 1),
-  "capability_version" integer NOT NULL DEFAULT 1 CHECK ("capability_version" >= 1), "expires_at" timestamptz NOT NULL, "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(),
+  "capability_version" integer NOT NULL DEFAULT 1 CHECK ("capability_version" >= 1), "expires_at" timestamptz NOT NULL, "termination_requested_at" timestamptz, "termination_confirmed_at" timestamptz, "termination_attempts" integer NOT NULL DEFAULT 0 CHECK ("termination_attempts" >= 0), "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT "upload_reservation_idempotency_uidx" UNIQUE("cell_id","owner_id","conversation_id","draft_message_id","idempotency_key"), CONSTRAINT "upload_reservation_upload_uidx" UNIQUE("cell_id","upload_id"),
   CONSTRAINT "upload_reservation_conversation_cell_fk" FOREIGN KEY("conversation_id","cell_id") REFERENCES "frank_domain"."chat_conversation"("id","cell_id") ON DELETE RESTRICT,
   CONSTRAINT "upload_reservation_expiry_24h" CHECK ("expires_at" > "created_at" AND "expires_at" <= "created_at" + interval '24 hours'),
-  CONSTRAINT "upload_reservation_ids_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("owner_id")) > 0 AND length(btrim("idempotency_key")) > 0 AND length(btrim("upload_id")) > 0)
+  CONSTRAINT "upload_reservation_ids_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("owner_id")) > 0 AND length(btrim("idempotency_key")) > 0 AND length(btrim("upload_id")) > 0 AND length(btrim("original_name")) > 0 AND length(btrim("media_type")) > 0),
+  CONSTRAINT "upload_reservation_termination_evidence" CHECK (("state" <> 'terminating' OR "termination_requested_at" IS NOT NULL) AND ("termination_confirmed_at" IS NULL OR ("termination_requested_at" IS NOT NULL AND "termination_confirmed_at" >= "termination_requested_at")) AND ("state" NOT IN ('cancelled','expired') OR "termination_confirmed_at" IS NOT NULL))
 );--> statement-breakpoint
 CREATE UNIQUE INDEX "upload_reservation_id_cell_uidx" ON "frank_domain"."upload_reservation"("id","cell_id");--> statement-breakpoint
 CREATE TABLE "frank_domain"."attachment_quota" (

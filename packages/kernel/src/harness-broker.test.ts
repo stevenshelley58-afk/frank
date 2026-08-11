@@ -286,7 +286,7 @@ describe('HarnessBroker', () => {
     expect(result.candidates.length).toBe(2);
   });
 
-  it('scores tool protocol coverage', async () => {
+  it('hard-gates tool protocol coverage in auto mode', async () => {
     const full = makeFakeAdapter({ id: 'goose', toolProtocols: ['acp', 'mcp', 'native'] });
     const partial = makeFakeAdapter({ id: 'hermes', toolProtocols: ['acp'] });
 
@@ -296,8 +296,31 @@ describe('HarnessBroker', () => {
       requiredToolProtocols: ['acp', 'mcp', 'native'],
     });
 
-    // Goose covers all 3, hermes covers 1/3
+    // Goose covers all 3; Hermes is absent rather than merely down-scored.
     expect(result.candidates[0]!.descriptor.id).toBe('goose');
+    expect(result.candidates).toHaveLength(1);
+  });
+
+  it('rejects a named harness that fails any eligibility gate', async () => {
+    const unhealthy = makeFakeAdapter({ id: 'unhealthy' }, { healthy: false });
+    const full = makeFakeAdapter({ id: 'full' }, {}, { accepting: false });
+    const openOnly = makeFakeAdapter({ id: 'open-only', maxDataClass: 'open' });
+    const missingTool = makeFakeAdapter({ id: 'missing-tool', toolProtocols: ['acp'] });
+    const broker = new HarnessBroker([unhealthy, full, openOnly, missingTool]);
+
+    await expect(broker.select(defaultFactors, 'unhealthy')).rejects.toThrow(NoEligibleHarnessError);
+    await expect(broker.select(defaultFactors, 'full')).rejects.toThrow(NoEligibleHarnessError);
+    await expect(broker.select({ ...defaultFactors, dataClass: 'private' }, 'open-only')).rejects.toThrow(NoEligibleHarnessError);
+    await expect(broker.select({ ...defaultFactors, requiredToolProtocols: ['mcp'] }, 'missing-tool')).rejects.toThrow(NoEligibleHarnessError);
+  });
+
+  it('uses the same tool gate for route profiles', async () => {
+    const missingTool = makeFakeAdapter({ id: 'first', toolProtocols: ['acp'] });
+    const eligible = makeFakeAdapter({ id: 'second', toolProtocols: ['acp', 'mcp'] });
+    const broker = new HarnessBroker([missingTool, eligible]);
+    broker.saveRouteProfile({ id: 'tools', name: 'Tools', preference: ['first', 'second'], createdAt: '2026-08-01T00:00:00Z', updatedAt: '2026-08-01T00:00:00Z' });
+    const result = await broker.select({ ...defaultFactors, requiredToolProtocols: ['mcp'] }, 'tools');
+    expect(result.harnessId).toBe('second');
   });
 
   it('explanation includes key details', async () => {

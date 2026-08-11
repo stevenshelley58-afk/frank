@@ -55,6 +55,7 @@ const SQL_0001 = singleMigrationSql('0001');
 const SQL_0002 = singleMigrationSql('0002');
 const SQL_0009 = singleMigrationSql('0009');
 const SQL_0011 = singleMigrationSql('0011');
+const SQL_0012 = singleMigrationSql('0012');
 const SQL_0013 = singleMigrationSql('0013');
 const CONTRACT_SCHEMAS_DIR = path.resolve(MIGRATIONS_DIR, '../../../../packages/contracts/schemas');
 
@@ -354,6 +355,13 @@ describe('Wave 1 harness migration parity', () => {
     ]) expect(SQL, constraint).toContain(constraint);
   });
 
+  it('scopes harness job and cancellation replay identity to the authenticated owner', () => {
+    expect(SQL_0012).toContain('UNIQUE("cell_id","owner_id","idempotency_key")');
+    expect(SQL_0012).toContain('"harness_job_cancel_request_hash"');
+    expect(SQL_0012).toContain('"idempotency_key" text NOT NULL, "request_hash" text NOT NULL');
+    expect(SQL_0012).toContain('"scope"->>\'room_id\' = "room_id"::text');
+  });
+
   it('models separate 2 GiB-file, 50 GiB-cell, 10 GiB/10k-message, and 30 GiB-host-free limits', () => {
     expect(SQL_0013).toContain('2147483648');
     expect(SQL_0013).toContain('53687091200');
@@ -388,8 +396,9 @@ describe('Wave 1 frozen contracts', () => {
     expect(MAX_CHAT_TURN_ATTACHMENTS).toBe(10_000);
     const hashes: Record<string, string> = {
       'chat-turn.v1.schema.json': 'e45e3e1cf04c9178b3c0c3b80a29ca2f735e1d30d5c924430cb6baed5934f75b',
-      'harness-control.v1.schema.json': '5d4a6f2b02eb38769803da7becadd4cd79031547121b2539ca6aa2720914188d',
+      'harness-control.v1.schema.json': '60c079f186cd1b360a9654a36e15f96646f55ef600840204c56682b0f163a4be',
       'object-manifest.v1.schema.json': '733b1641cc310fe69e03727be159f58eb64361712190b1ed0ab29a7e8546c9ae',
+      'attachment-upload.v1.schema.json': 'cbf621079e7c7146c25bdd38053a758a6852f16d322b6376e6374161718aaab6',
     };
     for (const [file, expected] of Object.entries(hashes)) {
       expect(createHash('sha256').update(readFileSync(path.join(CONTRACT_SCHEMAS_DIR, file))).digest('hex')).toBe(expected);

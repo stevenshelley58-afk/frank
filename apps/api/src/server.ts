@@ -80,6 +80,8 @@ import { StagedWriteService } from './services/workbench/staged-write.js';
 import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { chatRoutes, registerChatRoutes } from './routes/chats.js';
+import { harnessControlRoutes, registerHarnessControlRoutes } from './routes/harness-control.js';
+import { attachmentUploadRoutes, registerAttachmentUploadRoutes } from './routes/attachment-uploads.js';
 import { codegraphRoutes, registerCodegraphRoutes } from './routes/codegraph.js';
 import type { CodegraphRouteDependencies } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
@@ -104,6 +106,8 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...healthRoutes,
   ...brainRoutes,
   ...chatRoutes,
+  ...harnessControlRoutes,
+  ...attachmentUploadRoutes,
   ...codegraphRoutes,
 ];
 
@@ -225,8 +229,9 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   // Startup, not first request.
   // The Living Frame has no in-memory substitute: exposing its contract when
   // no database-backed sources were registered would advertise a 404 as data.
+  const databaseRoutes = new Set<AnyRouteDefinition>([frameGetRoute, ...harnessControlRoutes, ...attachmentUploadRoutes]);
   const activeRoutes =
-    options.db === undefined ? ALL_ROUTES.filter((route) => route !== frameGetRoute) : ALL_ROUTES;
+    options.db === undefined ? ALL_ROUTES.filter((route) => !databaseRoutes.has(route)) : ALL_ROUTES;
   assertRegistryConsistent(activeRoutes);
 
   const identity =
@@ -471,6 +476,8 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // The chat shell's own store — raw SQL on frank_domain (migration 0010),
     // so like brain it needs a DB handle.
     registerChatRoutes(app, { ...shared, db: options.db });
+    registerHarnessControlRoutes(app, { ...shared, db: options.db });
+    registerAttachmentUploadRoutes(app, { ...shared, db: options.db });
     registerFrameRoutes(app, { ...shared, store, db: options.db });
     // Workbench routes need Postgres (the front door + store are raw-SQL on
     // frank_domain); like brain, they only register when a DB handle exists.

@@ -12,6 +12,18 @@ export interface HarnessJobScope extends HarnessJobRequestScope { cell_id: strin
 export interface HarnessJobInput { harness: 'hermes'; task_type: 'browser-research'; idempotency_key: string; scope: HarnessJobRequestScope; input: BrowserResearchInput; allowed_tools: HermesAllowedTool[]; egress_profile: HermesEgressProfile; }
 export interface PersistedHarnessJobInput extends Omit<HarnessJobInput, 'scope'> { scope: HarnessJobScope; request_hash: string }
 export type HarnessJobStatus = 'queued'|'running'|'completed'|'failed'|'cancelled';
-export interface HarnessJobEvent { job_id:string; cursor:number; kind:'progress'|'artifact'|'error'|'terminal'; occurred_at:IsoDateTime; artifact?: { object_id:string; source_ref:SourceRef }; summary?:string }
-export interface HarnessJobResult { job_id:string; status:HarnessJobStatus; artifacts:Array<{object_id:string;source_ref:SourceRef}>; source_refs:SourceRef[] }
-export interface HarnessJobCancellation { job_id: string; requested_by: string; reason?: string; requested_at: IsoDateTime }
+export interface HarnessArtifact { object_id:string; source_ref:SourceRef }
+export type HarnessJobEvent =
+  | { job_id:string; cursor:number; kind:'progress'; occurred_at:IsoDateTime; payload:{summary:string} }
+  | { job_id:string; cursor:number; kind:'artifact'; occurred_at:IsoDateTime; payload:HarnessArtifact }
+  | { job_id:string; cursor:number; kind:'error'; occurred_at:IsoDateTime; payload:{summary:string} }
+  | { job_id:string; cursor:number; kind:'terminal'; occurred_at:IsoDateTime; payload:{status:Extract<HarnessJobStatus,'completed'|'failed'|'cancelled'>;summary?:string} };
+export interface HarnessJobRepresentation { job_id:string; status:HarnessJobStatus; created_at:IsoDateTime; updated_at:IsoDateTime; finished_at:IsoDateTime|null; cancelled_at:IsoDateTime|null; artifacts:HarnessArtifact[]; source_refs:SourceRef[] }
+export interface HarnessJobCreateResponse extends HarnessJobRepresentation { replayed:boolean }
+export type HarnessJobStatusResponse = HarnessJobRepresentation;
+export interface HarnessJobEventsResponse extends HarnessJobRepresentation { events:HarnessJobEvent[]; next_cursor:number|null }
+export interface HarnessJobCancelRequest { idempotency_key:string; reason?:string }
+export interface HarnessJobCancelResponse extends HarnessJobRepresentation { replayed:boolean }
+/** @deprecated Use the operation-specific response types above. */
+export type HarnessJobResult = HarnessJobRepresentation;
+export interface HarnessJobCancellation { job_id: string; requested_by: string; idempotency_key:string; reason?: string; requested_at: IsoDateTime }

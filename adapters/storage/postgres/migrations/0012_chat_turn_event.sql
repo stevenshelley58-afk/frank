@@ -49,8 +49,8 @@ CREATE TABLE "frank_domain"."harness_job" (
   "status" text NOT NULL CHECK ("status" IN ('queued','running','completed','failed','cancelled')),
   "cancelled_at" timestamptz, "finished_at" timestamptz, "created_at" timestamptz NOT NULL DEFAULT now(), "updated_at" timestamptz NOT NULL DEFAULT now(),
   CONSTRAINT "harness_job_room_cell_fk" FOREIGN KEY("room_id","cell_id") REFERENCES "frank_domain"."room"("id","cell_id") ON DELETE RESTRICT,
-  CONSTRAINT "harness_job_idempotency_uidx" UNIQUE("cell_id","idempotency_key"),
-  CONSTRAINT "harness_job_request_hash" CHECK ("request_hash" ~ '^[a-f0-9]{64}$'), CONSTRAINT "harness_job_scope_object" CHECK (jsonb_typeof("scope") = 'object' AND "scope" ? 'cell_id' AND "scope" ? 'owner_id' AND jsonb_typeof("scope"->'cell_id') = 'string' AND jsonb_typeof("scope"->'owner_id') = 'string' AND length(btrim("scope"->>'cell_id')) > 0 AND length(btrim("scope"->>'owner_id')) > 0 AND "scope"->>'cell_id' = "cell_id" AND "scope"->>'owner_id' = "owner_id" AND (NOT ("scope" ? 'project_id') OR (jsonb_typeof("scope"->'project_id') = 'string' AND length(btrim("scope"->>'project_id')) > 0)) AND (NOT ("scope" ? 'room_id') OR (jsonb_typeof("scope"->'room_id') = 'string' AND length(btrim("scope"->>'room_id')) > 0))),
+  CONSTRAINT "harness_job_idempotency_uidx" UNIQUE("cell_id","owner_id","idempotency_key"),
+  CONSTRAINT "harness_job_request_hash" CHECK ("request_hash" ~ '^[a-f0-9]{64}$'), CONSTRAINT "harness_job_scope_object" CHECK (jsonb_typeof("scope") = 'object' AND "scope" ? 'cell_id' AND "scope" ? 'owner_id' AND jsonb_typeof("scope"->'cell_id') = 'string' AND jsonb_typeof("scope"->'owner_id') = 'string' AND length(btrim("scope"->>'cell_id')) > 0 AND length(btrim("scope"->>'owner_id')) > 0 AND "scope"->>'cell_id' = "cell_id" AND "scope"->>'owner_id' = "owner_id" AND (NOT ("scope" ? 'project_id') OR (jsonb_typeof("scope"->'project_id') = 'string' AND length(btrim("scope"->>'project_id')) > 0)) AND (NOT ("scope" ? 'room_id') OR (jsonb_typeof("scope"->'room_id') = 'string' AND length(btrim("scope"->>'room_id')) > 0)) AND (("room_id" IS NULL AND NOT ("scope" ? 'room_id')) OR "scope"->>'room_id' = "room_id"::text)),
   CONSTRAINT "harness_job_input_object" CHECK (jsonb_typeof("input") = 'object' AND "input" <> '{}'::jsonb), CONSTRAINT "harness_job_tools_array" CHECK (jsonb_typeof("allowed_tools") = 'array' AND jsonb_array_length("allowed_tools") > 0),
   CONSTRAINT "harness_job_ids_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("owner_id")) > 0 AND length(btrim("idempotency_key")) > 0),
   CONSTRAINT "harness_job_terminal_finished_paired" CHECK (("status" IN ('completed','failed','cancelled')) = ("finished_at" IS NOT NULL)), CONSTRAINT "harness_job_cancelled_state_paired" CHECK (("status" = 'cancelled') = ("cancelled_at" IS NOT NULL)), CONSTRAINT "harness_job_finished_after_created" CHECK ("finished_at" IS NULL OR "finished_at" >= "created_at")
@@ -62,8 +62,11 @@ CREATE TABLE "frank_domain"."harness_job_event" (
   CONSTRAINT "harness_job_event_cursor_nonnegative" CHECK ("cursor" >= 0), CONSTRAINT "harness_job_event_payload_object" CHECK (jsonb_typeof("payload") = 'object' AND "payload" <> '{}'::jsonb), CONSTRAINT "harness_job_event_cell_not_blank" CHECK (length(btrim("cell_id")) > 0)
 );--> statement-breakpoint
 CREATE TABLE "frank_domain"."harness_job_cancel" (
-  "job_id" uuid PRIMARY KEY NOT NULL, "cell_id" text NOT NULL, "requested_by" text NOT NULL, "reason" text, "created_at" timestamptz NOT NULL DEFAULT now(),
-  CONSTRAINT "harness_job_cancel_job_cell_fk" FOREIGN KEY("job_id","cell_id") REFERENCES "frank_domain"."harness_job"("id","cell_id") ON DELETE CASCADE, CONSTRAINT "harness_job_cancel_ids_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("requested_by")) > 0)
+  "job_id" uuid PRIMARY KEY NOT NULL, "cell_id" text NOT NULL, "requested_by" text NOT NULL,
+  "idempotency_key" text NOT NULL, "request_hash" text NOT NULL, "reason" text, "created_at" timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT "harness_job_cancel_job_cell_fk" FOREIGN KEY("job_id","cell_id") REFERENCES "frank_domain"."harness_job"("id","cell_id") ON DELETE CASCADE,
+  CONSTRAINT "harness_job_cancel_request_hash" CHECK ("request_hash" ~ '^[a-f0-9]{64}$'),
+  CONSTRAINT "harness_job_cancel_ids_not_blank" CHECK (length(btrim("cell_id")) > 0 AND length(btrim("requested_by")) > 0 AND length(btrim("idempotency_key")) > 0 AND ("reason" IS NULL OR length(btrim("reason")) > 0))
 );--> statement-breakpoint
 CREATE TABLE "frank_domain"."harness_job_receipt" (
   "job_id" uuid PRIMARY KEY NOT NULL, "cell_id" text NOT NULL, "receipt" jsonb NOT NULL, "created_at" timestamptz NOT NULL DEFAULT now(),

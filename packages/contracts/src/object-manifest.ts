@@ -40,6 +40,22 @@ export const MAX_UPLOAD_CAPABILITY_TOKEN_BYTES = 2048;
 /** Signed capability lifetime; the separate upload reservation remains resumable for 24 hours. */
 export const MAX_UPLOAD_CAPABILITY_TTL_SECONDS = 900;
 
+/** Authorization binds a Tus creation request but never invents an attachment row. */
+export interface AttachmentUploadAuthorizationResponse {
+  upload_id: string;
+  reservation_id: string;
+  tus_creation_url: string;
+  tus_headers: { Authorization: string; 'Tus-Resumable': '1.0.0' };
+  tus_metadata: { upload_id: string; reservation_id: string };
+  capability_expires_at: IsoDateTime;
+  reservation_expires_at: IsoDateTime;
+}
+
+export type UploadReservationStatus = 'authorized'|'uploading'|'completed'|'terminating'|'cancelled'|'expired'|'rejected';
+export type AttachmentUploadStatus =
+  | { upload_id:string; reservation_state:UploadReservationStatus; attachment_id?:never; attachment_state?:never; scan_state?:never; extraction_state?:never }
+  | { upload_id:string; reservation_state:UploadReservationStatus; attachment_id:string; attachment_state:AttachmentState; scan_state:'pending'|'clean'|'blocked'|'failed'; extraction_state:'none'|'pending'|'complete'|'failed' };
+
 export type AttachmentState = 'staging'|'scanning'|'ready'|'promoted'|'rejected'|'cancelled'|'expired';
 export type AttachmentOutboxKind = 'hash_scan_promote'|'extract'|'cleanup'|'reconcile';
 export type AttachmentOutboxState = 'pending'|'leased'|'completed'|'failed'|'cancelled';
