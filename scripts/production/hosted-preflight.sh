@@ -33,6 +33,13 @@ require_command() {
   command -v "$command_name" >/dev/null 2>&1 || die "required command is unavailable: $command_name"
 }
 
+decimal_lte() {
+  local -r value="$1"
+  local -r maximum="$2"
+  (( ${#value} < ${#maximum} )) || \
+    { (( ${#value} == ${#maximum} )) && [[ "$value" < "$maximum" || "$value" == "$maximum" ]]; }
+}
+
 for command_name in awk date df docker git jq realpath; do
   require_command "$command_name"
 done
@@ -46,8 +53,11 @@ readonly required_network="${FRANK_REQUIRED_NETWORK:-frank}"
 readonly codegraph_network="${FRANK_CODEGRAPH_NETWORK:-frank-codegraph-internal}"
 readonly codegraph_container="${FRANK_CODEGRAPH_CONTAINER:-frank-codegraph}"
 readonly allow_legacy_codegraph_network="${FRANK_ALLOW_LEGACY_CODEGRAPH_NETWORK:-false}"
+readonly disk_gate_mode="${FRANK_DISK_GATE_MODE:-percent}"
 readonly max_disk_percent="${FRANK_MAX_DISK_PERCENT:-75}"
 readonly min_free_gib="${FRANK_MIN_FREE_GIB:-20}"
+readonly release_required_bytes_raw="${FRANK_RELEASE_REQUIRED_BYTES:-}"
+readonly rollback_headroom_bytes_raw="${FRANK_ROLLBACK_HEADROOM_BYTES:-}"
 readonly require_upstream_sync="${FRANK_REQUIRE_UPSTREAM_SYNC:-true}"
 readonly required_secret_vars_raw="${FRANK_REQUIRED_SECRET_VARS:-FRANK_DB_PASSWORD FRANK_SESSION_SIGNING_KEY FRANK_ENVELOPE_SIGNING_KEY GOOSE_ACP_SECRET}"
 readonly required_containers_raw="${FRANK_REQUIRED_CONTAINERS:-frank-frank-db-1 frank-frank-redis-1 frank-frank-api-1 frank-web frank-codegraph frank-frank-caddy-1}"
@@ -64,6 +74,7 @@ readonly workbench_image="${FRANK_WORKBENCH_IMAGE:-}"
 [[ "$codegraph_network" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "FRANK_CODEGRAPH_NETWORK is invalid"
 [[ "$codegraph_container" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "FRANK_CODEGRAPH_CONTAINER is invalid"
 [[ "$allow_legacy_codegraph_network" == "true" || "$allow_legacy_codegraph_network" == "false" ]] || die "FRANK_ALLOW_LEGACY_CODEGRAPH_NETWORK must be true or false"
+[[ "$disk_gate_mode" == "percent" || "$disk_gate_mode" == "absolute" ]] || die "FRANK_DISK_GATE_MODE must be percent or absolute"
 [[ "$max_disk_percent" =~ ^[0-9]+$ ]] || die "FRANK_MAX_DISK_PERCENT must be an integer"
 [[ "$min_free_gib" =~ ^[0-9]+$ ]] || die "FRANK_MIN_FREE_GIB must be an integer"
 (( max_disk_percent >= 1 && max_disk_percent <= 99 )) || die "FRANK_MAX_DISK_PERCENT must be between 1 and 99"
@@ -102,11 +113,45 @@ read -r disk_total_kib disk_used_kib disk_available_kib disk_used_percent disk_m
   df -Pk -- "$data_real" | awk 'NR == 2 {gsub(/%/, "", $5); print $2, $3, $4, $5, $6}'
 )
 [[ "$disk_used_percent" =~ ^[0-9]+$ ]] || die "could not parse disk usage"
-[[ "$disk_available_kib" =~ ^[0-9]+$ ]] || die "could not parse free disk space"
+[[ "$disk_available_kib" =~ ^(0|[1-9][0-9]{0,15})$ ]] || die "could not parse free disk space"
+decimal_lte "$disk_available_kib" 9007199254740991 || die "free disk space exceeds the signed 64-bit byte range"
 
 readonly min_free_kib="$((min_free_gib * 1024 * 1024))"
-(( disk_used_percent <= max_disk_percent )) || die "disk use is ${disk_used_percent}%, above the ${max_disk_percent}% release limit"
+readonly disk_available_bytes="$((disk_available_kib * 1024))"
+
+release_required_bytes=0
+rollback_headroom_bytes=0
+release_total_required_bytes=0
+case "$disk_gate_mode" in
+  percent)
+    [[ -z "$release_required_bytes_raw" && -z "$rollback_headroom_bytes_raw" ]] || \
+      die "absolute byte inputs require FRANK_DISK_GATE_MODE=absolute"
+    (( disk_used_percent <= max_disk_percent )) || \
+      die "disk use is ${disk_used_percent}%, above the ${max_disk_percent}% release limit"
+    ;;
+  absolute)
+    [[ "$release_required_bytes_raw" =~ ^[1-9][0-9]{0,18}$ ]] || \
+      die "FRANK_RELEASE_REQUIRED_BYTES must be a positive canonical decimal byte count"
+    [[ "$rollback_headroom_bytes_raw" =~ ^[1-9][0-9]{0,18}$ ]] || \
+      die "FRANK_ROLLBACK_HEADROOM_BYTES must be a positive canonical decimal byte count"
+    release_required_bytes="$release_required_bytes_raw"
+    rollback_headroom_bytes="$rollback_headroom_bytes_raw"
+    decimal_lte "$release_required_bytes" 9223372036854775807 || \
+      die "FRANK_RELEASE_REQUIRED_BYTES exceeds the signed 64-bit range"
+    decimal_lte "$rollback_headroom_bytes" 9223372036854775807 || \
+      die "FRANK_ROLLBACK_HEADROOM_BYTES exceeds the signed 64-bit range"
+    (( rollback_headroom_bytes <= 9223372036854775807 - release_required_bytes )) || \
+      die "release disk byte requirement overflows the signed 64-bit range"
+    release_total_required_bytes="$((release_required_bytes + rollback_headroom_bytes))"
+    ;;
+esac
+readonly release_required_bytes rollback_headroom_bytes release_total_required_bytes
+
 (( disk_available_kib >= min_free_kib )) || die "free disk space is below the ${min_free_gib} GiB release minimum"
+if [[ "$disk_gate_mode" == "absolute" ]]; then
+  (( disk_available_bytes >= release_total_required_bytes )) || \
+    die "free disk bytes ${disk_available_bytes} are below release requirement ${release_total_required_bytes}"
+fi
 
 IFS=', ' read -r -a required_secret_vars <<< "$required_secret_vars_raw"
 missing_secret_count=0
@@ -218,8 +263,13 @@ printf 'upstream=%s\n' "${upstream_ref:-none}"
 printf 'ahead=%s\n' "$ahead_count"
 printf 'behind=%s\n' "$behind_count"
 printf 'disk_mount=%s\n' "$disk_mount"
+printf 'disk_gate_mode=%s\n' "$disk_gate_mode"
 printf 'disk_used_percent=%s\n' "$disk_used_percent"
 printf 'disk_available_gib=%s\n' "$disk_available_gib"
+printf 'disk_available_bytes=%s\n' "$disk_available_bytes"
+printf 'release_required_bytes=%s\n' "$release_required_bytes"
+printf 'rollback_headroom_bytes=%s\n' "$rollback_headroom_bytes"
+printf 'release_total_required_bytes=%s\n' "$release_total_required_bytes"
 printf 'network=%s\n' "$required_network"
 printf 'codegraph_network=%s\n' "$codegraph_network"
 printf 'legacy_codegraph_network_allowed=%s\n' "$allow_legacy_codegraph_network"
