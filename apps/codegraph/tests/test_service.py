@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,6 +51,7 @@ class GraphifyContractTests(unittest.TestCase):
     def test_graphify_command_forwards_validated_excludes(self) -> None:
         project = Project("frank", "Frank", Path("/repositories/frank"), (".git", "node_modules", "generated/**"))
         command = graphify_command(project, Path("/data/stage"))
+        self.assertEqual(command[:4], [sys.executable, "-m", "graphify", "extract"])
         self.assertEqual(command.count("--exclude"), 3)
         self.assertIn(["--exclude", "generated/**"], [command[index:index + 2] for index in range(len(command) - 1)])
 
@@ -93,6 +95,25 @@ class PublicationTests(unittest.TestCase):
             self.assertTrue((current / "graphify-out" / "graph.json").is_file())
             self.assertTrue((current / "frank-overlay.json").is_file())
             self.assertEqual(release, json.loads((current / "status.json").read_text(encoding="utf-8"))["release"])
+
+    def test_supervisor_uses_fixed_graphify_subprocess_environment(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory) / "repo"
+            root.mkdir()
+            (root / "package.json").write_text(json.dumps({"name": "example"}), encoding="utf-8")
+            supervisor = Supervisor(Path(directory) / "output", [Project("example", "Example", root, ())])
+
+            def fake_extract(command: list[str], _cwd: Path, environment: dict[str, str]) -> tuple[int, str]:
+                self.assertEqual(environment["PATH"], "/usr/local/bin")
+                self.assertEqual(environment["PYTHONPATH"], "/opt/frank-codegraph/site-packages")
+                self.assertEqual(environment["PYTHONDONTWRITEBYTECODE"], "1")
+                output = Path(command[command.index("--out") + 1]) / "graphify-out"
+                output.mkdir(parents=True)
+                (output / "graph.json").write_text(json.dumps({"nodes": [{"id": "n"}], "links": []}), encoding="utf-8")
+                return 0, ""
+
+            with patch("frank_codegraph.service.run_graphify", side_effect=fake_extract):
+                supervisor._build_and_publish(supervisor.states["example"].project)
 
     def test_combined_graph_and_overlay_must_fit_api_cap(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

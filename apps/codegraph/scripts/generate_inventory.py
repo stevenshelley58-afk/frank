@@ -13,8 +13,9 @@ def normalized_name(value: str) -> str:
     return re.sub(r"[-_.]+", "-", value).lower()
 
 
+distribution_path = [sys.argv[2]] if len(sys.argv) > 2 else None
 components = []
-for distribution in distributions():
+for distribution in distributions(path=distribution_path):
     metadata = distribution.metadata
     name = metadata.get("Name")
     if not name:

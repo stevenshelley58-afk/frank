@@ -18,3 +18,14 @@ Upstream NOTICE:
 The upstream Apache license, NOTICE and historical MIT license are preserved in the
 installed distribution. The source and notices are available at the pinned
 upstream commit above.
+
+## CPython and runtime ELF closure
+
+The scratch image contains the minimum CPython 3.14.6 standard-library and ELF
+closure assembled from the digest-pinned official `python:3.14.6-alpine3.24`
+builder. CPython is distributed under the Python Software Foundation License
+Version 2; its complete license history is retained at
+`/usr/local/lib/python3.14/LICENSE.txt` in the image. Available system-library
+license files from the builder are preserved under `/usr/share/licenses`.
+The final SPDX SBOM and build provenance identify the exact published runtime
+contents and immutable builder digest.

@@ -239,18 +239,75 @@ manifest="$FRANK_RELEASE_ARTIFACT_DIR/release-manifest.json"
 api_sbom="$FRANK_RELEASE_ARTIFACT_DIR/api.spdx.json"
 web_sbom="$FRANK_RELEASE_ARTIFACT_DIR/web.spdx.json"
 codegraph_sbom="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.spdx.json"
+codegraph_sbom_verified="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.spdx.verified.json"
+codegraph_sbom_bundle="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.spdx.sigstore.json"
+codegraph_sbom_receipt="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.spdx.attestation.verify.json"
 workbench_sbom="$FRANK_RELEASE_ARTIFACT_DIR/workbench.spdx.json"
+codegraph_vex="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.openvex.json"
+codegraph_vex_verified="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.openvex.verified.json"
+codegraph_vex_bundle="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.openvex.sigstore.json"
+codegraph_vex_receipt="$FRANK_RELEASE_ARTIFACT_DIR/codegraph.openvex.attestation.verify.json"
+codegraph_raw_report="$FRANK_RELEASE_ARTIFACT_DIR/codegraph-grype-raw.json"
+codegraph_policy_report="$FRANK_RELEASE_ARTIFACT_DIR/codegraph-grype-vex.json"
 test -s "$manifest"
 test -s "$api_sbom"
 test -s "$web_sbom"
 test -s "$codegraph_sbom"
+test -s "$codegraph_sbom_verified"
+test -s "$codegraph_sbom_bundle"
+test -s "$codegraph_sbom_receipt"
 test -s "$workbench_sbom"
+test -s "$codegraph_vex"
+test -s "$codegraph_vex_verified"
+test -s "$codegraph_vex_bundle"
+test -s "$codegraph_vex_receipt"
+test -s "$codegraph_raw_report"
+test -s "$codegraph_policy_report"
 
-node --input-type=module - "$manifest" "$api_sbom" "$web_sbom" "$codegraph_sbom" "$workbench_sbom" \
+node --input-type=module - "$manifest" "$FRANK_RELEASE_ARTIFACT_DIR" "$api_sbom" "$web_sbom" "$codegraph_sbom" "$workbench_sbom" "$codegraph_vex" \
   "$FRANK_RELEASE_COMMIT" "$FRANK_GITHUB_REPOSITORY" <<'NODE'
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-const [manifestPath, apiSbomPath, webSbomPath, codegraphSbomPath, workbenchSbomPath, commit, repository] = process.argv.slice(2);
+const [manifestPath, artifactDir, apiSbomPath, webSbomPath, codegraphSbomPath, workbenchSbomPath, codegraphVexPath, commit, repository] = process.argv.slice(2);
 const manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+const expectedEvidence = [
+  'api.spdx.json',
+  'web.spdx.json',
+  'codegraph.spdx.json',
+  'codegraph.spdx.verified.json',
+  'codegraph.spdx.sigstore.json',
+  'codegraph.spdx.attestation.verify.json',
+  'workbench.spdx.json',
+  'codegraph.openvex.json',
+  'codegraph.openvex.verified.json',
+  'codegraph.openvex.sigstore.json',
+  'codegraph.openvex.attestation.verify.json',
+  'codegraph-grype-raw.json',
+  'codegraph-grype-vex.json',
+];
+if (JSON.stringify(Object.keys(manifest.evidence_sha256 ?? {}).sort()) !== JSON.stringify([...expectedEvidence].sort())) {
+  throw new Error('Manifest evidence hash set is incomplete');
+}
+for (const name of expectedEvidence) {
+  const actual = createHash('sha256').update(readFileSync(`${artifactDir}/${name}`)).digest('hex');
+  if (manifest.evidence_sha256[name] !== actual) throw new Error(`Evidence SHA-256 mismatch: ${name}`);
+}
+const expectedAttestations = [
+  'api_provenance', 'web_provenance', 'codegraph_provenance',
+  'codegraph_sbom', 'codegraph_vex', 'workbench_provenance',
+];
+if (JSON.stringify(Object.keys(manifest.attestations ?? {}).sort()) !== JSON.stringify([...expectedAttestations].sort()) ||
+    expectedAttestations.some((name) => {
+      const record = manifest.attestations[name];
+      return typeof record?.attestation_id !== 'string' || !record.attestation_id.trim() ||
+        typeof record.storage_records_supported !== 'boolean' ||
+        !Array.isArray(record.storage_record_ids) ||
+        (record.storage_records_supported && record.storage_record_ids.length < 1) ||
+        (!record.storage_records_supported && record.storage_record_ids.length !== 0) ||
+        record.storage_record_ids.some((id) => typeof id !== 'string' || !id.trim());
+    })) {
+  throw new Error('Manifest attestation/storage-record metadata is invalid');
+}
 for (const path of [apiSbomPath, webSbomPath, codegraphSbomPath, workbenchSbomPath]) {
   const sbom = JSON.parse(readFileSync(path, 'utf8'));
   if (!sbom || typeof sbom !== 'object' || !sbom.spdxVersion) throw new Error(`Invalid SPDX JSON: ${path}`);
@@ -268,14 +325,76 @@ if (manifest.schema_version !== 2 || manifest.commit !== commit ||
     !Number.isInteger(manifest.verified_by?.run_id) ||
     manifest.sbom?.api !== 'api.spdx.json' || manifest.sbom?.web !== 'web.spdx.json' ||
     manifest.sbom?.codegraph !== 'codegraph.spdx.json' ||
+    manifest.sbom?.codegraph_verified_predicate !== 'codegraph.spdx.verified.json' ||
+    manifest.sbom?.codegraph_signed_bundle !== 'codegraph.spdx.sigstore.json' ||
+    manifest.sbom?.codegraph_verification_receipt !== 'codegraph.spdx.attestation.verify.json' ||
+    manifest.sbom?.codegraph_predicate_type !== 'https://spdx.dev/Document/v2.3' ||
     manifest.sbom?.workbench !== 'workbench.spdx.json' ||
+    manifest.vex?.codegraph !== 'codegraph.openvex.json' ||
+    manifest.vex?.verified_predicate !== 'codegraph.openvex.verified.json' ||
+    manifest.vex?.signed_bundle !== 'codegraph.openvex.sigstore.json' ||
+    manifest.vex?.verification_receipt !== 'codegraph.openvex.attestation.verify.json' ||
+    manifest.vex?.predicate_type !== 'https://openvex.dev/ns/v0.2.0' ||
+    manifest.security_reports?.codegraph_raw !== 'codegraph-grype-raw.json' ||
+    manifest.security_reports?.codegraph_policy !== 'codegraph-grype-vex.json' ||
     manifest.images?.api?.reference !== expected.api || !digest.test(manifest.images?.api?.digest ?? '') ||
     manifest.images?.web?.reference !== expected.web || !digest.test(manifest.images?.web?.digest ?? '') ||
     manifest.images?.codegraph?.reference !== expected.codegraph || !digest.test(manifest.images?.codegraph?.digest ?? '') ||
     manifest.images?.workbench?.reference !== expected.workbench || !digest.test(manifest.images?.workbench?.digest ?? '')) {
   throw new Error('Manifest does not exactly bind this commit, repository, SBOMs, and immutable GHCR images');
 }
+const vex = JSON.parse(readFileSync(codegraphVexPath, 'utf8'));
+const codegraphDigest = manifest.images.codegraph.digest.slice('sha256:'.length);
+const expectedProduct = `pkg:oci/frank-codegraph@sha256%3A${codegraphDigest}?repository_url=${encodeURIComponent(`ghcr.io/${owner}`)}`;
+const vexCves = vex.statements?.map((statement) => statement.vulnerability?.name).sort();
+if (
+  vex['@context'] !== 'https://openvex.dev/ns/v0.2.0' ||
+  JSON.stringify(vexCves) !== JSON.stringify(['CVE-2026-11940', 'CVE-2026-11972', 'CVE-2026-15308']) ||
+  vex.statements.some((statement) =>
+    statement.status !== 'not_affected' ||
+    statement.justification !== 'vulnerable_code_not_present' ||
+    statement.products?.length !== 1 ||
+    statement.products[0]?.['@id'] !== expectedProduct ||
+    JSON.stringify(statement.products[0]?.hashes) !== JSON.stringify({'sha-256': codegraphDigest}) ||
+    JSON.stringify(statement.products[0]?.subcomponents) !== JSON.stringify([{'@id': 'pkg:generic/python@3.14.6'}])
+  )
+) {
+  throw new Error('OpenVEX does not exactly bind the release codegraph digest and audited CPython findings');
+}
 NODE
+
+# Re-evaluate the fail-closed scan policy from the downloaded, hash-bound reports.
+jq -e '
+  [(.ignoredMatches // [])[] |
+    select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")] |
+  length == 0
+' "$codegraph_raw_report" >/dev/null
+jq -e '
+  [(.matches // [])[] |
+    select(.vulnerability.severity == "Critical")] | length == 0
+' "$codegraph_raw_report" >/dev/null
+jq -e '
+  [(.matches // [])[] |
+    select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical") |
+    .vulnerability.id] | unique | sort ==
+  ["CVE-2026-11940", "CVE-2026-11972", "CVE-2026-15308"]
+' "$codegraph_raw_report" >/dev/null
+jq -e '
+  [(.matches // [])[] |
+    select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical") |
+    select(
+      .artifact.name != "python" or
+      .artifact.version != "3.14.6" or
+      .artifact.purl != "pkg:generic/python@3.14.6" or
+      ([.matchDetails[]?.searchedBy.package? |
+        select(.name == "python" and .version == "3.14.6")] | length == 0)
+    )] | length == 0
+' "$codegraph_raw_report" >/dev/null
+jq -e '
+  [(.matches // [])[] |
+    select(.vulnerability.severity == "High" or .vulnerability.severity == "Critical")] |
+  length == 0
+' "$codegraph_policy_report" >/dev/null
 
 verify_run_id="$(node --input-type=module - "$manifest" <<'NODE'
 import { readFileSync } from 'node:fs';
@@ -332,24 +451,86 @@ NODE
 gh attestation verify "oci://$FRANK_API_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
   --source-ref 'refs/heads/main' \
+  --signer-digest "$FRANK_RELEASE_COMMIT" \
   --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
   --format json \
   > "$evidence_dir/api.attestation.verify.json"
 gh attestation verify "oci://$FRANK_WEB_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
   --source-ref 'refs/heads/main' \
+  --signer-digest "$FRANK_RELEASE_COMMIT" \
   --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
   --format json \
   > "$evidence_dir/web.attestation.verify.json"
 gh attestation verify "oci://$FRANK_CODEGRAPH_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
   --source-ref 'refs/heads/main' \
+  --signer-digest "$FRANK_RELEASE_COMMIT" \
   --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
   --format json \
   > "$evidence_dir/codegraph.attestation.verify.json"
+gh attestation verify "oci://$FRANK_CODEGRAPH_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
+  --bundle "$codegraph_sbom_bundle" \
+  --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
+  --source-ref 'refs/heads/main' \
+  --signer-digest "$FRANK_RELEASE_COMMIT" \
+  --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
+  --predicate-type 'https://spdx.dev/Document/v2.3' \
+  --format json \
+  > "$evidence_dir/codegraph.spdx.attestation.verify.json"
+jq -e \
+  --arg name "${FRANK_CODEGRAPH_IMAGE%@*}" \
+  --arg digest "${FRANK_CODEGRAPH_IMAGE##*@sha256:}" '
+    length == 1 and
+    .[0].verificationResult.statement.predicateType == "https://spdx.dev/Document/v2.3" and
+    .[0].verificationResult.statement.subject == [{"name": $name, "digest": {"sha256": $digest}}]
+  ' "$evidence_dir/codegraph.spdx.attestation.verify.json" >/dev/null
+jq -S -c . "$codegraph_sbom" > "$evidence_dir/codegraph.spdx.local.canonical.json"
+jq -S -c '.[0].verificationResult.statement.predicate' \
+  "$evidence_dir/codegraph.spdx.attestation.verify.json" \
+  > "$evidence_dir/codegraph.spdx.verified.canonical.json"
+cmp --silent \
+  "$evidence_dir/codegraph.spdx.local.canonical.json" \
+  "$evidence_dir/codegraph.spdx.verified.canonical.json"
+cmp --silent \
+  "$codegraph_sbom_verified" \
+  "$evidence_dir/codegraph.spdx.verified.canonical.json"
+rm -f -- \
+  "$evidence_dir/codegraph.spdx.local.canonical.json" \
+  "$evidence_dir/codegraph.spdx.verified.canonical.json"
+gh attestation verify "oci://$FRANK_CODEGRAPH_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
+  --bundle "$codegraph_vex_bundle" \
+  --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
+  --source-ref 'refs/heads/main' \
+  --signer-digest "$FRANK_RELEASE_COMMIT" \
+  --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
+  --predicate-type 'https://openvex.dev/ns/v0.2.0' \
+  --format json \
+  > "$evidence_dir/codegraph.openvex.attestation.verify.json"
+jq -e \
+  --arg name "${FRANK_CODEGRAPH_IMAGE%@*}" \
+  --arg digest "${FRANK_CODEGRAPH_IMAGE##*@sha256:}" '
+    length == 1 and
+    .[0].verificationResult.statement.predicateType == "https://openvex.dev/ns/v0.2.0" and
+    .[0].verificationResult.statement.subject == [{"name": $name, "digest": {"sha256": $digest}}]
+  ' "$evidence_dir/codegraph.openvex.attestation.verify.json" >/dev/null
+jq -S -c . "$codegraph_vex" > "$evidence_dir/codegraph.openvex.local.canonical.json"
+jq -S -c '.[0].verificationResult.statement.predicate' \
+  "$evidence_dir/codegraph.openvex.attestation.verify.json" \
+  > "$evidence_dir/codegraph.openvex.verified.canonical.json"
+cmp --silent \
+  "$evidence_dir/codegraph.openvex.local.canonical.json" \
+  "$evidence_dir/codegraph.openvex.verified.canonical.json"
+cmp --silent \
+  "$codegraph_vex_verified" \
+  "$evidence_dir/codegraph.openvex.verified.canonical.json"
+rm -f -- \
+  "$evidence_dir/codegraph.openvex.local.canonical.json" \
+  "$evidence_dir/codegraph.openvex.verified.canonical.json"
 gh attestation verify "oci://$FRANK_WORKBENCH_IMAGE" -R "$FRANK_GITHUB_REPOSITORY" \
   --deny-self-hosted-runners --source-digest "$FRANK_RELEASE_COMMIT" \
   --source-ref 'refs/heads/main' \
+  --signer-digest "$FRANK_RELEASE_COMMIT" \
   --signer-workflow "$FRANK_GITHUB_REPOSITORY/.github/workflows/release-artifacts.yml" \
   --format json \
   > "$evidence_dir/workbench.attestation.verify.json"
@@ -357,14 +538,13 @@ docker image inspect "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMA
   --format '{{.RepoDigests}}\t{{.Id}}' \
   > "$evidence_dir/application-images.pulled.tsv"
 
-gh run list --commit "$FRANK_RELEASE_COMMIT" --workflow codegraph-image-security --limit 1 \
-  --json conclusion,url > "$evidence_dir/codegraph-image-security.json"
-jq -e 'length == 1 and .[0].conclusion == "success"' \
-  "$evidence_dir/codegraph-image-security.json" >/dev/null
 ```
 
-The artifact directory, manifest, parsed SPDX SBOMs, GitHub workflow receipts, verified
-attestation output, and pulled image IDs are release evidence. The four image environment
+The artifact directory, manifest, parsed SPDX SBOMs, digest-bound OpenVEX, GitHub workflow
+receipts, exact signed-bundle verification output, raw/policy scan reports, verified
+provenance/OpenVEX predicate, and pulled image IDs are release evidence. The standalone
+`codegraph-image-security` workflow is PR/manual diagnostic feedback only and is never a
+promotion authority. The four image environment
 variables must be copied only from the validated manifest output above—never composed from
 a tag or a branch name.
 
@@ -1021,8 +1201,11 @@ reconciliation method, and explicit release authority.
 Retain these artifacts together:
 
 - `preflight.result` and `preflight.log`;
-- verified release manifest, four SPDX SBOMs, four provenance receipts, and the
-  successful codegraph image-security run receipt;
+- verified release manifest with all six attestation IDs and explicit storage-record
+  support/ID metadata (empty and `false` for a user-owned repository), four hash-bound
+  SPDX SBOMs, four provenance receipts, the codegraph SBOM's exact signed bundle,
+  equality-verified predicate and fresh receipt, the signed digest-bound codegraph
+  OpenVEX bundle/predicate/receipt, plus the raw and VEX-aware codegraph scan reports;
 - `release-worktrees.txt`, candidate Git commit, and zero-divergence preflight evidence;
 - `containers.before.tsv`, `codegraph-volume-labels.tsv`, and configuration hashes;
 - complete checksummed codegraph snapshot and its encrypted off-cell object/version ID;
@@ -1038,8 +1221,10 @@ Retain these artifacts together:
 For a release built through GitHub Actions, retain the `release-evidence-<full-commit>`
 artifact from the `release-artifacts` workflow with the release evidence above. Its
 machine-readable `release-manifest.json` binds the verified full commit to the immutable
-GHCR API, web, codegraph, and workbench image digests; the accompanying SPDX SBOMs and GitHub OIDC provenance
-attestations are release evidence, not a deployment instruction. Production consumes the
+GHCR API, web, codegraph, and workbench image digests. All four SPDX SBOMs are hash-bound
+evidence; only the codegraph SBOM is separately signed and equality-verified. That signed
+SBOM, the signed codegraph OpenVEX, and GitHub OIDC provenance attestations are release evidence,
+not a deployment instruction. Production consumes the
 manifest's digest references only after the existing preflight, backup, and promotion
 gates pass. The workflow never deploys to preview, staging, or production.
 

@@ -69,14 +69,33 @@ and 200,000 edges. Oversized output fails the refresh without switching
 
 Production places the API and codegraph service on a dedicated internal Docker
 network. The codegraph service has no general egress network. A one-shot,
-networkless init service fixes ownership of only `/data/codegraph` for legacy
-volumes before the UID 10001 service starts. Repository and registry binds both
+networkless init service performs a bounded, no-follow migration of a legacy
+`/data/codegraph` tree before the UID 10001 service starts, refusing special
+files, hard-link anomalies and every symlink except the exact contained
+`<project>/current -> releases/<release>` selector. Repository and registry binds both
 come from `FRANK_RELEASE_SOURCE`, ensuring the image, registry and indexed tree
 belong to the same release.
 
-The runtime dependency set is hash-locked, the Graphify archive is pinned by
-commit and SHA-256, the Python base is digest-pinned, and the image carries a
-generated CycloneDX dependency/license inventory at
-`/app/sbom/dependencies.cdx.json`. CI also builds the final image, emits a
-final-image CycloneDX SBOM, and blocks promotion on high/critical known
-vulnerabilities.
+The runtime dependency set is hash-locked and the Graphify archive is pinned by
+commit and SHA-256. The credential-free builder is official Python 3.14.6 on
+Alpine 3.24, pinned by immutable multi-architecture index digest; production's
+amd64 child digest is recorded in the Dockerfile and final OCI metadata.
+
+The final stage starts from `scratch`. A build-time assembler copies only the
+Python standard library, target-installed runtime dependencies, application,
+licenses/notices, `/etc/os-release`, numeric user records and the recursively
+resolved ELF/musl closure. It physically excludes `tarfile.py`,
+`html/parser.py`, bytecode caches, pip, setuptools, wheel, shells and package
+managers. The scratch image runs `/usr/local/bin/python3 -m frank_codegraph`
+as UID/GID 10001. Every build verifies the removed modules cannot be imported
+and completes a real Graphify extraction before publication.
+
+CI generates the final SBOM, signs it, verifies the exact returned bundle and
+requires its signed predicate to equal the generated document byte-for-byte
+after canonicalization. It attests provenance and scans the exact GHCR digest
+with the newest Grype database and `only-fixed: false`. The raw
+High/Critical set must be exactly the three audited CPython module findings.
+CI then creates an exact-digest OpenVEX statement documenting the physically
+absent vulnerable code, signs it through GitHub OIDC, verifies its signature
+and subject, and requires a VEX-aware scan to report zero actionable
+High/Critical findings. No external registry credential is required.

@@ -259,18 +259,20 @@ services:
     ports: !reset []
 
   # One-shot migration for named volumes created by the legacy root service.
-  # The literal target, no interpolation/globs, no repository mount, and no
-  # network access constrain the privileged operation to /data/codegraph.
+  # The dedicated Python entry point opens /data/codegraph without following
+  # symlinks. For a legacy root-owned volume it inventories a capped descendant
+  # tree first, rejects special files/hard links and every link except a
+  # contained `<project>/current -> releases/<release>` selector, then migrates
+  # only those verified descriptors to UID/GID 10001 and data-only modes.
   frank-codegraph-volume-init:
     image: "${FRANK_CODEGRAPH_IMAGE:?FRANK_CODEGRAPH_IMAGE is required}"
     build: !reset null
     user: "0:0"
-    entrypoint: ["/bin/sh", "-eu", "-c"]
-    command:
-      - >-
-        test "$$(readlink -f /data/codegraph)" = /data/codegraph;
-        chown --recursive --no-dereference 10001:10001 /data/codegraph;
-        chmod 0750 /data/codegraph
+    environment: !override
+      HOME: /tmp
+      PYTHONPATH: /opt/frank-codegraph/site-packages
+    entrypoint: ["/usr/local/bin/python3", "-m", "frank_codegraph.volume_init"]
+    command: []
     volumes:
       - type: volume
         source: frank_codegraph_data
@@ -318,7 +320,7 @@ services:
     # Clear any legacy Compose command/entrypoint; this process is the new
     # Python supervisor even if the base development file still names the old
     # TypeScript watcher.
-    entrypoint: ["python", "-m", "frank_codegraph"]
+    entrypoint: ["/usr/local/bin/python3", "-m", "frank_codegraph"]
     command: []
     depends_on: !override
       frank-codegraph-volume-init:
@@ -373,7 +375,7 @@ services:
     healthcheck:
       test:
         - CMD
-        - python
+        - /usr/local/bin/python3
         - -c
         - >-
           import json, urllib.request;

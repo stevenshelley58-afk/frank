@@ -19,6 +19,7 @@ import shutil
 import signal
 import stat
 import subprocess
+import sys
 import threading
 import uuid
 from dataclasses import dataclass, field
@@ -515,7 +516,7 @@ def graph_summary(path: Path) -> dict[str, int]:
 
 def graphify_command(project: Project, stage: Path) -> list[str]:
     command = [
-        "graphify", "extract", str(project.mount), "--code-only", "--no-cluster",
+        sys.executable, "-m", "graphify", "extract", str(project.mount), "--code-only", "--no-cluster",
         "--out", str(stage),
     ]
     for pattern in project.ignore:
@@ -1001,7 +1002,13 @@ class Supervisor:
             command = graphify_command(project, stage)
             # The control token and all other service/container environment are
             # intentionally absent from the untrusted repository extraction child.
-            environment = {"PATH": os.environ.get("PATH", ""), "HOME": "/tmp", "PYTHONUNBUFFERED": "1"}
+            environment = {
+                "PATH": "/usr/local/bin",
+                "PYTHONPATH": "/opt/frank-codegraph/site-packages",
+                "HOME": "/tmp",
+                "PYTHONUNBUFFERED": "1",
+                "PYTHONDONTWRITEBYTECODE": "1",
+            }
             return_code, detail = run_graphify(command, project.mount, environment)
             if return_code != 0:
                 raise RuntimeError(f"Graphify extract exited {return_code}: {detail}")
