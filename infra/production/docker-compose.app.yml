@@ -20,6 +20,7 @@ services:
       NODE_ENV: production
       FRANK_ENV: production
       FRANK_CELL_ID: "${FRANK_CELL_ID:?FRANK_CELL_ID is required}"
+      FRANK_CELL_TIMEZONE: "${FRANK_CELL_TIMEZONE:-Australia/Perth}"
       FRANK_API_HOST: 0.0.0.0
       FRANK_API_PORT: "3000"
       FRANK_API_AUDIENCE: "${FRANK_API_AUDIENCE:?FRANK_API_AUDIENCE is required}"

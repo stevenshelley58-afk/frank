@@ -58,10 +58,12 @@ afterEach(async () => {
 
 function start(overrides: {
   create?: (input: CreateMissionInput) => Promise<MissionView>;
+  list?: (cellId: string, limit: number) => Promise<readonly MissionView['mission'][]>;
   get?: (cellId: string, missionId: string) => Promise<MissionView | null>;
   stop?: (input: StopMissionInput) => Promise<MissionView>;
 } = {}) {
   const create = vi.fn(overrides.create ?? (async () => runningMission));
+  const list = vi.fn(overrides.list ?? (async () => [runningMission.mission]));
   const get = vi.fn(overrides.get ?? (async () => runningMission));
   const stop = vi.fn(
     overrides.stop ??
@@ -76,11 +78,24 @@ function start(overrides: {
         },
       })),
   );
-  server = buildTestServer({ missionOrchestrator: { create, get, stop } });
-  return { server, create, get, stop };
+  server = buildTestServer({ missionOrchestrator: { create, list, get, stop } });
+  return { server, create, list, get, stop };
 }
 
 describe('mission routes', () => {
+  it('lists lightweight mission lifecycle summaries', async () => {
+    const target = start();
+    const response = await target.server.app.inject({
+      method: 'GET',
+      url: '/v1/missions?limit=25',
+      headers: { authorization: target.server.auth(['reviewer']) },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ missions: [runningMission.mission] });
+    expect(target.list).toHaveBeenCalledWith(TEST_CELL, 25);
+  });
+
   it('creates a mission, maps camel-case service input, and returns public graph nodes', async () => {
     const target = start();
     const response = await target.server.app.inject({

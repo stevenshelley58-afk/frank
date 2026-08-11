@@ -476,6 +476,23 @@ export class MissionOrchestrator {
     return row === undefined ? null : toMissionView(row);
   }
 
+  /** Newest-first lightweight collection; detail remains the graph-bearing read. */
+  async list(cellId: string, limit: number): Promise<readonly MissionView['mission'][]> {
+    const result = await this.#db.execute<MissionRow>(sql`
+      select m.id, m.cell_id, m.room_id, r.identity as room_name,
+             m.root_work_item_id, m.idempotency_key, m.objective, m.planned_work_graph,
+             m.state, m.spend_limit, m.token_limit, m.wall_clock_limit_seconds,
+             m.attempt_limit, m.stop_new_work, m.started_at, m.finished_at, m.error,
+             m.version, m.created_at, m.updated_at
+      from "frank_domain"."mission" m
+      join "frank_domain"."room" r on r.id = m.room_id and r.cell_id = m.cell_id
+      where m.cell_id = ${cellId}
+      order by m.updated_at desc, m.id
+      limit ${limit}
+    `);
+    return result.rows.map((row) => toMissionView(row).mission);
+  }
+
   async stop(input: StopMissionInput): Promise<MissionView> {
     assertStopInput(input);
     const reason = input.reason?.trim() || 'Stopped by owner request.';

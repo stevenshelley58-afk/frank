@@ -888,7 +888,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(38);
+    expect(operations).toBe(39);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

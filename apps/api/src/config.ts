@@ -34,6 +34,17 @@ import { randomBytes } from 'node:crypto';
 import { z } from 'zod';
 
 const environmentSchema = z.enum(['development', 'test', 'staging', 'production', 'recovery', 'preview']);
+const ianaTimeZoneSchema = z.string().min(1).refine(
+  (value) => {
+    try {
+      new Intl.DateTimeFormat('en-CA', { timeZone: value });
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  'must be an IANA time zone supported by this runtime',
+);
 
 export type FrankEnvironment = z.infer<typeof environmentSchema>;
 
@@ -41,6 +52,8 @@ const rawSchema = z.object({
   FRANK_ENV: environmentSchema.default('development'),
   /** FRANK-§2.4: one cell per deployment. */
   FRANK_CELL_ID: z.string().min(1).default('cell-steven'),
+  /** The cell's civil-day boundary for human-facing daily read models. */
+  FRANK_CELL_TIMEZONE: ianaTimeZoneSchema.default('Australia/Perth'),
   FRANK_API_HOST: z.string().min(1).default('127.0.0.1'),
   FRANK_API_PORT: z.coerce.number().int().min(1).max(65_535).default(8080),
   FRANK_API_AUDIENCE: z.string().min(1).default('frank.api'),
@@ -58,6 +71,7 @@ const rawSchema = z.object({
 export interface AppConfig {
   readonly environment: FrankEnvironment;
   readonly cellId: string;
+  readonly cellTimeZone: string;
   readonly host: string;
   readonly port: number;
   readonly audience: string;
@@ -129,6 +143,7 @@ export function resolveConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   return {
     environment: raw.FRANK_ENV,
     cellId: raw.FRANK_CELL_ID,
+    cellTimeZone: raw.FRANK_CELL_TIMEZONE,
     host: raw.FRANK_API_HOST,
     port: raw.FRANK_API_PORT,
     audience: raw.FRANK_API_AUDIENCE,
@@ -147,6 +162,7 @@ export function resolveConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       return {
         environment: raw.FRANK_ENV,
         cellId: raw.FRANK_CELL_ID,
+        cellTimeZone: raw.FRANK_CELL_TIMEZONE,
         host: raw.FRANK_API_HOST,
         port: raw.FRANK_API_PORT,
         audience: raw.FRANK_API_AUDIENCE,

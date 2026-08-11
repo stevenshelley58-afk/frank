@@ -60,6 +60,7 @@ import { captureRoutes, registerCaptureRoutes } from './routes/capture.js';
 import { healthRoutes, registerHealthRoutes } from './routes/health.js';
 import { provenanceRoutes, registerProvenanceRoutes } from './routes/provenance.js';
 import { registerTodayRoutes, todayRoutes } from './routes/today.js';
+import { frameGetRoute, frameRoutes, registerFrameRoutes } from './routes/frame.js';
 import { registerWorkRoutes, workRoutes } from './routes/work.js';
 import { registerWorkbenchRoutes, workbenchAllRoutes } from './routes/workbench.js';
 import {
@@ -98,6 +99,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...folderBindingRoutes,
   ...provenanceRoutes,
   ...todayRoutes,
+  ...frameRoutes,
   ...healthRoutes,
   ...brainRoutes,
   ...chatRoutes,
@@ -209,7 +211,11 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
 
   // FRANK-§3.8: duplicate paths and undocumented operations fail the build.
   // Startup, not first request.
-  assertRegistryConsistent(ALL_ROUTES);
+  // The Living Frame has no in-memory substitute: exposing its contract when
+  // no database-backed sources were registered would advertise a 404 as data.
+  const activeRoutes =
+    options.db === undefined ? ALL_ROUTES.filter((route) => route !== frameGetRoute) : ALL_ROUTES;
+  assertRegistryConsistent(activeRoutes);
 
   const identity =
     options.identity ??
@@ -373,6 +379,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
 
   const shared = {
     cellId: config.cellId,
+    cellTimeZone: config.cellTimeZone,
     policyVersion: POLICY_VERSION,
     identity,
     now,
@@ -452,6 +459,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // The chat shell's own store — raw SQL on frank_domain (migration 0010),
     // so like brain it needs a DB handle.
     registerChatRoutes(app, { ...shared, db: options.db });
+    registerFrameRoutes(app, { ...shared, store, db: options.db });
     // Workbench routes need Postgres (the front door + store are raw-SQL on
     // frank_domain); like brain, they only register when a DB handle exists.
     // ONE event bus is shared by the store (writer notifications) and the SSE
@@ -518,7 +526,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   // Code intelligence graph — reads from the codegraph service output volume.
   registerCodegraphRoutes(app, shared);
 
-  const openApiDocument = buildOpenApiDocument(ALL_ROUTES, {
+  const openApiDocument = buildOpenApiDocument(activeRoutes, {
     title: 'FRANK Domain API',
     version: '1.0.0-slice1',
     description:

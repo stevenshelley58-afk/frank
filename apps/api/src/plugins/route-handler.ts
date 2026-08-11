@@ -211,6 +211,13 @@ export function registerRoute<
         reply,
       });
 
+      // A conditional GET may deliberately have no representation. Validate
+      // normal successful bodies below, but never try to parse `undefined` as
+      // a route response after the handler selected HTTP 304.
+      if (reply.statusCode === 304) {
+        return reply.send();
+      }
+
       /* ---- validate the response ----------------------------------------- */
       const validated = route.response.safeParse(result);
       if (!validated.success) {

@@ -187,7 +187,8 @@ export interface WorkRouteDependencies extends RouteHandlerDependencies {
   ) => Promise<void>;
 }
 
-function summaryOf(item: WorkItemRecord, now: Date): {
+/** Shared by the waiting-work list and the Living Frame feed. */
+export function summaryOf(item: WorkItemRecord, now: Date): {
   id: string;
   kind: WorkItemRecord['kind'];
   title: string;

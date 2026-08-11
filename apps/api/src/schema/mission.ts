@@ -32,6 +32,12 @@ export const missionCreateBodySchema = z
 
 export const missionIdParamsSchema = z.object({ id: z.string().trim().min(1) }).strict();
 
+export const missionListQuerySchema = z
+  .object({
+    limit: z.coerce.number().int().min(1).max(200).default(100),
+  })
+  .strict();
+
 export const missionStopBodySchema = z
   .object({
     command_id: z.string().trim().min(1),
@@ -91,6 +97,14 @@ export const missionResponseSchema = z
     mission: missionRecordSchema,
     /** Public graph is deliberately a bare node array; planner prose is private. */
     work_graph: z.array(missionWorkGraphNodeSchema),
+    identifiers: identifiersSchema,
+  })
+  .strict();
+
+/** Lightweight mission collection; use GET /v1/missions/:id for its graph. */
+export const missionListResponseSchema = z
+  .object({
+    missions: z.array(missionRecordSchema),
     identifiers: identifiersSchema,
   })
   .strict();
