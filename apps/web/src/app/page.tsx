@@ -1,4 +1,4 @@
-'use client';
+import { Suspense } from 'react';
 
 import { FrankShell } from '@/components/shell/frank-shell';
 
@@ -10,5 +10,19 @@ import { FrankShell } from '@/components/shell/frank-shell';
  * do lives behind the console; this page is the thing you live in.
  */
 export default function Home() {
-  return <FrankShell />;
+  return (
+    <Suspense fallback={<ShellFallback />}>
+      <FrankShell />
+    </Suspense>
+  );
+}
+
+function ShellFallback() {
+  return (
+    <div className="flex h-dvh items-center justify-center bg-shell">
+      <span className="grid h-[46px] w-[46px] place-items-center rounded-xl bg-ink text-[24px] font-bold text-shell">
+        F
+      </span>
+    </div>
+  );
 }
