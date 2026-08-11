@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { FrankDatabase } from '@frank/adapter-postgres';
 import { sql } from 'drizzle-orm';
-import type { AttachmentPersistencePort, AttachmentRecord, AttachmentOutbox, ObjectManifest, ReservationRequest, ReservationResult, UploadReservation } from './types.js';
+import type { AttachmentPersistencePort, AttachmentRecord, ReservationRequest, ReservationResult, UploadReservation } from './types.js';
 import { MAX_FILE_BYTES, MAX_MESSAGE_BYTES, MAX_MESSAGE_FILES, MAX_POOL_BYTES, MIN_FREE_POOL_BYTES } from './types.js';
 
 const d=(v:unknown)=>JSON.stringify(v); const date=(v:Date|string)=>v instanceof Date?v:new Date(v);
