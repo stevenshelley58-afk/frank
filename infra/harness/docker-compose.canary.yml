@@ -28,7 +28,8 @@ services:
   gate:
     image: busybox:1.37.0
     networks: [canary-attachments]
-    command: ["sh", "-ec", "while true; do printf 'HTTP/1.1 204 No Content\\r\\nContent-Length: 0\\r\\n\\r\\n' | nc -lp 8080 -e sh; done"]
+    # Synthetic canary hook receiver. It has no production credential or route.
+    command: ["sh", "-ec", "while true; do printf 'HTTP/1.1 204 No Content\\r\\nContent-Length: 0\\r\\n\\r\\n' | nc -lp 8080; done"]
     read_only: true
     tmpfs: [/tmp]
   probe:
