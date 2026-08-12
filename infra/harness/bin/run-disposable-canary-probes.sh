@@ -13,8 +13,12 @@ compose=(docker compose -p "$FRANK_HARNESS_CANARY_PROJECT" -f "$harness_dir/dock
 # Bootstrap Seaweed's only canary bucket from the disposable service itself before
 # tusd starts; this never contacts production Seaweed or any external network.
 "${compose[@]}" up -d seaweedfs gate litellm clamav probe > "$receipt/up.log" 2>&1
-sleep 5
-"${compose[@]}" exec -T seaweedfs sh -ec 'echo "s3.bucket.create -name=canary-staging" | weed shell -master=127.0.0.1:9333 -filer=127.0.0.1:8888' > "$receipt/seaweed-bootstrap.txt"
+for attempt in $(seq 1 60); do
+  if "${compose[@]}" exec -T seaweedfs sh -ec 'wget -q -O /dev/null http://127.0.0.1:8333/status && wget -q -O /dev/null http://127.0.0.1:8888'; then break; fi
+  sleep 2
+done
+"${compose[@]}" exec -T seaweedfs sh -ec 'echo "s3.bucket.create -name=canary-staging" | weed shell -master=127.0.0.1:9333 -filer=127.0.0.1:8888' > "$receipt/seaweed-bootstrap.txt" 2>&1
+grep -Fq 'created bucket canary-staging' "$receipt/seaweed-bootstrap.txt" || { echo 'disposable Seaweed bucket bootstrap did not complete' >&2; exit 1; }
 "${compose[@]}" up -d tusd >> "$receipt/up.log" 2>&1
 cleanup() {
   "${compose[@]}" logs --no-color clamav > "$receipt/clamav.log" 2>&1 || true
