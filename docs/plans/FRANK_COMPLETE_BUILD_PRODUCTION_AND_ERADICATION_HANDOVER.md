@@ -1,11 +1,11 @@
 # Frank Complete Build, Production Cutover, and Legacy Eradication Handover
 
-Status: committed execution handover on `origin/codex/chat-completion-handover`  
-Created: 2026-08-12  
-Canonical starting commit: `b5b338b1589454596130b30364f70d55cf34f644`  
-Merged change: PR `#73` from `codex/chat-release-candidate`  
-Current production: accepted Graphify release `fead0c4b9e3cae60038b54f999a5066d165f8a2b` on the original VPS `76.13.209.160`  
-Public preview: `https://preview.frank.fail/wave2-conversation-composer-v1/`  
+Status: committed execution handover on `origin/codex/chat-completion-handover`
+Created: 2026-08-12
+Canonical starting commit: `b5b338b1589454596130b30364f70d55cf34f644`
+Merged change: PR `#73` from `codex/chat-release-candidate`
+Current production: accepted Graphify release `fead0c4b9e3cae60038b54f999a5066d165f8a2b` on the original VPS `76.13.209.160`
+Public preview: `https://preview.frank.fail/wave2-conversation-composer-v1/`
 Production policy: **do not deploy the new Frank build until every product phase in this plan is complete and the protected full-stack acceptance suite is green.**
 
 ## 1. Objective
