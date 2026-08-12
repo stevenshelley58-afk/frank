@@ -53,7 +53,7 @@ export class SeaweedS3Client {
     const scope = `${date.slice(0, 8)}/us-east-1/s3/aws4_request`;
     const signature = signV4(this.identity.secretKey, date, scope, canonical);
     headers.set('authorization', `AWS4-HMAC-SHA256 Credential=${this.identity.accessKey}/${scope}, SignedHeaders=${signedHeaders.join(';')}, Signature=${signature}`);
-    return this.fetcher(url, { method, signal, redirect: 'error', headers: Object.fromEntries(headers) });
+    return this.fetcher(url, { method, ...(signal ? { signal } : {}), redirect: 'error', headers: Object.fromEntries(headers) });
   }
 }
 
