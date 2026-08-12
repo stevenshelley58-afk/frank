@@ -54,6 +54,8 @@ export class AttachmentLifecycle {
     const result = capability ? await this.authorizeTusGate({ uploadId: hook.Event.Upload.ID || metadata.upload_id || '', capability, method: 'DELETE', cellId: metadata.cell_id }) : this.error('forbidden', 'Missing upload capability.', 'never');
     if (result.kind === 'error') return result;
     if (hook.Event.Upload.ID !== result.value.uploadId || !this.exactMetadata(metadata, result.value) || BigInt(hook.Event.Upload.Size) !== result.value.reservedBytes || hook.Event.Upload.Offset > hook.Event.Upload.Size) return this.error('hook_metadata_mismatch', 'Termination payload does not match the reservation.', 'never');
+    const begun = await this.persistence.beginTermination({ cellId: result.value.cellId, uploadId: result.value.uploadId, ownerId: result.value.ownerId });
+    if (begun === 'not_found') return this.error('not_found', 'Upload reservation was not found.', 'never');
     return result;
   }
   async postTerminate(hook: TusdHookRequest): Promise<LifecycleResult<{ persisted: boolean }>> {
