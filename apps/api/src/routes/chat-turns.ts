@@ -9,6 +9,7 @@ import { defineRoute, identifiersSchema } from '../schema/registry.js';
 import { registerRoute } from '../plugins/route-handler.js';
 import type { RouteHandlerDependencies } from '../plugins/route-handler.js';
 import { ProblemError } from '../problem.js';
+import { appendChatTurnEvent } from '../services/chat-turn-events.js';
 
 const id = z.string().uuid();
 const state = z.enum(['queued', 'running', 'completed', 'failed', 'cancelled']);
@@ -43,20 +44,20 @@ const event = z.object({
   payload: z.record(z.string(), z.unknown()),
 }).strict();
 
-const submit = defineRoute({ operationId: 'chatTurnSubmit', method: 'POST', path: '/v1/chat/turns', group: '/v1/chat', summary: 'Submit an API-owned chat turn', description: 'Idempotently persists then dispatches a turn through the kernel-owned runner.', actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'], capability: 'chat.write', dataClasses: ['internal'], standingPolicyEligible: true, policyOperation: 'chat.write', idempotency: 'required_key', consistency: 'read_own_writes', errors: ['unauthenticated', 'forbidden', 'idempotency_conflict', 'not_found', 'internal_error'], rateLimit: { requestsPerMinute: 60, burst: 10 }, auditObligations: ['create'], body, response: view, successStatus: 202 });
+const submit = defineRoute({ operationId: 'chatTurnSubmit', method: 'POST', path: '/v1/chat/turns', group: '/v1/chat', summary: 'Submit an API-owned chat turn', description: 'Idempotently persists then dispatches a turn through the kernel-owned runner.', actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'], capability: 'chat.write', dataClasses: ['internal'], standingPolicyEligible: true, policyOperation: 'chat.write', idempotency: 'required_key', consistency: 'read_own_writes', errors: ['unauthenticated', 'forbidden', 'idempotency_conflict', 'not_found', 'service_unavailable', 'internal_error'], rateLimit: { requestsPerMinute: 60, burst: 10 }, auditObligations: ['create'], body, response: view, successStatus: 202 });
 const get = defineRoute({ operationId: 'chatTurnGet', method: 'GET', path: '/v1/chat/turns/:id', group: '/v1/chat', summary: 'Read chat turn status', description: 'Reads only an owned turn.', actorRoles: ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'], capability: 'chat.read', dataClasses: ['internal'], standingPolicyEligible: true, policyOperation: 'chat.read', idempotency: 'safe', consistency: 'read_own_writes', errors: ['unauthenticated', 'forbidden', 'not_found'], rateLimit: { requestsPerMinute: 120, burst: 20 }, auditObligations: [], params: z.object({ id }), response: view, successStatus: 200 });
 const events = defineRoute({ operationId: 'chatTurnEvents', method: 'GET', path: '/v1/chat/turns/:id/events', group: '/v1/chat', summary: 'Resume durable chat-turn events', description: 'Streams ordered SSE events after Last-Event-ID or after_cursor.', actorRoles: ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'], capability: 'chat.read', dataClasses: ['internal'], standingPolicyEligible: true, policyOperation: 'chat.read', idempotency: 'safe', consistency: 'read_own_writes', errors: ['unauthenticated', 'forbidden', 'not_found'], rateLimit: { requestsPerMinute: 120, burst: 20 }, auditObligations: [], params: z.object({ id }), query: z.object({ after_cursor: z.coerce.number().int().min(-1).default(-1) }), response: z.object({ stream: z.literal('sse') }), successStatus: 200, responseMode: 'stream' });
 const cancel = defineRoute({ operationId: 'chatTurnCancel', method: 'POST', path: '/v1/chat/turns/:id/cancel', group: '/v1/chat', summary: 'Cancel a chat turn', description: 'Atomically cancels a non-terminal owned turn.', actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'], capability: 'chat.write', dataClasses: ['internal'], standingPolicyEligible: true, policyOperation: 'chat.write', idempotency: 'required_key', consistency: 'read_own_writes', errors: ['unauthenticated', 'forbidden', 'not_found'], rateLimit: { requestsPerMinute: 60, burst: 10 }, auditObligations: ['update'], params: z.object({ id }), body: z.object({ idempotency_key: z.string().min(1).max(255) }), response: view, successStatus: 200 });
 
 export const chatTurnRoutes = [submit, get, events, cancel] as const;
-export interface ChatTurnRunner { dispatch(turnId: string): Promise<void>; cancel(turnId: string): Promise<void> }
+export interface ChatTurnRunner { dispatch(turnId: string): Promise<void>; cancel(turnId: string): Promise<void>; available(): boolean; recover(): Promise<void>; shutdown(timeoutMs?: number): Promise<void> }
 export interface ChatTurnRouteDependencies extends RouteHandlerDependencies {
   readonly db: FrankDatabase;
   readonly runner?: ChatTurnRunner;
   readonly pollIntervalMs?: number;
 }
 
-type TurnRow = Record<string, unknown> & { id: string; state: string; request_hash: string; created_at: Date | string; updated_at: Date | string; finished_at: Date | string | null; cancelled_at: Date | string | null };
+type TurnRow = Record<string, unknown> & { id: string; cell_id: string; conversation_id: string; state: string; request_hash: string; input: z.infer<typeof body>; created_at: Date | string; updated_at: Date | string; finished_at: Date | string | null; cancelled_at: Date | string | null };
 type EventRow = { turn_id: string; cursor: number; kind: string; payload: Record<string, unknown>; created_at: Date | string };
 
 export function registerChatTurnRoutes(app: FastifyInstance, deps: ChatTurnRouteDependencies): void {
@@ -70,6 +71,7 @@ export function registerChatTurnRoutes(app: FastifyInstance, deps: ChatTurnRoute
   };
 
   registerRoute(app, deps, submit, async ({ body: input, context, principal, reply }) => {
+    if (!deps.runner?.available()) throw new ProblemError('service_unavailable', 'Chat execution is not configured.');
     if (context.idempotencyKey !== input.idempotency_key) throw new ProblemError('validation_failed', 'Body idempotency_key must match Idempotency-Key.');
     const attachmentIds = [...new Set([...input.attachment_ids, ...input.content.flatMap((part) => part.attachment_id ? [part.attachment_id] : [])])];
     const canonicalInput = { ...input, attachment_ids: attachmentIds };
@@ -133,7 +135,15 @@ export function registerChatTurnRoutes(app: FastifyInstance, deps: ChatTurnRoute
     if (!['completed', 'failed', 'cancelled'].includes(prior.state)) {
       await deps.db.transaction(async (tx) => {
         const updated = await tx.execute<{ id: string }>(sql`update frank_domain.chat_turn set state='cancelled',cancelled_at=now(),finished_at=now(),updated_at=now() where id=${params.id}::uuid and cell_id=${context.cellId} and state in ('queued','running') returning id`);
-        if (updated.rows[0]) await tx.execute(sql`insert into frank_domain.chat_turn_event(turn_id,cell_id,cursor,kind,payload) select ${params.id}::uuid,${context.cellId},coalesce(max(cursor)+1,0),'terminal','{"state":"cancelled"}'::jsonb from frank_domain.chat_turn_event where turn_id=${params.id}::uuid`);
+        if (updated.rows[0]) {
+          const attempts = await tx.execute<{ attempt: number; harness_id: string; upstream: string | null; outcome: string; created_at: Date | string }>(sql`select attempt,harness_id,upstream,outcome,created_at from frank_domain.harness_fallback_attempt where turn_id=${params.id}::uuid and cell_id=${context.cellId} order by attempt`);
+          const hashes = await tx.execute<{ digest: string }>(sql`select digest from frank_domain.attachment where turn_id=${params.id}::uuid and cell_id=${context.cellId} and digest is not null order by id`);
+          const fallback_chain = attempts.rows.map((attempt) => ({ attempt: attempt.attempt, harness: attempt.harness_id, ...(attempt.upstream ? { upstream: attempt.upstream } : {}), outcome: attempt.outcome, at: new Date(attempt.created_at).toISOString() }));
+          const receipt = { turn_id: params.id, state: 'cancelled', completed_at: new Date().toISOString(), ...(prior.input.requested_model_alias ? { requested_model: prior.input.requested_model_alias } : {}), harness: attempts.rows.at(-1)?.harness_id ?? 'unavailable', usage: { input_tokens: 0, output_tokens: 0 }, cost: { confidence: 'unavailable', source: 'unavailable' }, request_ids: [], policy: { decision: 'chat.write authorized', result: 'allowed' }, fallback_chain, context_hash: createHash('sha256').update(JSON.stringify({ turn: prior.id, conversation: prior.conversation_id, attachments: prior.input.attachment_ids })).digest('hex'), attachment_hashes: hashes.rows.map((row) => row.digest) };
+          await tx.execute(sql`insert into frank_domain.chat_turn_receipt(turn_id,cell_id,receipt) values (${params.id}::uuid,${context.cellId},${JSON.stringify(receipt)}::jsonb) on conflict(turn_id) do nothing`);
+          await appendChatTurnEvent(tx, { id: params.id, cell_id: context.cellId }, 'receipt', { receipt_id: params.id });
+          await appendChatTurnEvent(tx, { id: params.id, cell_id: context.cellId }, 'terminal', { state: 'cancelled' });
+        }
       });
       void deps.runner?.cancel(params.id).catch((error: unknown) => app.log.error({ err: error, turnId: params.id }, 'chat turn cancellation failed'));
     }

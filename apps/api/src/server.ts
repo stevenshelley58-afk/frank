@@ -324,6 +324,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // do not need them, so they are off.
     trustProxy: false,
   });
+  if (options.chatTurnRunner) app.addHook('onClose', async () => options.chatTurnRunner?.shutdown());
 
   /* ---------------------------------------------------- error handling --- */
 

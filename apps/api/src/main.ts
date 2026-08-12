@@ -42,6 +42,7 @@ import { AttachmentLifecycle } from './services/attachments/lifecycle.js';
 import { attachmentRuntimeConfig, createAttachmentRuntime, startAttachmentMaintenance } from './services/attachments/runtime.js';
 import { GooseAdapter, GooseAgentHarnessAdapter } from '@frank/adapter-harness-goose';
 import { DurableChatTurnRunner } from './services/chat-turn-runner.js';
+import { chatTurnRuntimeConfig } from './services/chat-turn-config.js';
 
 async function main(): Promise<void> {
   const config = resolveConfig();
@@ -90,17 +91,19 @@ async function main(): Promise<void> {
     stopAttachmentMaintenance = startAttachmentMaintenance({ worker: runtime.worker, lifecycle, persistence, terminator: runtime.terminator }, attachmentAbort.signal);
   }
 
-  const gooseAcpUrl = process.env.GOOSE_ACP_URL;
-  const chatTurnRunner = gooseAcpUrl ? new DurableChatTurnRunner({
+  const chatConfig = chatTurnRuntimeConfig(process.env);
+  const chatTurnRunner = chatConfig ? new DurableChatTurnRunner({
     db: store.db,
     adapters: [new GooseAgentHarnessAdapter(new GooseAdapter({
-      baseUrl: gooseAcpUrl.replace(/^ws/, 'http').replace(/\/acp\/?$/, ''),
-      wsUrl: gooseAcpUrl,
-      ...(process.env.GOOSE_ACP_SECRET ? { secretKey: process.env.GOOSE_ACP_SECRET } : {}),
-    }), process.env.GOOSE_PROVIDER && process.env.GOOSE_MODEL ? { provider: process.env.GOOSE_PROVIDER, model: process.env.GOOSE_MODEL } : undefined)],
-    modelAliases: process.env.GOOSE_MODEL ? { auto: { provider: process.env.GOOSE_PROVIDER ?? 'configured', model: process.env.GOOSE_MODEL } } : {},
-    workspacePath: process.env.GOOSE_REPO_CWD ?? process.env.FRANK_MISSION_WORKSPACE_SOURCE ?? '/srv/frank/workspaces/central',
+      baseUrl: chatConfig.gooseAcpUrl.replace(/^ws/, 'http').replace(/\/acp\/?$/, ''),
+      wsUrl: chatConfig.gooseAcpUrl,
+      ...(chatConfig.gooseSecret ? { secretKey: chatConfig.gooseSecret } : {}),
+    }))],
+    modelAliases: chatConfig.aliases,
+    capabilityRoutes: chatConfig.capabilityRoutes,
+    workspacePath: chatConfig.workspacePath,
   }) : undefined;
+  await chatTurnRunner?.recover();
 
   const runnerEnabled = process.env.FRANK_WORKBENCH_RUNNER_ENABLED === 'true';
   let workbenchRunner: WorkbenchRunner | undefined;
