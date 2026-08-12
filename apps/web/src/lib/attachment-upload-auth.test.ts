@@ -13,7 +13,7 @@ describe('attachment upload controls', () => {
   });
 
   it('uses canonical renew and cancel endpoints with required keys', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    const fetchMock = vi.fn().mockImplementation(async () => new Response('{}', { status: 200 }));
     vi.stubGlobal('fetch', fetchMock);
     await renewAttachmentUploadCapability('upload-1', 'renew-1');
     await cancelAttachmentUpload('upload-1', 'capability', 'cancel-1');
