@@ -11,6 +11,13 @@ describe('browser Domain API allowlist', () => {
     expect(isAllowedBrowserOperation('GET', '/v1/missions')).toBe(true);
     expect(isAllowedBrowserOperation('GET', '/v1/missions/mission-1')).toBe(true);
     expect(isAllowedBrowserOperation('POST', '/v1/chats')).toBe(true);
+    expect(isAllowedBrowserOperation('POST', '/v1/chat/turns')).toBe(true);
+    expect(isAllowedBrowserOperation('GET', '/v1/chat/turns/turn-1/events')).toBe(true);
+    expect(isAllowedBrowserOperation('POST', '/v1/chat/turns/turn-1/cancel')).toBe(true);
+    expect(isAllowedBrowserOperation('POST', '/v1/attachments/uploads')).toBe(true);
+    expect(isAllowedBrowserOperation('GET', '/v1/attachments/uploads/upload-1')).toBe(true);
+    expect(isAllowedBrowserOperation('POST', '/v1/attachments/uploads/upload-1/capability')).toBe(true);
+    expect(isAllowedBrowserOperation('DELETE', '/v1/attachments/uploads/upload-1')).toBe(true);
     expect(isAllowedBrowserOperation('POST', '/v1/work/item-1/commands/approve')).toBe(true);
     expect(isAllowedBrowserOperation('POST', '/v1/work/item-1/commands/ready')).toBe(true);
     expect(isAllowedBrowserOperation('POST', '/v1/work/item-1/commands/cancel')).toBe(true);

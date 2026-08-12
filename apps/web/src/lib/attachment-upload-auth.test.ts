@@ -1,12 +1,24 @@
-import { describe, expect, it, vi } from 'vitest';
-import { reserveAttachmentUpload } from './attachment-upload-auth';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { cancelAttachmentUpload, renewAttachmentUploadCapability, reserveAttachmentUpload } from './attachment-upload-auth';
 
-describe('reserveAttachmentUpload', () => {
-  it('uses the same-origin reservation contract before Tus starts', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ attachment_id: 'att_1', tus_creation_url: '/uploads/1', capability_header: { name: 'Authorization', value: 'cap' }, capability_expires_at: '2030-01-01T00:00:00Z' }), { status: 200 }));
+afterEach(() => vi.unstubAllGlobals());
+
+describe('attachment upload controls', () => {
+  it('binds authorisation idempotency in both header and body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ reservation_id: 'r', upload_id: 'u' }), { status: 201 }));
     vi.stubGlobal('fetch', fetchMock);
-    await reserveAttachmentUpload({ conversation_id: 'conv_1', draft_message_id: '11111111-1111-4111-8111-111111111111', idempotency_key: 'key', size_bytes: '12', original_name: 'brief.pdf' });
-    expect(fetchMock).toHaveBeenCalledWith('/v1/attachments/uploads', expect.objectContaining({ method: 'POST', credentials: 'same-origin' }));
-    expect(JSON.parse(fetchMock.mock.calls[0][1].body)).toMatchObject({ conversation_id: 'conv_1', size_bytes: '12', original_name: 'brief.pdf' });
+    await reserveAttachmentUpload({ conversation_id: 'conv', draft_message_id: '11111111-1111-4111-8111-111111111111', idempotency_key: 'key-1', size_bytes: '12', original_name: 'brief.pdf' });
+    expect(fetchMock).toHaveBeenCalledWith('/v1/attachments/uploads', expect.objectContaining({ method: 'POST', credentials: 'same-origin', headers: expect.objectContaining({ 'Idempotency-Key': 'key-1' }) }));
+    expect(JSON.parse(fetchMock.mock.calls[0]![1]!.body)).toMatchObject({ idempotency_key: 'key-1', size_bytes: '12' });
+  });
+
+  it('uses canonical renew and cancel endpoints with required keys', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await renewAttachmentUploadCapability('upload-1', 'renew-1');
+    await cancelAttachmentUpload('upload-1', 'capability', 'cancel-1');
+    expect(fetchMock.mock.calls[0]![0]).toBe('/v1/attachments/uploads/upload-1/capability');
+    expect(fetchMock.mock.calls[0]![1]!.headers).toMatchObject({ 'Idempotency-Key': 'renew-1' });
+    expect(fetchMock.mock.calls[1]![1]!.headers).toMatchObject({ 'Idempotency-Key': 'cancel-1', 'X-Frank-Upload-Capability': 'capability' });
   });
 });

@@ -17,7 +17,7 @@ import { useDelegations } from '@/lib/use-delegations';
 import { DelegationCard } from './delegation-card';
 import { Thread } from './thread';
 import { Composer } from './composer';
-import type { ChatTurnInput } from '@/lib/chat-turn-input';
+import type { ChatTurnDraft } from '@/lib/chat-turn-input';
 
 /**
  * A room view: header · thread · composer.
@@ -129,7 +129,7 @@ export function RoomView({ room, rooms }: { room: Room; rooms: Room[] }) {
     if (!finished) setSending(false);
   }
 
-  async function send(input: ChatTurnInput) {
+  async function send(input: ChatTurnDraft) {
     const trimmed = input.text.trim();
     if (!trimmed || (room.isHome ? missionBusy : sending)) return;
 

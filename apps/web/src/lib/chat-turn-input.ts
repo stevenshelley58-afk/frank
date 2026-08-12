@@ -1,7 +1,7 @@
-/**
- * The chat boundary intentionally carries references, never File/Blob bytes.
- * Wave 2 prepares the client side; the existing text transport remains live.
- */
+import type { ChatTurnInput as ContractChatTurnInput } from '@frank/contracts';
+
+export type ChatTurnInput = ContractChatTurnInput;
+
 export interface ChatAttachmentRef {
   id: string;
   name: string;
@@ -9,8 +9,25 @@ export interface ChatAttachmentRef {
   size: number;
 }
 
-export interface ChatTurnInput {
+/** Local composer state. The API adapter converts it to the frozen wire contract. */
+export interface ChatTurnDraft {
   text: string;
-  attachment_ids: string[];
   attachments: ChatAttachmentRef[];
+}
+
+export function chatTurnInput(input: {
+  conversationId: string;
+  idempotencyKey: string;
+  draft: ChatTurnDraft;
+  model: string;
+  thinking: 'off' | 'think' | 'deep';
+}): ChatTurnInput {
+  return {
+    conversation_id: input.conversationId,
+    idempotency_key: input.idempotencyKey,
+    content: [{ type: 'text', text: input.draft.text }],
+    attachment_ids: input.draft.attachments.map((attachment) => attachment.id),
+    requested_capability: input.thinking === 'deep' ? 'Deep' : 'Auto',
+    ...(input.model !== 'auto' ? { requested_model_alias: input.model } : {}),
+  };
 }
