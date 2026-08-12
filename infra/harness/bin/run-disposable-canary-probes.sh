@@ -7,7 +7,8 @@ set -a; source "$candidate"; set +a
 cat > "$receipt/s3.json" <<'JSON'
 {"identities":[{"name":"canary-staging","credentials":[{"accessKey":"canary-staging","secretKey":"canary-staging-secret"}],"actions":["Read:canary-staging","Write:canary-staging","List:canary-staging"]},{"name":"canary-deny","credentials":[{"accessKey":"canary-deny","secretKey":"canary-deny-secret"}],"actions":[]}]}
 JSON
-chmod 600 "$receipt/s3.json"; export FRANK_CANARY_S3_CONFIG="$receipt/s3.json"
+# Synthetic throwaway keys only; the image runs as an unprivileged user and must read it.
+chmod 644 "$receipt/s3.json"; export FRANK_CANARY_S3_CONFIG="$receipt/s3.json"
 compose=(docker compose -p "$FRANK_HARNESS_CANARY_PROJECT" -f "$harness_dir/docker-compose.canary.yml")
 # Bootstrap Seaweed's only canary bucket from the disposable service itself before
 # tusd starts; this never contacts production Seaweed or any external network.
