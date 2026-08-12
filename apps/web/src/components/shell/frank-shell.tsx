@@ -10,15 +10,19 @@ import { DEFAULT_ROOMS, type Room } from '@/lib/rooms';
 import { frankStream, StreamAbortedError, turnInfoToMessageMeta, type TurnInfo } from '@/lib/frank';
 import {
   appendMessage,
+  cancelChatTurn,
   createConversation,
+  listChatTurnEvents,
   listConversations,
   listMessages,
   patchConversation,
   resolveDecision,
+  submitChatTurn,
   type ChatMessageRow,
   type Conversation,
   type PendingDecision,
 } from '@/lib/chat-api';
+import { chatTurnInput, type ChatTurnDraft } from '@/lib/chat-turn-input';
 import { getFrame, type FrameResponse } from '@/lib/frame';
 import { stopMission } from '@/lib/missions/client';
 import { WORKBENCH_API } from '@/lib/workbench/types';
@@ -72,6 +76,7 @@ export function FrankShell() {
   const [frame, setFrame] = useState<FrameResponse | null>(null);
   const [frameError, setFrameError] = useState<string | null>(null);
   const frameEtag = useRef<string | null>(null);
+  const activeTurnRef = useRef<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const wasMobile = useRef<boolean | null>(null);
   const { providers: harnessProviders } = useHarnesses();
@@ -235,8 +240,9 @@ export function FrankShell() {
     return created;
   };
 
-  const send = async (text: string) => {
+  const legacySend = async (input: ChatTurnDraft) => {
     if (!api) return;
+    const text = input.text;
     const conversation = active ?? (await startChat(currentProjectId, text));
     if (!conversation) return;
 
@@ -322,9 +328,61 @@ export function FrankShell() {
     void refreshFrame();
   };
 
+  const send = async (draft: ChatTurnDraft): Promise<boolean> => {
+    if (!api) return false;
+    const text = draft.text.trim();
+    const conversation = active ?? (await startChat(currentProjectId, text));
+    if (!conversation) return false;
+    const idempotencyKey = crypto.randomUUID();
+    const input = chatTurnInput({ conversationId: conversation.id, idempotencyKey, draft: { ...draft, text }, model: effectiveModel, thinking: 'off' });
+    const turn = await submitChatTurn(api, input);
+    activeTurnRef.current = turn.turn_id;
+    const userRow: ChatMessageRow = { id: idempotencyKey, conversation_id: conversation.id, kind: 'user', body: text, meta: { attachment_ids: input.attachment_ids }, created_at: turn.created_at };
+    setMessages((prev) => [...prev, userRow]);
+    setConversations((prev) => prev.map((item) => item.id === conversation.id ? { ...item, running: true } : item));
+    setStreamingText('');
+    let accumulated = '';
+    let cursor = -1;
+    let terminal: 'completed' | 'failed' | 'cancelled' | null = null;
+    let completed = false;
+    try {
+      while (!terminal && activeTurnRef.current === turn.turn_id) {
+        const page = await listChatTurnEvents(api, turn.turn_id, cursor);
+        for (const event of page.events) {
+          cursor = Math.max(cursor, event.cursor);
+          if (event.kind === 'text' && typeof event.payload.text === 'string' && event.payload.text !== 'queued') {
+            accumulated += event.payload.text;
+            setStreamingText(accumulated);
+          }
+          if (event.kind === 'error' && typeof event.payload.message === 'string') accumulated = accumulated || event.payload.message;
+          if (event.kind === 'terminal' && ['completed', 'failed', 'cancelled'].includes(String(event.payload.state))) {
+            terminal = event.payload.state as typeof terminal;
+            completed = event.payload.state === 'completed';
+          }
+        }
+        if (!terminal) await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
+      }
+      if (!terminal && activeTurnRef.current !== turn.turn_id) terminal = 'cancelled';
+    } finally {
+      setStreamingText(null);
+      if (activeTurnRef.current === turn.turn_id) activeTurnRef.current = null;
+      setConversations((prev) => prev.map((item) => item.id === conversation.id ? { ...item, running: false } : item));
+    }
+    const body = accumulated.trim() || (terminal === 'cancelled' ? 'Stopped.' : terminal === 'failed' ? 'The turn failed before producing a reply.' : 'Acknowledged.');
+    const agentRow: ChatMessageRow = { id: `${turn.turn_id}:reply`, conversation_id: conversation.id, kind: 'agent', body, meta: { turn_id: turn.turn_id, state: terminal }, created_at: new Date().toISOString() };
+    setMessages((prev) => [...prev, agentRow]);
+    void refreshConversations();
+    void refreshFrame();
+    return completed;
+  };
+
   const stop = () => {
+    const turnId = activeTurnRef.current;
+    activeTurnRef.current = null;
+    if (api && turnId) void cancelChatTurn(api, turnId).catch(() => undefined);
     abortRef.current?.abort();
     abortRef.current = null;
+    setStreamingText(null);
     void refreshFrame();
   };
 
@@ -630,7 +688,8 @@ export function FrankShell() {
           models={availableModels}
           thinking="off"
           contextUsed={contextUsed}
-          onSend={(text) => void send(text)}
+          conversationId={active?.id}
+          onSend={send}
           onStop={stop}
           onModelChange={(m) => void changeModel(m)}
           onThinkingChange={() => {}}
