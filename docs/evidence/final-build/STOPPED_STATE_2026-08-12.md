@@ -17,15 +17,15 @@ Recorded: `2026-08-12T10:51:03+08:00`
 
 - Production remains on the previously accepted Graphify release `fead0c4b9e3cae60038b54f999a5066d165f8a2b` on the original VPS `76.13.209.160`.
 - The stopped release lane performed no VPS access, migration, deployment, Compose switch, image switch, Caddy change, cleanup, or DNS action.
-- The merged/signed `b5b338b1` artifacts are not production-accepted and must not be deployed until the handover plan reaches its exact-artifact Phase 8 and Phase 9 gates.
+- The merged/signed `b5b338b1` artifacts are not production-accepted and must not be deployed directly. Only the final cleaned `main` artifacts that pass the chat handover's Phase 5 exact-artifact acceptance, Phase 6 cutover, and Phase 7 production acceptance may become live. Any source, generated, configuration, migration, or image change requires a fresh build and evidence.
 
-## Durable downstream packets
+## Downstream packets at the stop boundary
 
 - `refs/heads/codex/project-dashboard-api` = `db20ce85eab8e3f50a03d547ab338cb039d98282`.
 - `refs/heads/codex/project-dashboard-ui` = `d852e87176d707423f4f245da3b2b54f8c3465f6`.
 - `refs/heads/codex/project-dashboard-lake` = `7a965c23bbfb41ff776a8b80522db80397dc8d46`.
 
-These refs were published for cold-start durability only. They were not merged.
+These refs were published for cold-start durability only and were not merged. A later remote check during the chat-only plan revision no longer found them, and the local object store no longer retained the packet objects. They must not be treated as current executable inputs. The chat compatibility phase must obtain each workstream's current accepted replacement ref and prove it resolves from a fresh clone; the recorded SHAs remain historical coordination evidence only.
 
 ## Zero-active-process check
 
