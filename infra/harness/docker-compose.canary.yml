@@ -46,7 +46,9 @@ services:
     tmpfs: [/tmp]
   clamav:
     image: ${FRANK_CLAMAV_CANDIDATE_IMAGE:?digest required}
-    networks: [canary-attachments]
+    # Freshclam needs egress only to acquire the signed upstream definitions. This
+    # project-scoped network has no production attachment and is not shared by probes.
+    networks: [canary-attachments, canary-updates]
     volumes: [clamav-signatures-canary:/var/lib/clamav]
     read_only: true
     # The official image's freshclam and clamd startup write transient logs here;
@@ -55,6 +57,7 @@ services:
 networks:
   canary-model: { internal: true }
   canary-attachments: { internal: true }
+  canary-updates: {}
 volumes:
   seaweedfs-canary: {}
   clamav-signatures-canary: {}
