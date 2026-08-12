@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Pavone — See it on your car | Tint Visualizer (Preview Skeleton)</title>
+<style>
+  :root{
+    --bg:#0b100e; --panel:#121917; --panel2:#0f1513; --line:#22302b;
+    --text:#e8efec; --muted:#93a49e; --gold:#d8c08a; --teal:#3fb397; --teal-dk:#2c8f78;
+    --warn:#e0b34d; --bad:#e07a5f;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--text);font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif}
+  .wrap{max-width:980px;margin:0 auto;padding:0 20px}
+  header{display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid var(--line)}
+  .logo{font-family:Georgia,"Times New Roman",serif;letter-spacing:.35em;font-size:22px;color:var(--gold)}
+  .logo small{display:block;font-size:9px;letter-spacing:.5em;color:var(--muted);margin-top:2px}
+  .call{color:var(--teal);text-decoration:none;font-weight:600;font-size:14px}
+  .ribbon{background:#1b2620;border:1px solid var(--line);color:var(--warn);font-size:12.5px;
+    text-align:center;padding:7px 10px;border-radius:8px;margin:16px 0 0}
+  h1{font-size:clamp(28px,5vw,44px);line-height:1.15;margin:28px 0 10px}
+  h1 em{color:var(--teal);font-style:normal}
+  .sub{color:var(--muted);max-width:560px}
+  .steps{display:flex;gap:8px;margin:26px 0 14px;flex-wrap:wrap}
+  .step{font-size:12px;letter-spacing:.08em;color:var(--muted);border:1px solid var(--line);
+    border-radius:999px;padding:5px 12px}
+  .step.on{color:var(--teal);border-color:var(--teal)}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:20px;margin:14px 0}
+  section h2{font-size:15px;letter-spacing:.12em;text-transform:uppercase;color:var(--gold);margin-bottom:12px}
+  /* upload */
+  .drop{border:2px dashed var(--line);border-radius:12px;padding:34px 16px;text-align:center;cursor:pointer;transition:border-color .15s}
+  .drop:hover,.drop.drag{border-color:var(--teal)}
+  .drop p{color:var(--muted);font-size:14px;margin-top:6px}
+  .btn{display:inline-block;background:var(--teal);color:#06231b;font-weight:700;border:none;border-radius:10px;
+    padding:12px 22px;font-size:15px;cursor:pointer;text-decoration:none}
+  .btn.ghost{background:transparent;color:var(--text);border:1px solid var(--line)}
+  .btn:disabled{opacity:.45;cursor:not-allowed}
+  .tiny{font-size:12px;color:var(--muted)}
+  /* chips */
+  .chips{display:flex;gap:10px;flex-wrap:wrap}
+  .chip{flex:1 1 130px;min-width:120px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+    padding:10px;cursor:pointer;text-align:center;transition:border-color .15s}
+  .chip.sel{border-color:var(--teal);box-shadow:0 0 0 1px var(--teal)}
+  .swatch{height:34px;border-radius:6px;border:1px solid #2a3a34;margin-bottom:8px;
+    background:linear-gradient(180deg,#cfd8d4,var(--sw,#cfd8d4))}
+  .chip .name{font-weight:700;font-size:14px}
+  .badge{display:inline-block;font-size:10.5px;letter-spacing:.03em;border-radius:999px;padding:2px 8px;margin-top:6px}
+  .b-ok{background:#12322a;color:var(--teal)} .b-rear{background:#31290f;color:var(--warn)} .b-show{background:#33170f;color:var(--bad)}
+  .preset{margin-top:12px}
+  /* compare */
+  .stage{position:relative;border-radius:12px;overflow:hidden;background:#000;aspect-ratio:16/9;display:none;user-select:none;touch-action:none}
+  .stage img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;pointer-events:none}
+  #after{clip-path:inset(0 0 0 50%)}
+  .divider{position:absolute;top:0;bottom:0;left:50%;width:2px;background:#fff;cursor:ew-resize}
+  .divider::after{content:"◂ ▸";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);
+    background:#fff;color:#111;border-radius:999px;padding:6px 9px;font-size:11px;white-space:nowrap}
+  .tag{position:absolute;top:10px;font-size:11px;background:rgba(0,0,0,.65);color:#fff;border-radius:999px;padding:4px 10px}
+  .tag.l{left:10px}.tag.r{right:10px}
+  .stats{display:none;gap:10px;margin-top:12px;flex-wrap:wrap}
+  .stat{flex:1 1 150px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+  .stat b{display:block;font-size:18px;color:var(--teal)} .stat span{font-size:12px;color:var(--muted)}
+  /* form */
+  form{display:grid;gap:10px;grid-template-columns:1fr 1fr}
+  input{background:var(--panel2);border:1px solid var(--line);border-radius:10px;color:var(--text);padding:12px;font-size:15px}
+  input::placeholder{color:#5d6f68}
+  .full{grid-column:1/-1}
+  footer{color:var(--muted);font-size:12px;padding:26px 0 40px;border-top:1px solid var(--line);margin-top:26px}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo">PAVONE<small>WINDOW TINTING</small></div>
+    <a class="call" href="tel:1800846848">1800 TINT IT</a>
+  </header>
+
+  <div class="ribbon">PREVIEW SKELETON (v1) — placeholder shading only. Photoreal AI render on your actual car ships in P1. Frank preview lane.</div>
+
+  <h1>See it on <em>your</em> car.<br>Before you buy.</h1>
+  <p class="sub">Upload a photo of your car, pick a shade, and preview the look — then send yourself the picture with a quote. Takes 30 seconds. No pressure.</p>
+
+  <div class="steps">
+    <span class="step on" id="s1">1 · PHOTO</span><span class="step" id="s2">2 · SHADE</span>
+    <span class="step" id="s3">3 · COMPARE</span><span class="step" id="s4">4 · QUOTE</span>
+  </div>
+
+  <section id="upload">
+    <h2>Your car</h2>
+    <div class="drop" id="drop">
+      <span class="btn">Upload / take a photo</span>
+      <p>¾-front or side angle in daylight works best — whole car in frame.<br>Photos never leave this page in the skeleton build.</p>
+      <input type="file" id="file" accept="image/*" capture="environment" hidden>
+    </div>
+  </section>
+
+  <section>
+    <h2>Film shade <span class="tiny">— tap to apply</span></h2>
+    <div class="chips" id="chips"></div>
+    <div class="preset">
+      <button class="btn ghost" id="legal">Darkest legal QLD combo — 35% front · 20% rear</button>
+      <p class="tiny" style="margin-top:8px">QLD: front side windows ≥35% VLT · behind driver ≥20% · windscreen top band only · reflectance ≤10%. Confirm current TMR rules in-store.</p>
+    </div>
+  </section>
+
+  <section>
+    <h2>Compare</h2>
+    <div class="stage" id="stage">
+      <img id="before" alt="Your car, no film">
+      <img id="after" alt="Your car with selected tint">
+      <span class="tag l">No Film</span><span class="tag r" id="shadeTag">Select a shade</span>
+      <div class="divider" id="divider"></div>
+    </div>
+    <p class="tiny" id="stageHint">Upload a photo to activate the comparison.</p>
+    <div class="stats" id="stats">
+      <div class="stat"><b id="stVlt">—</b><span>Visible light through</span></div>
+      <div class="stat"><b id="stPriv">—</b><span>Privacy</span></div>
+      <div class="stat"><b>Film-tier dependent</b><span>Heat rejection — Premium Ceramic rejects up to 94% IR</span></div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Get this as a quote</h2>
+    <form id="lead">
+      <input required placeholder="Full name" id="fName">
+      <input required placeholder="Phone" id="fPhone" type="tel">
+      <input placeholder="Email" id="fEmail" type="email" class="full">
+      <input placeholder="Vehicle (e.g. 2021 Hilux)" id="fCar" class="full">
+      <button class="btn full" type="submit">Email me this + my quote</button>
+      <p class="tiny full">Skeleton wiring: opens your email client pre-filled (real build posts to /api/lead with the render attached — P1).
+      Or go straight to <a href="https://pavoneauto.com/quote" style="color:var(--teal)">pavoneauto.com/quote</a>.</p>
+    </form>
+  </section>
+
+  <footer>
+    Simulation only — actual appearance varies by film brand, glass type, and lighting. Book a sample viewing at the Ipswich studio.
+    Renders are watermarked "Visualised by Pavone". © Pavone Window Tinting — Frank preview skeleton v1.
+  </footer>
+</div>
+
+<script>
+  // Shade catalog — VLT %, placeholder darkening, QLD legality badge
+  const SHADES=[
+    {name:"No Tint", vlt:100, bright:1.00, sw:"#cfd8d4", badge:null,          priv:"None"},
+    {name:"70% VLT", vlt:70,  bright:.88,  sw:"#9fb0aa", badge:["b-ok","Front-legal"], priv:"Low"},
+    {name:"50% VLT", vlt:50,  bright:.75,  sw:"#7c8d88", badge:["b-ok","Front-legal"], priv:"Low–Med"},
+    {name:"35% VLT", vlt:35,  bright:.62,  sw:"#5a6a66", badge:["b-ok","Front-legal min"], priv:"Medium"},
+    {name:"20% VLT", vlt:20,  bright:.45,  sw:"#394545", badge:["b-rear","Rear only (QLD)"], priv:"High"},
+    {name:"5% VLT",  vlt:5,   bright:.28,  sw:"#1d2624", badge:["b-show","Show / off-road only"], priv:"Maximum"}
+  ];
+  const $=id=>document.getElementById(id);
+  let sel=null, hasPhoto=false;
+
+  // Build chips
+  SHADES.forEach((s,i)=>{
+    const c=document.createElement("div");
+    c.className="chip"; c.style.setProperty("--sw",s.sw);
+    c.innerHTML=`<div class="swatch"></div><div class="name">${s.name}</div>`+
+      (s.badge?`<span class="badge ${s.badge[0]}">${s.badge[1]}</span>`:"");
+    c.onclick=()=>select(i,c);
+    $("chips").appendChild(c);
+  });
+  function select(i,el){
+    sel=SHADES[i];
+    document.querySelectorAll(".chip").forEach(c=>c.classList.remove("sel"));
+    el.classList.add("sel");
+    $("shadeTag").textContent=sel.name;
+    $("stVlt").textContent=sel.vlt+"%";
+    $("stPriv").textContent=sel.priv;
+    $("after").style.filter=`brightness(${sel.bright}) saturate(.92)`;
+    $("s2").classList.add("on");
+    if(hasPhoto){$("stats").style.display="flex";$("s3").classList.add("on");}
+  }
+  $("legal").onclick=()=>{ // preset = rear 20 shown, note front 35
+    const chips=document.querySelectorAll(".chip");
+    select(4,chips[4]);
+    $("shadeTag").textContent="20% rear · 35% front (legal combo)";
+  };
+
+  // Upload
+  const drop=$("drop"),file=$("file");
+  drop.onclick=()=>file.click();
+  ["dragover","dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{
+    e.preventDefault(); drop.classList.toggle("drag",ev==="dragover");
+    if(ev==="drop"&&e.dataTransfer.files[0]) load(e.dataTransfer.files[0]);
+  }));
+  file.onchange=()=>file.files[0]&&load(file.files[0]);
+  function load(f){
+    const url=URL.createObjectURL(f);
+    $("before").src=url; $("after").src=url;
+    $("stage").style.display="block"; $("stageHint").textContent="Drag the divider to compare.";
+    hasPhoto=true; $("s1").classList.add("on");
+    if(sel){$("stats").style.display="flex";$("s3").classList.add("on");}
+    $("stage").scrollIntoView({behavior:"smooth",block:"center"});
+  }
+
+  // Compare divider drag
+  const stage=$("stage"),divider=$("divider"),after=$("after");
+  let dragging=false;
+  const setSplit=x=>{
+    const r=stage.getBoundingClientRect();
+    const pct=Math.min(97,Math.max(3,((x-r.left)/r.width)*100));
+    divider.style.left=pct+"%"; after.style.clipPath=`inset(0 0 0 ${pct}%)`;
+  };
+  stage.addEventListener("pointerdown",e=>{dragging=true;setSplit(e.clientX);});
+  window.addEventListener("pointermove",e=>dragging&&setSplit(e.clientX));
+  window.addEventListener("pointerup",()=>dragging=false);
+
+  // Lead form → mailto (skeleton); real build POSTs /api/lead with render attached
+  $("lead").onsubmit=e=>{
+    e.preventDefault(); $("s4").classList.add("on");
+    const body=encodeURIComponent(
+`Quote request via tint visualizer (preview skeleton)
+
+Name: ${$("fName").value}
+Phone: ${$("fPhone").value}
+Email: ${$("fEmail").value}
+Vehicle: ${$("fCar").value}
+Shade selected: ${sel?sel.name:"not selected"}
+
+(P1 build attaches the AI render automatically.)`);
+    location.href=`mailto:info@pavoneauto.com?subject=${encodeURIComponent("Tint visualizer quote request")}&body=${body}`;
+  };
+</script>
+</body>
+</html>

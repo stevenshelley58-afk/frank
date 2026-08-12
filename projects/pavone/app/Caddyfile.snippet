@@ -1,0 +1,7 @@
+# Paste this block into your existing Caddyfile to proxy see.pavoneauto.com
+# to the Pavone visualizer running on 127.0.0.1:8787
+# Then run: caddy reload
+
+see.pavoneauto.com {
+  reverse_proxy 127.0.0.1:8787
+}

@@ -1,0 +1,13 @@
+# Secrets and runtime state must never enter an image layer.
+.env
+.env.*
+!.env.example
+data/
+
+# Dev-only and VCS noise
+.git
+.gitignore
+node_modules/
+*.log
+tools/harness-out/
+tools/test-photos/

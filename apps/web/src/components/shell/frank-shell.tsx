@@ -7,7 +7,8 @@ import { useSearchParams } from 'next/navigation';
 import { useAuth, useData } from '@/components/providers';
 import { useCommandPalette } from '@/components/command-palette';
 import { DEFAULT_ROOMS, type Room } from '@/lib/rooms';
-import { frankStream, StreamAbortedError, turnInfoToMessageMeta, type TurnInfo } from '@/lib/frank';
+// Chat streaming now goes through submitChatTurn() → Fastify /v1/chat/turns + SSE events.
+// The legacy frankStream() → /api/chat SSE path has been removed.
 import {
   appendMessage,
   cancelChatTurn,
@@ -238,94 +239,6 @@ export function FrankShell() {
     setActiveId(created.id);
     setMessages([]);
     return created;
-  };
-
-  const legacySend = async (input: ChatTurnDraft) => {
-    if (!api) return;
-    const text = input.text;
-    const conversation = active ?? (await startChat(currentProjectId, text));
-    if (!conversation) return;
-
-    const userRow = await appendMessage(api, conversation.id, { kind: 'user', body: text });
-    setMessages((prev) => [...prev, userRow]);
-    await patchConversation(api, conversation.id, { running: true });
-    setConversations((prev) =>
-      prev.map((c) => (c.id === conversation.id ? { ...c, running: true } : c)),
-    );
-    void refreshFrame();
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setStreamingText('');
-    let accumulated = '';
-    let turnInfo: TurnInfo = {};
-    let cancelled = false;
-
-    await frankStream(
-      text,
-      conversation.project_id,
-      {
-        onChunk: (chunk) => {
-          accumulated += chunk;
-          setStreamingText(accumulated);
-        },
-        onDone: (info) => {
-          turnInfo = info;
-        },
-        onError: (err) => {
-          accumulated = accumulated || `I couldn't reach my brain just then — ${err}`;
-        },
-      },
-      currentProject.name,
-      currentProject.agent,
-      controller.signal,
-      effectiveModel !== 'auto' ? effectiveModel : undefined,
-    ).catch((err: unknown) => {
-      if (err instanceof StreamAbortedError) {
-        cancelled = true;
-      } else {
-        accumulated = accumulated || 'The stream dropped before I could answer.';
-      }
-    });
-
-    setStreamingText(null);
-    abortRef.current = null;
-
-    if (cancelled) {
-      setConversations((prev) =>
-        prev.map((c) => (c.id === conversation.id ? { ...c, running: false } : c)),
-      );
-      // The local shell must stop immediately. The durable flag is a
-      // best-effort reconciliation: a failed patch must not turn Stop into an
-      // unhandled send failure or write an artificial assistant reply.
-      try {
-        await patchConversation(api, conversation.id, { running: false });
-      } catch {
-        // The authoritative Frame refresh below will reconcile a failed write.
-      }
-      void refreshFrame();
-      return;
-    }
-
-    const body = accumulated.trim() || 'Acknowledged.';
-    const agentRow = await appendMessage(api, conversation.id, {
-      kind: 'agent',
-      body,
-      // These are terminal facts supplied by /api/chat's SSE event.  Keep the
-      // wire names stable in persisted chat history, rather than deriving a
-      // route from the conversation preference after the fact.
-      meta: turnInfoToMessageMeta(turnInfo),
-    });
-    setMessages((prev) => [...prev, agentRow]);
-    await patchConversation(api, conversation.id, { running: false });
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === conversation.id
-          ? { ...c, running: false, last_message_at: agentRow.created_at }
-          : c,
-      ),
-    );
-    void refreshFrame();
   };
 
   const send = async (draft: ChatTurnDraft): Promise<boolean> => {

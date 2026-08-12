@@ -1,0 +1,4 @@
+# Deployment tarball contains .env (API key + admin password) — never commit it.
+*.tgz
+*.tar.gz
+app/.env
