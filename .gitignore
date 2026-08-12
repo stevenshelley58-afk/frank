@@ -28,3 +28,13 @@ HANDOVER*.md
 .light/
 .codex-preview-*/
 .aui-tmp/
+.cache/
+build/
+__pycache__/
+*.ttf
+*.otf
+*.woff
+*.woff2
+public/adstudio-samples/
+public/adstudio-templates/
+meta_ad_candidates/
