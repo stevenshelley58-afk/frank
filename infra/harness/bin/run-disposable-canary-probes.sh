@@ -9,7 +9,12 @@ cat > "$receipt/s3.json" <<'JSON'
 JSON
 chmod 600 "$receipt/s3.json"; export FRANK_CANARY_S3_CONFIG="$receipt/s3.json"
 compose=(docker compose -p "$FRANK_HARNESS_CANARY_PROJECT" -f "$harness_dir/docker-compose.canary.yml")
-"${compose[@]}" up -d > "$receipt/up.log" 2>&1
+# Bootstrap Seaweed's only canary bucket from the disposable service itself before
+# tusd starts; this never contacts production Seaweed or any external network.
+"${compose[@]}" up -d seaweedfs gate litellm clamav probe > "$receipt/up.log" 2>&1
+sleep 5
+"${compose[@]}" exec -T seaweedfs sh -ec 'echo "s3.bucket.create -name=canary-staging" | weed shell -master=127.0.0.1:9333' > "$receipt/seaweed-bootstrap.txt"
+"${compose[@]}" up -d tusd >> "$receipt/up.log" 2>&1
 trap '"${compose[@]}" down --volumes --remove-orphans > "$receipt/cleanup.log" 2>&1 || true' EXIT
 sleep 20
 "${compose[@]}" ps -a > "$receipt/ps.txt"
