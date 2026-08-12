@@ -16,6 +16,7 @@ describe('PostgresAttachmentPersistence SQL safety contract', () => {
   it('persists complete canonical manifests with a safe JSON size', () => {
     expect(source).toContain('bucket,object_key,sha256,size_bytes,media_type,manifest');
     expect(source).toContain('Number.isSafeInteger(size)');
+    expect(source).toContain('on conflict(cell_id,sha256) do update set object_id=frank_domain.object_manifest.object_id returning object_id,manifest');
   });
   it('records valid termination evidence and bounds stale leased outbox work', () => {
     expect(source).toContain("state='terminating'");
