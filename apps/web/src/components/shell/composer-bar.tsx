@@ -99,6 +99,7 @@ export function ComposerBar({
   models,
   thinking,
   contextUsed,
+  conversationId,
   onSend,
   onStop,
   onModelChange,
