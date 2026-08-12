@@ -19,7 +19,9 @@ describe('GooseAgentHarnessAdapter', () => {
     const events = [];
     for await (const event of adapter.prompt({ sessionId: session.id, content: 'prompt' })) events.push(event);
     expect(events).toEqual([{ type: 'text', content: 'hello' }, { type: 'done' }]);
-    expect(await adapter.usage('1h')).toMatchObject({ totalTurns: 1, estimatedCostUsd: undefined });
+    const usage = await adapter.usage('1h');
+    expect(usage).toMatchObject({ totalTurns: 1 });
+    expect(usage).not.toHaveProperty('estimatedCostUsd');
     await adapter.cancel({ sessionId: session.id, reason: 'stop', now: '2026-08-12T00:00:01.000Z' });
     expect(legacy.stopSession).toHaveBeenCalledWith(handle);
   });
