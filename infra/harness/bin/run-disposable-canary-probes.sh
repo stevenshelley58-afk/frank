@@ -4,6 +4,10 @@ set -Eeuo pipefail; set +x; umask 077
 candidate="$1" receipt="$2"; script_dir="$(cd "$(dirname "$0")" && pwd)"; harness_dir="$(cd "$script_dir/.." && pwd)"
 set -a; source "$candidate"; set +a
 : "${FRANK_HARNESS_CANARY_PROJECT:?set disposable project}"; mkdir -p "$receipt"
+cat > "$receipt/s3.json" <<'JSON'
+{"identities":[{"name":"canary-staging","credentials":[{"accessKey":"canary-staging","secretKey":"canary-staging-secret"}],"actions":["Read:canary-staging","Write:canary-staging","List:canary-staging"]},{"name":"canary-deny","credentials":[{"accessKey":"canary-deny","secretKey":"canary-deny-secret"}],"actions":[]}]}
+JSON
+chmod 600 "$receipt/s3.json"; export FRANK_CANARY_S3_CONFIG="$receipt/s3.json"
 compose=(docker compose -p "$FRANK_HARNESS_CANARY_PROJECT" -f "$harness_dir/docker-compose.canary.yml")
 "${compose[@]}" up -d > "$receipt/up.log" 2>&1
 trap '"${compose[@]}" down --volumes --remove-orphans > "$receipt/cleanup.log" 2>&1 || true' EXIT

@@ -9,9 +9,11 @@ services:
     command: ["--port", "4000"]
   seaweedfs:
     image: ${FRANK_SEAWEEDFS_CANDIDATE_IMAGE:?digest required}
-    command: [server, -dir=/data, -s3]
+    command: [server, -dir=/data, -s3, -s3.config=/etc/seaweedfs/s3.json]
     networks: [canary-attachments]
-    volumes: [seaweedfs-canary:/data]
+    volumes:
+      - seaweedfs-canary:/data
+      - ${FRANK_CANARY_S3_CONFIG:?canary S3 config required}:/etc/seaweedfs/s3.json:ro
     read_only: true
     tmpfs: [/tmp]
   tusd:
