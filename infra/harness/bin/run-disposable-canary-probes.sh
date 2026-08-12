@@ -17,6 +17,8 @@ sleep 5
 "${compose[@]}" exec -T seaweedfs sh -ec 'echo "s3.bucket.create -name=canary-staging" | weed shell -master=127.0.0.1:9333 -filer=127.0.0.1:8888' > "$receipt/seaweed-bootstrap.txt"
 "${compose[@]}" up -d tusd >> "$receipt/up.log" 2>&1
 cleanup() {
+  "${compose[@]}" logs --no-color clamav > "$receipt/clamav.log" 2>&1 || true
+  "${compose[@]}" exec -T clamav sh -ec 'find /var/lib/clamav -maxdepth 1 -type f -printf "%f %s bytes\\n" | sort' > "$receipt/clamav-definitions.txt" 2>&1 || true
   "${compose[@]}" down --volumes --remove-orphans > "$receipt/cleanup.log" 2>&1 || true
   {
     docker ps -a --format '{{.Names}}' | grep "^${FRANK_HARNESS_CANARY_PROJECT}-" || true
@@ -50,7 +52,9 @@ grep -Eqi 'HTTP/.*(400|403|409|412|500)' "$receipt/tusd-hook-rejection.txt"
 if "${compose[@]}" exec -T probe sh -ec 'wget -q -O /dev/null --header="Authorization: Basic Y2FuYXJ5LWRlbnk6Y2FuYXJ5LWRlbnktc2VjcmV0" http://seaweedfs:8333/canary-staging/'; then echo 'Seaweed deny identity unexpectedly listed bucket' >&2; exit 1; fi
 printf 'canary-deny=list/write denied; disposable canary-staging remains scoped to canary-staging identity\n' > "$receipt/seaweed-identity.txt"
 # ClamAV daemon protocol, not an assumed scanner binary: PING then INSTREAM EICAR over TCP.
-for attempt in $(seq 1 90); do
+for attempt in $(seq 1 300); do
+  # TCP availability is not enough: freshclam may still be obtaining definitions.
+  if ! "${compose[@]}" exec -T clamav sh -ec 'test -s /var/lib/clamav/main.cvd -o -s /var/lib/clamav/main.cld; test -s /var/lib/clamav/daily.cvd -o -s /var/lib/clamav/daily.cld'; then sleep 2; continue; fi
   if "${compose[@]}" exec -T probe sh -ec 'printf "zPING\\000" | nc -w 2 clamav 3310 | grep -Fx PONG' > "$receipt/clamav-ping.txt" 2>/dev/null; then break; fi
   sleep 2
 done
