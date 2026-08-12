@@ -14,7 +14,7 @@ compose=(docker compose -p "$FRANK_HARNESS_CANARY_PROJECT" -f "$harness_dir/dock
 # tusd starts; this never contacts production Seaweed or any external network.
 "${compose[@]}" up -d seaweedfs gate litellm clamav probe > "$receipt/up.log" 2>&1
 sleep 5
-"${compose[@]}" exec -T seaweedfs sh -ec 'echo "s3.bucket.create -name=canary-staging" | weed shell -master=127.0.0.1:9333' > "$receipt/seaweed-bootstrap.txt"
+"${compose[@]}" exec -T seaweedfs sh -ec 'echo "s3.bucket.create -name=canary-staging" | weed shell -master=127.0.0.1:9333 -filer=127.0.0.1:8888' > "$receipt/seaweed-bootstrap.txt"
 "${compose[@]}" up -d tusd >> "$receipt/up.log" 2>&1
 cleanup() {
   "${compose[@]}" down --volumes --remove-orphans > "$receipt/cleanup.log" 2>&1 || true
