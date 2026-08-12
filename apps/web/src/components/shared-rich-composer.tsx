@@ -259,7 +259,7 @@ function randomId(): string {
 
 async function filesFromDrop(transfer: DataTransfer): Promise<SelectedFile[]> {
   const entries = Array.from(transfer.items).flatMap((item) => {
-    const entry = (item as DataTransferItem & { webkitGetAsEntry?: () => DropEntry | null }).webkitGetAsEntry?.();
+    const entry = item.webkitGetAsEntry?.() as DropEntry | null | undefined;
     return entry ? [entry] : [];
   });
   if (!entries.length) return Array.from(transfer.files).map((data) => ({ data }));

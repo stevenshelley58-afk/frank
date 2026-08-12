@@ -76,7 +76,7 @@ export async function waitForCleanAttachment(uploadId: string, signal?: AbortSig
     const { upload } = await attachmentUploadStatus(uploadId);
     if ('attachment_id' in upload && upload.scan_state === 'clean' && ['ready', 'promoted'].includes(upload.attachment_state)) return upload.attachment_id;
     if (['cancelled', 'expired', 'rejected'].includes(upload.reservation_state)) throw new Error(`Attachment upload ${upload.reservation_state}.`);
-    if ('scan_state' in upload && ['blocked', 'failed'].includes(upload.scan_state)) throw new Error(`Attachment scan ${upload.scan_state}.`);
+    if ('scan_state' in upload && upload.scan_state && ['blocked', 'failed'].includes(upload.scan_state)) throw new Error(`Attachment scan ${upload.scan_state}.`);
     await new Promise<void>((resolve) => window.setTimeout(resolve, 1_000));
   }
   throw new Error('Attachment processing timed out.');
