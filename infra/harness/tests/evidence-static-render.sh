@@ -14,7 +14,7 @@ grep -Fq "docker compose -f \"\$harness_dir/docker-compose.canary.yml\" config -
 if grep -Eq 'external:|name:[[:space:]]*frank($|[-_])|frank-cell-seaweedfs-data|frank-attachments|networks:[[:space:]]*\[frank' "$compose"; then
   echo 'canary compose can attach production state'; exit 1
 fi
-grep -Fq 'clamav: [' "$compose"
+grep -Eq '^  clamav:$' "$compose"
 grep -Fq '1.5.4' "$root/infra/harness/README.md"
 test -x "$validator" || { echo 'evidence validator is not executable'; exit 1; }
 
