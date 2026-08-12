@@ -157,7 +157,9 @@ export function SharedRichComposer({ disabled = false, dark = false, conversatio
     cleanAttachments.current.clear();
     relativePaths.current.clear();
     reservations.current.clear();
+    const fileIds = uppy.getFiles().map((file) => file.id);
     uppy.cancelAll();
+    for (const fileId of fileIds) if (uppy.getFile(fileId)) uppy.removeFile(fileId);
     callbackRef.current?.([]);
     setNotice(null);
   }, [draftEpoch, uppy]);

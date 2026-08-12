@@ -35,7 +35,7 @@ async function responseJson<T>(response: Response, action: string): Promise<T> {
 }
 
 export async function reserveAttachmentUpload(input: AttachmentUploadInput): Promise<AttachmentUploadReservation> {
-  const response = await fetch('/v1/attachments/uploads', {
+  const response = await fetch('/api/v1/attachments/uploads', {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'Idempotency-Key': input.idempotency_key },
     credentials: 'same-origin',
@@ -45,7 +45,7 @@ export async function reserveAttachmentUpload(input: AttachmentUploadInput): Pro
 }
 
 export async function renewAttachmentUploadCapability(uploadId: string, idempotencyKey: string): Promise<AttachmentCapability> {
-  const response = await fetch(`/v1/attachments/uploads/${encodeURIComponent(uploadId)}/capability`, {
+  const response = await fetch(`/api/v1/attachments/uploads/${encodeURIComponent(uploadId)}/capability`, {
     method: 'POST',
     headers: { 'Idempotency-Key': idempotencyKey },
     credentials: 'same-origin',
@@ -54,7 +54,7 @@ export async function renewAttachmentUploadCapability(uploadId: string, idempote
 }
 
 export async function cancelAttachmentUpload(uploadId: string, capability: string, idempotencyKey: string): Promise<void> {
-  const response = await fetch(`/v1/attachments/uploads/${encodeURIComponent(uploadId)}`, {
+  const response = await fetch(`/api/v1/attachments/uploads/${encodeURIComponent(uploadId)}`, {
     method: 'DELETE',
     headers: { 'content-type': 'application/json', 'Idempotency-Key': idempotencyKey, 'X-Frank-Upload-Capability': capability },
     credentials: 'same-origin',
@@ -64,7 +64,7 @@ export async function cancelAttachmentUpload(uploadId: string, capability: strin
 }
 
 export async function attachmentUploadStatus(uploadId: string): Promise<AttachmentUploadStatusResponse> {
-  const response = await fetch(`/v1/attachments/uploads/${encodeURIComponent(uploadId)}`, { credentials: 'same-origin' });
+  const response = await fetch(`/api/v1/attachments/uploads/${encodeURIComponent(uploadId)}`, { credentials: 'same-origin' });
   return responseJson(response, 'Attachment status');
 }
 

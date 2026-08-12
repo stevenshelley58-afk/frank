@@ -51,6 +51,8 @@ async function proxy(req: NextRequest): Promise<NextResponse> {
   if (idempotencyKey) headers['idempotency-key'] = idempotencyKey;
   const ifNoneMatch = req.headers.get('if-none-match');
   if (ifNoneMatch) headers['if-none-match'] = ifNoneMatch;
+  const uploadCapability = req.headers.get('x-frank-upload-capability');
+  if (uploadCapability) headers['x-frank-upload-capability'] = uploadCapability;
 
   let body: string | undefined;
   if (req.method !== 'GET' && req.method !== 'DELETE' && req.method !== 'HEAD') {
