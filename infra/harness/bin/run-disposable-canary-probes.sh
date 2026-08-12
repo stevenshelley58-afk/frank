@@ -59,5 +59,6 @@ for attempt in $(seq 1 300); do
   sleep 2
 done
 grep -Fx PONG "$receipt/clamav-ping.txt"
-if "${compose[@]}" exec -T probe sh -ec 'p="X5O!P%@AP[4\\PZX54(P^)7CC)7}\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\$H+H*"; test "$(printf %s "$p" | wc -c)" -eq 68; { printf "zINSTREAM\\000\\000\\000\\104%s\\000\\000\\000\\000" "$p"; } | nc clamav 3310 | grep -E "FOUND"'; then :; else echo 'EICAR was not rejected' >&2; exit 1; fi > "$receipt/clamav-eicar.txt"
+"${compose[@]}" exec -T probe sh -ec 'p="X5O!P%@AP[4\\PZX54(P^)7CC)7}\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\$H+H*"; test "$(printf %s "$p" | wc -c)" -eq 68; { printf "zINSTREAM\\000\\000\\000\\104%s\\000\\000\\000\\000" "$p"; } | nc -w 5 clamav 3310' > "$receipt/clamav-eicar.txt"
+grep -E 'FOUND' "$receipt/clamav-eicar.txt" || { echo 'EICAR was not rejected' >&2; exit 1; }
 sha256sum "$receipt"/* > "$receipt/SHA256SUMS"
