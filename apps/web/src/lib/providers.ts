@@ -14,13 +14,6 @@
 
 import { createSession, streamMessage, gooseHealth, gooseModelInfo } from './goose-server';
 import { ensureAgent, streamLettaMessage, lettaHealth } from './letta-server';
-import {
-  createDeepseekSession,
-  deepseekHealth,
-  deepseekModel,
-  deepseekReportedModel,
-  streamDeepseekMessage,
-} from './deepseek-server';
 
 export interface PublicModelOption {
   id: string;
@@ -107,40 +100,16 @@ const lettaProvider: ChatProvider = {
 };
 
 /* ------------------------------------------------------------------ */
-/* DeepSeek direct — no local harness required                         */
-/* ------------------------------------------------------------------ */
-
-const deepseekProvider: ChatProvider = {
-  id: 'deepseek',
-  models: [
-    { id: 'deepseek-chat', name: 'DeepSeek Chat', short: 'DS Chat', sub: 'fast · general-purpose' },
-    { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner', short: 'Reasoner', sub: 'deep reasoning · slower, thoughtful' },
-  ],
-  label: 'DeepSeek Direct',
-  blurb: 'Direct DeepSeek API over HTTPS — streaming chat with per-room history, no local harness needed.',
-  health: deepseekHealth,
-  createSession: () => createDeepseekSession(),
-  stream: (sessionId, prompt, opts) =>
-    streamDeepseekMessage(sessionId, prompt, opts),
-  modelInfo: (sessionId) => Promise.resolve({
-    provider: 'deepseek',
-    // Registry status reports configured default; turns report only provider
-    // confirmation from stream frames, never the requested model.
-    model: sessionId === undefined ? deepseekModel() : deepseekReportedModel(sessionId),
-  }),
-};
-
 /* ------------------------------------------------------------------ */
 /* Registry                                                            */
 /* ------------------------------------------------------------------ */
 
 const providers = new Map<string, ChatProvider>();
 providers.set(gooseProvider.id, gooseProvider);
-providers.set(deepseekProvider.id, deepseekProvider);
 providers.set(lettaProvider.id, lettaProvider);
-const autoProviders: readonly ChatProvider[] = [gooseProvider, deepseekProvider, lettaProvider];
+const autoProviders: readonly ChatProvider[] = [gooseProvider, lettaProvider];
 
-/** Stable Auto preference: local Goose first, direct DeepSeek only on failure. */
+/** Stable Auto preference: Goose first, Letta for memory-aware rooms. */
 export const AUTO_PROVIDER_IDS = autoProviders.map((provider) => provider.id);
 
 export function registerProvider(p: ChatProvider): void {

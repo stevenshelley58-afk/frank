@@ -12,3 +12,19 @@ coverage/
 
 # secrets
 .mem0.key
+
+# workspace cruft (never commit)
+.worktrees/
+mockups/
+projects/
+docs/product/
+infra/deploy-hook/
+.hermes/
+.tmp-*
+*.patch
+*.tar.gz
+preview.report.json
+HANDOVER*.md
+.light/
+.codex-preview-*/
+.aui-tmp/
