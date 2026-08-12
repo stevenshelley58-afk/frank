@@ -7,8 +7,8 @@ Status: READY | IN_PROGRESS | DONE | BLOCKED | BLOCKED-DEP
 |---|---|---|---|---|---|
 | F0-1 scaffold | DONE | main | - | cowork | 2026-08-12 |
 | F0-2 deploy frank | READY | - | - | - | - |
-| F0-3 graphify registry | READY | - | - | - | - |
-| F0-4 gitignore | READY | - | - | - | - |
+| F0-3 graphify registry | DONE | main | 6c9557d | cowork | 2026-08-12 |
+| F0-4 gitignore | DONE | main | 6c9557d | cowork | 2026-08-12 |
 | F1-1 project registry | BLOCKED-DEP F0 | - | - | - | - |
 | F1-2 release contract | BLOCKED-DEP F1-1 | - | - | - | - |
 | F1-3 module manifest | BLOCKED-DEP F1-1 | - | - | - | - |
