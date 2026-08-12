@@ -38,7 +38,7 @@ export class DurableChatTurnRunner implements ChatTurnRunner {
     let terminalError: unknown;
     try {
       const selection = await this.#broker.select({ taskType: 'general', requiredToolProtocols: [], dataClass: 'private', needsReviewDiversity: false, preferredWorkspaceMode: 'shared' }, turn.input.route_profile ?? 'auto');
-      const candidates = selection.candidates.length ? selection.candidates.map((candidate) => candidate.descriptor.id) : [selection.harnessId];
+      const candidates = selection.candidates.length ? selection.candidates.map((candidate: { descriptor: { id: string } }) => candidate.descriptor.id) : [selection.harnessId];
       for (const harnessId of [...new Set([selection.harnessId, ...candidates])]) {
         const adapter = await this.findAdapter(harnessId);
         if (!adapter) continue;
