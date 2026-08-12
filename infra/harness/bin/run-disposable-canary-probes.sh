@@ -33,7 +33,7 @@ sleep 20
 # TUSD protocol: POST creates a zero-byte upload; HEAD/PATCH/DELETE prove endpoint semantics.
 "${compose[@]}" exec -T probe sh -ec 'printf "POST /v1/uploads/tus/ HTTP/1.1\r\nHost: tusd\r\nTus-Resumable: 1.0.0\r\nUpload-Length: 0\r\nUpload-Metadata: filename Zm9v\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" | nc tusd 8080' > "$receipt/tusd-post.txt"
 grep -Eqi "HTTP/.*(201|204)" "$receipt/tusd-post.txt"
-upload_url="$(sed -nE 's/^Location: (.*)\r?$/\1/ip' "$receipt/tusd-post.txt" | tr -d '\r' | head -n1)"
+upload_url="$(sed -nE 's/^Location: (.*)\r?$/\1/ip' "$receipt/tusd-post.txt" | tr -d '\r' | sed -E 's#^https?://[^/]+##' | head -n1)"
 [[ "$upload_url" =~ ^/v1/uploads/tus/ ]] || { echo 'tusd POST did not return an upload location' >&2; exit 1; }
 "${compose[@]}" exec -T probe sh -ec "printf 'HEAD $upload_url HTTP/1.1\\r\\nHost: tusd\\r\\nTus-Resumable: 1.0.0\\r\\nConnection: close\\r\\n\\r\\n' | nc tusd 8080" > "$receipt/tusd-head.txt"
 grep -Eqi 'HTTP/.*200' "$receipt/tusd-head.txt"
