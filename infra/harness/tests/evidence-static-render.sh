@@ -10,6 +10,8 @@ grep -Fq 'sealed-promotion' "$root/infra/harness/evidence-manifest.schema.json"
 grep -Fq 'generated-digest-bound-sbom' "$root/infra/harness/evidence-manifest.schema.json"
 grep -Fq 'generated-source-license-record' "$root/infra/harness/evidence-manifest.schema.json"
 grep -Fq 'approved-exception' "$root/infra/harness/evidence-manifest.schema.json"
+grep -Fq 'record_sha256' "$root/infra/harness/evidence-manifest.schema.json"
+grep -Fq 'frank-evidence://vps/srv/frank/evidence/' "$root/infra/harness/evidence-manifest.schema.json"
 grep -Fq "docker compose -f \"\$harness_dir/docker-compose.canary.yml\" config --format json" "$root/infra/harness/bin/render-disposable-canary.sh"
 if grep -Eq 'external:|name:[[:space:]]*frank($|[-_])|frank-cell-seaweedfs-data|frank-attachments|networks:[[:space:]]*\[frank' "$compose"; then
   echo 'canary compose can attach production state'; exit 1
