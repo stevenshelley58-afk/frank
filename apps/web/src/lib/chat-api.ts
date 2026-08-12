@@ -19,6 +19,7 @@
  */
 
 import type { ApiFetch, WorkListResponse, WorkSummary } from './api';
+import type { ChatTurnInput } from './chat-turn-input';
 
 /* ------------------------------------------------------------------ */
 /* Wire types                                                          */
@@ -148,6 +149,48 @@ export async function appendMessage(
   );
   const data = (await res.json()) as { message: ChatMessageRow };
   return data.message;
+}
+
+export interface ChatTurnRepresentation {
+  turn_id: string;
+  state: 'queued' | 'running' | 'completed' | 'failed' | 'cancelled';
+  created_at: string;
+  updated_at: string;
+  finished_at: string | null;
+  cancelled_at: string | null;
+  replayed?: boolean;
+}
+
+export interface ChatTurnEvent {
+  turn_id: string;
+  cursor: number;
+  kind: string;
+  occurred_at: string;
+  payload: Record<string, unknown>;
+}
+
+/** Frozen API-owned turn boundary. The request body is the canonical contract verbatim. */
+export async function submitChatTurn(api: ApiFetch, input: ChatTurnInput): Promise<ChatTurnRepresentation> {
+  const res = await api('/v1/chat/turns', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': input.idempotency_key },
+    body: JSON.stringify(input),
+  });
+  return res.json() as Promise<ChatTurnRepresentation>;
+}
+
+export async function listChatTurnEvents(api: ApiFetch, turnId: string, afterCursor: number): Promise<{ events: ChatTurnEvent[]; next_cursor: number | null }> {
+  const res = await api(`/v1/chat/turns/${turnId}/events?after_cursor=${afterCursor}&limit=200`);
+  return res.json() as Promise<{ events: ChatTurnEvent[]; next_cursor: number | null }>;
+}
+
+export async function cancelChatTurn(api: ApiFetch, turnId: string, idempotencyKey = commandId()): Promise<ChatTurnRepresentation> {
+  const res = await api(`/v1/chat/turns/${turnId}/cancel`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ idempotency_key: idempotencyKey }),
+  });
+  return res.json() as Promise<ChatTurnRepresentation>;
 }
 
 /* ------------------------------------------------------------------ */

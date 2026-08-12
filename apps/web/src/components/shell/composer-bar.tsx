@@ -2,6 +2,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ThinkingMode } from '@/lib/chat-api';
+import { SharedRichComposer } from '@/components/shared-rich-composer';
+import type { ChatAttachmentRef, ChatTurnDraft } from '@/lib/chat-turn-input';
 
 /* ------------------------------------------------------------------ */
 /* Options                                                             */
@@ -73,7 +75,8 @@ interface ComposerBarProps {
   thinking: ThinkingMode;
   /** Fraction of the context window in use, 0–1. */
   contextUsed: number;
-  onSend: (text: string) => void;
+  conversationId?: string;
+  onSend: (input: ChatTurnDraft) => Promise<boolean>;
   onStop: () => void;
   onModelChange: (model: string) => void;
   onThinkingChange: (mode: ThinkingMode) => void;
@@ -96,6 +99,7 @@ export function ComposerBar({
   models,
   thinking,
   contextUsed,
+  conversationId,
   onSend,
   onStop,
   onModelChange,
@@ -107,6 +111,9 @@ export function ComposerBar({
   const [focused, setFocused] = useState(false);
   const [menu, setMenu] = useState<'model' | 'thinking' | 'context' | null>(null);
   const [recording, setRecording] = useState(false);
+  const [attachments, setAttachments] = useState<ChatAttachmentRef[]>([]);
+  const [submitting, setSubmitting] = useState(false);
+  const [draftEpoch, setDraftEpoch] = useState(0);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const isDeck = tint === null;
@@ -135,11 +142,16 @@ export function ComposerBar({
     };
   }, [menu]);
 
-  const submit = () => {
+  const submit = async () => {
     const text = value.trim();
-    if (!text || disabled) return;
-    onSend(text);
+    if (!text || disabled || submitting) return;
+    setSubmitting(true);
+    const accepted = await onSend({ text, attachments }).catch(() => false);
+    setSubmitting(false);
+    if (!accepted) return;
     setValue('');
+    setAttachments([]);
+    setDraftEpoch((value) => value + 1);
     taRef.current?.focus();
   };
 
@@ -228,6 +240,14 @@ export function ComposerBar({
           </div>
 
           <div className="flex items-end gap-2">
+            <SharedRichComposer
+              disabled={disabled}
+              dark={isDeck}
+              conversationId={conversationId}
+              draftEpoch={draftEpoch}
+              pasteTargetRef={taRef}
+              onAttachmentsChange={setAttachments}
+            />
             <textarea
               ref={taRef}
               rows={1}
@@ -238,7 +258,7 @@ export function ComposerBar({
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  submit();
+                  void submit();
                 }
               }}
               placeholder={recording ? 'Listening…' : ''}
@@ -263,8 +283,8 @@ export function ComposerBar({
               </button>
             ) : (
               <button
-                onClick={submit}
-                disabled={!value.trim() || disabled}
+                onClick={() => void submit()}
+                disabled={!value.trim() || disabled || submitting}
                 aria-label="Send"
                 className="grid h-[38px] w-[38px] shrink-0 place-items-center rounded-[10px] bg-accent text-white transition-all duration-150 hover:brightness-110 active:scale-95 disabled:pointer-events-none disabled:opacity-35"
                 style={isDeck ? { color: '#06111f' } : undefined}

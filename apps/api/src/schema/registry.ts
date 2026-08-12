@@ -121,6 +121,9 @@ export interface RouteDefinition<
   readonly body?: TBody;
   readonly response: TResponse;
   readonly successStatus: number;
+  /** A declared binary response still gets central auth/input validation, but
+   * its body is intentionally streamed rather than JSON-schema validated. */
+  readonly responseMode?: 'json' | 'stream';
 }
 
 export type AnyRouteDefinition = RouteDefinition<

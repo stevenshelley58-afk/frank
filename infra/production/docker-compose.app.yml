@@ -50,6 +50,25 @@ services:
       FRANK_MISSION_CHEAP_MODEL: "${FRANK_MISSION_CHEAP_MODEL:?FRANK_MISSION_CHEAP_MODEL is required}"
       FRANK_MISSION_STRONG_MODEL: "${FRANK_MISSION_STRONG_MODEL:?FRANK_MISSION_STRONG_MODEL is required}"
       FRANK_MISSION_SCHEDULER_INTERVAL_MS: "${FRANK_MISSION_SCHEDULER_INTERVAL_MS:-5000}"
+      # Harness services are private peers. The API remains the policy/control owner;
+      # Letta is manual-only and is never a canonical memory or control authority.
+      FRANK_LITELLM_INTERNAL_URL: "${FRANK_LITELLM_INTERNAL_URL:-http://frank-litellm:4000}"
+      FRANK_LETTA_INTERNAL_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta-server:8283}"
+      FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
+      FRANK_CLAMAV_INTERNAL_URL: "${FRANK_CLAMAV_INTERNAL_URL:-tcp://frank-clamav:3310}"
+      FRANK_SEAWEEDFS_INTERNAL_URL: "${FRANK_SEAWEEDFS_INTERNAL_URL:-http://frank-seaweedfs:8333}"
+      # Endpoints alone never enable attachment routes or workers.  The harness
+      # overlay sets this true only with its complete distinct identity set.
+      FRANK_ATTACHMENT_RUNTIME_ENABLED: "${FRANK_ATTACHMENT_RUNTIME_ENABLED:-false}"
+      # This is a mounted persistent volume, never a caller-supplied byte value.
+      FRANK_ATTACHMENT_DURABLE_PATH: /var/lib/frank/artifacts
+      # Goose remains the existing externally managed default for one rollback release;
+      # Frank owns only its endpoint/credential policy, never an unused image slot.
+      GOOSE_ACP_URL: "${GOOSE_ACP_URL:?required}"
+      GOOSE_ACP_SECRET: "${GOOSE_ACP_SECRET:?required}"
+      GOOSE_PROVIDER: "${GOOSE_PROVIDER:?required}"
+      GOOSE_MODEL: "${GOOSE_MODEL:?required}"
+      FRANK_UPLOAD_GATE_INTERNAL_URL: "${FRANK_UPLOAD_GATE_INTERNAL_URL:-http://frank-api:3000}"
       FRANK_ARTIFACT_ARCHIVE_ROOT: /var/lib/frank/artifacts
       FRANK_WORKSPACE_SOURCE_ROOT: /srv/frank/repo
       CODEGRAPH_STATUS_URL: http://frank-codegraph:3002
@@ -170,6 +189,8 @@ services:
       FRANK_EXPECTED_MODEL: "${FRANK_EXPECTED_MODEL:?FRANK_EXPECTED_MODEL is required}"
       DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:?DEEPSEEK_API_KEY is required}"
       DEEPSEEK_MODEL: "${DEEPSEEK_MODEL:-deepseek-chat}"
+      # Transitional adapter only. The API uses FRANK_LETTA_INTERNAL_URL.
+      LETTA_URL: "${FRANK_LETTA_INTERNAL_URL:-http://frank-letta-server:8283}"
 
     volumes: !override
       - type: bind
@@ -244,11 +265,15 @@ services:
       FRANK_BASIC_AUTH_HASH: "${FRANK_BASIC_AUTH_HASH:?FRANK_BASIC_AUTH_HASH is required}"
       FRANK_API_INTERNAL_URL: "${FRANK_API_INTERNAL_URL:?FRANK_API_INTERNAL_URL is required}"
       FRANK_WEB_INTERNAL_URL: "${FRANK_WEB_INTERNAL_URL:?FRANK_WEB_INTERNAL_URL is required}"
+      FRANK_TUSD_INTERNAL_URL: "${FRANK_TUSD_INTERNAL_URL:-http://frank-tusd:1080}"
+      FRANK_UPLOAD_GATE_INTERNAL_URL: "${FRANK_UPLOAD_GATE_INTERNAL_URL:-http://frank-api:3000}"
     depends_on:
       frank-api:
         condition: service_healthy
       frank-web:
         condition: service_healthy
+    networks: !override
+      - frank
 
   # Supporting stores remain network-internal. The reset tags make an accidental
   # development port publication fail closed when this overlay is applied.

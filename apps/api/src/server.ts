@@ -80,6 +80,12 @@ import { StagedWriteService } from './services/workbench/staged-write.js';
 import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { chatRoutes, registerChatRoutes } from './routes/chats.js';
+import { chatTurnRoutes, registerChatTurnRoutes } from './routes/chat-turns.js';
+import type { ChatTurnRunner } from './routes/chat-turns.js';
+import { harnessControlRoutes, registerHarnessControlRoutes } from './routes/harness-control.js';
+import { attachmentUploadRoutes, registerAttachmentUploadRoutes } from './routes/attachment-uploads.js';
+import { attachmentRoutes, registerAttachmentRoutes } from './routes/attachments.js';
+import type { AttachmentRouteDependencies } from './routes/attachments.js';
 import { codegraphRoutes, registerCodegraphRoutes } from './routes/codegraph.js';
 import type { CodegraphRouteDependencies } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
@@ -104,6 +110,10 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...healthRoutes,
   ...brainRoutes,
   ...chatRoutes,
+  ...chatTurnRoutes,
+  ...harnessControlRoutes,
+  ...attachmentRoutes,
+  ...attachmentUploadRoutes,
   ...codegraphRoutes,
 ];
 
@@ -186,6 +196,9 @@ export interface BuildServerOptions {
   readonly db?: import("@frank/adapter-postgres").FrankDatabase;
   /** WB-06: workbench SSE live-poll interval (tests use a fast value). */
   readonly workbenchPollIntervalMs?: number;
+  /** Durable chat execution and SSE poll tuning; injected for hosted/tests. */
+  readonly chatTurnRunner?: ChatTurnRunner;
+  readonly chatTurnPollIntervalMs?: number;
   /**
    * FS-05: preview-lane deployer. Defaults to the real ssh deployer
    * (`SshPreviewDeployer` → /srv/frank/infra/preview-deploy.sh); tests inject
@@ -206,6 +219,8 @@ export interface BuildServerOptions {
     | 'codegraphReadLimit'
     | 'fetch'
   >;
+  /** Present only when every attachment runtime secret/endpoint validates. */
+  readonly attachments?: Pick<AttachmentRouteDependencies, 'lifecycle' | 'persistence' | 'downloader' | 'tusdTerminator' | 'tusdHookSecret' | 'tusdGateSecret'>;
 }
 
 export interface BuiltServer {
@@ -225,8 +240,11 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   // Startup, not first request.
   // The Living Frame has no in-memory substitute: exposing its contract when
   // no database-backed sources were registered would advertise a 404 as data.
-  const activeRoutes =
-    options.db === undefined ? ALL_ROUTES.filter((route) => route !== frameGetRoute) : ALL_ROUTES;
+  const databaseRoutes = new Set<AnyRouteDefinition>([frameGetRoute, ...chatTurnRoutes, ...harnessControlRoutes, ...attachmentRoutes, ...attachmentUploadRoutes]);
+  const activeRoutes = ALL_ROUTES.filter((route) =>
+    (options.db !== undefined || !databaseRoutes.has(route)) &&
+    (options.attachments !== undefined || !attachmentRoutes.includes(route as never)),
+  );
   assertRegistryConsistent(activeRoutes);
 
   const identity =
@@ -306,6 +324,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // do not need them, so they are off.
     trustProxy: false,
   });
+  if (options.chatTurnRunner) app.addHook('onClose', async () => options.chatTurnRunner?.shutdown());
 
   /* ---------------------------------------------------- error handling --- */
 
@@ -471,6 +490,12 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // The chat shell's own store — raw SQL on frank_domain (migration 0010),
     // so like brain it needs a DB handle.
     registerChatRoutes(app, { ...shared, db: options.db });
+    registerChatTurnRoutes(app, { ...shared, db: options.db, ...(options.chatTurnRunner ? { runner: options.chatTurnRunner } : {}), ...(options.chatTurnPollIntervalMs === undefined ? {} : { pollIntervalMs: options.chatTurnPollIntervalMs }) });
+    registerHarnessControlRoutes(app, { ...shared, db: options.db });
+    registerAttachmentUploadRoutes(app, { ...shared, db: options.db });
+    if (options.attachments) {
+      registerAttachmentRoutes(app, { ...shared, ...options.attachments, publicUrl: config.publicUrl });
+    }
     registerFrameRoutes(app, { ...shared, store, db: options.db });
     // Workbench routes need Postgres (the front door + store are raw-SQL on
     // frank_domain); like brain, they only register when a DB handle exists.

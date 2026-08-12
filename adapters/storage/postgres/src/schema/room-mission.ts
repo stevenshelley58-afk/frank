@@ -70,6 +70,7 @@ export const room = domain.table(
     version: integer('version').notNull().default(1),
   },
   (t) => [
+    uniqueIndex('room_id_cell_uidx').on(t.id, t.cellId),
     uniqueIndex('room_cell_identity_uidx').on(t.cellId, t.identity),
     index('room_state_idx').on(t.cellId, t.state, t.paused, t.updatedAt),
     check('room_identity_not_blank', sql`length(btrim(${t.identity})) > 0`),

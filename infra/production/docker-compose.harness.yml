@@ -1,0 +1,139 @@
+# Authoritative third production Compose unit. It is optional to enable, but atomic when
+# enabled: always render dev + app + this file together. No service publishes a port.
+services:
+  frank-api:
+    environment:
+      # Required only when the atomic harness overlay is enabled. The API never receives
+      # LiteLLM's administrator credential.
+      FRANK_ATTACHMENT_RUNTIME_ENABLED: "true"
+      # The API receives only promotion/download identities.  The staging
+      # credential belongs exclusively to frank-tusd below.
+      FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY: "${FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY:?required}"
+      FRANK_ATTACHMENT_PROMOTER_SECRET_KEY: "${FRANK_ATTACHMENT_PROMOTER_SECRET_KEY:?required}"
+      FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY: "${FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY:?required}"
+      FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY: "${FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY:?required}"
+      FRANK_UPLOAD_CAPABILITY_KEY: "${FRANK_UPLOAD_CAPABILITY_KEY:?base64 HMAC key required}"
+      FRANK_UPLOAD_CAPABILITY_PREVIOUS_KEY: "${FRANK_UPLOAD_CAPABILITY_PREVIOUS_KEY:-}"
+      FRANK_LITELLM_VIRTUAL_KEY: "${FRANK_LITELLM_VIRTUAL_KEY:?restricted LiteLLM virtual key required}"
+      FRANK_TUSD_GATE_SECRET: "${FRANK_TUSD_GATE_SECRET:?distinct Caddy-to-gate credential required}"
+      FRANK_TUSD_HOOK_SECRET: "${FRANK_TUSD_HOOK_SECRET:?Caddy-to-tusd hook credential required}"
+    networks: [frank, frank-codegraph-internal, frank-model, frank-attachments]
+
+  frank-caddy:
+    environment:
+      FRANK_TUSD_GATE_SECRET: "${FRANK_TUSD_GATE_SECRET:?distinct Caddy-to-gate credential required}"
+      FRANK_TUSD_HOOK_SECRET: "${FRANK_TUSD_HOOK_SECRET:?Caddy-to-tusd hook credential required}"
+    networks: [frank, frank-attachments]
+
+  frank-seaweedfs:
+    image: "${FRANK_SEAWEEDFS_CURRENT_IMAGE:?reviewed SeaweedFS digest required}"
+    command: !override ["server", "-dir=/data", "-s3", "-s3.config=/etc/seaweedfs/s3.json", "-ip.bind=0.0.0.0"]
+    environment: !override
+      WEED_CLUSTER_DEFAULT: ""
+      WEED_S3_CONFIG_FILE: /etc/seaweedfs/s3.json
+    volumes: !override
+      - type: volume
+        source: frank-cell-seaweedfs-data
+        target: /data
+      - type: bind
+        source: /srv/frank/secrets/seaweedfs/s3.json
+        target: /etc/seaweedfs/s3.json
+        read_only: true
+    networks: !override [frank-attachments]
+    ports: !reset []
+    expose: ["8333"]
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1536m
+    cpus: "1.0"
+    pids_limit: 256
+    healthcheck: { test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8333/status"], interval: 15s, timeout: 5s, retries: 8 }
+
+  frank-litellm:
+    image: "${FRANK_LITELLM_CURRENT_IMAGE:?reviewed LiteLLM digest required}"
+    command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
+    networks: [frank, frank-model]
+    volumes: ["${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/harness/litellm/config.yaml:/etc/litellm/config.yaml:ro"]
+    environment:
+      # Admin key is mounted only in LiteLLM. Application virtual-key bootstrap is
+      # external evidence; no runtime service receives this credential in this overlay.
+      LITELLM_ADMIN_KEY: "${LITELLM_ADMIN_KEY:?required}"
+      # Separate LiteLLM database/role; never point this at Frank domain tables.
+      LITELLM_DATABASE_URL: "${LITELLM_DATABASE_URL:?required; separate LiteLLM database role}"
+      FRANK_LITELLM_OPENAI_MODEL: "${FRANK_LITELLM_OPENAI_MODEL:?required}"
+      FRANK_LITELLM_GEMINI_MODEL: "${FRANK_LITELLM_GEMINI_MODEL:?required}"
+      FRANK_LITELLM_CONCENTRATE_MODEL: "${FRANK_LITELLM_CONCENTRATE_MODEL:?required}"
+      FRANK_LITELLM_DEEPSEEK_MODEL: "${FRANK_LITELLM_DEEPSEEK_MODEL:?required}"
+      OPENAI_API_KEY: "${OPENAI_API_KEY:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      CONCENTRATE_API_BASE: "${CONCENTRATE_API_BASE:-}"
+      CONCENTRATE_API_KEY: "${CONCENTRATE_API_KEY:-}"
+      DEEPSEEK_API_KEY: "${DEEPSEEK_API_KEY:-}"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 768m
+    cpus: "0.75"
+    pids_limit: 256
+    expose: ["4000"]
+    healthcheck: { test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:4000/health/readiness"], interval: 15s, timeout: 5s, retries: 8 }
+
+  frank-tusd:
+    image: "${FRANK_TUSD_CURRENT_IMAGE:?reviewed tusd digest required}"
+    # v2.10.0 evidence is required by the promotion manifest before this command may apply.
+    # Hooks stay on the private attachment network and terminate at the API route that
+    # validates FRANK_TUSD_HOOK_SECRET; no public or Caddy hop is involved.
+    command: ["-behind-proxy", "-base-path=/v1/uploads/tus/", "-s3-bucket=frank-attachment-staging", "-s3-endpoint=http://frank-seaweedfs:8333", "-s3-force-path-style", "-max-size=2147483648", "-hooks-http=${FRANK_TUSD_HOOK_URL:-http://frank-api:3000/private/tusd/hooks}", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish,post-terminate", "-hooks-http-forward-headers=X-Frank-Tusd-Hook-Secret,X-Frank-Upload-Capability,Upload-Metadata,Tus-Resumable,Upload-Offset,X-Forwarded-Method,X-Forwarded-Uri", "-disable-download", "-disable-concatenation"]
+    environment:
+      AWS_ACCESS_KEY_ID: "${FRANK_ATTACHMENT_STAGING_ACCESS_KEY:?required}"
+      AWS_SECRET_ACCESS_KEY: "${FRANK_ATTACHMENT_STAGING_SECRET_KEY:?required}"
+      AWS_REGION: us-east-1
+      AWS_S3_FORCE_PATH_STYLE: "true"
+    networks: [frank-attachments]
+    depends_on: { frank-seaweedfs: { condition: service_healthy } }
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 384m
+    cpus: "0.5"
+    pids_limit: 128
+    expose: ["1080"]
+    healthcheck: { test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:1080/healthz"], interval: 15s, timeout: 5s, retries: 8 }
+
+  frank-clamav:
+    image: "${FRANK_CLAMAV_CURRENT_IMAGE:?reviewed ClamAV digest required}"
+    networks: [frank, frank-attachments]
+    volumes:
+      - "frank-clamav-signatures:/var/lib/clamav"
+      - "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/harness/clamav/clamd.conf:/etc/clamav/clamd.conf:ro"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - "/tmp:rw,nosuid,nodev,noexec,size=64m"
+      - "/run:rw,nosuid,nodev,noexec,size=16m"
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    mem_limit: 1536m
+    cpus: "1.0"
+    pids_limit: 256
+    expose: ["3310"]
+    healthcheck: { test: ["CMD", "clamdcheck.sh"], interval: 30s, timeout: 10s, retries: 12, start_period: 120s }
+
+networks:
+  frank: { external: true, name: frank }
+  frank-model: { internal: true, name: frank-model }
+  frank-attachments: { internal: true, name: frank-attachments }
+volumes:
+  frank-cell-seaweedfs-data: { external: true, name: frank-cell-seaweedfs-data }
+  frank-clamav-signatures: { name: frank-clamav-signatures }

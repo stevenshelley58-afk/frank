@@ -88,6 +88,8 @@ export interface BuildTestServerOptions {
   readonly db?: import('@frank/adapter-postgres').FrankDatabase;
   /** WB-06: workbench SSE live-poll interval (tests use a fast value). */
   readonly workbenchPollIntervalMs?: number;
+  readonly chatTurnRunner?: import('../routes/chat-turns.js').ChatTurnRunner;
+  readonly chatTurnPollIntervalMs?: number;
   /** FS-05: preview-lane deployer (tests inject FakePreviewDeployer). */
   readonly previewDeployer?: import('../services/workbench/preview-backend.js').PreviewDeployer;
   /** Mission route port; tests inject a deterministic in-memory fake. */
@@ -125,6 +127,8 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
     ...(options.workbenchPollIntervalMs === undefined
       ? {}
       : { workbenchPollIntervalMs: options.workbenchPollIntervalMs }),
+    ...(options.chatTurnRunner === undefined ? {} : { chatTurnRunner: options.chatTurnRunner }),
+    ...(options.chatTurnPollIntervalMs === undefined ? {} : { chatTurnPollIntervalMs: options.chatTurnPollIntervalMs }),
     ...(options.previewDeployer === undefined
       ? {}
       : { previewDeployer: options.previewDeployer }),

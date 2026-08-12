@@ -172,6 +172,7 @@ export class HarnessBroker {
 
         // Hard gate: data class
         if (!this.#dataClassOk(descriptor, factors.dataClass)) continue;
+        if (!this.#toolProtocolsOk(descriptor, factors.requiredToolProtocols)) continue;
 
         const score = this.#score(descriptor, health, capacity, factors);
         const explanation = this.#explain(descriptor, health, capacity, factors, score);
@@ -295,6 +296,14 @@ export class HarnessBroker {
     return maxRank >= requiredRank;
   }
 
+  #toolProtocolsOk(
+    descriptor: HarnessDescriptor,
+    required: readonly HarnessDescriptor['toolProtocols'][number][],
+  ): boolean {
+    const supported = new Set(descriptor.toolProtocols);
+    return required.every((protocol) => supported.has(protocol));
+  }
+
   // -----------------------------------------------------------------------
   // Internal: named / profile selection
   // -----------------------------------------------------------------------
@@ -308,6 +317,13 @@ export class HarnessBroker {
       adapter.health(),
       adapter.capacity(),
     ]);
+
+    const reasons: string[] = [];
+    if (!health.healthy) reasons.push(`${harnessId} is unhealthy`);
+    if (!capacity.accepting) reasons.push(`${harnessId} is not accepting work`);
+    if (!this.#dataClassOk(descriptor, factors.dataClass)) reasons.push(`${harnessId} cannot handle ${factors.dataClass} data`);
+    if (!this.#toolProtocolsOk(descriptor, factors.requiredToolProtocols)) reasons.push(`${harnessId} lacks required tool protocols`);
+    if (reasons.length > 0) throw new NoEligibleHarnessError(factors, reasons);
 
     const score = this.#score(descriptor, health, capacity, factors);
     const explanation = this.#explain(descriptor, health, capacity, factors, score);
@@ -338,6 +354,7 @@ export class HarnessBroker {
 
         if (!health.healthy || !capacity.accepting) continue;
         if (!this.#dataClassOk(descriptor, factors.dataClass)) continue;
+        if (!this.#toolProtocolsOk(descriptor, factors.requiredToolProtocols)) continue;
 
         const score = this.#score(descriptor, health, capacity, factors);
         const explanation = this.#explain(descriptor, health, capacity, factors, score);

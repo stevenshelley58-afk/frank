@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { Room } from '@/lib/rooms';
 import type { ChatMessage } from '@/lib/frank';
 import { IconEdit, IconSend, IconStop } from './icons';
+import { SharedRichComposer } from './shared-rich-composer';
+import type { ChatTurnDraft } from '@/lib/chat-turn-input';
 
 interface ComposerProps {
   room: Room;
@@ -18,7 +20,7 @@ interface ComposerProps {
   stopping?: boolean;
   /** ChatGPT-style edit-and-resend: an existing user message being rewritten. */
   editing?: ChatMessage | null;
-  onSend: (text: string) => void;
+  onSend: (input: ChatTurnDraft) => void;
   onStop?: () => void;
   onCancelEdit?: () => void;
   onTyping: (active: boolean) => void;
@@ -76,7 +78,7 @@ export function Composer({
   const submit = () => {
     const text = value.trim();
     if (!text || disabled || booting) return;
-    onSend(text);
+    onSend({ text, attachments: [] });
     setValue('');
     onTyping(false);
     taRef.current?.focus();
@@ -162,6 +164,7 @@ export function Composer({
                     : ''}
             </div>
             <div className="flex items-end gap-2.5">
+              <SharedRichComposer disabled={disabled || Boolean(booting)} dark pasteTargetRef={taRef} />
               <textarea
                 {...textareaProps}
                 className="max-h-[132px] min-h-[42px] flex-1 resize-none border-none bg-transparent px-1 py-2 text-[14px] leading-[1.5] text-white outline-none placeholder:text-white/40"
@@ -209,6 +212,7 @@ export function Composer({
             }}
           >
             {/* room identity chip — tint lives here, concentrated not spread */}
+            <SharedRichComposer disabled={disabled || Boolean(booting)} pasteTargetRef={taRef} />
             <span
               className="mb-1 grid h-6 w-6 shrink-0 place-items-center rounded-lg font-display text-[10px] font-bold text-white shadow-sm"
               style={{ background: room.tint }}

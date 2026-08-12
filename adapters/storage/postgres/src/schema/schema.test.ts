@@ -10,13 +10,14 @@
  * WORK-004 transition table (`work-state.ts`, the seeded rows, the trigger).
  */
 
+import { createHash } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { describe, expect, it } from 'vitest';
 
-import { DATA_CLASS_ORDER } from '@frank/contracts';
+import { DATA_CLASS_ORDER, MAX_CHAT_TURN_ATTACHMENTS, normalizeSourceRef } from '@frank/contracts';
 
 import { WORK_STATES, legalTransitionPairs } from '../work-state.js';
 import { RUN_STATES, legalRunTransitionPairs } from '../run-state.js';
@@ -53,6 +54,10 @@ const SQL = migrationSql();
 const SQL_0001 = singleMigrationSql('0001');
 const SQL_0002 = singleMigrationSql('0002');
 const SQL_0009 = singleMigrationSql('0009');
+const SQL_0011 = singleMigrationSql('0011');
+const SQL_0012 = singleMigrationSql('0012');
+const SQL_0013 = singleMigrationSql('0013');
+const CONTRACT_SCHEMAS_DIR = path.resolve(MIGRATIONS_DIR, '../../../../packages/contracts/schemas');
 
 describe('FRANK-§2.3 vocabulary agrees with @frank/contracts', () => {
   it('lists the data classes in the contract-defined order', () => {
@@ -308,5 +313,95 @@ describe('autonomous room and mission schema', () => {
   it('contains no seed/demo rows or generated identifier defaults', () => {
     expect(SQL_0009).not.toMatch(/\bINSERT\b/i);
     expect(SQL_0009).not.toMatch(/gen_random_uuid\(\)|uuid_generate_v4\(\)/i);
+  });
+});
+
+describe('Wave 1 harness migration parity', () => {
+  it('keeps the one and only room composite key in 0011 and the Drizzle room model', () => {
+    expect((SQL_0011.match(/room_id_cell_uidx/g) ?? [])).toHaveLength(1);
+    expect(SQL_0011).toContain('CREATE UNIQUE INDEX "room_id_cell_uidx" ON "frank_domain"."room" ("id", "cell_id")');
+  });
+
+  it('uses composite cell-scoped foreign keys for live chat, room, turn, jobs, and attachment ownership', () => {
+    for (const name of [
+      'room_route_policy_room_cell_fk', 'chat_turn_conversation_cell_fk', 'chat_turn_room_cell_fk',
+      'chat_turn_user_message_cell_fk', 'chat_turn_assistant_message_cell_fk', 'chat_turn_event_turn_cell_fk',
+      'harness_job_room_cell_fk', 'harness_job_event_job_cell_fk', 'attachment_conversation_cell_fk',
+      'attachment_message_cell_fk', 'attachment_turn_cell_fk', 'attachment_reservation_cell_fk',
+      'attachment_object_cell_fk', 'attachment_outbox_attachment_cell_fk',
+    ]) expect(SQL, name).toContain(name);
+  });
+
+  it('gives every composite FK target a matching non-partial unique key before PostgreSQL applies it', () => {
+    for (const target of [
+      'room_id_cell_uidx', 'chat_conversation_id_cell_uidx', 'chat_message_id_cell_uidx',
+      'chat_turn_id_cell_uidx', 'harness_job_id_cell_uidx', 'upload_reservation_id_cell_uidx',
+      'object_manifest_id_cell_uidx', 'attachment_id_cell_uidx',
+    ]) expect(SQL, target).toContain(target);
+  });
+
+  it('makes rollback and session ancestry stay inside the same cell and harness', () => {
+    expect(SQL_0011).toContain('harness_config_revision_rollback_fk');
+    expect(SQL_0011).toContain('harness_session_lineage_parent_fk');
+    expect(SQL_0011).toContain('harness_activation_audit_revision_cell_harness_fk');
+  });
+
+  it('enforces exact terminal-state pairing, strict health TTL, and atomic request hashes', () => {
+    for (const constraint of [
+      'chat_turn_terminal_finished_paired', 'chat_turn_cancelled_state_paired',
+      'harness_job_terminal_finished_paired', 'harness_job_cancelled_state_paired',
+      'harness_health_ttl_strict', 'chat_turn_request_hash', 'harness_job_request_hash',
+      'upload_reservation_idempotency_uidx', 'upload_reservation_expiry_24h',
+    ]) expect(SQL, constraint).toContain(constraint);
+  });
+
+  it('scopes harness job and cancellation replay identity to the authenticated owner', () => {
+    expect(SQL_0012).toContain('UNIQUE("cell_id","owner_id","idempotency_key")');
+    expect(SQL_0012).toContain('"harness_job_cancel_request_hash"');
+    expect(SQL_0012).toContain('"idempotency_key" text NOT NULL, "request_hash" text NOT NULL');
+    expect(SQL_0012).toContain('"scope"->>\'room_id\' = "room_id"::text');
+  });
+
+  it('models separate 2 GiB-file, 50 GiB-cell, 10 GiB/10k-message, and 30 GiB-host-free limits', () => {
+    expect(SQL_0013).toContain('2147483648');
+    expect(SQL_0013).toContain('53687091200');
+    expect(SQL_0013).toContain('10737418240');
+    expect(SQL_0013).toContain('10000');
+    expect(SQL_0013).toContain('32212254720');
+    expect(SQL_0013).toContain('attachment_host_free_observation');
+  });
+
+  it('keeps attachment lifecycle and outbox vocabulary aligned around hash_scan_promote', () => {
+    expect(SQL_0013).toContain("'hash_scan_promote','extract','cleanup','reconcile'");
+    expect(SQL_0013).toContain("'pending','leased','completed','failed','cancelled'");
+    expect(SQL_0013).toContain('attachment_state_consistent');
+  });
+
+  it('keeps draft-message quota pre-send and canonical manifest payload checks database-enforced', () => {
+    expect(SQL_0013).toContain('draft_message_id');
+    expect(SQL_0013).not.toContain('attachment_message_quota_message_cell_fk');
+    expect(SQL_0013).toContain('object_manifest_canonical_payload');
+    expect(SQL_0013).toContain('jsonb_typeof("source_ref"->\'kind\') = \'string\'');
+  });
+});
+
+describe('Wave 1 frozen contracts', () => {
+  it('normalizes numeric source versions but never permits blank identities', () => {
+    expect(normalizeSourceRef({ kind: 'source', id: 'abc', version: 7 })).toEqual({ kind: 'source', id: 'abc', version: '7' });
+    expect(() => normalizeSourceRef({ kind: ' ', id: 'abc' })).toThrow('SourceRef.kind');
+    expect(() => normalizeSourceRef({ kind: 'source', id: 'abc', version: '' })).toThrow('SourceRef.version');
+  });
+
+  it('freezes the 10k attachment cardinality and the exact normative schema bytes', () => {
+    expect(MAX_CHAT_TURN_ATTACHMENTS).toBe(10_000);
+    const hashes: Record<string, string> = {
+      'chat-turn.v1.schema.json': 'e45e3e1cf04c9178b3c0c3b80a29ca2f735e1d30d5c924430cb6baed5934f75b',
+      'harness-control.v1.schema.json': '05318c2094914266a0a203c697b621581ce487e2f95f4f7e47585d482bb4fcfe',
+      'object-manifest.v1.schema.json': '733b1641cc310fe69e03727be159f58eb64361712190b1ed0ab29a7e8546c9ae',
+      'attachment-upload.v1.schema.json': '4abb812e83991316237c4e22dc268b6738db05f49e92c00f386db3305f208ce4',
+    };
+    for (const [file, expected] of Object.entries(hashes)) {
+      expect(createHash('sha256').update(readFileSync(path.join(CONTRACT_SCHEMAS_DIR, file))).digest('hex')).toBe(expected);
+    }
   });
 });

@@ -125,7 +125,9 @@ function responsesOf(route: AnyRouteDefinition): JsonSchema {
     [String(route.successStatus)]: {
       description: route.summary,
       headers: identifierHeaderDocs(),
-      content: { 'application/json': { schema: jsonSchemaOf(route.response) } },
+      content: route.responseMode === 'stream'
+        ? { 'application/octet-stream': { schema: { type: 'string', format: 'binary' } } }
+        : { 'application/json': { schema: jsonSchemaOf(route.response) } },
     },
   };
 

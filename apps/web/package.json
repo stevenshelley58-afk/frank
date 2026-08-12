@@ -4,10 +4,11 @@
   "private": true,
   "scripts": {
     "dev": "next dev -p 3001",
-    "build": "next build",
+    "build": "pnpm run guard:chat-composers && next build",
     "start": "next start -p 3001",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "guard:chat-composers": "node ../../tools/lint/no-standalone-chat-textareas.mjs"
   },
   "dependencies": {
     "@frank/contracts": "workspace:*",
@@ -30,6 +31,11 @@
     "@radix-ui/react-tabs": "1.1.21",
     "@radix-ui/react-tooltip": "1.2.16",
     "@tanstack/react-table": "8.21.3",
+    "@uppy/core": "5.2.0",
+    "@uppy/dashboard": "5.1.1",
+    "@uppy/golden-retriever": "5.2.1",
+    "@uppy/react": "5.2.0",
+    "@uppy/tus": "5.1.1",
     "@xyflow/react": "^12.10.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",

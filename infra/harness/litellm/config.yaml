@@ -1,0 +1,24 @@
+# Transport only: Frank API owns automatic policy and authorization. Credentials enter at
+# deploy time; aliases keep provider choice stable for callers and expose no balance claim.
+model_list:
+  - model_name: frank-openai-direct
+    litellm_params: { model: os.environ/FRANK_LITELLM_OPENAI_MODEL, api_key: os.environ/OPENAI_API_KEY }
+  - model_name: frank-gemini-direct
+    litellm_params: { model: os.environ/FRANK_LITELLM_GEMINI_MODEL, api_key: os.environ/GEMINI_API_KEY }
+  - model_name: frank-concentrate
+    litellm_params: { model: os.environ/FRANK_LITELLM_CONCENTRATE_MODEL, api_base: os.environ/CONCENTRATE_API_BASE, api_key: os.environ/CONCENTRATE_API_KEY }
+  - model_name: frank-deepseek-direct
+    litellm_params: { model: os.environ/FRANK_LITELLM_DEEPSEEK_MODEL, api_key: os.environ/DEEPSEEK_API_KEY }
+general_settings:
+  master_key: os.environ/LITELLM_ADMIN_KEY
+  database_url: os.environ/LITELLM_DATABASE_URL
+  # Durable usage records are required for receipts/reconciliation. This records usage,
+  # not provider account balances.
+  disable_spend_logs: false
+  # Provider credit/balance is not queried or inferred here: unknown remains unknown.
+router_settings:
+  # Frank makes every attempt decision; LiteLLM does not select fallbacks or retry.
+  num_retries: 0
+  fallbacks: []
+litellm_settings:
+  drop_params: true

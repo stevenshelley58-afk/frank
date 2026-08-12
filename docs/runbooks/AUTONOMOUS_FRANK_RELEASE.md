@@ -5,7 +5,7 @@ Version: 3
 Scope: the current single-host FRANK deployment on `vps`  
 Owner: release operator
 
-This runbook adds five fail-closed controls around a release:
+This runbook adds fail-closed controls around a release:
 
 1. a hosted preflight against the exact reviewed commit;
 2. a timestamped, checksummed PostgreSQL backup set;
@@ -35,7 +35,10 @@ between the backup and smoke gates.
   `/srv/frank/infra/docker-compose.dev.yml` then the reviewed
   `$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml`. The release source is a
   separate clean immutable worktree; it is never the mutable central workspace. Never
-  reverse the files or apply the overlay alone.
+  reverse the files or apply the overlay alone. When `FRANK_HARNESS_ENABLED=true`, it is
+  the ordered atomic triple: base, app, then `infra/production/docker-compose.harness.yml`.
+  A harness release never starts, snapshots, pulls, validates, deploys, smokes, receipts,
+  or rolls back only a subset of its four core services.
 
 ## Files
 
@@ -47,11 +50,44 @@ between the backup and smoke gates.
 | `scripts/production/snapshot-codegraph-release.sh` | Captures prior API/web/codegraph images, legacy overlay, Caddyfile, and codegraph volume | Briefly pauses codegraph; writes a complete checksummed root-only rollback set |
 | `scripts/production/rollback-codegraph-release.sh` | Restores the captured application unit, Caddyfile, and codegraph volume | Stops/recreates API, web, codegraph, and Caddy; replaces codegraph volume contents |
 | `infra/production/docker-compose.app.yml` | Authoritative production overrides for API, web, codegraph, and their Caddy dependency | None until passed to `docker compose up` |
+| `infra/production/docker-compose.harness.yml` | Optional reviewed four-service harness unit (LiteLLM, SeaweedFS, tusd, ClamAV) | Enable only after evidence/canaries; then it is atomic with base+app, reuses `frank-cell-seaweedfs-data`, and has no public ports. |
+| `scripts/production/bootstrap-litellm-virtual-key.sh` | Root-only, fail-closed creation/rotation of the restricted Frank API LiteLLM virtual key | Calls the candidate proxy `/key/generate`; writes only the returned virtual key to an explicit root-0600 secret path. |
 | `infra/production/Caddyfile.frank-production` | Replacement `frank.fail` site block with a private UI/control surface | None until merged into the live Caddy candidate and reloaded |
 
-Required host commands are Bash 4.3+, Docker with Compose, Git, GitHub CLI, `jq`,
-`curl`, `gzip`, `openssl`, `sha256sum`, `flock`, `find`, `realpath`, `tar`, and standard
+### Harness external prerequisites
+
+The live base has no SeaweedFS service and uses the external, manually managed
+`frank-letta-server:8283`; Letta is not a harness image or promotion slot. Every release
+must nevertheless match that running container to a reviewed OCI digest and pass the real
+private `/v1/health/` probe from `frank-web`. Hermes remains a later specialist overlay and
+this release creates no Hermes image slot or network.
+Before enabling the third unit, create (and record) only the external `frank-attachments`
+and `frank-model` networks plus the existing `frank-cell-seaweedfs-data` volume. This is a
+reversible host prerequisite: removing an
+unused network is allowed; volumes are never removed. Render
+`/srv/frank/secrets/seaweedfs/s3.json` through `render-seaweedfs-s3-config.sh` at mode 0600
+before Compose; mounting the repository template or unresolved placeholders is forbidden.
+Immediately before the first Seaweed start, the release procedure renders a temporary
+bootstrap identity alongside those scoped identities. After bucket/lifecycle creation it
+atomically re-renders scoped-only policy, recreates only Seaweed, proves a scoped identity
+still works, and proves the old bootstrap identity is denied. Canonical objects and previews
+never receive an expiry rule.
+
+Required host commands are Bash 4.3+, Node.js 22, Docker with Compose, Git, GitHub CLI,
+AWS CLI v2, `jq`, `curl`, `gzip`, `openssl`, `uuidgen`, `sha256sum`, `flock`, `find`,
+`realpath`, `tar`, and standard
 GNU coreutils.
+
+The four-core evidence manifest is a concrete, secret-free operator artifact, not the JSON
+schema in this repository. Harness-enabled validation requires it beneath the explicit
+operator-approved release-state directory and binds its exact release commit, current version tags,
+OCI digests, licenses, SBOM hashes, provenance methods, server commands, configuration
+hashes, and hosted canary URLs to the four candidate image assignments. Missing,
+placeholder, mismatched, or `.invalid` evidence stops before Compose validation or image
+pull. The validation-only preparation command never changes current or rollback pointers.
+Before the enabled run, provision `candidate.env`, `current.env`, `rollback.env`, and
+`evidence-manifest.json` as regular non-symlink files directly beneath that state root;
+foreign roots, traversal, duplicate assignments, and unexpected manifest fields are denied.
 
 ## 1. Create the release evidence directory
 
@@ -322,6 +358,59 @@ test "$(stat -c '%u:%g:%a' "$FRANK_CODEGRAPH_CONTROL_TOKEN_FILE")" = '10001:1000
 
 The codegraph token must never enter release evidence or shell tracing. Its rotation
 requires an API/codegraph restart together.
+
+### 2C. Provision the restricted LiteLLM virtual key
+
+This step remains blocked until the exact LiteLLM candidate (not below v1.83.7) has passed
+the isolated hosted canary and is running as a private `frank-litellm` candidate container
+against the durable LiteLLM database. Do not fabricate a successful bootstrap in static
+validation. The current candidate starting points are LiteLLM v1.96.0, SeaweedFS 4.41,
+tusd v2.10.0, and ClamAV 1.5.4 (upstream release `clamav-1.5.4`); tags never replace reviewed digests and evidence.
+
+The provisioning script uses the admin key only inside the proxy container to call the
+official `/key/generate` contract. Its unique operation alias makes an ambiguous retry fail
+closed rather than create another key. It permits only the four stable Frank model aliases
+and `/chat/completions`, `/v1/chat/completions`, `/responses`, and `/v1/responses`.
+
+```bash
+install -d -o root -g root -m 0700 -- /srv/frank/secrets/litellm
+export FRANK_LITELLM_CONTAINER='frank-litellm'
+export FRANK_LITELLM_VIRTUAL_KEY_FILE='/srv/frank/secrets/litellm/frank-api-virtual-key'
+
+bash "$FRANK_RELEASE_SOURCE/scripts/production/bootstrap-litellm-virtual-key.sh"
+test "$(stat -c '%u:%g:%a' -- "$FRANK_LITELLM_VIRTUAL_KEY_FILE")" = '0:0:600'
+```
+
+Provision the two distinct tus control credentials only for an enabled harness. Refuse to
+replace an existing credential here; rotate both through a separately recorded, coordinated
+Caddy/API/tusd restart.
+
+```bash
+install -d -o root -g root -m 0700 -- /srv/frank/secrets/tusd
+tusd_gate_file='/srv/frank/secrets/tusd/gate-secret'
+tusd_hook_file='/srv/frank/secrets/tusd/hook-secret'
+test ! -e "$tusd_gate_file" && test ! -L "$tusd_gate_file"
+test ! -e "$tusd_hook_file" && test ! -L "$tusd_hook_file"
+openssl rand -hex 32 | install -o root -g root -m 0600 /dev/stdin "$tusd_gate_file"
+openssl rand -hex 32 | install -o root -g root -m 0600 /dev/stdin "$tusd_hook_file"
+test "$(stat -c '%u:%g:%a' -- "$tusd_gate_file")" = '0:0:600'
+test "$(stat -c '%u:%g:%a' -- "$tusd_hook_file")" = '0:0:600'
+test "$(<"$tusd_gate_file")" != "$(<"$tusd_hook_file")"
+```
+
+The secret is never stdout or release evidence. Inject it into the root release environment
+without tracing as `FRANK_LITELLM_VIRTUAL_KEY`; never inject `LITELLM_ADMIN_KEY` into the
+API. Rotation requires `--rotate`, a unique UTC `FRANK_LITELLM_ROTATION_ID`, and a new
+`FRANK_LITELLM_PREVIOUS_VIRTUAL_KEY_FILE` in the same root-0700 directory. Restart only the
+API with the new key and verify inference receipts. Before old-key revocation, rollback may
+restore that previous file and restart the API. After acceptance, revoke the old key through
+the private admin boundary and remove the previous file; the script never claims revocation.
+
+Receipt reconciliation is OSS-safe: Frank persists the response ID, any provider request ID
+returned in the response/headers, and returned token/usage fields, then correlates them with
+LiteLLM's durable spend logs. LiteLLM retries and fallbacks remain disabled so Frank owns each
+attempt. This is usage reconciliation, not a provider-balance claim, and it does not depend
+on Enterprise-only custom spend metadata.
 
 Optional overrides:
 
@@ -981,6 +1070,9 @@ export FRANK_OWNER_ID='steven'
 export FRANK_PUBLIC_URL='https://frank.fail'
 export FRANK_API_INTERNAL_URL='http://frank-api:3000'
 export FRANK_WEB_INTERNAL_URL='http://frank-web:3001'
+export FRANK_LETTA_INTERNAL_URL='http://frank-letta-server:8283'
+export FRANK_LETTA_CONTAINER='frank-letta-server'
+export FRANK_LETTA_EXPECTED_IMAGE='<REVIEWED_LETTA_REPOSITORY>@sha256:<64_HEX_DIGEST>'
 export FRANK_LOG_LEVEL='info'
 export FRANK_MAX_BODY_BYTES='1048576'
 
@@ -1012,7 +1104,7 @@ export FRANK_BASIC_AUTH_USER='<NON_SECRET_OPERATOR_NAME>'
 ```
 
 `FRANK_DATABASE_URL`, `FRANK_REDIS_URL`, signing keys, `DEEPSEEK_API_KEY`,
-`FRANK_DOMAIN_SERVICE_TOKEN`, `GOOSE_ACP_SECRET`, `FRANK_BASIC_AUTH_HASH`, and
+`FRANK_DOMAIN_SERVICE_TOKEN`, `FRANK_LITELLM_VIRTUAL_KEY`, `GOOSE_ACP_SECRET`, `FRANK_BASIC_AUTH_HASH`, and
 `FRANK_BASIC_AUTH_PASSWORD` are secret material even when a name says "URL" or "hash".
 Inject their values without shell tracing. The Caddyfile accepts only the compatible hash;
 the plaintext password exists only in the root release environment for authenticated smoke.
@@ -1038,7 +1130,53 @@ Compose document, because it contains injected values:
 ```bash
 base_compose='/srv/frank/infra/docker-compose.dev.yml'
 app_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml"
+export FRANK_HARNESS_ENABLED="${FRANK_HARNESS_ENABLED:-false}"
+case "$FRANK_HARNESS_ENABLED" in true|false) ;; *) exit 1;; esac
 compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
+if test "$FRANK_HARNESS_ENABLED" = true; then
+  export FRANK_RELEASE_STATE_ROOT="${FRANK_RELEASE_STATE_ROOT:-/srv/frank/release-state/harness}"
+  export FRANK_HARNESS_CANDIDATE_SLOT="${FRANK_HARNESS_CANDIDATE_SLOT:-$FRANK_RELEASE_STATE_ROOT/candidate.env}"
+  export FRANK_HARNESS_CURRENT_SLOT="${FRANK_HARNESS_CURRENT_SLOT:-$FRANK_RELEASE_STATE_ROOT/current.env}"
+  export FRANK_HARNESS_ROLLBACK_SLOT="${FRANK_HARNESS_ROLLBACK_SLOT:-$FRANK_RELEASE_STATE_ROOT/rollback.env}"
+  export FRANK_HARNESS_EVIDENCE_MANIFEST="${FRANK_HARNESS_EVIDENCE_MANIFEST:-$FRANK_RELEASE_STATE_ROOT/evidence-manifest.json}"
+  : "${FRANK_HARNESS_EVIDENCE_URL:?HTTPS URL for hosted four-core candidate evidence required}"
+  export FRANK_SEAWEEDFS_S3_TEMPLATE="$FRANK_RELEASE_SOURCE/infra/compose/seaweedfs/s3.json.tmpl"
+  export FRANK_SEAWEEDFS_S3_CONFIG='/srv/frank/secrets/seaweedfs/s3.json'
+  # Private Compose DNS route implemented by the API attachment hook contract.
+  export FRANK_TUSD_HOOK_URL='http://frank-api:3000/private/tusd/hooks'
+  export FRANK_LITELLM_VIRTUAL_KEY_FILE="${FRANK_LITELLM_VIRTUAL_KEY_FILE:-/srv/frank/secrets/litellm/frank-api-virtual-key}"
+  tusd_gate_file='/srv/frank/secrets/tusd/gate-secret'
+  tusd_hook_file='/srv/frank/secrets/tusd/hook-secret'
+  promoter_access_file='/srv/frank/secrets/seaweedfs/promoter-access-key'
+  promoter_secret_file='/srv/frank/secrets/seaweedfs/promoter-secret-key'
+  downloader_access_file='/srv/frank/secrets/seaweedfs/downloader-access-key'
+  downloader_secret_file='/srv/frank/secrets/seaweedfs/downloader-secret-key'
+  upload_capability_file='/srv/frank/secrets/attachments/upload-capability-hmac'
+  for secret_file in "$FRANK_LITELLM_VIRTUAL_KEY_FILE" "$tusd_gate_file" "$tusd_hook_file" "$promoter_access_file" "$promoter_secret_file" "$downloader_access_file" "$downloader_secret_file" "$upload_capability_file"; do
+    test -f "$secret_file" && test ! -L "$secret_file"
+    test "$(stat -c '%u:%g:%a' -- "$secret_file")" = '0:0:600'
+  done
+  export FRANK_LITELLM_VIRTUAL_KEY="$(<"$FRANK_LITELLM_VIRTUAL_KEY_FILE")"
+  export FRANK_TUSD_GATE_SECRET="$(<"$tusd_gate_file")"
+  export FRANK_TUSD_HOOK_SECRET="$(<"$tusd_hook_file")"
+  export FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY="$(<"$promoter_access_file")"
+  export FRANK_ATTACHMENT_PROMOTER_SECRET_KEY="$(<"$promoter_secret_file")"
+  export FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY="$(<"$downloader_access_file")"
+  export FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY="$(<"$downloader_secret_file")"
+  export FRANK_UPLOAD_CAPABILITY_KEY="$(<"$upload_capability_file")"
+  test -n "$FRANK_LITELLM_VIRTUAL_KEY"
+  test -n "$FRANK_TUSD_GATE_SECRET" && test -n "$FRANK_TUSD_HOOK_SECRET"
+  test -n "$FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY" && test -n "$FRANK_ATTACHMENT_PROMOTER_SECRET_KEY"
+  test -n "$FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY" && test -n "$FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY"
+  test -n "$FRANK_UPLOAD_CAPABILITY_KEY"
+  test "$FRANK_TUSD_GATE_SECRET" != "$FRANK_TUSD_HOOK_SECRET"
+  harness_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.harness.yml"
+  compose+=( -f "$harness_overlay" )
+  export FRANK_BASE_COMPOSE="$base_compose" FRANK_APP_OVERLAY="$app_overlay" FRANK_HARNESS_OVERLAY="$harness_overlay" FRANK_ROOT_RUNTIME_ENV="$root_runtime_env"
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/validate-harness-release.sh" \
+    > "$evidence_dir/harness-config.result" 2> "$evidence_dir/harness-config.log"
+  grep -Fx 'harness-release-config=passed; attachment pool=50GiB reserved; free floor=30GiB; third unit atomic' "$evidence_dir/harness-config.result"
+fi
 
 version="$(docker compose version --short)"
 test "$(printf '%s\n' '2.24.4' "$version" | sort -V | head -n1)" = '2.24.4'
@@ -1050,6 +1188,8 @@ printf '%s' "$FRANK_RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
 printf '%s' "$FRANK_API_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-api@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_WEB_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-web@sha256:[a-f0-9]{64}$'
 printf '%s' "$FRANK_CODEGRAPH_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/frank-codegraph@sha256:[a-f0-9]{64}$'
+printf '%s' "$FRANK_LETTA_EXPECTED_IMAGE" | grep -Eq '^[a-z0-9./:_-]+@sha256:[a-f0-9]{64}$'
+test "$FRANK_LETTA_CONTAINER" = 'frank-letta-server'
 printf '%s' "$FRANK_DOCKER_SOCKET_GID" | grep -Eq '^[0-9]+$'
 test "$(realpath -e -- "$FRANK_WORKSPACE_SOURCE_HOST_PATH")" = '/srv/frank/workspaces/central'
 test "$(realpath -e -- "$FRANK_RELEASE_SOURCE")" = "$(realpath -e -- "$FRANK_REPO_PATH")"
@@ -1062,13 +1202,20 @@ test "$(sha256sum -- "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH" | awk '{print $1}')" 
   "$(sha256sum -- "$FRANK_RELEASE_SOURCE/infra/production/codegraph-projects.json" | awk '{print $1}')"
 test ! -e "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH/.git" && \
   test ! -L "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH/.git"
+letta_running_image_id="$(docker inspect --type container --format '{{.Image}}' "$FRANK_LETTA_CONTAINER")"
+test "$(docker inspect --type container --format '{{.State.Running}}' "$FRANK_LETTA_CONTAINER")" = 'true'
+test "$letta_running_image_id" = "$(docker image inspect --format '{{.Id}}' "$FRANK_LETTA_EXPECTED_IMAGE")"
+docker inspect --type container --format '{{json .NetworkSettings.Networks}}' "$FRANK_LETTA_CONTAINER" |
+  jq -e 'has("frank")' >/dev/null
+printf '%s\t%s\t%s\n' "$FRANK_LETTA_CONTAINER" "$FRANK_LETTA_EXPECTED_IMAGE" "$letta_running_image_id" \
+  > "$evidence_dir/letta-external.before.tsv"
 case "$FRANK_BASIC_AUTH_HASH" in
   '$2a$'*|'$2b$'*|'$2y$'*) ;;
   *) printf '%s\n' 'FRANK_BASIC_AUTH_HASH must be a bcrypt hash' >&2; exit 1 ;;
 esac
 
 "${compose[@]}" config --quiet
-"${compose[@]}" config --format json | jq -e '
+"${compose[@]}" config --format json | jq -e --argjson harness "$FRANK_HARNESS_ENABLED" '
   (.services["frank-api"].build == null) and
   (.services["frank-web"].build == null) and
   (.services["frank-codegraph"].build == null) and
@@ -1082,6 +1229,34 @@ esac
   (.services["frank-codegraph"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph"]) and
   (.services["frank-codegraph-volume-init"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph.volume_init"]) and
   .services["frank-api"].environment.FRANK_ENV == "production" and
+  (if $harness then
+    .services["frank-api"].environment.FRANK_ATTACHMENT_RUNTIME_ENABLED == "true" and
+    ((.services["frank-api"].environment.FRANK_LITELLM_VIRTUAL_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET // "") | length > 0) and
+    (.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET != .services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET) and
+    (.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET == .services["frank-caddy"].environment.FRANK_TUSD_GATE_SECRET) and
+    (.services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET == .services["frank-caddy"].environment.FRANK_TUSD_HOOK_SECRET) and
+    ((.services["frank-api"].environment.FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_ATTACHMENT_PROMOTER_SECRET_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_UPLOAD_CAPABILITY_KEY // "") | length > 0) and
+    (.services["frank-tusd"].environment | has("FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY") | not) and
+    (.services["frank-tusd"].environment | has("FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY") | not) and
+    (.services["frank-tusd"].command | index("-hooks-http=http://frank-api:3000/private/tusd/hooks") != null)
+  else
+    .services["frank-api"].environment.FRANK_ATTACHMENT_RUNTIME_ENABLED == "false" and
+    (.services["frank-api"].environment | has("FRANK_LITELLM_VIRTUAL_KEY") | not) and
+    (.services["frank-api"].environment | has("FRANK_TUSD_GATE_SECRET") | not) and
+    (.services["frank-api"].environment | has("FRANK_TUSD_HOOK_SECRET") | not) and
+    (.services["frank-caddy"].environment | has("FRANK_TUSD_GATE_SECRET") | not) and
+    (.services["frank-caddy"].environment | has("FRANK_TUSD_HOOK_SECRET") | not) and
+    (.services["frank-api"].environment | has("FRANK_ATTACHMENT_PROMOTER_BEARER") | not)
+  end) and
+  (.services["frank-api"].environment | has("LITELLM_ADMIN_KEY") | not) and
+  .services["frank-api"].environment.FRANK_LETTA_INTERNAL_URL == "http://frank-letta-server:8283" and
+  .services["frank-web"].environment.LETTA_URL == "http://frank-letta-server:8283" and
   .services["frank-web"].environment.FRANK_DOMAIN_API_URL == "http://frank-api:3000" and
   .services["frank-caddy"].environment.FRANK_WEB_INTERNAL_URL == "http://frank-web:3001" and
   (.services["frank-api"].environment.FRANK_WORKBENCH_IMAGE |
@@ -1243,6 +1418,14 @@ docker image inspect \
   --format '{{.RepoTags}}\t{{.Id}}' \
   > "$evidence_dir/application-images.promoted.tsv"
 
+if test "$FRANK_HARNESS_ENABLED" = true; then
+  # Exactly the four core harness images. Letta stays external/manual; Hermes is a later overlay.
+  for image_var in FRANK_LITELLM_CURRENT_IMAGE FRANK_SEAWEEDFS_CURRENT_IMAGE FRANK_TUSD_CURRENT_IMAGE FRANK_CLAMAV_CURRENT_IMAGE; do
+    image="${!image_var}"; docker pull "$image"; docker image inspect "$image" --format '{{.RepoDigests}}\t{{.Id}}' >> "$evidence_dir/harness-images.promoted.tsv"
+  done
+  sha256sum "$harness_overlay" "$FRANK_RELEASE_SOURCE/infra/harness/litellm/config.yaml" >> "$evidence_dir/release-inputs.sha256"
+fi
+
 for image in "$FRANK_API_IMAGE" "$FRANK_WEB_IMAGE" "$FRANK_CODEGRAPH_IMAGE" "$FRANK_WORKBENCH_IMAGE"; do
   test "$(docker image inspect "$image" \
     --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}')" \
@@ -1275,7 +1458,9 @@ manifest is published; a new source commit requires a new verified release artif
 The Caddy file in `infra/production` is the authoritative replacement for only the existing
 `frank.fail` site block. The live Caddyfile also owns unrelated hostnames, so replacing the
 whole file with this fragment is forbidden. Assemble a root-owned candidate by preserving
-every other live block and replacing exactly the old `frank.fail` block. The candidate must
+every other live block, including the active Pavone route, and replacing exactly the old
+`frank.fail` block. Graphify stays private behind `frank-api`; do not add a public route for
+it. The candidate must
 contain no credential value: it retains `{$FRANK_BASIC_AUTH_USER}` and
 `{$FRANK_BASIC_AUTH_HASH}` placeholders.
 
@@ -1291,6 +1476,12 @@ grep -Fq '{$FRANK_BASIC_AUTH_HASH}' "$caddy_candidate"
 docker run --rm \
   -e FRANK_BASIC_AUTH_USER \
   -e FRANK_BASIC_AUTH_HASH \
+  -e FRANK_API_INTERNAL_URL \
+  -e FRANK_WEB_INTERNAL_URL \
+  -e FRANK_TUSD_INTERNAL_URL=http://frank-tusd:1080 \
+  -e FRANK_UPLOAD_GATE_INTERNAL_URL=http://frank-api:3000 \
+  -e FRANK_TUSD_GATE_SECRET=validation-only-gate-sentinel \
+  -e FRANK_TUSD_HOOK_SECRET=validation-only-hook-sentinel \
   -v "$caddy_candidate:/etc/caddy/Caddyfile:ro" \
   caddy:2.8-alpine \
   caddy validate --config /etc/caddy/Caddyfile \
@@ -1312,6 +1503,64 @@ printf 'Starting Graphify-backed services; first extraction may take up to 30 mi
   --wait-timeout "$codegraph_wait_seconds" \
   frank-codegraph-volume-init frank-codegraph frank-api frank-web frank-caddy \
   2>&1 | tee "$evidence_dir/compose-up.log"
+
+frank_web_id="$("${compose[@]}" ps -q frank-web)"
+test -n "$frank_web_id"
+docker exec "$frank_web_id" node --input-type=module --eval '
+  const base = process.env.LETTA_URL;
+  if (base !== "http://frank-letta-server:8283") throw new Error("unexpected LETTA_URL");
+  const response = await fetch(`${base}/v1/health/`, {
+    redirect: "error", signal: AbortSignal.timeout(10000)
+  });
+  if (response.status !== 200) throw new Error(`Letta health returned ${response.status}`);
+  process.stdout.write(`letta_private_health_http=${response.status}\n`);
+' > "$evidence_dir/letta-private-health.result"
+grep -Fx 'letta_private_health_http=200' "$evidence_dir/letta-private-health.result"
+
+if test "$FRANK_HARNESS_ENABLED" = true; then
+  # The bootstrap credential exists only for this bounded first-start operation and is
+  # never written to evidence or a repository/runtime environment file.
+  export FRANK_S3_BOOTSTRAP_ACCESS_KEY="$(openssl rand -hex 16)"
+  export FRANK_S3_BOOTSTRAP_SECRET_KEY="$(openssl rand -hex 32)"
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/render-seaweedfs-s3-config.sh" --with-bootstrap
+  "${compose[@]}" up -d --no-build --wait --wait-timeout 180 \
+    frank-seaweedfs frank-litellm frank-tusd frank-clamav \
+    2>&1 | tee "$evidence_dir/harness-compose-up.log"
+  : > "$evidence_dir/harness-containers.after.tsv"
+  for service in frank-seaweedfs frank-litellm frank-tusd frank-clamav; do
+    service_id="$("${compose[@]}" ps -q "$service")"
+    test -n "$service_id"
+    docker inspect "$service_id" \
+      --format '{{.Name}}\t{{.Image}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
+      >> "$evidence_dir/harness-containers.after.tsv"
+  done
+  # These require the promoted Seaweed endpoint to be healthy. Any failure stops the
+  # release and enters the normal atomic rollback path.
+  seaweed_id="$("${compose[@]}" ps -q frank-seaweedfs)"
+  seaweed_ip="$(docker inspect --format '{{with index .NetworkSettings.Networks "frank-attachments"}}{{.IPAddress}}{{end}}' "$seaweed_id")"
+  printf '%s' "$seaweed_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+  export FRANK_S3_ENDPOINT="http://$seaweed_ip:8333"
+  # Seaweed's bucket-scoped Write action covers both object creation and deletion. The
+  # promoter alone uses it on staging to delete a successfully promoted upload; it also
+  # has Read on canonical objects for the extraction/head path. Downloader stays Read-only.
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/bootstrap-attachment-buckets.sh" \
+    > "$evidence_dir/attachment-bootstrap.result" 2> "$evidence_dir/attachment-bootstrap.log"
+  grep -Fx 'attachment-buckets=bootstrapped; lifecycle=staging-only; scoped-recreate=passed; temporary-admin=denied' "$evidence_dir/attachment-bootstrap.result"
+  unset FRANK_S3_BOOTSTRAP_ACCESS_KEY FRANK_S3_BOOTSTRAP_SECRET_KEY
+  seaweed_id="$("${compose[@]}" ps -q frank-seaweedfs)"
+  seaweed_ip="$(docker inspect --format '{{with index .NetworkSettings.Networks "frank-attachments"}}{{.IPAddress}}{{end}}' "$seaweed_id")"
+  printf '%s' "$seaweed_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+  export FRANK_S3_ENDPOINT="http://$seaweed_ip:8333"
+  export FRANK_STAGING_ACCESS_KEY="$FRANK_ATTACHMENT_STAGING_ACCESS_KEY"
+  export FRANK_STAGING_SECRET_KEY="$FRANK_ATTACHMENT_STAGING_SECRET_KEY"
+  export FRANK_PROMOTER_ACCESS_KEY="$FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY"
+  export FRANK_PROMOTER_SECRET_KEY="$FRANK_ATTACHMENT_PROMOTER_SECRET_KEY"
+  export FRANK_DOWNLOADER_ACCESS_KEY="$FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY"
+  export FRANK_DOWNLOADER_SECRET_KEY="$FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY"
+  bash "$FRANK_RELEASE_SOURCE/scripts/production/s3-policy-canary.sh" \
+    > "$evidence_dir/s3-policy-canary.result" 2> "$evidence_dir/s3-policy-canary.log"
+  grep -E '^s3-policy-canary=passed; scoped identities verified; disposable objects deleted; ' "$evidence_dir/s3-policy-canary.result"
+fi
 
 "${compose[@]}" ps \
   --format json > "$evidence_dir/compose-after.json"
@@ -1505,6 +1754,7 @@ Retain these artifacts together:
 - backup result, backup log, `SHA256SUMS`, `manifest.env`, verification output, and
   encrypted off-cell object/version ID;
 - deployment workflow/command receipt and migration identifiers;
+- external Letta reviewed OCI digest/image ID match and private health-probe receipt;
 - post-deploy smoke result/log and observation-window health evidence;
 - on rollback, codegraph rollback result/log, prior and restored image IDs, rollback smoke
   output, incident ID, and any isolated restore evidence.

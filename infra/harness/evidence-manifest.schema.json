@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Wave 1 private-image evidence",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["phase", "release", "services"],
+  "properties": {
+    "phase": { "enum": ["candidate", "sealed-promotion"] },
+    "release": { "type": "string", "pattern": "^[0-9a-f]{40}$" },
+    "services": {
+      "type": "array", "minItems": 4, "maxItems": 4,
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["service", "release_url", "tag", "oci_digest", "config_sha256", "source_license_record", "sbom_record", "upstream_oci_provenance"],
+        "properties": {
+          "service": { "enum": ["litellm", "seaweedfs", "tusd", "clamav"] },
+          "release_url": { "type": "string", "format": "uri" },
+          "tag": { "type": "string", "minLength": 1 },
+          "oci_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "config_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+          "source_license_record": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "sha256", "source_url", "license"],
+            "properties": {
+              "kind": { "const": "generated-source-license-record" },
+              "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+              "source_url": { "type": "string", "format": "uri" },
+              "license": { "type": "string", "minLength": 1 }
+            }
+          },
+          "sbom_record": {
+            "type": "object", "additionalProperties": false,
+            "required": ["kind", "sha256", "subject_digest", "generator"],
+            "properties": {
+              "kind": { "enum": ["generated-digest-bound-sbom", "digest-bound-receipt"] },
+              "sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+              "subject_digest": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+              "generator": { "type": "string", "minLength": 1 }
+            }
+          },
+          "upstream_oci_provenance": {
+            "type": "object", "additionalProperties": false,
+            "required": ["status", "method", "evidence_url"],
+            "properties": {
+              "status": { "enum": ["verified", "approved-exception"] },
+              "method": { "type": "string", "minLength": 1 },
+              "evidence_url": { "type": "string", "format": "uri" },
+              "approved_exception": {
+                "type": "object", "additionalProperties": false,
+                "required": ["record_uri", "record_sha256", "reason", "reviewed_by", "reviewed_at"],
+                "properties": {
+                  "record_uri": { "type": "string", "pattern": "^(docs/evidence/|frank-evidence://)" },
+                  "record_sha256": { "type": "string", "pattern": "^sha256:[a-f0-9]{64}$" },
+                  "reason": { "type": "string", "minLength": 1 },
+                  "reviewed_by": { "type": "string", "minLength": 1 },
+                  "reviewed_at": { "type": "string", "format": "date-time" }
+                }
+              }
+            },
+            "allOf": [
+              { "if": { "properties": { "status": { "const": "approved-exception" } } }, "then": { "required": ["approved_exception"] }, "else": { "not": { "required": ["approved_exception"] } } }
+            ]
+          },
+          "server_command": { "type": "string", "minLength": 1 },
+          "hosted_canary_url": {
+            "type": "string",
+            "anyOf": [
+              { "format": "uri", "pattern": "^https://" },
+              { "pattern": "^frank-evidence://vps/srv/frank/evidence/[a-z0-9-]+/[A-Za-z0-9._-]+$" }
+            ]
+          }
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": { "properties": { "phase": { "const": "sealed-promotion" } } },
+      "then": { "properties": { "services": { "items": { "required": ["server_command", "hosted_canary_url"] } } } },
+      "else": {
+        "properties": {
+          "services": {
+            "items": {
+              "not": {
+                "anyOf": [
+                  { "required": ["server_command"] },
+                  { "required": ["hosted_canary_url"] }
+                ]
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}
