@@ -39,7 +39,7 @@ services:
         cat > /tmp/www/cgi-bin/hooks <<'HOOK'
         #!/bin/sh
         body="$(cat)"
-        if printf '%s' "$body" | grep -q 'tamper'; then
+        if printf '%s' "$$body" | grep -q 'tamper'; then
           printf 'Status: 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: 22\r\n\r\n{"RejectUpload":true}\n'
         else
           printf 'Status: 204 No Content\r\nContent-Type: application/json\r\nContent-Length: 0\r\n\r\n'
