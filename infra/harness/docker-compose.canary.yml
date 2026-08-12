@@ -17,7 +17,7 @@ services:
   tusd:
     image: ${FRANK_TUSD_CANDIDATE_IMAGE:?digest required}
     networks: [canary-attachments]
-    command: ["-behind-proxy", "-base-path=/v1/uploads/tus/", "-s3-bucket=canary-staging", "-s3-endpoint=http://seaweedfs:8333", "-s3-force-path-style", "-max-size=2147483648", "-hooks-http=http://gate:8080/hooks", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish,post-terminate", "-disable-download", "-disable-concatenation"]
+    command: ["-behind-proxy", "-base-path=/v1/uploads/tus/", "-s3-bucket=canary-staging", "-s3-endpoint=http://seaweedfs:8333", "-max-size=2147483648", "-hooks-http=http://gate:8080/hooks", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish,post-terminate", "-disable-download", "-disable-concatenation"]
     environment:
       AWS_ACCESS_KEY_ID: canary-staging
       AWS_SECRET_ACCESS_KEY: canary-staging-secret
