@@ -49,9 +49,16 @@ real private `/v1/health/` probe from `frank-web`. Hermes has no Wave 1 runtime 
 Its v2026.8.3 tag is only a Wave 2 review starting point; exact OCI digest, SBOM, provenance,
 configuration, and typed-adapter canary evidence remain intentionally unavailable here.
 
-Promotion evidence is never inferred from `evidence-manifest.schema.json`. A real
-secret-free manifest must name exactly LiteLLM v1.96.0, SeaweedFS 4.41, tusd v2.10.0, and
-ClamAV 1.5.4 (upstream release `clamav-1.5.4`) and bind each reviewed digest, license, SBOM hash, provenance method,
-server command, configuration hash, and hosted canary URL to the exact release commit.
-The release validator rejects missing, placeholder, `.invalid`, or candidate/current
-mismatches before it renders the enabled Compose unit.
+Promotion evidence is never inferred from `evidence-manifest.schema.json`. A candidate
+manifest names exactly LiteLLM v1.96.0, SeaweedFS 4.41, tusd v2.10.0, and ClamAV 1.5.4
+(upstream release `clamav-1.5.4`) and binds each digest to a *generated* digest-bound SBOM
+record, a *generated* source/license record, configuration hash, and separately verified
+upstream OCI provenance. Those generated records are not upstream provenance. A provenance
+claim fails closed unless it is verified, or names a specific approved exception.
+
+Candidates must not invent a canary URL. Only the `sealed-promotion` phase may add the
+server command and an actual hosted canary receipt after the disposable canary passes. The
+canary compose unit has no external network or volume and never attaches to production
+`frank*` networks or attachment volumes. The release validator rejects missing, placeholder,
+`.invalid`, phase, candidate/current, provenance, or configuration mismatches before it
+renders the enabled Compose unit.

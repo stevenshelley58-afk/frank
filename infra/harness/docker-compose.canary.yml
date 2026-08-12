@@ -1,0 +1,32 @@
+# Disposable canary only. It deliberately has no external network or external volume.
+name: ${FRANK_HARNESS_CANARY_PROJECT:?set a disposable project name}
+services:
+  litellm:
+    image: ${FRANK_LITELLM_CANDIDATE_IMAGE:?digest required}
+    networks: [canary-model]
+    read_only: true
+    tmpfs: [/tmp]
+  seaweedfs:
+    image: ${FRANK_SEAWEEDFS_CANDIDATE_IMAGE:?digest required}
+    command: [server, -dir=/data, -s3]
+    networks: [canary-attachments]
+    volumes: [seaweedfs-canary:/data]
+    read_only: true
+    tmpfs: [/tmp]
+  tusd:
+    image: ${FRANK_TUSD_CANDIDATE_IMAGE:?digest required}
+    networks: [canary-attachments]
+    read_only: true
+    tmpfs: [/tmp]
+  clamav:
+    image: ${FRANK_CLAMAV_CANDIDATE_IMAGE:?digest required}
+    networks: [canary-attachments]
+    volumes: [clamav-signatures-canary:/var/lib/clamav]
+    read_only: true
+    tmpfs: [/tmp, /run]
+networks:
+  canary-model: { internal: true }
+  canary-attachments: { internal: true }
+volumes:
+  seaweedfs-canary: {}
+  clamav-signatures-canary: {}
