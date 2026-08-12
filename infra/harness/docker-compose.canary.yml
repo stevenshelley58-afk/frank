@@ -31,7 +31,22 @@ services:
     image: busybox:1.37.0
     networks: [canary-attachments]
     # Synthetic canary hook receiver. It has no production credential or route.
-    command: ["sh", "-ec", "while true; do printf 'HTTP/1.1 204 No Content\\r\\nContent-Length: 0\\r\\n\\r\\n' | nc -lp 8080; done"]
+    command:
+      - sh
+      - -ec
+      - |
+        mkdir -p /tmp/www/cgi-bin
+        cat > /tmp/www/cgi-bin/hooks <<'HOOK'
+        #!/bin/sh
+        body="$(cat)"
+        if printf '%s' "$body" | grep -q 'tamper'; then
+          printf 'Status: 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: 22\r\n\r\n{"RejectUpload":true}\n'
+        else
+          printf 'Status: 204 No Content\r\nContent-Type: application/json\r\nContent-Length: 0\r\n\r\n'
+        fi
+        HOOK
+        chmod 0555 /tmp/www/cgi-bin/hooks
+        exec httpd -f -p 8080 -h /tmp/www
     read_only: true
     tmpfs: [/tmp]
   probe:
