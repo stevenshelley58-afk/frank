@@ -243,7 +243,7 @@ seaweed_config_sha256="sha256:$(sha256sum -- "$root/infra/compose/seaweedfs/s3.j
 tusd_config_sha256="sha256:$(sha256sum -- "$root/infra/production/docker-compose.harness.yml" | awk '{print $1}')"
 clamav_config_sha256="sha256:$(sha256sum -- "$root/infra/harness/clamav/clamd.conf" | awk '{print $1}')"
 write_manifest() {
-  local release="$1" provenance="${2:-github-attestation-verified}"
+  local release="$1" provenance="${2:-verified}"
   node --input-type=module - "$manifest" "$release" "$digest" "$provenance" \
     "$litellm_config_sha256" "$seaweed_config_sha256" "$tusd_config_sha256" "$clamav_config_sha256" <<'NODE'
 import {writeFileSync} from 'node:fs';
@@ -256,11 +256,14 @@ const metadata = {
 };
 const services = Object.entries(metadata).map(([service, [tag, license, repository, config]]) => ({
   service, release_url: `https://github.com/${repository}/releases/tag/${service === 'clamav' ? 'clamav-1.5.4' : tag}`, tag,
-  oci_digest: digest, license, provenance_method: provenance, sbom_sha256: digest,
+  oci_digest: digest, config_sha256: config,
+  source_license_record: {kind: 'generated-source-license-record', sha256: digest, source_url: `https://github.com/${repository}`, license},
+  sbom_record: {kind: 'generated-digest-bound-sbom', sha256: digest, subject_digest: digest, generator: 'syft'},
+  upstream_oci_provenance: {status: provenance, method: 'cosign verify', evidence_url: `https://github.com/${repository}/attestations`},
   server_command: '{"entrypoint":["/usr/bin/server"],"cmd":[]}',
-  hosted_canary_url: 'https://github.com/stevenshelley58-afk/frank/actions/runs/1', config_sha256: config,
+  hosted_canary_url: 'https://github.com/stevenshelley58-afk/frank/actions/runs/1',
 }));
-writeFileSync(path, `${JSON.stringify({release, services})}\n`);
+writeFileSync(path, `${JSON.stringify({phase: 'sealed-promotion', release, services})}\n`);
 NODE
 }
 export FRANK_RELEASE_COMMIT='abcdefabcdefabcdefabcdefabcdefabcdefabcd'
