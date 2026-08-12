@@ -63,6 +63,6 @@ for attempt in $(seq 1 300); do
   sleep 2
 done
 grep -Fx PONG "$receipt/clamav-ping.txt"
-"${compose[@]}" exec -T probe sh -ec 'p="X5O!P%@AP[4\\PZX54(P^)7CC)7}\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\$H+H*"; test "$(printf %s "$p" | wc -c)" -eq 68; { printf "zINSTREAM\\000\\000\\000\\104%s\\000\\000\\000\\000" "$p"; } | nc -w 5 clamav 3310' > "$receipt/clamav-eicar.txt"
+"${compose[@]}" exec -T gate python3 -c 'import socket; p=b"X5O!P%@AP[4\\PZX54(P^)7CC)7}\x24EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\x24H+H*"; assert len(p)==68; s=socket.create_connection(("clamav",3310),5); s.settimeout(10); s.sendall(b"zINSTREAM\0"+len(p).to_bytes(4,"big")+p+(0).to_bytes(4,"big")); print(s.recv(4096).decode("utf-8","replace"),end="")' > "$receipt/clamav-eicar.txt"
 grep -E 'FOUND' "$receipt/clamav-eicar.txt" || { echo 'EICAR was not rejected' >&2; exit 1; }
 sha256sum "$receipt"/* > "$receipt/SHA256SUMS"
