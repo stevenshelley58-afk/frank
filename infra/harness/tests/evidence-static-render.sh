@@ -40,7 +40,11 @@ NODE
 if "$validator" candidate "$scratch/manifest.json" "$scratch/candidate.env" >/dev/null 2>&1; then
   echo 'candidate accepted a fake canary URL'; exit 1
 fi
-FRANK_HARNESS_CANARY_PROJECT="frank-harness-test-${RANDOM}${RANDOM}" "$root/infra/harness/bin/render-disposable-canary.sh" "$scratch/candidate.env" > "$scratch/render.json"
+# The disposable compose file deliberately requires a private S3 config mount.
+# Give its render-only contract a synthetic file so CI exercises the same strict
+# interpolation rule without reaching for any production secret or path.
+printf '%s\n' '{"identities":[]}' > "$scratch/canary-s3.json"
+FRANK_HARNESS_CANARY_PROJECT="frank-harness-test-${RANDOM}${RANDOM}" FRANK_CANARY_S3_CONFIG="$scratch/canary-s3.json" "$root/infra/harness/bin/render-disposable-canary.sh" "$scratch/candidate.env" > "$scratch/render.json"
 node --input-type=module - "$scratch/render.json" <<'NODE'
 import {readFileSync} from 'node:fs';const c=JSON.parse(readFileSync(process.argv[2]));
 for(const s of Object.values(c.services)) if((s.networks && Object.keys(s.networks).some(n=>n.startsWith('frank'))) || s.volumes?.some(v=>String(v.source).includes('frank-cell'))) throw Error('production attachment escaped into canary render');
