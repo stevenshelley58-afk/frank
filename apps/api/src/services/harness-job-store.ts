@@ -222,11 +222,9 @@ export class HarnessJobStore {
     request: HarnessJobCancelRequest;
   }): Promise<{ job: HarnessJobView; replayed: boolean }> {
     return this.db.transaction(async (tx) => {
-    const current = await this.#get(tx, input.cellId, input.ownerId, input.jobId);
-    if (terminal.has(current.status)) return { job: current, replayed: true };
-
-    const hash = requestHash({ job_id: input.jobId, ...input.request });
-    const inserted = await tx.execute<{ job_id: string }>(sql`
+      const current = await this.#get(tx, input.cellId, input.ownerId, input.jobId);
+      const hash = requestHash({ job_id: input.jobId, ...input.request });
+      const inserted = await tx.execute<{ job_id: string }>(sql`
       insert into frank_domain.harness_job_cancel
         (job_id, cell_id, requested_by, idempotency_key, request_hash, reason)
       values (${input.jobId}::uuid, ${input.cellId}, ${input.requestedBy},
@@ -234,23 +232,30 @@ export class HarnessJobStore {
       on conflict (job_id) do nothing
       returning job_id
     `);
-    const persisted = await tx.execute<{ idempotency_key: string; request_hash: string }>(sql`
+      const persisted = await tx.execute<{ idempotency_key: string; request_hash: string }>(sql`
       select c.idempotency_key, c.request_hash
       from frank_domain.harness_job_cancel c
       join frank_domain.harness_job j on j.id = c.job_id and j.cell_id = c.cell_id
       where c.job_id = ${input.jobId}::uuid and c.cell_id = ${input.cellId}
         and j.owner_id = ${input.ownerId}
     `);
-    const cancellation = persisted.rows[0];
-    if (cancellation === undefined) throw new HarnessJobStoreError('not_found');
-    if (
-      cancellation.idempotency_key !== input.request.idempotency_key ||
-      cancellation.request_hash !== hash
-    ) {
-      throw new HarnessJobStoreError('idempotency_conflict');
-    }
+      const cancellation = persisted.rows[0];
+      if (cancellation === undefined) throw new HarnessJobStoreError('not_found');
+      if (
+        cancellation.idempotency_key !== input.request.idempotency_key ||
+        cancellation.request_hash !== hash
+      ) {
+        throw new HarnessJobStoreError('idempotency_conflict');
+      }
 
-    await tx.execute(sql`
+      // A cancellation attempt is audit/idempotency state even when it cannot
+      // change a terminal job. Persist and validate it before returning the
+      // semantic no-op so later requests cannot silently use another key.
+      if (terminal.has(current.status)) {
+        return { job: current, replayed: inserted.rows.length === 0 };
+      }
+
+      await tx.execute(sql`
       with changed as (
         update frank_domain.harness_job
         set status = 'cancelled', cancelled_at = coalesce(cancelled_at, now()),
@@ -267,10 +272,10 @@ export class HarnessJobStore {
       from changed
       on conflict (job_id, cursor) do nothing
     `);
-    return {
-      job: await this.#get(tx, input.cellId, input.ownerId, input.jobId),
-      replayed: inserted.rows.length === 0,
-    };
+      return {
+        job: await this.#get(tx, input.cellId, input.ownerId, input.jobId),
+        replayed: inserted.rows.length === 0,
+      };
     });
   }
 }

@@ -46,11 +46,31 @@ describe('HarnessJobStore control-plane invariants', () => {
     expect(result.nextCursor).toBe(5);
   });
 
-  it('never rewrites an already-terminal job during cancellation', async () => {
-    const fake = database([{ ...row, status: 'completed', finished_at: '2026-08-11T00:02:00Z' }]);
-    const result = await new HarnessJobStore(fake.db).cancel({ cellId: 'cell-a', ownerId: 'user/a', jobId: row.id, requestedBy: 'user/a', request: { idempotency_key: 'cancel-1' } });
-    expect(result).toMatchObject({ replayed: true, job: { status: 'completed' } });
-    expect(fake.execute).toHaveBeenCalledTimes(1);
+  it('durably records a first cancellation request for a terminal job without rewriting it', async () => {
+    const completed = { ...row, status: 'completed' as const, finished_at: '2026-08-11T00:02:00Z' };
+    const request = { idempotency_key: 'cancel-1', reason: 'too late' };
+    const cancellationHash = createHash('sha256')
+      .update(JSON.stringify({ job_id: row.id, ...request }), 'utf8')
+      .digest('hex');
+    const fake = database([completed], [{ job_id: row.id }], [{ idempotency_key: request.idempotency_key, request_hash: cancellationHash }]);
+    const result = await new HarnessJobStore(fake.db).cancel({ cellId: 'cell-a', ownerId: 'user/a', jobId: row.id, requestedBy: 'user/a', request });
+    expect(result).toMatchObject({ replayed: false, job: { status: 'completed' } });
+    expect(fake.execute).toHaveBeenCalledTimes(3);
+  });
+
+  it('replays the same terminal cancellation and rejects a different request', async () => {
+    const completed = { ...row, status: 'failed' as const, finished_at: '2026-08-11T00:02:00Z' };
+    const request = { idempotency_key: 'cancel-1' };
+    const cancellationHash = createHash('sha256')
+      .update(JSON.stringify({ job_id: row.id, ...request }), 'utf8')
+      .digest('hex');
+    const replay = database([completed], [], [{ idempotency_key: request.idempotency_key, request_hash: cancellationHash }]);
+    await expect(new HarnessJobStore(replay.db).cancel({ cellId: 'cell-a', ownerId: 'user/a', jobId: row.id, requestedBy: 'user/a', request }))
+      .resolves.toMatchObject({ replayed: true, job: { status: 'failed' } });
+
+    const conflict = database([completed], [], [{ idempotency_key: request.idempotency_key, request_hash: cancellationHash }]);
+    await expect(new HarnessJobStore(conflict.db).cancel({ cellId: 'cell-a', ownerId: 'user/a', jobId: row.id, requestedBy: 'user/a', request: { idempotency_key: 'cancel-2' } }))
+      .rejects.toMatchObject({ failure: 'idempotency_conflict' });
   });
 
   it('uses the same not-found result for absent and unauthorized ownership', async () => {
