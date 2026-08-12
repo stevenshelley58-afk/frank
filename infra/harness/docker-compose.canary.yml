@@ -49,7 +49,9 @@ services:
     networks: [canary-attachments]
     volumes: [clamav-signatures-canary:/var/lib/clamav]
     read_only: true
-    tmpfs: [/tmp, /run]
+    # The official image's freshclam and clamd startup write transient logs here;
+    # signatures remain on the disposable named volume below.
+    tmpfs: [/tmp, /run, /var/log/clamav]
 networks:
   canary-model: { internal: true }
   canary-attachments: { internal: true }
