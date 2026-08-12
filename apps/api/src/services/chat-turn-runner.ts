@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentHarnessAdapter, ChatTurnInput, ContextPack, HarnessEvent, FallbackAttempt, TurnReceipt } from '@frank/contracts';
-import { HarnessBroker } from '@frank/kernel';
+import { HarnessBroker } from '@frank/kernel/harness-broker';
 import type { FrankDatabase } from '@frank/adapter-postgres';
 import { sql } from 'drizzle-orm';
 import type { ChatTurnRunner } from '../routes/chat-turns.js';
