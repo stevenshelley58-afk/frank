@@ -8,7 +8,7 @@ import GoldenRetriever from '@uppy/golden-retriever';
 import '@uppy/core/css/style.min.css';
 import '@uppy/dashboard/css/style.min.css';
 import type { ChatAttachmentRef } from '@/lib/chat-turn-input';
-import { reserveAttachmentUpload } from '@/lib/attachment-upload-auth';
+import { reserveAttachmentUpload, waitForCleanAttachment } from '@/lib/attachment-upload-auth';
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024 * 1024;
 const MAX_MESSAGE_BYTES = 10 * 1024 * 1024 * 1024;
@@ -28,12 +28,13 @@ export function SharedRichComposer({ disabled = false, dark = false, conversatio
     .use(Tus, { limit: 3, retryDelays: [0, 1000, 3000, 5000], allowedMetaFields: ['attachment_id', 'capability_expires_at'] }));
 
   useEffect(() => {
-    const sync = () => { const next = uppy.getFiles(); setFiles(next); callbackRef.current?.(next.flatMap((file) => { const attachmentId = file.meta.attachment_id as string | undefined; return file.progress.uploadComplete && attachmentId ? [{ id: attachmentId, name: file.name, size: file.size ?? 0, relativePath: (file.meta.relativePath as string | null) ?? null }] : []; })); };
-    uppy.on('file-added', sync); uppy.on('file-removed', sync); uppy.on('upload-success', sync); uppy.on('upload-error', sync); uppy.on('upload-progress', sync);
+    const sync = () => { const next = uppy.getFiles(); setFiles(next); callbackRef.current?.(next.flatMap((file) => { const attachmentId = file.meta.clean_attachment_id as string | undefined; return attachmentId ? [{ id: attachmentId, name: file.name, size: file.size ?? 0, relativePath: (file.meta.relativePath as string | null) ?? null }] : []; })); };
+    const finalize = (file: ReturnType<Uppy['getFile']>) => { const attachmentId = file?.meta.attachment_id as string | undefined; if (!file || !attachmentId) return; void waitForCleanAttachment(attachmentId).then(() => { uppy.setFileMeta(file.id, { clean_attachment_id: attachmentId }); sync(); }).catch((error: unknown) => { uppy.setFileState(file.id, { error: error instanceof Error ? error.message : 'Attachment processing failed.' }); sync(); }); };
+    uppy.on('file-added', sync); uppy.on('file-removed', sync); uppy.on('upload-success', finalize); uppy.on('upload-error', sync); uppy.on('upload-progress', sync);
     const target = pasteTargetRef?.current;
     const paste = (event: ClipboardEvent) => { const pasted = Array.from(event.clipboardData?.files ?? []); if (!pasted.length) return; if (!conversationRef.current || !draftId.current) { setNotice('Attachments become available when this conversation has a durable ID.'); return; } event.preventDefault(); void addFiles(pasted); };
     target?.addEventListener('paste', paste);
-    return () => { uppy.off('file-added', sync); uppy.off('file-removed', sync); uppy.off('upload-success', sync); uppy.off('upload-error', sync); uppy.off('upload-progress', sync); target?.removeEventListener('paste', paste); uppy.destroy(); };
+    return () => { uppy.off('file-added', sync); uppy.off('file-removed', sync); uppy.off('upload-success', finalize); uppy.off('upload-error', sync); uppy.off('upload-progress', sync); target?.removeEventListener('paste', paste); uppy.destroy(); };
   // The Uppy instance is intentionally destroyed only on unmount; callbacks live in refs.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [uppy, pasteTargetRef]);

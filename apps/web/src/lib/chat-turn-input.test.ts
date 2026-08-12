@@ -3,8 +3,8 @@ import type { ChatTurnInput } from './chat-turn-input';
 
 describe('ChatTurnInput', () => {
   it('keeps a completed attachment to an ID-only transport boundary', () => {
-    const turn: ChatTurnInput = { text: 'Review this', attachmentIds: ['att_123'], attachments: [{ id: 'att_123', name: 'brief.pdf', size: 12, relativePath: 'brief/brief.pdf' }] };
+    const turn: ChatTurnInput = { text: 'Review this', attachment_ids: ['att_123'], attachments: [{ id: 'att_123', name: 'brief.pdf', size: 12, relativePath: 'brief/brief.pdf' }] };
     expect(JSON.stringify(turn)).not.toContain('Blob');
-    expect(turn.attachmentIds).toEqual(['att_123']);
+    expect(turn.attachment_ids).toEqual(['att_123']);
   });
 });

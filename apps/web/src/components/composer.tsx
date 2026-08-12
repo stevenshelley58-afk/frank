@@ -5,6 +5,7 @@ import type { Room } from '@/lib/rooms';
 import type { ChatMessage } from '@/lib/frank';
 import { IconEdit, IconSend, IconStop } from './icons';
 import { SharedRichComposer } from './shared-rich-composer';
+import type { ChatTurnInput } from '@/lib/chat-turn-input';
 
 interface ComposerProps {
   room: Room;
@@ -19,7 +20,7 @@ interface ComposerProps {
   stopping?: boolean;
   /** ChatGPT-style edit-and-resend: an existing user message being rewritten. */
   editing?: ChatMessage | null;
-  onSend: (text: string) => void;
+  onSend: (input: ChatTurnInput) => void;
   onStop?: () => void;
   onCancelEdit?: () => void;
   onTyping: (active: boolean) => void;
@@ -77,7 +78,7 @@ export function Composer({
   const submit = () => {
     const text = value.trim();
     if (!text || disabled || booting) return;
-    onSend(text);
+    onSend({ text, attachment_ids: [], attachments: [] });
     setValue('');
     onTyping(false);
     taRef.current?.focus();

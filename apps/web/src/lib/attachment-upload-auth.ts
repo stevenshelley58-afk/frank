@@ -19,3 +19,18 @@ export async function reserveAttachmentUpload(input: {
   if (!response.ok) throw new Error(`Attachment authorisation failed (${response.status}).`);
   return response.json() as Promise<AttachmentUploadReservation>;
 }
+
+/** Bytes being uploaded is not enough: wait for the service to mark the attachment clean. */
+export async function waitForCleanAttachment(attachmentId: string): Promise<void> {
+  const deadline = Date.now() + 120_000;
+  while (Date.now() < deadline) {
+    const response = await fetch(`/v1/attachments/${encodeURIComponent(attachmentId)}`, { credentials: 'same-origin' });
+    if (!response.ok) throw new Error(`Attachment status failed (${response.status}).`);
+    const body = (await response.json()) as { status?: string; attachment?: { status?: string } };
+    const status = body.attachment?.status ?? body.status;
+    if (status === 'clean' || status === 'ready') return;
+    if (status === 'failed' || status === 'rejected' || status === 'infected') throw new Error(`Attachment ${status}.`);
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 1_000));
+  }
+  throw new Error('Attachment processing timed out.');
+}

@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ThinkingMode } from '@/lib/chat-api';
 import { SharedRichComposer } from '@/components/shared-rich-composer';
+import type { ChatAttachmentRef, ChatTurnInput } from '@/lib/chat-turn-input';
 
 /* ------------------------------------------------------------------ */
 /* Options                                                             */
@@ -74,7 +75,8 @@ interface ComposerBarProps {
   thinking: ThinkingMode;
   /** Fraction of the context window in use, 0–1. */
   contextUsed: number;
-  onSend: (text: string) => void;
+  conversationId?: string;
+  onSend: (input: ChatTurnInput) => void;
   onStop: () => void;
   onModelChange: (model: string) => void;
   onThinkingChange: (mode: ThinkingMode) => void;
@@ -108,6 +110,7 @@ export function ComposerBar({
   const [focused, setFocused] = useState(false);
   const [menu, setMenu] = useState<'model' | 'thinking' | 'context' | null>(null);
   const [recording, setRecording] = useState(false);
+  const [attachments, setAttachments] = useState<ChatAttachmentRef[]>([]);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
   const isDeck = tint === null;
@@ -139,7 +142,7 @@ export function ComposerBar({
   const submit = () => {
     const text = value.trim();
     if (!text || disabled) return;
-    onSend(text);
+    onSend({ text, attachment_ids: attachments.map((attachment) => attachment.id), attachments });
     setValue('');
     taRef.current?.focus();
   };
@@ -229,7 +232,13 @@ export function ComposerBar({
           </div>
 
           <div className="flex items-end gap-2">
-            <SharedRichComposer disabled={disabled} dark={isDeck} pasteTargetRef={taRef} />
+            <SharedRichComposer
+              disabled={disabled}
+              dark={isDeck}
+              conversationId={conversationId}
+              pasteTargetRef={taRef}
+              onAttachmentsChange={setAttachments}
+            />
             <textarea
               ref={taRef}
               rows={1}

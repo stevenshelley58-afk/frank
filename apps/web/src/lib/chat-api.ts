@@ -19,6 +19,7 @@
  */
 
 import type { ApiFetch, WorkListResponse, WorkSummary } from './api';
+import type { ChatTurnInput } from './chat-turn-input';
 
 /* ------------------------------------------------------------------ */
 /* Wire types                                                          */
@@ -146,6 +147,20 @@ export async function appendMessage(
     `/v1/chats/${id}/messages`,
     jsonWrite({ kind: message.kind, body: message.body ?? '', meta: message.meta ?? {} }),
   );
+  const data = (await res.json()) as { message: ChatMessageRow };
+  return data.message;
+}
+
+/** API-owned chat submission: durable attachment references only, never File/Blob data. */
+export async function submitChatTurn(api: ApiFetch, conversationId: string, input: ChatTurnInput, idempotencyKey = commandId()): Promise<ChatMessageRow> {
+  const res = await api(`/v1/chats/${conversationId}/messages`, {
+    method: 'POST',
+    headers: { 'Idempotency-Key': idempotencyKey },
+    body: JSON.stringify({ kind: 'user', body: input.text, meta: {
+      attachment_ids: input.attachment_ids,
+      attachments: input.attachments.map(({ id, name, relativePath, size }) => ({ id, name, relative_path: relativePath, size })),
+    } }),
+  });
   const data = (await res.json()) as { message: ChatMessageRow };
   return data.message;
 }

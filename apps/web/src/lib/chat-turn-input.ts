@@ -11,6 +11,6 @@ export interface ChatAttachmentRef {
 
 export interface ChatTurnInput {
   text: string;
-  attachmentIds: string[];
+  attachment_ids: string[];
   attachments: ChatAttachmentRef[];
 }
