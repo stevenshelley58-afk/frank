@@ -38,10 +38,10 @@ describe('attachment runtime policy seams', () => {
   });
 
   it('requires complete, role-distinct configuration that matches the deployed private service identities', () => {
-    const env = { FRANK_ATTACHMENT_S3_ENDPOINT: 'http://frank-seaweedfs:8333', FRANK_ATTACHMENT_STAGING_BUCKET: 'frank-attachment-staging', FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY: 'promoter', FRANK_ATTACHMENT_PROMOTER_SECRET_KEY: 'promoter-secret', FRANK_ATTACHMENT_CANONICAL_BUCKET: 'frank-objects', FRANK_ATTACHMENT_CANONICAL_ACCESS_KEY: 'canonical', FRANK_ATTACHMENT_CANONICAL_SECRET_KEY: 'canonical-secret', FRANK_ATTACHMENT_DOWNLOADER_BUCKET: 'frank-objects', FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY: 'downloader', FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY: 'downloader-secret', FRANK_UPLOAD_CAPABILITY_KEY: Buffer.alloc(32).toString('base64'), FRANK_TUSD_INTERNAL_URL: 'http://frank-tusd:1080', FRANK_CLAMAV_HOST: 'frank-clamav', FRANK_CLAMAV_PORT: '3310' };
-    expect(attachmentRuntimeConfig(env)).toMatchObject({ staging: { bucket: 'frank-attachment-staging' }, canonical: { bucket: 'frank-objects' }, downloader: { bucket: 'frank-objects' } });
-    expect(() => attachmentRuntimeConfig({ ...env, FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY: 'canonical' })).toThrow('attachment_storage_identity_reuse');
-    expect(() => attachmentRuntimeConfig({ ...env, FRANK_CLAMAV_HOST: 'other' })).toThrow('invalid_attachment_runtime_config');
+    const env = { FRANK_SEAWEEDFS_INTERNAL_URL: 'http://frank-seaweedfs:8333', FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY: 'promoter', FRANK_ATTACHMENT_PROMOTER_SECRET_KEY: 'promoter-secret', FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY: 'downloader', FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY: 'downloader-secret', FRANK_UPLOAD_CAPABILITY_KEY: Buffer.alloc(32).toString('base64'), FRANK_TUSD_INTERNAL_URL: 'http://frank-tusd:1080', FRANK_CLAMAV_INTERNAL_URL: 'tcp://frank-clamav:3310' };
+    expect(attachmentRuntimeConfig(env)).toMatchObject({ promoter: { accessKey: 'promoter' }, downloader: { bucket: 'frank-objects', accessKey: 'downloader' } });
+    expect(() => attachmentRuntimeConfig({ ...env, FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY: 'promoter' })).toThrow('attachment_storage_identity_reuse');
+    expect(() => attachmentRuntimeConfig({ ...env, FRANK_CLAMAV_INTERNAL_URL: 'tcp://other:3310' })).toThrow('invalid_attachment_runtime_config');
   });
 
   it('keeps private tusd termination on the internal host and canonicalizes bigint only at the JSON contract boundary', async () => {
