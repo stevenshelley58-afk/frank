@@ -23,6 +23,9 @@ describe('PostgresAttachmentPersistence SQL safety contract', () => {
     expect(source).toContain('termination_requested_at=now()');
     expect(source).toContain("state='leased' and available_at<=now()-interval '5 minutes'");
     expect(source).toContain("attempts>=10 then 'failed'");
+    expect(source).toContain("set state='failed' where state in ('pending','claimed') and attempts>=10");
+    expect(source).toContain("not exists (select 1 from frank_domain.attachment_cleanup_ledger");
+    expect(source).toContain('termination_attempts=least(termination_attempts+1,10)');
   });
   it('updates extraction manifest and releases quotas through terminal paths', () => {
     expect(source).toContain("jsonb_set(manifest,'{extraction}'");

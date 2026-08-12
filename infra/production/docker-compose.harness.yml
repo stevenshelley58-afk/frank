@@ -5,6 +5,15 @@ services:
     environment:
       # Required only when the atomic harness overlay is enabled. The API never receives
       # LiteLLM's administrator credential.
+      FRANK_ATTACHMENT_RUNTIME_ENABLED: "true"
+      # The API receives only promotion/download identities.  The staging
+      # credential belongs exclusively to frank-tusd below.
+      FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY: "${FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY:?required}"
+      FRANK_ATTACHMENT_PROMOTER_SECRET_KEY: "${FRANK_ATTACHMENT_PROMOTER_SECRET_KEY:?required}"
+      FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY: "${FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY:?required}"
+      FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY: "${FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY:?required}"
+      FRANK_UPLOAD_CAPABILITY_KEY: "${FRANK_UPLOAD_CAPABILITY_KEY:?base64 HMAC key required}"
+      FRANK_UPLOAD_CAPABILITY_PREVIOUS_KEY: "${FRANK_UPLOAD_CAPABILITY_PREVIOUS_KEY:-}"
       FRANK_LITELLM_VIRTUAL_KEY: "${FRANK_LITELLM_VIRTUAL_KEY:?restricted LiteLLM virtual key required}"
       FRANK_TUSD_GATE_SECRET: "${FRANK_TUSD_GATE_SECRET:?distinct Caddy-to-gate credential required}"
       FRANK_TUSD_HOOK_SECRET: "${FRANK_TUSD_HOOK_SECRET:?Caddy-to-tusd hook credential required}"

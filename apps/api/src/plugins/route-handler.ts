@@ -213,6 +213,16 @@ export function registerRoute<
         reply,
       });
 
+      // Binary downloads remain a central route: authentication, authorization,
+      // request schemas and identifier headers above still apply. The declared
+      // stream mode is the one explicit exception to JSON response validation.
+      if (route.responseMode === 'stream') {
+        if (!reply.sent) {
+          throw new ProblemError('internal_error', 'A declared stream route completed without sending its response.');
+        }
+        return;
+      }
+
       // A conditional GET may deliberately have no representation. Validate
       // normal successful bodies below, but never try to parse `undefined` as
       // a route response after the handler selected HTTP 304.

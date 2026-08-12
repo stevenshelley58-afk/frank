@@ -36,6 +36,10 @@ import { WorkbenchStore } from './services/workbench/store.js';
 import { WorkbenchTerminalReporter } from './services/workbench/terminal-reporter.js';
 import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
 import { MissionOrchestrator, MissionPlanner } from './services/missions/index.js';
+import { statfs } from 'node:fs/promises';
+import { PostgresAttachmentPersistence } from './services/attachments/postgres-persistence.js';
+import { AttachmentLifecycle } from './services/attachments/lifecycle.js';
+import { attachmentRuntimeConfig, createAttachmentRuntime, startAttachmentMaintenance } from './services/attachments/runtime.js';
 
 async function main(): Promise<void> {
   const config = resolveConfig();
@@ -51,6 +55,38 @@ async function main(): Promise<void> {
     connectionString: config.databaseUrl,
     applicationName: 'frank-api',
   });
+
+  // Attachment lifecycle is opt-in as one atomic configuration set. Empty is
+  // deliberately disabled; a partial set is rejected by attachmentRuntimeConfig
+  // before routes, workers or private hooks can be exposed.
+  const attachmentConfig = attachmentRuntimeConfig(process.env);
+  const attachmentAbort = new AbortController();
+  let stopAttachmentMaintenance: (() => Promise<void>) | undefined;
+  let attachments: Parameters<typeof buildServer>[0]['attachments'];
+  if (attachmentConfig) {
+    const hostFreeBytes = async (): Promise<bigint> => {
+      try {
+        const observed = await statfs(process.env.FRANK_ATTACHMENT_DURABLE_PATH ?? '/var/lib/frank/artifacts', { bigint: true });
+        return observed.bavail * observed.bsize;
+      } catch {
+        // A capacity observation failure refuses reservations; it is never
+        // replaced with caller-supplied or stale remaining-byte data.
+        return 0n;
+      }
+    };
+    const persistence = new PostgresAttachmentPersistence(store.db, hostFreeBytes);
+    const runtime = createAttachmentRuntime(attachmentConfig, persistence);
+    const lifecycle = new AttachmentLifecycle(persistence, runtime.capabilities);
+    attachments = {
+      lifecycle,
+      persistence,
+      downloader: runtime.downloader,
+      tusdTerminator: runtime.terminator,
+      tusdHookSecret: requiredAttachmentSecret('FRANK_TUSD_HOOK_SECRET'),
+      tusdGateSecret: requiredAttachmentSecret('FRANK_TUSD_GATE_SECRET'),
+    };
+    stopAttachmentMaintenance = startAttachmentMaintenance({ worker: runtime.worker, lifecycle, persistence, terminator: runtime.terminator }, attachmentAbort.signal);
+  }
 
   const runnerEnabled = process.env.FRANK_WORKBENCH_RUNNER_ENABLED === 'true';
   let workbenchRunner: WorkbenchRunner | undefined;
@@ -174,6 +210,7 @@ async function main(): Promise<void> {
     db: store.db,
     ...(workbenchRunner === undefined ? {} : { workbenchRunner }),
     ...(missionOrchestrator === undefined ? {} : { missionOrchestrator }),
+    ...(attachments === undefined ? {} : { attachments }),
   });
 
   const shutdown = (signal: string): void => {
@@ -182,6 +219,13 @@ async function main(): Promise<void> {
       .close()
       .then(async () => missionOrchestrator?.stopScheduler())
       .then(async () => workbenchRunner?.stop())
+      .then(async () => {
+        // Workers receive the abort before their bounded drain.  The pool stays
+        // open until both maintenance loops have stopped, so an in-flight CAS
+        // cannot race a closed database connection during shutdown.
+        attachmentAbort.abort();
+        await stopAttachmentMaintenance?.();
+      })
       .then(() => store.close())
       .then(() => {
         process.exit(0);
@@ -205,6 +249,12 @@ async function main(): Promise<void> {
 
 function appLoggerFallback(message: string): void {
   process.stderr.write(`[mission-orchestrator] ${message}\n`);
+}
+
+function requiredAttachmentSecret(name: string): string {
+  const value = process.env[name];
+  if (!value) throw new Error(`${name} is required when attachments are enabled`);
+  return value;
 }
 
 main().catch((error: unknown) => {

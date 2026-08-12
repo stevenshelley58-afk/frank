@@ -170,7 +170,7 @@ export FRANK_API_INTERNAL_URL='http://frank-api:3000' FRANK_WEB_INTERNAL_URL='ht
 export FRANK_CODEGRAPH_CONTROL_TOKEN_FILE="$scratch/codegraph-control-token"
 export FRANK_CODEGRAPH_REGISTRY_HOST_PATH="$scratch/projects.json"
 export FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH="$scratch/repository"
-unset FRANK_ATTACHMENT_PROMOTER_BEARER FRANK_LITELLM_VIRTUAL_KEY FRANK_TUSD_GATE_SECRET FRANK_TUSD_HOOK_SECRET FRANK_TUSD_HOOK_URL
+unset FRANK_ATTACHMENT_RUNTIME_ENABLED FRANK_ATTACHMENT_PROMOTER_BEARER FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY FRANK_ATTACHMENT_PROMOTER_SECRET_KEY FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY FRANK_UPLOAD_CAPABILITY_KEY FRANK_UPLOAD_CAPABILITY_PREVIOUS_KEY FRANK_LITELLM_VIRTUAL_KEY FRANK_TUSD_GATE_SECRET FRANK_TUSD_HOOK_SECRET FRANK_TUSD_HOOK_URL
 disabled_render="$scratch/disabled.json"
 docker compose -f "$compose_base" -f "$app_compose" config --format json > "$disabled_render"
 export FRANK_LITELLM_VIRTUAL_KEY='validation-only-virtual-key'
@@ -185,6 +185,11 @@ export FRANK_LITELLM_OPENAI_MODEL='validation-model' FRANK_LITELLM_GEMINI_MODEL=
 export FRANK_LITELLM_CONCENTRATE_MODEL='validation-model' FRANK_LITELLM_DEEPSEEK_MODEL='validation-model'
 export FRANK_ATTACHMENT_STAGING_ACCESS_KEY='validation-staging-access'
 export FRANK_ATTACHMENT_STAGING_SECRET_KEY='validation-staging-secret'
+export FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY='validation-promoter-access'
+export FRANK_ATTACHMENT_PROMOTER_SECRET_KEY='validation-promoter-secret'
+export FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY='validation-downloader-access'
+export FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY='validation-downloader-secret'
+export FRANK_UPLOAD_CAPABILITY_KEY='dmFsaWRhdGlvbi1vbmx5LWhtYWMta2V5LTMyeC1ieXRlcy0tLS0='
 enabled_render="$scratch/enabled.json"
 docker compose -f "$compose_base" -f "$app_compose" -f "$compose" config --format json > "$enabled_render"
 node --input-type=module - "$disabled_render" "$enabled_render" <<'NODE'
@@ -213,6 +218,9 @@ if (!clamav.tmpfs?.some((mount) => String(mount).startsWith('/run:'))) throw new
 if (!clamav.volumes?.some((volume) => volume.target === '/etc/clamav/clamd.conf' && volume.read_only)) throw new Error('ClamAV reviewed config mount missing');
 if (enabled.services['frank-api'].environment.FRANK_TUSD_GATE_SECRET !== enabled.services['frank-caddy'].environment.FRANK_TUSD_GATE_SECRET) throw new Error('enabled gate secrets differ');
 if (Object.hasOwn(enabled.services['frank-api'].environment, 'FRANK_ATTACHMENT_PROMOTER_BEARER')) throw new Error('enabled API retained unused promoter bearer');
+if (enabled.services['frank-api'].environment.FRANK_ATTACHMENT_RUNTIME_ENABLED !== 'true') throw new Error('enabled API attachment runtime flag missing');
+for (const name of ['FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY', 'FRANK_ATTACHMENT_PROMOTER_SECRET_KEY', 'FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY', 'FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY', 'FRANK_UPLOAD_CAPABILITY_KEY']) if (!enabled.services['frank-api'].environment[name]) throw new Error(`enabled API missing ${name}`);
+for (const name of ['FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY', 'FRANK_ATTACHMENT_PROMOTER_SECRET_KEY', 'FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY', 'FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY', 'FRANK_UPLOAD_CAPABILITY_KEY']) if (Object.hasOwn(enabled.services['frank-tusd'].environment, name)) throw new Error(`tusd retained API-only ${name}`);
 for (const service of ['frank-api', 'frank-tusd']) {
   if (!Object.hasOwn(enabled.services[service].networks, 'frank-attachments')) throw new Error(`${service} lacks private attachment network`);
 }
@@ -244,10 +252,10 @@ const metadata = {
   litellm: ['v1.96.0', 'MIT', 'BerriAI/litellm', litellmConfig],
   seaweedfs: ['4.41', 'Apache-2.0', 'seaweedfs/seaweedfs', seaweedConfig],
   tusd: ['v2.10.0', 'MIT', 'tus/tusd', tusdConfig],
-  clamav: ['clamav-1.5.4', 'GPL-2.0-only', 'Cisco-Talos/clamav', clamavConfig],
+  clamav: ['1.5.4', 'GPL-2.0-only', 'Cisco-Talos/clamav', clamavConfig],
 };
 const services = Object.entries(metadata).map(([service, [tag, license, repository, config]]) => ({
-  service, release_url: `https://github.com/${repository}/releases/tag/${tag}`, tag,
+  service, release_url: `https://github.com/${repository}/releases/tag/${service === 'clamav' ? 'clamav-1.5.4' : tag}`, tag,
   oci_digest: digest, license, provenance_method: provenance, sbom_sha256: digest,
   server_command: '{"entrypoint":["/usr/bin/server"],"cmd":[]}',
   hosted_canary_url: 'https://github.com/stevenshelley58-afk/frank/actions/runs/1', config_sha256: config,

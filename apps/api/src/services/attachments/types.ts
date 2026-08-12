@@ -18,7 +18,8 @@ export type AttachmentErrorCode = 'invalid_request' | 'limit_exceeded' | 'capaci
 export type LifecycleResult<T> = { kind: 'success'; value: T; warnings: readonly string[] } | { kind: 'warning'; value: T; warnings: readonly string[] } | { kind: 'error'; code: AttachmentErrorCode; hint: string; retry: 'never' | 'after_backoff' | 'after_fix'; artifactIds: readonly string[] };
 
 export interface UploadReservation { id: string; cellId: string; ownerId: string; conversationId?: string; draftMessageId: string; idempotencyKey: string; requestHash: string; uploadId: string; originalName: string; relativePath?: string; mediaType: string; state: UploadReservationState; reservedBytes: bigint; reservedCount: number; capabilityVersion: number; expiresAt: Date; }
-export interface UploadCapabilityClaims { uploadId: string; cellId: string; ownerId: string; capabilityVersion: number; expiresAt: Date; }
+/** `termination` is minted only inside the server after a durable expiry claim. */
+export interface UploadCapabilityClaims { uploadId: string; cellId: string; ownerId: string; capabilityVersion: number; expiresAt: Date; purpose?: 'browser' | 'termination'; }
 /** A compact signed capability is opaque. Its format and length belong to this port. */
 export interface UploadCapabilityPort { issue(claims: UploadCapabilityClaims): Promise<string>; verify(capability: string): Promise<UploadCapabilityClaims | undefined>; }
 export interface ReservationRequest { cellId: string; ownerId: string; conversationId?: string; draftMessageId: string; idempotencyKey: string; requestHash: string; uploadId: string; sizeBytes: bigint; originalName: string; relativePath?: string; mediaType: string; expiresAt: Date; }
@@ -48,6 +49,7 @@ export interface AttachmentPersistencePort {
   beginTermination(input: { cellId: string; uploadId: string; ownerId: string }): Promise<'accepted' | 'already_terminated' | 'not_found'>;
   retryTermination(input: { cellId: string; uploadId: string; reason: string }): Promise<void>;
   persistTermination(input: { cellId: string; uploadId: string; reason: 'cancelled' | 'expired' }): Promise<boolean>;
+  claimExpiredReservations(limit: number): Promise<UploadReservation[]>;
   claimOutbox(): Promise<AttachmentOutbox | undefined>;
   getAttachmentForWork(cellId: string, attachmentId: string): Promise<AttachmentRecord | undefined>;
   findCanonical(cellId: string, sha256: string): Promise<ObjectManifest | undefined>;
@@ -63,7 +65,7 @@ export interface StagingIngressStorage { /** Only the tusd ingress credential ma
 export interface AttachmentPromoterStorage { readonly role: 'promoter'; headStaging(key: string, signal?: AbortSignal): Promise<{ size: bigint } | undefined>; readStaging(key: string, signal?: AbortSignal): Promise<Readable>; headObject(key: string, signal?: AbortSignal): Promise<{ size: bigint } | undefined>; copyStagingToObject(sourceKey: string, objectKey: string, signal?: AbortSignal): Promise<void>; removeStaging(key: string, signal?: AbortSignal): Promise<void>; readObject(key: string, signal?: AbortSignal): Promise<Readable>; }
 export interface AttachmentDownloadStorage { readonly role: 'downloader'; readObject(key: string, range?: { start: bigint; end: bigint }, signal?: AbortSignal): Promise<Readable>; }
 /** The API cancellation path has this narrowly-scoped tusd credential only. */
-export interface TusdTerminationPort { terminate(input: { uploadId: string; capability: string }): Promise<void>; }
+export interface TusdTerminationPort { terminate(input: { uploadId: string; capability: string }): Promise<'deleted' | 'absent'>; }
 export interface ContentSandboxPort { inspect(stream: Readable, declaredMediaType: string, signal?: AbortSignal): Promise<{ mediaType: string; verdict: 'clean' | 'executable' | 'mime_spoof' | 'encrypted_archive' | 'archive_bomb' | 'unsafe_archive_path' | 'unsupported_archive' | 'error'; detail?: string }>; }
 export interface MalwareScanner { scan(stream: Readable, signal?: AbortSignal): Promise<{ state: 'clean' | 'infected' | 'unavailable' | 'error'; detail?: string }>; }
 /** Worker adapters only. A result may be complete only after all output artifacts were persisted. */

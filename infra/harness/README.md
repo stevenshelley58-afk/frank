@@ -35,7 +35,7 @@ artifact decision. Promotion is manual: populate a candidate digest only after `
 the upstream immutable commit/key, SBOM review, and the LiteLLM security floor established by
 GHSA-r75f-5x8p-qvmc (never 1.82.7/1.82.8; not before 1.83.7). Current candidate starting points
 as of 2026-08-11 are LiteLLM v1.96.0, SeaweedFS 4.41, tusd v2.10.0, and ClamAV
-clamav-1.5.4. Tags are not promotion identities and all candidate digest slots remain blank,
+1.5.4 (upstream GitHub release `clamav-1.5.4`). Tags are not promotion identities and all candidate digest slots remain blank,
 run the isolated hosted candidate probe, copy the verified manifest to CURRENT, and retain the
 previous manifest as ROLLBACK. Revert by restoring the ROLLBACK manifest and recreating only
 these services; never delete attachment volumes. Licenses to record per chosen artifact: LiteLLM
@@ -51,7 +51,7 @@ configuration, and typed-adapter canary evidence remain intentionally unavailabl
 
 Promotion evidence is never inferred from `evidence-manifest.schema.json`. A real
 secret-free manifest must name exactly LiteLLM v1.96.0, SeaweedFS 4.41, tusd v2.10.0, and
-ClamAV clamav-1.5.4 and bind each reviewed digest, license, SBOM hash, provenance method,
+ClamAV 1.5.4 (upstream release `clamav-1.5.4`) and bind each reviewed digest, license, SBOM hash, provenance method,
 server command, configuration hash, and hosted canary URL to the exact release commit.
 The release validator rejects missing, placeholder, `.invalid`, or candidate/current
 mismatches before it renders the enabled Compose unit.

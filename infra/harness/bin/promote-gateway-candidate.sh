@@ -39,7 +39,7 @@ const expected={
   LITELLM:{service:'litellm',tag:'v1.96.0',license:'MIT',config:litellmConfig},
   SEAWEEDFS:{service:'seaweedfs',tag:'4.41',license:'Apache-2.0',config:seaweedConfig},
   TUSD:{service:'tusd',tag:'v2.10.0',license:'MIT',config:tusdConfig},
-  CLAMAV:{service:'clamav',tag:'clamav-1.5.4',license:'GPL-2.0-only',config:clamavConfig},
+  CLAMAV:{service:'clamav',tag:'1.5.4',license:'GPL-2.0-only',config:clamavConfig},
 };
 const names=Object.keys(expected); if (!Array.isArray(m.services)||m.services.length!==names.length) throw Error('exact core evidence set required');
 if(JSON.stringify(Object.keys(m).sort())!=='["release","services"]') throw Error('unexpected manifest fields');

@@ -38,10 +38,13 @@ describe('attachment runtime policy seams', () => {
   });
 
   it('requires complete, role-distinct configuration that matches the deployed private service identities', () => {
-    const env = { FRANK_SEAWEEDFS_INTERNAL_URL: 'http://frank-seaweedfs:8333', FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY: 'promoter', FRANK_ATTACHMENT_PROMOTER_SECRET_KEY: 'promoter-secret', FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY: 'downloader', FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY: 'downloader-secret', FRANK_UPLOAD_CAPABILITY_KEY: Buffer.alloc(32).toString('base64'), FRANK_TUSD_INTERNAL_URL: 'http://frank-tusd:1080', FRANK_CLAMAV_INTERNAL_URL: 'tcp://frank-clamav:3310' };
+    const env = { FRANK_ATTACHMENT_RUNTIME_ENABLED: 'true', FRANK_SEAWEEDFS_INTERNAL_URL: 'http://frank-seaweedfs:8333', FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY: 'promoter', FRANK_ATTACHMENT_PROMOTER_SECRET_KEY: 'promoter-secret', FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY: 'downloader', FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY: 'downloader-secret', FRANK_UPLOAD_CAPABILITY_KEY: Buffer.alloc(32).toString('base64'), FRANK_TUSD_HOOK_SECRET: 'hook-secret', FRANK_TUSD_GATE_SECRET: 'gate-secret', FRANK_TUSD_INTERNAL_URL: 'http://frank-tusd:1080', FRANK_CLAMAV_INTERNAL_URL: 'tcp://frank-clamav:3310' };
     expect(attachmentRuntimeConfig(env)).toMatchObject({ promoter: { accessKey: 'promoter' }, downloader: { bucket: 'frank-objects', accessKey: 'downloader' } });
     expect(() => attachmentRuntimeConfig({ ...env, FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY: 'promoter' })).toThrow('attachment_storage_identity_reuse');
     expect(() => attachmentRuntimeConfig({ ...env, FRANK_CLAMAV_INTERNAL_URL: 'tcp://other:3310' })).toThrow('invalid_attachment_runtime_config');
+    expect(attachmentRuntimeConfig({ FRANK_ATTACHMENT_RUNTIME_ENABLED: 'false', FRANK_SEAWEEDFS_INTERNAL_URL: 'http://frank-seaweedfs:8333', FRANK_TUSD_INTERNAL_URL: 'http://frank-tusd:1080', FRANK_CLAMAV_INTERNAL_URL: 'tcp://frank-clamav:3310' })).toBeUndefined();
+    expect(() => attachmentRuntimeConfig({ ...env, FRANK_ATTACHMENT_RUNTIME_ENABLED: 'false' })).toThrow('incomplete_attachment_runtime_config');
+    expect(() => attachmentRuntimeConfig(({ ...env, FRANK_ATTACHMENT_RUNTIME_ENABLED: undefined }) as NodeJS.ProcessEnv)).toThrow('incomplete_attachment_runtime_config');
   });
 
   it('keeps private tusd termination on the internal host and canonicalizes bigint only at the JSON contract boundary', async () => {

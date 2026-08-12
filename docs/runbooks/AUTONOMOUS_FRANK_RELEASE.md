@@ -365,7 +365,7 @@ This step remains blocked until the exact LiteLLM candidate (not below v1.83.7) 
 the isolated hosted canary and is running as a private `frank-litellm` candidate container
 against the durable LiteLLM database. Do not fabricate a successful bootstrap in static
 validation. The current candidate starting points are LiteLLM v1.96.0, SeaweedFS 4.41,
-tusd v2.10.0, and ClamAV clamav-1.5.4; tags never replace reviewed digests and evidence.
+tusd v2.10.0, and ClamAV 1.5.4 (upstream release `clamav-1.5.4`); tags never replace reviewed digests and evidence.
 
 The provisioning script uses the admin key only inside the proxy container to call the
 official `/key/generate` contract. Its unique operation alias makes an ambiguous retry fail
@@ -1147,15 +1147,28 @@ if test "$FRANK_HARNESS_ENABLED" = true; then
   export FRANK_LITELLM_VIRTUAL_KEY_FILE="${FRANK_LITELLM_VIRTUAL_KEY_FILE:-/srv/frank/secrets/litellm/frank-api-virtual-key}"
   tusd_gate_file='/srv/frank/secrets/tusd/gate-secret'
   tusd_hook_file='/srv/frank/secrets/tusd/hook-secret'
-  for secret_file in "$FRANK_LITELLM_VIRTUAL_KEY_FILE" "$tusd_gate_file" "$tusd_hook_file"; do
+  promoter_access_file='/srv/frank/secrets/seaweedfs/promoter-access-key'
+  promoter_secret_file='/srv/frank/secrets/seaweedfs/promoter-secret-key'
+  downloader_access_file='/srv/frank/secrets/seaweedfs/downloader-access-key'
+  downloader_secret_file='/srv/frank/secrets/seaweedfs/downloader-secret-key'
+  upload_capability_file='/srv/frank/secrets/attachments/upload-capability-hmac'
+  for secret_file in "$FRANK_LITELLM_VIRTUAL_KEY_FILE" "$tusd_gate_file" "$tusd_hook_file" "$promoter_access_file" "$promoter_secret_file" "$downloader_access_file" "$downloader_secret_file" "$upload_capability_file"; do
     test -f "$secret_file" && test ! -L "$secret_file"
     test "$(stat -c '%u:%g:%a' -- "$secret_file")" = '0:0:600'
   done
   export FRANK_LITELLM_VIRTUAL_KEY="$(<"$FRANK_LITELLM_VIRTUAL_KEY_FILE")"
   export FRANK_TUSD_GATE_SECRET="$(<"$tusd_gate_file")"
   export FRANK_TUSD_HOOK_SECRET="$(<"$tusd_hook_file")"
+  export FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY="$(<"$promoter_access_file")"
+  export FRANK_ATTACHMENT_PROMOTER_SECRET_KEY="$(<"$promoter_secret_file")"
+  export FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY="$(<"$downloader_access_file")"
+  export FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY="$(<"$downloader_secret_file")"
+  export FRANK_UPLOAD_CAPABILITY_KEY="$(<"$upload_capability_file")"
   test -n "$FRANK_LITELLM_VIRTUAL_KEY"
   test -n "$FRANK_TUSD_GATE_SECRET" && test -n "$FRANK_TUSD_HOOK_SECRET"
+  test -n "$FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY" && test -n "$FRANK_ATTACHMENT_PROMOTER_SECRET_KEY"
+  test -n "$FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY" && test -n "$FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY"
+  test -n "$FRANK_UPLOAD_CAPABILITY_KEY"
   test "$FRANK_TUSD_GATE_SECRET" != "$FRANK_TUSD_HOOK_SECRET"
   harness_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.harness.yml"
   compose+=( -f "$harness_overlay" )
@@ -1217,14 +1230,23 @@ esac
   (.services["frank-codegraph-volume-init"].entrypoint == ["/usr/local/bin/python3", "-P", "-m", "frank_codegraph.volume_init"]) and
   .services["frank-api"].environment.FRANK_ENV == "production" and
   (if $harness then
+    .services["frank-api"].environment.FRANK_ATTACHMENT_RUNTIME_ENABLED == "true" and
     ((.services["frank-api"].environment.FRANK_LITELLM_VIRTUAL_KEY // "") | length > 0) and
     ((.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET // "") | length > 0) and
     ((.services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET // "") | length > 0) and
     (.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET != .services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET) and
     (.services["frank-api"].environment.FRANK_TUSD_GATE_SECRET == .services["frank-caddy"].environment.FRANK_TUSD_GATE_SECRET) and
     (.services["frank-api"].environment.FRANK_TUSD_HOOK_SECRET == .services["frank-caddy"].environment.FRANK_TUSD_HOOK_SECRET) and
+    ((.services["frank-api"].environment.FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_ATTACHMENT_PROMOTER_SECRET_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_ATTACHMENT_DOWNLOADER_SECRET_KEY // "") | length > 0) and
+    ((.services["frank-api"].environment.FRANK_UPLOAD_CAPABILITY_KEY // "") | length > 0) and
+    (.services["frank-tusd"].environment | has("FRANK_ATTACHMENT_PROMOTER_ACCESS_KEY") | not) and
+    (.services["frank-tusd"].environment | has("FRANK_ATTACHMENT_DOWNLOADER_ACCESS_KEY") | not) and
     (.services["frank-tusd"].command | index("-hooks-http=http://frank-api:3000/private/tusd/hooks") != null)
   else
+    .services["frank-api"].environment.FRANK_ATTACHMENT_RUNTIME_ENABLED == "false" and
     (.services["frank-api"].environment | has("FRANK_LITELLM_VIRTUAL_KEY") | not) and
     (.services["frank-api"].environment | has("FRANK_TUSD_GATE_SECRET") | not) and
     (.services["frank-api"].environment | has("FRANK_TUSD_HOOK_SECRET") | not) and
