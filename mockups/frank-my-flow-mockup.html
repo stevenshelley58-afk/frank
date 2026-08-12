@@ -1,0 +1,654 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>frank.my — flow mockup v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+/* ============ LIGHT SYSTEM — ChatGPT-inspired, minimal ============ */
+:root{
+  --bg:#FFFFFF; --page:#EFEFF1; --surface:#F7F7F8; --border:#E6E6E6; --border2:#D9D9DE;
+  --ink:#0D0D0D; --mut:#8A8A93; --faint:#B4B4BC;
+  --ok:#10A37F; --amber:#F5A524; --danger:#D93025;
+  --sans:"Inter",-apple-system,"Segoe UI",system-ui,sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+[hidden]{display:none!important}
+body{background:var(--page);color:var(--ink);font-family:var(--sans);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+button{font-family:inherit;cursor:pointer;border:none;background:none;color:inherit}
+:focus-visible{outline:2px solid var(--ink);outline-offset:2px;border-radius:4px}
+@media (prefers-reduced-motion: reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+/* ---- mock chrome ---- */
+.chrome{position:sticky;top:0;z-index:50;background:#FAFAFB;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:11.5px;color:var(--mut)}
+.chrome-row{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;max-width:1020px;margin:0 auto;padding:8px 16px}
+.chrome-tag{background:var(--ink);color:#fff;padding:1px 7px;border-radius:4px;font-weight:500}
+.chrome select{font-family:var(--mono);font-size:11.5px;color:var(--ink);background:#fff;border:1px solid var(--border2);border-radius:6px;padding:2px 6px}
+.chrome-btn{border:1px solid var(--border2);border-radius:6px;padding:2px 9px;font-family:var(--mono);font-size:11.5px;color:var(--mut)}
+.chrome-btn:hover{color:var(--ink);border-color:var(--ink)}
+.flowmap{display:flex;flex-wrap:wrap;gap:2px;max-width:1020px;margin:0 auto;padding:0 16px 8px;align-items:center}
+.fstep{font-family:var(--mono);font-size:11px;color:var(--faint);padding:2px 6px;border-radius:4px}
+.fstep:hover{color:var(--ink)}
+.fstep.on{color:#fff;background:var(--ink)}
+.fsep{color:var(--border2);font-size:10px}
+.fbranch{margin-left:auto;display:flex;gap:2px;flex-wrap:wrap}
+.fbranch .fstep{border:1px dashed var(--border2)}
+
+/* ---- stage / frame ---- */
+.stage{display:flex;justify-content:center;padding:24px 12px 70px}
+.phone{width:100%;max-width:480px;background:var(--bg);border:1px solid var(--border);border-radius:24px;height:min(880px,88vh);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,.08)}
+.appbar{display:flex;align-items:center;gap:8px;padding:14px 16px 12px 20px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--amber)}
+.wordmark{font-weight:600;font-size:15px;letter-spacing:-.01em}
+.appbar .right{margin-left:auto;display:flex;gap:6px;align-items:center}
+.tipbtn{font-size:12.5px;color:var(--mut);padding:6px 10px;border-radius:99px}
+.tipbtn:hover{color:var(--ink);background:var(--surface)}
+.bookbtn{font-size:12.5px;background:var(--ink);color:#fff;padding:6px 13px;border-radius:99px;font-weight:500}
+.bookbtn:hover{opacity:.85}
+.appbar .menu{color:var(--mut);font-size:18px;line-height:1;padding:2px 8px;border-radius:8px}
+.appbar .menu:hover{background:var(--surface)}
+.bio{font-size:14px;line-height:1.6;color:#3d3d43;max-width:340px;margin:14px auto 0}
+.proc{display:flex;gap:6px;max-width:360px;margin:18px auto 0}
+.proc div{flex:1;font-size:11.5px;color:var(--mut);border:1px solid var(--border);border-radius:10px;padding:8px 5px;text-align:center}
+.proc i{display:block;font-style:normal;font-family:var(--mono);font-size:10px;color:var(--faint);margin-bottom:2px}
+.screen{display:none;flex:1;flex-direction:column;min-height:0}
+.screen.on{display:flex}
+.pad{padding:8px 24px 24px;display:flex;flex-direction:column;flex:1;min-height:0;overflow-y:auto}
+
+/* ---- landing ---- */
+.hero{margin:auto 0;text-align:center;padding:20px 0}
+.hero h1{font-size:30px;font-weight:600;letter-spacing:-.02em;line-height:1.15}
+.hero .sub{color:var(--mut);font-size:15px;margin-top:8px}
+.chips{display:flex;justify-content:center;flex-wrap:wrap;gap:8px;margin-top:22px}
+.chip{border:1px solid var(--border);border-radius:99px;padding:6px 14px;font-size:13px;color:var(--ink);background:#fff;transition:border-color .15s}
+.chip:hover{border-color:var(--ink)}
+.composer{padding-top:12px}
+.cbox{position:relative;background:var(--surface);border:1px solid var(--border);border-radius:22px;transition:border-color .15s}
+.cbox:focus-within{border-color:var(--border2);box-shadow:0 2px 12px rgba(0,0,0,.05)}
+.cbox textarea{width:100%;background:none;border:none;resize:none;font-family:var(--sans);font-size:15px;line-height:1.5;padding:14px 52px 14px 18px;min-height:52px;max-height:180px;color:var(--ink)}
+.cbox textarea:focus{outline:none}
+.cbox textarea::placeholder{color:var(--mut)}
+.send{position:absolute;right:8px;bottom:8px;width:34px;height:34px;border-radius:50%;background:var(--ink);color:#fff;font-size:16px;display:flex;align-items:center;justify-content:center;transition:opacity .15s}
+.send:disabled{opacity:.15;cursor:default}
+.nudges{display:flex;justify-content:center;gap:14px;margin-bottom:10px;min-height:18px}
+.nudge{font-size:12.5px;color:var(--mut)}
+.nudge:hover{color:var(--ink)}
+.microfoot{text-align:center;margin-top:14px}
+.microfoot button{font-size:12px;color:var(--faint);padding:2px 6px}
+.microfoot button:hover{color:var(--ink)}
+
+/* ---- generic minimal screens ---- */
+.center{margin:auto 0;text-align:center;padding:20px 0}
+.center h2{font-size:22px;font-weight:600;letter-spacing:-.01em}
+.center .sub{color:var(--mut);font-size:14px;margin-top:6px}
+.back{align-self:flex-start;color:var(--mut);font-size:13px;padding:6px 0;margin-bottom:2px}
+.back:hover{color:var(--ink)}
+.btn{background:var(--ink);color:#fff;border-radius:99px;padding:12px 22px;font-size:15px;font-weight:500}
+.btn:hover{opacity:.85}
+.btn:disabled{opacity:.2;cursor:default}
+.btn.lite{background:#fff;color:var(--ink);border:1px solid var(--border)}
+.btn.lite:hover{border-color:var(--ink);opacity:1}
+.btn.sm{padding:8px 16px;font-size:13.5px}
+.trow{display:flex;gap:8px;justify-content:center}
+
+/* ---- seal modal fields ---- */
+.form{max-width:320px;width:100%;margin:14px auto 0;text-align:left}
+.form input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;font-family:var(--sans);font-size:15px;padding:13px 15px;color:var(--ink)}
+.form input:focus{outline:none;border-color:var(--border2)}
+.form .gap{height:10px}
+.inline{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--mut);margin-top:8px}
+.inline button{color:var(--mut);text-decoration:underline;text-underline-offset:2px;font-size:12.5px}
+.inline button:hover{color:var(--ink)}
+.cap{font-size:12.5px;color:var(--mut);margin-top:10px;text-align:center}
+.cap button{color:var(--mut);font-size:12.5px;border-bottom:1px dotted var(--faint)}
+.cap button:hover{color:var(--ink)}
+.strength{height:3px;border-radius:2px;background:var(--border);margin-top:8px;overflow:hidden}
+.strength i{display:block;height:100%;width:0;background:var(--danger);transition:width .3s,background .3s}
+
+/* ---- link card ---- */
+.linkcard{display:flex;align-items:center;gap:10px;background:var(--surface);border:1px solid var(--border);border-radius:14px;padding:13px 16px;max-width:340px;margin:18px auto 0;font-family:var(--mono);font-size:13px}
+.linkcard span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.linkcard button{color:var(--mut);font-size:12px;margin-left:auto;flex:none}
+.linkcard button:hover{color:var(--ink)}
+.okmark{width:52px;height:52px;border-radius:50%;background:var(--surface);display:flex;align-items:center;justify-content:center;margin:0 auto 14px;color:var(--ok);font-size:22px}
+
+/* ---- status ---- */
+.pulse-dot{width:10px;height:10px;border-radius:50%;background:var(--amber);margin:0 auto 16px;animation:pul 2s ease-in-out infinite}
+@keyframes pul{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.4;transform:scale(.8)}}
+.steps{max-width:250px;margin:20px auto 0;text-align:left;font-size:13.5px}
+.steps div{display:flex;gap:10px;align-items:baseline;padding:5px 0;color:var(--faint)}
+.steps div.done{color:var(--mut)}
+.steps div.done::before{content:"✓";color:var(--ok);font-size:12px}
+.steps div.now{color:var(--ink)}
+.steps div.now::before{content:"●";color:var(--amber);font-size:9px}
+.steps div.todo::before{content:"○";color:var(--border2);font-size:10px}
+.steps .t{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--faint)}
+.notice{font-size:12.5px;color:var(--mut);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:8px 14px;max-width:300px;margin:14px auto 0}
+
+/* ---- email mock ---- */
+.mail{background:#fff;border:1px solid var(--border);border-radius:16px;max-width:360px;margin:0 auto;padding:22px;text-align:left;box-shadow:0 4px 20px rgba(0,0,0,.05)}
+.mail .from{font-size:12px;color:var(--mut)}
+.mail h3{font-size:17px;font-weight:600;margin:4px 0 10px}
+.mail p{font-size:13.5px;color:var(--mut);margin-bottom:14px}
+.mailtag{font-family:var(--mono);font-size:10.5px;color:var(--faint);text-align:center;margin-bottom:10px}
+
+/* ---- unlock ---- */
+.pinbox{display:flex;gap:8px;max-width:280px;margin:18px auto 0}
+.pinbox input{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:12px;font-family:var(--mono);font-size:16px;text-align:center;padding:12px;letter-spacing:.12em}
+.pinbox input:focus{outline:none;border-color:var(--border2)}
+.err{color:var(--danger);font-size:12.5px;margin-top:10px;display:none}
+.err.on{display:block}
+
+/* ---- thread ---- */
+.thread{flex:1;overflow-y:auto;padding:6px 20px 10px;display:flex;flex-direction:column;gap:16px;min-height:0}
+.tstamp{text-align:center;font-size:11px;color:var(--faint)}
+.msg-user{align-self:flex-end;max-width:85%;background:var(--surface);border-radius:18px 18px 4px 18px;padding:11px 15px;font-size:14.5px}
+.answer{font-size:14.5px;line-height:1.6}
+.answer.developing{animation:dev .9s ease-out both}
+@keyframes dev{from{opacity:0;filter:blur(4px)}to{opacity:1;filter:none}}
+.answer h3{font-size:17px;font-weight:600;letter-spacing:-.01em;line-height:1.3;margin-bottom:10px}
+.answer ol{margin:0 0 6px 20px}
+.answer ol li{margin-bottom:8px}
+.answer details{border-top:1px solid var(--border);margin-top:2px}
+.answer details:last-of-type{border-bottom:1px solid var(--border)}
+.answer summary{list-style:none;display:flex;align-items:center;padding:9px 2px;font-size:13.5px;font-weight:500;color:var(--mut);cursor:pointer}
+.answer summary:hover{color:var(--ink)}
+.answer summary::after{content:"›";margin-left:auto;color:var(--faint);transform:rotate(90deg);transition:transform .15s}
+.answer details[open] summary::after{transform:rotate(-90deg)}
+.answer details p,.answer details ul{font-size:13.5px;color:#3d3d43;margin:2px 0 12px;padding-left:2px}
+.answer details ul{margin-left:18px}
+.answer details li{margin-bottom:5px}
+.answer .src a{color:var(--mut);text-decoration:underline;text-underline-offset:2px}
+.meta{font-family:var(--mono);font-size:10.5px;color:var(--faint);margin-top:10px}
+.nexth{font-size:13.5px;font-weight:600;margin-top:18px;padding-bottom:4px}
+.nexth span{font-weight:400;font-size:11.5px;color:var(--faint);margin-left:6px}
+.answer .val{color:var(--ink)}
+.answer .val::before{content:"Value — ";color:var(--mut)}
+.askbtn{border:1px solid var(--border);border-radius:99px;padding:5px 13px;font-size:12.5px;color:var(--ink);margin:0 0 12px}
+.askbtn:hover{border-color:var(--ink)}
+.bigger{border:1px solid var(--border);border-radius:14px;padding:14px 16px;margin-top:18px;background:var(--surface)}
+.bigger .bh{font-family:var(--mono);font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--amber);margin-bottom:6px}
+.bigger b{font-size:14.5px;font-weight:600;display:block;margin-bottom:6px}
+.bigger p{font-size:13.5px;color:#3d3d43;margin-bottom:8px}
+.bigger .bp-acts{display:flex;gap:6px;margin-top:10px}
+.bigger .bp-acts button{border:1px solid var(--border);border-radius:99px;padding:6px 13px;font-size:12.5px;color:var(--ink);background:#fff}
+.bigger .bp-acts button:hover{border-color:var(--ink)}
+.sharedbar{background:var(--surface);border-bottom:1px solid var(--border);padding:8px 20px;font-size:12px;color:var(--mut);text-align:center}
+.sharecta{padding:14px 20px 20px;text-align:center;border-top:1px solid var(--border)}
+.sharecta .s1{font-size:14px;font-weight:600;margin-bottom:8px}
+.acts{display:flex;justify-content:center;gap:6px;flex-wrap:wrap;padding-top:2px}
+.acts button{border:1px solid var(--border);border-radius:99px;padding:6px 13px;font-size:12.5px;color:var(--mut)}
+.acts button:hover{color:var(--ink);border-color:var(--ink)}
+.threadfoot{padding:10px 16px 16px}
+
+/* ---- booking ---- */
+.rows{max-width:320px;margin:20px auto 0;text-align:left}
+.rows div{display:flex;gap:10px;padding:11px 2px;border-top:1px solid var(--border);font-size:14px;align-items:baseline}
+.rows div:last-child{border-bottom:1px solid var(--border)}
+.rows b{font-weight:500}
+.rows .ic{color:var(--mut);font-size:13px;min-width:16px}
+
+/* ---- sheets (expandable info) ---- */
+.overlay{position:fixed;inset:0;background:rgba(0,0,0,.28);display:none;align-items:flex-end;justify-content:center;z-index:90;padding:12px}
+.overlay.on{display:flex}
+.sheet{width:100%;max-width:440px;background:#fff;border-radius:20px;padding:24px;box-shadow:0 -8px 40px rgba(0,0,0,.14);animation:up .22s ease-out}
+@keyframes up{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+.sheet h3{font-size:17px;font-weight:600;margin-bottom:6px;letter-spacing:-.01em}
+.sheet p{font-size:14px;color:var(--mut);margin-bottom:10px}
+.sheet p b{color:var(--ink);font-weight:500}
+.sheet .srow{display:flex;gap:8px;margin-top:14px}
+.sheet .srow .btn{flex:1}
+.lanes{display:flex;gap:8px;margin:4px 0 12px}
+.lane{flex:1;background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:9px 11px;font-size:11.5px}
+.lane .st{display:block;font-family:var(--mono);font-size:9.5px;color:var(--amber);text-transform:uppercase;letter-spacing:.05em;margin-top:3px}
+.lane .st.q{color:var(--faint)}
+.qa{border-top:1px solid var(--border)}
+.qa summary{list-style:none;display:flex;padding:11px 2px;font-size:14px;font-weight:500;cursor:pointer}
+.qa summary::after{content:"+";margin-left:auto;color:var(--faint)}
+.qa[open] summary::after{content:"–"}
+.qa p{padding-bottom:10px}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%) translateY(80px);background:var(--ink);color:#fff;font-size:13px;padding:10px 18px;border-radius:99px;transition:transform .3s;z-index:99;max-width:90vw;text-align:center}
+@media (max-width:620px){.fbranch{margin-left:0}.hero h1{font-size:26px}}
+</style>
+</head>
+<body>
+
+<div class="chrome">
+  <div class="chrome-row">
+    <span class="chrome-tag">MOCK</span>
+    <span>frank.my · v2 light</span>
+    <select id="scen">
+      <option value="happy">Happy path</option>
+      <option value="noemail">No-email mode</option>
+      <option value="budget">Budget rolled</option>
+      <option value="wrongpin">Wrong PIN first</option>
+    </select>
+    <button class="chrome-btn" id="timeskip" hidden>⏩ morning</button>
+    <button class="chrome-btn" onclick="resetAll()">↺ reset</button>
+  </div>
+  <div class="flowmap">
+    <button class="fstep" data-go="landing">1 ask</button><span class="fsep">→</span>
+    <button class="fstep" data-go="sheet">2 pin</button><span class="fsep">→</span>
+    <button class="fstep" data-go="receipt">3 sent</button><span class="fsep">→</span>
+    <button class="fstep" data-go="status">4 overnight</button><span class="fsep">→</span>
+    <button class="fstep" data-go="emailReady">5 email</button><span class="fsep">→</span>
+    <button class="fstep" data-go="unlock">6 pin</button><span class="fsep">→</span>
+    <button class="fstep" data-go="thread">7 answer</button>
+    <span class="fbranch">
+      <button class="fstep" data-go="booking">book</button>
+      <button class="fstep" data-go="shared">shared view</button>
+      <button class="fstep" onclick="openOv('ov-slots')">slots</button>
+      <button class="fstep" onclick="openOv('ov-share')">share</button>
+      <button class="fstep" onclick="openOv('ov-privacy')">privacy</button>
+    </span>
+  </div>
+</div>
+
+<div class="stage"><div class="phone">
+  <div class="appbar"><span class="dot"></span><span class="wordmark">frank.my</span>
+    <span class="right">
+      <button class="tipbtn" onclick="mockToast('Stripe tip — pay what you want')">Tip</button>
+      <button class="bookbtn" onclick="go('booking')">Book Steven</button>
+      <button class="menu" onclick="openOv('ov-menu')">···</button>
+    </span>
+  </div>
+
+  <!-- 1 · ASK -->
+  <section class="screen on" id="s-landing"><div class="pad">
+    <div class="hero">
+      <h1>Ask anything.</h1>
+      <div class="sub">A real answer by morning. Free.</div>
+      <div class="chips">
+        <button class="chip" onclick="info('free')">Free forever</button>
+        <button class="chip" onclick="info('signup')">No sign-up</button>
+        <button class="chip" onclick="info('private')">Private</button>
+        <button class="chip" onclick="info('overnight')">Overnight</button>
+      </div>
+    </div>
+    <div class="composer">
+      <div class="nudges" id="nudges" hidden>
+        <button class="nudge" onclick="addNudge(0)">+ solved looks like</button>
+        <button class="nudge" onclick="addNudge(1)">+ what I’ve tried</button>
+        <button class="nudge" onclick="addNudge(2)">+ limits</button>
+      </div>
+      <div class="cbox">
+        <textarea id="problem" rows="2" placeholder="What’s the problem?"></textarea>
+        <button class="send" id="sendBtn" disabled onclick="go('sheet')" aria-label="Send">↑</button>
+      </div>
+      <div class="microfoot"><button onclick="mockToast('GitHub repo would open')">Open source</button></div>
+    </div>
+  </div></section>
+
+  <!-- 2 · PIN -->
+  <section class="screen" id="s-sheet"><div class="pad">
+    <button class="back" onclick="go('landing')">‹ Back</button>
+    <div class="center">
+      <h2>One PIN. That’s the key.</h2>
+      <div class="sub">It encrypts your thread. Only you can open it.</div>
+      <div class="form">
+        <input type="email" id="email" placeholder="Email — to tell you it’s ready" autocomplete="off">
+        <div class="inline" id="skipline"><button id="skipEmail">Skip — I’ll keep my link instead</button></div>
+        <div class="gap"></div>
+        <input type="text" id="pin" placeholder="Create a PIN" autocomplete="off" maxlength="24" style="font-family:var(--mono)">
+        <div class="strength"><i id="sbar"></i></div>
+        <div class="cap">Can’t be recovered. <button onclick="info('pin')">Why</button></div>
+      </div>
+      <div style="margin-top:22px"><button class="btn" id="sealBtn" disabled onclick="sealJob()">Send</button></div>
+    </div>
+  </div></section>
+
+  <!-- 3 · SENT -->
+  <section class="screen" id="s-receipt"><div class="pad">
+    <div class="center">
+      <div class="okmark">✓</div>
+      <h2>Sent.</h2>
+      <div class="sub" id="receiptsub">Tap the link in your email to start.</div>
+      <div class="linkcard"><span>frank.my/t/8f2k1x#A9tR…</span><button onclick="mockToast('Copied')">Copy</button></div>
+      <div class="cap" style="margin-top:8px">Your link + PIN open the answer. <button onclick="info('link')">Keep it safe</button></div>
+      <div style="margin-top:22px">
+        <button class="btn lite sm" id="openConfirm" onclick="go('emailConfirm')">Open email →</button>
+        <button class="btn lite sm" id="openStatus" hidden onclick="startDevelop()">View status →</button>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- 3b · CONFIRM EMAIL -->
+  <section class="screen" id="s-emailConfirm"><div class="pad">
+    <button class="back" onclick="go('receipt')">‹ Back</button>
+    <div class="center">
+      <div class="mailtag">inbox · 9:48 pm</div>
+      <div class="mail">
+        <div class="from">frank.my</div>
+        <h3>One tap to start</h3>
+        <button class="btn" onclick="startDevelop()">Start</button>
+        <p style="margin:12px 0 0">Not you? Ignore this — nothing runs.</p>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- 4 · OVERNIGHT -->
+  <section class="screen" id="s-status"><div class="pad">
+    <div class="center">
+      <div class="pulse-dot" id="statusdot"></div>
+      <h2 id="statush">Working on it.</h2>
+      <div class="sub" id="eta">Ready by 7:00 am</div>
+      <div class="notice" id="budgetnote" hidden>Free capacity reached — running tomorrow night instead. Still free.</div>
+      <div class="steps" id="steps">
+        <div class="done">Received <span class="t">9:47 pm</span></div>
+        <div class="done" id="st-confirm">Confirmed <span class="t">9:48 pm</span></div>
+        <div class="now" id="st-queue">In tonight’s batch <span class="t"></span></div>
+        <div class="todo" id="st-run">Researching <span class="t"></span></div>
+        <div class="todo" id="st-check">Checking <span class="t"></span></div>
+        <div class="todo" id="st-ready">Delivered <span class="t"></span></div>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- 5 · READY EMAIL -->
+  <section class="screen" id="s-emailReady"><div class="pad">
+    <div class="center">
+      <div class="mailtag">inbox · 6:12 am</div>
+      <div class="mail">
+        <div class="from">frank.my</div>
+        <h3>Your answer is ready</h3>
+        <button class="btn" onclick="go('unlock')">Open</button>
+        <p style="margin:12px 0 0">Only email you’ll get. No newsletter, ever.</p>
+      </div>
+    </div>
+  </div></section>
+
+  <!-- 6 · PIN UNLOCK -->
+  <section class="screen" id="s-unlock"><div class="pad">
+    <div class="center">
+      <h2>Enter your PIN</h2>
+      <div class="pinbox">
+        <input type="text" id="pintry" placeholder="PIN" autocomplete="off" maxlength="24">
+        <button class="btn" onclick="tryUnlock()">Open</button>
+      </div>
+      <div class="err" id="pinerr">Wrong PIN. We can’t look it up or reset it.</div>
+      <div class="cap" style="margin-top:16px"><button onclick="info('decrypt')">Decrypted in your browser</button></div>
+    </div>
+  </div></section>
+
+  <!-- 7 · ANSWER -->
+  <section class="screen" id="s-thread">
+    <div class="thread" id="threadscroll">
+      <div class="tstamp">Tue 9:47 pm</div>
+      <div class="msg-user">My cafe in Fremantle is dying on weekends. Saturday takings down ~30% since June — weekdays fine. New specialty coffee place opened two streets over in May. $2k to spend, one spare barista shift.<br><br><b>Solved =</b> weekend revenue within 15% of autumn by October.</div>
+      <div class="tstamp">6:12 am</div>
+      <div class="answer" id="answerprint">
+        <h3>Stop fighting them on coffee. Win the weekend on what they can’t do.</h3>
+        <ol>
+          <li><b>Own brunch.</b> Fixed-price weekend brunch ($19–24, kid-friendly). They have 12 seats, no kitchen. You have 40 and a cook.</li>
+          <li><b>Call back lapsed regulars.</b> Your card terminal lists who went quiet since May. “Coffee’s on us Saturday” — personal, near-free.</li>
+          <li><b>Fix weekend search.</b> Google profile: brunch photos, menu, weekly posts, 10 fresh reviews. “Brunch Fremantle” is winnable.</li>
+        </ol>
+        <details><summary>Why it dropped</summary><p>Footfall, not spend per head — and it’s the discovery crowd, not your regulars. New specialty openings typically pull 20–35% of weekend traffic for 3–6 months, then settle. Winter amplified it.</p></details>
+        <details><summary>The $2k plan</summary><ul><li>$0 — brunch from your existing kitchen, $22 avg ticket, 60 covers/Sat target</li><li>$300 — profile photos + listing refresh</li><li>$500 — geofenced weekend posts, 6 weeks</li><li>$400 — win-back for ~120 lapsed regulars</li><li>$800 — hold until two weeks of data</li></ul></details>
+        <details><summary>Assumptions</summary><p>Drop is covers, not ticket size (your terminal confirms in minutes). Competitor is seat-limited, no full kitchen. You can serve food Saturdays without new gear. Wrong? Reply — tomorrow’s answer adjusts.</p></details>
+        <details><summary>Watch for</summary><p>Don’t discount coffee. Give brunch six Saturdays. Track one number weekly: Saturday covers.</p></details>
+        <details class="src"><summary>Sources</summary><ul><li><a href="#" onclick="return false">Hospitality WA — winter trading, Perth 2026</a></li><li><a href="#" onclick="return false">Fremantle pedestrian counters, Jan–Jul</a></li><li><a href="#" onclick="return false">Square — repeat-visit decay near new competitors</a></li><li><a href="#" onclick="return false">Google Business — local ranking factors</a></li><li><a href="#" onclick="return false">Competitor listing (public)</a></li></ul></details>
+        <div class="nexth">Worth asking next <span>each is a free overnight answer</span></div>
+        <details><summary>“Design my $22 brunch menu from my current kitchen”</summary>
+          <p>Frank maps your ingredients and gear to a 6–8 item menu priced to a $22 average ticket, portioned for a two-person kitchen on a busy Saturday.</p>
+          <p class="val">brunch only works if margin survives. This is the difference between busy and profitable.</p>
+          <button class="askbtn" onclick="askNext(0)">Ask this →</button>
+        </details>
+        <details><summary>“Write my win-back message and list rules”</summary>
+          <p>The exact message, send timing, and how to pull lapsed regulars from your terminal without being creepy about it.</p>
+          <p class="val">120 people who already liked you — the highest-return $400 you can spend.</p>
+          <button class="askbtn" onclick="askNext(1)">Ask this →</button>
+        </details>
+        <details><summary>“Build my 6-week Saturday scoreboard”</summary>
+          <p>A one-page weekly tracker — covers, ticket size, win-back redemptions — plus the decision rule for your $800 reserve.</p>
+          <p class="val">you’ll know by week 3 whether it’s working, not week 12.</p>
+          <button class="askbtn" onclick="askNext(2)">Ask this →</button>
+        </details>
+        <div class="bigger">
+          <div class="bh">The bigger picture</div>
+          <b>Turn your card-terminal data into a regulars engine.</b>
+          <p>Your terminal already knows who comes, how often, what they spend. Wired into a simple weekly loop — lapsed lists, quiet VIP perks, seasonal nudges — it compounds every fix above.</p>
+          <p class="val">weekends are won by regulars, not foot traffic. This is the asset the new cafe doesn’t have.</p>
+          <div class="bp-acts"><button onclick="askNext(3)">Break it into steps — free</button><button onclick="go('booking')">Or book Steven</button></div>
+        </div>
+        <div class="meta">sonnet 5 → opus 5 · 14 searches · checked ✓</div>
+        <div class="meta">yours for 90 days · reply anytime</div>
+      </div>
+      <div class="acts">
+        <button onclick="mockToast('Stripe tip — pay what you want')">Tip</button>
+        <button onclick="go('booking')">Book Steven</button>
+        <button onclick="openOv('ov-share')">Share</button>
+      </div>
+    </div>
+    <div class="threadfoot">
+      <div class="cbox">
+        <textarea id="followup" rows="1" placeholder="Reply — answers by morning"></textarea>
+        <button class="send" onclick="sendFollowup()" aria-label="Send">↑</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- BRANCH · SHARED VIEW (what a recipient sees) -->
+  <section class="screen" id="s-shared">
+    <div class="sharedbar">Shared from a frank.my thread · read-only</div>
+    <div class="thread" id="sharedscroll"></div>
+    <div class="sharecta">
+      <div class="s1">Got a problem of your own?</div>
+      <button class="btn" onclick="go('landing')">Ask anything — free</button>
+    </div>
+  </section>
+
+  <!-- BRANCH · BOOKING -->
+  <section class="screen" id="s-booking"><div class="pad">
+    <button class="back" onclick="go(state.answered?'thread':'landing')">‹ Back</button>
+    <div class="center">
+      <h2>Book Steven.</h2>
+      <div class="sub">$300 flat · solved or refunded</div>
+      <p class="bio">Hi — I’m Steven. AI nerd, career generalist: data science, business, marketing, web dev, app building. I love hard problems — the more obscure or interesting, the better.</p>
+      <div class="proc">
+        <div><i>1</i>Book · $300</div>
+        <div><i>2</i>We call</div>
+        <div><i>3</i>Define “solved”</div>
+        <div><i>4</i>I go do it</div>
+      </div>
+      <div class="rows">
+        <div><span class="ic">✓</span><span><b>Solved</b> — flat fee, done</span></div>
+        <div><span class="ic">↩</span><span><b>Not solved</b> — full refund</span></div>
+        <div><span class="ic">⇄</span><span><b>Bigger than $300</b> — rescope, top up, or refund. Your call.</span></div>
+      </div>
+      <div style="margin-top:22px"><button class="btn" onclick="mockToast('Stripe $300 → Cal.com booking')">Book a time — $300</button></div>
+      <div class="cap" style="margin-top:12px">Refunds via Stripe. The answers here stay free either way.</div>
+    </div>
+  </div></section>
+</div></div>
+
+<!-- ===== SHEETS ===== -->
+<div class="overlay" id="ov-info" onclick="if(event.target===this)closeOv('ov-info')">
+  <div class="sheet"><h3 id="infoTitle"></h3><p id="infoBody"></p><div class="srow"><button class="btn lite" onclick="closeOv('ov-info')">Done</button><button class="btn lite" id="infoMore" hidden onclick="closeOv('ov-info');openOv('ov-privacy')">Details</button></div></div>
+</div>
+
+<div class="overlay" id="ov-share" onclick="if(event.target===this)closeOv('ov-share')">
+  <div class="sheet"><h3>Share</h3>
+    <p><b>This answer</b> — a read-only link to this question and answer. When you share the link, it’s visible to whoever has it. Your thread stays private.</p>
+    <div class="srow"><button class="btn" onclick="closeOv('ov-share');mockToast('Answer link copied — anyone with it can read this answer')">Copy answer link</button></div>
+    <details class="qa" style="margin-top:14px"><summary>Send a copy to Steven</summary><p>This thread, as it is now — used only to make Frank better. <button style="text-decoration:underline" onclick="closeOv('ov-share');mockToast('Shared — thank you')">Send</button></p></details>
+    <details class="qa"><summary>Just share frank.my</summary><p>Pass the site on, keep your thread to yourself. <button style="text-decoration:underline" onclick="closeOv('ov-share');mockToast('frank.my copied')">Copy site link</button></p></details>
+  </div>
+</div>
+
+<div class="overlay" id="ov-slots" onclick="if(event.target===this)closeOv('ov-slots')">
+  <div class="sheet"><h3>3 answers developing.</h3>
+  <div class="lanes"><div class="lane">cafe weekends<span class="st">developing</span></div><div class="lane">lease review<span class="st q">queued</span></div><div class="lane">van vs ute<span class="st q">queued</span></div></div>
+  <p>A lane opens when one finishes — or unlock 10, once, forever.</p>
+  <div class="srow"><button class="btn lite" onclick="closeOv('ov-slots')">I’ll wait</button><button class="btn" onclick="closeOv('ov-slots');mockToast('Stripe $20 — 10 lanes unlocked')">10 lanes · $20</button></div></div>
+</div>
+
+<div class="overlay" id="ov-privacy" onclick="if(event.target===this)closeOv('ov-privacy')">
+  <div class="sheet"><h3>Private by default</h3>
+    <details class="qa"><summary>Only you can read your thread</summary><p>The key is made in your browser from your link + PIN. Neither is ever sent to us. We can’t read your stored thread — even if we wanted to.</p></details>
+    <details class="qa"><summary>An AI reads your question to answer it</summary><p>Decrypted only in memory at run time, sent to a model provider that doesn’t train on it, never stored readable. The code is open source — check it or run your own.</p></details>
+    <details class="qa"><summary>Email is for one thing</summary><p>“Your answer is ready.” Delete your thread and the address goes too. Or skip email entirely — then we hold nothing.</p></details>
+    <div class="srow"><button class="btn lite" onclick="closeOv('ov-privacy')">Done</button></div>
+  </div>
+</div>
+
+<div class="overlay" id="ov-menu" onclick="if(event.target===this)closeOv('ov-menu')">
+  <div class="sheet">
+    <details class="qa" open><summary>What is this?</summary><p>Ask a real problem. Overnight, serious AI works it — research, drafting, checking. By morning: a straight answer. Free.</p></details>
+    <details class="qa"><summary>Privacy</summary><p>Encrypted with your PIN. <button style="text-decoration:underline" onclick="closeOv('ov-menu');openOv('ov-privacy')">Details</button></p></details>
+    <details class="qa"><summary>Book Steven</summary><p>$300 flat. Solved or refunded. <button style="text-decoration:underline" onclick="closeOv('ov-menu');go('booking')">Open</button></p></details>
+    <div class="srow"><button class="btn lite" onclick="closeOv('ov-menu')">Done</button></div>
+  </div>
+</div>
+
+<div id="toast">·</div>
+
+<script>
+/* state — in-memory only */
+const state={screen:'landing',scenario:'happy',pin:'',noEmail:false,developed:false,answered:false,wrongTried:false};
+const $=id=>document.getElementById(id);
+
+/* info sheets: one short line each */
+const INFO={
+  free:['Free forever','Every answer, full depth, $0. Tips exist; nothing is ever paywalled.'],
+  signup:['No sign-up','No account. An email to deliver your answer — or skip even that.',1],
+  private:['Private','Encrypted with a PIN only you hold. We can’t read your thread.',1],
+  overnight:['Overnight','Deep research takes hours. Ask tonight, open it by 7 am.'],
+  pin:['Your PIN is the key','It never leaves your device, so nobody can reset it. Lose it, and the thread is gone — that’s what keeps it private.',1],
+  link:['Your link','Link + PIN are the only keys. Bookmark the link; remember the PIN.',1],
+  decrypt:['Decrypted here','The server only stores sealed data. Your browser opens it with your PIN.',1],
+  booking:['Booking','Pay $300 → pick a time → we define “solved” on the call. Then I work it: solved, refunded, or rescoped — in writing.']
+};
+function info(k){const[t,b,more]=INFO[k];$('infoTitle').textContent=t;$('infoBody').textContent=b;$('infoMore').hidden=!more;openOv('ov-info')}
+
+/* nav */
+function go(name){
+  state.screen=name;
+  document.querySelectorAll('.screen').forEach(s=>s.classList.remove('on'));
+  $('s-'+name).classList.add('on');
+  document.querySelectorAll('.fstep[data-go]').forEach(b=>b.classList.toggle('on',b.dataset.go===name));
+  $('timeskip').hidden=(name!=='status');
+  if(name==='thread'&&!state.answered){state.answered=true;$('answerprint').classList.add('developing')}
+  if(name==='shared'&&!state.sharedBuilt){
+    state.sharedBuilt=true;
+    const t=$('sharedscroll');
+    t.appendChild(document.querySelector('#s-thread .msg-user').cloneNode(true));
+    const a=$('answerprint').cloneNode(true);a.id='answershared';a.classList.remove('developing');
+    a.querySelectorAll('.askbtn,.bigger,.nexth').forEach(el=>el.remove());
+    t.appendChild(a);
+  }
+  window.scrollTo({top:0});
+}
+document.querySelectorAll('.fstep[data-go]').forEach(b=>b.addEventListener('click',()=>{
+  const t=b.dataset.go;
+  if(t==='thread'||t==='unlock'||t==='emailReady'){state.developed=true;finishSteps()}
+  go(t);
+}));
+
+/* landing */
+const NUDGE_TXT=['\n\nSolved looks like: ','\n\nTried so far: ','\n\nLimits (time / money): '];
+function addNudge(i){$('problem').value+=NUDGE_TXT[i];$('problem').focus();inputChg()}
+function inputChg(){const v=$('problem').value;$('sendBtn').disabled=v.trim().length<10;$('nudges').hidden=v.trim().length<10}
+$('problem').addEventListener('input',inputChg);
+
+/* pin sheet */
+function pinChg(){
+  const p=$('pin').value;let w=0,c='var(--danger)';
+  if(p.length){const L=/[a-z]/i.test(p),D=/\d/.test(p);
+    if(p.length>=6&&L&&D){w=100;c='var(--ok)'}else if(p.length>=6){w=60;c='var(--amber)'}else if(p.length>=4){w=30;c='var(--amber)'}else{w=12}}
+  $('sbar').style.width=w+'%';$('sbar').style.background=c;sealReady();
+}
+function sealReady(){const ok=state.noEmail||/.+@.+\..+/.test($('email').value);$('sealBtn').disabled=!(ok&&$('pin').value.length>=4)}
+$('pin').addEventListener('input',pinChg);
+$('email').addEventListener('input',sealReady);
+$('skipEmail').addEventListener('click',()=>{
+  state.noEmail=!state.noEmail;
+  $('email').disabled=state.noEmail;$('email').style.opacity=state.noEmail?'.35':'1';
+  $('skipEmail').textContent=state.noEmail?'Using link only — add email instead':'Skip — I’ll keep my link instead';
+  sealReady();
+});
+function sealJob(){
+  state.pin=$('pin').value;
+  $('receiptsub').textContent=state.noEmail?'Answer by 7:00 am. Keep your link.':'Tap the link in your email to start.';
+  $('openConfirm').hidden=state.noEmail;$('openStatus').hidden=!state.noEmail;
+  go('receipt');
+}
+
+/* status */
+function startDevelop(){applyScen();go('status')}
+function applyScen(){
+  $('budgetnote').hidden=state.scenario!=='budget';
+  $('eta').textContent=state.scenario==='budget'?'Ready by 7:00 am tomorrow':'Ready by 7:00 am';
+  $('st-confirm').innerHTML=(state.noEmail?'Verified':'Confirmed')+' <span class="t">9:48 pm</span>';
+  $('st-queue').innerHTML=(state.scenario==='budget'?'In tomorrow’s batch':'In tonight’s batch')+' <span class="t"></span>';
+}
+$('timeskip').addEventListener('click',()=>{state.developed=true;finishSteps();setTimeout(()=>go(state.noEmail?'unlock':'emailReady'),500)});
+function finishSteps(){
+  [['st-queue','Ran','2:04 am'],['st-run','Researched','2:31 am'],['st-check','Checked','2:52 am'],['st-ready','Delivered','6:12 am']]
+    .forEach(([id,txt,t])=>{const el=$(id);el.className='done';el.innerHTML=txt+' <span class="t">'+t+'</span>'});
+  $('statush').textContent='Done.';$('eta').textContent='Delivered 6:12 am';
+  $('statusdot').style.animation='none';$('statusdot').style.background='var(--ok)';
+}
+
+/* unlock */
+function tryUnlock(){
+  const a=$('pintry').value,exp=state.pin||'otter42';
+  const forceWrong=state.scenario==='wrongpin'&&!state.wrongTried;
+  if(forceWrong||a!==exp){state.wrongTried=true;$('pinerr').classList.add('on');
+    if(a===exp)$('pinerr').textContent='(mock: forced one failure — try again)';return}
+  $('pinerr').classList.remove('on');go('thread');
+}
+$('pintry').addEventListener('keydown',e=>{if(e.key==='Enter')tryUnlock()});
+
+/* follow-up suggestions */
+const NEXT_Q=[
+ 'Design my $22 brunch menu from my current kitchen',
+ 'Write my win-back message and list rules',
+ 'Build my 6-week Saturday scoreboard',
+ 'Break “turn my card-terminal data into a regulars engine” into steps I can do myself'
+];
+function askNext(i){const f=$('followup');f.value=NEXT_Q[i];f.focus();mockToast('Edit or send — free, answers by morning')}
+
+/* thread */
+function sendFollowup(){
+  const v=$('followup').value.trim();
+  if(!v){mockToast('Type a reply first');return}
+  const s=document.createElement('div');s.className='tstamp';s.textContent='sealed for tonight';
+  const m=document.createElement('div');m.className='msg-user';m.textContent=v;
+  const t=$('threadscroll');t.appendChild(s);t.appendChild(m);
+  $('followup').value='';t.scrollTop=t.scrollHeight;
+  mockToast('Answer by morning');
+}
+
+/* overlays */
+function openOv(id){$(id).classList.add('on')}
+function closeOv(id){$(id).classList.remove('on')}
+let toastT;
+function mockToast(m){const t=$('toast');t.textContent=m;t.style.transform='translateX(-50%) translateY(0)';clearTimeout(toastT);toastT=setTimeout(()=>t.style.transform='translateX(-50%) translateY(80px)',2200)}
+
+/* scenarios / reset */
+$('scen').addEventListener('change',e=>{
+  state.scenario=e.target.value;
+  if(state.scenario==='noemail'&&!state.noEmail)$('skipEmail').click();
+  if(state.screen==='status')applyScen();
+});
+function resetAll(){
+  const sc=state.scenario;
+  Object.assign(state,{screen:'landing',pin:'',noEmail:false,developed:false,answered:false,wrongTried:false});
+  ['problem','email','pin','pintry','followup'].forEach(id=>$(id).value='');
+  $('email').disabled=false;$('email').style.opacity='1';
+  $('skipEmail').textContent='Skip — I’ll keep my link instead';
+  $('pinerr').classList.remove('on');$('answerprint').classList.remove('developing');
+  $('statush').textContent='Working on it.';$('statusdot').style.animation='';$('statusdot').style.background='var(--amber)';
+  $('st-queue').className='now';$('st-queue').innerHTML='In tonight’s batch <span class="t"></span>';
+  [['st-run','Researching'],['st-check','Checking'],['st-ready','Delivered']].forEach(([id,txt])=>{const el=$(id);el.className='todo';el.innerHTML=txt+' <span class="t"></span>'});
+  $('eta').textContent='Ready by 7:00 am';
+  inputChg();pinChg();go('landing');
+}
+inputChg();pinChg();
+</script>
+</body>
+</html>

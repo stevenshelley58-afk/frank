@@ -1,0 +1,291 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#14231e">
+  <title>Frank — Living Frame + Console</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <nav class="icon-rail" aria-label="Primary">
+    <button class="brand" data-go="home" aria-label="Frank home">f.</button>
+    <div class="rail-stack">
+      <button class="rail-btn active" data-go="home" aria-label="Living Frame"><svg viewBox="0 0 24 24"><path d="M4 5.5h16v13H4zM4 10h16M9 10v8.5"/></svg><span class="tooltip">Living frame</span></button>
+      <button class="rail-btn" data-go="delegate" aria-label="Delegate work"><svg viewBox="0 0 24 24"><path d="M12 3v18M3 12h18"/></svg><span class="tooltip">Delegate work</span></button>
+      <button class="rail-btn" data-command aria-label="Search"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg><span class="tooltip">Search · ⌘K</span></button>
+    </div>
+    <div class="rail-stack bottom">
+      <button class="rail-btn" data-go="console" aria-label="Console"><span class="rail-dot"></span><svg viewBox="0 0 24 24"><path d="M4 5h16v14H4zM7.5 9l2.5 2.5L7.5 14M12.5 14h4"/></svg><span class="tooltip">Console · engine room</span></button>
+      <button class="rail-btn" aria-label="Help"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.8 9.3a2.5 2.5 0 0 1 4.8 1c0 1.7-2.6 2-2.6 3.7M12 17.5v.1"/></svg><span class="tooltip">Help</span></button>
+      <div class="rail-avatar" aria-label="Steven">SS</div>
+    </div>
+  </nav>
+
+  <aside class="side-panel" id="home-side">
+    <div class="side-top"><div><div class="eyebrow">Your frank</div><div class="side-title">Good morning.</div></div><button class="icon-button" data-go="delegate" aria-label="New chat"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button></div>
+    <section class="side-section">
+      <div class="side-label"><span>Rooms</span><span class="side-count">5</span></div>
+      <button class="room-row active"><span class="room-mark" style="background:var(--orange)"></span><span>Office</span><span class="room-meta">3</span></button>
+      <button class="room-row"><span class="room-mark" style="background:var(--blue)"></span><span>Studio</span><span class="room-meta">1</span></button>
+      <button class="room-row"><span class="room-mark" style="background:var(--acid)"></span><span>Workshop</span><span class="room-meta">2</span></button>
+      <button class="room-row"><span class="room-mark" style="background:var(--yellow)"></span><span>Kitchen</span></button>
+      <button class="room-row"><span class="room-mark" style="background:var(--lav)"></span><span>Lounge</span></button>
+    </section>
+    <section class="side-section">
+      <div class="side-label"><span>Recent</span><span>View all</span></div>
+      <button class="project-row"><span class="project-icon">F</span><span>Living Frame rebuild</span></button>
+      <button class="project-row"><span class="project-icon">B</span><span>Blockwise release</span></button>
+      <button class="project-row"><span class="project-icon">P</span><span>Pavone launch plan</span></button>
+    </section>
+    <section class="side-section">
+      <div class="side-label"><span>Projects</span><span class="side-count">4</span></div>
+      <button class="project-row"><span class="room-mark" style="background:var(--mint)"></span><span>Frank core</span></button>
+      <button class="project-row"><span class="room-mark" style="background:var(--lav)"></span><span>Research system</span></button>
+    </section>
+    <div class="side-footer-note">The frame shows what needs you.<br>The Console shows the machine.</div>
+  </aside>
+
+  <aside class="side-panel" id="console-side" style="display:none">
+    <button class="console-nav-item back-home" data-go="home"><svg viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></svg><span>Back to your frank</span></button>
+    <div class="side-top"><div><div class="eyebrow">Operator</div><div class="side-title">Console</div></div><button class="icon-button" data-command aria-label="Find module"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></button></div>
+    <section class="side-section">
+      <div class="side-label"><span>Machine</span></div>
+      <button class="console-nav-item active" data-go="console"><span>Overview</span><span class="nav-status"></span></button>
+      <button class="console-nav-item" data-go="harness"><span>Harness & gateway</span><span class="nav-status"></span></button>
+      <button class="console-nav-item" data-go="skills"><span>Skills</span><span class="nav-status"></span></button>
+      <button class="console-nav-item" data-go="tools"><span>Tools & connectors</span><span class="nav-status" style="background:var(--yellow)"></span></button>
+      <button class="console-nav-item" data-go="graph"><span>Memory graph</span><span class="nav-status"></span></button>
+    </section>
+    <section class="side-section">
+      <div class="side-label"><span>Workspace</span></div>
+      <button class="console-nav-item"><span>Files</span></button><button class="console-nav-item"><span>Research</span></button><button class="console-nav-item"><span>Memory</span></button><button class="console-nav-item"><span>Code graph</span></button><button class="console-nav-item"><span>Previews</span></button>
+    </section>
+    <section class="side-section">
+      <div class="side-label"><span>Operations</span></div>
+      <button class="console-nav-item"><span>Costs</span></button><button class="console-nav-item"><span>Health & audit</span></button><button class="console-nav-item"><span>Backups</span></button>
+    </section>
+    <div class="side-footer-note"><span class="status-light" style="display:inline-block;margin-right:8px"></span>Core online · 11:42 AWST</div>
+  </aside>
+
+  <main class="content-shell">
+    <section class="view active" data-view="home">
+      <div class="home-view">
+        <div class="mobile-top"><span class="mobile-logo">frank.</span><button class="keyboard-button" data-command>⌘ K</button></div>
+        <header class="home-header">
+          <div><div class="eyebrow">Tuesday · 11 August</div><h1>Here’s what’s <em>alive.</em></h1></div>
+          <div class="header-actions"><div class="status-pill"><span class="status-light"></span>Cell reachable · just now</div><button class="keyboard-button" data-command>⌘ K</button></div>
+        </header>
+        <div class="frame-wrap">
+          <div class="frame-grid">
+            <article class="frame-card">
+              <header class="card-head"><span class="panel-glyph" style="background:var(--orange2)">03</span><span class="card-title">Waiting on you</span><span class="card-subtitle">2 decisions · 1 write</span></header>
+              <div class="card-body">
+                <div class="frame-row"><span class="row-icon">ADR</span><div class="row-main"><span class="row-title">Use Cognee for memory projection?</span><span class="row-detail">Frank core · filed 18m ago</span></div><div class="action-pair"><button class="micro-btn approve" data-resolve>Approve</button><button class="micro-btn" data-reject>No</button></div></div>
+                <div class="frame-row"><span class="row-icon">FS</span><div class="row-main"><span class="row-title">Publish revised carrier brief</span><span class="row-detail">Staged write · 2 fields changed</span></div><div class="action-pair"><button class="micro-btn approve" data-resolve>Approve</button><button class="micro-btn" data-reject>No</button></div></div>
+                <div class="frame-row"><span class="row-icon">$</span><div class="row-main"><span class="row-title">Raise research run budget to $8?</span><span class="row-detail">Blockwise · requested by Goose</span></div><div class="action-pair"><button class="micro-btn approve" data-resolve>Approve</button><button class="micro-btn" data-reject>No</button></div></div>
+              </div>
+            </article>
+            <article class="frame-card">
+              <header class="card-head"><span class="panel-glyph" style="background:var(--acid)"><span class="pulse"></span></span><span class="card-title">Running now</span><span class="card-subtitle">3 live across 2 rooms</span></header>
+              <div class="card-body">
+                <div class="frame-row"><span class="row-icon" style="background:var(--blue)">C</span><div class="row-main"><span class="row-title">Rebuilding the Living Frame shell</span><span class="row-detail"><span class="tiny-chip">Chat</span> Claude Sonnet · 1m 12s</span></div><button class="micro-btn stop" data-stop>Stop</button></div>
+                <div class="frame-row"><span class="row-icon" style="background:var(--orange2)">W</span><div class="row-main"><span class="row-title">Researching carrier risk signals</span><span class="row-detail"><span class="tiny-chip">Workbench</span> Goose · 8m 03s</span></div><button class="micro-btn stop" data-stop>Stop</button></div>
+                <div class="frame-row"><span class="row-icon" style="background:var(--lav)">M</span><div class="row-main"><span class="row-title">Daily memory consolidation</span><span class="row-detail"><span class="tiny-chip">Mission</span> Container agent · 3m 46s</span></div><button class="micro-btn stop" data-stop>Stop</button></div>
+              </div>
+            </article>
+            <article class="frame-card">
+              <header class="card-head"><span class="panel-glyph" style="background:var(--mint)">✓</span><span class="card-title">Receipts</span><span class="card-subtitle">Today’s ledger · 7</span></header>
+              <div class="card-body">
+                <div class="frame-row"><span class="row-icon receipt-check">✓</span><div class="row-main"><span class="row-title">Preview lane health check passed</span><span class="row-detail">11:31 · Infrastructure · 4 checks</span></div><span class="receipt-amount">$0.03</span></div>
+                <div class="frame-row"><span class="row-icon receipt-check">✓</span><div class="row-main"><span class="row-title">Drafted Blockwise release notes</span><span class="row-detail">10:48 · Workbench · 3 artifacts</span></div><span class="receipt-amount">$0.41</span></div>
+                <div class="frame-row"><span class="row-icon" style="color:var(--danger)">■</span><div class="row-main"><span class="row-title">Stopped competitor scan</span><span class="row-detail">09:27 · Stopped by Steven · receipt saved</span></div><span class="receipt-amount">$0.18</span></div>
+              </div>
+            </article>
+            <article class="frame-card">
+              <header class="card-head"><span class="panel-glyph" style="background:var(--yellow)">11</span><span class="card-title">Today</span><span class="card-subtitle">Work + calendar</span></header>
+              <div class="card-body">
+                <div class="timeline-row"><span class="time">09:00</span><span class="time-mark" style="background:var(--blue)"></span><div class="row-main"><span class="row-title">Frank product review</span><span class="row-detail">Calendar · 45 min · Office</span></div></div>
+                <div class="timeline-row"><span class="time">11:30</span><span class="time-mark" style="background:var(--orange)"></span><div class="row-main"><span class="row-title">Review Living Frame mock</span><span class="row-detail">Work item · due today</span></div></div>
+                <div class="timeline-row"><span class="time">14:00</span><span class="time-mark" style="background:var(--acid)"></span><div class="row-main"><span class="row-title">VPS deploy window</span><span class="row-detail">Calendar · 30 min · Workshop</span></div></div>
+                <div class="coverage">Coverage: work items + calendar. Email, goals and routines are not connected yet.</div>
+              </div>
+            </article>
+          </div>
+        </div>
+        <div class="composer-wrap">
+          <div class="composer">
+            <textarea aria-label="Message Frank" placeholder="Ask Frank, or describe work to delegate…"></textarea>
+            <div class="composer-bar">
+              <button class="attach-btn" aria-label="Attach">+</button>
+              <button class="select-trigger" id="model-trigger"><span class="status-light" style="width:6px;height:6px;box-shadow:none"></span><span id="model-label">Auto</span><span>⌄</span></button>
+              <button class="select-trigger" id="thinking-trigger"><span id="thinking-label">Think</span><span>⌄</span></button>
+              <button class="send-btn" aria-label="Send"><svg viewBox="0 0 24 24"><path d="m5 12 14-7-4.5 14-3-5.5zM11.5 13.5 19 5"/></svg></button>
+            </div>
+            <div class="dropdown" id="model-menu">
+              <div class="drop-label">Model for this message</div>
+              <button class="drop-item selected" data-model="Auto"><span class="provider-logo">A</span><span><strong>Auto</strong><small>Best live route for this room</small></span><span class="drop-meta">Preferred</span></button>
+              <button class="drop-item" data-model="DeepSeek V3.2"><span class="provider-logo" style="background:#326ca8">D</span><span><strong>DeepSeek V3.2</strong><small>Fast general · direct provider</small></span><span class="drop-meta">$</span></button>
+              <button class="drop-item" data-model="Claude Sonnet"><span class="provider-logo" style="background:#b45b3d">C</span><span><strong>Claude Sonnet</strong><small>Deep reasoning · Anthropic</small></span><span class="drop-meta">$$$</span></button>
+              <button class="drop-item" data-model="Goose route"><span class="provider-logo" style="background:#4f745f">G</span><span><strong>Goose route</strong><small>Room harness · tool-enabled</small></span><span class="drop-meta">Tools</span></button>
+              <div class="registry-note">Only healthy models from the live registry appear here.</div>
+            </div>
+            <div class="dropdown thinking" id="thinking-menu">
+              <div class="drop-label">Reasoning</div>
+              <button class="drop-item" data-thinking="Off"><span class="provider-logo">—</span><span><strong>Off</strong><small>Fastest response</small></span></button>
+              <button class="drop-item selected" data-thinking="Think"><span class="provider-logo">T</span><span><strong>Think</strong><small>Balanced by default</small></span></button>
+              <button class="drop-item" data-thinking="Deep"><span class="provider-logo">D</span><span><strong>Deep</strong><small>More time and cost</small></span></button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view console-view" data-view="console">
+      <header class="console-header">
+        <div><div class="eyebrow">Frank / system</div><h1>The engine room.</h1></div>
+        <div class="console-header-meta"><div class="metric"><strong>11/13</strong><span>Healthy modules</span></div><div class="metric"><strong>$4.82</strong><span>Cost today</span></div><div class="metric"><strong>03</strong><span>Active runs</span></div></div>
+      </header>
+      <div class="console-content">
+        <div class="console-intro"><div><h2>Understand, configure, intervene.</h2><p>Everything Frank can use, everything it knows, and every route work can take — in one operational surface.</p></div><button class="search-box" data-command>Find a module or action… <kbd>⌘ K</kbd></button></div>
+        <div class="system-strip">
+          <div class="system-cell"><div class="eyebrow">System posture</div><div class="system-value"><span class="status-light"></span>Operational <small>99.98%</small></div></div>
+          <div class="system-cell"><div class="eyebrow">Default route</div><div class="system-value">Auto / Office <small>live</small></div></div>
+          <div class="system-cell"><div class="eyebrow">Knowledge</div><div class="system-value">1,284 nodes <small>+18 today</small></div></div>
+          <div class="system-cell"><div class="eyebrow">Last backup</div><div class="system-value">38m ago <small>verified</small></div></div>
+        </div>
+        <div class="module-grid">
+          <button class="module-card" data-go="harness" style="--module-color:var(--orange2)"><div class="module-top"><span class="module-icon">H/G</span><span class="health"><i class="health-dot"></i>healthy</span></div><h3>Harness & gateway</h3><p>Adapters, providers, models, routes, capability aliases and the real cost of every run.</p><div class="module-meta">5 harnesses · 8 models · 3 live sessions</div></button>
+          <button class="module-card" data-go="skills" style="--module-color:var(--acid)"><div class="module-top"><span class="module-icon">SK</span><span class="health"><i class="health-dot"></i>indexed</span></div><h3>Skills</h3><p>Versioned instruction and workflow packages. Inspect references, lifecycle and launch work.</p><div class="module-meta">42 active · 3 in progress · 6 deprecated</div></button>
+          <button class="module-card" data-go="graph" style="--module-color:var(--lav)"><div class="module-top"><span class="module-icon">MG</span><span class="health"><i class="health-dot"></i>fresh</span></div><h3>Memory graph</h3><p>Trace memories to rooms, work, receipts and skills without inventing missing relationships.</p><div class="module-meta">1,284 nodes · 2,912 evidenced edges</div></button>
+          <button class="module-card" data-go="tools" style="--module-color:var(--blue)"><div class="module-top"><span class="module-icon">T+C</span><span class="health"><i class="health-dot degraded"></i>2 degraded</span></div><h3>Tools & connectors</h3><p>MCP servers, channels and external dependencies with health, scope and pause controls.</p><div class="module-meta">31 tools · 9 connectors · 1 paused</div></button>
+          <button class="module-card" style="--module-color:var(--mint)"><div class="module-top"><span class="module-icon">FX</span><span class="health"><i class="health-dot"></i>healthy</span></div><h3>Files & explorer</h3><p>Repositories, room bindings, artifacts, previews and AI-assisted file organisation.</p><div class="module-meta">6 roots · 184 artifacts · proxy connected</div></button>
+          <button class="module-card" style="--module-color:var(--yellow)"><div class="module-top"><span class="module-icon">RS</span><span class="health"><i class="health-dot"></i>healthy</span></div><h3>Research</h3><p>Blockwise stages, queues, evidence quality and pipeline health from source to brief.</p><div class="module-meta">2 running · 4 queued · 98.2% source coverage</div></button>
+          <button class="module-card" style="--module-color:#c5dccd"><div class="module-top"><span class="module-icon">M</span><span class="health"><i class="health-dot"></i>healthy</span></div><h3>Memory</h3><p>Review, edit, expire and delete stored memories with BRAIN-006 controls intact.</p><div class="module-meta">836 memories · 5 expiring soon</div></button>
+          <button class="module-card" style="--module-color:#c7d8e4"><div class="module-top"><span class="module-icon">CG</span><span class="health"><i class="health-dot"></i>indexed</span></div><h3>Code graph</h3><p>Explore codebase structure, symbol relationships and the call paths that matter.</p><div class="module-meta">4 packages · refreshed 12m ago</div></button>
+          <button class="module-card" style="--module-color:#e2cbc1"><div class="module-top"><span class="module-icon">PR</span><span class="health"><i class="health-dot"></i>available</span></div><h3>Previews</h3><p>Browse preserved interface versions and promote reviewed work through the release lane.</p><div class="module-meta">8 live previews · newest 4m ago</div></button>
+        </div>
+      </div>
+    </section>
+
+    <section class="view module-page" data-view="skills">
+      <header class="module-page-head"><div><div class="eyebrow">Console / registry</div><h1>Skills</h1></div><div class="head-actions"><button class="secondary-btn">View references</button><button class="primary-btn" data-go="delegate">Delegate with skill</button></div></header>
+      <div class="module-body">
+        <div class="skills-layout">
+          <div class="category-list">
+            <input class="filter-input" placeholder="Filter registry…"><div class="eyebrow" style="padding:2px 8px 8px">Lifecycle</div>
+            <button class="category-btn active">All active <span>42</span></button><button class="category-btn">In progress <span>3</span></button><button class="category-btn">Deprecated <span>6</span></button>
+            <div class="eyebrow" style="padding:18px 8px 8px">Category</div>
+            <button class="category-btn">Engineering <span>17</span></button><button class="category-btn">Productivity <span>9</span></button><button class="category-btn">Personal <span>6</span></button><button class="category-btn">Research <span>5</span></button><button class="category-btn">Operations <span>5</span></button>
+          </div>
+          <div class="skill-list">
+            <div class="eyebrow" style="padding:4px 10px 9px">Engineering / 17</div>
+            <button class="skill-card active"><div class="skill-name">ask-matt</div><div class="skill-desc">Routes architectural questions through a structured expert review.</div><div class="skill-tags"><span class="tiny-chip">router</span><span class="tiny-chip">active</span></div></button>
+            <button class="skill-card"><div class="skill-name">preview-deploy</div><div class="skill-desc">Packages static output and publishes a preserved hosted preview.</div><div class="skill-tags"><span class="tiny-chip">deployment</span><span class="tiny-chip">active</span></div></button>
+            <button class="skill-card"><div class="skill-name">frank-tdd</div><div class="skill-desc">Contract-first test workflow for Frank services and packages.</div><div class="skill-tags"><span class="tiny-chip">quality</span></div></button>
+            <button class="skill-card"><div class="skill-name">code-review</div><div class="skill-desc">Evidence-led review with risk-ranked, actionable findings.</div><div class="skill-tags"><span class="tiny-chip">review</span></div></button>
+            <button class="skill-card"><div class="skill-name">prototype</div><div class="skill-desc">Builds reviewable interface prototypes in the preview lane.</div><div class="skill-tags"><span class="tiny-chip">design</span></div></button>
+          </div>
+          <div class="skill-detail">
+            <div class="eyebrow">skills/engineering</div><h2>ask-matt</h2><p>Routes high-impact architecture questions to a structured second-opinion flow before implementation.</p>
+            <div class="code-preview">---
+name: ask-matt
+description: Expert architecture router
+model-invocation: allowed
+---
+
+1. Frame the decision and constraints
+2. Collect concrete repository evidence
+3. Return a recommendation + dissent
+4. Record the choice in the receipt</div>
+            <div class="used-by"><div class="eyebrow" style="margin-bottom:6px">Referenced by</div><div class="used-row">Architecture review flow <span>flows/engineering</span></div><div class="used-row">Workshop room pack <span>room:workshop</span></div><div class="used-row">Frank core project <span>project:frank</span></div></div>
+            <button class="run-skill" data-go="delegate">Run this skill →</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="view module-page" data-view="harness">
+      <header class="module-page-head"><div><div class="eyebrow">Console / execution</div><h1>Harness & gateway</h1></div><div class="head-actions"><button class="secondary-btn">Run health check</button><button class="primary-btn">Evaluate a route</button></div></header>
+      <div class="module-body">
+        <div class="harness-summary"><div class="summary-card"><div class="eyebrow">System route</div><strong>Auto is healthy.</strong><p>5 harness adapters · 8 selectable models · no expected-model drift</p></div><div class="summary-card"><div class="eyebrow">Spend / today</div><strong>$4.82</strong><p>74% DeepSeek · 21% Claude · 5% local</p></div><div class="summary-card"><div class="eyebrow">Live work</div><strong>3 sessions</strong><p>2 chat turns · 1 workbench · 0 missions</p></div></div>
+        <div class="section-heading"><h2>Provider inventory</h2><span>Healthy entries can be selected at the point of use</span></div>
+        <table class="harness-table"><thead><tr><th>Provider / model</th><th>Capability</th><th>Health</th><th>Runs</th><th>Share</th><th>Cost</th><th>Default use</th></tr></thead><tbody>
+          <tr><td><div class="provider-name"><span class="provider-badge" style="background:#326ca8">D</span>DeepSeek V3.2</div></td><td><span class="tiny-chip">fast-general</span></td><td><span class="health"><i class="health-dot"></i>healthy · 184ms</span></td><td>31</td><td><div class="bar"><span style="width:74%"></span></div></td><td class="cost">$3.57</td><td><select class="route-select"><option>Preferred</option><option>Use once</option><option>After eval</option></select></td></tr>
+          <tr><td><div class="provider-name"><span class="provider-badge" style="background:#b45b3d">C</span>Claude Sonnet</div></td><td><span class="tiny-chip">deep-reasoning</span></td><td><span class="health"><i class="health-dot"></i>healthy · 612ms</span></td><td>8</td><td><div class="bar"><span style="width:21%;background:var(--lav)"></span></div></td><td class="cost">$1.02</td><td><select class="route-select"><option>Available</option><option>Use once</option><option>After eval</option></select></td></tr>
+          <tr><td><div class="provider-name"><span class="provider-badge" style="background:#4f745f">G</span>Goose headless</div></td><td><span class="tiny-chip">code-builder</span></td><td><span class="health"><i class="health-dot"></i>healthy · ready</span></td><td>2</td><td><div class="bar"><span style="width:8%;background:var(--mint)"></span></div></td><td class="cost">$0.23</td><td><select class="route-select"><option>Workbench</option><option>Use once</option><option>Preferred</option></select></td></tr>
+          <tr><td><div class="provider-name"><span class="provider-badge" style="background:#6f635b">L</span>Letta ACP</div></td><td><span class="tiny-chip">long-memory</span></td><td><span class="health"><i class="health-dot degraded"></i>degraded · 1.8s</span></td><td>1</td><td><div class="bar"><span style="width:3%;background:var(--yellow)"></span></div></td><td class="cost">$0.00</td><td><select class="route-select"><option>Fallback</option><option>Pause</option></select></td></tr>
+        </tbody></table>
+        <div class="gateway-section"><div class="section-heading"><h2>Room routes</h2><span>Changes affect the next turn; active runs keep their recorded route</span></div><div class="route-grid">
+          <div class="route-card"><div class="route-room"><span class="room-mark" style="background:var(--orange)"></span>Office</div><select><option>Auto · DeepSeek</option><option>Claude Sonnet</option><option>Goose route</option></select><div class="route-meta">fast-general · healthy</div></div>
+          <div class="route-card"><div class="route-room"><span class="room-mark" style="background:var(--blue)"></span>Studio</div><select><option>Claude Sonnet</option><option>Auto · DeepSeek</option></select><div class="route-meta">deep-reasoning · healthy</div></div>
+          <div class="route-card"><div class="route-room"><span class="room-mark" style="background:var(--acid)"></span>Workshop</div><select><option>Goose route</option><option>Auto · DeepSeek</option></select><div class="route-meta">code-builder · healthy</div></div>
+          <div class="route-card"><div class="route-room"><span class="room-mark" style="background:var(--yellow)"></span>Kitchen</div><select><option>Auto · DeepSeek</option><option>Claude Sonnet</option></select><div class="route-meta">fast-general · healthy</div></div>
+          <div class="route-card"><div class="route-room"><span class="room-mark" style="background:var(--lav)"></span>Lounge</div><select><option>Letta memory</option><option>Auto · DeepSeek</option></select><div class="route-meta">long-memory · degraded</div></div>
+        </div></div>
+      </div>
+    </section>
+
+    <section class="view module-page" data-view="graph">
+      <header class="module-page-head"><div><div class="eyebrow">Console / knowledge</div><h1>Memory graph</h1></div><div class="head-actions"><button class="secondary-btn">Provenance only ✓</button><button class="primary-btn">Find a node</button></div></header>
+      <div class="module-body">
+        <div class="graph-layout">
+          <div class="graph-canvas">
+            <svg viewBox="0 0 820 575" preserveAspectRatio="none" aria-hidden="true"><line class="graph-line hot" x1="390" y1="260" x2="190" y2="135"/><line class="graph-line hot" x1="390" y1="260" x2="630" y2="126"/><line class="graph-line" x1="390" y1="260" x2="680" y2="330"/><line class="graph-line" x1="390" y1="260" x2="475" y2="455"/><line class="graph-line" x1="390" y1="260" x2="180" y2="420"/><line class="graph-line" x1="190" y1="135" x2="390" y2="75"/><line class="graph-line" x1="630" y1="126" x2="760" y2="75"/><line class="graph-line" x1="680" y1="330" x2="740" y2="455"/><line class="graph-line" x1="180" y1="420" x2="70" y2="315"/></svg>
+            <button class="node big memory active" style="left:43%;top:38%">Memory<br>#M-284</button><button class="node mid work" style="left:18%;top:15%">LF-03<br>frame feed</button><button class="node mid receipt" style="left:73%;top:13%">Receipt<br>#R-981</button><button class="node mid room" style="left:78%;top:50%">Workshop<br>room</button><button class="node mid skill" style="left:53%;top:75%">preview-<br>deploy</button><button class="node mid work" style="left:17%;top:70%">Workbench<br>#WB-044</button><button class="node small receipt" style="left:44%;top:5%">ADR<br>022</button><button class="node small skill" style="left:88%;top:6%">frank<br>tdd</button><button class="node small room" style="left:87%;top:78%">Office</button><button class="node small receipt" style="left:5%;top:51%">R-977</button>
+            <div class="graph-legend"><span class="legend-item"><i class="legend-dot" style="background:var(--lav)"></i>Memory</span><span class="legend-item"><i class="legend-dot" style="background:var(--orange2)"></i>Work</span><span class="legend-item"><i class="legend-dot" style="background:var(--acid)"></i>Receipt</span><span class="legend-item"><i class="legend-dot" style="background:var(--blue)"></i>Room</span><span class="legend-item"><i class="legend-dot" style="background:var(--mint)"></i>Skill</span></div>
+          </div>
+          <aside class="graph-detail"><div class="eyebrow">Memory / evidence</div><h2>Preview work is reviewed live.</h2><p>Steven prefers a hosted preview as the first visible artifact for every buildable interface task.</p><div class="relation"><span class="relation-label">Supports work item</span><strong>LF-03 · One frame feed</strong></div><div class="relation"><span class="relation-label">Observed in room</span><strong>Workshop · 6 conversations</strong></div><div class="relation"><span class="relation-label">Produced receipt</span><strong>#R-981 · Preview deployed</strong></div><div class="relation"><span class="relation-label">Invoked skill</span><strong>preview-deploy</strong></div><div class="provenance">Source: conversation #CH-411<br>Captured: 2026-08-11 10:22 AWST<br>Confidence: direct instruction<br>Projection: provenance.v1</div></aside>
+        </div>
+      </div>
+    </section>
+
+    <section class="view module-page" data-view="tools">
+      <header class="module-page-head"><div><div class="eyebrow">Console / dependencies</div><h1>Tools & connectors</h1></div><div class="head-actions"><button class="secondary-btn">Audit log</button><button class="primary-btn">Add connection</button></div></header>
+      <div class="module-body">
+        <div class="section-heading"><h2>External dependencies</h2><span>Pausing a connector blocks its next use with an honest receipt</span></div>
+        <div class="tool-summary"><button class="filter-chip active">All · 9</button><button class="filter-chip">Healthy · 6</button><button class="filter-chip">Degraded · 2</button><button class="filter-chip">Paused · 1</button></div>
+        <div class="connector-grid">
+          <article class="connector-card"><div class="connector-top"><span class="connector-logo" style="background:#3f7c4b">G</span><div class="connector-head"><strong>Google Workspace</strong><span>Calendar · Drive · Gmail</span></div><button class="switch on" aria-label="Pause Google"></button></div><div class="connector-stats"><div class="stat-box"><strong>184ms</strong><span>Latency</span></div><div class="stat-box"><strong>12:41</strong><span>Last success</span></div></div><div class="connector-foot"><span class="health"><i class="health-dot"></i>healthy</span><button>Inspect tools →</button></div></article>
+          <article class="connector-card"><div class="connector-top"><span class="connector-logo" style="background:#c14d36">M</span><div class="connector-head"><strong>MCP tool server</strong><span>18 registered tools</span></div><button class="switch on" aria-label="Pause MCP"></button></div><div class="connector-stats"><div class="stat-box"><strong>98.4%</strong><span>Success</span></div><div class="stat-box"><strong>12:39</strong><span>Last success</span></div></div><div class="connector-foot"><span class="health"><i class="health-dot"></i>healthy</span><button>Inspect tools →</button></div></article>
+          <article class="connector-card"><div class="connector-top"><span class="connector-logo" style="background:#6e5c91">W</span><div class="connector-head"><strong>WhatsApp</strong><span>Inbound channel</span></div><button class="switch" aria-label="Enable WhatsApp"></button></div><div class="connector-stats"><div class="stat-box"><strong>—</strong><span>Latency</span></div><div class="stat-box"><strong>Gate G3</strong><span>Blocked by</span></div></div><div class="connector-foot"><span class="health"><i class="health-dot degraded"></i>paused · human gate</span><button>View gate →</button></div></article>
+          <article class="connector-card"><div class="connector-top"><span class="connector-logo" style="background:#275f87">B</span><div class="connector-head"><strong>Blockwise</strong><span>Research pipeline</span></div><button class="switch on"></button></div><div class="connector-stats"><div class="stat-box"><strong>423ms</strong><span>Latency</span></div><div class="stat-box"><strong>12:30</strong><span>Last success</span></div></div><div class="connector-foot"><span class="health"><i class="health-dot"></i>healthy</span><button>Inspect tools →</button></div></article>
+          <article class="connector-card"><div class="connector-top"><span class="connector-logo" style="background:#8d7244">C</span><div class="connector-head"><strong>CodeGraph</strong><span>Repository intelligence</span></div><button class="switch on"></button></div><div class="connector-stats"><div class="stat-box"><strong>1.2s</strong><span>Query avg.</span></div><div class="stat-box"><strong>12m</strong><span>Index age</span></div></div><div class="connector-foot"><span class="health"><i class="health-dot"></i>healthy</span><button>Open graph →</button></div></article>
+          <article class="connector-card"><div class="connector-top"><span class="connector-logo" style="background:#915252">V</span><div class="connector-head"><strong>VPS preview lane</strong><span>Static deploy service</span></div><button class="switch on"></button></div><div class="connector-stats"><div class="stat-box"><strong>846ms</strong><span>Latency</span></div><div class="stat-box"><strong>4m</strong><span>Latest deploy</span></div></div><div class="connector-foot"><span class="health"><i class="health-dot"></i>healthy</span><button>Open previews →</button></div></article>
+        </div>
+      </div>
+    </section>
+
+    <section class="view module-page" data-view="delegate">
+      <header class="module-page-head"><div><div class="eyebrow">Frank / new work</div><h1>Delegate a run</h1></div><div class="head-actions"><button class="secondary-btn" data-go="home">Cancel</button></div></header>
+      <div class="module-body">
+        <div class="delegate-layout">
+          <div class="delegate-card"><div class="eyebrow">Workbench task</div><h2>Tell Frank what “done” means.</h2><div class="field"><label>Task</label><input value="Review the Living Frame implementation against the accepted mock"></div><div class="field"><label>Outcome</label><textarea>Check the four-panel frame, selector truthfulness, Console module reachability and keyboard navigation. Return findings as an evidence-linked receipt.</textarea></div><div class="selector-grid"><div class="field"><label>Harness</label><select><option>Auto · recommended</option><option>Goose headless</option><option>Container agent</option><option>CLI headless</option></select></div><div class="field"><label>Model</label><select><option>Auto · live registry</option><option>DeepSeek V3.2</option><option>Claude Sonnet</option></select></div></div><div class="truth-note">Auto remains the default. Only healthy options the runner can genuinely execute are selectable.</div></div>
+          <aside class="delegate-card"><div class="eyebrow">Route preview</div><h2>Auto / code-builder</h2><div class="estimate-row"><span>Harness</span><span>Goose headless</span></div><div class="estimate-row"><span>Model</span><span>DeepSeek V3.2</span></div><div class="estimate-row"><span>Estimated time</span><span>6–10 min</span></div><div class="estimate-row"><span>Expected cost</span><span>$0.42–$0.90</span></div><div class="estimate-row"><span>Tools</span><span>Files · Browser · Preview</span></div><button class="launch-btn" data-launch>Start workbench →</button></aside>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-backdrop" id="command-modal" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="command-palette">
+    <div class="command-input"><span>⌕</span><input id="command-search" placeholder="Find anything in Frank…"><kbd>Esc</kbd></div>
+    <div class="command-list">
+      <div class="command-group">Go to</div>
+      <button class="command-item" data-go="home"><span class="command-icon">LF</span>Living Frame <small>Home</small></button>
+      <button class="command-item" data-go="console"><span class="command-icon">CO</span>Console overview <small>System</small></button>
+      <button class="command-item" data-go="harness"><span class="command-icon">H/G</span>Harness & gateway <small>Module</small></button>
+      <button class="command-item" data-go="skills"><span class="command-icon">SK</span>Skills registry <small>Module</small></button>
+      <button class="command-item" data-go="graph"><span class="command-icon">MG</span>Memory graph <small>Module</small></button>
+      <button class="command-item" data-go="tools"><span class="command-icon">T+C</span>Tools & connectors <small>Module</small></button>
+      <div class="command-group">Actions</div>
+      <button class="command-item" data-go="delegate"><span class="command-icon">＋</span>Delegate new work <small>⌘ N</small></button>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>
