@@ -80,6 +80,7 @@ import { StagedWriteService } from './services/workbench/staged-write.js';
 import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { chatRoutes, registerChatRoutes } from './routes/chats.js';
+import { chatTurnRoutes, registerChatTurnRoutes } from './routes/chat-turns.js';
 import { harnessControlRoutes, registerHarnessControlRoutes } from './routes/harness-control.js';
 import { attachmentUploadRoutes, registerAttachmentUploadRoutes } from './routes/attachment-uploads.js';
 import { attachmentRoutes, registerAttachmentRoutes } from './routes/attachments.js';
@@ -108,6 +109,7 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...healthRoutes,
   ...brainRoutes,
   ...chatRoutes,
+  ...chatTurnRoutes,
   ...harnessControlRoutes,
   ...attachmentRoutes,
   ...attachmentUploadRoutes,
@@ -234,7 +236,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   // Startup, not first request.
   // The Living Frame has no in-memory substitute: exposing its contract when
   // no database-backed sources were registered would advertise a 404 as data.
-  const databaseRoutes = new Set<AnyRouteDefinition>([frameGetRoute, ...harnessControlRoutes, ...attachmentRoutes, ...attachmentUploadRoutes]);
+  const databaseRoutes = new Set<AnyRouteDefinition>([frameGetRoute, ...chatTurnRoutes, ...harnessControlRoutes, ...attachmentRoutes, ...attachmentUploadRoutes]);
   const activeRoutes = ALL_ROUTES.filter((route) =>
     (options.db !== undefined || !databaseRoutes.has(route)) &&
     (options.attachments !== undefined || !attachmentRoutes.includes(route as never)),
@@ -483,6 +485,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // The chat shell's own store — raw SQL on frank_domain (migration 0010),
     // so like brain it needs a DB handle.
     registerChatRoutes(app, { ...shared, db: options.db });
+    registerChatTurnRoutes(app, { ...shared, db: options.db });
     registerHarnessControlRoutes(app, { ...shared, db: options.db });
     registerAttachmentUploadRoutes(app, { ...shared, db: options.db });
     if (options.attachments) {
