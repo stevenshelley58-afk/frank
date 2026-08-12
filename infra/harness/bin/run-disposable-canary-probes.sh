@@ -22,7 +22,7 @@ sleep 20
 # Network-side LiteLLM readiness: no package is installed in the target image.
 "${compose[@]}" exec -T probe sh -ec 'wget -q -O - http://litellm:4000/health/readiness' > "$receipt/litellm-readiness.json"
 # TUSD protocol: POST creates a zero-byte upload; HEAD/PATCH/DELETE prove endpoint semantics.
-"${compose[@]}" exec -T probe sh -ec 'wget -qS -O /tmp/post --method=POST --header="Tus-Resumable: 1.0.0" --header="Upload-Length: 0" http://tusd:8080/v1/uploads/tus/ 2>/tmp/post.h; cat /tmp/post.h; test -s /tmp/post' > "$receipt/tusd-post.txt" || true
+"${compose[@]}" exec -T probe sh -ec 'printf "POST /v1/uploads/tus/ HTTP/1.1\r\nHost: tusd\r\nTus-Resumable: 1.0.0\r\nUpload-Length: 0\r\nUpload-Metadata: filename Zm9v\r\nContent-Length: 0\r\nConnection: close\r\n\r\n" | nc tusd 8080' > "$receipt/tusd-post.txt"
 grep -Eqi "HTTP/.*(201|204)" "$receipt/tusd-post.txt"
 # Gate/hook deny proof is synthetic: a malformed request must not yield an upload success.
 if "${compose[@]}" exec -T probe sh -ec 'wget -q -O /dev/null --method=POST http://tusd:8080/v1/uploads/tus/'; then echo 'tamper unexpectedly accepted' >&2; exit 1; fi
