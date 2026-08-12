@@ -81,6 +81,7 @@ import { ChannelPushStore } from './services/workbench/channel-push.js';
 import { brainRoutes, registerBrainRoutes } from './routes/brain.js';
 import { chatRoutes, registerChatRoutes } from './routes/chats.js';
 import { chatTurnRoutes, registerChatTurnRoutes } from './routes/chat-turns.js';
+import type { ChatTurnRunner } from './routes/chat-turns.js';
 import { harnessControlRoutes, registerHarnessControlRoutes } from './routes/harness-control.js';
 import { attachmentUploadRoutes, registerAttachmentUploadRoutes } from './routes/attachment-uploads.js';
 import { attachmentRoutes, registerAttachmentRoutes } from './routes/attachments.js';
@@ -195,6 +196,9 @@ export interface BuildServerOptions {
   readonly db?: import("@frank/adapter-postgres").FrankDatabase;
   /** WB-06: workbench SSE live-poll interval (tests use a fast value). */
   readonly workbenchPollIntervalMs?: number;
+  /** Durable chat execution and SSE poll tuning; injected for hosted/tests. */
+  readonly chatTurnRunner?: ChatTurnRunner;
+  readonly chatTurnPollIntervalMs?: number;
   /**
    * FS-05: preview-lane deployer. Defaults to the real ssh deployer
    * (`SshPreviewDeployer` → /srv/frank/infra/preview-deploy.sh); tests inject
@@ -485,7 +489,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // The chat shell's own store — raw SQL on frank_domain (migration 0010),
     // so like brain it needs a DB handle.
     registerChatRoutes(app, { ...shared, db: options.db });
-    registerChatTurnRoutes(app, { ...shared, db: options.db });
+    registerChatTurnRoutes(app, { ...shared, db: options.db, ...(options.chatTurnRunner ? { runner: options.chatTurnRunner } : {}), ...(options.chatTurnPollIntervalMs === undefined ? {} : { pollIntervalMs: options.chatTurnPollIntervalMs }) });
     registerHarnessControlRoutes(app, { ...shared, db: options.db });
     registerAttachmentUploadRoutes(app, { ...shared, db: options.db });
     if (options.attachments) {

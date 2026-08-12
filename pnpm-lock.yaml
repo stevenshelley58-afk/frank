@@ -160,6 +160,9 @@ importers:
       '@frank/identity':
         specifier: workspace:*
         version: link:../../packages/identity
+      '@frank/kernel':
+        specifier: workspace:*
+        version: link:../../packages/kernel
       '@frank/policy':
         specifier: workspace:*
         version: link:../../packages/policy

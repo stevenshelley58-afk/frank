@@ -10,6 +10,7 @@
 
 export { GooseAdapter } from './goose-adapter.js';
 export type { GooseAdapterConfig } from './goose-adapter.js';
+export { GooseAgentHarnessAdapter } from './agent-harness-adapter.js';
 export type {
   HarnessAdapter,
   SessionHandle,

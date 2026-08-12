@@ -17,6 +17,7 @@
     "@frank/adapter-postgres": "workspace:*",
     "@frank/contracts": "workspace:*",
     "@frank/identity": "workspace:*",
+    "@frank/kernel": "workspace:*",
     "@frank/policy": "workspace:*",
     "drizzle-orm": "0.45.2",
     "fastify": "5.10.0",
@@ -34,6 +35,7 @@
       "@frank/contracts",
       "@frank/policy",
       "@frank/identity",
+      "@frank/kernel",
       "@frank/adapter-postgres",
       "@frank/adapter-harness-goose"
     ]
