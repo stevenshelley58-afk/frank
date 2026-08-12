@@ -1,0 +1,295 @@
+<!doctype html>
+<html lang="en" data-frank-theme="light">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f3f7fb">
+  <title>FRANK — Console extension</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div class="app">
+  <!-- Existing product shell. Nothing here is conceptually redesigned. -->
+  <section class="screen frank-shell active" data-screen="home">
+    <nav class="chat-rail" aria-label="Chats and projects">
+      <div class="frank-brand"><span class="frank-mark">F</span><span class="frank-word">FRANK</span></div>
+      <button class="new-chat">＋&nbsp; New chat</button>
+      <div class="chat-search">
+        <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.4-3.4"/></svg>
+        <input placeholder="Search chats…" aria-label="Search chats">
+      </div>
+      <div class="projects">
+        <div class="side-label">Projects</div>
+        <button class="project-row active"><span class="chev">⌄</span><span class="project-dot" style="background:#1c1917"></span><span>Frank</span></button>
+        <div class="project-sub">＋ New chat</div>
+        <button class="project-row"><span class="chev">›</span><span class="project-dot" style="background:#4a6fd0"></span><span>Blockwise</span></button>
+        <button class="project-row"><span class="chev">›</span><span class="project-dot" style="background:#8055b8"></span><span>Chase's Game</span></button>
+        <button class="project-row"><span class="chev">›</span><span class="project-dot" style="background:#b95c78"></span><span>MerryPaws</span></button>
+        <button class="project-row"><span class="chev">›</span><span class="project-dot" style="background:#cb7135"></span><span>LotFile</span></button>
+      </div>
+      <!-- The one intentional shell change: give the existing Console a real door. -->
+      <button class="console-door" data-go="console">
+        <span class="icon"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M12 15h5"/></svg></span>
+        <span>Console</span><span class="status-dot"></span><span class="door-meta">13 modules</span>
+      </button>
+      <div class="owner"><span class="owner-mark">SF</span><span class="owner-text"><b>Steve</b><span>Owner · full autonomy</span></span><span class="owner-arrow">›</span></div>
+    </nav>
+
+    <main class="workspace">
+      <header class="workspace-head"><span class="home-dot"></span><b>Frank</b><span class="scope">· Home</span><span class="spacer"></span><span class="agent">Frank</span></header>
+      <div class="workspace-body">
+        <span class="warm-mark">F</span>
+        <div class="composer-wrap">
+          <div class="composer">
+            <div class="composer-scope">Frank</div>
+            <div class="composer-input"><textarea aria-label="Message Frank"></textarea><button class="send" aria-label="Send"><span class="icon"><svg viewBox="0 0 24 24"><path d="m5 12 14-7-4.5 14-3-5.5zM11.5 13.5 19 5"/></svg></span></button></div>
+            <div class="composer-tools"><button class="tool-button">♩</button><button class="tool-button">✳&nbsp; Auto</button><button class="tool-button">◉&nbsp; Thinking</button><span class="context-ring">◯&nbsp; 0%</span></div>
+          </div>
+          <div class="composer-hint">Enter sends · Shift+Enter adds a line</div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="living-frame">
+      <div class="frame-head"><span class="mono-label">Living frame</span><button class="collapse" aria-label="Collapse frame">»</button></div>
+      <div class="frame-cards">
+        <section class="frame-card"><div class="frame-title">Waiting on you <span>0</span></div><p class="frame-empty">Nothing needs your decision.</p></section>
+        <section class="frame-card"><div class="frame-title">Running now <span>0</span></div><p class="frame-empty">Nothing mid-flight.</p></section>
+        <section class="frame-card"><div class="frame-title">Today</div><p class="frame-empty">Warming up…</p></section>
+        <section class="frame-card"><div class="frame-title">Receipts</div><p class="frame-empty">Nothing finished yet today.</p></section>
+      </div>
+    </aside>
+  </section>
+
+  <!-- Existing /console chrome with improved pages beneath it. -->
+  <section class="screen console-screen" data-screen="console-shell">
+    <header class="console-head">
+      <button class="console-back" data-go="home" aria-label="Back to Frank"><span class="icon"><svg viewBox="0 0 24 24"><path d="M19 12H5M11 18l-6-6 6-6"/></svg></span></button>
+      <button class="console-id" data-go="console" style="border:0;background:transparent;padding:0">CONSOLE</button>
+      <span class="crumb" id="console-module-name-wrap">/</span>
+      <span class="console-module-name" id="console-module-name" style="display:none"><span class="module-icon" id="console-module-icon" style="width:25px;height:25px;font:600 8px var(--mono)"></span></span>
+      <span class="system-tag" id="system-tag" style="display:none"></span>
+      <button class="console-back" data-command aria-label="Open command palette" style="margin-left:8px"><span class="icon"><svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg></span></button>
+    </header>
+
+    <div class="console-pages">
+      <section class="console-page active" data-console-page="console">
+        <div class="console-scroll">
+          <main class="console-main">
+            <div class="console-intro">
+              <div class="console-copy"><div class="mono-label">Operations</div><h1>Console</h1><p>The engines do their work and hand back results. This is where you look inside, configure, and intervene — one module per system.</p></div>
+              <button class="console-search" data-command>Find a module or action… <span>⌘ K</span></button>
+            </div>
+
+            <div class="health-strip">
+              <div class="health-cell"><div class="mono-label">System posture</div><strong><i class="health-dot"></i> Operational <small class="right">11 / 13</small></strong></div>
+              <div class="health-cell"><div class="mono-label">Running</div><strong>3 active <small class="right">2 rooms</small></strong></div>
+              <div class="health-cell"><div class="mono-label">Cost today</div><strong>$4.82 <small class="right">41 runs</small></strong></div>
+              <div class="health-cell"><div class="mono-label">Attention</div><strong><i class="health-dot warn"></i> 2 degraded</strong></div>
+            </div>
+
+            <section class="module-section">
+              <div class="section-head"><h2>Engine room</h2><span>New and expanded surfaces</span></div>
+              <div class="module-grid">
+                <button class="module-card" data-go="harness"><div class="module-top"><span class="module-icon">HG</span><span class="status"><i></i>live</span></div><h3>Harness & Gateway</h3><p>Every adapter, provider and model route — with health, live work and actual cost.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card" data-go="skills"><div class="module-top"><span class="module-icon">SK</span><span class="status"><i></i>indexed</span></div><h3>Skills</h3><p>Browse versioned instruction packages, see where each is used, and launch one into a workbench.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card" data-go="graph"><div class="module-top"><span class="module-icon">MG</span><span class="status"><i></i>live</span></div><h3>Memory Graph</h3><p>Memories, work, rooms, receipts and skills connected only by evidenced provenance.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card" data-go="tools"><div class="module-top"><span class="module-icon">TC</span><span class="status warn"><i></i>2 degraded</span></div><h3>Tools & Connectors</h3><p>MCP tools, channels and external dependencies with honest health and pause controls.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+              </div>
+            </section>
+
+            <section class="module-section">
+              <div class="section-head"><h2>Existing modules</h2><span>Kept intact and easier to distinguish</span></div>
+              <div class="module-grid">
+                <button class="module-card existing-card" data-toast="Repository Explorer would open here."><div class="module-top"><span class="module-icon">FX</span><span class="status"><i></i>live</span></div><h3>Repository Explorer</h3><p>Browse skills, flows, projects, agents, prompts, docs and contracts.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card existing-card" data-toast="Ad Template Anatomy would open here."><div class="module-top"><span class="module-icon">AA</span><span class="status"><i></i>live</span></div><h3>Ad Template Anatomy</h3><p>Inspect measured text and image regions on real Blockwise templates.</p><div class="module-foot"><span class="mini-tag">Blockwise</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card existing-card" data-toast="Research Pipeline would open here."><div class="module-top"><span class="module-icon">RP</span><span class="status"><i></i>live</span></div><h3>Research Pipeline</h3><p>Watch stages, sources and where a research job stalls.</p><div class="module-foot"><span class="mini-tag">Blockwise</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card existing-card" data-go="harness"><div class="module-top"><span class="module-icon">AR</span><span class="status"><i></i>live</span></div><h3>Agent Runtime</h3><p>Goose run-state and sessions, now folded into Harness & Gateway.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open expanded →</span></div></button>
+                <button class="module-card existing-card" data-toast="Memory controls would open here."><div class="module-top"><span class="module-icon">M</span><span class="status"><i></i>live</span></div><h3>Memory</h3><p>Review, edit, expire and delete what Frank remembers.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card existing-card" data-toast="Tasks would open here."><div class="module-top"><span class="module-icon">TK</span><span class="status"><i></i>live</span></div><h3>Tasks</h3><p>Plane projects and the Google Tasks phone mirror, side by side.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card existing-card" data-toast="Workbench would open here."><div class="module-top"><span class="module-icon">WB</span><span class="status"><i></i>live</span></div><h3>Workbench</h3><p>Delegated progress, event logs, artifacts, receipts and leash stops.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card existing-card" data-go="tools"><div class="module-top"><span class="module-icon">CH</span><span class="status"><i></i>live</span></div><h3>Channels</h3><p>Room-to-channel bindings and their truthful connection state.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open expanded →</span></div></button>
+                <button class="module-card existing-card" data-toast="Room Files would open here."><div class="module-top"><span class="module-icon">RF</span><span class="status"><i></i>live</span></div><h3>Room Files</h3><p>Folder bindings, sync direction, write-back and artifact previews.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card existing-card" data-toast="Code Graph would open here."><div class="module-top"><span class="module-icon">CG</span><span class="status"><i></i>live</span></div><h3>Code Graph</h3><p>Live code intelligence, symbols, relations and project structure.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+                <button class="module-card existing-card" data-toast="Previews would open here."><div class="module-top"><span class="module-icon">PV</span><span class="status"><i></i>live</span></div><h3>Previews</h3><p>Review preserved interface versions from the VPS preview lane.</p><div class="module-foot"><span class="mini-tag">Frank</span><span class="open-link">Open →</span></div></button>
+              </div>
+            </section>
+          </main>
+        </div>
+      </section>
+
+      <section class="console-page" data-console-page="harness">
+        <div class="detail-toolbar">
+          <div class="detail-toolbar-inner">
+            <div class="detail-title"><span class="detail-signal orange">HG</span><div><h1>Harness & Gateway</h1><p>The current Agent Runtime, expanded to show the whole execution path.</p></div></div>
+            <div class="detail-actions"><button class="plain-button" data-toast="Health probe completed.">Re-probe</button><button class="accent-button" data-toast="Evaluation queued.">Evaluate route</button></div>
+          </div>
+        </div>
+        <div class="console-scroll">
+          <main class="console-main narrow">
+            <div class="summary-grid">
+              <div class="summary-card"><div class="mono-label">Harnesses</div><strong>5 / 5</strong><small>healthy adapters</small></div>
+              <div class="summary-card"><div class="mono-label">Models</div><strong>8</strong><small>6 selectable now</small></div>
+              <div class="summary-card"><div class="mono-label">Live work</div><strong>3</strong><small>2 turns · 1 workbench</small></div>
+              <div class="summary-card"><div class="mono-label">Cost today</div><strong>$4.82</strong><small>41 recorded runs</small></div>
+            </div>
+
+            <section class="detail-section">
+              <h2 class="detail-section-title">Providers and models</h2>
+              <p class="detail-note">This grows the existing provider list; selectable status comes from the live registry.</p>
+              <div class="data-list">
+                <div class="data-row"><span class="provider-badge">DS</span><div class="data-main"><b>DeepSeek · chat</b><span>fast-general · direct provider · expected model matches</span></div><span class="status"><i></i>healthy</span><span class="data-meta">184ms</span><span class="data-cost">$3.57</span></div>
+                <div class="data-row"><span class="provider-badge">CL</span><div class="data-main"><b>Claude · sonnet</b><span>deep-reasoning · Anthropic provider · key present</span></div><span class="status"><i></i>healthy</span><span class="data-meta">612ms</span><span class="data-cost">$1.02</span></div>
+                <div class="data-row"><span class="provider-badge">GS</span><div class="data-main"><b>Goose headless</b><span>code-builder · tool-enabled workbench harness</span></div><span class="status"><i></i>healthy</span><span class="data-meta">ready</span><span class="data-cost">$0.23</span></div>
+                <div class="data-row"><span class="provider-badge">LT</span><div class="data-main"><b>Letta ACP</b><span>long-memory · one slow probe in the last 15 minutes</span></div><span class="status warn"><i></i>degraded</span><span class="data-meta">1.8s</span><span class="data-cost">$0.00</span></div>
+              </div>
+            </section>
+
+            <section class="detail-section">
+              <h2 class="detail-section-title">Room → harness routes</h2>
+              <p class="detail-note">Same hot-swap controls as Agent Runtime, now all five rooms are visible. Auto stays the default.</p>
+              <div class="data-list">
+                <div class="data-row"><span class="project-dot" style="background:#1c1917"></span><div class="data-main"><b>Frank</b><span>central · next turn only</span></div><div class="route-buttons"><button class="route-button active">Auto</button><button class="route-button">Goose</button><button class="route-button">Claude</button></div></div>
+                <div class="data-row"><span class="project-dot" style="background:#4a6fd0"></span><div class="data-main"><b>Blockwise</b><span>research · next turn only</span></div><div class="route-buttons"><button class="route-button">Auto</button><button class="route-button active accent">Goose</button><button class="route-button">Claude</button></div></div>
+                <div class="data-row"><span class="project-dot" style="background:#8055b8"></span><div class="data-main"><b>Chase's Game</b><span>creative · next turn only</span></div><div class="route-buttons"><button class="route-button active">Auto</button><button class="route-button">Goose</button><button class="route-button">Claude</button></div></div>
+                <div class="data-row"><span class="project-dot" style="background:#b95c78"></span><div class="data-main"><b>MerryPaws</b><span>operations · next turn only</span></div><div class="route-buttons"><button class="route-button active">Auto</button><button class="route-button">Goose</button><button class="route-button">Claude</button></div></div>
+                <div class="data-row"><span class="project-dot" style="background:#cb7135"></span><div class="data-main"><b>LotFile</b><span>documents · next turn only</span></div><div class="route-buttons"><button class="route-button active">Auto</button><button class="route-button">Goose</button><button class="route-button">Claude</button></div></div>
+              </div>
+            </section>
+          </main>
+        </div>
+      </section>
+
+      <section class="console-page" data-console-page="skills">
+        <div class="detail-toolbar">
+          <div class="detail-toolbar-inner">
+            <div class="detail-title"><span class="detail-signal orange">SK</span><div><h1>Skills</h1><p>The existing skills folders, made first-class without changing how they work.</p></div></div>
+            <div class="detail-actions"><button class="plain-button">References</button><button class="accent-button" data-toast="Workbench draft created with ask-matt attached.">Run skill</button></div>
+          </div>
+        </div>
+        <div class="console-scroll">
+          <main class="console-main narrow">
+            <div class="summary-grid">
+              <div class="summary-card"><div class="mono-label">Active</div><strong>42</strong><small>ready to invoke</small></div>
+              <div class="summary-card"><div class="mono-label">In progress</div><strong>3</strong><small>not model-invocable</small></div>
+              <div class="summary-card"><div class="mono-label">Deprecated</div><strong>6</strong><small>kept for history</small></div>
+              <div class="summary-card"><div class="mono-label">References</div><strong>117</strong><small>flows · rooms · packs</small></div>
+            </div>
+            <div class="two-pane">
+              <aside class="pane-list">
+                <input class="filter" placeholder="Filter skills…" aria-label="Filter skills">
+                <div class="mono-label" style="padding:3px 10px 7px">Engineering · 17</div>
+                <button class="skill-row active"><b>ask-matt</b><p>Structured architecture router</p></button>
+                <button class="skill-row"><b>preview-deploy</b><p>Publish a hosted preview</p></button>
+                <button class="skill-row"><b>frank-tdd</b><p>Contract-first verification</p></button>
+                <button class="skill-row"><b>code-review</b><p>Evidence-ranked review</p></button>
+                <button class="skill-row"><b>prototype</b><p>Build reviewable UI prototypes</p></button>
+                <div class="mono-label" style="padding:17px 10px 7px">Lifecycle</div>
+                <button class="skill-row"><b>In progress</b><p>3 packages</p></button>
+                <button class="skill-row"><b>Deprecated</b><p>6 packages</p></button>
+              </aside>
+              <article class="skill-detail">
+                <div class="mono-label">skills / engineering</div><h1>ask-matt</h1><p>Routes high-impact architecture questions through a structured second-opinion flow before implementation.</p>
+                <div class="skill-code">---
+name: ask-matt
+description: Expert architecture router
+disable-model-invocation: false
+---
+
+1. Frame the decision and constraints
+2. Collect concrete repository evidence
+3. Return a recommendation and dissent
+4. Record the choice in the receipt</div>
+                <h2 class="detail-section-title" style="margin-top:20px">Referenced by</h2>
+                <div class="reference-row">Architecture review flow <span>flows/engineering</span></div>
+                <div class="reference-row">Frank room pack <span>room:central</span></div>
+                <div class="reference-row">Workshop build pack <span>pack:workshop</span></div>
+              </article>
+            </div>
+          </main>
+        </div>
+      </section>
+
+      <section class="console-page" data-console-page="tools">
+        <div class="detail-toolbar">
+          <div class="detail-toolbar-inner">
+            <div class="detail-title"><span class="detail-signal orange">TC</span><div><h1>Tools & Connectors</h1><p>Existing channels plus the rest of Frank's external dependencies.</p></div></div>
+            <div class="detail-actions"><button class="plain-button">Audit log</button><button class="accent-button" data-toast="Connection wizard opened.">Add connection</button></div>
+          </div>
+        </div>
+        <div class="console-scroll">
+          <main class="console-main narrow">
+            <div class="summary-grid">
+              <div class="summary-card"><div class="mono-label">Tools</div><strong>31</strong><small>registered capabilities</small></div>
+              <div class="summary-card"><div class="mono-label">Connectors</div><strong>9</strong><small>6 healthy</small></div>
+              <div class="summary-card"><div class="mono-label">Degraded</div><strong>2</strong><small>slow or stale</small></div>
+              <div class="summary-card"><div class="mono-label">Paused</div><strong>1</strong><small>WhatsApp · gate G3</small></div>
+            </div>
+            <section class="detail-section">
+              <h2 class="detail-section-title">External dependencies</h2>
+              <p class="detail-note">Health uses Frank's operational taxonomy: healthy, degraded, unavailable, stale or paused.</p>
+              <div class="connector-grid">
+                <article class="connector"><div class="connector-head"><span class="connector-logo">GW</span><div><b>Google Workspace</b><span>Calendar · Drive · Gmail</span></div><button class="switch on" aria-label="Pause Google"></button></div><div class="connector-stats"><div class="connector-stat"><strong>184ms</strong><span>Latency</span></div><div class="connector-stat"><strong>12:41</strong><span>Last success</span></div></div><div class="connector-foot"><span class="status"><i></i>healthy</span><button>Inspect →</button></div></article>
+                <article class="connector"><div class="connector-head"><span class="connector-logo">MC</span><div><b>MCP tool server</b><span>18 registered tools</span></div><button class="switch on" aria-label="Pause MCP"></button></div><div class="connector-stats"><div class="connector-stat"><strong>98.4%</strong><span>Success</span></div><div class="connector-stat"><strong>12:39</strong><span>Last success</span></div></div><div class="connector-foot"><span class="status"><i></i>healthy</span><button>Inspect →</button></div></article>
+                <article class="connector"><div class="connector-head"><span class="connector-logo">WA</span><div><b>WhatsApp</b><span>Inbound channel</span></div><button class="switch" aria-label="Enable WhatsApp"></button></div><div class="connector-stats"><div class="connector-stat"><strong>—</strong><span>Latency</span></div><div class="connector-stat"><strong>Gate G3</strong><span>Blocked by</span></div></div><div class="connector-foot"><span class="status warn"><i></i>paused</span><button>View gate →</button></div></article>
+                <article class="connector"><div class="connector-head"><span class="connector-logo">BW</span><div><b>Blockwise</b><span>Research pipeline</span></div><button class="switch on"></button></div><div class="connector-stats"><div class="connector-stat"><strong>423ms</strong><span>Latency</span></div><div class="connector-stat"><strong>12:30</strong><span>Last success</span></div></div><div class="connector-foot"><span class="status"><i></i>healthy</span><button>Inspect →</button></div></article>
+                <article class="connector"><div class="connector-head"><span class="connector-logo">CG</span><div><b>CodeGraph</b><span>Repository intelligence</span></div><button class="switch on"></button></div><div class="connector-stats"><div class="connector-stat"><strong>1.2s</strong><span>Query avg.</span></div><div class="connector-stat"><strong>12m</strong><span>Index age</span></div></div><div class="connector-foot"><span class="status"><i></i>healthy</span><button>Open graph →</button></div></article>
+                <article class="connector"><div class="connector-head"><span class="connector-logo">VP</span><div><b>VPS preview lane</b><span>Static deploy service</span></div><button class="switch on"></button></div><div class="connector-stats"><div class="connector-stat"><strong>846ms</strong><span>Latency</span></div><div class="connector-stat"><strong>4m</strong><span>Latest deploy</span></div></div><div class="connector-foot"><span class="status"><i></i>healthy</span><button>Previews →</button></div></article>
+              </div>
+            </section>
+          </main>
+        </div>
+      </section>
+
+      <section class="console-page" data-console-page="graph">
+        <div class="detail-toolbar">
+          <div class="detail-toolbar-inner">
+            <div class="detail-title"><span class="detail-signal orange">MG</span><div><h1>Memory Graph</h1><p>The existing Memory controls stay; this adds an evidenced relationship view.</p></div></div>
+            <div class="detail-actions"><button class="plain-button">Provenance only ✓</button><button class="accent-button">Find node</button></div>
+          </div>
+        </div>
+        <div class="console-scroll">
+          <main class="console-main narrow">
+            <div class="graph-shell">
+              <div class="graph-canvas">
+                <svg viewBox="0 0 620 570" preserveAspectRatio="none" aria-hidden="true"><line class="graph-line hot" x1="310" y1="285" x2="145" y2="120"/><line class="graph-line hot" x1="310" y1="285" x2="500" y2="130"/><line class="graph-line" x1="310" y1="285" x2="500" y2="345"/><line class="graph-line" x1="310" y1="285" x2="365" y2="475"/><line class="graph-line" x1="310" y1="285" x2="135" y2="440"/><line class="graph-line" x1="145" y1="120" x2="305" y2="60"/><line class="graph-line" x1="500" y1="130" x2="565" y2="60"/></svg>
+                <button class="node big memory" style="left:43%;top:42%">Memory<br>#M-284</button>
+                <button class="node mid work" style="left:17%;top:13%">LF-03<br>frame feed</button>
+                <button class="node mid receipt" style="left:74%;top:15%">Receipt<br>#R-981</button>
+                <button class="node mid room" style="left:75%;top:55%">Workshop<br>room</button>
+                <button class="node mid skill" style="left:52%;top:79%">preview-<br>deploy</button>
+                <button class="node mid work" style="left:15%;top:72%">Workbench<br>#WB-044</button>
+                <button class="node small receipt" style="left:44%;top:5%">ADR<br>022</button>
+                <button class="node small skill" style="left:88%;top:6%">frank<br>tdd</button>
+              </div>
+              <aside class="graph-panel">
+                <div class="mono-label">Memory / evidence</div><h2>Preview work is reviewed live.</h2><p>Steven prefers a hosted preview as the first visible artifact for buildable interface work.</p>
+                <div class="relation"><span>Supports work item</span><b>LF-03 · One frame feed</b></div>
+                <div class="relation"><span>Observed in room</span><b>Workshop · 6 conversations</b></div>
+                <div class="relation"><span>Produced receipt</span><b>#R-981 · Preview deployed</b></div>
+                <div class="relation"><span>Invoked skill</span><b>preview-deploy</b></div>
+                <div class="provenance">Source: conversation #CH-411<br>Captured: 2026-08-11 10:22 AWST<br>Confidence: direct instruction<br>Projection: provenance.v1</div>
+              </aside>
+            </div>
+          </main>
+        </div>
+      </section>
+    </div>
+  </section>
+</div>
+
+<div class="modal" id="command-modal" role="dialog" aria-modal="true" aria-label="Command palette">
+  <div class="palette"><div class="palette-search"><input id="command-search" placeholder="Search Frank and Console…"><kbd>Esc</kbd></div><div class="palette-body">
+    <div class="mono-label" style="padding:7px 10px">Go to</div>
+    <button class="palette-item" data-go="home"><span class="module-icon">F</span><b>Frank home</b><span>Home</span></button>
+    <button class="palette-item" data-go="console"><span class="module-icon">CO</span><b>Console overview</b><span>System</span></button>
+    <button class="palette-item" data-go="harness"><span class="module-icon">HG</span><b>Harness & Gateway</b><span>Module</span></button>
+    <button class="palette-item" data-go="skills"><span class="module-icon">SK</span><b>Skills</b><span>Module</span></button>
+    <button class="palette-item" data-go="graph"><span class="module-icon">MG</span><b>Memory Graph</b><span>Module</span></button>
+    <button class="palette-item" data-go="tools"><span class="module-icon">TC</span><b>Tools & Connectors</b><span>Module</span></button>
+  </div></div>
+</div>
+<div class="toast" id="toast" role="status"></div>
+<script src="app.js"></script>
+</body>
+</html>
