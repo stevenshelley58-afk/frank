@@ -19,7 +19,6 @@ import type { AttachmentDownloadStorage, AttachmentPersistencePort, TusdHookRequ
 const uuid = z.string().uuid();
 const uploadId = uuid;
 const text = z.string().trim().min(1).max(255);
-const reservationState = z.enum(['authorized', 'uploading', 'completed', 'terminating', 'cancelled', 'expired', 'rejected']);
 const identifiersResponse = identifiersSchema;
 const capabilityResponse = z.object({
   upload_id: uploadId,
@@ -91,7 +90,7 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
       }
       const { reservation, capability, capabilityExpiresAt, replayed } = result.value;
       reply.code(201).header('x-frank-upload-capability', capability);
-      return { reservation_id: reservation.id, upload_id: reservation.uploadId, tus_creation_url: tusCreationUrl, tus_headers: { 'Upload-Metadata': metadataHeader(reservation), 'X-Frank-Upload-Capability': capability }, tus_metadata: { upload_id: reservation.uploadId, cell_id: reservation.cellId, conversation_id: reservation.conversationId! }, tus_allowed_meta_fields: ['upload_id', 'cell_id', 'conversation_id'] as const, capability_expires_at: capabilityExpiresAt.toISOString(), reservation_expires_at: reservation.expiresAt.toISOString(), replayed, identifiers: identifiersOf(context) };
+      return { reservation_id: reservation.id, upload_id: reservation.uploadId, tus_creation_url: tusCreationUrl, tus_headers: { 'Upload-Metadata': metadataHeader(reservation), 'X-Frank-Upload-Capability': capability }, tus_metadata: { upload_id: reservation.uploadId, cell_id: reservation.cellId, conversation_id: reservation.conversationId! }, tus_allowed_meta_fields: ['upload_id', 'cell_id', 'conversation_id'] as ['upload_id', 'cell_id', 'conversation_id'], capability_expires_at: capabilityExpiresAt.toISOString(), reservation_expires_at: reservation.expiresAt.toISOString(), replayed, identifiers: identifiersOf(context) };
     } catch (error) { if (error instanceof ProblemError) throw error; throw new ProblemError('validation_failed', 'Attachment request is invalid.'); }
   });
   registerRoute(app, deps, attachmentCapabilityRenewRoute, async ({ params, context, principal }) => {
@@ -105,7 +104,7 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
     try {
       const state = await deps.lifecycle.cancel(params.uploadId, principal.principalId, context.cellId, capability, deps.tusdTerminator);
       reply.code(202);
-      return { state: state === 'already_terminated' ? 'already_terminated' : 'termination_requested', identifiers: identifiersOf(context) };
+      return { state: state === 'already_terminated' ? 'already_terminated' as const : 'termination_requested' as const, identifiers: identifiersOf(context) };
     } catch (error) {
       if (error instanceof AttachmentCancelError) throw new ProblemError(error.reason === 'forbidden' ? 'forbidden' : error.reason === 'not_found' ? 'not_found' : 'internal_error', 'Upload termination could not be completed.');
       throw error;
@@ -115,17 +114,17 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
     const manifest = await deps.persistence.findDownload({ objectId: params.objectId, cellId: context.cellId, ownerId: principal.principalId, conversationId: query.conversation_id });
     if (!manifest || manifest.security.scan_state !== 'clean') throw new ProblemError('not_found', 'Attachment not found.');
     const etag = `\"${manifest.sha256}\"`;
-    if (etagMatches(headerText(request, 'if-none-match'), etag)) { void reply.code(304).header('etag', etag).send(); return { download: 'stream', identifiers: identifiersOf(context) }; }
+    if (etagMatches(headerText(request, 'if-none-match'), etag)) { void reply.code(304).header('etag', etag).send(); return { download: 'stream' as const, identifiers: identifiersOf(context) }; }
     let range: ByteRange | undefined;
-    try { range = parseSingleRange(headerText(request, 'range'), BigInt(manifest.size_bytes)); } catch { void reply.code(416).header('content-range', `bytes */${manifest.size_bytes}`).send(); return { download: 'stream', identifiers: identifiersOf(context) }; }
+    try { range = parseSingleRange(headerText(request, 'range'), BigInt(manifest.size_bytes)); } catch { void reply.code(416).header('content-range', `bytes */${manifest.size_bytes}`).send(); return { download: 'stream' as const, identifiers: identifiersOf(context) }; }
     const name = encodeURIComponent((manifest.original_name ?? manifest.object_id).replace(/[\r\n\"\\/]/g, '_'));
     reply.header('etag', etag).header('content-type', manifest.media_type).header('x-content-type-options', 'nosniff').header('cache-control', 'private, no-store').header('content-disposition', `attachment; filename*=UTF-8''${name}`).header('accept-ranges', 'bytes');
     if (range) reply.code(206).header('content-range', `bytes ${range.start}-${range.end}/${manifest.size_bytes}`).header('content-length', String(range.end - range.start + 1n));
     // Fastify's GET route exposes HEAD automatically. Stream only for GET; HEAD is body-free.
-    if (request.method === 'HEAD') { void reply.send(); return { download: 'stream', identifiers: identifiersOf(context) }; }
+    if (request.method === 'HEAD') { void reply.send(); return { download: 'stream' as const, identifiers: identifiersOf(context) }; }
     const stream = await deps.downloader.readObject(manifest.object_key, range);
     void reply.send(stream);
-    return { download: 'stream', identifiers: identifiersOf(context) };
+    return { download: 'stream' as const, identifiers: identifiersOf(context) };
   });
 
   // Private tusd hooks are protected by a dedicated secret. They are not part of
@@ -152,8 +151,8 @@ export function registerAttachmentRoutes(app: FastifyInstance, deps: AttachmentR
 
 function headerText(request: FastifyRequest, name: string): string | undefined { const value = request.headers[name]; return typeof value === 'string' ? value : Array.isArray(value) && value.length === 1 ? value[0] : undefined; }
 function secretHeader(request: FastifyRequest, name: string, expected: string): boolean { const value = headerText(request, name); return !!value && constantTimeEqual(value, expected); }
-function metadataHeader(reservation: { uploadId: string; cellId: string; conversationId?: string }): string { return [['upload_id', reservation.uploadId], ['cell_id', reservation.cellId], ['conversation_id', reservation.conversationId ?? '']].map(([key, value]) => `${key} ${Buffer.from(value).toString('base64')}`).join(','); }
-function tusdHook(value: unknown): TusdHookRequest { const body = objectBody(value); if (!['pre-create', 'pre-finish', 'post-finish', 'pre-terminate', 'post-terminate'].includes(String(body.Type))) throw new Error('bad_type'); const event = objectBody(body.Event); const upload = objectBody(event.Upload); const http = objectBody(event.HTTPRequest); if (typeof upload.ID !== 'string' || typeof upload.Size !== 'number' || !Number.isSafeInteger(upload.Size) || upload.Size < 0 || typeof upload.SizeIsDeferred !== 'boolean' || typeof upload.Offset !== 'number' || !Number.isSafeInteger(upload.Offset) || upload.Offset < 0 || !isStringRecord(upload.MetaData) || typeof http.Method !== 'string' || typeof http.URI !== 'string' || !isHeaderRecord(http.Header)) throw new Error('bad_event'); return body as TusdHookRequest; }
+function metadataHeader(reservation: { uploadId: string; cellId: string; conversationId?: string }): string { return ([['upload_id', reservation.uploadId], ['cell_id', reservation.cellId], ['conversation_id', reservation.conversationId ?? '']] as Array<[string, string]>).map(([key, value]) => `${key} ${Buffer.from(value).toString('base64')}`).join(','); }
+function tusdHook(value: unknown): TusdHookRequest { const body = objectBody(value); if (!['pre-create', 'pre-finish', 'post-finish', 'pre-terminate', 'post-terminate'].includes(String(body.Type))) throw new Error('bad_type'); const event = objectBody(body.Event); const upload = objectBody(event.Upload); const http = objectBody(event.HTTPRequest); if (typeof upload.ID !== 'string' || typeof upload.Size !== 'number' || !Number.isSafeInteger(upload.Size) || upload.Size < 0 || typeof upload.SizeIsDeferred !== 'boolean' || typeof upload.Offset !== 'number' || !Number.isSafeInteger(upload.Offset) || upload.Offset < 0 || !isStringRecord(upload.MetaData) || typeof http.Method !== 'string' || typeof http.URI !== 'string' || !isHeaderRecord(http.Header)) throw new Error('bad_event'); return body as unknown as TusdHookRequest; }
 function objectBody(value: unknown): Record<string, unknown> { if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid_body'); return value as Record<string, unknown>; }
 function isStringRecord(value: unknown): value is Record<string, string> { return !!value && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(item => typeof item === 'string'); }
 function isHeaderRecord(value: unknown): value is Record<string, string[]> { return !!value && typeof value === 'object' && !Array.isArray(value) && Object.values(value).every(item => Array.isArray(item) && item.every(part => typeof part === 'string')); }
