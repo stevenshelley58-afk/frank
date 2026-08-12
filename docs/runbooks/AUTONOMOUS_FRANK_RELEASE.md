@@ -78,6 +78,17 @@ AWS CLI v2, `jq`, `curl`, `gzip`, `openssl`, `uuidgen`, `sha256sum`, `flock`, `f
 `realpath`, `tar`, and standard
 GNU coreutils.
 
+The four-core evidence manifest is a concrete, secret-free operator artifact, not the JSON
+schema in this repository. Harness-enabled validation requires it beneath the explicit
+operator-approved release-state directory and binds its exact release commit, current version tags,
+OCI digests, licenses, SBOM hashes, provenance methods, server commands, configuration
+hashes, and hosted canary URLs to the four candidate image assignments. Missing,
+placeholder, mismatched, or `.invalid` evidence stops before Compose validation or image
+pull. The validation-only preparation command never changes current or rollback pointers.
+Before the enabled run, provision `candidate.env`, `current.env`, `rollback.env`, and
+`evidence-manifest.json` as regular non-symlink files directly beneath that state root;
+foreign roots, traversal, duplicate assignments, and unexpected manifest fields are denied.
+
 ## 1. Create the release evidence directory
 
 Use a new root-owned directory for every attempt, including failed attempts:
@@ -1123,6 +1134,12 @@ export FRANK_HARNESS_ENABLED="${FRANK_HARNESS_ENABLED:-false}"
 case "$FRANK_HARNESS_ENABLED" in true|false) ;; *) exit 1;; esac
 compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
 if test "$FRANK_HARNESS_ENABLED" = true; then
+  export FRANK_RELEASE_STATE_ROOT="${FRANK_RELEASE_STATE_ROOT:-/srv/frank/release-state/harness}"
+  export FRANK_HARNESS_CANDIDATE_SLOT="${FRANK_HARNESS_CANDIDATE_SLOT:-$FRANK_RELEASE_STATE_ROOT/candidate.env}"
+  export FRANK_HARNESS_CURRENT_SLOT="${FRANK_HARNESS_CURRENT_SLOT:-$FRANK_RELEASE_STATE_ROOT/current.env}"
+  export FRANK_HARNESS_ROLLBACK_SLOT="${FRANK_HARNESS_ROLLBACK_SLOT:-$FRANK_RELEASE_STATE_ROOT/rollback.env}"
+  export FRANK_HARNESS_EVIDENCE_MANIFEST="${FRANK_HARNESS_EVIDENCE_MANIFEST:-$FRANK_RELEASE_STATE_ROOT/evidence-manifest.json}"
+  : "${FRANK_HARNESS_EVIDENCE_URL:?HTTPS URL for hosted four-core candidate evidence required}"
   export FRANK_SEAWEEDFS_S3_TEMPLATE="$FRANK_RELEASE_SOURCE/infra/compose/seaweedfs/s3.json.tmpl"
   export FRANK_SEAWEEDFS_S3_CONFIG='/srv/frank/secrets/seaweedfs/s3.json'
   # Private Compose DNS route implemented by the API attachment hook contract.
@@ -1501,6 +1518,9 @@ if test "$FRANK_HARNESS_ENABLED" = true; then
   seaweed_ip="$(docker inspect --format '{{with index .NetworkSettings.Networks "frank-attachments"}}{{.IPAddress}}{{end}}' "$seaweed_id")"
   printf '%s' "$seaweed_ip" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
   export FRANK_S3_ENDPOINT="http://$seaweed_ip:8333"
+  # Seaweed's bucket-scoped Write action covers both object creation and deletion. The
+  # promoter alone uses it on staging to delete a successfully promoted upload; it also
+  # has Read on canonical objects for the extraction/head path. Downloader stays Read-only.
   bash "$FRANK_RELEASE_SOURCE/scripts/production/bootstrap-attachment-buckets.sh" \
     > "$evidence_dir/attachment-bootstrap.result" 2> "$evidence_dir/attachment-bootstrap.log"
   grep -Fx 'attachment-buckets=bootstrapped; lifecycle=staging-only; scoped-recreate=passed; temporary-admin=denied' "$evidence_dir/attachment-bootstrap.result"

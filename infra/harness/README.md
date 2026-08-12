@@ -48,3 +48,10 @@ and matches it through `FRANK_LETTA_EXPECTED_IMAGE`; the release runbook then pe
 real private `/v1/health/` probe from `frank-web`. Hermes has no Wave 1 runtime or image slot.
 Its v2026.8.3 tag is only a Wave 2 review starting point; exact OCI digest, SBOM, provenance,
 configuration, and typed-adapter canary evidence remain intentionally unavailable here.
+
+Promotion evidence is never inferred from `evidence-manifest.schema.json`. A real
+secret-free manifest must name exactly LiteLLM v1.96.0, SeaweedFS 4.41, tusd v2.10.0, and
+ClamAV clamav-1.5.4 and bind each reviewed digest, license, SBOM hash, provenance method,
+server command, configuration hash, and hosted canary URL to the exact release commit.
+The release validator rejects missing, placeholder, `.invalid`, or candidate/current
+mismatches before it renders the enabled Compose unit.

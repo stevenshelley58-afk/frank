@@ -12,6 +12,7 @@ bucket_bootstrap="$root/scripts/production/bootstrap-attachment-buckets.sh"
 s3_canary="$root/scripts/production/s3-policy-canary.sh"
 seaweed_renderer="$root/scripts/production/render-seaweedfs-s3-config.sh"
 release_runbook="$root/docs/runbooks/AUTONOMOUS_FRANK_RELEASE.md"
+release_validator="$root/scripts/production/validate-harness-release.sh"
 scratch="$(mktemp -d)"
 trap 'rm -rf -- "$scratch"' EXIT
 for token in 'frank-previews' 'FRANK_OPENFGA' 'insecure-skip-verify' 'tls-skip-verify'; do
@@ -34,7 +35,7 @@ grep -Eq 'max-size=2147483648' "$compose"
 grep -Eq 'http://frank-seaweedfs:8333' "$compose"
 grep -Eq 'frank-model' "$compose"
 grep -Eq 'X-Forwarded-Method|X-Forwarded-Uri|X-Frank-Upload-Capability|X-Frank-Tusd-Hook-Secret' "$root/infra/production/Caddyfile.frank-production"
-grep -Eq 'header_up X-Frank-Tusd-Gate-Secret \{\$FRANK_TUSD_GATE_SECRET\}' "$caddy"
+grep -Fq 'header_up x-frank-tusd-gate-secret {$FRANK_TUSD_GATE_SECRET}' "$caddy"
 if grep -Eq 'header_up X-Tusd-Gate-Secret' "$caddy"; then echo 'Caddy gate header does not match the API contract'; exit 1; fi
 grep -Eq 'forward_auth always issues GET' "$caddy"
 grep -Eq 'uri /private/tusd/gate' "$caddy"
@@ -77,6 +78,19 @@ grep -Fq 'render-seaweedfs-s3-config.sh"' "$bucket_bootstrap"
 grep -Fq -- '--force-recreate --no-deps --wait' "$bucket_bootstrap"
 grep -Fq 'temporary Seaweed bootstrap credential survived scoped recreate' "$bucket_bootstrap"
 grep -Fq 'FRANK_ROOT_RUNTIME_ENV' "$bucket_bootstrap"
+grep -Fq '"Write:frank-attachment-staging","Read:frank-objects","Write:frank-objects"' "$seaweed_template"
+grep -Fq '"actions":["Read:frank-objects","Read:frank-object-previews"]' "$seaweed_template"
+grep -Fq 'get-object --bucket frank-objects --key "$object" "$readback"' "$s3_canary"
+grep -Fq 'delete-object --bucket frank-attachment-staging --key "$key"' "$s3_canary"
+grep -Fq 'downloader delete overreach' "$s3_canary"
+grep -Fq 'healthcheck: { test: ["CMD", "clamdcheck.sh"]' "$compose"
+grep -Fq '"/run:rw,nosuid,nodev,noexec,size=16m"' "$compose"
+grep -Fq 'LocalSocket /run/clamav/clamd.sock' "$root/infra/harness/clamav/clamd.conf"
+if grep -Fq 'clamdscan --version' "$compose"; then echo 'ClamAV healthcheck does not reach clamd'; exit 1; fi
+grep -Fq 'FRANK_HARNESS_EVIDENCE_MANIFEST' "$release_validator"
+grep -Fq 'promote-gateway-candidate.sh' "$release_validator"
+grep -Fq 'does not match reviewed candidate evidence' "$release_validator"
+grep -Fq 'HTTPS URL for hosted four-core candidate evidence required' "$release_runbook"
 for credential in STAGING PROMOTER DOWNLOADER; do
   grep -Fq "__ATTACHMENT_${credential}_ACCESS_KEY__" "$seaweed_template"
   grep -Fq "__ATTACHMENT_${credential}_SECRET_KEY__" "$seaweed_template"
@@ -101,7 +115,7 @@ if env -u FRANK_LAKE_WORKER_ACCESS_KEY -u FRANK_LAKE_WORKER_SECRET_KEY \
 fi
 grep -Fq 'partially configured lake credentials cannot prove mutual denial' "$scratch/partial-lake.log"
 if grep -Eq '(^|[[:space:]])rg([[:space:]]|$)' "$root/infra/harness/bin/validate-gateway-candidate.sh"; then echo 'candidate validator requires unavailable ripgrep'; exit 1; fi
-test "$(grep -Ec 'delete-object --bucket frank-(attachment-staging|objects|object-previews)' "$s3_canary")" -eq 3
+test "$(grep -Ec '^aws_for "\$FRANK_PROMOTER_ACCESS_KEY".*delete-object --bucket frank-(attachment-staging|objects|object-previews)' "$s3_canary")" -eq 3
 grep -Fq 'object canary cleanup failed' "$s3_canary"
 grep -Fq 'preview canary cleanup failed' "$s3_canary"
 grep -Eq 'not before 1\.83\.7' "$root/infra/harness/README.md"
@@ -193,6 +207,10 @@ for (const model of [disabled, enabled]) {
 }
 const command = enabled.services['frank-tusd'].command;
 if (!Array.isArray(command) || !command.includes('-hooks-http=http://frank-api:3000/private/tusd/hooks')) throw new Error('enabled tusd private hook URL missing');
+const clamav = enabled.services['frank-clamav'];
+if (JSON.stringify(clamav.healthcheck?.test) !== JSON.stringify(['CMD', 'clamdcheck.sh'])) throw new Error('ClamAV daemon PING healthcheck missing');
+if (!clamav.tmpfs?.some((mount) => String(mount).startsWith('/run:'))) throw new Error('ClamAV runtime socket tmpfs missing');
+if (!clamav.volumes?.some((volume) => volume.target === '/etc/clamav/clamd.conf' && volume.read_only)) throw new Error('ClamAV reviewed config mount missing');
 if (enabled.services['frank-api'].environment.FRANK_TUSD_GATE_SECRET !== enabled.services['frank-caddy'].environment.FRANK_TUSD_GATE_SECRET) throw new Error('enabled gate secrets differ');
 if (Object.hasOwn(enabled.services['frank-api'].environment, 'FRANK_ATTACHMENT_PROMOTER_BEARER')) throw new Error('enabled API retained unused promoter bearer');
 for (const service of ['frank-api', 'frank-tusd']) {
@@ -205,26 +223,57 @@ promote="$root/infra/harness/bin/promote-gateway-candidate.sh"
 state_root="$scratch/release-state"
 mkdir -p -- "$state_root"
 candidate="$state_root/candidate.env"; current="$state_root/current.env"; rollback="$state_root/rollback.env"; manifest="$state_root/evidence-manifest.json"
-export FRANK_LITELLM_CURRENT_IMAGE="example.invalid/litellm@$digest"
-export FRANK_SEAWEEDFS_CURRENT_IMAGE="example.invalid/seaweedfs@$digest"
-export FRANK_TUSD_CURRENT_IMAGE="example.invalid/tusd@$digest"
-export FRANK_CLAMAV_CURRENT_IMAGE="example.invalid/clamav@$digest"
+export FRANK_LITELLM_CURRENT_IMAGE="ghcr.io/stevenshelley58-afk/litellm@$digest"
+export FRANK_SEAWEEDFS_CURRENT_IMAGE="ghcr.io/stevenshelley58-afk/seaweedfs@$digest"
+export FRANK_TUSD_CURRENT_IMAGE="ghcr.io/stevenshelley58-afk/tusd@$digest"
+export FRANK_CLAMAV_CURRENT_IMAGE="ghcr.io/stevenshelley58-afk/clamav@$digest"
 "$root/infra/harness/bin/validate-gateway-candidate.sh" >/dev/null
-for service in LITELLM SEAWEEDFS TUSD CLAMAV; do printf 'FRANK_%s_CANDIDATE_IMAGE=example.invalid/%s@%s\n' "$service" "${service,,}" "$digest" >> "$candidate"; done
+for service in LITELLM SEAWEEDFS TUSD CLAMAV; do printf 'FRANK_%s_CANDIDATE_IMAGE=ghcr.io/stevenshelley58-afk/%s@%s\n' "$service" "${service,,}" "$digest" >> "$candidate"; done
 : > "$current"; : > "$rollback"
+litellm_config_sha256="sha256:$(sha256sum -- "$root/infra/harness/litellm/config.yaml" | awk '{print $1}')"
+seaweed_config_sha256="sha256:$(sha256sum -- "$root/infra/compose/seaweedfs/s3.json.tmpl" | awk '{print $1}')"
+tusd_config_sha256="sha256:$(sha256sum -- "$root/infra/production/docker-compose.harness.yml" | awk '{print $1}')"
+clamav_config_sha256="sha256:$(sha256sum -- "$root/infra/harness/clamav/clamd.conf" | awk '{print $1}')"
 write_manifest() {
-  local release="$1"
-  node --input-type=module - "$manifest" "$release" "$digest" <<'NODE'
+  local release="$1" provenance="${2:-github-attestation-verified}"
+  node --input-type=module - "$manifest" "$release" "$digest" "$provenance" \
+    "$litellm_config_sha256" "$seaweed_config_sha256" "$tusd_config_sha256" "$clamav_config_sha256" <<'NODE'
 import {writeFileSync} from 'node:fs';
-const [path, release, digest] = process.argv.slice(2);
-const services = ['litellm', 'seaweedfs', 'tusd', 'clamav'].map((service) => ({service, release_url: `https://evidence.invalid/${service}`, tag: 'immutable', oci_digest: digest, license: 'test', provenance_method: 'test', sbom_sha256: digest, server_command: 'test', hosted_canary_url: `https://canary.invalid/${service}`, config_sha256: digest}));
+const [path, release, digest, provenance, litellmConfig, seaweedConfig, tusdConfig, clamavConfig] = process.argv.slice(2);
+const metadata = {
+  litellm: ['v1.96.0', 'MIT', 'BerriAI/litellm', litellmConfig],
+  seaweedfs: ['4.41', 'Apache-2.0', 'seaweedfs/seaweedfs', seaweedConfig],
+  tusd: ['v2.10.0', 'MIT', 'tus/tusd', tusdConfig],
+  clamav: ['clamav-1.5.4', 'GPL-2.0-only', 'Cisco-Talos/clamav', clamavConfig],
+};
+const services = Object.entries(metadata).map(([service, [tag, license, repository, config]]) => ({
+  service, release_url: `https://github.com/${repository}/releases/tag/${tag}`, tag,
+  oci_digest: digest, license, provenance_method: provenance, sbom_sha256: digest,
+  server_command: '{"entrypoint":["/usr/bin/server"],"cmd":[]}',
+  hosted_canary_url: 'https://github.com/stevenshelley58-afk/frank/actions/runs/1', config_sha256: config,
+}));
 writeFileSync(path, `${JSON.stringify({release, services})}\n`);
 NODE
 }
-write_manifest 'abcdefabcdefabcdefabcdefabcdefabcdefabcd'
-FRANK_RELEASE_STATE_ROOT="$state_root" "$promote" "$candidate" "$current" "$rollback" 'https://evidence.invalid/run' "$manifest" >/dev/null
-write_manifest 'gggggggggggggggggggggggggggggggggggggggg'
+export FRANK_RELEASE_COMMIT='abcdefabcdefabcdefabcdefabcdefabcdefabcd'
+write_manifest "$FRANK_RELEASE_COMMIT"
+FRANK_RELEASE_STATE_ROOT="$state_root" "$promote" "$candidate" "$current" "$rollback" 'https://github.com/stevenshelley58-afk/frank/actions/runs/1' "$manifest" >/dev/null
 if FRANK_RELEASE_STATE_ROOT="$state_root" "$promote" "$candidate" "$current" "$rollback" 'https://evidence.invalid/run' "$manifest" >/dev/null 2>&1; then
+  echo 'placeholder evidence URL was accepted'; exit 1
+fi
+node --input-type=module - "$manifest" <<'NODE'
+import {readFileSync,writeFileSync} from 'node:fs'; const path=process.argv[2]; const manifest=JSON.parse(readFileSync(path));
+manifest.services[0].config_sha256=`sha256:${'0'.repeat(64)}`; writeFileSync(path, `${JSON.stringify(manifest)}\n`);
+NODE
+if FRANK_RELEASE_STATE_ROOT="$state_root" "$promote" "$candidate" "$current" "$rollback" 'https://github.com/stevenshelley58-afk/frank/actions/runs/1' "$manifest" >/dev/null 2>&1; then
+  echo 'mismatched reviewed config hash was accepted'; exit 1
+fi
+write_manifest "$FRANK_RELEASE_COMMIT" pending
+if FRANK_RELEASE_STATE_ROOT="$state_root" "$promote" "$candidate" "$current" "$rollback" 'https://github.com/stevenshelley58-afk/frank/actions/runs/1' "$manifest" >/dev/null 2>&1; then
+  echo 'placeholder evidence was accepted'; exit 1
+fi
+write_manifest 'gggggggggggggggggggggggggggggggggggggggg'
+if FRANK_RELEASE_STATE_ROOT="$state_root" "$promote" "$candidate" "$current" "$rollback" 'https://github.com/stevenshelley58-afk/frank/actions/runs/1' "$manifest" >/dev/null 2>&1; then
   echo 'non-hex manifest release was accepted'; exit 1
 fi
 echo 'gateway static security assertions passed'

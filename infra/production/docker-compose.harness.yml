@@ -104,18 +104,22 @@ services:
   frank-clamav:
     image: "${FRANK_CLAMAV_CURRENT_IMAGE:?reviewed ClamAV digest required}"
     networks: [frank, frank-attachments]
-    volumes: ["frank-clamav-signatures:/var/lib/clamav"]
+    volumes:
+      - "frank-clamav-signatures:/var/lib/clamav"
+      - "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/harness/clamav/clamd.conf:/etc/clamav/clamd.conf:ro"
     init: true
     restart: unless-stopped
     read_only: true
-    tmpfs: ["/tmp:rw,nosuid,nodev,noexec,size=64m"]
+    tmpfs:
+      - "/tmp:rw,nosuid,nodev,noexec,size=64m"
+      - "/run:rw,nosuid,nodev,noexec,size=16m"
     cap_drop: [ALL]
     security_opt: [no-new-privileges:true]
     mem_limit: 1536m
     cpus: "1.0"
     pids_limit: 256
     expose: ["3310"]
-    healthcheck: { test: ["CMD-SHELL", "clamdscan --version >/dev/null"], interval: 30s, timeout: 10s, retries: 12, start_period: 120s }
+    healthcheck: { test: ["CMD", "clamdcheck.sh"], interval: 30s, timeout: 10s, retries: 12, start_period: 120s }
 
 networks:
   frank: { external: true, name: frank }
