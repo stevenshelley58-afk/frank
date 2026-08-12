@@ -30,6 +30,11 @@ published history and transparency metadata. `hard-erasure` replaces the
 repository and attempts removal from every enumerated storage/provider surface.
 Never claim hard erasure while an enumerated provider or clone retains content.
 
+Steven's current requested outcome maps to `hard-erasure`. Phase 0 must record that
+choice and this instruction in its signed authority packet. `clean-current-tree` is
+documented only as the honest fallback if a provider makes complete content erasure
+impossible; it does not satisfy the currently requested outcome.
+
 This is an eradication job, not a general disk cleanup. Never use a broad name match, global prune, recursive deletion of a parent directory, or `tools/ops/teardown-old-frank.sh --destroy`. That script matches the current Frank deployment and can destroy production.
 
 ## 2. Current facts
