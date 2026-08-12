@@ -28,25 +28,14 @@ services:
     read_only: true
     tmpfs: [/tmp]
   gate:
-    image: busybox:1.37.0
+    image: python:3.13-alpine
     networks: [canary-attachments]
     # Synthetic canary hook receiver. It has no production credential or route.
     command:
       - sh
       - -ec
       - |
-        mkdir -p /tmp/www/cgi-bin
-        cat > /tmp/www/cgi-bin/hooks <<'HOOK'
-        #!/bin/sh
-        body="$(cat)"
-        if printf '%s' "$$body" | grep -q 'tamper'; then
-          printf 'Status: 403 Forbidden\r\nContent-Type: application/json\r\nContent-Length: 22\r\n\r\n{"RejectUpload":true}\n'
-        else
-          printf 'Status: 204 No Content\r\nContent-Type: application/json\r\nContent-Length: 0\r\n\r\n'
-        fi
-        HOOK
-        chmod 0555 /tmp/www/cgi-bin/hooks
-        exec httpd -f -p 8080 -h /tmp/www
+        exec python3 -c 'from http.server import BaseHTTPRequestHandler,HTTPServer; H=type("H",(BaseHTTPRequestHandler,),{"do_POST":lambda s:(setattr(s,"b",s.rfile.read(int(s.headers.get("Content-Length",0)))),s.send_response(403 if b"tamper" in s.b else 204),s.send_header("Content-Type","application/json"),s.send_header("Content-Length","0"),s.end_headers()),"log_message":lambda *a:None}); HTTPServer(("",8080),H).serve_forever()'
     read_only: true
     tmpfs: [/tmp]
   probe:
