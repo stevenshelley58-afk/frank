@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-const root = join(process.cwd(), 'apps/web/src');
+// pnpm runs a package script from apps/web; direct CI invocation runs at repo root.
+const root = join(process.cwd(), process.cwd().replaceAll('\\', '/').endsWith('/apps/web') ? 'src' : 'apps/web/src');
 // These are known non-chat forms: a component-gallery control and console memory note.
 const composerFiles = new Set(['components/composer.tsx', 'components/shell/composer-bar.tsx']);
 const nonChatForms = new Set(['app/dev/shadcn-kitchen-sink/page.tsx', 'app/console/memory/memory-console.tsx']);
