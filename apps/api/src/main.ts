@@ -244,6 +244,7 @@ async function main(): Promise<void> {
         attachmentAbort.abort();
         await stopAttachmentMaintenance?.();
       })
+      .then(async () => chatTurnRunner?.shutdown())
       .then(() => store.close())
       .then(() => {
         process.exit(0);
