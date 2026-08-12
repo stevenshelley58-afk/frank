@@ -15,6 +15,11 @@ if grep -Eq 'external:|name:[[:space:]]*frank($|[-_])|frank-cell-seaweedfs-data|
   echo 'canary compose can attach production state'; exit 1
 fi
 grep -Eq '^  clamav:$' "$compose"
+grep -Fq -- '-base-path=/v1/uploads/tus/' "$compose"
+grep -Fq -- '-disable-download' "$compose"
+grep -Fq 's3-endpoint=http://seaweedfs:8333' "$compose"
+grep -Fq 'gate:' "$compose"
+grep -Fq 'probe:' "$compose"
 grep -Fq '1.5.4' "$root/infra/harness/README.md"
 test -x "$validator" || { echo 'evidence validator is not executable'; exit 1; }
 

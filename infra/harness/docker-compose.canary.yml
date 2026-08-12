@@ -6,6 +6,7 @@ services:
     networks: [canary-model]
     read_only: true
     tmpfs: [/tmp]
+    command: ["--port", "4000"]
   seaweedfs:
     image: ${FRANK_SEAWEEDFS_CANDIDATE_IMAGE:?digest required}
     command: [server, -dir=/data, -s3]
@@ -16,6 +17,24 @@ services:
   tusd:
     image: ${FRANK_TUSD_CANDIDATE_IMAGE:?digest required}
     networks: [canary-attachments]
+    command: ["-behind-proxy", "-base-path=/v1/uploads/tus/", "-s3-bucket=canary-staging", "-s3-endpoint=http://seaweedfs:8333", "-s3-force-path-style", "-max-size=2147483648", "-hooks-http=http://gate:8080/hooks", "-hooks-enabled-events=pre-create,pre-finish,pre-terminate,post-finish,post-terminate", "-disable-download", "-disable-concatenation"]
+    environment:
+      AWS_ACCESS_KEY_ID: canary-staging
+      AWS_SECRET_ACCESS_KEY: canary-staging-secret
+      AWS_REGION: us-east-1
+      AWS_S3_FORCE_PATH_STYLE: "true"
+    read_only: true
+    tmpfs: [/tmp]
+  gate:
+    image: busybox:1.37.0
+    networks: [canary-attachments]
+    command: ["sh", "-ec", "while true; do printf 'HTTP/1.1 204 No Content\\r\\nContent-Length: 0\\r\\n\\r\\n' | nc -lp 8080 -e sh; done"]
+    read_only: true
+    tmpfs: [/tmp]
+  probe:
+    image: alpine:3.22.2
+    networks: [canary-model, canary-attachments]
+    command: ["sh", "-ec", "trap : TERM INT; while :; do sleep 3600; done"]
     read_only: true
     tmpfs: [/tmp]
   clamav:
