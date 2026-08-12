@@ -47,9 +47,13 @@ grep -Eqi 'HTTP/.*(400|403|409|412|500)' "$receipt/tusd-hook-rejection.txt"
 # Seaweed endpoint must be reachable only on the isolated attachment network; no lake identity exists here.
 "${compose[@]}" exec -T probe sh -ec 'wget -q -O - http://seaweedfs:8333/status' > "$receipt/seaweed-status.json"
 # The deliberately unprivileged identity cannot list or write the disposable bucket.
-if "${compose[@]}" exec -T probe sh -ec 'wget -q -O /dev/null --user=canary-deny --password=canary-deny-secret http://seaweedfs:8333/canary-staging/'; then echo 'Seaweed deny identity unexpectedly listed bucket' >&2; exit 1; fi
+if "${compose[@]}" exec -T probe sh -ec 'wget -q -O /dev/null --header="Authorization: Basic Y2FuYXJ5LWRlbnk6Y2FuYXJ5LWRlbnktc2VjcmV0" http://seaweedfs:8333/canary-staging/'; then echo 'Seaweed deny identity unexpectedly listed bucket' >&2; exit 1; fi
 printf 'canary-deny=list/write denied; disposable canary-staging remains scoped to canary-staging identity\n' > "$receipt/seaweed-identity.txt"
 # ClamAV daemon protocol, not an assumed scanner binary: PING then INSTREAM EICAR over TCP.
-"${compose[@]}" exec -T probe sh -ec 'printf "zPING\\000" | nc clamav 3310 | grep -Fx PONG' > "$receipt/clamav-ping.txt"
+for attempt in $(seq 1 90); do
+  if "${compose[@]}" exec -T probe sh -ec 'printf "zPING\\000" | nc -w 2 clamav 3310 | grep -Fx PONG' > "$receipt/clamav-ping.txt" 2>/dev/null; then break; fi
+  sleep 2
+done
+grep -Fx PONG "$receipt/clamav-ping.txt"
 if "${compose[@]}" exec -T probe sh -ec 'p="X5O!P%@AP[4\\PZX54(P^)7CC)7}\$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!\$H+H*"; test "$(printf %s "$p" | wc -c)" -eq 68; { printf "zINSTREAM\\000\\000\\000\\000D%s\\000" "$p"; } | nc clamav 3310 | grep -E "FOUND"'; then :; else echo 'EICAR was not rejected' >&2; exit 1; fi > "$receipt/clamav-eicar.txt"
 sha256sum "$receipt"/* > "$receipt/SHA256SUMS"
