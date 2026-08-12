@@ -39,7 +39,7 @@ export const attachmentAuthorizeRoute = defineRoute({
 export const attachmentCapabilityRenewRoute = defineRoute({
   operationId: 'attachmentCapabilityRenew', method: 'POST', path: '/v1/attachments/uploads/:uploadId/capability', group: '/v1/attachments',
   summary: 'Renew a short-lived upload capability', description: 'Renews only a still-resumable, unexpired reservation. Expired reservations never receive a browser capability.',
-  actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'], capability: 'chat.write', dataClasses: ['private'], standingPolicyEligible: true, policyOperation: 'chat.write', idempotency: 'safe', consistency: 'read_own_writes', errors: ['unauthenticated', 'forbidden', 'not_found', 'validation_failed', 'internal_error'], rateLimit: { requestsPerMinute: 120, burst: 20 }, auditObligations: [],
+  actorRoles: ['owner', 'operator', 'builder', 'member', 'service_identity'], capability: 'chat.write', dataClasses: ['private'], standingPolicyEligible: true, policyOperation: 'chat.write', idempotency: 'required_key', consistency: 'read_own_writes', errors: ['unauthenticated', 'forbidden', 'not_found', 'validation_failed', 'internal_error'], rateLimit: { requestsPerMinute: 120, burst: 20 }, auditObligations: [],
   params: z.object({ uploadId }).strict(), response: capabilityResponse, successStatus: 200,
 });
 
