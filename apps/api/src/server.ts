@@ -68,7 +68,6 @@ import { RoomFolderBindingStore } from './services/folder-binding/folder-binding
 import { ChannelPushStore } from './services/channels/channel-push.js';
 import { chatRoutes, registerChatRoutes } from './routes/chats.js';
 import { chatTurnRoutes, registerChatTurnRoutes } from './routes/chat-turns.js';
-import type { ChatTurnRunner } from './routes/chat-turns.js';
 import { attachmentUploadRoutes, registerAttachmentUploadRoutes } from './routes/attachment-uploads.js';
 import { attachmentRoutes, registerAttachmentRoutes } from './routes/attachments.js';
 import type { AttachmentRouteDependencies } from './routes/attachments.js';
@@ -174,8 +173,6 @@ export interface BuildServerOptions {
   /** Raw DB handle for brain routes (raw SQL queries, not yet in DomainStore). */
   readonly db?: import("@frank/adapter-postgres").FrankDatabase;
   /** Durable chat execution and SSE poll tuning; injected for hosted/tests. */
-  readonly chatTurnRunner?: ChatTurnRunner;
-  readonly chatTurnPollIntervalMs?: number;
   /** Codegraph storage/service ports; tests provide isolated fixtures. */
   readonly codegraph?: Pick<
     CodegraphRouteDependencies,
@@ -291,7 +288,6 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     // do not need them, so they are off.
     trustProxy: false,
   });
-  if (options.chatTurnRunner) app.addHook('onClose', async () => options.chatTurnRunner?.shutdown());
 
   /* ---------------------------------------------------- error handling --- */
 
@@ -395,7 +391,7 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
   if (options.db) {
     // The chat shell's own store — raw SQL on frank_domain (migration 0010).
     registerChatRoutes(app, { ...shared, db: options.db });
-    registerChatTurnRoutes(app, { ...shared, db: options.db, ...(options.chatTurnRunner ? { runner: options.chatTurnRunner } : {}), ...(options.chatTurnPollIntervalMs === undefined ? {} : { pollIntervalMs: options.chatTurnPollIntervalMs }) });
+    registerChatTurnRoutes(app, { ...shared, db: options.db });
     registerAttachmentUploadRoutes(app, { ...shared, db: options.db });
     if (options.attachments) {
       registerAttachmentRoutes(app, { ...shared, ...options.attachments, publicUrl: config.publicUrl });
