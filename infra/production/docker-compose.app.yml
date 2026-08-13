@@ -178,9 +178,6 @@ services:
       FRANK_DOMAIN_API_URL: "${FRANK_API_INTERNAL_URL:?FRANK_API_INTERNAL_URL is required}"
       FRANK_DOMAIN_SERVICE_TOKEN: "${FRANK_DOMAIN_SERVICE_TOKEN:?FRANK_DOMAIN_SERVICE_TOKEN is required}"
       FRANK_PACK_SIGNING_KEY: "${FRANK_PACK_SIGNING_KEY:?FRANK_PACK_SIGNING_KEY is required}"
-      FRANK_EXPLORER_ROOT: /srv/frank/repo-view
-      FRANK_EXPLORER_CACHE: /var/explorer-cache
-      FRANK_PREVIEWS_ROOT: /srv/frank/preview-view
       GOOSE_REPO_CWD: /srv/frank/repo
       GOOSE_ACP_URL: "${GOOSE_ACP_URL:?GOOSE_ACP_URL is required}"
       GOOSE_ACP_SECRET: "${GOOSE_ACP_SECRET:?GOOSE_ACP_SECRET is required}"
