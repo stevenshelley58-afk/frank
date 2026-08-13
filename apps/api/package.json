@@ -13,7 +13,6 @@
     "lint": "echo 'lint: api (schema + dependency gates run at repo root)'"
   },
   "dependencies": {
-    "@frank/adapter-harness-goose": "workspace:*",
     "@frank/adapter-postgres": "workspace:*",
     "@frank/contracts": "workspace:*",
     "@frank/identity": "workspace:*",
@@ -36,8 +35,7 @@
       "@frank/policy",
       "@frank/identity",
       "@frank/kernel",
-      "@frank/adapter-postgres",
-      "@frank/adapter-harness-goose"
+      "@frank/adapter-postgres"
     ]
   }
 }
