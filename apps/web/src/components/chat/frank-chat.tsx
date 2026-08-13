@@ -21,7 +21,7 @@
  * Hermes conversation and a "conversation continues" note explains why
  * the transcript is not replayed (see conversationRestoreNote in chat-api).
  */
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   AssistantRuntimeProvider,
   ComposerPrimitive,
@@ -55,19 +55,29 @@ export interface FrankChatProps {
   projectName?: (projectId: string) => string;
   onFollowDelegation?: (projectId: string) => void;
   onTitleChange?: (title: string) => void;
+  /** Fired whenever the turn-running state flips (shell frame stop affordance). */
+  onRunningChange?: (running: boolean) => void;
   className?: string;
 }
 
-export function FrankChat({
-  api,
-  conversationId,
-  profile = 'hub',
-  sessionKey,
-  restored = false,
-  agentLabel,
-  tint,
-  className,
-}: FrankChatProps) {
+export interface FrankChatHandle {
+  cancel: () => Promise<void>;
+}
+
+export const FrankChat = forwardRef<FrankChatHandle, FrankChatProps>(function FrankChat(
+  {
+    api,
+    conversationId,
+    profile = 'hub',
+    sessionKey,
+    restored = false,
+    agentLabel,
+    tint,
+    onRunningChange,
+    className,
+  }: FrankChatProps,
+  ref,
+) {
   const sessionKeyValue = sessionKey ?? conversationId;
   const [messages, setMessages] = useState<ThreadMessageLike[]>([]);
   const [isRunning, setIsRunning] = useState(false);
@@ -114,6 +124,7 @@ export function FrankChat({
       };
       setMessages((prev) => [...prev, userMessage, assistantMessage]);
       setIsRunning(true);
+      onRunningChange?.(true);
       turnIdRef.current = null;
 
       const controller = new AbortController();
@@ -176,6 +187,7 @@ export function FrankChat({
         }
       } finally {
         setIsRunning(false);
+        onRunningChange?.(false);
         abortRef.current = null;
       }
     },
@@ -196,7 +208,10 @@ export function FrankChat({
       ),
     );
     setIsRunning(false);
-  }, [api]);
+    onRunningChange?.(false);
+  }, [api, onRunningChange]);
+
+  useImperativeHandle(ref, () => ({ cancel: () => cancel() }), [cancel]);
 
   const runtime = useExternalStoreRuntime({
     messages,
@@ -226,7 +241,7 @@ export function FrankChat({
       </ThreadPrimitive.Root>
     </AssistantRuntimeProvider>
   );
-}
+});
 
 /* ------------------------------------------------------------------ */
 /* Message rows — official MessagePrimitive composition only           */
