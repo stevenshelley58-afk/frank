@@ -28,3 +28,6 @@ HANDOVER*.md
 .light/
 .codex-preview-*/
 .aui-tmp/
+
+# Registry generator build input — required by tools/registry/generate-registry.mjs (CI verify).
+!docs/product/FRANK_COMPLETE_BUILD_PLAN_AND_SPEC.md
