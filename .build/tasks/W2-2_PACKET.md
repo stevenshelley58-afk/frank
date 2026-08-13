@@ -13,6 +13,11 @@ streaming, tool-call rendering, or markdown yourself — the library does all of
   'tool' events; render them with assistant-ui's tool-call UI).
 - Reloading the page restores the conversation — read back from Hermes (same sessionKey →
   conversation chaining), NOT from Frank's DB.
+- ⚠️ F-TRACK OVERLAP: the parallel F-board (`.build/STATE.md`) has **F3-0 chat** READY
+  (owner: cowork). Before starting, check `.build/STATE.md` — if F3-0 is IN_PROGRESS or
+  its branch has touched `apps/web/src/components/chat/**`, STOP and report back to AG-0
+  instead of colliding. Our rebuild wins on architecture (Hermes-backed chat); coordinate,
+  don't duplicate.
 
 ## Scope
 - Allowed: `apps/web/src/components/chat/**`, `apps/web/src/lib/chat-api.ts` (adapt to the
