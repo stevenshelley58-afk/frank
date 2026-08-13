@@ -198,7 +198,10 @@ export type JsonValue = string | number | boolean | null | JsonValue[] | { [key:
 export interface ToolCallEventPayload {
   name: string;
   call_id: string;
+  /** Parsed tool arguments (object when the envelope carries JSON). */
   arguments: { [key: string]: JsonValue };
+  /** Raw arguments text when the envelope carries a JSON string (Hermes does). */
+  argumentsText?: string;
 }
 
 /** Parse the JSON envelope carried by a `tool` SSE event. Null when malformed. */
@@ -206,14 +209,26 @@ export function parseToolEventPayload(content: string): ToolCallEventPayload | n
   try {
     const parsed = JSON.parse(content) as Partial<ToolCallEventPayload>;
     if (typeof parsed.name !== 'string' || typeof parsed.call_id !== 'string') return null;
-    return {
-      name: parsed.name,
-      call_id: parsed.call_id,
-      arguments:
-        parsed.arguments && typeof parsed.arguments === 'object'
-          ? (parsed.arguments as { [key: string]: JsonValue })
-          : {},
-    };
+    // Hermes streams tool arguments as a JSON *string* (e.g.
+    // "{\"command\":\"date\"}"); parse it into an object and keep the raw text
+    // for argsText. A plain object envelope passes through untouched.
+    let args: { [key: string]: JsonValue } = {};
+    let argumentsText: string | undefined;
+    const raw = parsed.arguments;
+    if (typeof raw === 'string') {
+      argumentsText = raw;
+      try {
+        const parsedArgs = JSON.parse(raw) as JsonValue;
+        if (typeof parsedArgs === 'object' && parsedArgs !== null && !Array.isArray(parsedArgs)) {
+          args = parsedArgs as { [key: string]: JsonValue };
+        }
+      } catch {
+        // keep empty args; argsText still carries the raw payload
+      }
+    } else if (typeof raw === 'object' && raw !== null) {
+      args = raw as { [key: string]: JsonValue };
+    }
+    return { name: parsed.name, call_id: parsed.call_id, arguments: args, ...(argumentsText === undefined ? {} : { argumentsText }) };
   } catch {
     return null;
   }
@@ -310,6 +325,96 @@ export async function cancelChatTurn(api: ApiFetch, turnId: string, idempotencyK
     body: JSON.stringify({ idempotency_key: idempotencyKey }),
   });
   return res.json() as Promise<ChatTurnRepresentation>;
+}
+
+/* ------------------------------------------------------------------ */
+/* Profile routing — 'hub' by default, the project's profile when one  */
+/* is active (W2-2: "the UI decides profile; pass it through").        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Hermes profile for a project id. Central/home is always the `hub`
+ * profile; a selected project talks to its own profile (same name).
+ */
+export function profileForProject(projectId: string | null | undefined): string {
+  if (!projectId || projectId === 'central') return 'hub';
+  return projectId;
+}
+
+/* ------------------------------------------------------------------ */
+/* Streaming bridge — the BFF proxy buffers JSON, so the live SSE      */
+/* stream goes through a dedicated app-router route (/api/chat/turns). */
+/* ------------------------------------------------------------------ */
+
+export interface StreamChatTurnOptions extends ChatTurnStreamOptions {
+  /** Abort the underlying POST (pair with cancelChatTurn server-side). */
+  signal?: AbortSignal;
+  /** Underlying fetch — injectable for tests. Defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Submit one turn through the streaming bridge route and consume the
+ * Hermes reply as SSE. Same event shape as `submitChatTurn`, but the
+ * request goes to `/api/chat/turns` (a Next.js route handler that pipes
+ * the upstream text/event-stream through) instead of the JSON-buffering
+ * BFF proxy — the proxy would swallow the stream.
+ */
+export async function streamChatTurn(
+  input: ChatTurnInput,
+  options: StreamChatTurnOptions = {},
+): Promise<ChatTurnRepresentation> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const res = await fetchImpl('/api/chat/turns', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': input.idempotency_key },
+    body: JSON.stringify(input),
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  if (!res.ok) throw new Error(`Chat turn request failed with status ${res.status}`);
+  if (!res.body) throw new Error('Chat turn response has no stream body.');
+  let turn: ChatTurnRepresentation | null = null;
+  for await (const event of readSse(res.body)) {
+    if (options.onEvent) options.onEvent(event);
+    if (event.type === 'turn') turn = event.data as unknown as ChatTurnRepresentation;
+  }
+  if (!turn) throw new Error('Chat turn stream closed before the turn event.');
+  return turn;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reload restore — conversation text lives in Hermes, never Frank.    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Restore result for a conversation on reload.
+ *
+ * The Hermes API server documents a real history endpoint
+ * (`GET /api/sessions/{id}/messages` — verified live 2026-08-13), but the
+ * session id it needs is Hermes-generated and is never exposed to Frank:
+ * the W2-1 turn API persists only {profile, session_key} and does not
+ * forward `X-Hermes-Session-Id`, and the id is not derivable from the
+ * session key. So the web app cannot address that endpoint today.
+ *
+ * Restore therefore degrades gracefully (sanctioned by the W2-2 packet):
+ * the same `session_key` chains turns in the same Hermes conversation, so
+ * context survives a reload — the UI shows a "conversation continues"
+ * marker instead of fabricating a transcript.
+ */
+export interface ConversationRestore {
+  /** 'continues' — transcript replay unavailable; context chains via sessionKey. */
+  status: 'continues';
+  note: string;
+  /** The documented endpoint that would enable real replay (needs an API change). */
+  historyEndpoint: string;
+}
+
+export function conversationRestoreNote(sessionKey: string): ConversationRestore {
+  return {
+    status: 'continues',
+    note: `Conversation continues — earlier turns live in Hermes (session "${sessionKey}" chains them). Frank stores no message text.`,
+    historyEndpoint: `/api/sessions/{id}/messages`,
+  };
 }
 
 /* ------------------------------------------------------------------ */

@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { ApiFetch } from './api';
-import { parseToolEventPayload, submitChatTurn, type ChatTurnStreamEvent } from './chat-api';
+import {
+  conversationRestoreNote,
+  parseToolEventPayload,
+  profileForProject,
+  submitChatTurn,
+  type ChatTurnStreamEvent,
+} from './chat-api';
 
 const CONVERSATION = '11111111-1111-4111-8111-111111111111';
 
@@ -83,8 +89,50 @@ describe('parseToolEventPayload', () => {
     expect(tool).toEqual({ name: 'web_search', call_id: 'call_1', arguments: { query: 'x' } });
   });
 
+  it('parses string arguments the way Hermes actually emits them', () => {
+    // Live Hermes shape (verified 2026-08-13): arguments is a JSON *string*.
+    const tool = parseToolEventPayload('{"name":"terminal","call_id":"call_2","arguments":"{\\"command\\":\\"date\\"}"}');
+    expect(tool).toEqual({
+      name: 'terminal',
+      call_id: 'call_2',
+      arguments: { command: 'date' },
+      argumentsText: '{"command":"date"}',
+    });
+  });
+
+  it('keeps raw text when string arguments are not JSON', () => {
+    const tool = parseToolEventPayload('{"name":"search","call_id":"call_3","arguments":"raw"}');
+    expect(tool).toEqual({
+      name: 'search',
+      call_id: 'call_3',
+      arguments: {},
+      argumentsText: 'raw',
+    });
+  });
+
   it('returns null for malformed envelopes', () => {
     expect(parseToolEventPayload('not json')).toBeNull();
     expect(parseToolEventPayload('{"name":"only_name"}')).toBeNull();
+  });
+});
+
+describe('profileForProject', () => {
+  it('defaults to the hub profile', () => {
+    expect(profileForProject(undefined)).toBe('hub');
+    expect(profileForProject('central')).toBe('hub');
+  });
+
+  it('selects the project profile when a project is active', () => {
+    expect(profileForProject('blockwise')).toBe('blockwise');
+    expect(profileForProject('chase')).toBe('chase');
+  });
+});
+
+describe('conversationRestoreNote', () => {
+  it('degrades to a sessionKey-chaining note with the documented history endpoint', () => {
+    const restore = conversationRestoreNote('conv-1');
+    expect(restore.status).toBe('continues');
+    expect(restore.note).toContain('conv-1');
+    expect(restore.historyEndpoint).toBe('/api/sessions/{id}/messages');
   });
 });
