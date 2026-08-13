@@ -86,6 +86,7 @@ export interface BuildTestServerOptions {
    */
   readonly db?: import('@frank/adapter-postgres').FrankDatabase;
   readonly chatTurnRunner?: import('../routes/chat-turns.js').ChatTurnRunner;
+  readonly chatTurnPollIntervalMs?: number;
   /** Isolated codegraph fixtures and service stub for route-contract tests. */
   readonly codegraph?: Pick<
     CodegraphRouteDependencies,
