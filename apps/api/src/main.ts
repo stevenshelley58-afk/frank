@@ -40,9 +40,6 @@ import { statfs } from 'node:fs/promises';
 import { PostgresAttachmentPersistence } from './services/attachments/postgres-persistence.js';
 import { AttachmentLifecycle } from './services/attachments/lifecycle.js';
 import { attachmentRuntimeConfig, createAttachmentRuntime, startAttachmentMaintenance } from './services/attachments/runtime.js';
-import { GooseAdapter, GooseAgentHarnessAdapter } from '@frank/adapter-harness-goose';
-import { DurableChatTurnRunner } from './services/chat-turn-runner.js';
-import { chatTurnRuntimeConfig } from './services/chat-turn-config.js';
 
 async function main(): Promise<void> {
   const config = resolveConfig();
@@ -90,20 +87,6 @@ async function main(): Promise<void> {
     };
     stopAttachmentMaintenance = startAttachmentMaintenance({ worker: runtime.worker, lifecycle, persistence, terminator: runtime.terminator }, attachmentAbort.signal);
   }
-
-  const chatConfig = chatTurnRuntimeConfig(process.env);
-  const chatTurnRunner = chatConfig ? new DurableChatTurnRunner({
-    db: store.db,
-    adapters: [new GooseAgentHarnessAdapter(new GooseAdapter({
-      baseUrl: chatConfig.gooseAcpUrl.replace(/^ws/, 'http').replace(/\/acp\/?$/, ''),
-      wsUrl: chatConfig.gooseAcpUrl,
-      ...(chatConfig.gooseSecret ? { secretKey: chatConfig.gooseSecret } : {}),
-    }))],
-    modelAliases: chatConfig.aliases,
-    capabilityRoutes: chatConfig.capabilityRoutes,
-    workspacePath: chatConfig.workspacePath,
-  }) : undefined;
-  await chatTurnRunner?.recover();
 
   const runnerEnabled = process.env.FRANK_WORKBENCH_RUNNER_ENABLED === 'true';
   let workbenchRunner: WorkbenchRunner | undefined;
@@ -228,7 +211,6 @@ async function main(): Promise<void> {
     ...(workbenchRunner === undefined ? {} : { workbenchRunner }),
     ...(missionOrchestrator === undefined ? {} : { missionOrchestrator }),
     ...(attachments === undefined ? {} : { attachments }),
-    ...(chatTurnRunner === undefined ? {} : { chatTurnRunner }),
   });
 
   const shutdown = (signal: string): void => {
@@ -244,7 +226,6 @@ async function main(): Promise<void> {
         attachmentAbort.abort();
         await stopAttachmentMaintenance?.();
       })
-      .then(async () => chatTurnRunner?.shutdown())
       .then(() => store.close())
       .then(() => {
         process.exit(0);

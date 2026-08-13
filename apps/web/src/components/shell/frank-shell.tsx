@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
 import { useAuth, useData } from '@/components/providers';
@@ -512,16 +511,6 @@ export function FrankShell() {
             <b className="block text-[12.5px]">Steve</b>
             <span className="text-[10.5px] text-muted">Owner · full autonomy</span>
           </span>
-          <Link
-            href="/console"
-            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium text-muted transition-colors hover:bg-hover hover:text-ink"
-            aria-label="Console"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="m4 17 6-6-6-6M12 19h8" />
-            </svg>
-            <span>Console</span>
-          </Link>
         </div>
       </nav>
 
@@ -556,12 +545,6 @@ export function FrankShell() {
           <span className="hidden font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted/80 sm:inline">
             {currentProject.agent}
           </span>
-          <Link
-            href="/console"
-            className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-muted transition-colors hover:bg-hover hover:text-ink lg:hidden"
-          >
-            Console
-          </Link>
           <button
             onClick={() => setMobileFrameOpen((v) => !v)}
             id="living-frame-trigger"

@@ -809,8 +809,6 @@ describe('ADR-017 OpenAPI', () => {
     };
     expect(document.openapi).toBe('3.1.0');
     expect(Object.keys(document.paths).sort()).toEqual([
-      '/v1/brain/save',
-      '/v1/brain/search',
       '/v1/capture',
       // CH-06: outbox poll/ack for the channels listener.
       '/v1/channels/outbox',

@@ -86,28 +86,6 @@ importers:
         specifier: 3.2.6
         version: 3.2.6(@types/debug@4.1.13)(@types/node@22.10.2)(jiti@1.21.7)(tsx@4.23.11)(yaml@2.8.3)
 
-  adapters/harness/goose:
-    dependencies:
-      '@frank/contracts':
-        specifier: workspace:*
-        version: link:../../../packages/contracts
-      ws:
-        specifier: 8.21.0
-        version: 8.21.0
-      zod:
-        specifier: 4.4.3
-        version: 4.4.3
-    devDependencies:
-      '@types/ws':
-        specifier: 8.18.0
-        version: 8.18.0
-      typescript:
-        specifier: 5.7.2
-        version: 5.7.2
-      vitest:
-        specifier: 3.2.6
-        version: 3.2.6(@types/debug@4.1.13)(@types/node@22.10.2)(jiti@1.21.7)(tsx@4.23.11)(yaml@2.8.3)
-
   adapters/storage/postgres:
     dependencies:
       '@frank/contracts':
@@ -148,9 +126,6 @@ importers:
 
   apps/api:
     dependencies:
-      '@frank/adapter-harness-goose':
-        specifier: workspace:*
-        version: link:../../adapters/harness/goose
       '@frank/adapter-postgres':
         specifier: workspace:*
         version: link:../../adapters/storage/postgres
@@ -224,9 +199,6 @@ importers:
       '@frank/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
-      '@frank/memory':
-        specifier: workspace:*
-        version: link:../../packages/memory
       '@frank/pipeline-graph':
         specifier: workspace:*
         version: link:../../packages/pipeline-graph
@@ -406,28 +378,9 @@ importers:
       '@frank/contracts':
         specifier: workspace:*
         version: link:../contracts
-      '@frank/memory':
-        specifier: workspace:*
-        version: link:../memory
       '@frank/policy':
         specifier: workspace:*
         version: link:../policy
-    devDependencies:
-      '@types/node':
-        specifier: 22.10.2
-        version: 22.10.2
-      typescript:
-        specifier: 5.7.2
-        version: 5.7.2
-      vitest:
-        specifier: 3.2.6
-        version: 3.2.6(@types/debug@4.1.13)(@types/node@22.10.2)(jiti@1.21.7)(tsx@4.23.11)(yaml@2.8.3)
-
-  packages/memory:
-    dependencies:
-      '@frank/contracts':
-        specifier: workspace:*
-        version: link:../contracts
     devDependencies:
       '@types/node':
         specifier: 22.10.2

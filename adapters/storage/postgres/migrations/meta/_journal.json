@@ -81,6 +81,7 @@
     },
     { "idx": 11, "version": "7", "when": 1787300001000, "tag": "0011_harness_gateway", "breakpoints": true },
     { "idx": 12, "version": "7", "when": 1787300002000, "tag": "0012_chat_turn_event", "breakpoints": true },
-    { "idx": 13, "version": "7", "when": 1787300003000, "tag": "0013_attachment", "breakpoints": true }
+    { "idx": 13, "version": "7", "when": 1787300003000, "tag": "0013_attachment", "breakpoints": true },
+    { "idx": 14, "version": "7", "when": 1787300004000, "tag": "0014_brain_legacy_rename", "breakpoints": true }
   ]
 }
