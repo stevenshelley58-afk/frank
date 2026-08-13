@@ -1,13 +1,16 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { chat, type HermesChatEvent } from './index.js';
+import { chat, type ChatEvent } from './index.js';
 
 /**
- * The suite exercises the transport against a FAKE OpenAI-compatible HTTP
- * server on loopback — no real Hermes gateway, no public internet. Each test
- * sets the env vars `chat()` reads, so the request shape, headers, SSE
- * parsing, and abort behaviour are all verified end to end.
+ * The suite talks ONLY to a fake OpenAI-compatible HTTP server on loopback —
+ * never to the real Hermes gateway, never to the public internet. The fake
+ * emits the same Responses-API SSE event stream the real Hermes API server
+ * emits (verified by the W2-1 live probe): `response.created`,
+ * `response.output_item.added` (function_call), `response.output_item.done`,
+ * `response.output_text.delta`, `response.completed`.
  */
 
 interface RecordedRequest {
@@ -49,8 +52,8 @@ function startFakeServer(respond: (req: RecordedRequest, res: ServerResponse) =>
     });
     server.on('error', reject);
     server.listen(0, '127.0.0.1', () => {
-      const address = server.address();
-      if (address === null || typeof address === 'string') {
+      const address = server.address() as AddressInfo | null;
+      if (address === null) {
         reject(new Error('fake server did not bind a port'));
         return;
       }
@@ -68,73 +71,68 @@ function startFakeServer(respond: (req: RecordedRequest, res: ServerResponse) =>
   });
 }
 
-/** Standard OpenAI SSE encoding for chat.completions chunks. */
-function sseBody(...chunks: Array<Record<string, unknown>>): string {
-  const lines = chunks.map((chunk) => `data: ${JSON.stringify(chunk)}\n\n`).join('');
-  return `${lines}data: [DONE]\n\n`;
+/** Responses-API SSE encoding: `event: <name>` + `data: <json>`. */
+function sse(...events: Array<{ name: string; data: Record<string, unknown> }>): string {
+  return events.map((e) => `event: ${e.name}\ndata: ${JSON.stringify(e.data)}\n\n`).join('');
 }
 
-function textChunk(content: string, finish: 'stop' | null = null): Record<string, unknown> {
+function textDelta(delta: string, sequence = 0): { name: string; data: Record<string, unknown> } {
   return {
-    id: 'chatcmpl-test',
-    object: 'chat.completion.chunk',
-    created: 1,
-    model: 'hub',
-    choices: [{ index: 0, delta: { content }, finish_reason: finish }],
+    name: 'response.output_text.delta',
+    data: { type: 'response.output_text.delta', item_id: 'msg_1', output_index: 0, content_index: 0, delta, sequence_number: sequence },
   };
 }
 
-function emptyChunk(finish: 'stop' | 'tool_calls' | null = null): Record<string, unknown> {
+function completed(sequence = 0): { name: string; data: Record<string, unknown> } {
   return {
-    id: 'chatcmpl-test',
-    object: 'chat.completion.chunk',
-    created: 1,
-    model: 'hub',
-    choices: [{ index: 0, delta: {}, finish_reason: finish }],
+    name: 'response.completed',
+    data: { type: 'response.completed', response: { id: 'resp_1', status: 'completed' }, sequence_number: sequence },
   };
 }
 
-function toolDeltaChunk(index: number, fragment: Record<string, unknown>): Record<string, unknown> {
+function functionCallDone(name: string, callId: string, args: string, sequence = 0): { name: string; data: Record<string, unknown> } {
   return {
-    id: 'chatcmpl-test',
-    object: 'chat.completion.chunk',
-    created: 1,
-    model: 'hub',
-    choices: [{ index: 0, delta: { tool_calls: [{ index, ...fragment }] }, finish_reason: null }],
+    name: 'response.output_item.done',
+    data: {
+      type: 'response.output_item.done',
+      output_index: 0,
+      item: { id: `fc_${callId}`, type: 'function_call', status: 'completed', name, call_id: callId, arguments: args },
+      sequence_number: sequence,
+    },
   };
 }
 
-async function collect(events: AsyncIterable<HermesChatEvent>): Promise<HermesChatEvent[]> {
-  const out: HermesChatEvent[] = [];
+async function collect(events: AsyncIterable<ChatEvent>): Promise<ChatEvent[]> {
+  const out: ChatEvent[] = [];
   for await (const event of events) out.push(event);
   return out;
 }
 
+const ENV_KEYS = ['HERMES_API_URL', 'HERMES_API_KEY', 'HERMES_API_CONNECT_TIMEOUT_MS', 'HERMES_API_IDLE_TIMEOUT_MS'] as const;
 const ORIGINAL_ENV: Record<string, string | undefined> = {};
 
 describe('hermes-client chat()', () => {
   beforeEach(() => {
-    ORIGINAL_ENV.HERMES_API_URL = process.env.HERMES_API_URL;
-    ORIGINAL_ENV.HERMES_API_KEY = process.env.HERMES_API_KEY;
-    ORIGINAL_ENV.HERMES_API_TIMEOUT_MS = process.env.HERMES_API_TIMEOUT_MS;
+    for (const name of ENV_KEYS) ORIGINAL_ENV[name] = process.env[name];
     process.env.HERMES_API_KEY = 'dev-key-abc123';
   });
 
   afterEach(() => {
-    for (const [name, value] of Object.entries(ORIGINAL_ENV)) {
+    for (const name of ENV_KEYS) {
+      const value = ORIGINAL_ENV[name];
       if (value === undefined) delete process.env[name];
       else process.env[name] = value;
     }
   });
 
-  it('streams text deltas and ends with done, hitting the profile-routed endpoint', async () => {
+  it('streams text deltas and ends with done, hitting the profile-routed responses endpoint', async () => {
     const fake = await startFakeServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      res.end(sseBody(textChunk('Hel'), textChunk('lo'), emptyChunk('stop')));
+      res.end(sse(textDelta('Hel', 1), textDelta('lo', 2), completed(3)));
     });
     try {
       process.env.HERMES_API_URL = fake.url;
-      const events = await collect(chat({ profile: 'hub', sessionKey: 'conv-1', message: 'hi' }));
+      const events = await collect(chat({ profile: 'hub', sessionKey: 'conv-1', message: 'Hello there' }));
 
       expect(events).toEqual([
         { type: 'text', content: 'Hel' },
@@ -146,41 +144,54 @@ describe('hermes-client chat()', () => {
       const request = fake.requests[0];
       if (!request) throw new Error('no request recorded');
       expect(request.method).toBe('POST');
-      expect(request.path).toBe('/p/hub/v1/chat/completions');
+      expect(request.path).toBe('/p/hub/v1/responses');
       expect(request.body.model).toBe('hub');
+      expect(request.body.input).toBe('Hello there');
       expect(request.body.stream).toBe(true);
-      expect(request.body.messages).toEqual([{ role: 'user', content: 'hi' }]);
       expect(request.body.conversation).toBe('conv-1');
-      const authorization = request.headers.authorization;
-      expect(authorization).toBe('Bearer ' + 'dev-key-abc123');
+      expect(request.headers.authorization).toBe('Bearer dev-key-abc123');
       expect(request.headers['x-hermes-session-key']).toBe('conv-1');
     } finally {
       await fake.close();
     }
   });
 
-  it('assembles fragmented tool-call deltas into one tool event per call', async () => {
+  it('emits one tool event per completed function call, with name and arguments', async () => {
     const fake = await startFakeServer((_req, res) => {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
       res.end(
-        sseBody(
-          toolDeltaChunk(0, { id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '' } }),
-          toolDeltaChunk(0, { function: { arguments: '{"path":"' } }),
-          toolDeltaChunk(0, { function: { arguments: 'notes.txt"}' } }),
-          emptyChunk('tool_calls'),
+        sse(
+          functionCallDone('terminal', 'call_1', '{"command":"pwd"}', 1),
+          textDelta('The directory is /c/Users/steve.', 2),
+          completed(3),
         ),
       );
     });
     try {
       process.env.HERMES_API_URL = fake.url;
-      const events = await collect(chat({ profile: 'hub', sessionKey: 'conv-1', message: 'read my notes' }));
-      const toolEvents = events.filter((event) => event.type === 'tool');
-      expect(toolEvents).toHaveLength(1);
-      const tool = JSON.parse(toolEvents[0]?.content ?? '') as { id: string; name: string; arguments: string };
-      expect(tool.id).toBe('call_1');
-      expect(tool.name).toBe('read_file');
-      expect(tool.arguments).toBe('{"path":"notes.txt"}');
-      expect(events.at(-1)).toEqual({ type: 'done', content: '' });
+      const events = await collect(chat({ profile: 'hub', sessionKey: 'conv-1', message: 'where am I?' }));
+
+      expect(events).toHaveLength(3);
+      expect(events[0]).toEqual({
+        type: 'tool',
+        content: JSON.stringify({ name: 'terminal', call_id: 'call_1', arguments: '{"command":"pwd"}' }),
+      });
+      expect(events[1]).toEqual({ type: 'text', content: 'The directory is /c/Users/steve.' });
+      expect(events[2]).toEqual({ type: 'done', content: '' });
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it('routes the default profile without a /p/ prefix', async () => {
+    const fake = await startFakeServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(sse(completed(0)));
+    });
+    try {
+      process.env.HERMES_API_URL = fake.url;
+      await collect(chat({ profile: 'hermes-agent', sessionKey: 'conv-1', message: 'hi' }));
+      expect(fake.requests[0]?.path).toBe('/v1/responses');
     } finally {
       await fake.close();
     }
@@ -201,25 +212,25 @@ describe('hermes-client chat()', () => {
     expect(events).toHaveLength(1);
     expect(events[0]?.type).toBe('error');
     expect(events[0]?.content ?? '').not.toBe('');
-    // Connection refused on loopback is immediate; anything under 5 s proves
-    // the client did not hang waiting for a retry or a long timeout.
+    // Connection refused on loopback is immediate; well under 5 s proves the
+    // client did not hang waiting on a retry or a long timeout.
     expect(elapsedMs).toBeLessThan(5_000);
   });
 
-  it('aborts a stalled request via HERMES_API_TIMEOUT_MS and yields a clear error', async () => {
+  it('aborts a stalled request via the connect timeout and yields a clear error', async () => {
     const fake = await startFakeServer(() => {
       // Accept the connection and never respond — the request stalls.
     });
     try {
       process.env.HERMES_API_URL = fake.url;
-      process.env.HERMES_API_TIMEOUT_MS = '300';
+      process.env.HERMES_API_CONNECT_TIMEOUT_MS = '300';
       const startedAt = Date.now();
       const events = await collect(chat({ profile: 'hub', sessionKey: 'conv-1', message: 'hi' }));
       const elapsedMs = Date.now() - startedAt;
 
       expect(events).toHaveLength(1);
       expect(events[0]?.type).toBe('error');
-      expect(events[0]?.content).toContain('timed out');
+      expect(events[0]?.content).toContain('connect timeout');
       expect(elapsedMs).toBeGreaterThan(250);
       expect(elapsedMs).toBeLessThan(5_000);
     } finally {
@@ -230,6 +241,43 @@ describe('hermes-client chat()', () => {
   it('yields a configuration error when HERMES_API_KEY is missing', async () => {
     delete process.env.HERMES_API_KEY;
     const events = await collect(chat({ profile: 'hub', sessionKey: 'conv-1', message: 'hi' }));
-    expect(events).toEqual([{ type: 'error', content: 'HERMES_API_KEY is not configured.' }]);
+    expect(events).toEqual([
+      { type: 'error', content: 'HERMES_API_KEY is not set; cannot authenticate to the Hermes API server.' },
+    ]);
+  });
+
+  it('maps an HTTP error response to an error event', async () => {
+    const fake = await startFakeServer((_req, res) => {
+      res.writeHead(503, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ error: { message: 'Too many concurrent runs', type: 'server_error' } }));
+    });
+    try {
+      process.env.HERMES_API_URL = fake.url;
+      const events = await collect(chat({ profile: 'hub', sessionKey: 'conv-1', message: 'hi' }));
+      expect(events).toHaveLength(1);
+      expect(events[0]?.type).toBe('error');
+      expect(events[0]?.content).toContain('HTTP 503');
+    } finally {
+      await fake.close();
+    }
+  });
+
+  it('surfaces an in-stream SSE error event', async () => {
+    const fake = await startFakeServer((_req, res) => {
+      res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+      res.end(
+        sse(
+          textDelta('partial', 1),
+          { name: 'error', data: { type: 'error', code: 'server_error', message: 'upstream exploded', param: null, sequence_number: 2 } },
+        ),
+      );
+    });
+    try {
+      process.env.HERMES_API_URL = fake.url;
+      const events = await collect(chat({ profile: 'hub', sessionKey: 'conv-1', message: 'hi' }));
+      expect(events.at(-1)).toEqual({ type: 'error', content: 'Hermes stream error: upstream exploded' });
+    } finally {
+      await fake.close();
+    }
   });
 });

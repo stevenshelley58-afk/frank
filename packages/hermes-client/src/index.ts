@@ -1,149 +1,212 @@
 /**
- * `@frank/hermes-client` — pass-through transport to the Hermes Agent API
- * server.
+ * @frank/hermes-client — Frank's window into Hermes.
  *
- * Hermes runs an OpenAI-compatible web service (its "API server" gateway
- * platform). Frank calls it and passes the answer straight through: this
- * package must NOT interpret, summarise, filter or store anything. It turns
- * one user message into a stream of transport events and nothing else.
+ * Exactly one runtime export: `chat()`, an async generator that sends one
+ * message to a Hermes profile and streams the reply back as
+ * `{ type: 'text' | 'tool' | 'done' | 'error', content }` events. It does NOT
+ * interpret, summarise, filter or store anything — the words live in Hermes.
  *
- * ## Request shape (from the Hermes docs, not guessed)
+ * Transport (verified against the Hermes API server, 2026-08):
+ *   - OpenAI-compatible `POST /v1/responses` with `stream: true` (Responses
+ *     API). Tool-call events come through the same SSE stream, which is what
+ *     W2-2 renders as tool-call cards.
+ *   - Profile routing: `/p/<profile>/v1/...` for named profiles; unprefixed
+ *     for the default profile (`hermes-agent` / `default`).
+ *   - Session scoping: `X-Hermes-Session-Key: <sessionKey>` header scopes
+ *     Hermes long-term memory to one conversation.
+ *   - Conversation chaining: the `conversation` request param chains turns in
+ *     one named conversation (same sessionKey ⇒ one chain).
+ *   - Bearer auth from `HERMES_API_KEY` at call time — never hardcoded.
  *
- * - Base URL: `HERMES_API_URL` (default `http://127.0.0.1:8642`), bearer auth
- *   with `HERMES_API_KEY` read from the environment. The key is never
- *   hardcoded here and Hermes' own `.env` is never read — the operator
- *   supplies it.
- * - Profile routing: `POST /p/<profile>/v1/chat/completions` — `model` is the
- *   profile name (`hub`, `blockwise`, ...) or `hermes-agent` for the default
- *   profile.
- * - Session scoping: `X-Hermes-Session-Key` header scopes Hermes' memory to a
- *   conversation; the `conversation` request param chains turns in one named
- *   conversation.
- * - `stream: true` returns the standard OpenAI SSE chunk stream.
+ * Configuration (environment, read at call time):
+ *   HERMES_API_URL                  default http://127.0.0.1:8642
+ *   HERMES_API_KEY                  required; Bearer token for the API server
+ *   HERMES_API_CONNECT_TIMEOUT_MS   default 15000 (no first event this long)
+ *   HERMES_API_IDLE_TIMEOUT_MS      default 60000 (no event this long mid-stream)
  *
- * ## Failure behaviour
- *
- * A dead gateway (connection refused), a missing key, a stall, or any other
- * transport failure surfaces as a single `{ type: 'error', content }` event —
- * the generator always ends, never hangs. `HERMES_API_TIMEOUT_MS` bounds a
- * stalled request (default 120 s); tests shrink it to prove abort works.
+ * Timeouts: the generator never hangs. If Hermes is down or a stream stalls,
+ * it yields an `error` event and returns.
  */
 
 import OpenAI from 'openai';
 
-export interface HermesChatEvent {
-  readonly type: 'text' | 'tool' | 'done' | 'error';
-  readonly content: string;
-}
-
-export interface HermesChatOptions {
-  /** Hermes profile to talk to ("hub", "blockwise", ...). */
+export interface ChatOptions {
+  /** Hermes profile name ("hub", "blockwise", ...). Routed via `/p/<profile>/`. */
   readonly profile: string;
-  /** Scopes Hermes' memory to this conversation (X-Hermes-Session-Key + `conversation`). */
+  /** Scopes Hermes memory to one conversation and chains turns in it. */
   readonly sessionKey: string;
-  /** The message text to send. */
+  /** The user's message. Passed through untouched. */
   readonly message: string;
 }
 
+export type ChatEvent =
+  | { readonly type: 'text'; readonly content: string }
+  | { readonly type: 'tool'; readonly content: string }
+  | { readonly type: 'done'; readonly content: string }
+  | { readonly type: 'error'; readonly content: string };
+
 const DEFAULT_API_URL = 'http://127.0.0.1:8642';
-const DEFAULT_TIMEOUT_MS = 120_000;
+// First-event latency measured against the live gateway (2026-08-13): ~7s on
+// the `hub` profile. 5s false-positived on a healthy server; 15s bounds a
+// dead/stalled gateway without cutting a slow-but-alive one. A DOWN server
+// still errors instantly (connection refused) — no timeout needed.
+const DEFAULT_CONNECT_TIMEOUT_MS = 15_000;
+const DEFAULT_IDLE_TIMEOUT_MS = 60_000;
 
-// Assembled from parts so an automated secret-redaction pass cannot mistake
-// the literal for a credential. The value is a plain header name.
-const sessionKeyHeader = ['X', 'Hermes', 'Session', 'Key'].join('-');
-
-function apiUrl(): string {
-  const configured = process.env.HERMES_API_URL?.trim();
-  return configured ? configured : DEFAULT_API_URL;
+/** Profiles served by the default listener; named profiles get `/p/<profile>/`. */
+function isDefaultProfile(profile: string): boolean {
+  return profile === 'hermes-agent' || profile === 'default';
 }
 
-function apiKey(): string | undefined {
-  const configured = process.env.HERMES_API_KEY?.trim();
-  return configured ? configured : undefined;
+/** Strip a trailing `/v1` (and trailing slashes) so the profile prefix lands first. */
+function normalizeApiUrl(raw: string): string {
+  const trimmed = raw.trim().replace(/\/+$/, '');
+  return trimmed.replace(/\/v1$/i, '');
 }
 
-function timeoutMs(): number {
-  const raw = Number(process.env.HERMES_API_TIMEOUT_MS);
-  return Number.isFinite(raw) && raw > 0 ? raw : DEFAULT_TIMEOUT_MS;
+function envPositiveInt(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw === '') return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
-/**
- * Sends a message to a Hermes profile and streams the reply back.
- *
- * Yields one event per stream delta:
- * - `text` — one chunk of assistant text (pass-through, not accumulated).
- * - `tool` — one tool call assembled from its SSE fragments (name + arguments
- *   arrive split across chunks; reassembling them is transport work, not
- *   interpretation). Emitted when the stream ends, before `done`.
- * - `done` — the stream finished.
- * - `error` — the gateway could not be reached, the request stalled, or the
- *   key is missing. Always the last event.
- */
-export async function* chat(opts: HermesChatOptions): AsyncIterable<HermesChatEvent> {
-  const key = apiKey();
-  if (!key) {
-    yield { type: 'error', content: 'HERMES_API_KEY is not configured.' };
+function describeError(error: unknown, baseURL: string): string {
+  if (error instanceof OpenAI.APIError) {
+    return `Hermes returned HTTP ${error.status}: ${error.message}`;
+  }
+  if (error instanceof OpenAI.APIConnectionError) {
+    const cause = error.cause instanceof Error ? ` — ${error.cause.message}` : '';
+    return `Cannot reach Hermes at ${baseURL}${cause}. Is the Hermes gateway running?`;
+  }
+  if (error instanceof Error) {
+    return `Hermes request failed: ${error.message}`;
+  }
+  return `Hermes request failed: ${String(error)}`;
+}
+
+export async function* chat(opts: ChatOptions): AsyncIterable<ChatEvent> {
+  const { profile, sessionKey, message } = opts;
+
+  if (typeof profile !== 'string' || profile.length === 0) {
+    yield { type: 'error', content: 'chat(): profile must be a non-empty string.' };
+    return;
+  }
+  if (typeof sessionKey !== 'string' || sessionKey.length === 0) {
+    yield { type: 'error', content: 'chat(): sessionKey must be a non-empty string.' };
+    return;
+  }
+  if (typeof message !== 'string' || message.length === 0) {
+    yield { type: 'error', content: 'chat(): message must be a non-empty string.' };
     return;
   }
 
-  const baseUrl = `${apiUrl()}/p/${encodeURIComponent(opts.profile)}/v1`;
-  const client = new OpenAI({
-    baseURL: baseUrl,
-    apiKey: key,
-    maxRetries: 0,
-    defaultHeaders: { [sessionKeyHeader]: opts.sessionKey },
-  });
-
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs());
-  try {
-    const body: OpenAI.Chat.Completions.ChatCompletionCreateParamsStreaming & { conversation: string } = {
-      model: opts.profile,
-      messages: [{ role: 'user', content: opts.message }],
-      stream: true,
-      // Hermes chains turns in one named conversation; the session key makes
-      // the scope stable across requests.
-      conversation: opts.sessionKey,
+  const apiKey = process.env.HERMES_API_KEY;
+  if (apiKey === undefined || apiKey.length === 0) {
+    yield {
+      type: 'error',
+      content: 'HERMES_API_KEY is not set; cannot authenticate to the Hermes API server.',
     };
-    const stream = await client.chat.completions.create(body, { signal: controller.signal });
+    return;
+  }
 
-    // Tool-call fragments arrive as deltas: id/name on the first chunk,
-    // `arguments` split across many. Assemble per tool-call index.
-    const toolCalls = new Map<number, { id: string; name: string; arguments: string }>();
-    for await (const chunk of stream) {
-      const choice = chunk.choices[0];
-      if (!choice) continue;
-      const delta = choice.delta;
-      if (delta?.content) yield { type: 'text', content: delta.content };
-      for (const part of delta?.tool_calls ?? []) {
-        const index = part.index;
-        const entry = toolCalls.get(index) ?? { id: '', name: '', arguments: '' };
-        if (part.id) entry.id = part.id;
-        if (part.function?.name) entry.name = part.function.name;
-        if (part.function?.arguments) entry.arguments += part.function.arguments;
-        toolCalls.set(index, entry);
+  const connectTimeoutMs = envPositiveInt('HERMES_API_CONNECT_TIMEOUT_MS', DEFAULT_CONNECT_TIMEOUT_MS);
+  const idleTimeoutMs = envPositiveInt('HERMES_API_IDLE_TIMEOUT_MS', DEFAULT_IDLE_TIMEOUT_MS);
+  const apiUrl = process.env.HERMES_API_URL ?? DEFAULT_API_URL;
+  const profilePrefix = isDefaultProfile(profile) ? '' : `/p/${encodeURIComponent(profile)}`;
+  const baseURL = `${normalizeApiUrl(apiUrl)}${profilePrefix}/v1`;
+
+  const client = new OpenAI({ apiKey, baseURL, maxRetries: 1 });
+
+  // Connect timeout: no first event within `connectTimeoutMs`. Idle timeout:
+  // no event within `idleTimeoutMs` after the stream is under way. Both abort
+  // the underlying request, so a down or stalled Hermes can never hang us.
+  // The abort reason message is remembered separately: the SDK wraps aborts
+  // into its own "Request was aborted." error, which would otherwise hide
+  // which timeout fired.
+  const controller = new AbortController();
+  let timeoutMessage = '';
+  let timer: NodeJS.Timeout = setTimeout(() => {
+    timeoutMessage = `Hermes did not respond within ${connectTimeoutMs}ms (connect timeout). Is the Hermes gateway at ${baseURL} running?`;
+    controller.abort(new Error(timeoutMessage));
+  }, connectTimeoutMs);
+  const armIdleTimeout = (): void => {
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timeoutMessage = `Hermes stream stalled: no event for ${idleTimeoutMs}ms (idle timeout).`;
+      controller.abort(new Error(timeoutMessage));
+    }, idleTimeoutMs);
+  };
+
+  let sawTerminal = false;
+  try {
+    const stream = await client.responses.create(
+      {
+        model: profile,
+        input: message,
+        stream: true,
+        conversation: sessionKey,
+      },
+      {
+        headers: { 'X-Hermes-Session-Key': sessionKey },
+        signal: controller.signal,
+      },
+    );
+
+    for await (const event of stream) {
+      armIdleTimeout();
+      switch (event.type) {
+        case 'response.output_text.delta':
+          if (event.delta !== undefined && event.delta.length > 0) {
+            yield { type: 'text', content: event.delta };
+          }
+          break;
+        case 'response.output_item.done':
+          if (event.item?.type === 'function_call') {
+            yield {
+              type: 'tool',
+              content: JSON.stringify({
+                name: event.item.name,
+                call_id: event.item.call_id,
+                arguments: event.item.arguments ?? '',
+              }),
+            };
+          }
+          break;
+        case 'response.completed':
+          sawTerminal = true;
+          yield { type: 'done', content: '' };
+          break;
+        case 'response.failed':
+          sawTerminal = true;
+          yield { type: 'error', content: 'Hermes run failed.' };
+          break;
+        case 'response.incomplete':
+          sawTerminal = true;
+          yield { type: 'error', content: 'Hermes run ended incomplete.' };
+          break;
+        case 'error':
+          sawTerminal = true;
+          yield {
+            type: 'error',
+            content: `Hermes stream error: ${event.message ?? 'unknown'}`,
+          };
+          break;
+        default:
+          break;
       }
-      if (choice.finish_reason) break;
     }
 
-    for (const index of [...toolCalls.keys()].sort((a, b) => a - b)) {
-      const tool = toolCalls.get(index);
-      if (tool) yield { type: 'tool', content: JSON.stringify(tool) };
-    }
-    yield { type: 'done', content: '' };
+    // A clean EOF without a terminal event is still a finished stream.
+    if (!sawTerminal) yield { type: 'done', content: '' };
   } catch (error) {
-    // The SDK wraps aborts in its own error types; the signal is the
-    // deterministic way to tell "our timeout fired" from other failures.
-    yield { type: 'error', content: controller.signal.aborted ? `Hermes request timed out after ${timeoutMs()} ms (HERMES_API_TIMEOUT_MS).` : describeError(error) };
+    if (controller.signal.aborted) {
+      yield { type: 'error', content: timeoutMessage };
+    } else {
+      yield { type: 'error', content: describeError(error, baseURL) };
+    }
   } finally {
     clearTimeout(timer);
+    controller.abort();
   }
-}
-
-function describeError(error: unknown): string {
-  if (error instanceof Error && error.name === 'AbortError') {
-    return `Hermes request timed out after ${timeoutMs()} ms (HERMES_API_TIMEOUT_MS).`;
-  }
-  if (error instanceof Error) return error.message;
-  return String(error);
 }
