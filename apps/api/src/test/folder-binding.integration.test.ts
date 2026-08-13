@@ -17,7 +17,7 @@ import type { FrankDatabaseHandle } from '@frank/adapter-postgres';
 import { sql } from 'drizzle-orm';
 
 import { PostgresDomainStore } from '../services/postgres-store.js';
-import { RoomFolderBindingStore } from '../services/workbench/folder-binding-store.js';
+import { RoomFolderBindingStore } from '../services/folder-binding/folder-binding-store.js';
 import { buildTestServer, TEST_CELL } from './harness.js';
 import type { TestServer } from './harness.js';
 import {

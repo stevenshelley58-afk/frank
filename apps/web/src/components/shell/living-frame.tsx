@@ -33,8 +33,6 @@ interface LivingFrameProps {
   activeChatId: string | null;
   activeChatStreaming: boolean;
   onStopActiveChat: () => void;
-  onStopWorkbench: (id: string) => void;
-  onStopMission: (id: string) => void;
 }
 
 /**
@@ -67,8 +65,6 @@ export function LivingFrame(props: LivingFrameProps) {
   activeChatId,
   activeChatStreaming,
   onStopActiveChat,
-  onStopWorkbench,
-  onStopMission,
   } = props;
   const running = frame?.running ?? [];
   const receipts = (frame?.receipts ?? []).filter(
@@ -178,7 +174,7 @@ export function LivingFrame(props: LivingFrameProps) {
           ) : running.length === 0 ? (
             <Empty>Nothing mid-flight.</Empty>
           ) : (
-            running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} onStopWorkbench={onStopWorkbench} onStopMission={onStopMission} />)
+            running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} />)
           )}
         </Card>
 
@@ -247,8 +243,7 @@ function FrameContent({ props }: { props: LivingFrameProps }) {
   const {
     decisions, frame, frameError, today, todayError, calendarEvents, calendarStatus,
     calendarLoading, calendarError, projectName, onOpenConversation, onResolve, onRetry,
-    onRetryToday, activeChatId, activeChatStreaming, onStopActiveChat, onStopWorkbench,
-    onStopMission,
+    onRetryToday, activeChatId, activeChatStreaming, onStopActiveChat,
   } = props;
   const running = frame?.running ?? [];
   const receipts = (frame?.receipts ?? []).filter(
@@ -278,7 +273,7 @@ function FrameContent({ props }: { props: LivingFrameProps }) {
         ))}
       </Card>
       <Card title="Running now" count={running.length}>
-        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : running.length === 0 ? <Empty>Nothing mid-flight.</Empty> : running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} onStopWorkbench={onStopWorkbench} onStopMission={onStopMission} />)}
+        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : running.length === 0 ? <Empty>Nothing mid-flight.</Empty> : running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} />)}
       </Card>
       <Card title="Today"><TodayList today={today} todayError={todayError} calendarEvents={calendarEvents} calendarStatus={calendarStatus} calendarLoading={calendarLoading} calendarError={calendarError} onRetry={onRetryToday} /></Card>
       <Card title="Receipts">
@@ -290,20 +285,18 @@ function FrameContent({ props }: { props: LivingFrameProps }) {
 
 /* ------------------------------------------------------------------ */
 
-function RunningRow({ item, projectName, onOpenConversation, activeChatId, activeChatStreaming, onStopActiveChat, onStopWorkbench, onStopMission }: {
+function RunningRow({ item, projectName, onOpenConversation, activeChatId, activeChatStreaming, onStopActiveChat }: {
   item: FrameRunning;
   projectName: (projectId: string) => string;
   onOpenConversation: (id: string) => void;
   activeChatId: string | null;
   activeChatStreaming: boolean;
   onStopActiveChat: () => void;
-  onStopWorkbench: (id: string) => void;
-  onStopMission: (id: string) => void;
 }) {
-  const title = item.kind === 'chat' ? item.title : item.kind === 'mission' ? item.objective : `Workbench ${item.work_item_id}`;
-  const sub = item.kind === 'chat' ? `${projectName(item.project_id)} · chat` : item.kind === 'mission' ? `${item.room_name} · ${item.state}` : `${item.state} · workbench`;
-  const canOpen = item.kind === 'chat';
-  const stop = item.kind === 'workbench' ? () => onStopWorkbench(item.id) : item.kind === 'mission' ? () => onStopMission(item.id) : item.id === activeChatId && activeChatStreaming ? onStopActiveChat : null;
+  const title = item.title;
+  const sub = `${projectName(item.project_id)} · chat`;
+  const canOpen = true;
+  const stop = item.id === activeChatId && activeChatStreaming ? onStopActiveChat : null;
   return <div className="flex items-center gap-2.5 border-b border-line py-2 last:border-b-0">
     <span className="animate-pip h-2 w-2 shrink-0 rounded-full bg-running" aria-hidden />
     <button disabled={!canOpen} onClick={() => canOpen && onOpenConversation(item.id)} className="min-w-0 flex-1 text-left disabled:cursor-default">

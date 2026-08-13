@@ -62,22 +62,10 @@ import { provenanceRoutes, registerProvenanceRoutes } from './routes/provenance.
 import { registerTodayRoutes, todayRoutes } from './routes/today.js';
 import { frameGetRoute, frameRoutes, registerFrameRoutes } from './routes/frame.js';
 import { registerWorkRoutes, workRoutes } from './routes/work.js';
-import { registerWorkbenchRoutes, workbenchAllRoutes } from './routes/workbench.js';
-import {
-  missionRoutes,
-  registerMissionRoutes,
-} from './routes/missions.js';
-import type { MissionRouteOrchestrator } from './routes/missions.js';
 import { channelRoutes, registerChannelRoutes } from './routes/channels.js';
-import { registerWorkbenchEventsRoute } from './routes/workbench-events.js';
 import { folderBindingRoutes, registerFolderBindingRoutes } from './routes/folder-binding.js';
-import { RoomFolderBindingStore } from './services/workbench/folder-binding-store.js';
-import { WorkbenchEventBus } from './services/workbench/event-bus.js';
-import { WorkbenchCancellationService } from './services/workbench/cancellation.js';
-import type { WorkbenchRunner } from './services/workbench/runner.js';
-import { WorkbenchDecisionService } from './services/workbench/decision.js';
-import { StagedWriteService } from './services/workbench/staged-write.js';
-import { ChannelPushStore } from './services/workbench/channel-push.js';
+import { RoomFolderBindingStore } from './services/folder-binding/folder-binding-store.js';
+import { ChannelPushStore } from './services/channels/channel-push.js';
 import { chatRoutes, registerChatRoutes } from './routes/chats.js';
 import { chatTurnRoutes, registerChatTurnRoutes } from './routes/chat-turns.js';
 import type { ChatTurnRunner } from './routes/chat-turns.js';
@@ -87,9 +75,6 @@ import type { AttachmentRouteDependencies } from './routes/attachments.js';
 import { codegraphRoutes, registerCodegraphRoutes } from './routes/codegraph.js';
 import type { CodegraphRouteDependencies } from './routes/codegraph.js';
 import { ActionBoundary } from './services/action-boundary.js';
-import { WorkbenchFrontDoor } from './services/workbench/front-door.js';
-import type { PreviewDeployer } from './services/workbench/preview-backend.js';
-import { PreviewBackend, SshPreviewDeployer } from './services/workbench/preview-backend.js';
 import { HealthService } from './services/health.js';
 import type { EnrichmentDispatcher } from './services/enrichment.js';
 import { InProcessEnrichmentDispatcher, noopEnrichmentHandler } from './services/enrichment.js';
@@ -98,8 +83,6 @@ import type { DomainStore } from './services/store.js';
 export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...captureRoutes,
   ...workRoutes,
-  ...workbenchAllRoutes,
-  ...missionRoutes,
   ...channelRoutes,
   ...folderBindingRoutes,
   ...provenanceRoutes,
@@ -190,21 +173,9 @@ export interface BuildServerOptions {
   readonly startedAt?: Date;
   /** Raw DB handle for brain routes (raw SQL queries, not yet in DomainStore). */
   readonly db?: import("@frank/adapter-postgres").FrankDatabase;
-  /** WB-06: workbench SSE live-poll interval (tests use a fast value). */
-  readonly workbenchPollIntervalMs?: number;
   /** Durable chat execution and SSE poll tuning; injected for hosted/tests. */
   readonly chatTurnRunner?: ChatTurnRunner;
   readonly chatTurnPollIntervalMs?: number;
-  /**
-   * FS-05: preview-lane deployer. Defaults to the real ssh deployer
-   * (`SshPreviewDeployer` → /srv/frank/infra/preview-deploy.sh); tests inject
-   * a fake so no ssh ever runs in CI.
-   */
-  readonly previewDeployer?: PreviewDeployer;
-  /** In-process runner used by Stop to reach the live sandbox immediately. */
-  readonly workbenchRunner?: WorkbenchRunner;
-  /** Durable objective orchestrator. Production composition injects and starts it. */
-  readonly missionOrchestrator?: MissionRouteOrchestrator;
   /** Codegraph storage/service ports; tests provide isolated fixtures. */
   readonly codegraph?: Pick<
     CodegraphRouteDependencies,
@@ -412,71 +383,11 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
     now,
   };
 
-  // HITL-01/02: the decision seam needs a DB handle. Created once here (before
-  // the work routes, which call back into it on ready/cancel) and reused by
-  // the workbench routes registered below.
-  const workbenchDecisions =
-    options.db === undefined ? null : new WorkbenchDecisionService(options.db);
-  // FS-03: staged shared writes. Created alongside the decision seam because
-  // the resolution hook (below) lands an approved staged write when the
-  // decision item it filed resolves `ready`.
-  const stagedWrites =
-    workbenchDecisions === null || options.db === undefined
-      ? null
-      : new StagedWriteService(options.db, workbenchDecisions);
-
   registerCaptureRoutes(app, { ...shared, store, enrichment, actions });
   registerWorkRoutes(app, {
     ...shared,
     store,
     actions,
-    // HITL-02: a ready/cancel command on a workbench decision resumes or
-    // safe-fails the linked run. A paused run that never resumes is a silent
-    // stall, so a resolution failure propagates to the caller.
-    ...(workbenchDecisions === null
-      ? {}
-      : {
-          onDecisionResolution: async (
-            cellId: string,
-            workItemId: string,
-            resolution: 'ready' | 'cancel',
-            actor: { kind: 'user' | 'agent' | 'service'; id: string },
-            correlationId: string,
-            now: Date,
-          ): Promise<void> => {
-            await workbenchDecisions.resolveDecision({
-              cellId,
-              decisionWorkItemId: workItemId,
-              resolution,
-              actor,
-              correlationId,
-              now,
-            });
-            // FS-03: if this decision approved a staged shared write, the
-            // controlled copy lands here (outside the harness), fully
-            // audited. Denied decisions copy nothing. Non-staged-write
-            // decisions are a no-op on both paths. Landing runs AFTER the
-            // workbench resume so a copy failure never leaves the run
-            // paused-and-landed; it throws and the envelope surfaces it.
-            if (stagedWrites !== null) {
-              if (resolution === 'ready') {
-                await stagedWrites.landStagedWrite(workItemId, {
-                  cellId,
-                  actor,
-                  correlationId,
-                  now,
-                });
-              } else {
-                await stagedWrites.denyStagedWrite(workItemId, {
-                  cellId,
-                  actor,
-                  correlationId,
-                  now,
-                });
-              }
-            }
-          },
-        }),
   });
   registerProvenanceRoutes(app, { ...shared, store });
   registerTodayRoutes(app, { ...shared, store });
@@ -490,16 +401,6 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
       registerAttachmentRoutes(app, { ...shared, ...options.attachments, publicUrl: config.publicUrl });
     }
     registerFrameRoutes(app, { ...shared, store, db: options.db });
-    // Workbench routes need Postgres (the front door + store are raw-SQL on
-    // frank_domain); like brain, they only register when a DB handle exists.
-    // ONE event bus is shared by the store (writer notifications) and the SSE
-    // route (live delivery) — WB-06.
-    const workbenchBus = new WorkbenchEventBus();
-    const workbenchFrontDoor = new WorkbenchFrontDoor(options.db, workbenchBus);
-    const workbenchCancellation = new WorkbenchCancellationService(
-      options.db,
-      options.workbenchRunner,
-    );
     // CH-06: canonical room↔channel bindings + outbox access for the listener.
     const channelPush = new ChannelPushStore(options.db);
     registerChannelRoutes(app, {
@@ -507,48 +408,11 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
       channelPush,
       actions,
     });
-    // HITL-01/02: the decision seam (created once above, before the work
-    // routes, so ready/cancel on a decision item can resume the run).
-    // FS-05: preview backend — classification + preview-lane publishing. The
-    // deployer is injectable: production gets the real ssh deployer; tests
-    // pass a fake so CI never shells out. Shares the bus so a published
-    // preview wakes SSE subscribers too.
-    const previewBackend = new PreviewBackend({
-      store: workbenchFrontDoor.store,
-      deployer: options.previewDeployer ?? new SshPreviewDeployer(),
-    });
-    registerWorkbenchRoutes(app, {
-      ...shared,
-      frontDoor: workbenchFrontDoor,
-      actions,
-      cancellation: workbenchCancellation,
-      decisions: workbenchDecisions as WorkbenchDecisionService,
-      preview: previewBackend,
-      stagedWrites: stagedWrites as StagedWriteService,
-      folderBindings: new RoomFolderBindingStore(options.db),
-    });
     // FS-02: room folder bindings — declarations are Postgres rows (migration
-    // 0006), so the routes register alongside the workbench routes, only when
-    // a DB handle exists. Mount enforcement is FS-03, not here.
+    // 0006), so the routes register only when a DB handle exists.
     registerFolderBindingRoutes(app, {
       ...shared,
       bindings: new RoomFolderBindingStore(options.db),
-      actions,
-    });
-    registerWorkbenchEventsRoute(app, {
-      ...shared,
-      frontDoor: workbenchFrontDoor,
-      bus: workbenchBus,
-      ...(options.workbenchPollIntervalMs === undefined
-        ? {}
-        : { pollIntervalMs: options.workbenchPollIntervalMs }),
-    });
-  }
-
-  if (options.missionOrchestrator !== undefined) {
-    registerMissionRoutes(app, {
-      ...shared,
-      orchestrator: options.missionOrchestrator,
       actions,
     });
   }

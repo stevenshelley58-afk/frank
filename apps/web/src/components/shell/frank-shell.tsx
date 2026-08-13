@@ -24,8 +24,6 @@ import {
 } from '@/lib/chat-api';
 import { chatTurnInput, type ChatTurnDraft } from '@/lib/chat-turn-input';
 import { getFrame, type FrameResponse } from '@/lib/frame';
-import { stopMission } from '@/lib/missions/client';
-import { WORKBENCH_API } from '@/lib/workbench/types';
 import { ChatThread } from './chat-thread';
 import { ComposerBar, type ModelOption } from './composer-bar';
 import { LivingFrame } from './living-frame';
@@ -296,29 +294,6 @@ export function FrankShell() {
     abortRef.current = null;
     setStreamingText(null);
     void refreshFrame();
-  };
-
-  const stopWorkbench = async (id: string) => {
-    try {
-      const response = await fetch(WORKBENCH_API.stop(id), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'Stopped from Living Frame', command_id: crypto.randomUUID() }),
-      });
-      if (!response.ok) throw new Error(`Workbench stop failed (${response.status}).`);
-      void refreshFrame();
-    } catch (error) {
-      setFrameError(error instanceof Error ? error.message : 'Workbench stop failed.');
-    }
-  };
-
-  const stopFrameMission = async (id: string) => {
-    try {
-      await stopMission(id, 'Stopped from Living Frame');
-      void refreshFrame();
-    } catch (error) {
-      setFrameError(error instanceof Error ? error.message : 'Mission stop failed.');
-    }
   };
 
   const changeModel = async (model: string) => {
@@ -616,8 +591,6 @@ export function FrankShell() {
           onStopActiveChat={stop}
           activeChatId={activeId}
           activeChatStreaming={streamingText !== null}
-          onStopWorkbench={(id) => void stopWorkbench(id)}
-          onStopMission={(id) => void stopFrameMission(id)}
       />
     </div>
   );

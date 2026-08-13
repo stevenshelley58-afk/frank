@@ -5,29 +5,6 @@ import { z } from 'zod';
 import { identifiersSchema } from './registry.js';
 import { workItemSummarySchema } from './views.js';
 
-const frameWorkbenchRunningSchema = z
-  .object({
-    kind: z.literal('workbench'),
-    id: z.string(),
-    work_item_id: z.string(),
-    room_id: z.string().nullable(),
-    state: z.enum(['queued', 'provisioning', 'running', 'waiting', 'verifying']),
-    updated_at: z.string(),
-  })
-  .strict();
-
-const frameMissionRunningSchema = z
-  .object({
-    kind: z.literal('mission'),
-    id: z.string(),
-    room_id: z.string(),
-    room_name: z.string(),
-    objective: z.string(),
-    state: z.enum(['planning', 'running', 'waiting']),
-    updated_at: z.string(),
-  })
-  .strict();
-
 const frameChatRunningSchema = z
   .object({
     kind: z.literal('chat'),
@@ -42,23 +19,7 @@ const frameChatRunningSchema = z
   })
   .strict();
 
-export const frameRunningSchema = z.discriminatedUnion('kind', [
-  frameWorkbenchRunningSchema,
-  frameMissionRunningSchema,
-  frameChatRunningSchema,
-]);
-
-const frameWorkbenchReceiptSchema = z
-  .object({
-    kind: z.literal('workbench'),
-    workbench_id: z.string(),
-    work_item_id: z.string(),
-    room_id: z.string().nullable(),
-    summary: z.string(),
-    published_at: z.string(),
-    published_by: z.string(),
-  })
-  .strict();
+export const frameRunningSchema = frameChatRunningSchema;
 
 const frameChatReceiptSchema = z
   .object({
@@ -71,10 +32,7 @@ const frameChatReceiptSchema = z
   })
   .strict();
 
-export const frameReceiptSchema = z.discriminatedUnion('kind', [
-  frameWorkbenchReceiptSchema,
-  frameChatReceiptSchema,
-]);
+export const frameReceiptSchema = frameChatReceiptSchema;
 
 /** GET /v1/frame. Every field is a persisted fact read at request time. */
 export const frameResponseSchema = z
