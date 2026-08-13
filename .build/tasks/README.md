@@ -64,3 +64,30 @@ Final commit of the task carries the full Done/Next/Files block.
 3. Hot-file requests filed (with file + change).
 4. Anything BLOCKED / rule that stopped you.
 5. Targeted checks you ran and their results.
+
+---
+
+## F-series task index (merged from origin/main 2026-08-13)
+
+Drop this directory into `frank/.build/tasks/` — each file is the full brief for one
+F/B task (owner: cowork). Model tiers + parallelism live in `EXECUTION-PLAN.md` §1-3.
+
+| ID | File | Wave | Model | Parallel with |
+|---|---|---|---|---|
+| F0-1..4 | (in EXECUTION-PLAN §3) | 0 | cheap | serial — DONE (d5ae122/6cbc25f/e1d19a5) |
+| F0-5 retire /srv/frank | — | 0 | cheap | DONE by W1-5 (see STATE.md) |
+| F1-1..F1-4 | F1-1-project-registry / F1-2-release-contract / F1-3-module-manifest / F1-4-delivery | 1 | strong | serial |
+| F2-A1/A2 | F2-A1-renderer / F2-A2-template-factory | 2 | cheap + strong rubric | group A |
+| F2-B1..B4 | F2-B-intelligence-prospect-mail-outreach | 2 | cheap | group B |
+| F2-C1 | F2-C1-content-factory | 2 | cheap | group C |
+| F3-0 | F3-0-chat | 3 | cheap ×3 lanes | lanes then serial |
+| F3-1 | F3-1-project-home | 3 | cheap, strong review | after F3-0 |
+| F3-2/3 | F3-2-3-widgets-nightwatch | 3 | cheap | after F3-1 |
+| F3-4 | F3-4-graphify-lakehouse | 3 | cheap/medium | independent |
+| B4-1 | B4-1-deletion | 4 | cheap | starts immediately |
+| B4-2/3/5 | B4-2-3-5-consumer-catalogue-save | 4 | cheap, strong for Save | after B4-1 |
+| B4-4 | B4-4-editor | 4 | cheap ×3 | after B4-3 |
+| B4-6 | B4-6-publish-meta | 4 | strong | after B4-5 |
+
+F-series rules: no blockwise-specific code in modules/; commit at every green
+checkpoint; never edit an applied migration (next free = 0016 after this rebuild).

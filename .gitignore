@@ -28,6 +28,19 @@ HANDOVER*.md
 .light/
 .codex-preview-*/
 .aui-tmp/
+<<<<<<< HEAD
 
 # Registry generator build input — required by tools/registry/generate-registry.mjs (CI verify).
 !docs/product/FRANK_COMPLETE_BUILD_PLAN_AND_SPEC.md
+=======
+.cache/
+build/
+__pycache__/
+*.ttf
+*.otf
+*.woff
+*.woff2
+public/adstudio-samples/
+public/adstudio-templates/
+meta_ad_candidates/
+>>>>>>> origin/main

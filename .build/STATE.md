@@ -82,3 +82,30 @@ AG-0 extension for Wave 1 (shared hotspots, one consolidated edit at gate):
   plan specifies; VPS reorg is a separate infra task (flagged to user).
 - Row counts W1-2: all five brain_* tables = 0 rows (recorded from prod DB
   frank-frank-db-1 on 2026-08-13).
+
+## Parallel F-series build (merged from origin/main 2026-08-13)
+
+A separate build program (owner "cowork") runs F0-F3/B4 tasks on main. Its board was
+merged here to keep one source of truth. Original F-board: F0-1..F0-4 DONE; F0-5,
+F0-6, F1-1, F3-0, F3-4, B4-1 READY; the rest BLOCKED-DEP on those.
+
+| id | status | notes |
+|---|---|---|
+| F0-1 scaffold | DONE | main d5ae122 |
+| F0-2 deploy frank | DONE | main e1d19a5 — VPS live, chat E2E via Goose ACP (old stack) |
+| F0-3 graphify registry | DONE | main 6cbc25f (5 projects indexed) |
+| F0-4 gitignore | DONE | main d5ae122 |
+| F0-5 retire /srv/frank paths | DONE by W1-5 | mapping per FRANK_REBUILD_PLAN (/projects/frank + /frank/deployed/*) — supersedes F0-5's draft (/frank/repo); rebuild plan wins |
+| F0-6 dev compose in git | READY | secrets reconciliation needed before commit (see F0-6 note) |
+| F1-1..F1-4 | READY / BLOCKED-DEP | project registry → release contract → module manifest → delivery |
+| F2-A1/A2 · B1-B4 · C1 | BLOCKED-DEP | renderer / template factory / intelligence+outreach / content factory |
+| F3-0..F3-4 | READY / BLOCKED-DEP | chat / project home / widgets / night watch / graphify+lakehouse |
+| B4-1..B4-6 | READY / BLOCKED-DEP | adstudio legacy deletion → consumer boundary → editor → publish |
+
+Wave 0 gate PASSED 2026-08-12: frank.fail live (Caddy, basic auth); 14 migrations,
+69 tables; chat turn E2E streamed WAVE0-OK via Goose ACP.
+
+⚠️ MIGRATION LEASE CONFLICT: the F-board reserved 0014 (F3-1 dashboard) + 0015
+(F3-3 night watch) — BOTH were consumed by this rebuild's W1-2 (0014 brain_* rename)
+and W1-3 (0015 runner tables). F3-1/F3-3 must request 0016+ when they execute.
+Next free migration number: **0016**.
