@@ -27,6 +27,40 @@ status, started, finished.
 - **Timeout/abort**: if the Hermes service is down or a request stalls, the endpoint must
   return a clear error quickly — never hang. Wire AbortSignal timeouts.
 
+## Code map (AG-0 recon — trust this, do not re-explore)
+
+- `apps/api/src/routes/chat-turns.ts` (159 lines) — still has local `ChatTurnRunner`
+  interface and `deps.runner?.dispatch/cancel/available()`. Submit returns 202 after
+  persisting `input` jsonb (currently includes message `content` text — STOP storing
+  message text; store profile + sessionKey + status only). Events SSE already exists.
+  Cancel still queries deleted `harness_fallback_attempt` — remove that.
+- `apps/api/src/services/chat-turn-events.ts` (38 lines) — keep; used to append SSE events.
+- `apps/api/src/server.ts` (HOT FILE) imports `ChatTurnRunner` and `chatTurnRunner?:`.
+  File a HOT-FILE REQUEST with the exact replacement: drop runner, inject hermes-client
+  config (`HERMES_API_URL`/`HERMES_API_KEY`) instead.
+- `apps/api/src/test/harness.ts` also types `chatTurnRunner` — allowed if you must keep
+  tests compiling; otherwise hot-file.
+- `@frank/api` `frank.mayDependOn` is currently
+  `['@frank/contracts','@frank/policy','@frank/identity','@frank/kernel','@frank/adapter-postgres']`.
+  You MUST add `@frank/hermes-client` there AND as a workspace dep, or `deps:check` fails.
+  `apps/api/package.json` is allowed for this task (workspace wiring).
+- `pnpm-workspace.yaml` already includes `packages/*` — no edit needed.
+- Package template: copy shape of `packages/policy/` (package.json + tsconfig extends
+  `../../tsconfig.base.json` + vitest.config.ts + `src/index.ts`).
+  `frank.layer: "packages"`. `openai` (npm, Apache, last release 2026-08-03, v7.x) is
+  the allowed transport — depend on it ONLY inside hermes-client, never in apps/api.
+- `pnpm-lock.yaml`: you MAY update it via `pnpm install` after adding the package
+  (W2-1 exception). Include it in the same commit as package.json.
+- Do NOT add a migration. Next free is 0016 and is leased by AG-0. Existing
+  `chat_turn.input` jsonb can hold `{profile, sessionKey}` without message text.
+- Do NOT restore Goose/HarnessBroker/F3-0. Wave 1 deleted that on purpose.
+- Tests: fake HTTP server (Node `http.createServer` or undici MockAgent). No real
+  network. Cover: stream text events; map tool events; timeout/abort when URL is
+  dead (clear error, does not hang); DB persist assertion that stored input has
+  no message text.
+- Node: `export PATH="/c/Users/steve/node22:$PATH"` before every pnpm/npx.
+- First command: `cd /c/Dev/Frank && git branch --show-current` (must be rebuild/wave2).
+
 ## Scope
 - Allowed: `packages/hermes-client/**` (new), `apps/api/src/routes/chat*.ts`,
   `apps/api/src/services/chat-turn-events.ts` (only to adapt to the new turn shape),
