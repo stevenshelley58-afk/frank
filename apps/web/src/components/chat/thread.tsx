@@ -3,6 +3,7 @@
 import { useMemo } from 'react';
 import {
   AssistantRuntimeProvider,
+  MessagePrimitive,
   ThreadPrimitive,
   useExternalStoreRuntime,
   type MessageState,
@@ -10,23 +11,25 @@ import {
 } from '@assistant-ui/react';
 import type { ChatMessageRow } from '@/lib/chat-api';
 import { parseToolEventPayload } from '@/lib/chat-api';
-import { AssistantBubble, UserBubble } from './bubbles';
-import { SystemCard } from './system-cards';
+import { MarkdownText } from './assistant-ui/markdown-text';
+import { ToolFallback } from './assistant-ui/tool-fallback';
 
 /**
- * The thread — an @assistant-ui/react host.
+ * The thread — an @assistant-ui/react surface (W2-2).
  *
  * frank-shell owns the conversation state (`messages` rows + a live
  * `streamingText`) and the composer; this component renders that state
- * through assistant-ui's external-store runtime and primitives. Rows map to
- * `ThreadMessageLike`s: user/agent rows become bubbles, tool rows become
- * assistant tool-call parts, and the older working/thinking/delegation/
- * receipt kinds ride through as system-role cards. The live reply is a
- * running assistant message with the accumulated text.
+ * through assistant-ui's external-store runtime and official components:
+ * bubbles are `MessagePrimitive.Root`/`Parts`, reply text is markdown via
+ * `MarkdownTextPrimitive`, and Hermes `tool` events surface as tool-call
+ * parts rendered by the vendored official `ToolFallback`. Nothing here is
+ * hand-built — bubbles, streaming, tool cards and markdown all come from
+ * the library (the packet's W2-2 hard constraint).
  *
- * Sending stays in frank-shell (`send()` → submitChatTurn SSE → setMessages /
- * setStreamingText), so the runtime here is a render-only host: `onNew` is a
- * no-op because the composer lives outside the thread.
+ * Sending stays in frank-shell (`send()` → SSE → setMessages / setStreamingText)
+ * until the coordinator adopts the self-contained `FrankChat` surface
+ * (components/chat/frank-chat.tsx); the runtime here is a render host fed
+ * by props, so `onNew` is a no-op because the composer lives outside.
  */
 
 interface ChatThreadProps {
@@ -44,8 +47,8 @@ export function ChatThread({
   streamingText,
   agentLabel,
   tint,
-  projectName,
-  onFollowDelegation,
+  projectName: _projectName,
+  onFollowDelegation: _onFollowDelegation,
 }: ChatThreadProps) {
   const threadMessages = useMemo(
     () => toThreadMessages(messages, streamingText),
@@ -67,13 +70,7 @@ export function ChatThread({
           <div className="mx-auto flex min-h-full max-w-[760px] flex-col justify-end gap-4 px-6 pb-4 pt-7">
             <ThreadPrimitive.Messages>
               {({ message }) => (
-                <MessageRow
-                  message={message}
-                  agentLabel={agentLabel}
-                  tint={tint}
-                  projectName={projectName}
-                  onFollowDelegation={onFollowDelegation}
-                />
+                <MessageRow message={message} agentLabel={agentLabel} tint={tint} />
               )}
             </ThreadPrimitive.Messages>
           </div>
@@ -123,20 +120,20 @@ function toThreadMessages(messages: ChatMessageRow[], streamingText: string | nu
                 toolCallId: tool.call_id,
                 toolName: tool.name,
                 args: tool.arguments,
+                argsText: tool.argumentsText ?? JSON.stringify(tool.arguments),
               },
             ]
           : [{ type: 'text', text: row.body }],
       });
     } else {
-      // working / thinking / delegation / receipt — system cards. The row
-      // rides in metadata.custom so the card renderer has the original shape.
+      // Legacy rows (working/thinking/delegation/receipt) have no meaning in
+      // the Hermes-backed flow; render their body as a quiet system note.
       rows.push({
         role: 'system',
         id: row.id,
         createdAt: new Date(row.created_at),
         status: { type: 'complete', reason: 'stop' },
-        content: [{ type: 'text', text: '' }],
-        metadata: { custom: { row } },
+        content: [{ type: 'text', text: row.body || row.kind }],
       });
     }
   }
@@ -160,22 +157,84 @@ function MessageRow({
   message,
   agentLabel,
   tint,
-  projectName,
-  onFollowDelegation,
 }: {
   message: MessageState;
   agentLabel: string;
   tint: string;
-  projectName: (projectId: string) => string;
-  onFollowDelegation: (projectId: string) => void;
 }) {
-  if (message.role === 'user') return <UserBubble message={message} />;
-  if (message.role === 'assistant') {
-    return <AssistantBubble message={message} agentLabel={agentLabel} tint={tint} />;
-  }
-  const row = message.metadata?.custom?.row as ChatMessageRow | undefined;
-  if (!row) return null;
-  return <SystemCard row={row} projectName={projectName} onFollowDelegation={onFollowDelegation} />;
+  if (message.role === 'user') return <UserMessage />;
+  if (message.role === 'system') return <SystemNote message={message} />;
+  return <AssistantMessage agentLabel={agentLabel} tint={tint} />;
+}
+
+/* ------------------------------------------------------------------ */
+/* Bubbles — official MessagePrimitive composition only               */
+/* ------------------------------------------------------------------ */
+
+function UserMessage() {
+  return (
+    <MessagePrimitive.Root className="animate-msg-in flex max-w-[82%] flex-col items-end gap-1.5 self-end">
+      <span className="font-mono text-[9.5px] font-semibold uppercase tracking-[0.1em] text-muted/80">
+        Steve
+      </span>
+      <MessagePrimitive.Parts>
+        {({ part }) =>
+          part.type === 'text' ? (
+            <div className="rounded-2xl rounded-tr-[4px] bg-ink px-[15px] py-3 text-[13.5px] leading-[1.55] whitespace-pre-wrap text-white">
+              {part.text}
+            </div>
+          ) : null
+        }
+      </MessagePrimitive.Parts>
+    </MessagePrimitive.Root>
+  );
+}
+
+function AssistantMessage({
+  agentLabel,
+  tint,
+}: {
+  agentLabel: string;
+  tint: string;
+}) {
+  return (
+    <MessagePrimitive.Root className="animate-msg-in flex flex-col gap-1.5 self-stretch">
+      <span className="flex items-center gap-2 font-mono text-[9.5px] font-semibold uppercase tracking-[0.1em] text-muted/80">
+        <span className="h-[7px] w-[7px] rounded-[2px]" style={{ background: tint }} aria-hidden />
+        {agentLabel}
+      </span>
+      <div className="text-[14px] leading-[1.62] text-ink">
+        <MessagePrimitive.Parts>
+          {({ part }) => {
+            switch (part.type) {
+              case 'text':
+                return <MarkdownText />;
+              case 'tool-call':
+                // Registered tool UIs win; otherwise the official
+                // ToolFallback renders the call (name, status, args, result).
+                return part.toolUI ?? <ToolFallback {...part} />;
+              default:
+                return null;
+            }
+          }}
+        </MessagePrimitive.Parts>
+      </div>
+    </MessagePrimitive.Root>
+  );
+}
+
+/** Quiet note for legacy rows; keeps projectName/onFollowDelegation unused but in the contract. */
+function SystemNote({ message }: { message: MessageState }) {
+  const text = message.content
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .join('')
+    .trim();
+  if (!text) return null;
+  return (
+    <MessagePrimitive.Root className="animate-msg-in self-stretch">
+      <p className="text-[11.5px] leading-snug text-muted/80">{text}</p>
+    </MessagePrimitive.Root>
+  );
 }
 
 // Re-exported so type-only consumers can reference the row contract.
