@@ -47,10 +47,10 @@ AG-0 extension for Wave 1 (shared hotspots, one consolidated edit at gate):
 
 | Task | Depends | Owner | Status | Notes |
 |---|---|---|---|---|
-| W1-1 harness layer | — | AG-1 | pending | deletes adapters/harness, harness-broker, harness-control, chat-turn-runner/config |
-| W1-2 memory system | — | AG-2 | pending | deletes packages/memory, brain.ts, web memory api; migration 0014 (counts all 0) |
-| W1-3 mission+workbench runners | — | AG-3 | pending | deletes workbench services, missions/workbench/worktree routes+apis; migration 0015 |
-| W1-4 console/files/previews/explorer | — | AG-4 | pending | web deletions + nav entry removal (frank-shell hot-file request) |
+| W1-1 harness layer | — | AG-1 | 🔄 IN_PROGRESS (batch 1) | deletes adapters/harness, harness-broker, harness-control, chat-turn-runner/config |
+| W1-2 memory system | — | AG-2 | 🔄 IN_PROGRESS (batch 1) | deletes packages/memory, brain.ts, web memory api; migration 0014 (counts all 0) |
+| W1-3 mission+workbench runners | — | AG-3 | pending (batch 2) | deletes workbench services, missions/workbench/worktree routes+apis; migration 0015 |
+| W1-4 console/files/previews/explorer | — | AG-4 | 🔄 IN_PROGRESS (batch 1) | web deletions + nav entry removal (frank-shell hot-file request) |
 | W1-5 stale paths | W1-1..W1-4 | AG-5 | pending | /srv/frank → new paths, longest match first |
 | WAVE 1 GATE | W1-1..W1-5 | AG-0 | pending | more deletions than insertions; typecheck+test+build green on rebuild/wave1; registry regenerated |
 | W2-1 Hermes client | W1 gate | AG-6 | pending | packages/hermes-client + chat-turns rewrite |
