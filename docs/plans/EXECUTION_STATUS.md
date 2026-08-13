@@ -3,6 +3,17 @@
 Source of truth for leases, merge order, and gate status. Updated by AG-0 only.
 Master plan: `docs/plans/FRANK_MASTER_PARALLEL_BUILD_PLAN.md`
 
+## ⚠️ 2026-08-13 — NEW DIRECTION: FRANK REBUILD (tracked in .build/STATE.md)
+
+The owner handed AG-0 a new rebuild plan (`docs/plans/FRANK_REBUILD_PLAN.md`):
+Frank becomes a window over Hermes — the harness layer, memory system,
+mission/workbench runners, and console/explorer/previews are DELETED (Wave 1),
+chat is rewired to Hermes (Wave 2), then factories + trace viewer (Waves 4-5),
+signing (Wave 6), hub widgets (Wave 7), graph + discovery (Wave 8).
+Task board: `.build/STATE.md`. Integration branch: `rebuild/wave1` (→ PR → main).
+The WB/CH/FS/SS rows below are the COMPLETED prior build; they are retained as
+history. Wave 1 supersedes the workbench runner (deleted in W1-3).
+
 ## Leases (shared-file hotspots)
 
 | Hotspot | Leased to | Since |
