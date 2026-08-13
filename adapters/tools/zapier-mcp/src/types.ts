@@ -1,7 +1,7 @@
 /**
  * FRANK Tool Provider Protocol.
  *
- * Mirrors the HarnessAdapter seam (see `adapters/harness/goose/src/types.ts`):
+ * Mirrors the adapter seam Frank's control plane uses for external systems:
  * Frank's control plane talks to an external tool source through this interface
  * alone, and the source underneath is hot-swappable. A `ToolProvider` discovers
  * and invokes tools; today the one implementation is Zapier's MCP server, but a
@@ -100,7 +100,7 @@ export interface ToolResultContent {
   readonly mimeType?: string;
 }
 
-/** Health report for a provider, mirroring HarnessAdapter.status(). */
+/** Health report for a provider, mirroring an external adapter's status(). */
 export interface ToolProviderStatus {
   readonly healthy: boolean;
   readonly version?: string;

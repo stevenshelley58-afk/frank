@@ -25,7 +25,7 @@ import { ProblemError } from '../problem.js';
 import { defineRoute } from '../schema/registry.js';
 import type { ActionBoundary } from '../services/action-boundary.js';
 import { ownerCommandInfluence } from '../services/action-boundary.js';
-import type { ChannelPushStore } from '../services/workbench/channel-push.js';
+import type { ChannelPushStore } from '../services/channels/channel-push.js';
 import { registerRoute } from '../plugins/route-handler.js';
 import type { RouteHandlerDependencies } from '../plugins/route-handler.js';
 

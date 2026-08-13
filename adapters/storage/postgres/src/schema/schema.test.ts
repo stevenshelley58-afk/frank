@@ -396,12 +396,14 @@ describe('Wave 1 frozen contracts', () => {
     expect(MAX_CHAT_TURN_ATTACHMENTS).toBe(10_000);
     const hashes: Record<string, string> = {
       'chat-turn.v1.schema.json': 'e45e3e1cf04c9178b3c0c3b80a29ca2f735e1d30d5c924430cb6baed5934f75b',
-      'harness-control.v1.schema.json': '05318c2094914266a0a203c697b621581ce487e2f95f4f7e47585d482bb4fcfe',
       'object-manifest.v1.schema.json': '733b1641cc310fe69e03727be159f58eb64361712190b1ed0ab29a7e8546c9ae',
       'attachment-upload.v1.schema.json': '4abb812e83991316237c4e22dc268b6738db05f49e92c00f386db3305f208ce4',
     };
     for (const [file, expected] of Object.entries(hashes)) {
-      expect(createHash('sha256').update(readFileSync(path.join(CONTRACT_SCHEMAS_DIR, file))).digest('hex')).toBe(expected);
+      // Hash LF-normalized bytes so CRLF checkouts (Windows) cannot break the
+      // frozen contract: the freeze was computed on the repo blob (LF).
+      const content = readFileSync(path.join(CONTRACT_SCHEMAS_DIR, file), 'utf8').replace(/\r\n/g, '\n');
+      expect(createHash('sha256').update(content).digest('hex')).toBe(expected);
     }
   });
 });

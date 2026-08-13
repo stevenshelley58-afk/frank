@@ -1,14 +1,14 @@
 # CH-00 — Throwaway Telegram spike plan (needs bot token)
 
 Status: ⛔ gated on Telegram bot token (asked Steven 2026-08-06).
-Location: OUTSIDE the monorepo (`/srv/frank/spikes/channels-telegram/`).
+Location: OUTSIDE the monorepo (`/frank/deployed/spikes/channels-telegram/`).
 Rule: after verification, DELETE the spike. Nothing from it (MemoryStore,
 hardcoded state) may be promoted into the repo.
 
 ## Token handling (secret rules, plan §3.5)
 
 1. Steven creates bot via @BotFather (`/newbot`), pastes token to agent.
-2. Agent writes it to `/srv/frank/infra/env` as `TELEGRAM_BOT_TOKEN=***
+2. Agent writes it to `/frank/deployed/infra/env` as `TELEGRAM_BOT_TOKEN=***
    (`chmod 600`, compose env-file path — the existing secret mechanism).
 3. NEVER in: repo, preview content, synced folders, logs, screenshots.
 
@@ -31,5 +31,5 @@ hardcoded state) may be promoted into the repo.
 ## Exit
 
 - Log evidence attached to the CH-00 issue.
-- `rm -rf /srv/frank/spikes/channels-telegram/`, stop the process.
+- `rm -rf /frank/deployed/spikes/channels-telegram/`, stop the process.
 - Findings recorded in EXECUTION_STATUS.md → CH-01/CH-02 proceed on facts.

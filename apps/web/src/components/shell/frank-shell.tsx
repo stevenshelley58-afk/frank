@@ -1,7 +1,6 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
 import { useAuth, useData } from '@/components/providers';
@@ -25,8 +24,6 @@ import {
 } from '@/lib/chat-api';
 import { chatTurnInput, type ChatTurnDraft } from '@/lib/chat-turn-input';
 import { getFrame, type FrameResponse } from '@/lib/frame';
-import { stopMission } from '@/lib/missions/client';
-import { WORKBENCH_API } from '@/lib/workbench/types';
 import { ChatThread } from './chat-thread';
 import { ComposerBar, type ModelOption } from './composer-bar';
 import { LivingFrame } from './living-frame';
@@ -299,29 +296,6 @@ export function FrankShell() {
     void refreshFrame();
   };
 
-  const stopWorkbench = async (id: string) => {
-    try {
-      const response = await fetch(WORKBENCH_API.stop(id), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'Stopped from Living Frame', command_id: crypto.randomUUID() }),
-      });
-      if (!response.ok) throw new Error(`Workbench stop failed (${response.status}).`);
-      void refreshFrame();
-    } catch (error) {
-      setFrameError(error instanceof Error ? error.message : 'Workbench stop failed.');
-    }
-  };
-
-  const stopFrameMission = async (id: string) => {
-    try {
-      await stopMission(id, 'Stopped from Living Frame');
-      void refreshFrame();
-    } catch (error) {
-      setFrameError(error instanceof Error ? error.message : 'Mission stop failed.');
-    }
-  };
-
   const changeModel = async (model: string) => {
     setDraftModel(model);
     if (api && active) {
@@ -512,16 +486,6 @@ export function FrankShell() {
             <b className="block text-[12.5px]">Steve</b>
             <span className="text-[10.5px] text-muted">Owner · full autonomy</span>
           </span>
-          <Link
-            href="/console"
-            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium text-muted transition-colors hover:bg-hover hover:text-ink"
-            aria-label="Console"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="m4 17 6-6-6-6M12 19h8" />
-            </svg>
-            <span>Console</span>
-          </Link>
         </div>
       </nav>
 
@@ -556,12 +520,6 @@ export function FrankShell() {
           <span className="hidden font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted/80 sm:inline">
             {currentProject.agent}
           </span>
-          <Link
-            href="/console"
-            className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-muted transition-colors hover:bg-hover hover:text-ink lg:hidden"
-          >
-            Console
-          </Link>
           <button
             onClick={() => setMobileFrameOpen((v) => !v)}
             id="living-frame-trigger"
@@ -633,8 +591,6 @@ export function FrankShell() {
           onStopActiveChat={stop}
           activeChatId={activeId}
           activeChatStreaming={streamingText !== null}
-          onStopWorkbench={(id) => void stopWorkbench(id)}
-          onStopMission={(id) => void stopFrameMission(id)}
       />
     </div>
   );

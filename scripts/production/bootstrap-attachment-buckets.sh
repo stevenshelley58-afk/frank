@@ -19,7 +19,7 @@ done
 lifecycle='{"Rules":[{"ID":"abort-incomplete-and-quarantine-24h","Status":"Enabled","Filter":{"Prefix":""},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1},"Expiration":{"Days":1}}]}'
 aws "${endpoint[@]}" s3api put-bucket-lifecycle-configuration --bucket frank-attachment-staging --lifecycle-configuration "$lifecycle"
 bash "$(dirname "$0")/render-seaweedfs-s3-config.sh"
-scoped_config="${FRANK_SEAWEEDFS_S3_CONFIG:-/srv/frank/secrets/seaweedfs/s3.json}"
+scoped_config="${FRANK_SEAWEEDFS_S3_CONFIG:-/frank/deployed/secrets/seaweedfs/s3.json}"
 if grep -Fq -- "$FRANK_S3_BOOTSTRAP_ACCESS_KEY" "$scoped_config"; then
   echo 'temporary Seaweed bootstrap identity remains in scoped configuration' >&2; exit 1
 fi

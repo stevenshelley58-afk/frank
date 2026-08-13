@@ -10,13 +10,13 @@ Recorded 2026-08-06. Companion to `FRANK_MASTER_PARALLEL_BUILD_PLAN.md` §8G.
 2. Install Syncthing-Fork (or official app) on Steven's Pixel 10 / Windows PC.
    Windows: SyncTrayzor.
 3. Exchange device IDs (VPS ↔ PC). **Never put device IDs in the repo.**
-4. Folder model: `/srv/frank/sync/<room-id>/<folder>` on VPS, one folder per
+4. Folder model: `/frank/deployed/sync/<room-id>/<folder>` on VPS, one folder per
    bound room folder. `.stignore` excludes `.env*`, `*.secret`, `node_modules`,
    `~*` temp files.
 5. Direction default: **PC Send Only, VPS Receive Only.** Write-back is an
    explicit per-folder opt-in recorded in the room folder binding (FS-02).
 6. Firewall: 22000/tcp open; GUI never exposed.
-7. Recovery: `syncthing cli config` backup at `/srv/frank/infra/syncthing/`;
+7. Recovery: `syncthing cli config` backup at `/frank/deployed/infra/syncthing/`;
    re-pair procedure documented in docs/ops.
 
 ## Backend interface proposal (FS-02)
@@ -26,7 +26,7 @@ interface RoomFolderBinding {
   id: string;
   roomId: string;
   label: string;                 // human name
-  serverPath: string;            // /srv/frank/sync/<room>/<folder>
+  serverPath: string;            // /frank/deployed/sync/<room>/<folder>
   syncDirection: 'pc-to-vps' | 'vps-to-pc' | 'bidirectional';
   mountMode: 'ro' | 'rw' | 'staged';
   writeBackEnabled: boolean;     // default false

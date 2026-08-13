@@ -6,7 +6,6 @@ const nextConfig = {
   output: process.env.NEXT_SKIP_STANDALONE ? undefined : 'standalone',
   transpilePackages: [
     '@frank/pipeline-graph',
-    '@frank/memory',
     '@frank/kernel',
     '@frank/contracts',
     '@frank/policy',

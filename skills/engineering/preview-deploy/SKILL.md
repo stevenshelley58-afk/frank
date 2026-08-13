@@ -17,16 +17,16 @@ live URL. The user reviews the link, not screenshots.
 
 ```bash
 # Deploy a directory (auto-versions: topic-v1, topic-v2, ...):
-/srv/frank/infra/preview-deploy.sh <topic> <source-dir>
+/frank/deployed/infra/preview-deploy.sh <topic> <source-dir>
 
 # Deploy a single HTML file:
-/srv/frank/infra/preview-deploy.sh <topic> <file.html>
+/frank/deployed/infra/preview-deploy.sh <topic> <file.html>
 
 # Overwrite the latest version (rapid iteration, no version bump):
-/srv/frank/infra/preview-deploy.sh <topic> <source> --update
+/frank/deployed/infra/preview-deploy.sh <topic> <source> --update
 
 # Use an exact slug (no versioning):
-/srv/frank/infra/preview-deploy.sh <exact-slug> <source> --exact
+/frank/deployed/infra/preview-deploy.sh <exact-slug> <source> --exact
 ```
 
 The script prints the live URL. Hand that URL to the user.

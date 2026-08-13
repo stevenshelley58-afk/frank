@@ -1,4 +1,4 @@
-# Production application overlay for the existing /srv/frank/infra/docker-compose.dev.yml
+# Production application overlay for the existing /frank/deployed/infra/docker-compose.dev.yml
 # stack. Apply this only as the second Compose file; it is not standalone.
 #
 # Compose 2.24.4+ is required for !override and !reset. Those tags are deliberate:
@@ -70,7 +70,7 @@ services:
       GOOSE_MODEL: "${GOOSE_MODEL:?required}"
       FRANK_UPLOAD_GATE_INTERNAL_URL: "${FRANK_UPLOAD_GATE_INTERNAL_URL:-http://frank-api:3000}"
       FRANK_ARTIFACT_ARCHIVE_ROOT: /var/lib/frank/artifacts
-      FRANK_WORKSPACE_SOURCE_ROOT: /srv/frank/repo
+      FRANK_WORKSPACE_SOURCE_ROOT: /projects/frank
       CODEGRAPH_STATUS_URL: http://frank-codegraph:3002
       CODEGRAPH_REGISTRY: /etc/frank-codegraph/projects.json
       CODEGRAPH_CONTROL_TOKEN_FILE: /run/secrets/frank_codegraph_control_token
@@ -86,11 +86,11 @@ services:
         source: /var/run/docker.sock
         target: /var/run/docker.sock
       - type: bind
-        source: /srv/frank/infra/docker-compose.dev.yml
-        target: /srv/frank/infra/docker-compose.dev.yml
+        source: /frank/deployed/infra/docker-compose.dev.yml
+        target: /frank/deployed/infra/docker-compose.dev.yml
         read_only: true
       - type: bind
-        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/scripts"
+        source: "${FRANK_RELEASE_SOURCE:-/projects/frank}/scripts"
         target: /scripts
         read_only: true
       - type: volume
@@ -106,7 +106,7 @@ services:
         target: /var/lib/frank/artifacts
       - type: bind
         source: "${FRANK_WORKSPACE_SOURCE_HOST_PATH:?FRANK_WORKSPACE_SOURCE_HOST_PATH is required}"
-        target: /srv/frank/repo
+        target: /projects/frank
         read_only: true
 
     secrets: !override
@@ -178,10 +178,7 @@ services:
       FRANK_DOMAIN_API_URL: "${FRANK_API_INTERNAL_URL:?FRANK_API_INTERNAL_URL is required}"
       FRANK_DOMAIN_SERVICE_TOKEN: "${FRANK_DOMAIN_SERVICE_TOKEN:?FRANK_DOMAIN_SERVICE_TOKEN is required}"
       FRANK_PACK_SIGNING_KEY: "${FRANK_PACK_SIGNING_KEY:?FRANK_PACK_SIGNING_KEY is required}"
-      FRANK_EXPLORER_ROOT: /srv/frank/repo-view
-      FRANK_EXPLORER_CACHE: /var/explorer-cache
-      FRANK_PREVIEWS_ROOT: /srv/frank/preview-view
-      GOOSE_REPO_CWD: /srv/frank/repo
+      GOOSE_REPO_CWD: /projects/frank
       GOOSE_ACP_URL: "${GOOSE_ACP_URL:?GOOSE_ACP_URL is required}"
       GOOSE_ACP_SECRET: "${GOOSE_ACP_SECRET:?GOOSE_ACP_SECRET is required}"
       GOOSE_PROVIDER: "${GOOSE_PROVIDER:?GOOSE_PROVIDER is required}"
@@ -198,15 +195,15 @@ services:
         target: /app/apps/web/public/adstudio-samples
         read_only: true
       - type: bind
-        source: "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}"
-        target: /srv/frank/repo-view
+        source: "${FRANK_RELEASE_SOURCE:-/projects/frank}"
+        target: /projects/frank-view
         read_only: true
       - type: volume
         source: frank_explorer_cache
         target: /var/explorer-cache
       - type: bind
-        source: /srv/frank/static/preview
-        target: /srv/frank/preview-view
+        source: /frank/deployed/static/preview
+        target: /frank/deployed/preview-view
         read_only: true
 
     depends_on:
@@ -424,7 +421,7 @@ secrets:
   # Compose implements file-backed secrets as bind mounts, so the host file is
   # provisioned UID/GID 10001 and mode 0400 before `compose up`.
   frank_codegraph_control_token:
-    file: "${FRANK_CODEGRAPH_CONTROL_TOKEN_FILE:-/srv/frank/secrets/codegraph-control-token}"
+    file: "${FRANK_CODEGRAPH_CONTROL_TOKEN_FILE:-/frank/deployed/secrets/codegraph-control-token}"
 
 networks:
   frank-codegraph-internal:

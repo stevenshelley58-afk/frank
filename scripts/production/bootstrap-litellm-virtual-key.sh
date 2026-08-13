@@ -9,7 +9,7 @@ command -v node >/dev/null 2>&1 || { echo 'Node.js is required for fail-closed k
 mode="${1:-bootstrap}"
 case "$mode" in bootstrap|--rotate) ;; *) echo "usage: $0 [--rotate]" >&2; exit 64;; esac
 
-secret_root="${FRANK_RELEASE_SECRET_ROOT:-/srv/frank/secrets}"
+secret_root="${FRANK_RELEASE_SECRET_ROOT:-/frank/deployed/secrets}"
 key_file="${FRANK_LITELLM_VIRTUAL_KEY_FILE:?explicit FRANK_LITELLM_VIRTUAL_KEY_FILE is required}"
 container="${FRANK_LITELLM_CONTAINER:-frank-litellm}"
 [[ "$secret_root" == /* && -d "$secret_root" && ! -L "$secret_root" ]] || { echo 'invalid release secret root' >&2; exit 65; }

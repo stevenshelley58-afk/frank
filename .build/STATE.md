@@ -9,7 +9,7 @@ Status: READY | IN_PROGRESS | DONE | BLOCKED | BLOCKED-DEP
 | F0-2 deploy frank | DONE | main | HEAD | cowork | 2026-08-12 |
 | F0-3 graphify registry | DONE | main | 6cbc25f | cowork | 2026-08-12 |
 | F0-4 gitignore | DONE | main | d5ae122 | cowork | 2026-08-12 |
-| F0-5 retire /srv/frank paths | READY | - | - | - | - |
+| F0-5 retire legacy VPS path paths | READY | - | - | - | - |
 | F1-1 project registry | READY | - | - | - | - |
 | F1-2 release contract | BLOCKED-DEP F1-1 | - | - | - | - |
 | F1-3 module manifest | BLOCKED-DEP F1-1 | - | - | - | - |
@@ -46,13 +46,13 @@ Highest applied: 0013. Next free: 0014.
   streamed `WAVE0-OK` from DeepSeek via Goose ACP, receipt written, agent message persisted.
 - Graphify publishes all five projects: frank 10,953 nodes · blockwise 7,224 · elfandwonder 623 · pavone-demo 249 · merrypaws 155.
 
-## F0-5 — retire /srv/frank paths (mechanical, cheap agent)
+## F0-5 — retire legacy VPS path paths (mechanical, cheap agent)
 
-40 files still reference `/srv/frank`. All are container-internal defaults overridden
+40 files still reference `legacy VPS path`. All are container-internal defaults overridden
 by env in the dev compose, so nothing is broken today, but the production overlay
 `infra/production/docker-compose.app.yml` carries host paths that no longer exist.
-Map: `/srv/frank/repo` -> `/frank/repo` (host source of truth) ·
-`/srv/frank/{infra,static,secrets,workspaces,preview-view}` -> `/frank/deployed/...`.
+Map: `legacy VPS path/repo` -> `/frank/repo` (host source of truth) ·
+`legacy VPS path/{infra,static,secrets,workspaces,preview-view}` -> `/frank/deployed/...`.
 Compatibility symlinks under `/srv` stay until this lands, then go.
 
 ## F0-6 — put the dev compose under version control (cheap agent, needs one decision)

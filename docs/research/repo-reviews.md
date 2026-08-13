@@ -82,7 +82,7 @@ Source: session "get these live on prod and clean up git" · Follow-up to the 20
 ### Git cleanup (same session)
 
 - **GitHub `stevenshelley58-afk/frank`:** deleted merged branches `feat/console-explorer`, `feat/run-state-machine`. Now 3 branches: `feat/frank-console` (prod), `feat/kernel-memory-foundation` (unmerged memory work), `main`.
-- **VPS `/srv/frank/repo`:** on `feat/frank-console` (prod). Deleted the same 2 local branches. `main` (Buzz boundary work, diverged) and `chore/sync-spec-1.1-buzz-mcp` (lint housekeeping) left intact — unmerged work.
+- **VPS `/projects/frank`:** on `feat/frank-console` (prod). Deleted the same 2 local branches. `main` (Buzz boundary work, diverged) and `chore/sync-spec-1.1-buzz-mcp` (lint housekeeping) left intact — unmerged work.
 - **Prod confirmation:** prod branch is `feat/frank-console`, NOT `main` (per deploy skill). frank.fail serving it, HTTP 200. The i-have-adhd + spec-skill work is on this branch.
 
 ---
