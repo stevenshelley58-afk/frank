@@ -1,111 +1,72 @@
-# Frank rebuild — task board (AG-0 control plane)
+# Build state
 
-Source of truth for the FRANK REBUILD (plan: `docs/plans/FRANK_REBUILD_PLAN.md`).
-Maintained by AG-0 (Hermes orchestrator) only. Agents never edit this file.
+One line per task. A replacement agent reads this file first and needs nothing else.
+Status: READY | IN_PROGRESS | DONE | BLOCKED | BLOCKED-DEP
 
-Repo: `C:\Dev\Frank` (git-bash: `/c/Dev/Frank`). Integration branch per wave.
-Main is PROTECTED (M14, strict, contexts=[verify]) — no direct pushes; merges
-via PR after CI verify.
+| id | status | branch | commit | owner | updated |
+|---|---|---|---|---|---|
+| F0-1 scaffold | DONE | main | d5ae122 | cowork | 2026-08-12 |
+| F0-2 deploy frank | DONE | main | HEAD | cowork | 2026-08-12 |
+| F0-3 graphify registry | DONE | main | 6cbc25f | cowork | 2026-08-12 |
+| F0-4 gitignore | DONE | main | d5ae122 | cowork | 2026-08-12 |
+| F0-5 retire legacy VPS path paths | READY | - | - | - | - |
+| F1-1 project registry | READY | - | - | - | - |
+| F1-2 release contract | BLOCKED-DEP F1-1 | - | - | - | - |
+| F1-3 module manifest | BLOCKED-DEP F1-1 | - | - | - | - |
+| F1-4 delivery | BLOCKED-DEP F1-2 | - | - | - | - |
+| F2-A1 renderer | BLOCKED-DEP F1-2 | - | - | - | - |
+| F2-A2 template factory | BLOCKED-DEP F2-A1 | - | - | - | - |
+| F2-B1 ad-intelligence | BLOCKED-DEP F1-4 | - | - | - | - |
+| F2-B2 prospect-discovery | BLOCKED-DEP F1-4 | - | - | - | - |
+| F2-B3 mail | BLOCKED-DEP F1-4 | - | - | - | - |
+| F2-B4 outreach | BLOCKED-DEP F2-B2,F2-B3 | - | - | - | - |
+| F2-C1 content-factory | BLOCKED-DEP F1-4 | - | - | - | - |
+| F3-0 chat | READY | - | - | - | - |
+| F3-1 project home | BLOCKED-DEP F3-0 | - | - | - | - |
+| F3-2 widget groups | BLOCKED-DEP F3-1 | - | - | - | - |
+| F3-3 night watch | BLOCKED-DEP F3-1 | - | - | - | - |
+| F3-4 graphify+lake | READY | - | - | - | - |
+| B4-1 delete legacy adstudio | READY | - | - | - | - |
+| B4-2 consumer boundary | BLOCKED-DEP B4-1,F1-4 | - | - | - | - |
+| B4-3 catalogue | BLOCKED-DEP B4-2 | - | - | - | - |
+| B4-4 editor | BLOCKED-DEP B4-3 | - | - | - | - |
+| B4-5 save | BLOCKED-DEP B4-3 | - | - | - | - |
+| B4-6 publish+meta | BLOCKED-DEP B4-5 | - | - | - | - |
 
-## Ground rules (from plan §1, adapted to this machine)
+## Migration numbers (coordinator assigns, never a worker)
+Highest applied: 0013. Next free: 0014.
+0014 -> F3-1 project dashboard
+0015 -> F3-3 night watch
 
-1. Never edit Hermes itself (`C:\Users\steve\AppData\Local\hermes`).
-2. Never edit any project other than this repo.
-3. No model calls in deterministic code paths.
-4. Never drop a DB table that has rows — rename to `legacy_*` (or `legacy_` prefix).
-5. Never hardcode a model name — use aliases `frank-planner`/`frank-coder`/`frank-bulk`.
-6. Never store in Frank what Hermes already stores.
-7. Commit every verified increment; minimum once an hour.
-8. Never force-push. Never merge your own work. Never deploy.
-9. Reuse OSS libs from Appendix A only; check licence + last release date.
-10. If a rule blocks you: name the rule, the reason, what you would do instead, stop.
+## Wave 0 gate — PASSED 2026-08-12
 
-## Coordinator-only files (agents: file `## HOT-FILE REQUEST` in your task file instead)
+- `frank.fail` serves over HTTPS through Caddy to `frank-web` (basic auth, user `steven`).
+- `frank-api` is ready: `/v1/system/ready` returns `{"ready":true,"state":"healthy"}`, 14 migrations applied, 69 tables in `frank_domain`.
+- Chat responds end to end: turn `019ff728-067a-70bc-86d8-29c4be8bc605` completed,
+  streamed `WAVE0-OK` from DeepSeek via Goose ACP, receipt written, agent message persisted.
+- Graphify publishes all five projects: frank 10,953 nodes · blockwise 7,224 · elfandwonder 623 · pavone-demo 249 · merrypaws 155.
 
-Plan's list:
-- `packages/contracts/src/index.ts`
-- `apps/api/src/main.ts`
-- `apps/web/src/components/shell/frank-shell.tsx`
-- `infra/docker-compose.dev.yml`
-- `pnpm-lock.yaml`
-- drizzle migration journal (`adapters/storage/postgres/migrations/meta/`)
+## F0-5 — retire legacy VPS path paths (mechanical, cheap agent)
 
-AG-0 extension for Wave 1 (shared hotspots, one consolidated edit at gate):
-- `apps/api/src/server.ts` (route registration)
-- `docs/requirements/registry.json` + `registry.md`
-- `packages/contracts/src/harness*.ts` (deletion decision at gate)
+40 files still reference `legacy VPS path`. All are container-internal defaults overridden
+by env in the dev compose, so nothing is broken today, but the production overlay
+`infra/production/docker-compose.app.yml` carries host paths that no longer exist.
+Map: `legacy VPS path/repo` -> `/frank/repo` (host source of truth) ·
+`legacy VPS path/{infra,static,secrets,workspaces,preview-view}` -> `/frank/deployed/...`.
+Compatibility symlinks under `/srv` stay until this lands, then go.
 
-## Migration number lease
+## F0-6 — put the dev compose under version control (cheap agent, needs one decision)
 
-| Number | Task | Renames |
-|---|---|---|
-| 0014 | W1-2 | brain_* → legacy_brain_* |
-| 0015 | W1-3 | mission_*/workbench_*/worktree_* → legacy_* |
-| 0016+ | W4-1 | **ask AG-0 before picking** |
+`/frank/deployed/infra/docker-compose.dev.yml` is the file that actually runs the
+box and it is not in git, so a replacement agent cannot reproduce the stack from
+the repo alone. It was deliberately NOT committed in the Wave 0 commit because it
+carries three secrets inline: the Postgres password and two signing keys.
 
-## Task status
-
-| Task | Depends | Owner | Status | Notes |
-|---|---|---|---|---|
-| W1-1 harness layer | — | AG-1 | ✅ DONE (8815531 + e5100bc hot files) | adapters/harness, harness-broker, harness-control, chat-turn-runner/config, contracts harness.ts deleted |
-| W1-2 memory system | — | AG-2 | ✅ DONE (61f457b..f2249c1 + e5100bc hot files) | packages/memory, brain.ts, web memory api, kernel memory-recall stripped; migration 0014 (counts all 0) |
-| W1-3 mission+workbench runners | — | AG-3 | ✅ DONE (7360a29..db3f9f6 + 2e7959a restore/hot-files) | workbench+missions deleted; channels/folder-binding RESTORED by AG-0 (plan keeps them); migration 0015 |
-| W1-4 console/files/previews/explorer | — | AG-4 | ✅ DONE (621cccf..1882816 + e5100bc frank-shell) | console/**, explorer/previews/files/worktrees libs deleted; nav cleaned |
-| W1-5 stale paths | W1-1..W1-4 | AG-5 | ✅ DONE (bc4cefc) | legacy VPS path → new paths, longest match first |
-| WAVE 1 GATE | W1-1..W1-5 | AG-0 | ✅ PASSED locally (2026-08-13) | net −49,532 lines (260 files); /srv/frank grep = 0; typecheck 13/13; tests 11/12 pkgs green (api: 25 fails all pre-existing/untouched-by-wave — 14 symlink-EPERM Windows-only, 8 disk-gate env, 2 runbook golden drift, 1 production-inputs; see notes); build: api ✓ web ✗ Windows symlink EPERM (CI-Linux covers); PR → main for the authoritative CI gate |
-| W2-1 Hermes client | W1 gate | AG-6 | pending | packages/hermes-client + chat-turns rewrite |
-| W2-2 chat UI assistant-ui | W2-1 | AG-7 | pending | |
-| W3-1 files page | W2 | AG-8 | pending | |
-| W3-2 skills page | W2 | AG-9 | pending | |
-| W4-1 factory tables | W3 | AG-10 | pending | migration number from AG-0 |
-| W4-2 factory runner | W4-1 | AG-11 | pending | pg-boss, escalation ladder |
-| W4-3 trace viewer | W4-2 | AG-12 | pending | |
-| W4-4 tools page | W4-3 | AG-13 | pending | |
-| W5-1 ad-template skill | W4 | AG-14 | pending | skills dir target: TBD (see notes) |
-| W5-2 template-pack contracts | W5-1 | AG-15 | pending | |
-| W5-3 renderer (satori+resvg) | W5-2 | AG-16 | pending | golden hash test first |
-| W5-4 ad-templates factory | W5-3 | AG-17 | pending | |
-| W6-1 release signing | W5 | AG-18 | pending | @noble/ed25519 |
-| W6-2 releases page | W6-1 | AG-19 | pending | |
-| W7-1 project pages + widgets | W6 | AG-20 | pending | |
-| W8-1 graph page | W7 | AG-21 | pending | |
-| W8-2 discovery job | W8-1 | AG-22 | pending | |
-
-## Notes / open items
-
-- W5-1 skills dir: plan says `~/agent-skills/skills`. On this machine Hermes skills
-  live at `C:\Users\steve\AppData\Local\hermes\skills`. Decision needed at Wave 5
-  (probably: write the skill there so the running Hermes sees it; Frank's skills
-  page target dir TBD).
-- VPS still runs the old layout (the legacy VPS root exists; `/frank/deployed` exists;
-  `/projects/frank` does NOT). W1-5 string replacements land in the repo as the
-  plan specifies; VPS reorg is a separate infra task (flagged to user).
-- Row counts W1-2: all five brain_* tables = 0 rows (recorded from prod DB
-  frank-frank-db-1 on 2026-08-13).
-
-## Parallel F-series build (merged from origin/main 2026-08-13)
-
-A separate build program (owner "cowork") runs F0-F3/B4 tasks on main. Its board was
-merged here to keep one source of truth. Original F-board: F0-1..F0-4 DONE; F0-5,
-F0-6, F1-1, F3-0, F3-4, B4-1 READY; the rest BLOCKED-DEP on those.
-
-| id | status | notes |
-|---|---|---|
-| F0-1 scaffold | DONE | main d5ae122 |
-| F0-2 deploy frank | DONE | main e1d19a5 — VPS live, chat E2E via Goose ACP (old stack) |
-| F0-3 graphify registry | DONE | main 6cbc25f (5 projects indexed) |
-| F0-4 gitignore | DONE | main d5ae122 |
-| F0-5 retire /srv/frank paths | DONE by W1-5 | mapping per FRANK_REBUILD_PLAN (/projects/frank + /frank/deployed/*) — supersedes F0-5's draft (/frank/repo); rebuild plan wins |
-| F0-6 dev compose in git | READY | secrets reconciliation needed before commit (see F0-6 note) |
-| F1-1..F1-4 | READY / BLOCKED-DEP | project registry → release contract → module manifest → delivery |
-| F2-A1/A2 · B1-B4 · C1 | BLOCKED-DEP | renderer / template factory / intelligence+outreach / content factory |
-| F3-0..F3-4 | READY / BLOCKED-DEP | chat / project home / widgets / night watch / graphify+lakehouse |
-| B4-1..B4-6 | READY / BLOCKED-DEP | adstudio legacy deletion → consumer boundary → editor → publish |
-
-Wave 0 gate PASSED 2026-08-12: frank.fail live (Caddy, basic auth); 14 migrations,
-69 tables; chat turn E2E streamed WAVE0-OK via Goose ACP.
-
-⚠️ MIGRATION LEASE CONFLICT: the F-board reserved 0014 (F3-1 dashboard) + 0015
-(F3-3 night watch) — BOTH were consumed by this rebuild's W1-2 (0014 brain_* rename)
-and W1-3 (0015 runner tables). F3-1/F3-3 must request 0016+ when they execute.
-Next free migration number: **0016**.
+To land it, replace those with `${VAR:?}` references and source them from
+`/frank/deployed/infra/.env`. One snag found while checking: `FRANK_DB_PASSWORD`
+in `.env` matches the inline value, but `FRANK_SESSION_SIGNING_KEY` and
+`FRANK_ENVELOPE_SIGNING_KEY` do NOT. Substituting blindly would rotate them and
+invalidate every minted session. Reconcile the two sources first — the compose
+comment says these are dev-only fixed keys and production takes them from OpenBao,
+so aligning `.env` to the compose values is the likely answer, but confirm before
+changing anything.
