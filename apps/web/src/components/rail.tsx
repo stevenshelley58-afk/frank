@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { foundRoom, type Room } from '@/lib/rooms';
-import Link from 'next/link';
-import { IconFolder, IconFrame, IconPlus, IconShield, IconStar } from './icons';
+import { IconPlus, IconShield, IconStar } from './icons';
 import { useToast } from './providers';
 import { Sheet, SheetContent, SheetDescription } from './ui/sheet';
 import { cn } from '@/lib/utils';
@@ -195,36 +194,6 @@ function RailContent({
         </span>
         {!collapsed && <span className="text-[12.5px] font-medium">New room</span>}
       </button>
-
-      {/* console */}
-      <Link
-        href="/console"
-        title={collapsed ? 'Console' : undefined}
-        className={cn(
-          'mt-1 flex w-full items-center gap-2.5 rounded-[10px] px-2.5 py-2 text-left text-muted transition-colors hover:bg-hover hover:text-ink2',
-          collapsed && 'justify-center px-0',
-        )}
-      >
-        <span className="grid h-2.5 w-2.5 shrink-0 place-items-center">
-          <IconFrame size={13} />
-        </span>
-        {!collapsed && <span className="text-[12.5px] font-medium">Console</span>}
-      </Link>
-
-      {/* files explorer shortcut — sits right under the console icon */}
-      <Link
-        href="/console/explorer"
-        title={collapsed ? 'Files' : undefined}
-        className={cn(
-          'flex w-full items-center gap-2.5 rounded-[10px] py-1.5 pl-[26px] pr-2.5 text-left text-muted transition-colors hover:bg-hover hover:text-ink2',
-          collapsed && 'justify-center px-0',
-        )}
-      >
-        <span className="grid h-2.5 w-2.5 shrink-0 place-items-center">
-          <IconFolder size={12} />
-        </span>
-        {!collapsed && <span className="text-[11.5px] font-medium">Files</span>}
-      </Link>
 
       {/* footer */}
       <div className="mt-auto pt-4">

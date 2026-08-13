@@ -13,7 +13,6 @@
  * rendered log identical — the core UI-07 reconnect guarantee.
  */
 
-import Link from 'next/link';
 import { useEffect, useMemo, useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -152,12 +151,6 @@ export function WorkbenchPreview() {
         <p className="mt-1 text-[12.5px] text-muted">
           The Running list, waiting surface, and detail view against scripted events. No backend —
           everything is the frozen-contract envelope driven through a mock EventSource.
-        </p>
-        <p className="mt-1 text-[12px]">
-          Real console:{' '}
-          <Link href="/console/workbench" className="text-accent underline-offset-2 hover:underline">
-            /console/workbench
-          </Link>
         </p>
       </div>
 

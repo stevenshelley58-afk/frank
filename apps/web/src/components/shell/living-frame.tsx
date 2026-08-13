@@ -71,7 +71,7 @@ export function LivingFrame(props: LivingFrameProps) {
   onStopMission,
   } = props;
   const running = frame?.running ?? [];
-  const receipts = frame?.receipts ?? [];
+  const receipts = (frame?.receipts ?? []).filter((r) => r.kind === 'chat');
   if (!desktopOpen) {
     return (
       <>
@@ -190,7 +190,7 @@ export function LivingFrame(props: LivingFrameProps) {
           ) : receipts.length === 0 ? (
             <Empty>Nothing finished yet today.</Empty>
           ) : (
-            receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.kind === 'chat' ? receipt.message_id : receipt.workbench_id} receipt={receipt} onOpenConversation={onOpenConversation} />)
+            receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.message_id} receipt={receipt} onOpenConversation={onOpenConversation} />)
           )}
         </Card>
       </div>
@@ -249,7 +249,7 @@ function FrameContent({ props }: { props: LivingFrameProps }) {
     onStopMission,
   } = props;
   const running = frame?.running ?? [];
-  const receipts = frame?.receipts ?? [];
+  const receipts = (frame?.receipts ?? []).filter((r) => r.kind === 'chat');
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
@@ -278,7 +278,7 @@ function FrameContent({ props }: { props: LivingFrameProps }) {
       </Card>
       <Card title="Today"><TodayList today={today} todayError={todayError} calendarEvents={calendarEvents} calendarStatus={calendarStatus} calendarLoading={calendarLoading} calendarError={calendarError} onRetry={onRetryToday} /></Card>
       <Card title="Receipts">
-        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : receipts.length === 0 ? <Empty>Nothing finished yet today.</Empty> : receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.kind === 'chat' ? receipt.message_id : receipt.workbench_id} receipt={receipt} onOpenConversation={onOpenConversation} />)}
+        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : receipts.length === 0 ? <Empty>Nothing finished yet today.</Empty> : receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.message_id} receipt={receipt} onOpenConversation={onOpenConversation} />)}
       </Card>
     </div>
   );
@@ -311,17 +311,9 @@ function RunningRow({ item, projectName, onOpenConversation, activeChatId, activ
 }
 
 function ReceiptRow({ receipt, onOpenConversation }: { receipt: FrameReceipt; onOpenConversation: (id: string) => void }) {
-  const title = receipt.kind === 'chat' ? receipt.body : receipt.summary;
-  const sub = receipt.kind === 'chat' ? 'chat receipt' : `workbench · ${receipt.published_by}`;
-  const open = () => {
-    if (receipt.kind === 'chat') onOpenConversation(receipt.conversation_id);
-    else {
-      const query = receipt.room_id === null
-        ? `workbenchId=${encodeURIComponent(receipt.workbench_id)}`
-        : `roomId=${encodeURIComponent(receipt.room_id)}&workbenchId=${encodeURIComponent(receipt.workbench_id)}`;
-      window.location.assign(`/console/workbench?${query}`);
-    }
-  };
+  const title = receipt.body;
+  const sub = 'chat receipt';
+  const open = () => onOpenConversation(receipt.conversation_id);
   return <button onClick={open} className="flex w-full items-center gap-2.5 border-b border-line py-2 text-left last:border-b-0">
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-success"><path d="M20 6 9 17l-5-5" /></svg>
     <span className="min-w-0 flex-1"><b className="block truncate text-[12.5px] font-semibold text-ink">{title}</b><span className="mt-px block font-mono text-[9.5px] text-muted">{sub}</span></span>
