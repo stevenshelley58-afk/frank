@@ -52,9 +52,9 @@ AG-0 extension for Wave 1 (shared hotspots, one consolidated edit at gate):
 | W1-3 mission+workbench runners | — | AG-3 | ✅ DONE (7360a29..db3f9f6 + 2e7959a restore/hot-files) | workbench+missions deleted; channels/folder-binding RESTORED by AG-0 (plan keeps them); migration 0015 |
 | W1-4 console/files/previews/explorer | — | AG-4 | ✅ DONE (621cccf..1882816 + e5100bc frank-shell) | console/**, explorer/previews/files/worktrees libs deleted; nav cleaned |
 | W1-5 stale paths | W1-1..W1-4 | AG-5 | ✅ DONE (bc4cefc) | legacy VPS path → new paths, longest match first |
-| WAVE 1 GATE | W1-1..W1-5 | AG-0 | ✅ PASSED locally (2026-08-13) | net −49,532 lines (260 files); legacy VPS path grep = 0; typecheck 13/13; tests 11/12 pkgs green (api: 25 fails all pre-existing/untouched-by-wave — 14 symlink-EPERM Windows-only, 8 disk-gate env, 2 runbook golden drift, 1 production-inputs; see notes); build: api ✓ web ✗ Windows symlink EPERM (CI-Linux covers); PR → main for the authoritative CI gate |
-| W2-1 Hermes client | W1 gate | AG-6 | pending | packages/hermes-client + chat-turns rewrite |
-| W2-2 chat UI assistant-ui | W2-1 | AG-7 | pending | |
+| WAVE 1 GATE | W1-1..W1-5 | AG-0 | ✅ MERGED to main (PR #75, 717fd3a, 2026-08-13) | CI verify on the PR was green (Linux). F0 main merged in first (7072ade). F-board stays at `.build/STATE.md`; this file is the W-board. |
+| W2-1 Hermes client | W1 gate | AG-6 | ✅ DONE (99e8658..efc4044) | `@frank/hermes-client` `chat()` streams Responses API SSE; chat-turns persist metadata only; 8+2 tests + api typecheck green |
+| W2-2 chat UI assistant-ui | W2-1 | AG-7 | ✅ DONE (39c24f4..58e7573, 2026-08-13) | assistant-ui 0.15.14 thread+composer+tool cards; SSE bridge route; /chat page; frank-shell adopted (58e7573, hot-file A); reload-restore degrades via sessionKey chaining + note (Hermes session id not exposed — backlog C); web 50/50 tests, 14/14 typecheck |
 | W3-1 files page | W2 | AG-8 | pending | |
 | W3-2 skills page | W2 | AG-9 | pending | |
 | W4-1 factory tables | W3 | AG-10 | pending | migration number from AG-0 |

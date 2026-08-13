@@ -27,7 +27,7 @@ import type { ChatTurnInput } from './chat-turn-input';
 
 export type ThinkingMode = 'off' | 'think' | 'deep';
 
-export type MessageKind = 'user' | 'agent' | 'working' | 'delegation' | 'receipt' | 'thinking';
+export type MessageKind = 'user' | 'agent' | 'working' | 'delegation' | 'receipt' | 'thinking' | 'tool';
 
 export interface Conversation {
   id: string;
@@ -169,14 +169,148 @@ export interface ChatTurnEvent {
   payload: Record<string, unknown>;
 }
 
-/** Frozen API-owned turn boundary. The request body is the canonical contract verbatim. */
-export async function submitChatTurn(api: ApiFetch, input: ChatTurnInput): Promise<ChatTurnRepresentation> {
+/* ------------------------------------------------------------------ */
+/* Chat turns — Hermes SSE stream (W2-1/W2-2)                          */
+/* ------------------------------------------------------------------ */
+
+export type ChatTurnStreamEventType = 'turn' | 'text' | 'tool' | 'done' | 'error';
+
+export interface ChatTurnStreamEvent {
+  type: ChatTurnStreamEventType;
+  /**
+   * Parsed SSE data payload. For `turn` this is the turn view
+   * ({ turn_id, state, created_at, ... }); for text/tool/done/error it is
+   * `{ content: string }` — the text delta, a JSON tool envelope, '' or the
+   * failure reason respectively.
+   */
+  data: Record<string, unknown>;
+}
+
+export interface ChatTurnStreamOptions {
+  /** Called for every SSE event as it arrives: turn → text/tool* → done|error. */
+  onEvent?: (event: ChatTurnStreamEvent) => void;
+  /** Aborts the fetch stream. Pair with cancelChatTurn() server-side. */
+  signal?: AbortSignal;
+}
+
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+export interface ToolCallEventPayload {
+  name: string;
+  call_id: string;
+  /** Parsed tool arguments (object when the envelope carries JSON). */
+  arguments: { [key: string]: JsonValue };
+  /** Raw arguments text when the envelope carries a JSON string (Hermes does). */
+  argumentsText?: string;
+}
+
+/** Parse the JSON envelope carried by a `tool` SSE event. Null when malformed. */
+export function parseToolEventPayload(content: string): ToolCallEventPayload | null {
+  try {
+    const parsed = JSON.parse(content) as Partial<ToolCallEventPayload>;
+    if (typeof parsed.name !== 'string' || typeof parsed.call_id !== 'string') return null;
+    // Hermes streams tool arguments as a JSON *string* (e.g.
+    // "{\"command\":\"date\"}"); parse it into an object and keep the raw text
+    // for argsText. A plain object envelope passes through untouched.
+    let args: { [key: string]: JsonValue } = {};
+    let argumentsText: string | undefined;
+    const raw = parsed.arguments;
+    if (typeof raw === 'string') {
+      argumentsText = raw;
+      try {
+        const parsedArgs = JSON.parse(raw) as JsonValue;
+        if (typeof parsedArgs === 'object' && parsedArgs !== null && !Array.isArray(parsedArgs)) {
+          args = parsedArgs as { [key: string]: JsonValue };
+        }
+      } catch {
+        // keep empty args; argsText still carries the raw payload
+      }
+    } else if (typeof raw === 'object' && raw !== null) {
+      args = raw as { [key: string]: JsonValue };
+    }
+    return { name: parsed.name, call_id: parsed.call_id, arguments: args, ...(argumentsText === undefined ? {} : { argumentsText }) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Submit an API-owned chat turn and consume the Hermes reply as SSE.
+ *
+ * The POST returns `text/event-stream`, not JSON: the first event is the
+ * `turn` view, then `text` deltas and `tool` envelopes until `done` or
+ * `error`. The resolved turn view is the first `turn` event — the same shape
+ * the old JSON response used, so call sites that only read `turn_id` keep
+ * working unchanged.
+ */
+export async function submitChatTurn(
+  api: ApiFetch,
+  input: ChatTurnInput,
+  options: ChatTurnStreamOptions = {},
+): Promise<ChatTurnRepresentation> {
   const res = await api('/v1/chat/turns', {
     method: 'POST',
     headers: { 'Idempotency-Key': input.idempotency_key },
     body: JSON.stringify(input),
+    ...(options.signal ? { signal: options.signal } : {}),
   });
-  return res.json() as Promise<ChatTurnRepresentation>;
+  if (!res.ok) throw new Error(`Chat turn request failed with status ${res.status}`);
+  if (!res.body) throw new Error('Chat turn response has no stream body.');
+  let turn: ChatTurnRepresentation | null = null;
+  for await (const event of readSse(res.body)) {
+    if (options.onEvent) options.onEvent(event);
+    if (event.type === 'turn') turn = event.data as unknown as ChatTurnRepresentation;
+  }
+  if (!turn) throw new Error('Chat turn stream closed before the turn event.');
+  return turn;
+}
+
+/**
+ * Read a `text/event-stream` body and yield one parsed event per block
+ * (`event: name` + `data: <json>`). Handles chunk-boundary splits; comment
+ * lines are skipped.
+ */
+async function* readSse(stream: ReadableStream<Uint8Array>): AsyncGenerator<ChatTurnStreamEvent> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let match: RegExpExecArray | null;
+      while ((match = /\r?\n\r?\n/.exec(buffer)) !== null) {
+        const block = buffer.slice(0, match.index);
+        buffer = buffer.slice(match.index + match[0].length);
+        const event = parseSseBlock(block);
+        if (event) yield event;
+      }
+    }
+    const event = parseSseBlock(buffer);
+    if (event) yield event;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseSseBlock(block: string): ChatTurnStreamEvent | null {
+  let name = 'message';
+  const dataLines: string[] = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (line.startsWith(':')) continue; // SSE comment
+    if (line.startsWith('event:')) name = line.slice(6).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+  }
+  if (dataLines.length === 0) return null;
+  const raw = dataLines.join('\n');
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    data = { content: raw };
+  }
+  return { type: name as ChatTurnStreamEventType, data };
 }
 
 export async function listChatTurnEvents(api: ApiFetch, turnId: string, afterCursor: number): Promise<{ events: ChatTurnEvent[]; next_cursor: number | null }> {
@@ -191,6 +325,96 @@ export async function cancelChatTurn(api: ApiFetch, turnId: string, idempotencyK
     body: JSON.stringify({ idempotency_key: idempotencyKey }),
   });
   return res.json() as Promise<ChatTurnRepresentation>;
+}
+
+/* ------------------------------------------------------------------ */
+/* Profile routing — 'hub' by default, the project's profile when one  */
+/* is active (W2-2: "the UI decides profile; pass it through").        */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Hermes profile for a project id. Central/home is always the `hub`
+ * profile; a selected project talks to its own profile (same name).
+ */
+export function profileForProject(projectId: string | null | undefined): string {
+  if (!projectId || projectId === 'central') return 'hub';
+  return projectId;
+}
+
+/* ------------------------------------------------------------------ */
+/* Streaming bridge — the BFF proxy buffers JSON, so the live SSE      */
+/* stream goes through a dedicated app-router route (/api/chat/turns). */
+/* ------------------------------------------------------------------ */
+
+export interface StreamChatTurnOptions extends ChatTurnStreamOptions {
+  /** Abort the underlying POST (pair with cancelChatTurn server-side). */
+  signal?: AbortSignal;
+  /** Underlying fetch — injectable for tests. Defaults to global fetch. */
+  fetchImpl?: typeof fetch;
+}
+
+/**
+ * Submit one turn through the streaming bridge route and consume the
+ * Hermes reply as SSE. Same event shape as `submitChatTurn`, but the
+ * request goes to `/api/chat/turns` (a Next.js route handler that pipes
+ * the upstream text/event-stream through) instead of the JSON-buffering
+ * BFF proxy — the proxy would swallow the stream.
+ */
+export async function streamChatTurn(
+  input: ChatTurnInput,
+  options: StreamChatTurnOptions = {},
+): Promise<ChatTurnRepresentation> {
+  const fetchImpl = options.fetchImpl ?? fetch;
+  const res = await fetchImpl('/api/chat/turns', {
+    method: 'POST',
+    headers: { 'Idempotency-Key': input.idempotency_key },
+    body: JSON.stringify(input),
+    ...(options.signal ? { signal: options.signal } : {}),
+  });
+  if (!res.ok) throw new Error(`Chat turn request failed with status ${res.status}`);
+  if (!res.body) throw new Error('Chat turn response has no stream body.');
+  let turn: ChatTurnRepresentation | null = null;
+  for await (const event of readSse(res.body)) {
+    if (options.onEvent) options.onEvent(event);
+    if (event.type === 'turn') turn = event.data as unknown as ChatTurnRepresentation;
+  }
+  if (!turn) throw new Error('Chat turn stream closed before the turn event.');
+  return turn;
+}
+
+/* ------------------------------------------------------------------ */
+/* Reload restore — conversation text lives in Hermes, never Frank.    */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Restore result for a conversation on reload.
+ *
+ * The Hermes API server documents a real history endpoint
+ * (`GET /api/sessions/{id}/messages` — verified live 2026-08-13), but the
+ * session id it needs is Hermes-generated and is never exposed to Frank:
+ * the W2-1 turn API persists only {profile, session_key} and does not
+ * forward `X-Hermes-Session-Id`, and the id is not derivable from the
+ * session key. So the web app cannot address that endpoint today.
+ *
+ * Restore therefore degrades gracefully (sanctioned by the W2-2 packet):
+ * the same `session_key` chains turns in the same Hermes conversation, so
+ * context survives a reload — the UI shows a "conversation continues"
+ * marker instead of fabricating a transcript.
+ */
+export interface ConversationRestore {
+  /** 'continues' — transcript replay unavailable; context chains via sessionKey. */
+  status: 'continues';
+  note: string;
+  /** The documented endpoint that would enable real replay (needs an API change). */
+  historyEndpoint: string;
+}
+
+export function conversationRestoreNote(sessionKey: string): ConversationRestore {
+  return {
+    status: 'continues',
+    note: `Conversation continues — earlier turns live in Hermes (session "${sessionKey}" chains them). Frank stores no message text.`,
+    historyEndpoint: `/api/sessions/{id}/messages`,
+  };
 }
 
 /* ------------------------------------------------------------------ */

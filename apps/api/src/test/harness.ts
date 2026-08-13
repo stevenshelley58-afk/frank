@@ -85,8 +85,6 @@ export interface BuildTestServerOptions {
    * `main.ts`, which passes `store.db`.
    */
   readonly db?: import('@frank/adapter-postgres').FrankDatabase;
-  readonly chatTurnRunner?: import('../routes/chat-turns.js').ChatTurnRunner;
-  readonly chatTurnPollIntervalMs?: number;
   /** Isolated codegraph fixtures and service stub for route-contract tests. */
   readonly codegraph?: Pick<
     CodegraphRouteDependencies,
@@ -117,8 +115,6 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
     identity: identityProvider,
     ...(options.enrichment === undefined ? {} : { enrichment: options.enrichment }),
     ...(options.db === undefined ? {} : { db: options.db }),
-    ...(options.chatTurnRunner === undefined ? {} : { chatTurnRunner: options.chatTurnRunner }),
-    ...(options.chatTurnPollIntervalMs === undefined ? {} : { chatTurnPollIntervalMs: options.chatTurnPollIntervalMs }),
     ...(options.codegraph === undefined ? {} : { codegraph: options.codegraph }),
     now,
     startedAt: now(),
