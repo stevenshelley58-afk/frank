@@ -10,10 +10,10 @@ for command_name in date docker install jq realpath sha256sum; do
   command -v "$command_name" >/dev/null 2>&1 || die "missing command: $command_name"
 done
 
-readonly backup_root="${FRANK_CODEGRAPH_BACKUP_ROOT:-/srv/frank/backups/codegraph}"
+readonly backup_root="${FRANK_CODEGRAPH_BACKUP_ROOT:-/frank/deployed/backups/codegraph}"
 readonly release_id="${FRANK_RELEASE_ID:-$(date -u +%Y%m%dT%H%M%SZ)}"
-readonly overlay="${FRANK_PRE_RELEASE_OVERLAY:-/srv/frank/repo/infra/production/docker-compose.app.yml}"
-readonly caddyfile="${FRANK_PRE_RELEASE_CADDYFILE:-/srv/frank/infra/Caddyfile}"
+readonly overlay="${FRANK_PRE_RELEASE_OVERLAY:-/projects/frank/infra/production/docker-compose.app.yml}"
+readonly caddyfile="${FRANK_PRE_RELEASE_CADDYFILE:-/frank/deployed/infra/Caddyfile}"
 readonly volume_override="${FRANK_CODEGRAPH_PHYSICAL_VOLUME:-}"
 readonly logical_volume="${FRANK_CODEGRAPH_LOGICAL_VOLUME:-frank_codegraph_data}"
 readonly compose_project="${FRANK_COMPOSE_PROJECT_NAME:-frank}"
@@ -22,12 +22,12 @@ readonly web_container="${FRANK_WEB_CONTAINER:-frank-web}"
 readonly codegraph_container="${FRANK_CODEGRAPH_CONTAINER:-frank-codegraph}"
 
 [[ "$release_id" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || die "FRANK_RELEASE_ID is invalid"
-[[ "$backup_root" == '/srv/frank/backups/codegraph' ]] || die "refusing unexpected backup root"
+[[ "$backup_root" == '/frank/deployed/backups/codegraph' ]] || die "refusing unexpected backup root"
 [[ "$logical_volume" == 'frank_codegraph_data' ]] || die "refusing unexpected logical codegraph volume"
 [[ "$compose_project" == 'frank' ]] || die "refusing unexpected Compose project"
 [[ -z "$volume_override" || "$volume_override" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$ ]] || die "invalid physical volume override"
 [[ -f "$overlay" && ! -L "$overlay" ]] || die "pre-release overlay must be a regular non-linked file"
-[[ "$caddyfile" == '/srv/frank/infra/Caddyfile' ]] || die "refusing unexpected pre-release Caddyfile"
+[[ "$caddyfile" == '/frank/deployed/infra/Caddyfile' ]] || die "refusing unexpected pre-release Caddyfile"
 [[ -f "$caddyfile" && ! -L "$caddyfile" ]] || die "pre-release Caddyfile must be a regular non-linked file"
 
 declare -a matching_volumes=()

@@ -289,7 +289,7 @@ continue.
 ### W1-5 · Delete stale paths and dead config
 
 **Depends on:** W1-1, W1-2, W1-3, W1-4 all DONE
-**Allowed:** any file containing the string `/srv/frank`
+**Allowed:** any file containing the string `/frank/deployed`
 **Forbidden:** `.env` files, anything under Hermes' own directory
 
 The machine was reorganised. Roughly 40 files still refer to paths that no
@@ -298,18 +298,18 @@ longer exist.
 Replace exactly these, everywhere:
 
 ```
-/srv/frank/repo          →  /projects/frank
-/srv/frank/infra         →  /frank/deployed/infra
-/srv/frank/static        →  /frank/deployed/static
-/srv/frank/secrets       →  /frank/deployed/secrets
-/srv/frank/workspaces    →  /frank/deployed/workspaces
-/srv/frank               →  /frank/deployed
+/projects/frank          →  /projects/frank
+/frank/deployed/infra         →  /frank/deployed/infra
+/frank/deployed/static        →  /frank/deployed/static
+/frank/deployed/secrets       →  /frank/deployed/secrets
+/frank/deployed/workspaces    →  /frank/deployed/workspaces
+/frank/deployed               →  /frank/deployed
 ```
 
 Apply the longest match first. Do not touch any `.env` file.
 
 **Done when:**
-- [ ] `grep -rn "/srv/frank" . --exclude-dir=node_modules --exclude-dir=.git` returns nothing
+- [ ] `grep -rn "/frank/deployed" . --exclude-dir=node_modules --exclude-dir=.git` returns nothing
 - [ ] All four verification commands pass
 
 ---

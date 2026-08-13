@@ -103,7 +103,7 @@ describe.skipIf(requiresDatabase)(`FS-02 room folder bindings (${SKIP_REASON})`,
 
   const BINDING_BODY = {
     folder_source: 'sync-laptop-notes',
-    server_path: `/srv/frank/sync/${ROOM}/notes`,
+    server_path: `/frank/deployed/sync/${ROOM}/notes`,
     sync_direction: 'send-only',
     mount_mode: 'ro',
     write_back: false,
@@ -227,7 +227,7 @@ describe.skipIf(requiresDatabase)(`FS-02 room folder bindings (${SKIP_REASON})`,
       cellId: TEST_CELL,
       roomId: ROOM,
       folderSource: 'shared-docs',
-      serverPath: `/srv/frank/sync/${ROOM}/docs`,
+      serverPath: `/frank/deployed/sync/${ROOM}/docs`,
       syncDirection: 'receive-only',
       mountMode: 'rw',
       writeBack: false,
@@ -245,7 +245,7 @@ describe.skipIf(requiresDatabase)(`FS-02 room folder bindings (${SKIP_REASON})`,
           (id, cell_id, room_id, folder_source, server_path,
            created_at, updated_at, created_by, updated_by,
            sync_direction, mount_mode, write_back)
-        values (${newId()}, ${TEST_CELL}, ${ROOM}, 'shared-docs', '/srv/frank/sync/other/docs',
+        values (${newId()}, ${TEST_CELL}, ${ROOM}, 'shared-docs', '/frank/deployed/sync/other/docs',
                 ${NOW}, ${NOW}, 'user/steven', 'user/steven',
                 'send-only', 'ro', false)
       `),
@@ -259,7 +259,7 @@ describe.skipIf(requiresDatabase)(`FS-02 room folder bindings (${SKIP_REASON})`,
       cellId: TEST_CELL,
       roomId: ROOM,
       folderSource: 'shared-docs',
-      serverPath: `/srv/frank/sync/${ROOM}/docs-v2`,
+      serverPath: `/frank/deployed/sync/${ROOM}/docs-v2`,
       syncDirection: 'bidirectional',
       mountMode: 'staged',
       writeBack: true,
@@ -268,7 +268,7 @@ describe.skipIf(requiresDatabase)(`FS-02 room folder bindings (${SKIP_REASON})`,
     });
     expect(rebind.created).toBe(false);
     expect(rebind.record.id).toBe(first.record.id);
-    expect(rebind.record.serverPath).toBe(`/srv/frank/sync/${ROOM}/docs-v2`);
+    expect(rebind.record.serverPath).toBe(`/frank/deployed/sync/${ROOM}/docs-v2`);
     expect(rebind.record.writeBack).toBe(true);
 
     const all = await store.listByRoom(TEST_CELL, ROOM);

@@ -56,7 +56,7 @@
       "current_ref": "origin/main (b5b338b contains Graphify)",
       "production_sha": "fead0c4b9e3cae60038b54f999a5066d165f8a2b",
       "fresh_clone_resolvable": true,
-      "note": "Graphify is live on production VPS at fead0c4b. Current main (b5b338b) includes Graphify evolved code. Production acceptance receipt at /srv/frank/release-evidence/20260811T223058Z/PRODUCTION_ACCEPTED.receipt.",
+      "note": "Graphify is live on production VPS at fead0c4b. Current main (b5b338b) includes Graphify evolved code. Production acceptance receipt at /frank/deployed/release-evidence/20260811T223058Z/PRODUCTION_ACCEPTED.receipt.",
       "migration": "none — Graphify has no DB migration",
       "chat_owns_contract": false,
       "chat_hot_file_conflicts": [

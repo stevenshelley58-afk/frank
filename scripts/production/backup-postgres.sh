@@ -63,9 +63,9 @@ for command_name in awk basename chmod date docker find flock git gzip install m
 done
 
 readonly container="${FRANK_DB_CONTAINER:-frank-frank-db-1}"
-readonly configured_backup_root="${FRANK_BACKUP_DIR:-/srv/frank/backups/postgres}"
+readonly configured_backup_root="${FRANK_BACKUP_DIR:-/frank/deployed/backups/postgres}"
 readonly retention_days="${FRANK_BACKUP_RETENTION_DAYS:-35}"
-readonly repo_path="${FRANK_REPO_PATH:-/srv/frank/repo}"
+readonly repo_path="${FRANK_REPO_PATH:-/projects/frank}"
 
 [[ "$container" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*$ ]] || die "FRANK_DB_CONTAINER is not a valid container name"
 [[ "$configured_backup_root" == /* ]] || die "FRANK_BACKUP_DIR must be an absolute path"
@@ -76,7 +76,7 @@ install -d -m 0700 -- "$configured_backup_root"
 backup_root="$(realpath -e -- "$configured_backup_root")"
 
 case "$backup_root" in
-  /|/root|/srv|/srv/frank|/srv/frank/backups|/var|/var/backups)
+  /|/root|/srv|/frank/deployed|/frank/deployed/backups|/var|/var/backups)
     die "FRANK_BACKUP_DIR resolves to a path that is too broad for retention cleanup"
     ;;
 esac

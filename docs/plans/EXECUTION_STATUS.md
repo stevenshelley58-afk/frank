@@ -23,7 +23,7 @@ history. Wave 1 supersedes the workbench runner (deleted in W1-3).
 | Contract exports (`packages/contracts/src/index.ts`) | AG-4 (CH-01 only, additive export) | wave-1 |
 | Schema registry (`docs/requirements/registry.json` hash) | AG-0 | — |
 | Migration journal (`adapters/storage/postgres/migrations/`) | AG-3 (WB-01; next number: **0004**) | wave-1 |
-| Docker Compose / VPS manifests (`/srv/frank/infra/`) | AG-3 (WB runner deployment only) | wave-1 |
+| Docker Compose / VPS manifests (`/frank/deployed/infra/`) | AG-3 (WB runner deployment only) | wave-1 |
 | `apps/web/src/app/globals.css` + Tailwind config | — (none; A-track done) | — |
 | App shell / rail / console registry | AG-2 (UI-07, after WB-06) | not started |
 | `AGENTS.md` + precedence docs | AG-0 | — |
@@ -53,7 +53,7 @@ history. Wave 1 supersedes the workbench runner (deleted in W1-3).
 ## GOV-06: stably/orca re-review (recorded 2026-08-06)
 
 **Decision: CONTINUE-BUILD.** Evidence: 2026-08-02 repo review (session
-20260802_132510_8d702d, log: /srv/frank/repo/docs/research/repo-reviews.md)
+20260802_132510_8d702d, log: /projects/frank/docs/research/repo-reviews.md)
 rated orca 🟡 "evaluate later" — it is a cockpit for a fleet of coding agents
 in parallel git worktrees with a phone companion app. It owns no work items,
 no approval state machine, no fences, no receipts, no VPS control plane, and

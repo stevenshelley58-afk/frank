@@ -4,7 +4,7 @@
 spec-compliant part of it. Frank OWNS memory; harnesses (Goose today, others later)
 borrow it via context packs. Per FRANK-§7, §6.2, BRAIN-006.
 
-**Starting point (verified on VPS /srv/frank/repo, 2026-08):**
+**Starting point (verified on VPS /projects/frank, 2026-08):**
 - `packages/contracts/` exports: common, classification, event-envelope, policy,
   evidence, module-manifest, screen, pack, buzz. (`pack.ts` = EXTENSION pack §6.10,
   e.g. `industry.real-estate` — NOT the agent context pack.)
