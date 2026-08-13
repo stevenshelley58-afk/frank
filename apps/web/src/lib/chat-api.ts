@@ -27,7 +27,7 @@ import type { ChatTurnInput } from './chat-turn-input';
 
 export type ThinkingMode = 'off' | 'think' | 'deep';
 
-export type MessageKind = 'user' | 'agent' | 'working' | 'delegation' | 'receipt' | 'thinking';
+export type MessageKind = 'user' | 'agent' | 'working' | 'delegation' | 'receipt' | 'thinking' | 'tool';
 
 export interface Conversation {
   id: string;
@@ -169,14 +169,133 @@ export interface ChatTurnEvent {
   payload: Record<string, unknown>;
 }
 
-/** Frozen API-owned turn boundary. The request body is the canonical contract verbatim. */
-export async function submitChatTurn(api: ApiFetch, input: ChatTurnInput): Promise<ChatTurnRepresentation> {
+/* ------------------------------------------------------------------ */
+/* Chat turns — Hermes SSE stream (W2-1/W2-2)                          */
+/* ------------------------------------------------------------------ */
+
+export type ChatTurnStreamEventType = 'turn' | 'text' | 'tool' | 'done' | 'error';
+
+export interface ChatTurnStreamEvent {
+  type: ChatTurnStreamEventType;
+  /**
+   * Parsed SSE data payload. For `turn` this is the turn view
+   * ({ turn_id, state, created_at, ... }); for text/tool/done/error it is
+   * `{ content: string }` — the text delta, a JSON tool envelope, '' or the
+   * failure reason respectively.
+   */
+  data: Record<string, unknown>;
+}
+
+export interface ChatTurnStreamOptions {
+  /** Called for every SSE event as it arrives: turn → text/tool* → done|error. */
+  onEvent?: (event: ChatTurnStreamEvent) => void;
+  /** Aborts the fetch stream. Pair with cancelChatTurn() server-side. */
+  signal?: AbortSignal;
+}
+
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+
+export interface ToolCallEventPayload {
+  name: string;
+  call_id: string;
+  arguments: { [key: string]: JsonValue };
+}
+
+/** Parse the JSON envelope carried by a `tool` SSE event. Null when malformed. */
+export function parseToolEventPayload(content: string): ToolCallEventPayload | null {
+  try {
+    const parsed = JSON.parse(content) as Partial<ToolCallEventPayload>;
+    if (typeof parsed.name !== 'string' || typeof parsed.call_id !== 'string') return null;
+    return {
+      name: parsed.name,
+      call_id: parsed.call_id,
+      arguments:
+        parsed.arguments && typeof parsed.arguments === 'object'
+          ? (parsed.arguments as { [key: string]: JsonValue })
+          : {},
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Submit an API-owned chat turn and consume the Hermes reply as SSE.
+ *
+ * The POST returns `text/event-stream`, not JSON: the first event is the
+ * `turn` view, then `text` deltas and `tool` envelopes until `done` or
+ * `error`. The resolved turn view is the first `turn` event — the same shape
+ * the old JSON response used, so call sites that only read `turn_id` keep
+ * working unchanged.
+ */
+export async function submitChatTurn(
+  api: ApiFetch,
+  input: ChatTurnInput,
+  options: ChatTurnStreamOptions = {},
+): Promise<ChatTurnRepresentation> {
   const res = await api('/v1/chat/turns', {
     method: 'POST',
     headers: { 'Idempotency-Key': input.idempotency_key },
     body: JSON.stringify(input),
+    ...(options.signal ? { signal: options.signal } : {}),
   });
-  return res.json() as Promise<ChatTurnRepresentation>;
+  if (!res.ok) throw new Error(`Chat turn request failed with status ${res.status}`);
+  if (!res.body) throw new Error('Chat turn response has no stream body.');
+  let turn: ChatTurnRepresentation | null = null;
+  for await (const event of readSse(res.body)) {
+    if (options.onEvent) options.onEvent(event);
+    if (event.type === 'turn') turn = event.data as unknown as ChatTurnRepresentation;
+  }
+  if (!turn) throw new Error('Chat turn stream closed before the turn event.');
+  return turn;
+}
+
+/**
+ * Read a `text/event-stream` body and yield one parsed event per block
+ * (`event: name` + `data: <json>`). Handles chunk-boundary splits; comment
+ * lines are skipped.
+ */
+async function* readSse(stream: ReadableStream<Uint8Array>): AsyncGenerator<ChatTurnStreamEvent> {
+  const reader = stream.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      let match: RegExpExecArray | null;
+      while ((match = /\r?\n\r?\n/.exec(buffer)) !== null) {
+        const block = buffer.slice(0, match.index);
+        buffer = buffer.slice(match.index + match[0].length);
+        const event = parseSseBlock(block);
+        if (event) yield event;
+      }
+    }
+    const event = parseSseBlock(buffer);
+    if (event) yield event;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+function parseSseBlock(block: string): ChatTurnStreamEvent | null {
+  let name = 'message';
+  const dataLines: string[] = [];
+  for (const line of block.split(/\r?\n/)) {
+    if (line.startsWith(':')) continue; // SSE comment
+    if (line.startsWith('event:')) name = line.slice(6).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice(5).trimStart());
+  }
+  if (dataLines.length === 0) return null;
+  const raw = dataLines.join('\n');
+  let data: Record<string, unknown>;
+  try {
+    data = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    data = { content: raw };
+  }
+  return { type: name as ChatTurnStreamEventType, data };
 }
 
 export async function listChatTurnEvents(api: ApiFetch, turnId: string, afterCursor: number): Promise<{ events: ChatTurnEvent[]; next_cursor: number | null }> {
