@@ -71,7 +71,9 @@ export function LivingFrame(props: LivingFrameProps) {
   onStopMission,
   } = props;
   const running = frame?.running ?? [];
-  const receipts = (frame?.receipts ?? []).filter((r) => r.kind === 'chat');
+  const receipts = (frame?.receipts ?? []).filter(
+    (r): r is Extract<FrameReceipt, { kind: 'chat' }> => r.kind === 'chat',
+  );
   if (!desktopOpen) {
     return (
       <>
@@ -249,7 +251,9 @@ function FrameContent({ props }: { props: LivingFrameProps }) {
     onStopMission,
   } = props;
   const running = frame?.running ?? [];
-  const receipts = (frame?.receipts ?? []).filter((r) => r.kind === 'chat');
+  const receipts = (frame?.receipts ?? []).filter(
+    (r): r is Extract<FrameReceipt, { kind: 'chat' }> => r.kind === 'chat',
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
@@ -310,7 +314,7 @@ function RunningRow({ item, projectName, onOpenConversation, activeChatId, activ
   </div>;
 }
 
-function ReceiptRow({ receipt, onOpenConversation }: { receipt: FrameReceipt; onOpenConversation: (id: string) => void }) {
+function ReceiptRow({ receipt, onOpenConversation }: { receipt: Extract<FrameReceipt, { kind: 'chat' }>; onOpenConversation: (id: string) => void }) {
   const title = receipt.body;
   const sub = 'chat receipt';
   const open = () => onOpenConversation(receipt.conversation_id);

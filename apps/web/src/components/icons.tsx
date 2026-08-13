@@ -93,7 +93,7 @@ export function IconAlert(props: IconProps) {
       <path d="M12 17.5v.1" />
     </svg>
   );
-);
+}
 
 /** Copy to clipboard — two overlapping sheets. */
 export function IconCopy(props: IconProps) {
