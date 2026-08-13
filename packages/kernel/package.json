@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "FRANK-§7.4 context-pack assembler. Builds a signed, hash-addressed, minimized manifest of what an agent is allowed to know for one assignment. Memory is recalled through @frank/memory and carried in a distinct lower-trust section (FRANK-§2.3). Integrity uses canonical JSON + HMAC signing via @frank/policy key infrastructure.",
+  "description": "FRANK-§7.4 context-pack assembler. Builds a signed, hash-addressed, minimized manifest of what an agent is allowed to know for one assignment. Integrity uses canonical JSON + HMAC signing via @frank/policy key infrastructure.",
   "exports": {
     ".": "./src/index.ts",
     "./harness-broker": "./src/harness-broker.ts"
@@ -15,7 +15,6 @@
   },
   "dependencies": {
     "@frank/contracts": "workspace:*",
-    "@frank/memory": "workspace:*",
     "@frank/policy": "workspace:*"
   },
   "devDependencies": {
@@ -25,6 +24,6 @@
   },
   "frank": {
     "layer": "packages",
-    "mayDependOn": ["@frank/contracts", "@frank/memory", "@frank/policy"]
+    "mayDependOn": ["@frank/contracts", "@frank/policy"]
   }
 }

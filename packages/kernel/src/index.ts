@@ -8,7 +8,6 @@
 export {
   ContextPackAssembler,
   MissingPackSigningKeyError,
-  UntrustedMemoryViolationError,
 } from './context-pack-assembler';
 export type { AssembleInput } from './context-pack-assembler';
 export { canonicalJson, NonCanonicalValueError } from './canonical-json';
