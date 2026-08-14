@@ -55,8 +55,10 @@ AG-0 extension for Wave 1 (shared hotspots, one consolidated edit at gate):
 | WAVE 1 GATE | W1-1..W1-5 | AG-0 | ✅ MERGED to main (PR #75, 717fd3a, 2026-08-13) | CI verify on the PR was green (Linux). F0 main merged in first (7072ade). F-board stays at `.build/STATE.md`; this file is the W-board. |
 | W2-1 Hermes client | W1 gate | AG-6 | ✅ DONE (99e8658..efc4044) | `@frank/hermes-client` `chat()` streams Responses API SSE; chat-turns persist metadata only; 8+2 tests + api typecheck green |
 | W2-2 chat UI assistant-ui | W2-1 | AG-7 | ✅ DONE (39c24f4..58e7573, 2026-08-13) | assistant-ui 0.15.14 thread+composer+tool cards; SSE bridge route; /chat page; frank-shell adopted (58e7573, hot-file A); reload-restore degrades via sessionKey chaining + note (Hermes session id not exposed — backlog C); web 50/50 tests, 14/14 typecheck |
-| W3-1 files page | W2 | AG-8 | pending | |
-| W3-2 skills page | W2 | AG-9 | pending | |
+| W2 GATE | W2-1..W2-2 | AG-0 | ✅ MERGED to main (PR #76, 2026-08-13) | CI verify green on Linux. Frank chats through Hermes end to end (hermes-client + assistant-ui). |
+| W3-1 files page | W2 | AG-8 | ✅ DONE (3e20c9e feature + dc884a7 wiring) | read-only file browser, react-arborist + shiki; GET /v1/files; /files page |
+| W3-2 skills page | W2 | AG-9 | ✅ DONE (66c6b76..3d59611 + dc884a7 wiring) | reads Hermes skills root read-only, gray-matter; GET /v1/skills + /:id; /skills page |
+| WAVE 3 GATE | W3-1..W3-2 | AG-0 | 🔄 PR #77 open (rebuild/wave3 → main) | CI verify pending |
 | W4-1 factory tables | W3 | AG-10 | pending | migration number from AG-0 |
 | W4-2 factory runner | W4-1 | AG-11 | pending | pg-boss, escalation ladder |
 | W4-3 trace viewer | W4-2 | AG-12 | pending | |

@@ -73,6 +73,9 @@ import { attachmentRoutes, registerAttachmentRoutes } from './routes/attachments
 import type { AttachmentRouteDependencies } from './routes/attachments.js';
 import { codegraphRoutes, registerCodegraphRoutes } from './routes/codegraph.js';
 import type { CodegraphRouteDependencies } from './routes/codegraph.js';
+import { filesRoutes, registerFilesRoutes } from './routes/files.js';
+import type { FilesRouteDependencies } from './routes/files.js';
+import { registerSkillRoutes, skillRoutes } from './routes/skills.js';
 import { ActionBoundary } from './services/action-boundary.js';
 import { HealthService } from './services/health.js';
 import type { EnrichmentDispatcher } from './services/enrichment.js';
@@ -93,6 +96,8 @@ export const ALL_ROUTES: readonly AnyRouteDefinition[] = [
   ...attachmentRoutes,
   ...attachmentUploadRoutes,
   ...codegraphRoutes,
+  ...filesRoutes,
+  ...skillRoutes,
 ];
 
 const ENVELOPE_KEY_HANDLE = 'handle:frank.api.envelope-signing-key';
@@ -185,6 +190,8 @@ export interface BuildServerOptions {
   >;
   /** Present only when every attachment runtime secret/endpoint validates. */
   readonly attachments?: Pick<AttachmentRouteDependencies, 'lifecycle' | 'persistence' | 'downloader' | 'tusdTerminator' | 'tusdHookSecret' | 'tusdGateSecret'>;
+  /** Files browser root; tests provide an isolated fixture directory. */
+  readonly files?: Pick<FilesRouteDependencies, 'filesRoot'>;
 }
 
 export interface BuiltServer {
@@ -415,6 +422,12 @@ export function buildServer(options: BuildServerOptions): BuiltServer {
 
   // Code intelligence graph — reads from the codegraph service output volume.
   registerCodegraphRoutes(app, { ...shared, ...(options.codegraph ?? {}) });
+
+  // Read-only project file browser — the owner's window into the projects root.
+  registerFilesRoutes(app, { ...shared, ...(options.files ?? {}) });
+
+  // W3-2: the Hermes skill library — read-only filesystem views.
+  registerSkillRoutes(app, { ...shared });
 
   const openApiDocument = buildOpenApiDocument(activeRoutes, {
     title: 'FRANK Domain API',
