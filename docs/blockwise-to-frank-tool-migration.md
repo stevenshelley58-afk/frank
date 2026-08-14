@@ -639,7 +639,7 @@ provider tokens in span attributes/events. Use opaque IDs and counts.
 A public release is append-only and addressable by release ID and checksum. It
 must include:
 
-- release_id, schema_version, tool_id, version, and status: public;
+- `schema`, `release_id`, `tool_id`, version, and final status;
 - artifact URLs or storage references that contain no credentials;
 - SHA-256 checksums for every artifact;
 - source/provenance references, graph version, settings revision, QA gates,
@@ -650,6 +650,12 @@ must include:
 
 Consumers pin a release ID/checksum. A new output is a new release; never
 mutate a public release in place.
+
+The identity field is always named `schema`; do not introduce aliases such as
+`producer_schema`. Domain payloads may differ, but every publishing Tool must
+declare its release schema in `manifest.json`, include matching `schema` and
+`tool_id` fields in each release, and validate both before a consumer reads the
+payload.
 
 ### 5.6 Hermes command/event boundary
 
