@@ -16,7 +16,7 @@ from .contracts import (
     validate_manifest,
     validate_pipeline,
 )
-from .home_manifest import validate_home_manifest
+from .home_manifest import discover_tool_homes, validate_home_manifest
 
 __all__ = [
     "ContractError",
@@ -26,6 +26,7 @@ __all__ = [
     "SETTING_SCHEMA",
     "SettingRevisionStore",
     "discover_tool_apps",
+    "discover_tool_homes",
     "validate_manifest",
     "validate_pipeline",
     "validate_home_manifest",

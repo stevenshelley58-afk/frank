@@ -3,7 +3,7 @@ import re
 import unittest
 from pathlib import Path
 
-from tool_apps import discover_tool_apps, validate_home_manifest
+from tool_apps import discover_tool_apps, discover_tool_homes, validate_home_manifest
 
 
 TOOLS_ROOT = Path(__file__).parents[1] / "tools"
@@ -43,6 +43,7 @@ class ToolAppCatalogTest(unittest.TestCase):
     def test_all_migration_tools_share_the_platform_contract(self):
         manifests = discover_tool_apps(TOOLS_ROOT)
         self.assertEqual({manifest["id"] for manifest in manifests}, EXPECTED_TOOLS)
+        self.assertEqual({home["id"] for home in discover_tool_homes(TOOLS_ROOT)}, EXPECTED_TOOLS)
 
         for manifest in manifests:
             tool_id = manifest["id"]

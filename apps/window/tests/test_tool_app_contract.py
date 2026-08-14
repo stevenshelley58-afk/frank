@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 from tool_apps.adapters import HermesAdapter, command, event, trace
-from tool_apps.home_manifest import validate_home_manifest
+from tool_apps.home_manifest import discover_tool_homes, validate_home_manifest
 from tool_apps.contracts import (
     COMMAND_SCHEMA,
     MANIFEST_SCHEMA,
@@ -48,6 +48,20 @@ class ToolAppContractTest(unittest.TestCase):
             validate_home_manifest({**home, "callback": "run()"})
         with self.assertRaises(ContractError):
             validate_home_manifest({key: value for key, value in home.items() if key != "blurb"})
+        with self.assertRaises(ContractError):
+            validate_home_manifest({**home, "capabilities": ["reports read"]})
+
+    def test_tool_home_discovery_matches_package_identity(self):
+        with tempfile.TemporaryDirectory() as root:
+            app_dir = Path(root) / "weekly-report"
+            app_dir.mkdir()
+            (app_dir / "manifest.json").write_text("{}", encoding="utf-8")
+            home = {"id": "weekly-report", "name": "Weekly report", "kind": "tool", "blurb": "Review a report.", "capabilities": ["reports.read"], "default_widget_ids": [], "connection_capabilities": []}
+            (app_dir / "home.json").write_text(json.dumps(home), encoding="utf-8")
+            self.assertEqual(discover_tool_homes(root)[0]["id"], "weekly-report")
+            (app_dir / "home.json").write_text(json.dumps({**home, "id": "other"}), encoding="utf-8")
+            with self.assertRaises(ContractError):
+                discover_tool_homes(root)
 
     def test_discovery_loads_versioned_manifests_and_rejects_mismatch(self):
         with tempfile.TemporaryDirectory() as root:
