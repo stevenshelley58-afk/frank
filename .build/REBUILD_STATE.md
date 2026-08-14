@@ -58,7 +58,7 @@ AG-0 extension for Wave 1 (shared hotspots, one consolidated edit at gate):
 | W2 GATE | W2-1..W2-2 | AG-0 | ✅ MERGED to main (PR #76, 2026-08-13) | CI verify green on Linux. Frank chats through Hermes end to end (hermes-client + assistant-ui). |
 | W3-1 files page | W2 | AG-8 | ✅ DONE (3e20c9e feature + dc884a7 wiring) | read-only file browser, react-arborist + shiki; GET /v1/files; /files page |
 | W3-2 skills page | W2 | AG-9 | ✅ DONE (66c6b76..3d59611 + dc884a7 wiring) | reads Hermes skills root read-only, gray-matter; GET /v1/skills + /:id; /skills page |
-| WAVE 3 GATE | W3-1..W3-2 | AG-0 | 🔄 PR OPEN (rebuild/wave3 → main) | CI verify pending |
+| WAVE 3 GATE | W3-1..W3-2 | AG-0 | 🔄 PR #77 open (rebuild/wave3 → main) | CI verify pending |
 | W4-1 factory tables | W3 | AG-10 | pending | migration number from AG-0 |
 | W4-2 factory runner | W4-1 | AG-11 | pending | pg-boss, escalation ladder |
 | W4-3 trace viewer | W4-2 | AG-12 | pending | |
