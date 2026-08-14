@@ -44,6 +44,15 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('"--timeout", "0"', dockerfile)
         self.assertIn("HERMES_PROFILE: default", compose)
 
+    def test_clicking_any_chat_opens_that_chat_in_hub(self):
+        script = (WEB / "js" / "app.js").read_text(encoding="utf-8")
+
+        self.assertIn("if (turnAbort) return;\n    void selectChat(button.dataset.chatId);", script)
+        self.assertNotIn("turnAbort || button.dataset.chatId === currentChatId", script)
+        self.assertIn("const switchingChats = chatId !== currentChatId;", script)
+        self.assertIn("if (switchingChats && chatAtts.length) void discardAttachments", script)
+        self.assertIn('show("hub");\n  await loadChatMessages(chatId);', script)
+
     def test_accounts_tool_is_secret_safe_and_responsive(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         script = (WEB / "js" / "app.js").read_text(encoding="utf-8")
