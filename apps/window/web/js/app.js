@@ -120,6 +120,37 @@ let uploadsInFlight = 0;
 let turnAbort = null;
 let turnQueue = Promise.resolve();
 let chatPinnedToBottom = true;
+let loadedChatVersion = "";
+let modelUpdate = Promise.resolve();
+let renderModelPicker = () => {};
+
+function chatVersion(chat) {
+  return chat ? `${chat.id}:${chat.updated_at || 0}:${chat.message_count || 0}` : "";
+}
+function savedSessionModels() {
+  try {
+    const value = JSON.parse(localStorage.getItem("frank.session-models") || "{}");
+    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  } catch { return {}; }
+}
+function rememberSessionModel(chatId, model, provider) {
+  if (!chatId) return;
+  const value = savedSessionModels();
+  value[chatId] = { model, provider };
+  localStorage.setItem("frank.session-models", JSON.stringify(value));
+}
+function applySessionModel(chat) {
+  if (!chat) return;
+  const saved = savedSessionModels()[chat.id] || {};
+  const id = saved.model || chat.model;
+  if (!id) return;
+  const hit = models.find((item) => item.id === id);
+  chatModel = id;
+  chatProvider = saved.provider || hit?.provider || chatProvider;
+  localStorage.setItem("frank.model", chatModel);
+  localStorage.setItem("frank.provider", chatProvider);
+  renderModelPicker();
+}
 
 function chatDate(sec) {
   if (!sec) return "";
@@ -158,6 +189,7 @@ async function loadChatMessages(chatId) {
   const data = await response.json();
   for (const message of data.messages || []) addChatMsg(message);
   if (!(data.messages || []).length) empty.classList.remove("is-hidden");
+  loadedChatVersion = chatVersion(chatSessions.find((chat) => chat.id === chatId));
   chatPinnedToBottom = true;
   chatScrollBottom(true);
 }
@@ -168,15 +200,17 @@ async function selectChat(chatId) {
   localStorage.setItem("frank.chat", chatId);
   renderChatNav();
   const selected = chatSessions.find((chat) => chat.id === chatId);
+  applySessionModel(selected);
   $("#view-sub").textContent = selected?.title || "";
   await loadChatMessages(chatId);
 }
 async function createChat() {
   if (turnAbort) return;
+  await modelUpdate.catch(() => {});
   const response = await fetch("/api/chat/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: "New chat" }),
+    body: JSON.stringify({ title: "New chat", model: chatModel, provider: chatProvider }),
   });
   if (!response.ok) throw new Error("Could not start a new chat");
   const data = await response.json();
@@ -184,11 +218,16 @@ async function createChat() {
   await selectChat(data.session.id);
   $("#chat-input").focus();
 }
-async function refreshChatSessions() {
+async function refreshChatSessions(reloadCurrent = false) {
   try {
     await fetchChatSessions();
     const selected = chatSessions.find((chat) => chat.id === currentChatId);
-    if (selected) $("#view-sub").textContent = selected.title || "";
+    if (selected) {
+      $("#view-sub").textContent = selected.title || "";
+      if (reloadCurrent && !turnAbort && chatVersion(selected) !== loadedChatVersion) {
+        await loadChatMessages(selected.id);
+      }
+    }
   } catch { /* the active chat remains usable */ }
 }
 
@@ -472,15 +511,41 @@ function setupModelPicker() {
     $("#model-name").textContent = chatModel;
     $$(".model-opt", menu).forEach((o) =>
       o.addEventListener("click", () => {
+        const previous = { model: chatModel, provider: chatProvider };
         chatModel = o.dataset.id;
         chatProvider = o.dataset.provider || "";
         localStorage.setItem("frank.model", chatModel);
         localStorage.setItem("frank.provider", chatProvider);
         menu.classList.remove("is-open");
         paint();
+        if (!currentChatId) return;
+        const selected = chatSessions.find((chat) => chat.id === currentChatId);
+        if (selected) selected.model = chatModel;
+        const requested = { model: chatModel, provider: chatProvider };
+        modelUpdate = fetch(`/api/chat/sessions/${encodeURIComponent(currentChatId)}/model`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(requested),
+        }).then(async (response) => {
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.error || "Hermes did not accept that model");
+          }
+          rememberSessionModel(currentChatId, requested.model, requested.provider);
+        }).catch((error) => {
+          chatModel = previous.model;
+          chatProvider = previous.provider;
+          if (selected) selected.model = previous.model;
+          localStorage.setItem("frank.model", chatModel);
+          localStorage.setItem("frank.provider", chatProvider);
+          paint();
+          addChatMsg({ role: "sys", text: error.message || "Could not change the Hermes model.", error: true, ts: Date.now() / 1000 | 0 });
+          return false;
+        });
       })
     );
   };
+  renderModelPicker = paint;
   paint();
   $("#model-btn").addEventListener("click", (e) => { e.stopPropagation(); menu.classList.toggle("is-open"); });
   document.addEventListener("click", (e) => { if (!e.target.closest("#model-pick")) menu.classList.remove("is-open"); });
@@ -495,6 +560,7 @@ function setupModelPicker() {
 
 async function sendTurn(text, atts) {
   if (!currentChatId) await createChat();
+  await modelUpdate.catch(() => {});
   const turnChatId = currentChatId;
   chatPinnedToBottom = true;
   addChatMsg({ role: "user", text, attachments: atts, model: chatModel, ts: Date.now() / 1000 | 0 });
@@ -542,10 +608,7 @@ async function sendTurn(text, atts) {
         if (!data) continue;
         let obj = null;
         try { obj = JSON.parse(data); } catch { continue; }
-        if (obj.type === "frank.session" || ev === "frank.session") {
-          // Frank has detached this chat from an invalid Hermes history and
-          // retried the same turn. The visible Frank chat remains unchanged.
-        } else if (obj.type === "response.output_text.delta" || ev === "response.output_text.delta") {
+        if (obj.type === "response.output_text.delta" || ev === "response.output_text.delta" || ev === "assistant.delta") {
           acc += obj.delta || obj.content || "";
           content.innerHTML = renderMd(acc);
           chatScrollBottom();
@@ -555,8 +618,16 @@ async function sendTurn(text, atts) {
           line.className = "tool-line";
           line.textContent = name;
           content.after(line);
+        } else if (ev === "tool.started") {
+          const line = document.createElement("div");
+          line.className = "tool-line";
+          line.textContent = obj.tool_name || "tool";
+          content.after(line);
+        } else if (ev === "assistant.completed" && !acc && obj.content) {
+          acc = obj.content;
+          content.innerHTML = renderMd(acc);
         } else if (obj.type === "error" || ev === "error") {
-          acc = acc || obj.content || "Hermes returned an error.";
+          acc = acc || obj.content || obj.message || "Hermes returned an error.";
           content.innerHTML = renderMd(acc);
           content.classList.add("is-err");
         }
@@ -581,7 +652,7 @@ async function sendTurn(text, atts) {
     setBusy(false);
     turnAbort = null;
     chatScrollBottom();
-    void refreshChatSessions();
+    void refreshChatSessions(true);
   }
 }
 
@@ -775,6 +846,9 @@ function setupChat() {
   }).catch(() => {
     addChatMsg({ role: "sys", text: "Chats could not be loaded.", ts: Date.now() / 1000 | 0 });
   });
+  window.setInterval(() => {
+    if (!turnAbort) void refreshChatSessions(true);
+  }, 5000);
 }
 
 /* ---------------- files explorer (Windows-style) ---------------- */

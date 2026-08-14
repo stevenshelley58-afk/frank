@@ -10,17 +10,14 @@ import secrets
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
-import uuid
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory, stream_with_context
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
-CHAT_FILE = CHAT_DIR / "chat.jsonl"
-CHAT_INDEX = CHAT_DIR / "chats.json"
-CHAT_SESSIONS_DIR = CHAT_DIR / "chats"
 UPLOAD_DIR = CHAT_DIR / "uploads"
 ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accounts.json")))
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
@@ -28,7 +25,7 @@ MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
 HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
 HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
-HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "hub")
+HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
 ROOTS = {
     # The container receives only the explicitly approved read-only VPS mounts
     # beneath /vps. This presents one familiar tree without exposing the
@@ -47,7 +44,6 @@ CURATED_MODELS = [
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
-_chat_lock = threading.RLock()
 _accounts_lock = threading.RLock()
 
 ACCOUNT_KINDS = {"customer", "email", "service", "domain"}
@@ -214,156 +210,23 @@ def _connector_status(variable: str, fallback: str = "unconfigured") -> str:
     return status if status in CONNECTOR_STATUSES else "unconfigured"
 
 
-def _new_hermes_conversation() -> str:
-    return f"frank-hub-{uuid.uuid4()}"
-
-
-def _write_chat_index(data: dict) -> None:
-    CHAT_DIR.mkdir(parents=True, exist_ok=True)
-    temp = CHAT_INDEX.with_suffix(".tmp")
-    temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
-    temp.replace(CHAT_INDEX)
-
-
-def _new_chat_record(title: str = "New chat") -> dict:
-    now = int(time.time())
-    return {
-        "id": secrets.token_hex(8),
-        "title": title[:80] or "New chat",
-        "hermes_conversation": _new_hermes_conversation(),
-        "file": "",
-        "created_at": now,
-        "updated_at": now,
-        "message_count": 0,
-        "preview": "",
-    }
-
-
-def _ensure_chat_index() -> dict:
-    with _chat_lock:
-        if CHAT_INDEX.exists():
-            try:
-                data = json.loads(CHAT_INDEX.read_text(encoding="utf-8"))
-                if isinstance(data.get("sessions"), list):
-                    return data
-            except (OSError, json.JSONDecodeError, AttributeError):
-                pass
-
-        sessions = []
-        if CHAT_FILE.exists() and CHAT_FILE.stat().st_size:
-            lines = [line for line in CHAT_FILE.read_text(encoding="utf-8").splitlines() if line.strip()]
-            preview = ""
-            for line in reversed(lines):
-                try:
-                    item = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-                if item.get("role") == "user" and item.get("text"):
-                    preview = str(item["text"]).replace("\n", " ")[:100]
-                    break
-            sessions.append({
-                "id": "previous",
-                "title": "Previous chat",
-                "hermes_conversation": _new_hermes_conversation(),
-                "file": "chat.jsonl",
-                "created_at": int(CHAT_FILE.stat().st_ctime),
-                "updated_at": int(CHAT_FILE.stat().st_mtime),
-                "message_count": len(lines),
-                "preview": preview,
-            })
-
-        # A clean chat is selected on the first reload. The imported transcript
-        # remains available, but it never resumes the damaged Hermes chain.
-        clean = _new_chat_record()
-        if sessions:
-            clean["updated_at"] = max(clean["updated_at"], max(int(item.get("updated_at", 0)) for item in sessions) + 1)
-        sessions.append(clean)
-        data = {"version": 1, "sessions": sessions}
-        _write_chat_index(data)
-        return data
-
-
-def _chat_record(chat_id: str | None = None) -> dict | None:
-    data = _ensure_chat_index()
-    sessions = data["sessions"]
-    if not sessions:
-        return None
-    if chat_id:
-        return next((item for item in sessions if item.get("id") == chat_id), None)
-    return max(sessions, key=lambda item: int(item.get("updated_at", 0)))
-
-
-def _chat_path(record: dict) -> Path:
-    filename = str(record.get("file") or f"{record['id']}.jsonl")
-    if filename == "chat.jsonl":
-        return CHAT_FILE
-    CHAT_SESSIONS_DIR.mkdir(parents=True, exist_ok=True)
-    return CHAT_SESSIONS_DIR / Path(filename).name
-
-
-def _public_chat(record: dict) -> dict:
-    return {key: record.get(key) for key in (
-        "id", "title", "created_at", "updated_at", "message_count", "preview"
-    )}
-
-
-def _title_from_message(msg: dict) -> str:
-    text = re.sub(r"\s+", " ", str(msg.get("text", ""))).strip()
-    if text:
-        return text[:52] + ("…" if len(text) > 52 else "")
-    attachments = msg.get("attachments") or []
-    if attachments:
-        first = attachments[0].get("relative_path") or attachments[0].get("name") or "attachment"
-        return f"File: {first}"[:60]
-    return "New chat"
-
-
-def append_chat(msg: dict, chat_id: str | None = None) -> dict:
-    with _chat_lock:
-        data = _ensure_chat_index()
-        sessions = data["sessions"]
-        record = next((item for item in sessions if item.get("id") == chat_id), None) if chat_id else (
-            max(sessions, key=lambda item: int(item.get("updated_at", 0))) if sessions else None
-        )
-        if record is None:
-            raise KeyError("chat not found")
-        path = _chat_path(record)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(msg, ensure_ascii=False) + "\n")
-        previous_count = int(record.get("message_count", 0))
-        record["message_count"] = previous_count + 1
-        record["updated_at"] = int(time.time())
-        if msg.get("role") == "user":
-            record["preview"] = _title_from_message(msg)
-            if record.get("title") == "New chat" and previous_count == 0:
-                record["title"] = _title_from_message(msg)
-        _write_chat_index(data)
-    return msg
-
-
-def _rotate_hermes_conversation(chat_id: str) -> str:
-    with _chat_lock:
-        data = _ensure_chat_index()
-        record = next((item for item in data["sessions"] if item.get("id") == chat_id), None)
-        if record is None:
-            raise KeyError("chat not found")
-        record["hermes_conversation"] = _new_hermes_conversation()
-        _write_chat_index(data)
-        return record["hermes_conversation"]
-
-
 def hermes_base() -> str:
     url = HERMES_URL
     if url.endswith("/v1"):
         url = url[:-3]
-    profile = HERMES_PROFILE.strip() or "hub"
+    profile = HERMES_PROFILE.strip() or "default"
     if profile in ("default", "hermes-agent"):
         return url
     return f"{url}/p/{profile}"
 
 
-def hermes_request(path: str, payload: dict | None = None, timeout: float = 15):
+def hermes_request(
+    path: str,
+    payload: dict | None = None,
+    *,
+    method: str | None = None,
+    timeout: float = 30,
+):
     url = hermes_base() + path
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     headers = {"Accept": "application/json"}
@@ -371,10 +234,96 @@ def hermes_request(path: str, payload: dict | None = None, timeout: float = 15):
         headers["Authorization"] = f"Bearer {HERMES_KEY}"
     if data is not None:
         headers["Content-Type"] = "application/json"
-    req = urllib.request.Request(url, data=data, headers=headers, method="GET" if data is None else "POST")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers=headers,
+        method=method or ("GET" if data is None else "POST"),
+    )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         body = resp.read()
         return json.loads(body.decode("utf-8") or "{}")
+
+
+def _hermes_error(err: Exception):
+    if isinstance(err, urllib.error.HTTPError):
+        detail = err.read().decode("utf-8", errors="replace")[:1200]
+        message = f"Hermes returned HTTP {err.code}."
+        try:
+            parsed = json.loads(detail)
+            message = parsed.get("error", {}).get("message") or parsed.get("message") or message
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        return jsonify({"error": message}), err.code if 400 <= err.code < 600 else 502
+    return jsonify({"error": f"Could not reach Hermes: {str(err).split(chr(10))[0][:180]}"}), 502
+
+
+def _session_path(session_id: str, suffix: str = "") -> str:
+    safe_id = urllib.parse.quote(str(session_id), safe="")
+    return f"/api/sessions/{safe_id}{suffix}"
+
+
+def _public_hermes_session(session: dict) -> dict:
+    preview = re.sub(r"\s+", " ", str(session.get("preview") or "")).strip()
+    title = re.sub(r"\s+", " ", str(session.get("title") or "")).strip()
+    if not title:
+        title = (preview[:52] + ("…" if len(preview) > 52 else "")) or "New chat"
+    return {
+        "id": str(session.get("id") or ""),
+        "title": title,
+        "created_at": session.get("started_at") or 0,
+        "updated_at": session.get("last_active") or session.get("ended_at") or session.get("started_at") or 0,
+        "message_count": int(session.get("message_count") or 0),
+        "preview": preview[:100],
+        "model": str(session.get("model") or ""),
+        "source": str(session.get("source") or ""),
+    }
+
+
+def _message_text(content) -> str:
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return str(content or "")
+    parts = []
+    for item in content:
+        if isinstance(item, str):
+            parts.append(item)
+        elif isinstance(item, dict):
+            if item.get("type") in ("text", "input_text", "output_text") and item.get("text"):
+                parts.append(str(item["text"]))
+            elif item.get("type") in ("image_url", "input_image"):
+                parts.append("[Image]")
+    return "\n".join(parts)
+
+
+def _public_hermes_messages(items: list) -> list:
+    messages = []
+    for item in items:
+        role = str(item.get("role") or "")
+        if role not in ("user", "assistant"):
+            continue
+        text = _message_text(item.get("content")).strip()
+        tool_calls = item.get("tool_calls") or []
+        tools = []
+        if isinstance(tool_calls, list):
+            for call in tool_calls:
+                if not isinstance(call, dict):
+                    continue
+                function = call.get("function") if isinstance(call.get("function"), dict) else {}
+                name = function.get("name") or call.get("name")
+                if name:
+                    tools.append(str(name))
+        if not text and not tools:
+            continue
+        messages.append({
+            "role": role,
+            "text": text,
+            "tools": tools,
+            "attachments": [],
+            "ts": item.get("timestamp") or 0,
+        })
+    return messages
 
 
 def hermes_reachable() -> dict:
@@ -581,21 +530,37 @@ def models():
 
 @app.get("/api/chat/sessions")
 def chat_sessions_list():
-    data = _ensure_chat_index()
-    sessions = sorted(data["sessions"], key=lambda item: int(item.get("updated_at", 0)), reverse=True)
-    return jsonify({"sessions": [_public_chat(item) for item in sessions]})
+    try:
+        data = hermes_request("/api/sessions?limit=100&include_children=true")
+    except Exception as err:
+        return _hermes_error(err)
+    sessions = [
+        _public_hermes_session(item)
+        for item in data.get("data", [])
+        if isinstance(item, dict) and item.get("id")
+    ]
+    return jsonify({"sessions": sessions, "profile": HERMES_PROFILE})
 
 
 @app.post("/api/chat/sessions")
 def chat_sessions_create():
     body = request.get_json(silent=True) or {}
     title = re.sub(r"\s+", " ", str(body.get("title", "New chat"))).strip()[:80] or "New chat"
-    with _chat_lock:
-        data = _ensure_chat_index()
-        record = _new_chat_record(title)
-        data["sessions"].append(record)
-        _write_chat_index(data)
-    return jsonify({"ok": True, "session": _public_chat(record)}), 201
+    model = str(body.get("model", "")).strip()
+    provider = str(body.get("provider", "")).strip()
+    payload = {"source": "api_server"}
+    if title != "New chat":
+        payload["title"] = title
+    if model:
+        payload.update({"model": model, "require_model_lock": True})
+    if provider:
+        payload["provider"] = provider
+    try:
+        data = hermes_request("/api/sessions", payload, method="POST")
+    except Exception as err:
+        return _hermes_error(err)
+    session = data.get("session") or {}
+    return jsonify({"ok": True, "session": _public_hermes_session(session)}), 201
 
 
 @app.patch("/api/chat/sessions/<chat_id>")
@@ -604,55 +569,40 @@ def chat_sessions_rename(chat_id: str):
     title = re.sub(r"\s+", " ", str(body.get("title", ""))).strip()[:80]
     if not title:
         abort(400, "title required")
-    with _chat_lock:
-        data = _ensure_chat_index()
-        record = next((item for item in data["sessions"] if item.get("id") == chat_id), None)
-        if record is None:
-            abort(404)
-        record["title"] = title
-        record["updated_at"] = int(time.time())
-        _write_chat_index(data)
-    return jsonify({"ok": True, "session": _public_chat(record)})
+    try:
+        data = hermes_request(_session_path(chat_id), {"title": title}, method="PATCH")
+    except Exception as err:
+        return _hermes_error(err)
+    return jsonify({"ok": True, "session": _public_hermes_session(data.get("session") or {})})
+
+
+@app.post("/api/chat/sessions/<chat_id>/model")
+def chat_sessions_model(chat_id: str):
+    body = request.get_json(silent=True) or {}
+    model = str(body.get("model", "")).strip()
+    provider = str(body.get("provider", "")).strip()
+    if not model:
+        abort(400, "model required")
+    payload = {"model": model, "require_model_lock": True}
+    if provider:
+        payload["provider"] = provider
+    try:
+        data = hermes_request(_session_path(chat_id, "/model"), payload, method="POST")
+    except Exception as err:
+        return _hermes_error(err)
+    return jsonify({"ok": True, "runtime": data.get("runtime") or {}})
 
 
 @app.get("/api/chat")
 def chat_list():
-    record = _chat_record(str(request.args.get("session_id", "")).strip() or None)
-    if record is None:
-        return jsonify({"messages": []})
-    path = _chat_path(record)
-    if not path.exists():
-        return jsonify({"messages": [], "session": _public_chat(record)})
-    msgs = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        try:
-            msgs.append(json.loads(line))
-        except json.JSONDecodeError:
-            continue
-    return jsonify({"messages": msgs[-300:], "session": _public_chat(record)})
-
-
-@app.post("/api/chat")
-def chat_post():
-    body = request.get_json(silent=True) or {}
-    chat_id = str(body.get("chat_id", "")).strip() or None
-    if _chat_record(chat_id) is None:
-        abort(404, "chat not found")
-    role = "user" if body.get("role") != "assistant" else "assistant"
-    text = str(body.get("text", "")).strip()
-    attachments = _clean_atts(body.get("attachments"))
-    if not text and not attachments:
-        abort(400, "empty message")
-    msg = {
-        "role": role,
-        "text": text,
-        "model": str(body.get("model", "")).strip() or None,
-        "attachments": attachments,
-        "ts": int(time.time()),
-    }
-    return jsonify({"ok": True, "message": append_chat(msg, chat_id)})
+    chat_id = str(request.args.get("session_id", "")).strip()
+    if not chat_id:
+        abort(400, "session_id required")
+    try:
+        data = hermes_request(_session_path(chat_id, "/messages") + "?limit=500&order=oldest")
+    except Exception as err:
+        return _hermes_error(err)
+    return jsonify({"messages": _public_hermes_messages(data.get("data") or []), "session_id": chat_id})
 
 
 def _clean_atts(raw) -> list:
@@ -808,64 +758,28 @@ def _hermes_input(text: str, attachments: list) -> str | list:
         encoded = base64.b64encode(target.read_bytes()).decode("ascii")
         content.append({"type": "input_image", "image_url": f"data:{attachment['type']};base64,{encoded}"})
         inline_total += size
-    return [{"role": "user", "content": content}]
+    return content
 
 
 @app.post("/api/chat/turn")
 def chat_turn():
-    """Forward one user turn to VPS Hermes. Frank does not think."""
+    """Stream one turn through the authoritative Hermes session."""
     body = request.get_json(silent=True) or {}
     text = str(body.get("text", "")).strip()
     attachments = _clean_atts(body.get("attachments"))
     model = str(body.get("model", "")).strip()
     provider = str(body.get("provider", "")).strip()
     chat_id = str(body.get("chat_id", "")).strip()
-    chat_record = _chat_record(chat_id)
-    if chat_record is None:
-        abort(404, "chat not found")
-    session_key = str(chat_record.get("hermes_conversation") or _rotate_hermes_conversation(chat_id))
+    if not chat_id:
+        abort(400, "chat_id required")
     if not text and not attachments:
         abort(400, "empty message")
-
-    user_msg = {
-        "role": "user",
-        "text": text,
-        "model": model or None,
-        "attachments": attachments,
-        "ts": int(time.time()),
-    }
-    append_chat(user_msg, chat_id)
-
-    brain = hermes_reachable()
-    if not brain.get("ok"):
-        note = brain.get("reason") or "Hermes is not on this box yet."
-        sys_msg = {
-            "role": "assistant",
-            "text": f"Hub is not reachable. {note}",
-            "model": None,
-            "attachments": [],
-            "ts": int(time.time()),
-            "error": True,
-        }
-        append_chat(sys_msg, chat_id)
-
-        def dead():
-            yield f"event: error\ndata: {json.dumps({'type': 'error', 'content': sys_msg['text']})}\n\n"
-            yield "event: done\ndata: {\"type\":\"done\"}\n\n"
-
-        return Response(stream_with_context(dead()), mimetype="text/event-stream", headers=_sse_headers())
-
-    payload = {
-        "model": model or HERMES_PROFILE,
-        "input": _hermes_input(text, attachments),
-        "stream": True,
-        "conversation": session_key,
-    }
+    payload = {"message": _hermes_input(text, attachments)}
+    if model:
+        payload.update({"model": model, "require_model_lock": True})
     if provider:
         payload["provider"] = provider
-        payload["model"] = model or payload["model"]
-
-    url = hermes_base() + "/v1/responses"
+    url = hermes_base() + _session_path(chat_id, "/chat/stream")
     base_headers = {
         "Authorization": f"Bearer {HERMES_KEY}",
         "Content-Type": "application/json",
@@ -873,136 +787,30 @@ def chat_turn():
     }
 
     def generate():
-        collected = []
-        active_session = session_key
-        recovered = False
-        terminal_error = False
-
-        def sse_blocks(resp):
-            block = []
-            for raw_line in resp:
-                if raw_line in (b"\n", b"\r\n"):
-                    if block:
-                        yield b"".join(block) + b"\n"
-                        block = []
-                else:
-                    block.append(raw_line)
-            if block:
-                yield b"".join(block) + b"\n"
-
-        def event_json(block: bytes) -> dict:
-            chunks = []
-            for line in block.decode("utf-8", errors="replace").splitlines():
-                if line.startswith("data:"):
-                    chunks.append(line[5:].strip())
-            blob = "".join(chunks)
-            if not blob or blob == "[DONE]":
-                return {}
-            try:
-                value = json.loads(blob)
-                return value if isinstance(value, dict) else {}
-            except json.JSONDecodeError:
-                return {}
-
-        def is_poisoned(value) -> bool:
-            raw = value if isinstance(value, str) else json.dumps(value, ensure_ascii=False)
-            lowered = raw.lower()
-            return "tool_calls" in lowered and "empty array" in lowered
-
         try:
-            while True:
-                attempt_payload = {**payload, "conversation": active_session}
-                headers = {**base_headers, "X-Hermes-Session-Key": f"frank-hub:{chat_id}"}
-                req = urllib.request.Request(url, data=json.dumps(attempt_payload).encode("utf-8"), headers=headers, method="POST")
-                try:
-                    poisoned_stream = False
-                    pending_text_blocks = []
-                    probe_text = ""
-                    probing_error = True
-                    with urllib.request.urlopen(req, timeout=15) as resp:
-                        for block in sse_blocks(resp):
-                            ev = event_json(block)
-                            if is_poisoned(ev) or is_poisoned(block.decode("utf-8", errors="replace")):
-                                poisoned_stream = True
-                                break
-                            if ev.get("type") == "response.output_text.delta" and ev.get("delta"):
-                                delta = str(ev["delta"])
-                                if probing_error:
-                                    probe_text += delta
-                                    pending_text_blocks.append(block)
-                                    if is_poisoned(probe_text):
-                                        poisoned_stream = True
-                                        break
-                                    lower_probe = probe_text.lower().lstrip()
-                                    suspicious = (
-                                        lower_probe.startswith("http 400")
-                                        or lower_probe.startswith("error code: 400")
-                                        or lower_probe.startswith("invalid 'messages")
-                                        or lower_probe.startswith("hermes returned http 400")
-                                    )
-                                    if len(probe_text) < 48 or suspicious:
-                                        continue
-                                    collected.append(probe_text)
-                                    for pending in pending_text_blocks:
-                                        yield pending
-                                    pending_text_blocks = []
-                                    probe_text = ""
-                                    probing_error = False
-                                    continue
-                                collected.append(delta)
-                            yield block
-                    if probing_error and not poisoned_stream and pending_text_blocks:
-                        if is_poisoned(probe_text):
-                            poisoned_stream = True
-                        else:
-                            collected.append(probe_text)
-                            for pending in pending_text_blocks:
-                                yield pending
-                    if poisoned_stream and not recovered and not collected:
-                        active_session = _rotate_hermes_conversation(chat_id)
-                        recovered = True
-                        yield f"event: frank.session\ndata: {json.dumps({'type': 'frank.session', 'chat_id': chat_id, 'reason': 'history_recovered'})}\n\n".encode()
-                        continue
-                    break
-                except urllib.error.HTTPError as err:
-                    detail = err.read().decode("utf-8", errors="replace")[:800]
-                    poisoned_history = err.code == 400 and is_poisoned(detail)
-                    if poisoned_history and not recovered:
-                        active_session = _rotate_hermes_conversation(chat_id)
-                        recovered = True
-                        yield f"event: frank.session\ndata: {json.dumps({'type': 'frank.session', 'chat_id': chat_id, 'reason': 'history_recovered'})}\n\n".encode()
-                        continue
-                    msg = f"Hermes returned HTTP {err.code}."
-                    try:
-                        parsed = json.loads(detail)
-                        msg = parsed.get("error", {}).get("message") or parsed.get("message") or msg
-                    except Exception:
-                        if detail:
-                            msg = detail[:180]
-                    collected.clear()
-                    collected.append(msg)
-                    terminal_error = True
-                    yield f"event: error\ndata: {json.dumps({'type': 'error', 'content': msg})}\n\n".encode()
-                    break
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(payload).encode("utf-8"),
+                headers=base_headers,
+                method="POST",
+            )
+            # No client-side turn deadline. Hermes owns the run lifecycle and
+            # emits SSE keepalives; the browser's Stop button closes this stream.
+            with urllib.request.urlopen(req) as resp:
+                for raw_line in resp:
+                    yield raw_line
+        except urllib.error.HTTPError as err:
+            detail = err.read().decode("utf-8", errors="replace")[:1200]
+            msg = f"Hermes returned HTTP {err.code}."
+            try:
+                parsed = json.loads(detail)
+                msg = parsed.get("error", {}).get("message") or parsed.get("message") or msg
+            except (json.JSONDecodeError, AttributeError):
+                pass
+            yield f"event: error\ndata: {json.dumps({'type': 'error', 'content': msg})}\n\n".encode()
         except Exception as err:
             msg = f"Could not reach Hermes: {str(err).split(chr(10))[0][:180]}"
-            collected.append(msg)
-            terminal_error = True
             yield f"event: error\ndata: {json.dumps({'type': 'error', 'content': msg})}\n\n".encode()
-        finally:
-            reply = "".join(collected).strip()
-            if reply:
-                append_chat(
-                    {
-                        "role": "assistant",
-                        "text": reply,
-                        "model": model or None,
-                        "attachments": [],
-                        "ts": int(time.time()),
-                        "error": terminal_error,
-                    },
-                    chat_id,
-                )
             yield b"event: done\ndata: {\"type\":\"done\"}\n\n"
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream", headers=_sse_headers())
