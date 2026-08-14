@@ -163,10 +163,14 @@ describe('W3-1 /v1/files — browsing and reading', () => {
 describe('W3-1 /v1/files — path traversal protection', () => {
   it('refuses an absolute path outside the root, existing or not (403 before any stat)', async () => {
     const target = start();
-    for (const escape of [
-      'C:/Windows/System32/drivers/etc/hosts',
-      'C:/Windows/definitely-not-here',
-    ]) {
+    // Absolute paths that are genuinely outside the temp root on this
+    // platform (one that exists, one that does not — the refusal must fire
+    // before any stat either way).
+    const escapes =
+      process.platform === 'win32'
+        ? ['C:/Windows/System32/drivers/etc/hosts', 'C:/Windows/definitely-not-here']
+        : ['/etc/passwd', '/definitely-not-here'];
+    for (const escape of escapes) {
       const result = await files(target, escape);
       expect(result.status).toBe(403);
       expect(result.body['type']).toBe('https://frank.fail/problems/forbidden');
