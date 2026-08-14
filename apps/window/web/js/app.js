@@ -1,5 +1,6 @@
 import { mount, mountAll } from "./registry.js";
 import "./widgets.js";
+import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -9,6 +10,9 @@ const TITLES = {
   project: ["Project", ""],
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
+  "entity-home": ["Home", "Live, capability-aware widgets"],
+  "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
+  connections: ["Connections", "Recorded provider setup and capabilities"],
   accounts: ["Accounts", "Customer directory; provider actions connect through Hermes later"],
   trace: ["Trace", "One run, fully visible"],
   releases: ["Releases", "Signed and verified"],
@@ -17,24 +21,27 @@ const TITLES = {
 let projects = { projects: [] };
 
 function show(id) {
+  const editorWasOpen = closeHomeEditors({ restoreFocus: false });
+  if (id !== "project" && id !== "entity-home") clearHomeActions();
   const [title, sub] = TITLES[id] || TITLES.hub;
   $("#view-title").textContent = id === "project" ? currentProject.name : title;
   $("#view-sub").textContent = id === "hub"
     ? (chatSessions.find((chat) => chat.id === currentChatId)?.title || "")
     : sub;
-  const railView = id === "accounts" ? "tools" : id;
+  const railView = ["accounts", "entity-home", "widget-builder", "connections"].includes(id) ? "tools" : id;
   $$(".rail-item[data-view]").forEach((b) => b.classList.toggle("is-on", b.dataset.view === railView));
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
+  if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
 let currentProject = { id: "blockwise", name: "Blockwise" };
 
 function showProject(id) {
   currentProject = projects.projects.find((x) => x.id === id) || { id, name: id };
-  mountAll("project-home", $("#slot-project"), { project: currentProject, root: currentProject.root || id });
   show("project");
+  openProjectHome(currentProject);
 }
 
 $$(".rail-item[data-view]").forEach((b) =>
@@ -75,6 +82,24 @@ window.addEventListener("frank:view", (event) => {
     show("accounts");
     loadAccounts();
   }
+});
+
+window.addEventListener("frank:entity-home", (event) => {
+  const entity = event.detail || {};
+  if (!entity.kind || !entity.id) return;
+  show("entity-home");
+  $("#view-title").textContent = entity.name || entity.id;
+  openEntityHome(entity);
+});
+
+window.addEventListener("frank:widget-builder", () => {
+  show("widget-builder");
+  openWidgetBuilder();
+});
+
+window.addEventListener("frank:connections", () => {
+  show("connections");
+  openConnections();
 });
 
 function escapeHtml(s) {
@@ -1592,6 +1617,7 @@ function setupAccounts() {
 setupChat();
 setupExplorer();
 setupAccounts();
+setupHomePlatform();
 
 fetch("/api/projects")
   .then((r) => r.json())

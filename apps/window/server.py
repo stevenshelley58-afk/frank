@@ -16,6 +16,8 @@ from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory, stream_with_context
 
+import home_platform
+
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 UPLOAD_DIR = CHAT_DIR / "uploads"
@@ -354,10 +356,19 @@ def health():
 
 @app.get("/api/projects")
 def projects():
+    return jsonify({"projects": _project_items()})
+
+
+def _project_items() -> list[dict]:
     p = WEB / "data" / "projects.json"
     if p.exists():
-        return jsonify(json.loads(p.read_text(encoding="utf-8")))
-    return jsonify({"projects": DEFAULT_PROJECTS})
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(data, dict) and isinstance(data.get("projects"), list):
+                return data["projects"]
+        except (OSError, json.JSONDecodeError):
+            pass
+    return DEFAULT_PROJECTS
 
 
 @app.get("/api/accounts")
@@ -822,6 +833,15 @@ def _sse_headers():
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
     }
+
+
+home_platform.configure(
+    project_loader=_project_items,
+    account_loader=lambda: list(_ensure_accounts().get("accounts", [])),
+    hermes_health=hermes_reachable,
+    roots=ROOTS,
+)
+app.register_blueprint(home_platform.api)
 
 
 @app.get("/", defaults={"path": ""})
