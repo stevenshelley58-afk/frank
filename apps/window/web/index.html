@@ -7,7 +7,7 @@
 <title>Frank</title>
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
-<link rel="stylesheet" href="/app.css?v=20260814-accounts-explorer">
+<link rel="stylesheet" href="/app.css?v=20260814-customer-accounts">
 </head>
 <body>
 <div class="app">
@@ -171,18 +171,46 @@
               <input type="hidden" id="account-id">
               <label>Project<select id="account-project" required></select></label>
               <div class="account-form-pair">
-                <label>Type<select id="account-kind"><option value="email">Email address</option><option value="service">Service account</option><option value="domain">Domain</option></select></label>
+                <label>Type<select id="account-kind"><option value="customer">Customer</option><option value="email">Email address</option><option value="service">Service account</option><option value="domain">Domain</option></select></label>
                 <label>Status<select id="account-status"><option value="planned">Planned</option><option value="setup">Setup needed</option><option value="ready">Ready</option><option value="attention">Needs attention</option><option value="disabled">Disabled</option></select></label>
               </div>
               <label>Name<input id="account-name" maxlength="120" required placeholder="Blockwise main"></label>
               <label>Identity<input id="account-identity" maxlength="240" required placeholder="hello@blockwise.sale"></label>
-              <div class="account-form-pair">
-                <label>Provider<input id="account-provider" maxlength="120" placeholder="Resend"></label>
-                <label>Purpose<input id="account-purpose" maxlength="160" placeholder="Main sender"></label>
+              <div class="customer-fields" id="account-customer-fields">
+                <fieldset>
+                  <legend>Customer access</legend>
+                  <div class="account-form-pair">
+                    <label>Account type<select id="account-mode"><option value="selfserve">Self-serve</option><option value="managed">Managed</option><option value="internal">Internal</option></select></label>
+                    <label>Environment<select id="account-environment"><option value="test">Test</option><option value="live">Live</option></select></label>
+                  </div>
+                  <div class="account-form-pair">
+                    <label>Recorded auth status<select id="account-auth-status"><option value="not_connected">Not connected</option><option value="invited">Invited</option><option value="active">Active</option><option value="suspended">Suspended</option><option value="closed">Closed</option></select></label>
+                    <label>Auth provider<input id="account-auth-provider" maxlength="120" placeholder="Provider name"></label>
+                  </div>
+                  <label>Auth user reference<input id="account-auth-ref" maxlength="240" placeholder="Provider user ID or test:// reference"></label>
+                  <p class="account-help">Directory status only: changing this does not alter project access until Hermes connects the authentication provider. Passwords and sessions never live here.</p>
+                </fieldset>
+                <fieldset>
+                  <legend>Billing</legend>
+                  <div class="account-form-pair">
+                    <label>Recorded billing status<select id="account-billing-status"><option value="not_connected">Not connected</option><option value="trial">Trial</option><option value="active">Active</option><option value="past_due">Past due</option><option value="canceled">Canceled</option></select></label>
+                    <label>Billing provider<input id="account-billing-provider" maxlength="120" placeholder="Stripe"></label>
+                  </div>
+                  <label>Plan<input id="account-plan" maxlength="120" placeholder="Self-serve trial"></label>
+                  <label>Customer reference<input id="account-billing-customer-ref" maxlength="240" placeholder="Provider customer ID or test:// reference"></label>
+                  <label>Subscription reference<input id="account-billing-subscription-ref" maxlength="240" placeholder="Provider subscription ID or test:// reference"></label>
+                  <p class="account-help">Directory status only: changing this does not alter a subscription. Card and bank details are rejected; Frank stores only provider references.</p>
+                </fieldset>
+              </div>
+              <div id="account-operations-fields">
+                <div class="account-form-pair">
+                  <label>Provider<input id="account-provider" maxlength="120" placeholder="Resend"></label>
+                  <label>Purpose<input id="account-purpose" maxlength="160" placeholder="Main sender"></label>
+                </div>
+                <label>Credential reference<input id="account-credential" maxlength="300" placeholder="openbao://frank/email/blockwise"></label>
+                <p class="account-help">Passwords and API keys never live here. Store them in the shared vault and save only the reference.</p>
               </div>
               <label>Admin link<input id="account-url" type="url" maxlength="500" placeholder="https://"></label>
-              <label>Credential reference<input id="account-credential" maxlength="300" placeholder="openbao://frank/email/blockwise"></label>
-              <p class="account-help">Passwords and API keys never live here. Store them in the shared vault and save only the reference.</p>
               <label>Notes<textarea id="account-notes" maxlength="800" rows="3" placeholder="Non-secret setup notes"></textarea></label>
               <div class="account-error" id="account-error" role="alert"></div>
               <div class="account-form-actions">
@@ -213,6 +241,6 @@
   </div>
   <div class="media-stage" id="media-stage"></div>
 </div>
-<script type="module" src="/js/app.js?v=20260814-accounts-explorer"></script>
+<script type="module" src="/js/app.js?v=20260814-customer-accounts"></script>
 </body>
 </html>
