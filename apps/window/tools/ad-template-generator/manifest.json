@@ -1,0 +1,68 @@
+{
+  "schema": "schema://frank.tool-app-manifest/v1",
+  "id": "ad-template-generator",
+  "name": "Ad Template Generator",
+  "description": "Reference-clone ad templates with visible QA, native-pixel human approval, and immutable source-free releases.",
+  "version": "1.0.0",
+  "kind": "tool",
+  "scopes": ["project", "workspace"],
+  "settings": {
+    "schema": "schema://frank.tool-app-settings/v1",
+    "properties": {
+      "project_pack_ref": {"type": "string"},
+      "prompt_ref": {"type": "string"},
+      "prompt_version": {"type": "string"},
+      "style_pack_ref": {"type": "string"},
+      "model_policy": {"type": "string"},
+      "retry_budget": {"type": "integer", "minimum": 0, "maximum": 1},
+      "placements": {"type": "array", "items": {"type": "string"}},
+      "export_targets": {"type": "array", "items": {"type": "string"}},
+      "approval_policy": {"type": "string", "const": "human_native_pixel"}
+    }
+  },
+  "pipelines": [
+    {
+      "id": "reference-clone-release",
+      "schema": "schema://frank.tool-app-pipeline/v1",
+      "nodes": [
+        {"id": "source", "kind": "source"},
+        {"id": "extract", "kind": "extract"},
+        {"id": "clone", "kind": "clone"},
+        {"id": "qa", "kind": "qa"},
+        {"id": "native-pixel-human-approval", "kind": "approval"},
+        {"id": "immutable-source-free-release", "kind": "release"}
+      ],
+      "edges": [
+        {"from": "source", "to": "extract"},
+        {"from": "extract", "to": "clone"},
+        {"from": "clone", "to": "qa"},
+        {"from": "qa", "to": "native-pixel-human-approval"},
+        {"from": "native-pixel-human-approval", "to": "immutable-source-free-release"}
+      ]
+    }
+  ],
+  "capabilities": ["source.inspect", "template.extract", "reference.clone", "qa.review", "release.issue"],
+  "connectors": ["image.generate"],
+  "schedules": [],
+  "thresholds": [
+    {"id": "identity-leakage", "key": "identity_leakage", "value": 0, "minimum": 0, "maximum": 1},
+    {"id": "copy-mismatch", "key": "copy_mismatch", "value": 0, "minimum": 0, "maximum": 1},
+    {"id": "visual-defects", "key": "visual_defects", "value": 0, "minimum": 0, "maximum": 1},
+    {"id": "asset-replacement", "key": "asset_replacement", "value": 1, "minimum": 0, "maximum": 1},
+    {"id": "retry-budget", "key": "retry_budget", "value": 1, "minimum": 0, "maximum": 1}
+  ],
+  "approval_gates": ["native-pixel-human-approval"],
+  "hermes": {
+    "actions": ["inspect-source", "extract-contract", "clone-reference", "review-qa", "approve-native-pixels", "issue-release"],
+    "event_kinds": ["source-recorded", "contract-extracted", "clone-attempted", "qa-completed", "native-pixel-approval-requested", "native-pixel-approved", "release-issued", "run-failed"]
+  },
+  "trace": {
+    "schema": "schema://frank.tool-app-trace/v1",
+    "style": "otel-genai",
+    "event_kinds": ["source-recorded", "contract-extracted", "clone-attempted", "qa-completed", "native-pixel-approval-requested", "native-pixel-approved", "release-issued", "run-failed"]
+  },
+  "metadata": {
+    "lineage": {"engine_owner": "hermes", "canonical_commits": ["1c91bda6", "dcaaf47a", "0cd587b4"]},
+    "health": {"endpoint": "hermes://ad-template-generator/health", "states": ["ready", "degraded", "blocked", "unavailable"]}
+  }
+}
