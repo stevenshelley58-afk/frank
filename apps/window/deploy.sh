@@ -92,5 +92,6 @@ done
 docker exec frank-window python -c \
   "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/health',timeout=5)); assert data['ok'] is True"
 curl --fail --silent --show-error --output /dev/null \
+  --retry 10 --retry-delay 2 --retry-all-errors \
   https://preview.frank.fail/frank-vps-file-explorer-v1/
 echo "deployed $(git -C "$repo" rev-parse HEAD)"
