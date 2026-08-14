@@ -43,8 +43,8 @@ class AdIntelligenceToolTest(unittest.TestCase):
         self.assertIn("run", ALLOWED_ACTIONS)
         self.assertIn("stage-completed", ALLOWED_EVENTS)
         self.assertEqual(set(declarative["hermes"]["event_kinds"]), set(ALLOWED_EVENTS))
-        self.assertEqual(declarative["otel"]["trace_schema"], "schema://frank.tool-app-trace/v1")
-        self.assertEqual(set(declarative["otel"]["event_kinds"]), set(ALLOWED_EVENTS))
+        self.assertEqual(declarative["trace"]["schema"], "schema://frank.tool-app-trace/v1")
+        self.assertEqual(set(declarative["trace"]["event_kinds"]), set(ALLOWED_EVENTS))
 
     def test_run_advances_and_publishes_only_in_order(self):
         run = PipelineRun("run-1", AdIntelligenceManifest())

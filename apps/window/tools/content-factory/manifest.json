@@ -35,8 +35,10 @@
   "schedules": [{"id": "hermes-schedule-ref", "owner": "hermes"}],
   "thresholds": [{"id": "word-count"}, {"id": "media"}, {"id": "seo"}, {"id": "compliance"}],
   "approval_gates": [{"id": "human-approval", "required": true}, {"id": "immutable-release", "required": true}],
-  "actions": ["run", "resume", "rerun", "withdraw"],
-  "events": ["stage-completed", "review-requested", "release-immutable", "quarantined", "withdrawn"],
+  "hermes": {
+    "actions": ["run", "resume", "rerun", "withdraw"],
+    "event_kinds": ["stage-completed", "review-requested", "release-immutable", "quarantined", "withdrawn"]
+  },
   "trace": {
     "schema": "schema://frank.tool-app-trace/v1",
     "style": "otel-genai",

@@ -51,8 +51,8 @@
     "actions": ["run", "retry", "approve-publish", "pause", "health"],
     "event_kinds": ["run-started", "stage-completed", "run-quarantined", "publish-completed"]
   },
-  "otel": {
-    "trace_schema": "schema://frank.tool-app-trace/v1",
+  "trace": {
+    "schema": "schema://frank.tool-app-trace/v1",
     "instrumentation": "gen-ai",
     "span_prefix": "ad-radar",
     "event_kinds": ["run-started", "stage-completed", "run-quarantined", "publish-completed"]

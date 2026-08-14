@@ -46,8 +46,8 @@ ARTIFACT_TAXONOMY = {
     "compliance": ("compliance_report",), "human-approval": ("review_report",),
 }
 
-COMMAND_ACTIONS = frozenset(_PACKAGE_MANIFEST["actions"])
-EVENT_KINDS = frozenset(_PACKAGE_MANIFEST["events"])
+COMMAND_ACTIONS = frozenset(_PACKAGE_MANIFEST["hermes"]["actions"])
+EVENT_KINDS = frozenset(_PACKAGE_MANIFEST["hermes"]["event_kinds"])
 
 
 def _require_id(value: Any, label: str) -> str:
