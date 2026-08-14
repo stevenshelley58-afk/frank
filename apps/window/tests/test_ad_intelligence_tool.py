@@ -2,6 +2,7 @@ import json
 import importlib.util
 import sys
 import unittest
+from dataclasses import replace
 from pathlib import Path
 
 PACKAGE_DIR = Path(__file__).parents[1] / "tools" / "ad-intelligence"
@@ -124,6 +125,9 @@ class AdIntelligenceToolTest(unittest.TestCase):
         self.assertEqual(release.to_dict()["consumer_compatibility"], ["ad-intelligence-public-v1"])
         self.assertEqual(release.to_dict()["qa_receipt_ref"], "receipt://qa/run-1")
         self.assertEqual(len(release.to_dict()["sanitization_receipt_refs"]), 2)
+        self.assertEqual(len(release.to_dict()["release_hash"]), 64)
+        with self.assertRaises(ValueError):
+            replace(release, project_scope="other-project")
         with self.assertRaises(TypeError): release.public_export["project"] = "other"
 
         private_payload = json.loads(json.dumps(payload))
