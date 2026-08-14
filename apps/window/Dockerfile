@@ -8,4 +8,5 @@ COPY web /web
 ENV FRANK_WEB=/web
 ENV PORT=8080
 EXPOSE 8080
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "--workers", "2", "--threads", "4", "server:app"]
+# Frank's JSON stores use process-local locks; keep one worker and use threads.
+CMD ["gunicorn", "-b", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "server:app"]

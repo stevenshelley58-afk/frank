@@ -99,6 +99,7 @@ class UiContractTest(unittest.TestCase):
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
         browser_canary = (WEB.parent / "tests" / "hosted_focus_canary.js").read_text(encoding="utf-8")
+        dockerfile = (WEB.parent / "Dockerfile").read_text(encoding="utf-8")
 
         self.assertIn("API keys, passwords, provider code, and arbitrary HTML are rejected", html)
         self.assertIn("Never paste a password, API key, OAuth token, card number, or bank detail", html)
@@ -128,6 +129,8 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('setAttribute("inert", "")', homes)
         self.assertIn("editorReturnFocus", homes)
         self.assertIn("export function closeHomeEditors", homes)
+        self.assertIn('"--workers", "1"', dockerfile)
+        self.assertNotIn('"--workers", "2"', dockerfile)
 
 
 if __name__ == "__main__":

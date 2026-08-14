@@ -224,6 +224,45 @@ class HomePlatformApiTest(unittest.TestCase):
         persisted = self.client.get("/api/connections").get_json()["connections"][0]
         self.assertEqual(persisted, item)
 
+    def test_connection_scope_change_rejects_bound_widgets_but_allows_metadata_updates(self):
+        created = self.client.post("/api/connections", json={
+            "provider": "api", "name": "Bound scope target", "scope_kind": "global",
+            "status": "connected", "connection_ref": "api://scope/bound",
+        }).get_json()["connection"]
+        home = self.client.get("/api/homes/project/blockwise").get_json()
+        instances = [
+            {**item, "config": {"connection_id": created["id"]}}
+            if item["widget_id"] == "connections-summary" else item
+            for item in home["instances"]
+        ]
+        saved = self.client.put("/api/homes/project/blockwise", json={
+            "expected_revision": home["revision"], "instances": instances,
+        })
+        self.assertEqual(saved.status_code, 200)
+
+        metadata = self.client.patch(f"/api/connections/{created['id']}", json={"status": "verified"})
+        self.assertEqual(metadata.status_code, 200)
+        self.assertEqual(metadata.get_json()["connection"]["status"], "verified")
+
+        rejected = self.client.patch(f"/api/connections/{created['id']}", json={
+            "scope_kind": "project", "scope_id": "blockwise",
+        })
+        self.assertEqual(rejected.status_code, 409)
+        self.assertIn("scope", rejected.get_json()["error"])
+        self.assertIn("bound", rejected.get_json()["error"])
+
+        current = self.client.get("/api/connections").get_json()["connections"][0]
+        self.assertEqual(current["scope_kind"], "global")
+        self.assertEqual(current["status"], "verified")
+
+        reset = self.client.post("/api/homes/project/blockwise/reset", json={"expected_revision": saved.get_json()["revision"]})
+        self.assertEqual(reset.status_code, 200)
+        allowed = self.client.patch(f"/api/connections/{created['id']}", json={
+            "scope_kind": "project", "scope_id": "blockwise",
+        })
+        self.assertEqual(allowed.status_code, 200)
+        self.assertEqual(allowed.get_json()["connection"]["scope_kind"], "project")
+
 
 if __name__ == "__main__":
     unittest.main()

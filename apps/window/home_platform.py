@@ -775,12 +775,23 @@ def connections_create():
 def connections_update(connection_id: str):
     connection_id = _clean_id(connection_id, "connection id")
     body = request.get_json(silent=True) or {}
-    with _connections_lock:
+    with _home_lock, _connections_lock:
         store = _connection_store()
         index = next((position for position, item in enumerate(store["connections"]) if item.get("id") == connection_id), None)
         if index is None:
             abort(404, "connection not found")
-        item = _clean_connection(body, store["connections"][index])
+        previous = store["connections"][index]
+        item = _clean_connection(body, previous)
+        scope_changed = (
+            item.get("scope_kind") != previous.get("scope_kind")
+            or item.get("scope_id") != previous.get("scope_id")
+        )
+        if scope_changed and any(
+            instance.get("config", {}).get("connection_id") == connection_id
+            for home in _home_store()["homes"].values() if isinstance(home, dict)
+            for instance in home.get("instances", [])
+        ):
+            abort(409, "cannot change connection scope while home widgets are bound; unbind it first")
         if any(
             position != index
             and existing.get("name", "").casefold() == item["name"].casefold()
