@@ -167,6 +167,7 @@ class HomePlatformApiTest(unittest.TestCase):
                 )
             self.assertEqual(raised.exception.code, 302)
             self.assertEqual(RedirectHandler.hits, 1)
+            raised.exception.close()
         finally:
             redirect_server.shutdown()
             redirect_server.server_close()
