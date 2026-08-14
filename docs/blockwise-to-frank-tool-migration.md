@@ -89,8 +89,9 @@ runtime ownership only.
 
 ### 0.4 Named capability destinations
 
-Use these exact Frank tool IDs and directories. Create them only in a later
-implementation task; this runbook does not create them:
+Use these exact Frank tool IDs and directories. Phase P2 creates them when
+absent; when they are already present on the reviewed integration branch,
+validate and reuse them rather than creating parallel packages:
 
 Each Tool directory has one canonical dashboard manifest at `home.json`.
 `default_widget_ids` remains empty (`[]`) until shared widget IDs land; do not
