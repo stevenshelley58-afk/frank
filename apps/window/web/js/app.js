@@ -156,6 +156,7 @@ async function selectChat(chatId) {
   if (!chatId) return;
   currentChatId = chatId;
   localStorage.setItem("frank.chat", chatId);
+  chatAtts.forEach(releaseAttachmentPreview);
   chatAtts = [];
   renderAtts();
   renderChatNav();
@@ -269,9 +270,16 @@ function renderMd(source) {
 }
 function attachmentChip(a) {
   const url = safeUrl(a.url || "");
+  const image = String(a.type || "").startsWith("image/");
+  if (image && url) {
+    const name = escapeHtml(a.name || "Image");
+    return `<span class="att-image-message">
+      <button type="button" data-preview-url="${escapeHtml(url)}" aria-label="Preview ${name}" title="Open image preview"><img src="${escapeHtml(url)}" alt="${name}" loading="lazy"></button>
+      <a href="${escapeHtml(url)}?download=1" aria-label="Download ${name}" title="Download image">↓</a>
+    </span>`;
+  }
   const label = `${escapeHtml(a.relative_path || a.name)} <em>${fmtSize(a.size)}</em>`;
   if (!url) return `<span class="att-chip">${label}</span>`;
-  const image = String(a.type || "").startsWith("image/");
   return `<span class="att-chip linked"><button type="button" ${image ? `data-preview-url="${escapeHtml(url)}"` : `data-open-url="${escapeHtml(url)}"`}>${label}</button><a href="${escapeHtml(url)}?download=1" aria-label="Download ${escapeHtml(a.name)}" title="Download">↓</a></span>`;
 }
 function chatBubble(m) {
@@ -296,26 +304,38 @@ function setBusy(on) {
   $("#chat-nav").classList.toggle("is-busy", on);
   $("#new-chat").disabled = on;
 }
-function renderLegacyAtts() {
-  const row = $("#att-row");
-  row.innerHTML = chatAtts.map((a, i) =>
-    `<span class="att-chip big">${escapeHtml(a.name)} <em>${fmtSize(a.size)}</em>
-      <button type="button" class="att-x" data-i="${i}" aria-label="Remove">✕</button></span>`
-  ).join("");
-  $$(".att-x", row).forEach((b) => b.addEventListener("click", () => { chatAtts.splice(+b.dataset.i, 1); renderAtts(); }));
-}
 function addChatAtt(f) {
   return stageFiles([{ file: f, path: f.webkitRelativePath || f.name }]);
 }
+function releaseAttachmentPreview(attachment) {
+  if (attachment?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(attachment.previewUrl);
+}
+function attachmentPayload(attachment) {
+  const { status, previewUrl, uploadPromise, uploadError, ...payload } = attachment;
+  return payload;
+}
+function pendingAttachment(attachment, index) {
+  const image = String(attachment.type || "").startsWith("image/");
+  if (image && attachment.previewUrl) {
+    const name = escapeHtml(attachment.name || "Image");
+    return `<span class="att-image-pending is-${escapeHtml(attachment.status || "ready")}">
+      <img src="${escapeHtml(attachment.previewUrl)}" alt="${name}">
+      ${attachment.status === "uploading" ? '<span class="att-uploading" aria-label="Uploading"></span>' : ""}
+      ${attachment.status === "error" ? '<span class="att-failed" title="Upload failed">!</span>' : ""}
+      <button type="button" class="att-x" data-i="${index}" aria-label="Remove ${name}">×</button>
+    </span>`;
+  }
+  const state = attachment.status === "uploading" ? " · uploading" : attachment.status === "error" ? " · failed" : "";
+  return `<span class="att-chip big ${attachment.status === "error" ? "is-error" : ""}">${escapeHtml(attachment.relative_path || attachment.name)} <em>${fmtSize(attachment.size)}${state}</em>
+    <button type="button" class="att-x" data-i="${index}" aria-label="Remove">×</button></span>`;
+}
 function renderAtts() {
   const row = $("#att-row");
-  const pending = uploadsInFlight ? `<span class="upload-note"><span></span>Uploading ${uploadsInFlight} file${uploadsInFlight === 1 ? "" : "s"} to Hermes…</span>` : "";
-  row.innerHTML = pending + chatAtts.map((a, i) =>
-    `<span class="att-chip big">${escapeHtml(a.relative_path || a.name)} <em>${fmtSize(a.size)}</em>
-      <button type="button" class="att-x" data-i="${i}" aria-label="Remove">×</button></span>`
-  ).join("");
+  row.innerHTML = chatAtts.map(pendingAttachment).join("");
+  row.classList.toggle("has-items", chatAtts.length > 0);
   $$(".att-x", row).forEach((button) => button.addEventListener("click", () => {
-    chatAtts.splice(Number(button.dataset.i), 1);
+    const [removed] = chatAtts.splice(Number(button.dataset.i), 1);
+    releaseAttachmentPreview(removed);
     renderAtts();
   }));
 }
@@ -327,33 +347,40 @@ async function uploadFiles(items) {
     form.append("files", item.file, item.file.name);
     form.append("paths", item.path || item.file.webkitRelativePath || item.file.name);
   }
-  uploadsInFlight += selected.length;
-  renderAtts();
-  try {
-    const response = await fetch("/api/chat/uploads", { method: "POST", body: form });
-    if (!response.ok) throw new Error(`Upload failed (HTTP ${response.status})`);
-    const data = await response.json();
-    return Array.isArray(data.attachments) ? data.attachments : [];
-  } finally {
-    uploadsInFlight = Math.max(0, uploadsInFlight - selected.length);
-    renderAtts();
-  }
+  const response = await fetch("/api/chat/uploads", { method: "POST", body: form });
+  if (!response.ok) throw new Error(`Upload failed (HTTP ${response.status})`);
+  const data = await response.json();
+  return Array.isArray(data.attachments) ? data.attachments : [];
 }
 async function stageFiles(items) {
-  try {
-    chatAtts.push(...await uploadFiles(items));
+  const selected = items.slice(0, 500);
+  if (!selected.length) return;
+  const staged = selected.map(({ file, path }) => ({
+    name: file.name,
+    relative_path: path || file.webkitRelativePath || file.name,
+    type: file.type || "application/octet-stream",
+    size: file.size,
+    status: "uploading",
+    previewUrl: String(file.type || "").startsWith("image/") ? URL.createObjectURL(file) : "",
+    uploadPromise: null,
+  }));
+  chatAtts.push(...staged);
+  uploadsInFlight += staged.length;
+  renderAtts();
+  const uploadPromise = uploadFiles(selected).then((uploaded) => {
+    staged.forEach((attachment, index) => {
+      if (uploaded[index]) Object.assign(attachment, uploaded[index], { status: "ready" });
+      else Object.assign(attachment, { status: "error", uploadError: "The file was not accepted." });
+    });
+  }).catch((error) => {
+    staged.forEach((attachment) => Object.assign(attachment, { status: "error", uploadError: error.message || "Upload failed" }));
+    addChatMsg({ role: "sys", text: error.message || "The files could not be uploaded.", ts: Date.now() / 1000 | 0 });
+  }).finally(() => {
+    uploadsInFlight = Math.max(0, uploadsInFlight - staged.length);
     renderAtts();
-  } catch (error) {
-    addChatMsg({ role: "sys", text: error.message || "The files could not be uploaded.", ts: Date.now() / 1000 | 0 });
-  }
-}
-async function sendFilesNow(items) {
-  try {
-    const uploaded = await uploadFiles(items);
-    if (uploaded.length) enqueueTurn("", uploaded);
-  } catch (error) {
-    addChatMsg({ role: "sys", text: error.message || "The files could not be uploaded.", ts: Date.now() / 1000 | 0 });
-  }
+  });
+  staged.forEach((attachment) => { attachment.uploadPromise = uploadPromise; });
+  await uploadPromise;
 }
 function enqueueTurn(text, atts) {
   turnQueue = turnQueue.catch(() => {}).then(() => sendTurn(text, atts));
@@ -510,10 +537,9 @@ async function filesFromTransfer(transfer) {
   return Array.from(transfer.files || []).map((file) => ({ file, path: file.webkitRelativePath || file.name }));
 }
 function setupChatActions() {
-  const messages = $("#chat-msgs");
   const viewer = $("#media-viewer");
   const closeViewer = () => { viewer.hidden = true; $("#media-stage").innerHTML = ""; };
-  messages.addEventListener("click", async (event) => {
+  document.addEventListener("click", async (event) => {
     const copyCode = event.target.closest("[data-copy-code]");
     if (copyCode) {
       const code = copyCode.closest(".code-block")?.querySelector("code")?.textContent || "";
@@ -583,15 +609,36 @@ function setupChat() {
     event.target.value = "";
   });
 
-  bar.addEventListener("submit", (e) => {
+  let preparingTurn = false;
+  bar.addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (preparingTurn) return;
     const text = input.value.trim();
     if (!text && !chatAtts.length) return;
-    const atts = chatAtts;
-    chatAtts = []; renderAtts();
-    input.value = "";
-    grow();
-    enqueueTurn(text, atts);
+    const selected = chatAtts.slice();
+    preparingTurn = true;
+    bar.classList.add("is-preparing");
+    input.disabled = true;
+    $("#send").disabled = true;
+    try {
+      const waits = [...new Set(selected.map((attachment) => attachment.uploadPromise).filter(Boolean))];
+      await Promise.allSettled(waits);
+      const ready = selected.filter((attachment) => attachment.status === "ready");
+      if (!text && !ready.length) return;
+      const readySet = new Set(ready);
+      chatAtts = chatAtts.filter((attachment) => !readySet.has(attachment));
+      ready.forEach(releaseAttachmentPreview);
+      renderAtts();
+      input.value = "";
+      grow();
+      enqueueTurn(text, ready.map(attachmentPayload));
+    } finally {
+      preparingTurn = false;
+      bar.classList.remove("is-preparing");
+      input.disabled = false;
+      $("#send").disabled = false;
+      input.focus();
+    }
   });
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -617,14 +664,14 @@ function setupChat() {
     if (!e.dataTransfer?.files?.length && !e.dataTransfer?.items?.length) return;
     e.preventDefault();
     composer.classList.remove("is-drag");
-    void sendFilesNow(await filesFromTransfer(e.dataTransfer));
+    void stageFiles(await filesFromTransfer(e.dataTransfer));
   });
   document.addEventListener("paste", (event) => {
     if (!$(".view[data-view=hub]").classList.contains("is-on")) return;
     const files = Array.from(event.clipboardData?.files || []);
     if (!files.length) return;
     event.preventDefault();
-    void sendFilesNow(files.map((file) => ({ file, path: file.name })));
+    void stageFiles(files.map((file) => ({ file, path: file.name })));
   });
 
   const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
