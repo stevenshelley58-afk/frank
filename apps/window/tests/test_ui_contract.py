@@ -98,6 +98,7 @@ class UiContractTest(unittest.TestCase):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
+        browser_canary = (WEB.parent / "tests" / "hosted_focus_canary.js").read_text(encoding="utf-8")
 
         self.assertIn("API keys, passwords, provider code, and arbitrary HTML are rejected", html)
         self.assertIn("Never paste a password, API key, OAuth token, card number, or bank detail", html)
@@ -119,6 +120,9 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('$(".topbar")', homes)
         self.assertIn("restoreModalBackground", homes)
         self.assertIn("closeHomeEditors({ restoreFocus: false })", app)
+        self.assertIn('$("#view-title")?.focus({ preventScroll: true })', app)
+        self.assertIn('activeElement: "view-title"', browser_canary)
+        self.assertIn('titleTabIndex !== "-1"', browser_canary)
         self.assertIn("restoreFocus = true", homes)
         self.assertIn("offsetParent !== null", homes)
         self.assertIn('setAttribute("inert", "")', homes)
