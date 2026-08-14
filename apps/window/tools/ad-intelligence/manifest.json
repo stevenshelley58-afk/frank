@@ -1,0 +1,60 @@
+{
+  "schema": "schema://frank.tool-app-manifest/v1",
+  "id": "ad-intelligence",
+  "version": "1.0.0",
+  "name": "Ad Radar",
+  "description": "Discover and compare public advertising creative through Hermes-owned research execution.",
+  "scopes": ["project"],
+  "settings": {
+    "schema": "schema://frank.tool-app-settings/v1",
+    "properties": {
+      "taxonomy": {"type": "object"},
+      "sources": {"type": "array"},
+      "cadence": {"type": "object"},
+      "prompt_ref": {"type": "string"},
+      "prompt_version": {"type": "string"},
+      "style_preset": {"type": "string"},
+      "model_policy": {"type": "object"},
+      "media_policy": {"type": "object"},
+      "thresholds": {"type": "object"},
+      "retention": {"type": "object"},
+      "approval_policy": {"type": "object"}
+    }
+  },
+  "pipelines": [{
+    "schema": "schema://frank.tool-app-pipeline/v1",
+    "id": "ad-radar-pipeline",
+    "nodes": [
+      {"id": "discover", "kind": "hermes-command"},
+      {"id": "resolve", "kind": "hermes-command"},
+      {"id": "capture", "kind": "hermes-command"},
+      {"id": "normalize", "kind": "hermes-command"},
+      {"id": "classify", "kind": "hermes-command"},
+      {"id": "media-qa", "kind": "hermes-command"},
+      {"id": "publish", "kind": "hermes-command"}
+    ],
+    "edges": [
+      {"from": "discover", "to": "resolve"},
+      {"from": "resolve", "to": "capture"},
+      {"from": "capture", "to": "normalize"},
+      {"from": "normalize", "to": "classify"},
+      {"from": "classify", "to": "media-qa"},
+      {"from": "media-qa", "to": "publish"}
+    ]
+  }],
+  "capabilities": ["public-ad-discovery", "creative-classification", "media-quality-assurance", "evidence-and-receipts"],
+  "connectors": ["browser-public-read"],
+  "schedules": ["manual", "configured-cadence"],
+  "thresholds": ["publish-confidence", "media-quality", "max-missing-fields"],
+  "approval_gates": ["new-source", "low-confidence", "publish"],
+  "hermes": {
+    "actions": ["run", "retry", "approve-publish", "pause", "health"],
+    "event_kinds": ["run-started", "stage-completed", "run-quarantined", "publish-completed"]
+  },
+  "otel": {
+    "trace_schema": "schema://frank.tool-app-trace/v1",
+    "instrumentation": "gen-ai",
+    "span_prefix": "ad-radar",
+    "event_kinds": ["run-started", "stage-completed", "run-quarantined", "publish-completed"]
+  }
+}

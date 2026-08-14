@@ -1,0 +1,79 @@
+# Ad Intelligence (Ad Radar)
+
+Ad Radar is a reusable tool package for discovering and comparing public advertising
+creative. It is a contract and policy package, not a scraper. Hermes owns execution;
+adapters can later connect approved browser automation, CDP, OpenTelemetry, and provider
+systems without changing the package's data boundaries.
+
+## Design
+
+- The project-neutral manifest controls taxonomy, sources, cadence, classification prompt
+  reference/model policy, media QA, thresholds, retention, and approval.
+- Every run follows the fixed graph: `discover -> resolve -> capture -> normalize ->
+  classify -> media-qa -> publish`.
+- Retryable failures use bounded exponential backoff. Non-retryable, policy, schema, and
+  repeated failures are quarantined with a receipt; publication never silently skips them.
+- Traces use span-like records with model, cost, evidence, and receipt references. The
+  OpenTelemetry adapter is intentionally optional.
+- Public exports are structural allowlists: copy, observation, media, and classification
+  are typed records with no arbitrary nested dictionaries, raw payload slot, contact or
+  outreach fields. HTML and contact-field variants are rejected before serialization.
+  Public classification exposes only sanitized label, confidence, receipt refs, and
+  provenance refs; prompt refs, prompt versions, models, and rationale remain private
+  execution metadata in traces.
+- `build_release` wraps that export in an immutable, checksummed release record with
+  project scope, provenance/trace/settings refs, QA approval, and recursive PII/secret
+  sanitization. Public asset/source refs cannot point at private vault or filesystem
+  schemes.
+- Browser access is expressed by an adapter boundary. Prefer Playwright/CDP-compatible
+  adapters for browser work; do not bake a provider SDK into this package.
+- Domain Tools own/version manifests, declarative nodes/edges, immutable settings
+  revisions, and allowlisted Hermes actions/events. The shared Tool contract owns
+  command/event envelopes and its graph lane owns projection to `schema://frank.graph/v1`;
+  maxGraph (Apache-2.0) is the sole renderer. CodeMirror 6
+  is the prompt/instruction inspector, and vanilla-jsoneditor + Ajv is reserved for
+  schema-backed payload editing.
+- OTel GenAI-style spans/events are trace interchange. Existing Frank
+  `trace`/`slot-trace`/`trace-view` hooks remain shared-runtime concerns; this package
+  adds no graph UI, graph execution, or Tool-specific settings store.
+
+Open-source make-vs-use guidance: use Playwright and its CDP connection for browser
+control, OpenTelemetry APIs/exporters for traces, and a small schema/validation library
+only if the host already standardizes on one. Build the orchestration, policy, redaction,
+quarantine, and public export contract here because those are product-specific boundaries.
+
+See `manifest.json`, `packs/blockwise-real-estate.json`, and `migration_map.md`.
+
+`manifest.json` follows the shared Tool contract shape conceptually: versioned tool-app
+schema, scoped settings, declarative pipeline nodes/edges, capabilities, schedules,
+thresholds, approval gates, Hermes action/event allowlists, and OTel trace metadata.
+`home.json` is the separate exact seven-field
+non-executable dashboard manifest.
+
+There is no bespoke graph surface or widget binding here. The shared graph owner uses
+maxGraph (Apache-2.0) for rendering; the empty `default_widget_ids` is intentional until
+the shared runtime assigns known widgets.
+
+The pipeline contract is the sole owner of nodes and edges. The shared graph lane may
+reference the pipeline ID for projection, but this package does not duplicate graph data
+or declare renderer/editor choices.
+
+## Reuse boundary from Blockwise
+
+The actual checkout at `C:\Dev\Blockwise\hermes` was inspected before finalizing.
+These existing Hermes components are the intended implementations to invoke through
+adapters:
+
+| Existing component | Pipeline responsibility | Boundary decision |
+| --- | --- | --- |
+| `tools/meta-library-capture/bin/capture.mjs` | discover/resolve/capture | left in Hermes; its structured outcome is an adapter input |
+| `tools/research-runtime/bin/ad-classifier.mjs` | classify and image assessment | left in Hermes; model/provider policy stays with Hermes |
+| `tools/research-runtime/bin/ad-radar-accuracy-audit.mjs` | quality/health evidence | left in Hermes; mapped to health/trace receipts |
+| `tools/research-runtime/bin/media-quality-backfill.mjs` | media QA maintenance | left in Hermes; not reimplemented here |
+| `tools/research-runtime/bin/migrate-raw-evidence.mjs` | evidence retention/migration | left in Hermes; Frank never handles credentials or storage |
+| `tools/research-runtime/bin/customer-read-model-publisher.mjs` | optional customer projection | left in Hermes and kept out of the public creative export |
+
+Copied: none. Wrapped: only the provider-neutral `BrowserAdapter`,
+`TelemetryAdapter`, and `HermesAdapter` interfaces. Intentionally not moved: scraper
+logic, OpenRouter/Supabase access, raw evidence storage, OCR/media backfills, and the
+customer projection. This avoids a second scraper or a second customer data plane.
