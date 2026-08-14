@@ -24,13 +24,17 @@ configured and awaiting verification.
 | `POST /api/connections/agent/plan` | Authenticated Hermes-produced plan ingress. |
 | `POST /api/connections/agent/apply` | Authenticated application of a Hermes-issued plan. |
 | `GET /api/connections/attention` | Latest unresolved action per correlation id. |
-| `GET /api/connections/activity` | Cursor-pollable safe action activity (`?after=<sequence>`). |
+| `GET /api/connections/activity` | Cursor-pollable safe action activity (`?after=<sequence>`); add `latest=1` for a newest-first page. |
 | `GET /api/connections/events` | Alias of the activity projection for widget polling. |
 | `GET /api/connections/receipts/<receipt_id>` | Safe receipt lookup. |
 
 All plan/apply/mutation requests require a validated `Idempotency-Key` (or the
 equivalent JSON field). Plan/apply responses and errors are `no-store`.
 Activity, attention, and receipt responses and errors are also `no-store`.
+The activity endpoint preserves its existing oldest-first `after` cursor
+behavior by default. `latest=1` is an additive newest-first projection over
+the same append-only records; `after=N` still restricts it to sequences newer
+than `N`, and action fields are unchanged.
 Manual writes require a strict same-origin `Origin`; missing, `null`, or
 foreign origins are rejected against the explicit
 `FRANK_CONNECTION_ALLOWED_ORIGINS` allowlist (default includes canonical
@@ -69,8 +73,12 @@ sequence is:
    with `action.state=failed`, never `completed`; relevant connection metadata
    is recorded as `error` and the failure receipt remains in attention.
 
-Manual create/update may record only `setup_needed` or `connected` metadata.
-Only a receipt-backed Hermes result may record `verified` or `error`. Provider
+Manual create may record only `setup_needed` or `connected` metadata. Manual
+update may omit `status` for ordinary metadata edits, preserving an existing
+provider-owned `verified` or `error` status; any explicit manual status change
+is limited to setup metadata and cannot escalate or downgrade provider-owned
+truth. Only a receipt-backed Hermes result may record `verified` or `error`.
+Provider
 failure text is not accepted; only the opaque receipt and safe code/category
 are persisted. Agent
 create/update/delete also require provider evidence. Agent `discover` is local

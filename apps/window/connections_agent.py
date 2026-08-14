@@ -253,9 +253,11 @@ class ActionLedger:
                 raise ContractError("connection ledger is unavailable", 503, "state_unavailable") from error
             return record
 
-    def list(self, *, after: int = 0, limit: int = 50) -> list[dict]:
+    def list(self, *, after: int = 0, limit: int = 50, latest: bool = False) -> list[dict]:
         with self.lock:
             records = [item for item in self._records() if item["sequence"] > after]
+        if latest:
+            records.sort(key=lambda item: item["sequence"], reverse=True)
         return [_public_action(item) for item in records[:max(1, min(limit, 200))]]
 
     def find_idempotency(self, reference: str, fingerprint: str) -> dict | None:
@@ -731,16 +733,22 @@ class ConnectionsMutationService:
     def _clean(self, body: dict, existing: dict | None, *, source: str, action: str, provider_result: bool = False) -> dict:
         try:
             item = self.clean_connection(body, existing)
-            if not provider_result and source == "manual" and action in {"create", "update"} and item.get("status") not in {"setup_needed", "connected"}:
-                raise ContractError("manual metadata must remain setup_needed or connected", 409, "provider_result_required")
+            if not provider_result and source == "manual" and action in {"create", "update"}:
+                if item.get("status") in {"verified", "error"}:
+                    if action == "create" or "status" in body:
+                        raise ContractError("provider-owned status requires a Hermes result", 409, "provider_result_required")
+                elif item.get("status") not in {"setup_needed", "connected"}:
+                    raise ContractError("manual metadata must remain setup_needed or connected", 409, "provider_result_required")
+                if action == "update" and "status" in body and existing and existing.get("status") in {"verified", "error"}:
+                    raise ContractError("provider-owned status cannot be changed by manual metadata", 409, "provider_result_required")
             return item
         except ContractError:
             raise
         except Exception as error:
             raise ContractError("connection metadata rejected") from error
 
-    def activity(self, *, after: int = 0, limit: int = 50) -> list[dict]:
-        return self.ledger.list(after=after, limit=limit)
+    def activity(self, *, after: int = 0, limit: int = 50, latest: bool = False) -> list[dict]:
+        return self.ledger.list(after=after, limit=limit, latest=latest)
 
     def attention(self, *, limit: int = 50) -> list[dict]:
         items = [item for item in self.ledger.latest_by_correlation()

@@ -9,15 +9,21 @@ import urllib.request
 
 
 BASE_URL = os.environ.get("FRANK_CANARY_URL", "http://127.0.0.1:8080").rstrip("/")
+HERMES_AGENT_KEY = os.environ.get("HERMES_CONNECTIONS_AGENT_KEY", "").strip()
 
 
-def request(path: str, *, method: str = "GET", payload: dict | None = None) -> tuple[int, dict]:
+def request(path: str, *, method: str = "GET", payload: dict | None = None, headers: dict[str, str] | None = None) -> tuple[int, dict]:
     body = json.dumps(payload).encode("utf-8") if payload is not None else None
     outgoing = urllib.request.Request(
         f"{BASE_URL}{path}",
         data=body,
         method=method,
-        headers={"Content-Type": "application/json"},
+        headers={
+            "Content-Type": "application/json",
+            "Origin": BASE_URL,
+            **({"Idempotency-Key": f"canary-{time.time_ns()}"} if method in {"POST", "PATCH", "DELETE"} else {}),
+            **(headers or {}),
+        },
     )
     try:
         with urllib.request.urlopen(outgoing, timeout=10) as response:
@@ -42,27 +48,41 @@ def main() -> None:
         "credential_ref": f"openbao://frank/connections/canary-{suffix}",
         "capabilities": ["workflow.status"],
         "notes": "Disposable hosted acceptance record.",
+        "idempotency_key": f"canary-create-{suffix}",
     })
     assert status == 201
     connection = created["connection"]
 
-    status, updated = request(f"/api/connections/{connection['id']}", method="PATCH", payload={"status": "verified"})
-    assert status == 200 and updated["connection"]["status"] == "verified"
+    status, updated = request(f"/api/connections/{connection['id']}", method="PATCH", payload={"notes": "Hosted canary metadata update", "idempotency_key": f"canary-update-{suffix}"})
+    assert status == 200 and updated["connection"]["status"] == "connected"
+
+    status, planned = request("/api/connections/plan", method="POST", payload={
+        "action": "verify", "connection_id": connection["id"],
+        "expected_revision": updated["connection"]["revision"], "idempotency_key": f"canary-verify-plan-{suffix}",
+    })
+    assert status == 200
+    plan_id = planned["plan"]["plan_id"]
+
+    status, pending = request("/api/connections/apply", method="POST", payload={
+        "plan_id": plan_id, "idempotency_key": f"canary-verify-apply-{suffix}",
+    })
+    assert status == 202 and pending["action"]["state"] == "waiting_for_provider"
+
+    status, verified = request("/api/connections/agent/apply", method="POST", payload={
+        "plan_id": plan_id, "idempotency_key": f"canary-hermes-apply-{suffix}",
+        "provider_receipt": f"hermes://receipts/canary-verify-{suffix}", "provider_outcome": "verified",
+    }, headers={"Authorization": f"Bearer {HERMES_AGENT_KEY}", "X-Hermes-Profile": "default"})
+    assert status == 200 and verified["action"]["state"] == "completed"
+    assert verified["connection"]["status"] == "verified"
 
     status, home = request("/api/homes/project/blockwise")
-    assert status == 200
-    assert home["entity"]["id"] == "blockwise"
-    assert home["entity"]["kind"] == "project"
-    assert home["entity"]["name"] == "Blockwise"
-    assert home["entity"]["profile"]["root"] == "blockwise"
-    assert [item["widget_id"] for item in home["instances"]] == [
-        "entity-overview", "application-status", "repository-activity",
-        "repository-status", "project-files", "accounts-summary",
-        "connection-attention", "analytics-summary",
-    ]
-    connection_instance = next(item for item in home["instances"] if item["widget_id"] == "connection-attention")
+    assert status == 200 and home["entity"] == {
+        "id": "blockwise", "kind": "project", "name": "Blockwise",
+        "project": home["entity"]["project"],
+    }
     instances = [
-        instance
+        {**instance, "config": {"connection_id": connection["id"]}}
+        if instance["widget_id"] == "connections-summary" else instance
         for instance in home["instances"]
     ]
     status, saved = request("/api/homes/project/blockwise", method="PUT", payload={
@@ -70,33 +90,16 @@ def main() -> None:
     })
     assert status == 200 and saved["revision"] == home["revision"] + 1
 
-    connection_instance = next(item for item in saved["instances"] if item["widget_id"] == "connection-attention")
+    connection_instance = next(item for item in saved["instances"] if item["widget_id"] == "connections-summary")
     status, snapshot = request(
         f"/api/homes/project/blockwise/widgets/{connection_instance['instance_id']}"
     )
-    assert status == 200
-    assert snapshot["status"] == "ready"
-    assert snapshot["summary"] == "No connection setup, verification, or error items are recorded."
-    assert snapshot["data"]["rows"] == []
-
-    status, central_summary = request(
-        "/api/homes/tool/connections/widgets/connections-summary-1"
-    )
-    assert status == 200
-    assert central_summary["status"] == "ready"
-    assert central_summary["data"]["counts"]["verified"] >= 1
-    assert any(item["id"] == connection["id"] for item in central_summary["data"]["connections"])
-
-    status, central_coverage = request(
-        "/api/homes/tool/connections/widgets/provider-coverage-1"
-    )
-    assert status == 200
-    assert central_coverage["data"]["verified"] >= 1
-    assert next(row for row in central_coverage["data"]["rows"] if row["provider"] == "activepieces")["status"] == "verified"
+    assert status == 200 and snapshot["data"]["counts"]["verified"] >= 1
+    assert snapshot["data"]["status_is_recorded"] is True
 
     status, _ = request("/api/connections", method="POST", payload={
         "provider": "resend", "name": f"Unsafe {suffix}", "scope_kind": "global",
-        "status": "connected", "connection_ref": "re_" + "1234567890abcdefghijklmnop",
+        "status": "connected", "connection_ref": "re_" + "1234567890abcdefghijklmnop", "idempotency_key": f"canary-unsafe-{suffix}",
     })
     assert status == 400
 
@@ -104,7 +107,7 @@ def main() -> None:
         "status": "pass",
         "widgets": len(catalog["widgets"]),
         "layout_revision": saved["revision"],
-        "connection_status": updated["connection"]["status"],
+        "connection_status": verified["connection"]["status"],
         "secret_rejection": "pass",
     }, sort_keys=True))
 

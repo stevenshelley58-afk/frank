@@ -390,6 +390,79 @@ class ConnectionsAgentApiTest(unittest.TestCase):
         self.assertEqual(response.status_code, 409, response.get_json())
         self.assertEqual(self.client.get("/api/connections").get_json()["connections"][0]["status"], "connected")
 
+    def test_manual_metadata_update_preserves_verified_and_error_provider_status(self):
+        origin = {"Origin": "http://localhost"}
+        connection = self._create()
+        verified_plan = self.client.post("/api/connections/agent/plan", json={
+            "action": "verify", "connection_id": connection["id"],
+            "expected_revision": connection["revision"], "idempotency_key": "preserve-verified-plan-01",
+        }, headers=self.agent_headers).get_json()["plan"]
+        verified = self.client.post("/api/connections/agent/apply", json={
+            "plan_id": verified_plan["plan_id"], "idempotency_key": "preserve-verified-apply-01",
+            "provider_receipt": "hermes://receipts/preserve-verified-01", "provider_outcome": "verified",
+        }, headers=self.agent_headers)
+        self.assertEqual(verified.status_code, 200)
+        verified_item = verified.get_json()["connection"]
+
+        metadata = self.client.patch(f"/api/connections/{verified_item['id']}", json={
+            "notes": "Provider verified; local note only", "idempotency_key": "preserve-verified-update-01",
+        }, headers=origin)
+        self.assertEqual(metadata.status_code, 200, metadata.get_json())
+        self.assertEqual(metadata.get_json()["connection"]["status"], "verified")
+        downgrade = self.client.patch(f"/api/connections/{verified_item['id']}", json={
+            "status": "connected", "idempotency_key": "preserve-verified-downgrade-01",
+        }, headers=origin)
+        self.assertEqual(downgrade.status_code, 409)
+
+        failure_plan = self.client.post("/api/connections/agent/plan", json={
+            "action": "verify", "connection_id": verified_item["id"],
+            "expected_revision": metadata.get_json()["connection"]["revision"], "idempotency_key": "preserve-error-plan-01",
+        }, headers=self.agent_headers).get_json()["plan"]
+        failed = self.client.post("/api/connections/agent/apply", json={
+            "plan_id": failure_plan["plan_id"], "idempotency_key": "preserve-error-apply-01",
+            "provider_receipt": "hermes://receipts/preserve-error-01", "provider_outcome": "failed",
+            "provider_error_code": "provider_timeout", "provider_error_category": "timeout",
+        }, headers=self.agent_headers)
+        self.assertEqual(failed.status_code, 200)
+        error_item = failed.get_json()["connection"]
+        self.assertEqual(error_item["status"], "error")
+        metadata_error = self.client.patch(f"/api/connections/{error_item['id']}", json={
+            "notes": "Provider error; local note only", "idempotency_key": "preserve-error-update-01",
+        }, headers=origin)
+        self.assertEqual(metadata_error.status_code, 200, metadata_error.get_json())
+        self.assertEqual(metadata_error.get_json()["connection"]["status"], "error")
+        downgrade_error = self.client.patch(f"/api/connections/{error_item['id']}", json={
+            "status": "setup_needed", "idempotency_key": "preserve-error-downgrade-01",
+        }, headers=origin)
+        self.assertEqual(downgrade_error.status_code, 409)
+
+    def test_activity_latest_projection_is_newest_first_and_preserves_cursor(self):
+        self._create()
+        planned = self.client.post("/api/connections/agent/plan", json={
+            "action": "discover", "idempotency_key": "activity-latest-agent-plan-01",
+        }, headers=self.agent_headers)
+        self.assertEqual(planned.status_code, 200, planned.get_json())
+        applied = self.client.post("/api/connections/agent/apply", json={
+            "plan_id": planned.get_json()["plan"]["plan_id"], "idempotency_key": "activity-latest-agent-apply-01",
+        }, headers=self.agent_headers)
+        self.assertEqual(applied.status_code, 200, applied.get_json())
+
+        oldest = self.client.get("/api/connections/activity?after=0&limit=1")
+        self.assertEqual(oldest.status_code, 200)
+        self.assertEqual(oldest.get_json()["items"][0]["sequence"], 1)
+        latest = self.client.get("/api/connections/activity?after=0&limit=50&latest=1")
+        self.assertEqual(latest.status_code, 200)
+        payload = latest.get_json()
+        self.assertTrue(payload["latest"])
+        items = payload["items"]
+        self.assertEqual([item["sequence"] for item in items], sorted((item["sequence"] for item in items), reverse=True))
+        self.assertTrue(any(item["actor"] == "manual.browser" for item in items))
+        self.assertTrue(any(item["actor"] == "hermes.connections-agent" for item in items))
+        cursor = items[0]["sequence"]
+        after_cursor = self.client.get(f"/api/connections/activity?after={cursor}&limit=50&latest=1")
+        self.assertEqual(after_cursor.status_code, 200)
+        self.assertTrue(all(item["sequence"] > cursor for item in after_cursor.get_json()["items"]))
+
     def test_attention_projects_latest_state_and_completion_clears_it(self):
         connection = self._create()
         planned = self.client.post("/api/connections/plan", json={

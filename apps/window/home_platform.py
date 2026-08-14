@@ -959,8 +959,9 @@ def connections_attention():
 def connections_activity():
     after = request.args.get("after", default=0, type=int)
     limit = request.args.get("limit", default=50, type=int)
-    items = _connection_service_or_abort().activity(after=after, limit=limit)
-    return jsonify({"schema": "schema://frank.connections-activity/v1", "after": after, "items": items})
+    latest = request.args.get("latest", "0").strip().lower() in {"1", "true"}
+    items = _connection_service_or_abort().activity(after=after, limit=limit, latest=latest)
+    return jsonify({"schema": "schema://frank.connections-activity/v1", "after": after, "latest": latest, "items": items})
 
 
 @api.get("/api/connections/receipts/<receipt_id>")
