@@ -11,6 +11,28 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function stopChrome(chrome) {
+  return new Promise((resolve) => {
+    if (chrome.exitCode !== null) {
+      resolve();
+      return;
+    }
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      clearTimeout(timeout);
+      resolve();
+    };
+    const timeout = setTimeout(() => {
+      try { chrome.kill("SIGKILL"); } catch {}
+      finish();
+    }, 1500);
+    chrome.once("exit", finish);
+    try { chrome.kill("SIGTERM"); } catch { finish(); }
+  });
+}
+
 async function waitForDevTools() {
   for (let attempt = 0; attempt < 30; attempt += 1) {
     try {
@@ -91,8 +113,8 @@ async function main() {
     console.log(JSON.stringify({ status: "pass", ...result }));
     browser.close();
   } finally {
-    chrome.kill();
-    fs.rmSync(PROFILE, { recursive: true, force: true });
+    await stopChrome(chrome);
+    fs.rmSync(PROFILE, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   }
 }
 
