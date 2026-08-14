@@ -44,9 +44,9 @@ for command_name in awk date df docker git jq realpath; do
   require_command "$command_name"
 done
 
-readonly repo_path="${FRANK_REPO_PATH:-/srv/frank/repo}"
-readonly compose_file="${FRANK_COMPOSE_FILE:-/srv/frank/infra/docker-compose.dev.yml}"
-readonly data_path="${FRANK_DATA_PATH:-/srv/frank}"
+readonly repo_path="${FRANK_REPO_PATH:-/projects/frank}"
+readonly compose_file="${FRANK_COMPOSE_FILE:-/frank/deployed/infra/docker-compose.dev.yml}"
+readonly data_path="${FRANK_DATA_PATH:-/frank/deployed}"
 readonly expected_commit="${FRANK_EXPECTED_COMMIT:-}"
 readonly expected_branch="${FRANK_EXPECTED_BRANCH:-main}"
 readonly required_network="${FRANK_REQUIRED_NETWORK:-frank}"

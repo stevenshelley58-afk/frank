@@ -15,7 +15,7 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { PostgresDomainStore } from '../services/postgres-store.js';
-import { ChannelPushStore } from '../services/workbench/channel-push.js';
+import { ChannelPushStore } from '../services/channels/channel-push.js';
 import { buildTestServer } from './harness.js';
 import type { TestServer } from './harness.js';
 import {

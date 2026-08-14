@@ -10,7 +10,7 @@ candidate_preparation_receipt="$(bash "$repo_root/infra/harness/bin/promote-gate
   "$FRANK_HARNESS_EVIDENCE_MANIFEST")"
 [[ "${FRANK_ATTACHMENT_POOL_GIB:-50}" == 50 && "${FRANK_ATTACHMENT_RESERVED_GIB:-50}" == 50 ]] || { echo 'attachment pool/reservation must both be exactly 50GiB' >&2; exit 1; }
 [[ "${FRANK_ATTACHMENT_USED_GIB:-0}" =~ ^[0-9]+$ ]] && (( FRANK_ATTACHMENT_USED_GIB <= 50 )) || { echo 'attachment used capacity is invalid' >&2; exit 1; }
-[[ "$FRANK_BASE_COMPOSE" == /srv/frank/infra/docker-compose.dev.yml ]] || { echo 'base must be live docker-compose.dev.yml' >&2; exit 1; }
+[[ "$FRANK_BASE_COMPOSE" == /frank/deployed/infra/docker-compose.dev.yml ]] || { echo 'base must be live docker-compose.dev.yml' >&2; exit 1; }
 [[ "$FRANK_HARNESS_OVERLAY" == */infra/production/docker-compose.harness.yml ]] || { echo 'only authoritative production harness overlay is accepted' >&2; exit 1; }
 for name in LITELLM SEAWEEDFS TUSD CLAMAV; do
   key="FRANK_${name}_CURRENT_IMAGE"; value="${!key:-}"
@@ -22,7 +22,7 @@ for name in LITELLM SEAWEEDFS TUSD CLAMAV; do
   ' "$FRANK_HARNESS_CANDIDATE_SLOT")"
   [[ "$value" == "$candidate_value" ]] || { echo "$key does not match reviewed candidate evidence" >&2; exit 1; }
 done
-available_kib="$(df -Pk "${FRANK_DATA_PATH:-/srv/frank}" | awk 'NR==2{print $4}')"
+available_kib="$(df -Pk "${FRANK_DATA_PATH:-/frank/deployed}" | awk 'NR==2{print $4}')"
 (( available_kib >= 30*1024*1024 )) || { echo 'attachment pool refused: less than 30 GiB free' >&2; exit 1; }
 rendered="$(mktemp)"; trap 'rm -f -- "$rendered"' EXIT
 docker compose -f "$FRANK_BASE_COMPOSE" -f "$FRANK_APP_OVERLAY" -f "$FRANK_HARNESS_OVERLAY" config --format json > "$rendered"

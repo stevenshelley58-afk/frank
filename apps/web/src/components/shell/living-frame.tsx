@@ -33,8 +33,6 @@ interface LivingFrameProps {
   activeChatId: string | null;
   activeChatStreaming: boolean;
   onStopActiveChat: () => void;
-  onStopWorkbench: (id: string) => void;
-  onStopMission: (id: string) => void;
 }
 
 /**
@@ -67,11 +65,11 @@ export function LivingFrame(props: LivingFrameProps) {
   activeChatId,
   activeChatStreaming,
   onStopActiveChat,
-  onStopWorkbench,
-  onStopMission,
   } = props;
   const running = frame?.running ?? [];
-  const receipts = frame?.receipts ?? [];
+  const receipts = (frame?.receipts ?? []).filter(
+    (r): r is Extract<FrameReceipt, { kind: 'chat' }> => r.kind === 'chat',
+  );
   if (!desktopOpen) {
     return (
       <>
@@ -176,7 +174,7 @@ export function LivingFrame(props: LivingFrameProps) {
           ) : running.length === 0 ? (
             <Empty>Nothing mid-flight.</Empty>
           ) : (
-            running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} onStopWorkbench={onStopWorkbench} onStopMission={onStopMission} />)
+            running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} />)
           )}
         </Card>
 
@@ -190,7 +188,7 @@ export function LivingFrame(props: LivingFrameProps) {
           ) : receipts.length === 0 ? (
             <Empty>Nothing finished yet today.</Empty>
           ) : (
-            receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.kind === 'chat' ? receipt.message_id : receipt.workbench_id} receipt={receipt} onOpenConversation={onOpenConversation} />)
+            receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.message_id} receipt={receipt} onOpenConversation={onOpenConversation} />)
           )}
         </Card>
       </div>
@@ -245,11 +243,12 @@ function FrameContent({ props }: { props: LivingFrameProps }) {
   const {
     decisions, frame, frameError, today, todayError, calendarEvents, calendarStatus,
     calendarLoading, calendarError, projectName, onOpenConversation, onResolve, onRetry,
-    onRetryToday, activeChatId, activeChatStreaming, onStopActiveChat, onStopWorkbench,
-    onStopMission,
+    onRetryToday, activeChatId, activeChatStreaming, onStopActiveChat,
   } = props;
   const running = frame?.running ?? [];
-  const receipts = frame?.receipts ?? [];
+  const receipts = (frame?.receipts ?? []).filter(
+    (r): r is Extract<FrameReceipt, { kind: 'chat' }> => r.kind === 'chat',
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto p-3">
@@ -274,11 +273,11 @@ function FrameContent({ props }: { props: LivingFrameProps }) {
         ))}
       </Card>
       <Card title="Running now" count={running.length}>
-        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : running.length === 0 ? <Empty>Nothing mid-flight.</Empty> : running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} onStopWorkbench={onStopWorkbench} onStopMission={onStopMission} />)}
+        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : running.length === 0 ? <Empty>Nothing mid-flight.</Empty> : running.map((item) => <RunningRow key={`${item.kind}:${item.id}`} item={item} projectName={projectName} onOpenConversation={onOpenConversation} activeChatId={activeChatId} activeChatStreaming={activeChatStreaming} onStopActiveChat={onStopActiveChat} />)}
       </Card>
       <Card title="Today"><TodayList today={today} todayError={todayError} calendarEvents={calendarEvents} calendarStatus={calendarStatus} calendarLoading={calendarLoading} calendarError={calendarError} onRetry={onRetryToday} /></Card>
       <Card title="Receipts">
-        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : receipts.length === 0 ? <Empty>Nothing finished yet today.</Empty> : receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.kind === 'chat' ? receipt.message_id : receipt.workbench_id} receipt={receipt} onOpenConversation={onOpenConversation} />)}
+        {frame === null && !frameError ? <Empty>Loading the authoritative frame…</Empty> : receipts.length === 0 ? <Empty>Nothing finished yet today.</Empty> : receipts.slice(0, 4).map((receipt) => <ReceiptRow key={receipt.message_id} receipt={receipt} onOpenConversation={onOpenConversation} />)}
       </Card>
     </div>
   );
@@ -286,20 +285,18 @@ function FrameContent({ props }: { props: LivingFrameProps }) {
 
 /* ------------------------------------------------------------------ */
 
-function RunningRow({ item, projectName, onOpenConversation, activeChatId, activeChatStreaming, onStopActiveChat, onStopWorkbench, onStopMission }: {
+function RunningRow({ item, projectName, onOpenConversation, activeChatId, activeChatStreaming, onStopActiveChat }: {
   item: FrameRunning;
   projectName: (projectId: string) => string;
   onOpenConversation: (id: string) => void;
   activeChatId: string | null;
   activeChatStreaming: boolean;
   onStopActiveChat: () => void;
-  onStopWorkbench: (id: string) => void;
-  onStopMission: (id: string) => void;
 }) {
-  const title = item.kind === 'chat' ? item.title : item.kind === 'mission' ? item.objective : `Workbench ${item.work_item_id}`;
-  const sub = item.kind === 'chat' ? `${projectName(item.project_id)} · chat` : item.kind === 'mission' ? `${item.room_name} · ${item.state}` : `${item.state} · workbench`;
-  const canOpen = item.kind === 'chat';
-  const stop = item.kind === 'workbench' ? () => onStopWorkbench(item.id) : item.kind === 'mission' ? () => onStopMission(item.id) : item.id === activeChatId && activeChatStreaming ? onStopActiveChat : null;
+  const title = item.title;
+  const sub = `${projectName(item.project_id)} · chat`;
+  const canOpen = true;
+  const stop = item.id === activeChatId && activeChatStreaming ? onStopActiveChat : null;
   return <div className="flex items-center gap-2.5 border-b border-line py-2 last:border-b-0">
     <span className="animate-pip h-2 w-2 shrink-0 rounded-full bg-running" aria-hidden />
     <button disabled={!canOpen} onClick={() => canOpen && onOpenConversation(item.id)} className="min-w-0 flex-1 text-left disabled:cursor-default">
@@ -310,18 +307,10 @@ function RunningRow({ item, projectName, onOpenConversation, activeChatId, activ
   </div>;
 }
 
-function ReceiptRow({ receipt, onOpenConversation }: { receipt: FrameReceipt; onOpenConversation: (id: string) => void }) {
-  const title = receipt.kind === 'chat' ? receipt.body : receipt.summary;
-  const sub = receipt.kind === 'chat' ? 'chat receipt' : `workbench · ${receipt.published_by}`;
-  const open = () => {
-    if (receipt.kind === 'chat') onOpenConversation(receipt.conversation_id);
-    else {
-      const query = receipt.room_id === null
-        ? `workbenchId=${encodeURIComponent(receipt.workbench_id)}`
-        : `roomId=${encodeURIComponent(receipt.room_id)}&workbenchId=${encodeURIComponent(receipt.workbench_id)}`;
-      window.location.assign(`/console/workbench?${query}`);
-    }
-  };
+function ReceiptRow({ receipt, onOpenConversation }: { receipt: Extract<FrameReceipt, { kind: 'chat' }>; onOpenConversation: (id: string) => void }) {
+  const title = receipt.body;
+  const sub = 'chat receipt';
+  const open = () => onOpenConversation(receipt.conversation_id);
   return <button onClick={open} className="flex w-full items-center gap-2.5 border-b border-line py-2 text-left last:border-b-0">
     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-success"><path d="M20 6 9 17l-5-5" /></svg>
     <span className="min-w-0 flex-1"><b className="block truncate text-[12.5px] font-semibold text-ink">{title}</b><span className="mt-px block font-mono text-[9.5px] text-muted">{sub}</span></span>

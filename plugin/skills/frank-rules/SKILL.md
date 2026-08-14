@@ -19,9 +19,9 @@ No local testing. No localhost. No "it works on my machine."
 Deploy:
 
 ```bash
-ssh vps '/srv/frank/infra/preview-deploy.sh <topic> /path/to/output/'          # new version
-ssh vps '/srv/frank/infra/preview-deploy.sh <topic> /path/to/output/ --update'  # overwrite latest
-ssh vps '/srv/frank/infra/preview-deploy.sh <slug> /path/ --exact'              # exact slug
+ssh vps '/frank/deployed/infra/preview-deploy.sh <topic> /path/to/output/'          # new version
+ssh vps '/frank/deployed/infra/preview-deploy.sh <topic> /path/to/output/ --update'  # overwrite latest
+ssh vps '/frank/deployed/infra/preview-deploy.sh <slug> /path/ --exact'              # exact slug
 ```
 
 Rules: topics auto-sanitize to `[a-z0-9-]`; previews are PUBLIC (no secrets);

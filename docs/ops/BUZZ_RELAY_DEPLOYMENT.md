@@ -5,8 +5,8 @@ This is the S6 infrastructure base; the `frank-buzz` boundary layer (BuzzPort,
 signed-event projections, §4.13 / BUZZ-001…012) is a later build on top.
 
 ## Where it lives
-- Compose bundle: `/srv/frank/buzz/` (vendored from `deploy/compose/`, NOT in this repo).
-- Secrets: `/srv/frank/buzz/.env` (git-ignored; relay private key, DB/Redis/S3
+- Compose bundle: `/frank/deployed/buzz/` (vendored from `deploy/compose/`, NOT in this repo).
+- Secrets: `/frank/deployed/buzz/.env` (git-ignored; relay private key, DB/Redis/S3
   passwords, git-hook HMAC, owner pubkey). Back these up before upgrades.
 - Image: `ghcr.io/block/buzz:main` (pin to a digest/semver per spec §7.3 before prod).
 
@@ -18,14 +18,14 @@ network so frank-caddy can reach it by container name.
 ## Public access — `https://buzz.frank.fail`
 Routed through **frank-caddy** (owns 80/443), not Buzz's own Caddyfile (that
 would fight for 80/443). Added a `buzz.frank.fail` block in
-`/srv/frank/infra/Caddyfile` reverse-proxying to `buzz-prod-relay-1:3000`.
+`/frank/deployed/infra/Caddyfile` reverse-proxying to `buzz-prod-relay-1:3000`.
 - DNS: **grey-cloud** A record `buzz → 76.13.209.160` (proxy OFF) so Let's
   Encrypt ACME (http-01/tls-alpn-01) can issue the cert. Proxy-on blocks ACME.
 - Cert auto-managed by Caddy; first issuance can race DNS propagation — it
   retries in 60s and succeeds once the A record is globally live.
 
 ## Operations
-cd /srv/frank/buzz && ./run.sh {start|stop|restart|status|logs|upgrade}
+cd /frank/deployed/buzz && ./run.sh {start|stop|restart|status|logs|upgrade}
 ./run.sh add-member <npub-or-hex> [--role member|admin]   # sleep 1 between adds
 ./run.sh list-members
 

@@ -95,39 +95,6 @@ export function IconAlert(props: IconProps) {
   );
 }
 
-/** Living frame toggle — three stacked panels. */
-export function IconFrame(props: IconProps) {
-  return (
-    <svg {...base(props)}>
-      <rect x="3" y="4" width="18" height="16" rx="2.5" />
-      <path d="M15 4v16" />
-    </svg>
-  );
-}
-
-/** Files explorer shortcut — a folder glyph. */
-export function IconFolder(props: IconProps) {
-  return (
-    <svg {...base(props)}>
-      <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" />
-    </svg>
-  );
-}
-
-/** Git worktrees — a branch glyph. */
-export function IconTree(props: IconProps) {
-  return (
-    <svg {...base(props)}>
-      <circle cx="6" cy="6" r="2.5" />
-      <circle cx="18" cy="6" r="2.5" />
-      <circle cx="6" cy="18" r="2.5" />
-      <path d="M6 8.5v7" />
-      <path d="M8.5 6h7" />
-      <path d="M18 8.5c0 4-4 4-6 7" />
-    </svg>
-  );
-}
-
 /** Copy to clipboard — two overlapping sheets. */
 export function IconCopy(props: IconProps) {
   return (

@@ -1,8 +1,7 @@
 /**
  * GET /v1/frame -- one authoritative feed for the Living Frame.
  *
- * This is a read-only composition of canonical work, workbench, mission and
- * chat records. It deliberately does not infer progress, synthesize receipts,
+ * This is a read-only composition of canonical work and chat records.
  * or turn a missing execution seam into a reassuring status.
  */
 
@@ -27,7 +26,7 @@ export const frameGetRoute = defineRoute({
   group: '/v1/frame',
   summary: 'Read the Living Frame feed',
   description:
-    'A read-only, authoritative aggregation of waiting work, currently open workbenches and missions, running chats, and receipts published today. Empty sections mean no persisted records matched; the server never fabricates activity.',
+    'A read-only, authoritative aggregation of waiting work, running chats, and receipts published today. Empty sections mean no persisted records matched; the server never fabricates activity.',
   actorRoles: ['owner', 'operator', 'builder', 'member', 'reviewer', 'service_identity'],
   capability: 'work.read',
   dataClasses: ['internal', 'private'],
@@ -107,11 +106,11 @@ export function registerFrameRoutes(app: FastifyInstance, dependencies: FrameRou
     const ownerId = principal.principalId;
 
     // ADR-002 makes the cell the authorization and data-isolation boundary.
-    // Work, workbench, and mission projections therefore intentionally match
-    // the cell-wide visibility of GET /v1/work and GET /v1/today. Chat rows
-    // remain owner-scoped because the browser BFF service identity owns them.
+    // Work and chat projections therefore intentionally match the cell-wide
+    // visibility of GET /v1/work and GET /v1/today. Chat rows remain
+    // owner-scoped because the browser BFF service identity owns them.
 
-    const [waitingPage, workbenches, missions, chats, workbenchReceipts, chatReceipts] = await Promise.all([
+    const [waitingPage, chats, chatReceipts] = await Promise.all([
       dependencies.store.listWork({
         cellId: context.cellId,
         state: 'waiting',
@@ -122,26 +121,6 @@ export function registerFrameRoutes(app: FastifyInstance, dependencies: FrameRou
         order: 'desc',
       }),
       dependencies.db.execute<{
-        id: string; work_item_id: string; room_id: string | null; state: 'queued' | 'provisioning' | 'running' | 'waiting' | 'verifying'; updated_at: Timestamp;
-      }>(sql`
-        select id, work_item_id, room_id, state, updated_at
-        from frank_domain.workbench
-        where cell_id = ${context.cellId}
-          and state in ('queued', 'provisioning', 'running', 'waiting', 'verifying')
-        order by updated_at desc, id
-        limit 200
-      `),
-      dependencies.db.execute<{
-        id: string; room_id: string; room_name: string; objective: string; state: 'planning' | 'running' | 'waiting'; updated_at: Timestamp;
-      }>(sql`
-        select m.id, m.room_id, r.identity as room_name, m.objective, m.state, m.updated_at
-        from frank_domain.mission m
-        join frank_domain.room r on r.id = m.room_id and r.cell_id = m.cell_id
-        where m.cell_id = ${context.cellId} and m.state in ('planning', 'running', 'waiting')
-        order by m.updated_at desc, m.id
-        limit 100
-      `),
-      dependencies.db.execute<{
         id: string; project_id: string; agent: string; title: string; model: string; thinking: string; last_message_at: Timestamp;
       }>(sql`
         select id, project_id, agent, title, model, thinking, last_message_at
@@ -149,16 +128,6 @@ export function registerFrameRoutes(app: FastifyInstance, dependencies: FrameRou
         where cell_id = ${context.cellId} and owner_id = ${ownerId}
           and running = true and archived = false
         order by last_message_at desc, id
-        limit 100
-      `),
-      dependencies.db.execute<{
-        workbench_id: string; work_item_id: string; room_id: string | null; summary: string; published_at: Timestamp; published_by: string;
-      }>(sql`
-        select r.workbench_id, wb.work_item_id, wb.room_id, r.summary, r.published_at, r.published_by
-        from frank_domain.workbench_receipt r
-        join frank_domain.workbench wb on wb.id = r.workbench_id
-        where wb.cell_id = ${context.cellId} and r.published_at >= ${dayStart}
-        order by r.published_at desc, r.workbench_id
         limit 100
       `),
       dependencies.db.execute<{
@@ -175,19 +144,10 @@ export function registerFrameRoutes(app: FastifyInstance, dependencies: FrameRou
     ]);
 
     const waiting = waitingPage.items.map((item) => summaryOf(item, now));
-    const running = [
-      ...workbenches.rows.map((row) => ({ kind: 'workbench' as const, id: row.id, work_item_id: row.work_item_id, room_id: row.room_id, state: row.state, updated_at: iso(row.updated_at) })),
-      ...missions.rows.map((row) => ({ kind: 'mission' as const, id: row.id, room_id: row.room_id, room_name: row.room_name, objective: row.objective, state: row.state, updated_at: iso(row.updated_at) })),
-      ...chats.rows.map((row) => ({ kind: 'chat' as const, id: row.id, project_id: row.project_id, agent: row.agent, title: row.title, model: row.model, thinking: row.thinking, running: true as const, last_message_at: iso(row.last_message_at) })),
-    ];
-    const receipts = [
-      ...workbenchReceipts.rows.map((row) => ({ kind: 'workbench' as const, workbench_id: row.workbench_id, work_item_id: row.work_item_id, room_id: row.room_id, summary: row.summary, published_at: iso(row.published_at), published_by: row.published_by })),
-      ...chatReceipts.rows.map((row) => ({ kind: 'chat' as const, message_id: row.message_id, conversation_id: row.conversation_id, project_id: row.project_id, body: row.body, created_at: iso(row.created_at) })),
-    ].sort((a, b) => {
-      const left = a.kind === 'workbench' ? a.published_at : a.created_at;
-      const right = b.kind === 'workbench' ? b.published_at : b.created_at;
-      return right.localeCompare(left);
-    });
+    const running = chats.rows.map((row) => ({ kind: 'chat' as const, id: row.id, project_id: row.project_id, agent: row.agent, title: row.title, model: row.model, thinking: row.thinking, running: true as const, last_message_at: iso(row.last_message_at) }));
+    const receipts = chatReceipts.rows
+      .map((row) => ({ kind: 'chat' as const, message_id: row.message_id, conversation_id: row.conversation_id, project_id: row.project_id, body: row.body, created_at: iso(row.created_at) }))
+      .sort((a, b) => b.created_at.localeCompare(a.created_at));
 
     // A fact snapshot deliberately excludes response-local identifiers and
     // generation time, so this is a weak validator rather than a claim that

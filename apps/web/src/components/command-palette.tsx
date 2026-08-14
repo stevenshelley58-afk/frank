@@ -19,10 +19,8 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-  CommandShortcut,
 } from '@/components/ui/command';
 import { DEFAULT_ROOMS } from '@/lib/rooms';
-import { consoleModules } from '@/app/console/registry';
 
 /* ------------------------------------------------------------------ */
 /* ⌘K command palette (Track A3).                                       */
@@ -98,7 +96,7 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
            translate), rounded on top like a native sheet. */
         className="max-sm:top-auto max-sm:bottom-0 max-sm:left-0 max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:border-b-0 data-[state=open]:max-sm:slide-in-from-bottom data-[state=closed]:max-sm:slide-out-to-bottom"
       >
-        <CommandInput placeholder="Jump to a room or console…" />
+        <CommandInput placeholder="Jump to a room…" />
         <CommandList>
           <CommandEmpty>No matches.</CommandEmpty>
           <CommandGroup heading="Rooms">
@@ -116,21 +114,6 @@ export function CommandPaletteProvider({ children }: { children: ReactNode }) {
                 />
                 <span className="flex-1">{room.name}</span>
                 <span className="text-[10px] font-mono uppercase text-muted">{room.sub}</span>
-              </CommandItem>
-            ))}
-          </CommandGroup>
-          <CommandGroup heading="Consoles">
-            {consoleModules.map((module) => (
-              <CommandItem
-                key={module.id}
-                value={`${module.title} ${module.description} ${module.system}`}
-                onSelect={() => {
-                  setOpen(false);
-                  router.push(`/console/${module.id}`);
-                }}
-              >
-                <span className="flex-1">{module.title}</span>
-                <CommandShortcut>{module.system}</CommandShortcut>
               </CommandItem>
             ))}
           </CommandGroup>

@@ -11,10 +11,11 @@
     "guard:chat-composers": "node ../../tools/lint/no-standalone-chat-textareas.mjs"
   },
   "dependencies": {
+    "@assistant-ui/react": "0.15.14",
+    "@assistant-ui/react-markdown": "0.14.10",
     "@frank/contracts": "workspace:*",
     "@frank/google-connectors": "workspace:*",
     "@frank/kernel": "workspace:*",
-    "@frank/memory": "workspace:*",
     "@frank/pipeline-graph": "workspace:*",
     "@frank/policy": "workspace:*",
     "@radix-ui/react-avatar": "1.2.6",
@@ -43,11 +44,13 @@
     "elkjs": "^0.10.0",
     "next": "15.5.21",
     "react": "18.3.1",
+    "react-arborist": "3.16.0",
     "react-dom": "18.3.1",
     "react-markdown": "^9.1.0",
     "rehype-highlight": "^7.0.2",
     "remark-gfm": "^4.0.1",
     "sharp": "^0.34.3",
+    "shiki": "4.4.3",
     "sonner": "2.0.7",
     "tailwind-merge": "3.6.0",
     "ws": "8.18.0"
