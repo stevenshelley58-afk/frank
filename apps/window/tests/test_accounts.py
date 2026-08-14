@@ -81,6 +81,55 @@ class AccountsApiTest(unittest.TestCase):
         })
         self.assertEqual(raw_reference.status_code, 400)
 
+        card_data = self.client.post("/api/accounts", json={
+            **safe_account,
+            "card_number": "4242424242424242",
+        })
+        self.assertEqual(card_data.status_code, 400)
+
+        card_in_notes = self.client.post("/api/accounts", json={
+            **safe_account,
+            "notes": "Test card 4242 4242 4242 4242",
+        })
+        self.assertEqual(card_in_notes.status_code, 400)
+
+        iban_in_notes = self.client.post("/api/accounts", json={
+            **safe_account,
+            "notes": "Bank GB82 WEST 1234 5698 7654 32",
+        })
+        self.assertEqual(iban_in_notes.status_code, 400)
+
+    def test_customer_account_tracks_auth_and_billing_references(self):
+        customer = {
+            "project_id": "blockwise",
+            "kind": "customer",
+            "name": "Blockwise Test Customer",
+            "identity": "selfserve-test@blockwise.invalid",
+            "status": "ready",
+            "account_mode": "selfserve",
+            "environment": "test",
+            "auth_status": "active",
+            "auth_provider": "Test auth",
+            "auth_user_ref": "test://blockwise/auth/users/selfserve-001",
+            "billing_status": "trial",
+            "billing_provider": "Test billing",
+            "billing_customer_ref": "test://blockwise/billing/customers/selfserve-001",
+            "billing_subscription_ref": "test://blockwise/billing/subscriptions/trial-001",
+            "plan_name": "Self-serve trial",
+        }
+        created = self.client.post("/api/accounts", json=customer)
+
+        self.assertEqual(created.status_code, 201)
+        account = created.get_json()["account"]
+        self.assertEqual(account["auth_status"], "active")
+        self.assertEqual(account["billing_status"], "trial")
+        self.assertEqual(account["environment"], "test")
+        self.assertNotIn("password", account)
+        self.assertNotIn("card_number", account)
+
+        duplicate = self.client.post("/api/accounts", json={**customer, "name": "Duplicate"})
+        self.assertEqual(duplicate.status_code, 409)
+
     def test_email_tool_health_never_depends_on_resend_key(self):
         with patch.dict(os.environ, {
             "RESEND_API_KEY": "re_secret_never_read_by_frank",

@@ -33,7 +33,7 @@ define({
 define({
   id: "account-manager", title: "Accounts", surfaces: ["tools"],
   mount(el) {
-    el.innerHTML = `<p>Project email identities, domains and service logins. Credentials stay in the shared vault.</p>
+    el.innerHTML = `<p>Customer directory with recorded auth and billing state, plus project service identities.</p>
       <div class="tool-actions"><button type="button" class="tool-open">Open accounts</button><span class="tool-state">Loading…</span></div>`;
     el.querySelector(".tool-open")?.addEventListener("click", () => {
       window.dispatchEvent(new CustomEvent("frank:view", { detail: "accounts" }));
@@ -42,7 +42,8 @@ define({
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("accounts unavailable")))
       .then((data) => {
         const count = data.accounts?.length || 0;
-        el.querySelector(".tool-state").textContent = count ? `${count} account${count === 1 ? "" : "s"}` : "No accounts yet";
+        const customers = (data.accounts || []).filter((account) => account.kind === "customer").length;
+        el.querySelector(".tool-state").textContent = count ? `${customers} customer${customers === 1 ? "" : "s"} · ${count} total` : "No accounts yet";
       })
       .catch(() => { el.querySelector(".tool-state").textContent = "Unavailable"; });
   },

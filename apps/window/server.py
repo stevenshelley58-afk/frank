@@ -50,15 +50,23 @@ app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 _chat_lock = threading.RLock()
 _accounts_lock = threading.RLock()
 
-ACCOUNT_KINDS = {"email", "service", "domain"}
+ACCOUNT_KINDS = {"customer", "email", "service", "domain"}
 ACCOUNT_STATUSES = {"planned", "setup", "ready", "attention", "disabled"}
+ACCOUNT_MODES = {"selfserve", "managed", "internal"}
+ACCOUNT_ENVIRONMENTS = {"test", "live"}
+AUTH_STATUSES = {"not_connected", "invited", "active", "suspended", "closed"}
+BILLING_STATUSES = {"not_connected", "trial", "active", "past_due", "canceled"}
 ACCOUNT_FIELDS = {
     "project_id", "kind", "name", "identity", "provider", "purpose",
-    "admin_url", "credential_ref", "notes", "status",
+    "admin_url", "credential_ref", "notes", "status", "account_mode",
+    "environment", "auth_status", "auth_provider", "auth_user_ref",
+    "billing_status", "billing_provider", "billing_customer_ref",
+    "billing_subscription_ref", "plan_name",
 }
 FORBIDDEN_ACCOUNT_FIELDS = {
     "password", "secret", "token", "api_key", "apikey", "private_key",
-    "access_key", "refresh_token",
+    "access_key", "refresh_token", "card_number", "cvc", "cvv", "expiry",
+    "bank_account", "iban", "payment_details", "card_details",
 }
 VAULT_REFERENCE = re.compile(
     r"^(?:vault|openbao|bitwarden|1password|pass|keyring|secret)://[A-Za-z0-9][A-Za-z0-9._/-]*$",
@@ -70,6 +78,35 @@ SECRET_VALUE_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"),
 )
 CONNECTOR_STATUSES = {"unconfigured", "configured", "ready", "error"}
+EXTERNAL_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,239}$")
+DEFAULT_PROJECTS = [
+    {"id": "blockwise", "name": "Blockwise", "root": "blockwise"},
+    {"id": "merrypaws", "name": "Merrypaws", "root": "merrypaws"},
+    {"id": "elfwonder", "name": "Elf & Wonder", "root": "elfwonder"},
+    {"id": "pavone", "name": "Pavone", "root": "pavone"},
+]
+
+
+def _contains_payment_data(text: str) -> bool:
+    iban = re.compile(r"\b[A-Z]{2}\d{2}(?:[ -]?[A-Z0-9]){11,30}\b", re.I)
+    if iban.search(text):
+        return True
+    for candidate in re.findall(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)", text):
+        digits = re.sub(r"\D", "", candidate)
+        if not 13 <= len(digits) <= 19:
+            continue
+        total = 0
+        parity = len(digits) % 2
+        for index, char in enumerate(digits):
+            value = int(char)
+            if index % 2 == parity:
+                value *= 2
+                if value > 9:
+                    value -= 9
+            total += value
+        if total % 10 == 0:
+            return True
+    return False
 
 
 def jail(root_key: str, rel: str = "") -> Path:
@@ -117,6 +154,8 @@ def _clean_account(body: dict, existing: dict | None = None) -> dict:
         text = str(value or "")
         if any(pattern.search(text) for pattern in SECRET_VALUE_PATTERNS):
             abort(400, "credentials must be stored in the vault; remove the secret value")
+        if _contains_payment_data(text):
+            abort(400, "card and bank details must stay with the billing provider")
 
     item = dict(existing or {})
     for field in ACCOUNT_FIELDS:
@@ -133,19 +172,40 @@ def _clean_account(body: dict, existing: dict | None = None) -> dict:
     item["credential_ref"] = item.get("credential_ref", "")[:300]
     item["notes"] = item.get("notes", "")[:800]
     item["status"] = item.get("status", "planned").lower()
+    item["account_mode"] = item.get("account_mode", "selfserve").lower()
+    item["environment"] = item.get("environment", "test").lower()
+    item["auth_status"] = item.get("auth_status", "not_connected").lower()
+    item["auth_provider"] = item.get("auth_provider", "")[:120]
+    item["auth_user_ref"] = item.get("auth_user_ref", "")[:240]
+    item["billing_status"] = item.get("billing_status", "not_connected").lower()
+    item["billing_provider"] = item.get("billing_provider", "")[:120]
+    item["billing_customer_ref"] = item.get("billing_customer_ref", "")[:240]
+    item["billing_subscription_ref"] = item.get("billing_subscription_ref", "")[:240]
+    item["plan_name"] = item.get("plan_name", "")[:120]
 
     if item["kind"] not in ACCOUNT_KINDS:
         abort(400, "invalid account kind")
     if item["status"] not in ACCOUNT_STATUSES:
         abort(400, "invalid account status")
+    if item["account_mode"] not in ACCOUNT_MODES:
+        abort(400, "invalid account mode")
+    if item["environment"] not in ACCOUNT_ENVIRONMENTS:
+        abort(400, "invalid account environment")
+    if item["auth_status"] not in AUTH_STATUSES:
+        abort(400, "invalid auth status")
+    if item["billing_status"] not in BILLING_STATUSES:
+        abort(400, "invalid billing status")
     if not item["name"] or not item["identity"]:
         abort(400, "name and identity are required")
-    if item["kind"] == "email" and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", item["identity"]):
+    if item["kind"] in {"customer", "email"} and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", item["identity"]):
         abort(400, "email identity must be a valid email address")
     if item["admin_url"] and not re.match(r"^https?://", item["admin_url"], re.I):
         abort(400, "admin_url must use http or https")
     if item["credential_ref"] and not VAULT_REFERENCE.fullmatch(item["credential_ref"]):
         abort(400, "credential_ref must be an opaque vault locator such as openbao://frank/email/main")
+    for field in ("auth_user_ref", "billing_customer_ref", "billing_subscription_ref"):
+        if item[field] and not EXTERNAL_REFERENCE.fullmatch(item[field]):
+            abort(400, f"{field} must be an opaque provider reference")
     return item
 
 
@@ -348,7 +408,7 @@ def projects():
     p = WEB / "data" / "projects.json"
     if p.exists():
         return jsonify(json.loads(p.read_text(encoding="utf-8")))
-    return jsonify({"projects": []})
+    return jsonify({"projects": DEFAULT_PROJECTS})
 
 
 @app.get("/api/accounts")
@@ -372,6 +432,13 @@ def accounts_create():
     item.update({"id": secrets.token_hex(8), "created_at": now, "updated_at": now})
     with _accounts_lock:
         data = _ensure_accounts()
+        duplicate = next((entry for entry in data["accounts"] if (
+            entry.get("project_id") == item["project_id"]
+            and entry.get("kind") == item["kind"]
+            and str(entry.get("identity", "")).lower() == item["identity"].lower()
+        )), None)
+        if duplicate:
+            abort(409, "this identity already exists for the project")
         data["accounts"].append(item)
         _write_accounts(data)
     return jsonify({"ok": True, "account": item}), 201
@@ -389,6 +456,14 @@ def accounts_update(account_id: str):
         cleaned["id"] = item["id"]
         cleaned["created_at"] = item.get("created_at", int(time.time()))
         cleaned["updated_at"] = int(time.time())
+        duplicate = next((entry for entry in data["accounts"] if (
+            entry.get("id") != account_id
+            and entry.get("project_id") == cleaned["project_id"]
+            and entry.get("kind") == cleaned["kind"]
+            and str(entry.get("identity", "")).lower() == cleaned["identity"].lower()
+        )), None)
+        if duplicate:
+            abort(409, "this identity already exists for the project")
         item.clear()
         item.update(cleaned)
         _write_accounts(data)

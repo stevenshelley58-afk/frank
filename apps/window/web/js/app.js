@@ -9,7 +9,7 @@ const TITLES = {
   project: ["Project", ""],
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
-  accounts: ["Accounts", "Project identities and service access"],
+  accounts: ["Accounts", "Customer directory; provider actions connect through Hermes later"],
   trace: ["Trace", "One run, fully visible"],
   releases: ["Releases", "Signed and verified"],
 };
@@ -1220,10 +1220,19 @@ const ACCOUNT_STATUS_LABELS = {
   attention: "Needs attention",
   disabled: "Disabled",
 };
+const ACCOUNT_MODE_LABELS = { selfserve: "Self-serve", managed: "Managed", internal: "Internal" };
+const AUTH_STATUS_LABELS = { not_connected: "Not connected", invited: "Invited", active: "Active", suspended: "Suspended", closed: "Closed" };
+const BILLING_STATUS_LABELS = { not_connected: "Not connected", trial: "Trial", active: "Active", past_due: "Past due", canceled: "Canceled" };
 let accountState = { items: [], scope: "all", query: "", emailTools: null, loading: false, error: "" };
 
 function accountProjects() {
-  return [{ id: "main", name: "Main" }, ...(projects.projects || []).map((project) => ({ id: project.id, name: project.name }))];
+  const known = [
+    ...(projects.projects || []).map((project) => ({ id: project.id, name: project.name })),
+    ...$$('.rail-item[data-project]').map((button) => ({ id: button.dataset.project, name: button.getAttribute("aria-label") || button.dataset.project })),
+  ];
+  const unique = new Map([["main", { id: "main", name: "Main" }]]);
+  known.forEach((project) => { if (!unique.has(project.id)) unique.set(project.id, project); });
+  return [...unique.values()];
 }
 
 function accountProjectName(id) {
@@ -1273,13 +1282,17 @@ function renderEmailStack() {
   const host = $("#email-stack");
   if (!host) return;
   const emailCount = accountState.items.filter((item) => item.kind === "email").length;
-  const projectCount = new Set(accountState.items.filter((item) => item.kind === "email").map((item) => item.project_id)).size;
   const resend = accountState.emailTools?.resend;
   const mautic = accountState.emailTools?.mautic;
+  const customers = accountState.items.filter((item) => item.kind === "customer");
+  const customerProjects = new Set(customers.map((item) => item.project_id)).size;
+  const activeAuth = customers.filter((item) => item.auth_status === "active").length;
+  const activeBilling = customers.filter((item) => ["trial", "active"].includes(item.billing_status)).length;
   host.innerHTML = `
-    <div class="email-stack-item"><strong>Mail identities</strong><span>${emailCount ? `${emailCount} across ${projectCount} project${projectCount === 1 ? "" : "s"}` : "None registered"}</span></div>
-    <div class="email-stack-item"><strong>Sending · Resend</strong><span>${connectorLabel(resend?.status)}${resend?.mcp_status && resend.mcp_status !== "unconfigured" ? ` · MCP ${connectorLabel(resend.mcp_status).toLowerCase()}` : ""}</span></div>
-    <div class="email-stack-item"><strong>Campaigns · Mautic</strong><span>${connectorLabel(mautic?.status)}</span></div>`;
+    <div class="email-stack-item"><strong>Customers</strong><span>${customers.length ? `${customers.length} across ${customerProjects} project${customerProjects === 1 ? "" : "s"}` : "None registered"}</span></div>
+    <div class="email-stack-item"><strong>Recorded auth</strong><span>${customers.length ? `${activeAuth} active` : "No customer auth"}</span></div>
+    <div class="email-stack-item"><strong>Recorded billing</strong><span>${customers.length ? `${activeBilling} trial or active` : "No customer billing"}</span></div>
+    <div class="email-stack-item"><strong>Mail operations</strong><span>${emailCount ? `${emailCount} identities · ` : ""}Resend ${connectorLabel(resend?.status).toLowerCase()} · Mautic ${connectorLabel(mautic?.status).toLowerCase()}</span></div>`;
 }
 
 function filteredAccounts() {
@@ -1287,7 +1300,7 @@ function filteredAccounts() {
   return accountState.items.filter((item) => {
     if (accountState.scope !== "all" && item.project_id !== accountState.scope) return false;
     if (!query) return true;
-    return [item.name, item.identity, item.provider, item.purpose, accountProjectName(item.project_id)]
+    return [item.name, item.identity, item.provider, item.purpose, item.auth_provider, item.billing_provider, item.plan_name, accountProjectName(item.project_id)]
       .some((value) => String(value || "").toLowerCase().includes(query));
   });
 }
@@ -1310,14 +1323,14 @@ function renderAccountList() {
   if (status) status.textContent = `${items.length} account${items.length === 1 ? "" : "s"} shown`;
   if (!items.length) {
     const scoped = accountState.scope !== "all" || accountState.query;
-    host.innerHTML = `<div class="account-empty"><h2>${scoped ? "No matching accounts" : "No accounts yet"}</h2><p>${scoped ? "Change the project or search." : "Add the main address, then one identity for each project."}</p></div>`;
+    host.innerHTML = `<div class="account-empty"><h2>${scoped ? "No matching accounts" : "No accounts yet"}</h2><p>${scoped ? "Change the project or search." : "Add the first customer, email identity or service account."}</p></div>`;
     return;
   }
-  host.innerHTML = `<div class="account-list-head"><span>Account</span><span>Project</span><span>Provider</span><span>Status</span></div>${items.map((item) => `
+  host.innerHTML = `<div class="account-list-head"><span>Account</span><span>Project</span><span>Access / billing</span><span>Status</span></div>${items.map((item) => `
     <button type="button" class="account-row" data-account-id="${escapeHtml(item.id)}">
-      <span class="account-primary"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.identity)}</span></span>
+      <span class="account-primary"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.kind === "customer" ? `${item.identity} · ${ACCOUNT_MODE_LABELS[item.account_mode] || "Self-serve"} · ${item.environment === "live" ? "Live" : "Test"}` : item.identity)}</span></span>
       <span class="account-cell">${escapeHtml(accountProjectName(item.project_id))}</span>
-      <span class="account-cell">${escapeHtml(item.provider || item.kind)}</span>
+      <span class="account-cell">${escapeHtml(item.kind === "customer" ? `${AUTH_STATUS_LABELS[item.auth_status] || "Not connected"} auth · ${BILLING_STATUS_LABELS[item.billing_status] || "Not connected"}` : (item.provider || item.kind))}</span>
       <span class="account-status" data-status="${escapeHtml(item.status)}">${escapeHtml(ACCOUNT_STATUS_LABELS[item.status] || item.status)}</span>
     </button>`).join("")}`;
   host.querySelectorAll("[data-account-id]").forEach((button) => {
@@ -1335,6 +1348,15 @@ function renderAccountProjectOptions(selected = "main") {
   const select = $("#account-project");
   select.innerHTML = accountProjects().map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join("");
   select.value = accountProjects().some((project) => project.id === selected) ? selected : "main";
+}
+
+function syncAccountKindFields() {
+  const customer = $("#account-kind").value === "customer";
+  $("#account-customer-fields").hidden = !customer;
+  $("#account-operations-fields").hidden = customer;
+  $("#account-identity").type = customer || $("#account-kind").value === "email" ? "email" : "text";
+  $("#account-name").placeholder = customer ? "Blockwise Test Customer" : "Blockwise main";
+  $("#account-identity").placeholder = customer ? "customer@example.invalid" : "hello@blockwise.sale";
 }
 
 let accountEditorReturnFocus = null;
@@ -1367,7 +1389,7 @@ function openAccountEditor(item = null) {
   $("#account-error").textContent = "";
   $("#account-id").value = item?.id || "";
   renderAccountProjectOptions(item?.project_id || (accountState.scope !== "all" ? accountState.scope : "main"));
-  $("#account-kind").value = item?.kind || "email";
+  $("#account-kind").value = item?.kind || "customer";
   $("#account-status").value = item?.status || "planned";
   $("#account-name").value = item?.name || "";
   $("#account-identity").value = item?.identity || "";
@@ -1375,9 +1397,20 @@ function openAccountEditor(item = null) {
   $("#account-purpose").value = item?.purpose || "";
   $("#account-url").value = item?.admin_url || "";
   $("#account-credential").value = item?.credential_ref || "";
+  $("#account-mode").value = item?.account_mode || "selfserve";
+  $("#account-environment").value = item?.environment || "test";
+  $("#account-auth-status").value = item?.auth_status || "not_connected";
+  $("#account-auth-provider").value = item?.auth_provider || "";
+  $("#account-auth-ref").value = item?.auth_user_ref || "";
+  $("#account-billing-status").value = item?.billing_status || "not_connected";
+  $("#account-billing-provider").value = item?.billing_provider || "";
+  $("#account-billing-customer-ref").value = item?.billing_customer_ref || "";
+  $("#account-billing-subscription-ref").value = item?.billing_subscription_ref || "";
+  $("#account-plan").value = item?.plan_name || "";
   $("#account-notes").value = item?.notes || "";
   $("#account-form-title").textContent = item ? "Edit account" : "Add account";
   $("#account-delete").hidden = !item;
+  syncAccountKindFields();
   $("#account-editor").hidden = false;
   $(".account-scopes").inert = true;
   $(".accounts-browser").inert = true;
@@ -1422,20 +1455,32 @@ function setupAccounts() {
   $("#account-add")?.addEventListener("click", () => openAccountEditor());
   $("#account-cancel")?.addEventListener("click", closeAccountEditor);
   $("#account-editor")?.addEventListener("keydown", accountEditorKeydown);
+  $("#account-kind")?.addEventListener("change", syncAccountKindFields);
   $("#account-search")?.addEventListener("input", (event) => { accountState.query = event.target.value; renderAccountList(); });
   $("#account-form")?.addEventListener("submit", async (event) => {
     event.preventDefault();
     const id = $("#account-id").value;
+    const customer = $("#account-kind").value === "customer";
     const payload = {
       project_id: $("#account-project").value,
       kind: $("#account-kind").value,
       status: $("#account-status").value,
       name: $("#account-name").value,
       identity: $("#account-identity").value,
-      provider: $("#account-provider").value,
-      purpose: $("#account-purpose").value,
+      provider: customer ? "" : $("#account-provider").value,
+      purpose: customer ? "" : $("#account-purpose").value,
       admin_url: $("#account-url").value,
-      credential_ref: $("#account-credential").value,
+      credential_ref: customer ? "" : $("#account-credential").value,
+      account_mode: customer ? $("#account-mode").value : "selfserve",
+      environment: customer ? $("#account-environment").value : "test",
+      auth_status: customer ? $("#account-auth-status").value : "not_connected",
+      auth_provider: customer ? $("#account-auth-provider").value : "",
+      auth_user_ref: customer ? $("#account-auth-ref").value : "",
+      billing_status: customer ? $("#account-billing-status").value : "not_connected",
+      billing_provider: customer ? $("#account-billing-provider").value : "",
+      billing_customer_ref: customer ? $("#account-billing-customer-ref").value : "",
+      billing_subscription_ref: customer ? $("#account-billing-subscription-ref").value : "",
+      plan_name: customer ? $("#account-plan").value : "",
       notes: $("#account-notes").value,
     };
     const submit = event.submitter;
