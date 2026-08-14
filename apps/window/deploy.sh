@@ -5,6 +5,7 @@ repo="${FRANK_REPO:-/projects/frank}"
 app="$repo/apps/window"
 secret_dir="/srv/frank/secrets"
 secret_file="$secret_dir/window.env"
+caddy_secret_file="$secret_dir/caddy.env"
 data_dir="/srv/frank/data/window"
 preview_dir="/srv/frank/previews"
 
@@ -20,6 +21,17 @@ git -C "$repo" diff --quiet HEAD -- || {
 install -d -m 0700 -- "$secret_dir"
 install -d -m 0750 -- "$data_dir"
 install -d -m 0755 -- "$preview_dir"
+
+if [[ -e "$secret_file" || -L "$secret_file" ]]; then
+  [[ -f "$secret_file" && ! -L "$secret_file" ]] || {
+    echo "refusing non-regular Frank secret file: $secret_file" >&2
+    exit 1
+  }
+  [[ "$(stat -c '%a' -- "$secret_file")" == "600" ]] || {
+    echo "Frank secret file must be mode 0600: $secret_file" >&2
+    exit 1
+  }
+fi
 
 if [[ ! -f "$secret_file" ]]; then
   tmp="$(mktemp "$secret_dir/.window.env.XXXXXX")"
@@ -50,6 +62,19 @@ for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH HERMES_CON
     exit 1
   }
 done
+
+# Caddy receives only the two values required by its basic-auth directive.
+# Rebuild this derived file without ever passing Window or Hermes credentials
+# into the public proxy container.
+caddy_tmp="$(mktemp "$secret_dir/.caddy.env.XXXXXX")"
+trap 'rm -f -- "$caddy_tmp"' EXIT
+grep -E '^(FRANK_BASIC_AUTH_USER|FRANK_BASIC_AUTH_HASH)=' "$secret_file" > "$caddy_tmp" || {
+  echo "missing Caddy basic-auth settings in $secret_file" >&2
+  exit 1
+}
+chmod 0600 "$caddy_tmp"
+mv -f -- "$caddy_tmp" "$caddy_secret_file"
+trap - EXIT
 
 if [[ -d /frank/window/data ]]; then
   cp -a -n -- /frank/window/data/. "$data_dir/"
@@ -98,6 +123,8 @@ done
   exit 1
 }
 
+docker exec frank-window python -c \
+  "import connections_agent, home_platform, server; assert connections_agent and home_platform and server"
 docker exec frank-window python -c \
   "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/health',timeout=5)); assert data['ok'] is True"
 curl --fail --silent --show-error --output /dev/null \

@@ -43,7 +43,7 @@ services:
     container_name: frank-caddy
     restart: unless-stopped
     env_file:
-      - ${FRANK_WINDOW_ENV_FILE:-/srv/frank/secrets/window.env}
+      - ${FRANK_CADDY_ENV_FILE:-/srv/frank/secrets/caddy.env}
     ports:
       - "80:80"
       - "443:443"

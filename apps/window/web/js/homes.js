@@ -96,6 +96,7 @@ function openToolEditor(editor, focusTarget) {
 
 function closeToolEditor(editor, { restoreFocus = true } = {}) {
   if (!editor || editor.hidden) return false;
+  if (editor.id === "connection-editor") clearConnectionSecret();
   editor.hidden = true;
   editor.removeEventListener("keydown", editorKeydown);
   restoreModalBackground(editor);
@@ -157,6 +158,7 @@ export function clearHomeActions() {
   homeState.controller?.abort();
   window.clearInterval(homeState.refreshTimer);
   homeState.refreshTimer = null;
+  clearConnectionSecret();
   setTopActions();
 }
 
@@ -741,6 +743,11 @@ let connectionWorkspace = { payload: null, vault: null, providers: null, binding
 let connectionEditItem = null;
 let connectionRequestPending = false;
 
+function clearConnectionSecret() {
+  const input = $("#connection-secret");
+  if (input) input.value = "";
+}
+
 function setConnectionBusy(value) {
   connectionRequestPending = Boolean(value);
   document.querySelectorAll("#connection-editor button, #connection-catalog button, #connection-list button, #connection-vault-health button, #connection-agent-open").forEach((control) => {
@@ -868,7 +875,19 @@ function renderConnections(payload, providerPayload = {}, vault = {}, bindings =
   const saved = $("#connection-list");
   catalog?.replaceChildren();
   saved?.replaceChildren();
-  const providers = providerPayload.providers || payload.catalog || [];
+  const baseCatalog = Array.isArray(payload.catalog) ? payload.catalog : [];
+  const brokerByProvider = new Map((providerPayload.providers || []).map((item) => [item.provider, item]));
+  const providers = baseCatalog.map((item) => {
+    const broker = brokerByProvider.get(item.provider);
+    if (!broker) return item;
+    return {
+      ...item,
+      ...(Object.hasOwn(broker, "status") ? { status: broker.status } : {}),
+      ...(Object.hasOwn(broker, "setup_mode") ? { setup_mode: broker.setup_mode } : {}),
+      ...(Object.hasOwn(broker, "setup_url") ? { setup_url: broker.setup_url } : {}),
+      ...(Object.hasOwn(broker, "setup_note") ? { setup_note: broker.setup_note } : {}),
+    };
+  });
   for (const item of providers) {
     const card = node("article", "w-card connection-catalog-card");
     const status = item.status || item.setup_mode || "setup_needed";
@@ -925,6 +944,7 @@ async function loadConnections() {
 }
 
 function syncConnectionScope() {
+  clearConnectionSecret();
   const global = $("#connection-scope-kind")?.value === "global";
   const scope = $("#connection-scope-id");
   if (!scope) return;
@@ -943,7 +963,7 @@ function editConnection(item = null) {
   $("#connection-ref").value = item?.connection_ref || "";
   $("#connection-admin-url").value = item?.admin_url || "";
   $("#connection-notes").value = item?.notes || "";
-  $("#connection-secret").value = "";
+  clearConnectionSecret();
   const resend = $("#connection-provider").value === "resend";
   $("#connection-secret-row").hidden = !resend;
   $("#connection-secret-label").firstChild.textContent = item?.id ? "Rotate Resend API key " : "Resend API key ";
@@ -961,7 +981,7 @@ async function applyConnectionPlan(action, item, body = {}) {
   });
   if (plan.plan?.confirmation_required) {
     const confirmed = window.confirm(`${connectionActionLabel(action)} ${item?.name || "this connection"}? This cannot be undone from Frank.`);
-    if (!confirmed) return null;
+    if (!confirmed) return { cancelled: true };
   }
   const applied = await requestJson("/api/connections/apply", {
     method: "POST", idempotencyKey: freshIdempotencyKey(`apply-${action}`),
@@ -986,11 +1006,14 @@ async function runConnectionAction(action, item) {
   setConnectionBusy(true);
   try {
     $("#connections-status").textContent = `${connectionActionLabel(action)} queued…`;
-    await applyConnectionPlan(action, item, {});
+    const result = await applyConnectionPlan(action, item, {});
+    if (result?.cancelled) return false;
     await loadConnections();
     $("#connections-status").textContent = `${connectionActionLabel(action)} recorded. Provider truth will appear in the receipt.`;
+    return true;
   } catch (error) {
     $("#connections-status").textContent = error.message || "Connection action failed.";
+    return false;
   } finally {
     setConnectionBusy(false);
   }
@@ -1043,10 +1066,13 @@ async function rotateResendSecret(item, value) {
 }
 
 async function createResendSecret(fields, value) {
-  const scopeKind = fields.scope_kind === "project" ? "project" : "global";
+  const scopeKind = fields.scope_kind;
+  if (!["global", "project"].includes(scopeKind)) throw new Error("Resend secrets support only Frank-wide or project scope.");
+  const scopeId = scopeKind === "project" ? String(fields.scope_id || "").trim() : "";
+  if (scopeKind === "project" && !scopeId) throw new Error("Project scope requires a project id.");
   const response = await requestJson("/api/vault/secrets", {
     method: "POST", idempotencyKey: freshIdempotencyKey("vault-create"),
-    body: JSON.stringify({ project_id: "frank", environment: "live", secret_path: "/frank/connections", secret_name: "RESEND_API_KEY", scope_kind: scopeKind, scope_id: scopeKind === "project" ? fields.scope_id : "", provider: "resend", capabilities: ["email.send", "email.status"], secret_value: value }),
+    body: JSON.stringify({ project_id: "frank", environment: "live", secret_path: "/frank/connections", secret_name: "RESEND_API_KEY", scope_kind: scopeKind, scope_id: scopeId, provider: "resend", capabilities: ["email.send", "email.status"], secret_value: value }),
   });
   const ref = response.secret?.ref || "";
   if (!ref) throw new Error("Secure vault did not return an opaque reference.");
@@ -1070,7 +1096,7 @@ async function submitConnectionForm(event) {
   setConnectionBusy(true);
   const secretInput = $("#connection-secret");
   const secret = secretInput?.value || "";
-  if (secretInput) secretInput.value = "";
+  clearConnectionSecret();
   const fields = {
     provider: $("#connection-provider").value,
     name: $("#connection-name").value,
@@ -1094,7 +1120,8 @@ async function submitConnectionForm(event) {
     } else if (!connectionEditId) {
       fields.status = "setup_needed";
     }
-    await applyConnectionPlan(connectionEditId ? "update" : "create", connectionEditItem, fields);
+    const result = await applyConnectionPlan(connectionEditId ? "update" : "create", connectionEditItem, fields);
+    if (result?.cancelled) return;
     closeToolEditor($("#connection-editor"));
     connectionEditId = ""; connectionEditItem = null;
     await loadConnections();
@@ -1106,6 +1133,7 @@ async function submitConnectionForm(event) {
       $("#connections-status").textContent = `Attention: secure vault metadata needs reconciliation. Opaque ref: ${reconciliationRef}`;
     }
   } finally {
+    clearConnectionSecret();
     setConnectionBusy(false);
   }
 }
@@ -1123,6 +1151,7 @@ async function openConnectionsAgent() {
 }
 
 export async function openConnections() {
+  clearConnectionSecret();
   setTopActions([button("Add connection", () => editConnection(), "home-action home-action-primary")]);
   $("#connections-status").textContent = "Loading workspace…";
   requestAnimationFrame(() => $("#connections-heading")?.focus({ preventScroll: true }));
@@ -1161,14 +1190,14 @@ export function setupHomePlatform() {
   $("#connection-editor-close")?.addEventListener("click", () => closeToolEditor($("#connection-editor")));
   $("#connection-scope-kind")?.addEventListener("change", syncConnectionScope);
   $("#connection-provider")?.addEventListener("change", () => {
+    clearConnectionSecret();
     const resend = $("#connection-provider").value === "resend";
     $("#connection-secret-row").hidden = !resend;
   });
   $("#connection-form")?.addEventListener("submit", submitConnectionForm);
   $("#connection-delete")?.addEventListener("click", async () => {
     if (!connectionEditId || !connectionEditItem) return;
-    await runConnectionAction("delete", connectionEditItem);
-    closeToolEditor($("#connection-editor"));
+    if (await runConnectionAction("delete", connectionEditItem)) closeToolEditor($("#connection-editor"));
   });
   $("#connection-agent-open")?.addEventListener("click", openConnectionsAgent);
 }

@@ -208,11 +208,11 @@
             <div class="tool-editor-head"><div><span class="home-kicker">Connection</span><h2 id="connection-form-title">Add connection</h2></div><button type="button" id="connection-editor-close" aria-label="Close connection editor">×</button></div>
             <form id="connection-form" autocomplete="off">
               <div class="tool-form-pair">
-                <label>Provider<select id="connection-provider"><option value="resend">Resend</option><option value="mautic-smtp">Mautic SMTP</option><option value="stripe">Stripe</option><option value="activepieces">Activepieces</option><option value="mcp">MCP</option><option value="api">API</option></select></label>
+                <label>Provider<select id="connection-provider"><option value="resend">Resend</option><option value="stripe">Stripe</option><option value="activepieces">Activepieces</option><option value="mcp">MCP</option><option value="api">API</option></select></label>
               </div>
               <label>Name<input id="connection-name" maxlength="120" required placeholder="Blockwise Resend"></label>
               <div class="tool-form-pair">
-                <label>Scope<select id="connection-scope-kind"><option value="global">All Frank</option><option value="project">Project</option><option value="tool">Tool</option><option value="agent">Agent</option><option value="service">Service</option></select></label>
+                <label>Scope<select id="connection-scope-kind"><option value="global">All Frank</option><option value="project">Project</option></select></label>
                 <label>Scope ID<input id="connection-scope-id" maxlength="80" placeholder="blockwise"></label>
               </div>
               <label>Provider connection reference<input id="connection-ref" maxlength="300" placeholder="ap://connections/resend-main"></label>
