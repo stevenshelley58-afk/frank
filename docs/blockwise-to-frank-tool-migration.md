@@ -607,10 +607,22 @@ This decision is fixed for every tool:
 - Preserve the existing trace, slot-trace, and trace-view hooks while wiring
   the shared graph projection.
 
-Integration is blocked until the final graph specification path and the
-`ToolManifestAdapter` fields are available. Until then, agents may write
-fixtures and contract tests only; they must not invent adapter fields or
-create a temporary renderer.
+The accepted contract is
+`docs/specs/shared-graph-trace-contract.md` at source revision
+`390fcf7a0bcc226526d9cb88e20a01f963d3b030`. The canonical Tool files remain
+`schema://frank.tool-app-manifest/v1`; the adapter creates only an in-memory or
+disposable `schema://frank.graph/v1` projection. Do not create a second
+checked-in manifest or pipeline.
+
+The one shared implementation registers `graph`, `slot-graph`,
+`entity-graph`, `graph-workbench`, and `tool-manifest`. The existing `trace`
+and `slot-trace` hosts use the same workbench with a `run.trace` lens, and
+`trace-view` remains a deprecated compatibility alias. A Tool keeps
+`default_widget_ids: []` until `/api/capabilities` advertises
+`frank.graph.v1`; only then may the shared runtime select `entity-graph`.
+Integration remains BLOCKED until this shared implementation lands on the
+accepted dashboard base. Domain agents must not invent adapter fields, widget
+IDs, routes, or a temporary renderer.
 
 ### 5.4 OTel-style traces and events
 
@@ -1062,8 +1074,8 @@ The handoff must name:
   copying or exposing their contents;
 - supervisor stop command and process evidence;
 - release IDs/checksums consumed by Blockwise;
-- the final graph specification path and `ToolManifestAdapter` fields, or a
-  BLOCK status showing that integration correctly waited for them;
+- the accepted graph specification path, source revision, exact shared
+  registration IDs, and `ToolManifestAdapter` verification evidence;
 - traces for representative template, research/prospect, mail/outreach, and
   content runs;
 - acceptance matrix results and browser viewport evidence;
