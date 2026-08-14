@@ -21,6 +21,7 @@
   "pipelines": [{
     "schema": "schema://frank.tool-app-pipeline/v1",
     "id": "policy-gated-outbound",
+    "version": "1.0.0",
     "nodes": [
       {"id": "list", "kind": "list"},
       {"id": "sequence", "kind": "sequence"},

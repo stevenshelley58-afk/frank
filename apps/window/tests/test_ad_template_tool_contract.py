@@ -89,6 +89,7 @@ class AdTemplateToolContractTest(unittest.TestCase):
         self.assertIsInstance(self.manifest["thresholds"], list)
         pipeline = self.manifest["pipelines"][0]
         self.assertEqual(pipeline["schema"], "schema://frank.tool-app-pipeline/v1")
+        self.assertEqual(pipeline["version"], "1.0.0")
         self.assertTrue(all(set(node) == {"id", "kind"} for node in pipeline["nodes"]))
         self.assertTrue(all(set(edge) == {"from", "to"} for edge in pipeline["edges"]))
         self.assertTrue(all("_" not in node["id"] for node in pipeline["nodes"]))
@@ -125,7 +126,7 @@ class AdTemplateToolContractTest(unittest.TestCase):
             "settings_revision": "revision-1",
             "settings_ref": "hermes://settings/revision-1",
             "pipeline_id": "reference-clone-release",
-            "pipeline_version": "schema://frank.tool-app-pipeline/v1",
+            "pipeline_version": "1.0.0",
             "consumer_compatibility": {"schema": "schema://frank.release-consumer/v1", "version": "1.0.0"},
             "artifact_refs": ["hermes://artifacts/release-1/feed"],
             "artifact_provenance": [{"artifact_ref": "hermes://artifacts/release-1/feed", "kind": "finished-raster", "created_at": "2026-08-14T00:00:00Z", "receipt_ref": "hermes://receipts/artifact-1"}],

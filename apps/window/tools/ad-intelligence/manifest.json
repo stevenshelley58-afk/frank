@@ -25,6 +25,7 @@
   "pipelines": [{
     "schema": "schema://frank.tool-app-pipeline/v1",
     "id": "ad-radar-pipeline",
+    "version": "1.0.0",
     "nodes": [
       {"id": "discover", "kind": "hermes-command"},
       {"id": "resolve", "kind": "hermes-command"},

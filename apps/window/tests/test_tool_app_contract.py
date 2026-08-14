@@ -28,7 +28,7 @@ def manifest(**overrides):
             "style_preset": {"type": "string"}, "model_policy": {"type": "object"},
             "connection_id": {"type": "string"}, "capabilities": {"type": "array"}, "schedule": {"type": "string"},
             "threshold": {"type": "number"}, "approval_gate": {"type": "boolean"},
-        }}, "pipelines": [{"schema": PIPELINE_SCHEMA, "nodes": [
+        }}, "pipelines": [{"schema": PIPELINE_SCHEMA, "id": "weekly-report", "version": "1.0.0", "nodes": [
             {"id": "start", "kind": "trigger"}, {"id": "run", "kind": "hermes-command"}],
             "edges": [{"from": "start", "to": "run"}]}],
         "capabilities": ["reports.read"], "connectors": [], "schedules": [],
@@ -89,13 +89,15 @@ class ToolAppContractTest(unittest.TestCase):
         self.assertEqual(validate_manifest(manifest(settings={"schema": SETTING_SCHEMA, "properties": {"connection_id": {"type": "string"}, "capabilities": {"type": "array"}}}))["id"], "weekly-report")
 
     def test_pipeline_is_acyclic_and_has_known_edges(self):
-        cyclic = {"schema": PIPELINE_SCHEMA, "nodes": [{"id": "a", "kind": "step"}, {"id": "b", "kind": "step"}], "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "a"}]}
+        cyclic = {"schema": PIPELINE_SCHEMA, "id": "cycle", "version": "1.0.0", "nodes": [{"id": "a", "kind": "step"}, {"id": "b", "kind": "step"}], "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "a"}]}
         with self.assertRaises(ContractError):
             validate_pipeline(cyclic)
         with self.assertRaises(ContractError):
-            validate_pipeline({"schema": PIPELINE_SCHEMA, "nodes": [{"id": "a", "kind": "step", "callback": "run"}], "edges": []})
+            validate_pipeline({"schema": PIPELINE_SCHEMA, "id": "bad-node", "version": "1.0.0", "nodes": [{"id": "a", "kind": "step", "callback": "run"}], "edges": []})
         with self.assertRaises(ContractError):
-            validate_pipeline({"schema": PIPELINE_SCHEMA, "nodes": [{"id": "a", "kind": "step"}, {"id": "b", "kind": "step"}], "edges": [{"from": "a", "to": "b", "handler": "run"}]})
+            validate_pipeline({"schema": PIPELINE_SCHEMA, "id": "bad-edge", "version": "1.0.0", "nodes": [{"id": "a", "kind": "step"}, {"id": "b", "kind": "step"}], "edges": [{"from": "a", "to": "b", "handler": "run"}]})
+        with self.assertRaises(ContractError):
+            validate_pipeline({"schema": PIPELINE_SCHEMA, "id": "unversioned", "nodes": [], "edges": []})
 
     def test_settings_are_scoped_optimistic_and_immutable(self):
         store = SettingRevisionStore(["project"])

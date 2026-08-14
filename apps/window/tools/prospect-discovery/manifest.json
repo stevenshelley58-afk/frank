@@ -17,6 +17,7 @@
   "pipelines": [{
     "schema": "schema://frank.tool-app-pipeline/v1",
     "id": "discover-enrich-qualify",
+    "version": "1.0.0",
     "nodes": [
       {"id": "discover", "kind": "discover"},
       {"id": "enrich", "kind": "enrich"},

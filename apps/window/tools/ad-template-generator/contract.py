@@ -262,6 +262,8 @@ def validate_release(release: Mapping[str, Any] | ImmutableRelease) -> list[str]
             errors.extend(_safe_ref(item, f"release.consumer_compatibility.{key}"))
     if value.get("status") != "released":
         errors.append("release.status must be released")
+    if value.get("tool_id") != MANIFEST["id"]:
+        errors.append("release.tool_id is unsupported")
     if value.get("immutable") is not True or value.get("source_free") is not True:
         errors.append("release must be immutable and source_free")
     if not isinstance(value.get("release_hash"), str) or not SHA256.fullmatch(value.get("release_hash", "")):
@@ -270,7 +272,7 @@ def validate_release(release: Mapping[str, Any] | ImmutableRelease) -> list[str]
         errors.append("release.release_hash is not the canonical release hash")
     if value.get("pipeline_id") != PIPELINE_ENTRY["id"]:
         errors.append("release.pipeline_id is unsupported")
-    if value.get("pipeline_version") != PIPELINE_ENTRY["schema"]:
+    if value.get("pipeline_version") != PIPELINE_ENTRY["version"]:
         errors.append("release.pipeline_version is unsupported")
     artifact_refs = value.get("artifact_refs")
     if not isinstance(artifact_refs, (list, tuple)) or not artifact_refs:

@@ -39,6 +39,7 @@ class AdIntelligenceToolTest(unittest.TestCase):
         self.assertEqual(declarative["schema"], "schema://frank.tool-app-manifest/v1")
         self.assertEqual(declarative["release_schema"], "schema://frank.ad-intelligence-release/v1")
         pipeline = declarative["pipelines"][0]
+        self.assertEqual(pipeline["version"], "1.0.0")
         self.assertEqual([node["id"] for node in pipeline["nodes"]][-2:], ["media-qa", "publish"])
         self.assertEqual(len(pipeline["edges"]), 6)
         self.assertIn("run", ALLOWED_ACTIONS)
@@ -110,6 +111,9 @@ class AdIntelligenceToolTest(unittest.TestCase):
         self.assertEqual(release.to_dict()["status"], "released")
         self.assertEqual(release.to_dict()["schema"], "schema://frank.ad-intelligence-release/v1")
         self.assertEqual(release.to_dict()["tool_id"], "ad-intelligence")
+        self.assertEqual(release.to_dict()["pipeline_id"], "ad-radar-pipeline")
+        self.assertEqual(release.to_dict()["pipeline_version"], "1.0.0")
+        self.assertEqual(release.to_dict()["consumer_compatibility"], ["ad-intelligence-public-v1"])
         with self.assertRaises(TypeError): release.public_export["project"] = "other"
 
         private_payload = json.loads(json.dumps(payload))

@@ -24,6 +24,7 @@
   "pipelines": [
     {
       "id": "reference-clone-release",
+      "version": "1.0.0",
       "schema": "schema://frank.tool-app-pipeline/v1",
       "nodes": [
         {"id": "source", "kind": "source"},

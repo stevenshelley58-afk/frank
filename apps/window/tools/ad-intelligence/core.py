@@ -23,6 +23,10 @@ PIPELINE_STAGES = _load_pipeline_stages()
 RELEASE_SCHEMA = "schema://frank.ad-intelligence-release/v1"
 TOOL_ID = "ad-intelligence"
 
+_PIPELINE_MANIFEST = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["pipelines"][0]
+PIPELINE_ID = _PIPELINE_MANIFEST["id"]
+PIPELINE_VERSION = _PIPELINE_MANIFEST["version"]
+
 _HTML = re.compile(r"</?[a-z][^>]*>|javascript\s*:", re.IGNORECASE)
 _FORBIDDEN_KEY = re.compile(
     r"^(?:email|phone|prospect|prospectid|outreach|outreachsequence|agentcontacts?|contactid|recipient|leademail|phonenumber|contactemail|promptref|promptversion|model|rationale|rawpayload|secret|token|apikey|password)$",
@@ -305,14 +309,21 @@ class AdIntelligenceRelease:
     public_export: Any
     schema: str = RELEASE_SCHEMA
     tool_id: str = TOOL_ID
+    pipeline_id: str = PIPELINE_ID
+    pipeline_version: str = PIPELINE_VERSION
+    consumer_compatibility: tuple[str, ...] = ("ad-intelligence-public-v1",)
 
     def __post_init__(self):
         if self.schema != RELEASE_SCHEMA or self.tool_id != TOOL_ID:
             raise ValueError("release schema or tool identity is invalid")
+        if self.pipeline_id != PIPELINE_ID or self.pipeline_version != PIPELINE_VERSION:
+            raise ValueError("release pipeline identity or version is invalid")
         for field_name, value in (("release_id", self.release_id), ("version", self.version), ("status", self.status), ("project_scope", self.project_scope), ("checksum", self.checksum)):
             _safe_text(value, field_name)
         if self.status != "released" or self.immutable is not True or not self.qa_approved or not self.pii_sanitized or not self.secret_sanitized: raise ValueError("release must be immutable, released, approved, and sanitized")
         for field_name, values in (("provenance_refs", self.provenance_refs), ("trace_refs", self.trace_refs), ("settings_refs", self.settings_refs)): _validate_refs(values, field_name)
+        _validate_refs(self.consumer_compatibility, "consumer_compatibility")
+        if not self.consumer_compatibility: raise ValueError("consumer_compatibility must not be empty")
         payload = _validate_release_export(self.public_export)
         checksum = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
         if checksum != self.checksum: raise ValueError("release checksum does not match public export")
@@ -321,6 +332,8 @@ class AdIntelligenceRelease:
     def to_dict(self) -> dict[str, Any]:
         result = {
             "schema": self.schema, "tool_id": self.tool_id,
+            "pipeline_id": self.pipeline_id, "pipeline_version": self.pipeline_version,
+            "consumer_compatibility": list(self.consumer_compatibility),
             "release_id": self.release_id, "version": self.version, "status": self.status,
             "immutable": self.immutable, "project_scope": self.project_scope,
             "checksum": self.checksum, "provenance_refs": list(self.provenance_refs),
@@ -331,10 +344,10 @@ class AdIntelligenceRelease:
         result["public_export"] = _thaw(self.public_export)
         return result
 
-def build_release(release_id: str, version: str, project_scope: str, public_export: dict[str, Any], *, provenance_refs: tuple[str, ...] = (), trace_refs: tuple[str, ...] = (), settings_refs: tuple[str, ...] = ()) -> AdIntelligenceRelease:
+def build_release(release_id: str, version: str, project_scope: str, public_export: dict[str, Any], *, provenance_refs: tuple[str, ...] = (), trace_refs: tuple[str, ...] = (), settings_refs: tuple[str, ...] = (), consumer_compatibility: tuple[str, ...] = ("ad-intelligence-public-v1",)) -> AdIntelligenceRelease:
     payload = _validate_release_export(public_export)
     checksum = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-    return AdIntelligenceRelease(release_id, version, "released", True, project_scope, checksum, provenance_refs, trace_refs, settings_refs, True, True, True, payload)
+    return AdIntelligenceRelease(release_id, version, "released", True, project_scope, checksum, provenance_refs, trace_refs, settings_refs, True, True, True, payload, consumer_compatibility=consumer_compatibility)
 
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict): return {key: _json_ready(child) for key, child in value.items()}

@@ -121,8 +121,14 @@ def validate_scope(scope: Any) -> dict[str, str]:
 
 def validate_pipeline(pipeline: Any) -> dict[str, Any]:
     _require(pipeline, dict, "pipeline")
+    if set(pipeline) != {"schema", "id", "version", "nodes", "edges"}:
+        raise ContractError("pipeline fields are restricted")
     if pipeline.get("schema") != PIPELINE_SCHEMA:
         raise ContractError("pipeline schema must be the supported version")
+    if not isinstance(pipeline.get("id"), str) or not _ID.fullmatch(pipeline["id"]):
+        raise ContractError("pipeline id must be a safe kebab-case identifier")
+    if not isinstance(pipeline.get("version"), str) or not _VERSION.fullmatch(pipeline["version"]):
+        raise ContractError("pipeline version must be semver")
     nodes = pipeline.get("nodes")
     edges = pipeline.get("edges", [])
     _require(nodes, list, "pipeline.nodes")
