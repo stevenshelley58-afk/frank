@@ -78,10 +78,32 @@ SECRET_VALUE_PATTERNS = (
 CONNECTOR_STATUSES = {"unconfigured", "configured", "ready", "error"}
 EXTERNAL_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,239}$")
 DEFAULT_PROJECTS = [
-    {"id": "blockwise", "name": "Blockwise", "root": "blockwise"},
-    {"id": "merrypaws", "name": "Merrypaws", "root": "merrypaws"},
-    {"id": "elfwonder", "name": "Elf & Wonder", "root": "elfwonder"},
-    {"id": "pavone", "name": "Pavone", "root": "pavone"},
+    {
+        "id": "blockwise", "name": "Blockwise", "root": "blockwise",
+        "blurb": "Meta ads workflow for real-estate teams.",
+        "live": "https://blockwise.sale", "health": "https://blockwise.sale/api/health",
+        "capabilities": ["application.health", "repository.activity", "repository.summary", "project.files", "accounts.directory", "connections.read", "analytics.setup"],
+        "default_widgets": ["entity-overview", "application-status", "repository-activity", "repository-status", "project-files", "accounts-summary", "connection-attention", "analytics-summary"],
+    },
+    {
+        "id": "merrypaws", "name": "Merrypaws", "root": "merrypaws",
+        "blurb": "Merrypaws project workspace and storefront operations.",
+        "capabilities": ["repository.activity", "repository.summary", "project.files", "accounts.directory", "connections.read", "analytics.setup"],
+        "default_widgets": ["entity-overview", "repository-activity", "repository-status", "project-files", "accounts-summary", "connection-attention", "analytics-summary"],
+    },
+    {
+        "id": "elfwonder", "name": "Elf & Wonder", "root": "elfandwonder",
+        "blurb": "Elf & Wonder project workspace.",
+        "capabilities": ["repository.activity", "repository.summary", "project.files", "connections.read", "analytics.setup"],
+        "default_widgets": ["entity-overview", "repository-activity", "repository-status", "project-files", "connection-attention", "analytics-summary"],
+    },
+    {
+        "id": "pavone", "name": "Pavone", "root": "pavone-demo",
+        "blurb": "Pavone automotive project workspace.",
+        "live": "https://pavoneauto.com", "health": "https://pavoneauto.com/api/health",
+        "capabilities": ["application.health", "repository.activity", "repository.summary", "project.files", "accounts.directory", "connections.read", "analytics.setup"],
+        "default_widgets": ["entity-overview", "application-status", "repository-activity", "repository-status", "project-files", "accounts-summary", "connection-attention", "analytics-summary"],
+    },
 ]
 
 
@@ -332,13 +354,14 @@ def hermes_reachable() -> dict:
     if not HERMES_KEY:
         return {"ok": False, "reason": "HERMES_API_KEY is not set"}
     try:
-        urllib.request.urlopen(
+        with urllib.request.urlopen(
             urllib.request.Request(
                 f"{HERMES_URL.rstrip('/')}/v1/health",
                 headers={"Authorization": f"Bearer {HERMES_KEY}"},
             ),
             timeout=3,
-        )
+        ):
+            pass
         return {"ok": True}
     except urllib.error.HTTPError as err:
         if err.code in (200, 401, 403):
@@ -346,6 +369,29 @@ def hermes_reachable() -> dict:
         return {"ok": False, "reason": f"HTTP {err.code}"}
     except Exception as err:
         return {"ok": False, "reason": str(err).split("\n")[0][:180]}
+
+
+def hermes_session_summaries() -> dict:
+    """Read-only home data from the existing Hermes sessions API.
+
+    This callback is intentionally separate from the chat routes. It returns
+    the same public, redacted session shape used by the existing session list
+    endpoint and never exposes messages, credentials, or Hermes state files.
+    """
+    if not HERMES_KEY:
+        return {"ok": False, "reason": "HERMES_API_KEY is not set", "sessions": []}
+    try:
+        payload = hermes_request("/api/sessions?limit=20&include_children=true", timeout=3)
+        raw_sessions = payload.get("sessions", []) if isinstance(payload, dict) else []
+        if not isinstance(raw_sessions, list):
+            return {"ok": False, "reason": "Hermes returned an invalid session summary", "sessions": []}
+        return {
+            "ok": True,
+            "profile": HERMES_PROFILE.strip() or "default",
+            "sessions": [_public_hermes_session(item) for item in raw_sessions if isinstance(item, dict)],
+        }
+    except Exception as err:
+        return {"ok": False, "reason": str(err).split("\n", 1)[0][:180], "sessions": []}
 
 
 @app.get("/api/health")
@@ -360,15 +406,16 @@ def projects():
 
 
 def _project_items() -> list[dict]:
-    p = WEB / "data" / "projects.json"
-    if p.exists():
-        try:
-            data = json.loads(p.read_text(encoding="utf-8"))
-            if isinstance(data, dict) and isinstance(data.get("projects"), list):
-                return data["projects"]
-        except (OSError, json.JSONDecodeError):
-            pass
-    return DEFAULT_PROJECTS
+    # Keep the canonical profile source in this tracked module. Return copies
+    # so API consumers and home providers cannot mutate the process registry.
+    return [
+        {
+            **item,
+            "capabilities": list(item.get("capabilities", [])),
+            "default_widgets": list(item.get("default_widgets", [])),
+        }
+        for item in DEFAULT_PROJECTS
+    ]
 
 
 @app.get("/api/accounts")
@@ -839,6 +886,7 @@ home_platform.configure(
     project_loader=_project_items,
     account_loader=lambda: list(_ensure_accounts().get("accounts", [])),
     hermes_health=hermes_reachable,
+    hermes_sessions=hermes_session_summaries,
     roots=ROOTS,
 )
 app.register_blueprint(home_platform.api)

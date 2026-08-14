@@ -4,6 +4,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
 COPY home_platform.py .
+COPY home_defaults.py .
+COPY home_providers.py .
 COPY web /web
 ENV FRANK_WEB=/web
 ENV PORT=8080

@@ -50,13 +50,19 @@ def main() -> None:
     assert status == 200 and updated["connection"]["status"] == "verified"
 
     status, home = request("/api/homes/project/blockwise")
-    assert status == 200 and home["entity"] == {
-        "id": "blockwise", "kind": "project", "name": "Blockwise",
-        "project": home["entity"]["project"],
-    }
+    assert status == 200
+    assert home["entity"]["id"] == "blockwise"
+    assert home["entity"]["kind"] == "project"
+    assert home["entity"]["name"] == "Blockwise"
+    assert home["entity"]["profile"]["root"] == "blockwise"
+    assert [item["widget_id"] for item in home["instances"]] == [
+        "entity-overview", "application-status", "repository-activity",
+        "repository-status", "project-files", "accounts-summary",
+        "connection-attention", "analytics-summary",
+    ]
+    connection_instance = next(item for item in home["instances"] if item["widget_id"] == "connection-attention")
     instances = [
-        {**instance, "config": {"connection_id": connection["id"]}}
-        if instance["widget_id"] == "connections-summary" else instance
+        instance
         for instance in home["instances"]
     ]
     status, saved = request("/api/homes/project/blockwise", method="PUT", payload={
@@ -64,12 +70,29 @@ def main() -> None:
     })
     assert status == 200 and saved["revision"] == home["revision"] + 1
 
-    connection_instance = next(item for item in saved["instances"] if item["widget_id"] == "connections-summary")
+    connection_instance = next(item for item in saved["instances"] if item["widget_id"] == "connection-attention")
     status, snapshot = request(
         f"/api/homes/project/blockwise/widgets/{connection_instance['instance_id']}"
     )
-    assert status == 200 and snapshot["data"]["counts"]["verified"] >= 1
-    assert snapshot["data"]["status_is_recorded"] is True
+    assert status == 200
+    assert snapshot["status"] == "ready"
+    assert snapshot["summary"] == "No connection setup, verification, or error items are recorded."
+    assert snapshot["data"]["rows"] == []
+
+    status, central_summary = request(
+        "/api/homes/tool/connections/widgets/connections-summary-1"
+    )
+    assert status == 200
+    assert central_summary["status"] == "ready"
+    assert central_summary["data"]["counts"]["verified"] >= 1
+    assert any(item["id"] == connection["id"] for item in central_summary["data"]["connections"])
+
+    status, central_coverage = request(
+        "/api/homes/tool/connections/widgets/provider-coverage-1"
+    )
+    assert status == 200
+    assert central_coverage["data"]["verified"] >= 1
+    assert next(row for row in central_coverage["data"]["rows"] if row["provider"] == "activepieces")["status"] == "verified"
 
     status, _ = request("/api/connections", method="POST", payload={
         "provider": "resend", "name": f"Unsafe {suffix}", "scope_kind": "global",

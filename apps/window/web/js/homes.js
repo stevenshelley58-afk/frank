@@ -307,7 +307,11 @@ function connectionOptions(instance, manifest) {
   none.value = "";
   none.textContent = "Automatic / none";
   select.append(none);
-  for (const item of homeState.connections.filter((connection) => connection.scope_kind === "global" || (connection.scope_kind === homeState.home.entity.kind && connection.scope_id === homeState.home.entity.id))) {
+  const isCentralConnections = homeState.home.entity.kind === "tool" && homeState.home.entity.id === "connections";
+  const availableConnections = isCentralConnections
+    ? homeState.connections
+    : homeState.connections.filter((connection) => connection.scope_kind === "global" || (connection.scope_kind === homeState.home.entity.kind && connection.scope_id === homeState.home.entity.id));
+  for (const item of availableConnections) {
     const option = document.createElement("option");
     option.value = item.id;
     option.textContent = `${item.name} · ${String(item.status || "").replace("_", " ")}`;
@@ -324,19 +328,114 @@ function connectionOptions(instance, manifest) {
   return label;
 }
 
+const SNAPSHOT_STATUSES = new Set(["ready", "recorded", "verified", "empty", "setup_needed", "attention", "error", "unavailable"]);
+const INTERNAL_VIEWS = new Set(["hub", "files", "tools", "trace", "releases", "project", "entity-home", "accounts", "connections", "widget-builder", "campaigns"]);
+const INTERNAL_KINDS = new Set(["project", "tool", "agent", "service"]);
+
+function displayStatus(value) {
+  const status = String(value || "unavailable").toLowerCase();
+  return SNAPSHOT_STATUSES.has(status) ? status : "unavailable";
+}
+
+function displayValue(value, unit = "") {
+  if (value === null || value === undefined || value === "") return "-";
+  if (typeof value === "number" && Number.isFinite(value)) return `${value.toLocaleString()}${unit ? ` ${unit}` : ""}`;
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  return `${String(value)}${unit ? ` ${unit}` : ""}`;
+}
+
+function scalarValue(value) {
+  return value === null || value === undefined || ["string", "number", "boolean"].includes(typeof value) ? value : "";
+}
+
+function safeTimestamp(value) {
+  if (!value) return null;
+  const numeric = typeof value === "number" || (typeof value === "string" && value.trim() !== "" && Number.isFinite(Number(value))) ? Number(value) : NaN;
+  const normalized = Number.isFinite(numeric) ? (Math.abs(numeric) < 100000000000 ? numeric * 1000 : numeric) : value;
+  const date = new Date(normalized);
+  if (Number.isNaN(date.valueOf())) return null;
+  const time = node("time", "home-timestamp", date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }));
+  time.dateTime = date.toISOString();
+  return time;
+}
+
+function appendStatusNote(body, snapshot) {
+  const status = displayStatus(snapshot.status);
+  const messages = {
+    recorded: "Recorded in Frank; the provider remains authoritative.",
+    verified: "Verified by the configured provider adapter.",
+    setup_needed: "Setup is required before live data is available.",
+    attention: "This provider needs attention before it can be treated as healthy.",
+    error: "The provider returned an error; check the linked setup or service status.",
+    empty: "No records are available yet.",
+    unavailable: "Live data is unavailable from this provider.",
+  };
+  if (snapshot.data?.status_is_recorded || messages[status]) body.append(node("p", "home-truth", messages[status] || "Recorded in Frank; the provider remains authoritative."));
+}
+
+function validInternalTarget(item) {
+  const target = item?.target;
+  if (!target || typeof target !== "object") return null;
+  if (target.view && INTERNAL_VIEWS.has(target.view)) return { view: target.view };
+  if (!INTERNAL_KINDS.has(target.kind) || !/^[a-z0-9][a-z0-9._-]{0,79}$/.test(String(target.id || ""))) return null;
+  return { kind: target.kind, id: String(target.id), name: String(target.name || target.id) };
+}
+
+function safeExternalUrl(value) {
+  try {
+    const url = new URL(String(value || ""), window.location.href);
+    if (url.protocol !== "https:") return null;
+    if (url.username || url.password) return null;
+    return url.href;
+  } catch {
+    return null;
+  }
+}
+
+function appendSnapshotAction(parent, item) {
+  const label = String(item?.label || "Open").slice(0, 120);
+  const internal = validInternalTarget(item);
+  if (item?.kind === "internal" && internal) {
+    const action = button(label, () => {
+      if (internal.view) window.dispatchEvent(new CustomEvent("frank:view", { detail: internal.view }));
+      else window.dispatchEvent(new CustomEvent("frank:entity-home", { detail: internal }));
+    }, "home-inline-button");
+    parent.append(action);
+    return true;
+  }
+  if (item?.kind !== "external") return false;
+  const url = safeExternalUrl(item.url);
+  if (!url) return false;
+  const link = node("a", "tool-link", label);
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  parent.append(link);
+  return true;
+}
+
 function renderSnapshot(body, snapshot) {
   body.replaceChildren();
-  const summary = node("p", "home-summary", snapshot.summary || "No summary available.");
-  const status = node("span", `home-status-pill status-${snapshot.status || "unavailable"}`, String(snapshot.status || "unavailable").replaceAll("_", " "));
+  const summary = node("p", "home-summary", scalarValue(snapshot.summary) || "No summary available.");
+  const statusValue = displayStatus(snapshot.status);
+  const status = node("span", `home-status-pill status-${statusValue}`, statusValue.replaceAll("_", " "));
   body.append(status, summary);
 
   const data = snapshot.data || {};
   const metrics = [];
-  if (Number.isInteger(data.customers)) metrics.push(["Customers", data.customers]);
-  if (Number.isInteger(data.attention)) metrics.push(["Attention", data.attention]);
-  if (Number.isInteger(data.running)) metrics.push(["Running", data.running]);
-  if (Number.isInteger(data.waiting)) metrics.push(["Waiting", data.waiting]);
-  if (data.branch) metrics.push(["Branch", data.branch]);
+  const metricKeys = ["customers", "attention", "running", "waiting", "files", "folders", "custom", "recorded", "verified", "configured", "setup_needed", "error", "total"];
+  for (const metric of Array.isArray(data.metrics) ? data.metrics : []) {
+    if (!metric || typeof metric !== "object" || !metric.label) continue;
+    const value = scalarValue(metric.value);
+    if (value !== "") metrics.push([String(metric.label), displayValue(value, metric.unit)]);
+  }
+  for (const key of metricKeys) if (Number.isFinite(data[key]) && Number.isInteger(data[key])) metrics.push([key.replaceAll("_", " "), data[key]]);
+  if (data.counts && typeof data.counts === "object" && !Array.isArray(data.counts)) {
+    for (const key of ["recorded", "verified", "configured", "connected", "setup_needed", "error", "total"]) {
+      if (Number.isFinite(data.counts[key]) && Number.isInteger(data.counts[key])) metrics.push([key.replaceAll("_", " "), data.counts[key]]);
+    }
+  }
+  if (scalarValue(data.branch)) metrics.push(["Branch", data.branch]);
   if (metrics.length) {
     const grid = node("div", "home-metrics");
     for (const [label, value] of metrics) {
@@ -346,29 +445,54 @@ function renderSnapshot(body, snapshot) {
     }
     body.append(grid);
   }
-  if (data.description) body.append(node("p", "quiet", data.description));
-  if (Array.isArray(data.connections) && data.connections.length) {
+  if (scalarValue(data.description)) body.append(node("p", "quiet", data.description));
+  const rowsData = [
+    ...(Array.isArray(data.rows) ? data.rows : []),
+    ...(Array.isArray(data.connections) ? data.connections : []),
+    ...(Array.isArray(data.recent) ? data.recent : []),
+  ];
+  if (rowsData.length) {
     const rows = node("ul", "home-data-rows");
-    for (const item of data.connections) {
+    for (const item of rowsData) {
+      if (!item || typeof item !== "object") continue;
       const row = node("li");
-      row.append(node("strong", "", item.name || item.provider), node("span", "", String(item.status || "").replace("_", " ")));
+      const primaryValue = scalarValue(item.subject || item.name || item.title || item.provider || item.label || "Item");
+      const detailValue = scalarValue(item.author || item.detail || item.status || item.kind || item.value || "");
+      const primary = node("strong", "", primaryValue);
+      const detail = node("span", "", String(detailValue).replaceAll("_", " "));
+      row.append(primary, detail);
+      const timestamp = safeTimestamp(item.timestamp || item.updated_at || item.created_at);
+      if (timestamp) row.append(timestamp);
       rows.append(row);
     }
     body.append(rows);
   }
-  if (data.status_is_recorded) body.append(node("p", "home-truth", "Recorded in Frank; the provider remains authoritative."));
-  if (Array.isArray(snapshot.links) && snapshot.links.length) {
-    const links = node("div", "home-links");
-    for (const item of snapshot.links) {
-      if (!String(item.url || "").startsWith("https://")) continue;
-      const link = node("a", "tool-link", item.label || "Open");
-      link.href = item.url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      links.append(link);
+  if (Array.isArray(data.timeline) && data.timeline.length) {
+    const timeline = node("ol", "home-data-rows home-timeline");
+    for (const item of data.timeline) {
+      if (!item || typeof item !== "object") continue;
+      const row = node("li");
+      row.append(node("strong", "", String(item.title || item.label || item.event || "Event")));
+      const detail = scalarValue(item.detail || item.description);
+      if (detail) row.append(node("span", "", detail));
+      const timestamp = safeTimestamp(item.timestamp || item.at);
+      if (timestamp) row.append(timestamp);
+      timeline.append(row);
     }
-    body.append(links);
+    if (timeline.childElementCount) body.append(timeline);
   }
+  appendStatusNote(body, snapshot);
+  const actions = [
+    ...(Array.isArray(snapshot.links) ? snapshot.links : []),
+    ...(Array.isArray(snapshot.actions) ? snapshot.actions : []),
+  ];
+  if (actions.length) {
+    const links = node("div", "home-links");
+    actions.forEach((item) => appendSnapshotAction(links, item));
+    if (links.childElementCount) body.append(links);
+  }
+  const generated = safeTimestamp(snapshot.generated_at);
+  if (generated) body.append(generated);
 }
 
 async function loadSnapshot(card, body, instance, generation) {

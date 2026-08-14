@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import home_platform
+import home_providers
 import server
 
 
@@ -29,6 +30,10 @@ class HomePlatformApiTest(unittest.TestCase):
             project_loader=lambda: [{
                 "id": "blockwise", "name": "Blockwise", "root": "blockwise",
                 "live": "https://blockwise.example", "blurb": "Sales intelligence.",
+                "default_widgets": [
+                    "entity-overview", "application-status", "connections-summary",
+                    "accounts-summary", "repository-status", "analytics-summary",
+                ],
             }],
             account_loader=lambda: [
                 {"id": "customer-1", "project_id": "blockwise", "kind": "customer", "status": "ready"},
@@ -38,6 +43,52 @@ class HomePlatformApiTest(unittest.TestCase):
             roots={"vps": Path(self.temp.name) / "vps"},
         )
         self.client = server.app.test_client()
+
+    def test_canonical_project_profiles_are_enriched_and_returned_as_copies(self):
+        profiles = {item["id"]: item for item in server._project_items()}
+        self.assertEqual(profiles["blockwise"]["live"], "https://blockwise.sale")
+        self.assertEqual(profiles["blockwise"]["health"], "https://blockwise.sale/api/health")
+        self.assertEqual(profiles["elfwonder"]["root"], "elfandwonder")
+        self.assertNotIn("live", profiles["merrypaws"])
+        self.assertEqual(profiles["pavone"]["root"], "pavone-demo")
+        self.assertEqual(profiles["pavone"]["live"], "https://pavoneauto.com")
+        profiles["blockwise"]["capabilities"].clear()
+        self.assertTrue(server._project_items()[0]["capabilities"])
+
+    def test_health_probe_is_allowlisted_cached_and_fail_closed(self):
+        class Response:
+            status = 204
+
+            def getcode(self):
+                return self.status
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_args):
+                return False
+
+        home_providers._probe_cache.clear()
+        allowed_urls = {item["health"] for item in server.DEFAULT_PROJECTS if item.get("health")}
+        with patch.object(home_providers, "urlopen", return_value=Response()) as opener:
+            first = home_providers.probe_profile_health(server.DEFAULT_PROJECTS[0], allowed_urls)
+            second = home_providers.probe_profile_health(server.DEFAULT_PROJECTS[0], allowed_urls)
+        self.assertTrue(first["ok"])
+        self.assertFalse(first.get("cached", False))
+        self.assertTrue(second["cached"])
+        opener.assert_called_once()
+
+        with patch.object(home_providers, "urlopen") as opener:
+            rejected = home_providers.probe_profile_health({"health": "https://untrusted.example/health"}, allowed_urls)
+        self.assertFalse(rejected["ok"])
+        self.assertIn("allowlisted", rejected["reason"])
+        opener.assert_not_called()
+
+        home_providers._probe_cache.clear()
+        with patch.object(home_providers, "urlopen", side_effect=OSError("offline")):
+            failed = home_providers.probe_profile_health(server.DEFAULT_PROJECTS[0], allowed_urls)
+        self.assertFalse(failed["ok"])
+        self.assertIn("offline", failed["reason"])
 
     def tearDown(self):
         home_platform.HOME_STORE_FILE = self.original_home_file
@@ -135,6 +186,9 @@ class HomePlatformApiTest(unittest.TestCase):
         }]
         saved = self.client.put("/api/homes/project/blockwise", json={"expected_revision": 0, "instances": instances})
         self.assertEqual(saved.status_code, 200, saved.get_json())
+        custom_snapshot = self.client.get("/api/homes/project/blockwise/widgets/runbook-1").get_json()
+        self.assertEqual(custom_snapshot["status"], "ready")
+        self.assertEqual(custom_snapshot["links"][0]["url"], "https://docs.example/runbook")
         self.assertEqual(self.client.delete(f"/api/widgets/{widget['id']}").status_code, 409)
 
         updated = self.client.patch(f"/api/widgets/{widget['id']}", json={"body": "Updated guidance."})
@@ -181,6 +235,138 @@ class HomePlatformApiTest(unittest.TestCase):
         snapshot = self.client.get("/api/homes/project/blockwise/widgets/connections-summary-1").get_json()
         self.assertTrue(snapshot["data"]["status_is_recorded"])
         self.assertEqual(snapshot["data"]["counts"]["verified"], 1)
+
+    def test_connections_home_is_central_but_project_home_is_scope_limited(self):
+        global_connection = self.client.post("/api/connections", json={
+            "provider": "api", "name": "Global API", "scope_kind": "global",
+            "status": "verified", "connection_ref": "api://global/main",
+        }).get_json()["connection"]
+        project_connection = self.client.post("/api/connections", json={
+            "provider": "resend", "name": "Blockwise mail", "scope_kind": "project",
+            "scope_id": "blockwise", "status": "connected", "connection_ref": "resend://blockwise/main",
+        }).get_json()["connection"]
+        service_connection = self.client.post("/api/connections", json={
+            "provider": "stripe", "name": "Other service", "scope_kind": "service",
+            "scope_id": "elsewhere", "status": "error", "connection_ref": "stripe://elsewhere/main",
+        }).get_json()["connection"]
+
+        central = self.client.get("/api/homes/tool/connections/widgets/connections-summary-1").get_json()
+        names = {item["name"] for item in central["data"]["connections"]}
+        self.assertEqual(names, {global_connection["name"], project_connection["name"], service_connection["name"]})
+
+        project = self.client.get("/api/homes/project/blockwise/widgets/connections-summary-1").get_json()
+        scoped_names = {item["name"] for item in project["data"]["connections"]}
+        self.assertEqual(scoped_names, {global_connection["name"], project_connection["name"]})
+        self.assertEqual(project["status"], "attention")
+
+        central_home = self.client.get("/api/homes/tool/connections").get_json()
+        central_attention = self.client.get("/api/homes/tool/connections/widgets/connection-attention-1").get_json()
+        self.assertIn("await verification", central_attention["summary"])
+        bound = [dict(item, config={"connection_id": service_connection["id"]}) if item["widget_id"] == "connections-summary" else item for item in central_home["instances"]]
+        saved = self.client.put("/api/homes/tool/connections", json={"expected_revision": 0, "instances": bound})
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+
+    def test_provider_coverage_distinguishes_recorded_verified_setup_and_error(self):
+        for provider, name, status, ref in (
+            ("api", "Recorded", "connected", "api://recorded/main"),
+            ("resend", "Verified", "verified", "resend://verified/main"),
+            ("stripe", "Broken", "error", "stripe://broken/main"),
+        ):
+            response = self.client.post("/api/connections", json={
+                "provider": provider, "name": name, "scope_kind": "global",
+                "status": status, "connection_ref": ref,
+            })
+            self.assertEqual(response.status_code, 201, response.get_json())
+        snapshot = self.client.get("/api/homes/tool/connections/widgets/provider-coverage-1").get_json()
+        statuses = {row["provider"]: row["status"] for row in snapshot["data"]["rows"]}
+        self.assertEqual(statuses["api"], "recorded")
+        self.assertEqual(statuses["resend"], "verified")
+        self.assertEqual(statuses["stripe"], "error")
+        self.assertEqual(statuses["activepieces"], "setup_needed")
+        self.assertEqual(snapshot["status"], "error")
+
+    def test_repository_reflog_rows_expose_display_names_without_emails(self):
+        logs = self.project_root / ".git" / "logs"
+        logs.mkdir(parents=True)
+        (logs / "HEAD").write_text(
+            "0" * 40 + " " + "1" * 40 + " Jane Operator <jane@example.com> 1700000000 +0000\tupdate dashboard\n",
+            encoding="utf-8",
+        )
+        rows = home_providers._repo_rows(self.project_root)
+        self.assertEqual(rows[0]["author"], "Jane Operator")
+        self.assertNotIn("@", rows[0]["author"])
+
+    def test_current_tool_home_emitters_resolve_to_named_profiles_and_defaults(self):
+        emitters = {
+            "accounts", "connections", "campaigns", "ad-templates", "widget-builder",
+        }
+        for entity_id in emitters:
+            profile = home_platform.home_defaults.api_entity_profile("tool", entity_id)
+            self.assertIsNotNone(profile, entity_id)
+            self.assertEqual(profile["name"].strip(), profile["name"])
+            self.assertTrue(profile.get("default_widgets"), entity_id)
+            self.assertTrue(home_platform._default_instances("tool", entity_id), entity_id)
+        for profile in home_platform.home_defaults.API_ENTITY_PROFILES.values():
+            self.assertNotIn("quick-links", profile.get("default_widgets", []))
+            self.assertNotIn("work-status", profile.get("default_widgets", []))
+            self.assertNotIn("recent-receipts", profile.get("default_widgets", []))
+
+    def test_entity_profile_registry_validates_copies_and_unknown_widgets_fail_closed(self):
+        manifest = {
+            "id": "registry-fixture",
+            "name": "Registry fixture",
+            "kind": "tool",
+            "blurb": "A test-only declarative profile.",
+            "capabilities": ["fixture.read"],
+            "default_widget_ids": ["entity-overview", "widget-does-not-exist"],
+            "connection_capabilities": ["fixture.read"],
+        }
+        try:
+            registered = home_platform.home_defaults.register_entity_profile(manifest)
+            self.assertEqual(registered["default_widgets"], manifest["default_widget_ids"])
+            registered["capabilities"].append("mutated")
+            manifest["connection_capabilities"].append("mutated")
+            stored = home_platform.home_defaults.api_entity_profile("tool", "registry-fixture")
+            self.assertEqual(stored["capabilities"], ["fixture.read"])
+            self.assertEqual(stored["connection_capabilities"], ["fixture.read"])
+            self.assertEqual(stored["default_widget_ids"], ["entity-overview", "widget-does-not-exist"])
+            instances = home_platform._default_instances("tool", "registry-fixture")
+            self.assertEqual([item["widget_id"] for item in instances], ["entity-overview"])
+        finally:
+            home_platform.home_defaults._REGISTERED_ENTITY_PROFILES.pop("tool:registry-fixture", None)
+
+    def test_entity_profile_registry_rejects_replacing_builtin_connections_or_hermes(self):
+        for kind, entity_id in (("tool", "connections"), ("agent", "hermes")):
+            with self.subTest(kind=kind, entity_id=entity_id):
+                original = home_platform.home_defaults.api_entity_profile(kind, entity_id)
+                replacement = dict(original)
+                replacement.pop("default_widgets", None)
+                replacement["name"] = "Unexpected replacement"
+                with self.assertRaises(ValueError):
+                    home_platform.home_defaults.register_entity_profile(replacement)
+                current = home_platform.home_defaults.api_entity_profile(kind, entity_id)
+                self.assertEqual(current["name"], original["name"])
+
+    def test_entity_profile_registry_rejects_invalid_kind_id_and_fields(self):
+        base = {
+            "id": "registry-invalid",
+            "name": "Invalid fixture",
+            "kind": "tool",
+            "blurb": "Invalid test profile.",
+            "capabilities": [],
+            "default_widget_ids": [],
+            "connection_capabilities": [],
+        }
+        with self.assertRaises(ValueError):
+            home_platform.home_defaults.register_entity_profile({**base, "kind": "project"})
+        with self.assertRaises(ValueError):
+            home_platform.home_defaults.register_entity_profile({**base, "id": "Not Valid"})
+        with self.assertRaises(ValueError):
+            home_platform.home_defaults.register_entity_profile({**base, "unexpected": True})
+        with self.assertRaises(TypeError):
+            home_platform.home_defaults.register_entity_profile({**base, "capabilities": "fixture.read"})
+        with self.assertRaises(ValueError):
+            home_platform.home_defaults.register_entity_profile({**base, "default_widget_ids": ["entity-overview", "entity-overview"]})
 
     def test_connections_reject_provider_keys_tokens_and_payment_data_everywhere(self):
         encode_segment = lambda value: base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip("=")

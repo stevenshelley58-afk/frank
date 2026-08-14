@@ -759,6 +759,10 @@ a { color: inherit; text-decoration: none; }
 .home-data-rows li { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 12px; }
 .home-data-rows li strong { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .home-data-rows li span { color: var(--mute); text-transform: capitalize; }
+.home-data-rows li .home-timestamp { margin-left: auto; white-space: nowrap; text-transform: none; }
+.home-timeline { padding-left: 18px; list-style: decimal; }
+.home-timeline li { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.home-timeline li span { grid-column: 1 / -1; }
 .home-truth { margin-top: 12px; color: var(--mute) !important; font-size: 11px !important; line-height: 1.45; }
 .home-links { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
 .home-error { color: var(--bad) !important; }

@@ -18,6 +18,9 @@ from urllib.parse import urlparse
 from flask import Blueprint, abort, jsonify, request
 from werkzeug.exceptions import HTTPException
 
+import home_defaults
+import home_providers
+
 
 api = Blueprint("home_platform", __name__)
 
@@ -69,6 +72,7 @@ _connections_lock = threading.RLock()
 _project_loader: Callable[[], list[dict]] = lambda: []
 _account_loader: Callable[[], list[dict]] = lambda: []
 _hermes_health: Callable[[], dict] = lambda: {"ok": False, "reason": "not configured"}
+_hermes_sessions: Callable[[], dict] | None = None
 _roots: dict[str, Path] = {}
 
 
@@ -95,11 +99,46 @@ BUILTIN_WIDGETS = [
         "freshness": "on_demand", "accepts_connection": False, "multiple": False,
     },
     {
+        "id": "repository-activity", "version": "1.0.0", "title": "Repository activity",
+        "description": "Recent read-only Git changes from the mounted project checkout.",
+        "surfaces": ["project"], "default_size": "wide",
+        "allowed_sizes": ["medium", "wide"], "provider": "frank.git",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "project-files", "version": "1.0.0", "title": "Project files",
+        "description": "A compact summary of the mounted project root.",
+        "surfaces": ["project"], "default_size": "medium",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.files",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
         "id": "connections-summary", "version": "1.0.0", "title": "Connections",
         "description": "Recorded provider connections and setup issues.",
         "surfaces": sorted(ENTITY_KINDS), "default_size": "medium",
         "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.connections",
         "freshness": "on_demand", "accepts_connection": True, "multiple": False,
+    },
+    {
+        "id": "connection-attention", "version": "1.0.0", "title": "Connection attention",
+        "description": "Setup, verification, and connection errors needing review.",
+        "surfaces": sorted(ENTITY_KINDS), "default_size": "medium",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.connections",
+        "freshness": "poll", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "provider-catalog", "version": "1.0.0", "title": "Provider catalog",
+        "description": "Available provider capabilities and safe setup boundaries.",
+        "surfaces": ["project", "tool", "agent", "service"], "default_size": "wide",
+        "allowed_sizes": ["medium", "wide"], "provider": "frank.connections",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "provider-coverage", "version": "1.0.0", "title": "Provider coverage",
+        "description": "Recorded, verified, setup-needed, and error states by provider.",
+        "surfaces": sorted(ENTITY_KINDS), "default_size": "medium",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.connections",
+        "freshness": "poll", "accepts_connection": False, "multiple": False,
     },
     {
         "id": "accounts-summary", "version": "1.0.0", "title": "Accounts",
@@ -113,6 +152,13 @@ BUILTIN_WIDGETS = [
         "description": "Reachability of the sole Frank brain.",
         "surfaces": ["project", "tool", "agent", "service"], "default_size": "medium",
         "allowed_sizes": ["small", "medium", "wide"], "provider": "hermes.health",
+        "freshness": "poll", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "hermes-session", "version": "1.0.0", "title": "Hermes sessions",
+        "description": "Read-only session and work summaries from Hermes.",
+        "surfaces": sorted(ENTITY_KINDS), "default_size": "wide",
+        "allowed_sizes": ["medium", "wide"], "provider": "hermes.sessions",
         "freshness": "poll", "accepts_connection": False, "multiple": False,
     },
     {
@@ -137,6 +183,13 @@ BUILTIN_WIDGETS = [
         "freshness": "poll", "accepts_connection": True, "multiple": False,
     },
     {
+        "id": "widget-catalog", "version": "1.0.0", "title": "Widget catalog",
+        "description": "Registered widgets and their compatible home surfaces.",
+        "surfaces": ["tool"], "default_size": "wide",
+        "allowed_sizes": ["medium", "wide"], "provider": "frank.widgets",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
         "id": "quick-links", "version": "1.0.0", "title": "Links",
         "description": "Safe shortcuts configured for this home.",
         "surfaces": sorted(ENTITY_KINDS), "default_size": "small",
@@ -145,12 +198,7 @@ BUILTIN_WIDGETS = [
     },
 ]
 
-DEFAULT_WIDGET_IDS = {
-    "project": ["entity-overview", "application-status", "connections-summary", "accounts-summary", "repository-status", "analytics-summary"],
-    "tool": ["entity-overview", "connections-summary", "accounts-summary", "work-status", "recent-receipts"],
-    "agent": ["entity-overview", "hermes-status", "connections-summary", "work-status", "recent-receipts"],
-    "service": ["entity-overview", "application-status", "connections-summary", "analytics-summary", "recent-receipts"],
-}
+DEFAULT_WIDGET_IDS = {kind: list(widget_ids) for kind, widget_ids in home_defaults.KIND_DEFAULT_WIDGET_IDS.items()}
 
 CONNECTION_CATALOG = [
     {
@@ -184,11 +232,13 @@ def configure(
     account_loader: Callable[[], list[dict]],
     hermes_health: Callable[[], dict],
     roots: dict[str, Path],
+    hermes_sessions: Callable[[], dict] | None = None,
 ) -> None:
-    global _project_loader, _account_loader, _hermes_health, _roots
+    global _project_loader, _account_loader, _hermes_health, _hermes_sessions, _roots
     _project_loader = project_loader
     _account_loader = account_loader
     _hermes_health = hermes_health
+    _hermes_sessions = hermes_sessions
     _roots = roots
 
 
@@ -304,8 +354,15 @@ def _project(entity_id: str) -> dict | None:
 
 def _entity(kind: str, entity_id: str) -> dict:
     project = _project(entity_id) if kind == "project" else None
-    name = str(project.get("name")) if project else entity_id.replace("-", " ").replace("_", " ").title()
-    return {"kind": kind, "id": entity_id, "name": name, "project": project}
+    profile = project or home_defaults.api_entity_profile(kind, entity_id)
+    name = str(profile.get("name")) if profile else entity_id.replace("-", " ").replace("_", " ").title()
+    return {
+        "kind": kind,
+        "id": entity_id,
+        "name": name,
+        "project": project,
+        "profile": profile,
+    }
 
 
 def _all_widgets(store: dict | None = None) -> list[dict]:
@@ -317,17 +374,22 @@ def _widget_by_id(widget_id: str, store: dict | None = None) -> dict | None:
     return next((item for item in _all_widgets(store) if item.get("id") == widget_id), None)
 
 
-def _default_instances(kind: str) -> list[dict]:
+def _default_instances(kind: str, entity_id: str, entity: dict | None = None, store: dict | None = None) -> list[dict]:
+    entity = entity or _entity(kind, entity_id)
+    requested = home_defaults.default_widget_ids(kind, entity_id, entity.get("profile"))
     by_id = {item["id"]: item for item in BUILTIN_WIDGETS}
-    return [
-        {
+    result = []
+    for widget_id in requested:
+        manifest = by_id.get(widget_id)
+        if not manifest or kind not in manifest.get("surfaces", []):
+            continue
+        result.append({
             "instance_id": f"{widget_id}-1",
             "widget_id": widget_id,
-            "size": by_id[widget_id]["default_size"],
+            "size": manifest["default_size"],
             "config": {},
-        }
-        for widget_id in DEFAULT_WIDGET_IDS[kind]
-    ]
+        })
+    return result
 
 
 def _clean_widget_config(config: object) -> dict:
@@ -384,7 +446,7 @@ def _clean_instances(raw: object, kind: str, entity_id: str, store: dict) -> lis
             abort(400, "this widget cannot bind a connection")
         if connection_id and connection_id not in connection_records:
             abort(400, "connection does not exist")
-        if connection_id and not _scope_matches(connection_records[connection_id], kind, entity_id):
+        if connection_id and not _connection_allowed_for_home(connection_records[connection_id], kind, entity_id):
             abort(400, "connection is outside this home scope")
         result.append({"instance_id": instance_id, "widget_id": widget_id, "size": size, "config": config})
         seen_instances.add(instance_id)
@@ -395,11 +457,13 @@ def _clean_instances(raw: object, kind: str, entity_id: str, store: dict) -> lis
 def _home_payload(kind: str, entity_id: str, store: dict) -> dict:
     key = f"{kind}:{entity_id}"
     saved = store["homes"].get(key)
+    entity = _entity(kind, entity_id)
+    defaults = _default_instances(kind, entity_id, entity, store)
     return {
         "schema": "schema://frank.home/v1",
-        "entity": _entity(kind, entity_id),
+        "entity": entity,
         "revision": int(saved.get("revision", 0)) if isinstance(saved, dict) else 0,
-        "instances": saved.get("instances", _default_instances(kind)) if isinstance(saved, dict) else _default_instances(kind),
+        "instances": saved.get("instances", defaults) if isinstance(saved, dict) else defaults,
         "updated_at": saved.get("updated_at") if isinstance(saved, dict) else None,
         "max_widgets": MAX_WIDGETS_PER_HOME,
     }
@@ -411,124 +475,49 @@ def _scope_matches(connection: dict, kind: str, entity_id: str) -> bool:
     )
 
 
+def _connection_allowed_for_home(connection: dict, kind: str, entity_id: str) -> bool:
+    """Central Connections can operate on all scopes; other homes are scoped."""
+    return (kind == "tool" and entity_id == "connections") or _scope_matches(connection, kind, entity_id)
+
+
 def _public_connection(item: dict) -> dict:
     return {key: value for key, value in item.items() if key in CONNECTION_PUBLIC_FIELDS}
 
 
-def _snapshot(status: str, summary: str, data: dict | None = None, links: list[dict] | None = None) -> dict:
-    return {
-        "schema": "schema://frank.widget-snapshot/v1",
-        "status": status,
-        "summary": summary,
-        "data": data or {},
-        "links": links or [],
-        "generated_at": _now(),
-        "source_truth": "provider",
-    }
-
-
 def _instance_snapshot(kind: str, entity_id: str, instance: dict) -> dict:
-    widget_id = instance["widget_id"]
     entity = _entity(kind, entity_id)
     config = instance.get("config", {})
-    connections = [
-        item for item in _connection_store().get("connections", [])
-        if _scope_matches(item, kind, entity_id)
-    ]
+    all_connections = _connection_store().get("connections", [])
+    # Connections is the central control-plane home and must see every scope;
+    # every other home receives only global plus its exact entity scope.
+    connections = [item for item in all_connections if _connection_allowed_for_home(item, kind, entity_id)]
     bound = next((item for item in connections if item.get("id") == config.get("connection_id")), None)
-
-    if widget_id == "entity-overview":
-        project = entity.get("project") or {}
-        return _snapshot("ready", f"{entity['name']} {kind}", {
-            "kind": kind,
-            "name": entity["name"],
-            "description": str(project.get("blurb") or "No description recorded."),
-        })
-    if widget_id == "connections-summary":
-        counts = {status: sum(1 for item in connections if item.get("status") == status) for status in sorted(CONNECTION_STATUSES)}
-        problems = counts["setup_needed"] + counts["error"]
-        state = "attention" if problems else ("ready" if connections else "empty")
-        summary = f"{len(connections)} recorded connection{'s' if len(connections) != 1 else ''}"
-        return _snapshot(state, summary, {
-            "counts": counts,
-            "connections": [
-                {"id": item.get("id"), "name": item.get("name"), "provider": item.get("provider"), "status": item.get("status")}
-                for item in connections[:4]
-            ],
-            "status_is_recorded": True,
-        })
-    if widget_id == "accounts-summary":
-        accounts = [item for item in _account_loader() if kind != "project" or item.get("project_id") == entity_id]
-        customers = sum(1 for item in accounts if item.get("kind") == "customer")
-        attention = sum(1 for item in accounts if item.get("status") == "attention")
-        return _snapshot("attention" if attention else ("ready" if accounts else "empty"), f"{len(accounts)} account records", {
-            "customers": customers, "attention": attention, "status_is_recorded": True,
-        })
-    if widget_id == "hermes-status":
-        health = _hermes_health() or {}
-        ok = bool(health.get("ok"))
-        return _snapshot("ready" if ok else "unavailable", "Hermes reachable" if ok else "Hermes unavailable", {
-            "profile": health.get("profile"), "reason": health.get("reason", ""),
-        })
-    if widget_id == "repository-status":
-        project = entity.get("project") or {}
-        root_name = str(project.get("root") or entity_id)
-        base = _roots.get("vps")
-        target = (base / "projects" / root_name).resolve() if base else None
-        allowed = (base / "projects").resolve() if base else None
-        if not target or not allowed:
-            return _snapshot("unavailable", "Repository mount is unavailable")
-        try:
-            target.relative_to(allowed)
-        except ValueError:
-            return _snapshot("error", "Repository path was rejected")
-        if not target.is_dir():
-            return _snapshot("empty", "Repository is not present on the VPS", {"root": root_name})
-        branch = "unknown"
-        try:
-            head = (target / ".git" / "HEAD").read_text(encoding="utf-8").strip()
-            branch = head.rsplit("/", 1)[-1] if head.startswith("ref:") else head[:12]
-        except OSError:
-            pass
-        return _snapshot("ready", f"Repository present on {branch}", {"root": root_name, "branch": branch})
-    if widget_id == "application-status":
-        project = entity.get("project") or {}
-        live = str(project.get("live") or "")
-        links = [{"label": "Open application", "url": live}] if live.startswith("https://") else []
-        if bound:
-            return _snapshot("ready" if bound.get("status") == "verified" else "attention", f"Recorded connection: {bound.get('status')}", {
-                "connection_id": bound.get("id"), "status_is_recorded": True,
-            }, links)
-        if live.startswith("https://"):
-            return _snapshot("attention", "Live URL recorded; health is not connected", {"health_connected": False}, links)
-        return _snapshot("empty", "No live application is recorded")
-    if widget_id == "analytics-summary":
-        analytics = bound or next((
-            item for item in connections
-            if "analytics.read" in item.get("capabilities", []) or "umami" in str(item.get("name", "")).lower()
-        ), None)
-        if not analytics:
-            return _snapshot("empty", "Connect an analytics provider such as Umami", {"metrics": []})
-        return _snapshot("attention", f"{analytics.get('name')} is registered; analytics adapter is not connected", {
-            "connection_id": analytics.get("id"), "status": analytics.get("status"), "metrics": [], "status_is_recorded": True,
-        })
-    if widget_id == "work-status":
-        return _snapshot("unavailable", "No Hermes work-event provider is connected", {"running": 0, "waiting": 0})
-    if widget_id == "recent-receipts":
-        return _snapshot("unavailable", "No receipt provider is connected", {"receipts": []})
-    if widget_id == "quick-links":
-        url = str(config.get("url") or "")
-        links = [{"label": config.get("label") or "Open link", "url": url}] if url.startswith("https://") else []
-        return _snapshot("ready" if links else "empty", config.get("body") or ("One shortcut" if links else "No link configured"), {}, links)
-    if widget_id.startswith("custom-"):
-        with _home_lock:
-            manifest = _widget_by_id(widget_id, _home_store()) or {}
-        definition = manifest.get("definition", {})
-        url = str(config.get("url") or definition.get("url") or "")
-        links = [{"label": config.get("label") or definition.get("label") or "Open link", "url": url}] if url.startswith("https://") else []
-        body = config.get("body") or definition.get("body") or "No content configured."
-        return _snapshot("ready", body, {}, links)
-    return _snapshot("error", "Widget provider is not registered")
+    accounts = list(_account_loader() or [])
+    catalog = _catalog()
+    store = _home_store()
+    allowed_health_urls = {
+        str(profile.get("health"))
+        for profile in (_project_loader() or [])
+        if isinstance(profile, dict) and profile.get("health")
+    }
+    context = home_providers.ProviderContext(
+        kind=kind,
+        entity_id=entity_id,
+        entity=entity,
+        project=entity.get("profile") or {},
+        connections=connections,
+        bound_connection=bound,
+        accounts=accounts,
+        hermes_health=_hermes_health,
+        hermes_sessions=_hermes_sessions,
+        roots=_roots,
+        catalog=catalog,
+        widget_catalog=_all_widgets(store),
+        now=_now(),
+        probe_health=lambda profile: home_providers.probe_profile_health(profile, allowed_health_urls),
+        extra={"config": config, "all_connections": all_connections},
+    )
+    return home_providers.render(instance["widget_id"], context)
 
 
 @api.get("/api/widgets")
@@ -666,7 +655,7 @@ def homes_reset(kind: str, entity_id: str):
             return jsonify({"error": "layout changed", "current": current}), 409
         store["homes"][f"{kind}:{entity_id}"] = {
             "revision": current["revision"] + 1,
-            "instances": _default_instances(kind),
+            "instances": _default_instances(kind, entity_id, current["entity"], store),
             "updated_at": _now(),
         }
         _write_json(HOME_STORE_FILE, store)
