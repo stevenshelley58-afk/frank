@@ -825,12 +825,17 @@ describe('ADR-017 OpenAPI', () => {
       '/v1/codegraph/{project}/refresh',
       '/v1/codegraph/{project}/spec',
       '/v1/codegraph/{project}/status',
+      // W3-1: read-only project file browser.
+      '/v1/files',
       // CH-06: room↔channel bindings (Frank owns the binding).
       '/v1/rooms/{roomId}/channel-bindings',
       '/v1/rooms/{roomId}/channel-bindings/{id}',
       // FS-02: room folder bindings (declaration records; enforcement is FS-03).
       '/v1/rooms/{roomId}/folder-bindings',
       '/v1/rooms/{roomId}/folder-bindings/{id}',
+      // W3-2: skills page — read-only library browser.
+      '/v1/skills',
+      '/v1/skills/{id}',
       '/v1/system/health',
       '/v1/system/live',
       '/v1/system/ready',
@@ -917,7 +922,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(30);
+    expect(operations).toBe(33);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

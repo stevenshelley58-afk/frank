@@ -3,9 +3,9 @@
  *
  * The fixture is built in a temp directory and pointed at via
  * `FRANK_SKILLS_ROOT` (the documented test seam); the real Hermes store is
- * never touched. Routes are registered directly on the built server because
- * the `server.ts` composition-root registration is a coordinator hot-file
- * applied at the wave gate — see `.build/tasks/W3-2.md`.
+ * never touched. Routes are registered by the `server.ts` composition root
+ * (the coordinator hot-file applied at the wave gate), so the server under
+ * test uses the same registration path as production.
  *
  * What is proven here, per the packet's done-when:
  *   - every skill folder appears with name + description (list);
@@ -20,11 +20,10 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { POLICY_VERSION } from '@frank/policy';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
-import { registerSkillRoutes, skillRoutes } from '../routes/skills.js';
-import { buildTestServer, TEST_CELL, TEST_NOW } from './harness.js';
+import { skillRoutes } from '../routes/skills.js';
+import { buildTestServer, TEST_CELL } from './harness.js';
 import type { TestServer } from './harness.js';
 
 let server: TestServer | undefined;
@@ -76,12 +75,6 @@ afterEach(async () => {
 
 function start(): TestServer {
   server = buildTestServer();
-  registerSkillRoutes(server.app, {
-    cellId: TEST_CELL,
-    policyVersion: POLICY_VERSION,
-    identity: server.identityProvider,
-    now: () => TEST_NOW,
-  });
   return server;
 }
 
@@ -97,6 +90,13 @@ function summaryById(body: { skills: SkillSummary[] }, id: string): SkillSummary
   const skill = body.skills.find((entry) => entry.id === id);
   if (skill === undefined) throw new Error(`fixture skill ${id} missing from the list`);
   return skill;
+}
+
+
+function ownerHeaders(target: TestServer): Record<string, string> {
+  const headers: Record<string, string> = {};
+  headers['authorization'] = target.auth(['owner']);
+  return headers;
 }
 
 describe('W3-2 skills list', () => {
@@ -117,7 +117,7 @@ describe('W3-2 skills list', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
 
     expect(response.statusCode).toBe(200);
@@ -147,7 +147,7 @@ describe('W3-2 skills list', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     const body = response.json() as { skills: SkillSummary[] };
     const nofront = summaryById(body, 'nofront');
@@ -160,7 +160,7 @@ describe('W3-2 skills list', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     expect(response.statusCode).toBe(200);
     const body = response.json() as { skills: SkillSummary[] };
@@ -176,7 +176,7 @@ describe('W3-2 skills list', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     expect(response.statusCode).toBe(503);
   });
@@ -188,7 +188,7 @@ describe('W3-2 skill detail', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills?path=good',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
 
     expect(response.statusCode).toBe(200);
@@ -215,7 +215,7 @@ describe('W3-2 skill detail', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills?path=nested/sub/deep',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     expect(response.statusCode).toBe(200);
     const body = response.json() as { path: string; content: string };
@@ -228,7 +228,7 @@ describe('W3-2 skill detail', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills/good',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     expect(response.statusCode).toBe(200);
     const body = response.json() as { id: string; content: string };
@@ -241,7 +241,7 @@ describe('W3-2 skill detail', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills?path=broken',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     expect(response.statusCode).toBe(200);
     const body = response.json() as { content: string; frontmatter_error: string | null };
@@ -255,7 +255,7 @@ describe('W3-2 skill detail', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills?path=no-such-skill',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     expect(response.statusCode).toBe(404);
   });
@@ -265,7 +265,7 @@ describe('W3-2 skill detail', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills?path=not-a-skill',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     expect(response.statusCode).toBe(404);
   });
@@ -288,7 +288,7 @@ describe('W3-2 path safety', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: `/v1/skills?path=${encodeURIComponent(id)}`,
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     expect(response.statusCode).toBe(400);
     const problem = response.json() as { type: string };
@@ -300,7 +300,7 @@ describe('W3-2 path safety', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: `/v1/skills/${encodeURIComponent(id)}`,
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     // `..` decodes to a literal dot-segment request; either a validation
     // refusal (400) or no route match (404) is a refusal to read outside.
@@ -312,7 +312,7 @@ describe('W3-2 path safety', () => {
     const response = await target.app.inject({
       method: 'GET',
       url: '/v1/skills',
-      headers: { authorization: target.auth(['owner']) },
+      headers: ownerHeaders(target),
     });
     expect(response.statusCode).toBe(200);
     expect(response.body).not.toContain(fixtureRoot);
