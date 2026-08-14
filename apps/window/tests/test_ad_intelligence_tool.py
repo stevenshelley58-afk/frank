@@ -37,6 +37,7 @@ class AdIntelligenceToolTest(unittest.TestCase):
 
         declarative = json.loads((Path(__file__).parents[1] / "tools" / "ad-intelligence" / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(declarative["schema"], "schema://frank.tool-app-manifest/v1")
+        self.assertEqual(declarative["release_schema"], "schema://frank.ad-intelligence-release/v1")
         pipeline = declarative["pipelines"][0]
         self.assertEqual([node["id"] for node in pipeline["nodes"]][-2:], ["media-qa", "publish"])
         self.assertEqual(len(pipeline["edges"]), 6)
@@ -107,6 +108,8 @@ class AdIntelligenceToolTest(unittest.TestCase):
         self.assertTrue(release.immutable)
         self.assertTrue(release.pii_sanitized and release.secret_sanitized and release.qa_approved)
         self.assertEqual(release.to_dict()["status"], "released")
+        self.assertEqual(release.to_dict()["schema"], "schema://frank.ad-intelligence-release/v1")
+        self.assertEqual(release.to_dict()["tool_id"], "ad-intelligence")
         with self.assertRaises(TypeError): release.public_export["project"] = "other"
 
         private_payload = json.loads(json.dumps(payload))

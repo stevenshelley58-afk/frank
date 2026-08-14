@@ -20,6 +20,8 @@ def _load_pipeline_stages() -> tuple[str, ...]:
     return stages
 
 PIPELINE_STAGES = _load_pipeline_stages()
+RELEASE_SCHEMA = "schema://frank.ad-intelligence-release/v1"
+TOOL_ID = "ad-intelligence"
 
 _HTML = re.compile(r"</?[a-z][^>]*>|javascript\s*:", re.IGNORECASE)
 _FORBIDDEN_KEY = re.compile(
@@ -301,8 +303,12 @@ class AdIntelligenceRelease:
     pii_sanitized: bool
     secret_sanitized: bool
     public_export: Any
+    schema: str = RELEASE_SCHEMA
+    tool_id: str = TOOL_ID
 
     def __post_init__(self):
+        if self.schema != RELEASE_SCHEMA or self.tool_id != TOOL_ID:
+            raise ValueError("release schema or tool identity is invalid")
         for field_name, value in (("release_id", self.release_id), ("version", self.version), ("status", self.status), ("project_scope", self.project_scope), ("checksum", self.checksum)):
             _safe_text(value, field_name)
         if self.status != "released" or self.immutable is not True or not self.qa_approved or not self.pii_sanitized or not self.secret_sanitized: raise ValueError("release must be immutable, released, approved, and sanitized")
@@ -314,6 +320,7 @@ class AdIntelligenceRelease:
 
     def to_dict(self) -> dict[str, Any]:
         result = {
+            "schema": self.schema, "tool_id": self.tool_id,
             "release_id": self.release_id, "version": self.version, "status": self.status,
             "immutable": self.immutable, "project_scope": self.project_scope,
             "checksum": self.checksum, "provenance_refs": list(self.provenance_refs),

@@ -15,6 +15,11 @@ EXPECTED_TOOLS = {
     "outreach",
     "prospect-discovery",
 }
+PUBLISHING_TOOLS = {
+    "ad-intelligence": "schema://frank.ad-intelligence-release/v1",
+    "ad-template-generator": "schema://frank.tool-app-release/v1",
+    "content-factory": "schema://frank.content-factory-release/v1",
+}
 SAFE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
 
@@ -36,6 +41,9 @@ class ToolAppCatalogTest(unittest.TestCase):
             trace = manifest.get("trace")
             self.assertIsInstance(trace, dict, f"{tool_id}.trace")
             self.assertEqual(trace.get("schema"), "schema://frank.tool-app-trace/v1")
+
+            if tool_id in PUBLISHING_TOOLS:
+                self.assertEqual(manifest.get("release_schema"), PUBLISHING_TOOLS[tool_id])
 
             hermes = manifest.get("hermes")
             self.assertIsInstance(hermes, dict, f"{tool_id}.hermes")
