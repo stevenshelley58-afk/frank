@@ -192,7 +192,7 @@ function renderChatNav() {
       <time>${chatDate(chat.updated_at)}</time>
     </button>`).join("");
   $$(".chat-nav-item", nav).forEach((button) => button.addEventListener("click", () => {
-    if (turnAbort || button.dataset.chatId === currentChatId) return;
+    if (turnAbort) return;
     void selectChat(button.dataset.chatId);
   }));
 }
@@ -220,13 +220,14 @@ async function loadChatMessages(chatId) {
 }
 async function selectChat(chatId) {
   if (!chatId) return;
-  if (chatAtts.length) await discardAttachments(chatAtts.slice(), true);
+  const switchingChats = chatId !== currentChatId;
+  if (switchingChats && chatAtts.length) void discardAttachments(chatAtts.slice(), true);
   currentChatId = chatId;
   localStorage.setItem("frank.chat", chatId);
   renderChatNav();
   const selected = chatSessions.find((chat) => chat.id === chatId);
   applySessionModel(selected);
-  $("#view-sub").textContent = selected?.title || "";
+  show("hub");
   await loadChatMessages(chatId);
 }
 async function createChat() {
