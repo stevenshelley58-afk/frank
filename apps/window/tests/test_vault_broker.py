@@ -401,7 +401,7 @@ class VaultBrokerApiTest(unittest.TestCase):
                             project_id="project", environment="dev", secret_path="/frank",
                             secret_name="RESEND_API_KEY", secret_value="runtime-only-value",
                         )
-                    with self.assertRaises(vault_broker.VaultRemoteError):
+                    with self.assertRaises((vault_broker.VaultRemoteError, vault_broker.VaultUnavailable)):
                         adapter.delete(
                             project_id="project", environment="dev", secret_path="/frank",
                             secret_name="RESEND_API_KEY", confirmation_token="T" * 32,

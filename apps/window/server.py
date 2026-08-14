@@ -17,6 +17,7 @@ from pathlib import Path
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory, stream_with_context
 
 import home_platform
+import vault_broker
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
@@ -897,6 +898,7 @@ home_platform.configure(
     roots=ROOTS,
 )
 app.register_blueprint(home_platform.api)
+app.register_blueprint(vault_broker.api)
 
 
 @app.get("/", defaults={"path": ""})

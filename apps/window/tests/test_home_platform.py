@@ -14,11 +14,44 @@ import home_providers
 import server
 
 
+class ContractTestClient:
+    """Keep mutation tests explicit about same-origin and idempotency contracts."""
+
+    def __init__(self, client):
+        self._client = client
+        self._sequence = 0
+
+    def _mutation(self, method, *args, **kwargs):
+        self._sequence += 1
+        headers = dict(kwargs.pop("headers", {}) or {})
+        headers.setdefault("Origin", "http://localhost")
+        headers.setdefault("Idempotency-Key", f"home-platform-test-{self._sequence:06d}")
+        kwargs["headers"] = headers
+        return getattr(self._client, method)(*args, **kwargs)
+
+    def get(self, *args, **kwargs):
+        return self._client.get(*args, **kwargs)
+
+    def put(self, *args, **kwargs):
+        return self._mutation("put", *args, **kwargs)
+
+    def post(self, *args, **kwargs):
+        return self._mutation("post", *args, **kwargs)
+
+    def patch(self, *args, **kwargs):
+        return self._mutation("patch", *args, **kwargs)
+
+    def delete(self, *args, **kwargs):
+        return self._mutation("delete", *args, **kwargs)
+
+
 class HomePlatformApiTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.original_home_file = home_platform.HOME_STORE_FILE
         self.original_connections_file = home_platform.CONNECTIONS_FILE
+        self.original_actions_file = home_platform.CONNECTION_ACTIONS_FILE
+        self.original_plans_file = home_platform.CONNECTION_PLANS_FILE
         self.original_loaders = (
             home_platform._project_loader,
             home_platform._account_loader,
@@ -27,6 +60,8 @@ class HomePlatformApiTest(unittest.TestCase):
         )
         home_platform.HOME_STORE_FILE = Path(self.temp.name) / "home-layouts.json"
         home_platform.CONNECTIONS_FILE = Path(self.temp.name) / "connections.json"
+        home_platform.CONNECTION_ACTIONS_FILE = Path(self.temp.name) / "connection-actions.jsonl"
+        home_platform.CONNECTION_PLANS_FILE = Path(self.temp.name) / "connection-plans.json"
         self.project_root = Path(self.temp.name) / "vps" / "projects" / "blockwise"
         (self.project_root / ".git").mkdir(parents=True)
         (self.project_root / ".git" / "HEAD").write_text("ref: refs/heads/main\n", encoding="utf-8")
@@ -46,7 +81,7 @@ class HomePlatformApiTest(unittest.TestCase):
             hermes_health=lambda: {"ok": True, "profile": "hub"},
             roots={"vps": Path(self.temp.name) / "vps"},
         )
-        self.client = server.app.test_client()
+        self.client = ContractTestClient(server.app.test_client())
 
     def test_canonical_project_profiles_are_enriched_and_returned_as_copies(self):
         profiles = {item["id"]: item for item in server._project_items()}
@@ -199,6 +234,8 @@ class HomePlatformApiTest(unittest.TestCase):
     def tearDown(self):
         home_platform.HOME_STORE_FILE = self.original_home_file
         home_platform.CONNECTIONS_FILE = self.original_connections_file
+        home_platform.CONNECTION_ACTIONS_FILE = self.original_actions_file
+        home_platform.CONNECTION_PLANS_FILE = self.original_plans_file
         home_platform.configure(
             project_loader=self.original_loaders[0],
             account_loader=self.original_loaders[1],
@@ -323,11 +360,11 @@ class HomePlatformApiTest(unittest.TestCase):
         connection = created.get_json()["connection"]
         self.assertEqual(connection["status"], "connected")
 
-        updated = self.client.patch(f"/api/connections/{connection['id']}", json={"status": "verified"})
+        updated = self.client.patch(f"/api/connections/{connection['id']}", json={"notes": "Metadata reviewed while verification remains provider-owned."})
         self.assertEqual(updated.status_code, 200)
-        self.assertEqual(updated.get_json()["connection"]["status"], "verified")
+        self.assertEqual(updated.get_json()["connection"]["status"], "connected")
         persisted = self.client.get("/api/connections").get_json()["connections"]
-        self.assertEqual(persisted[0]["status"], "verified")
+        self.assertEqual(persisted[0]["status"], "connected")
         connection = persisted[0]
 
         home = self.client.get("/api/homes/project/blockwise").get_json()
@@ -340,12 +377,12 @@ class HomePlatformApiTest(unittest.TestCase):
         self.assertEqual(saved.status_code, 200, saved.get_json())
         snapshot = self.client.get("/api/homes/project/blockwise/widgets/connections-summary-1").get_json()
         self.assertTrue(snapshot["data"]["status_is_recorded"])
-        self.assertEqual(snapshot["data"]["counts"]["verified"], 1)
+        self.assertEqual(snapshot["data"]["counts"]["connected"], 1)
 
     def test_connections_home_is_central_but_project_home_is_scope_limited(self):
         global_connection = self.client.post("/api/connections", json={
             "provider": "api", "name": "Global API", "scope_kind": "global",
-            "status": "verified", "connection_ref": "api://global/main",
+            "status": "connected", "connection_ref": "api://global/main",
         }).get_json()["connection"]
         project_connection = self.client.post("/api/connections", json={
             "provider": "resend", "name": "Blockwise mail", "scope_kind": "project",
@@ -353,7 +390,7 @@ class HomePlatformApiTest(unittest.TestCase):
         }).get_json()["connection"]
         service_connection = self.client.post("/api/connections", json={
             "provider": "stripe", "name": "Other service", "scope_kind": "service",
-            "scope_id": "elsewhere", "status": "error", "connection_ref": "stripe://elsewhere/main",
+            "scope_id": "elsewhere", "status": "setup_needed", "connection_ref": "stripe://elsewhere/main",
         }).get_json()["connection"]
 
         central = self.client.get("/api/homes/tool/connections/widgets/connections-summary-1").get_json()
@@ -375,8 +412,8 @@ class HomePlatformApiTest(unittest.TestCase):
     def test_provider_coverage_distinguishes_recorded_verified_setup_and_error(self):
         for provider, name, status, ref in (
             ("api", "Recorded", "connected", "api://recorded/main"),
-            ("resend", "Verified", "verified", "resend://verified/main"),
-            ("stripe", "Broken", "error", "stripe://broken/main"),
+            ("resend", "Configured", "connected", "resend://configured/main"),
+            ("stripe", "Needs setup", "setup_needed", "stripe://setup/main"),
         ):
             response = self.client.post("/api/connections", json={
                 "provider": provider, "name": name, "scope_kind": "global",
@@ -386,15 +423,15 @@ class HomePlatformApiTest(unittest.TestCase):
         snapshot = self.client.get("/api/homes/tool/connections/widgets/provider-coverage-1").get_json()
         statuses = {row["provider"]: row["status"] for row in snapshot["data"]["rows"]}
         self.assertEqual(statuses["api"], "recorded")
-        self.assertEqual(statuses["resend"], "verified")
-        self.assertEqual(statuses["stripe"], "error")
+        self.assertEqual(statuses["resend"], "recorded")
+        self.assertEqual(statuses["stripe"], "setup_needed")
         self.assertEqual(statuses["activepieces"], "setup_needed")
-        self.assertEqual(snapshot["status"], "error")
+        self.assertEqual(snapshot["status"], "attention")
 
     def test_provider_coverage_aggregates_same_provider_records_order_independently(self):
         records = [
-            {"name": "Resend error", "scope_kind": "global", "scope_id": "", "status": "error", "connection_ref": "resend://error/main"},
-            {"name": "Resend verified", "scope_kind": "project", "scope_id": "blockwise", "status": "verified", "connection_ref": "resend://verified/blockwise"},
+            {"name": "Resend setup", "scope_kind": "global", "scope_id": "", "status": "setup_needed", "connection_ref": "resend://setup/main"},
+            {"name": "Resend connected", "scope_kind": "project", "scope_id": "blockwise", "status": "connected", "connection_ref": "resend://connected/blockwise"},
         ]
 
         def coverage(order):
@@ -411,7 +448,7 @@ class HomePlatformApiTest(unittest.TestCase):
         first = coverage(records)
         second = coverage(list(reversed(records)))
         self.assertEqual(first, second)
-        self.assertEqual(first, ("error", "error", 2, ["error", "verified"]))
+        self.assertEqual(first, ("attention", "setup_needed", 2, ["connected", "setup_needed"]))
 
     def test_repository_reflog_rows_expose_display_names_without_emails(self):
         logs = self.project_root / ".git" / "logs"
@@ -581,16 +618,14 @@ class HomePlatformApiTest(unittest.TestCase):
             "admin_url": "https://docs.example/setup", "capabilities": ["api.read"],
             "notes": "Initial metadata",
         }).get_json()["connection"]
-        updated = self.client.patch(f"/api/connections/{created['id']}", json={
-            "status": "verified", "notes": "Verified metadata",
-        })
+        updated = self.client.patch(f"/api/connections/{created['id']}", json={"notes": "Metadata reviewed"})
         self.assertEqual(updated.status_code, 200)
         item = updated.get_json()["connection"]
         self.assertEqual(item["id"], created["id"])
         self.assertEqual(item["connection_ref"], "api://patch/initial")
         self.assertEqual(item["credential_ref"], "openbao://frank/connections/patch-target")
-        self.assertEqual(item["status"], "verified")
-        self.assertEqual(item["notes"], "Verified metadata")
+        self.assertEqual(item["status"], "setup_needed")
+        self.assertEqual(item["notes"], "Metadata reviewed")
         persisted = self.client.get("/api/connections").get_json()["connections"][0]
         self.assertEqual(persisted, item)
 
@@ -612,9 +647,9 @@ class HomePlatformApiTest(unittest.TestCase):
         })
         self.assertEqual(saved.status_code, 200, saved.get_json())
 
-        metadata = self.client.patch(f"/api/connections/{created['id']}", json={"status": "verified"})
+        metadata = self.client.patch(f"/api/connections/{created['id']}", json={"notes": "Metadata updated while provider truth remains connected"})
         self.assertEqual(metadata.status_code, 200)
-        self.assertEqual(metadata.get_json()["connection"]["status"], "verified")
+        self.assertEqual(metadata.get_json()["connection"]["status"], "connected")
 
         rejected = self.client.patch(f"/api/connections/{created['id']}", json={
             "scope_kind": "project", "scope_id": "blockwise",
@@ -625,7 +660,7 @@ class HomePlatformApiTest(unittest.TestCase):
 
         current = self.client.get("/api/connections").get_json()["connections"][0]
         self.assertEqual(current["scope_kind"], "global")
-        self.assertEqual(current["status"], "verified")
+        self.assertEqual(current["status"], "connected")
 
         reset = self.client.post("/api/homes/project/blockwise/reset", json={"expected_revision": saved.get_json()["revision"]})
         self.assertEqual(reset.status_code, 200)

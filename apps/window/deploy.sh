@@ -24,7 +24,7 @@ install -d -m 0755 -- "$preview_dir"
 if [[ ! -f "$secret_file" ]]; then
   tmp="$(mktemp "$secret_dir/.window.env.XXXXXX")"
   trap 'rm -f -- "$tmp"' EXIT
-  for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH; do
+  for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH HERMES_CONNECTIONS_AGENT_KEY HERMES_VAULT_BROKER_KEY HERMES_VAULT_BROKER_URL; do
     value=""
     for source in /frank/window/.env /frank/deployed/infra/.env; do
       [[ -f "$source" ]] || continue
@@ -41,6 +41,15 @@ if [[ ! -f "$secret_file" ]]; then
   mv -f -- "$tmp" "$secret_file"
   trap - EXIT
 fi
+
+# Validate the complete private ingress/broker contract before any build or
+# container replacement. Never print values from the secret file.
+for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH HERMES_CONNECTIONS_AGENT_KEY HERMES_VAULT_BROKER_KEY HERMES_VAULT_BROKER_URL; do
+  grep -q -E "^${key}=[^[:space:]]" "$secret_file" || {
+    echo "missing required $key in $secret_file" >&2
+    exit 1
+  }
+done
 
 if [[ -d /frank/window/data ]]; then
   cp -a -n -- /frank/window/data/. "$data_dir/"

@@ -846,6 +846,40 @@ a { color: inherit; text-decoration: none; }
 .connection-primary strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 500; }
 .connection-primary span { display: block; margin-top: 3px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--mute); font-size: 11px; }
 .connection-empty { padding: 24px 8px; color: var(--mute); font-size: 13px; }
+.connection-overview { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)); gap: 10px; margin-top: 20px; }
+.connection-summary-card { min-width: 0; min-height: 112px; display: flex; flex-direction: column; gap: 7px; padding: 14px; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); }
+.connection-summary-value { color: var(--ink); font-size: 22px; font-weight: 500; text-transform: capitalize; }
+.connection-summary-note { color: var(--mute); font-size: 11px; line-height: 1.4; }
+.connection-summary-foot { grid-column: 1 / -1; color: var(--mute); font-size: 11px; }
+.connection-columns { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 20px; }
+.connection-panel { min-width: 0; }
+.connection-attention-list, .connection-activity, .connection-vault-card, .connection-agent-card { margin-top: 10px; }
+.connection-attention-row, .connection-activity-row { display: grid; gap: 4px; padding: 10px 0; border-top: 1px solid var(--line); font-size: 12px; }
+.connection-attention-row span, .connection-activity-row p { color: var(--mute); font-size: 11px; }
+.connection-vault-card { padding: 14px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.connection-vault-card p, .connection-agent-card p { margin-top: 9px; color: var(--mute); font-size: 12px; line-height: 1.5; }
+.connection-vault-inventory, .connection-binding-list { margin-top: 16px; }
+.connection-vault-inventory h3, .connection-binding-list h3 { margin: 0 0 8px; font-size: 12px; font-weight: 500; }
+.connection-vault-row { display: grid; grid-template-columns: minmax(100px, 1fr) minmax(120px, 1.2fr) minmax(100px, 1fr) auto; align-items: center; gap: 8px; padding: 9px 0; border-top: 1px solid var(--line); font-size: 11px; }
+.connection-vault-row span, .connection-vault-row code { color: var(--mute); overflow-wrap: anywhere; }
+.connection-vault-row code { font-family: inherit; font-size: 10px; }
+.connection-agent-card { padding: 14px; border: 1px solid var(--line); border-radius: var(--r-sm); }
+.connection-agent-card .home-action { margin-top: 12px; min-height: 44px; }
+.connection-row { align-items: flex-start; flex-wrap: wrap; }
+.connection-row-state { display: grid; justify-items: end; gap: 3px; margin-left: auto; }
+.connection-row-revision { color: var(--mute); font-size: 10px; }
+.connection-row-actions { width: 100%; display: flex; flex-wrap: wrap; gap: 7px; padding-top: 5px; }
+.connection-row-actions .home-inline-button, .connection-vault-row .home-inline-button { min-height: 44px; }
+.connection-activity-heading { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.connection-secret-row { display: grid; gap: 5px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--hover); }
+.connection-secret-row[hidden] { display: none; }
+.connection-secret-row input { background: var(--bg); }
+.connection-status.status-connected { color: var(--rules); }
+.connection-status.status-vault-verified { color: var(--ok); }
+.connection-status.status-vault-setup_needed { color: var(--mute); }
+.connection-status.status-vault-unavailable,
+.connection-status.status-vault-permission_denied,
+.connection-status.status-vault-error { color: var(--bad); }
 
 @media (max-width: 1100px) and (min-width: 721px) {
   .accounts { position: relative; }
@@ -1169,6 +1203,9 @@ a { color: inherit; text-decoration: none; }
   .tool-form-pair { grid-template-columns: 1fr; }
   .builder-grid,
   .connection-catalog { grid-template-columns: 1fr; }
+  .connection-overview, .connection-columns { grid-template-columns: 1fr; }
+  .connection-summary-foot { grid-column: 1; }
   .section-heading { display: grid; gap: 4px; }
   .connection-row { min-height: 64px; }
+  .connection-vault-row { grid-template-columns: 1fr; }
 }

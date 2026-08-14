@@ -113,9 +113,12 @@ export function closeHomeEditors(options = {}) {
 }
 
 async function requestJson(url, options = {}) {
+  const { idempotencyKey, ...requestOptions } = options;
+  const headers = { "Content-Type": "application/json", ...(requestOptions.headers || {}) };
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   const response = await fetch(url, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    ...requestOptions,
+    headers,
   });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) {
@@ -125,6 +128,10 @@ async function requestJson(url, options = {}) {
     throw error;
   }
   return body;
+}
+
+function freshIdempotencyKey(prefix = "frank") {
+  return `${prefix}-${crypto.randomUUID().replaceAll("-", "")}`;
 }
 
 function validateHome(payload, kind, id) {
@@ -729,82 +736,400 @@ function connectionStatusLabel(value) {
   return ({ setup_needed: "Setup needed", connected: "Connected", verified: "Verified", error: "Error" })[value] || value;
 }
 
-function renderConnections(payload) {
+/* Connections workspace: one screen for safe metadata, provider truth, and receipts. */
+let connectionWorkspace = { payload: null, vault: null, providers: null, bindings: null, attention: [], activity: [] };
+let connectionEditItem = null;
+let connectionRequestPending = false;
+
+function setConnectionBusy(value) {
+  connectionRequestPending = Boolean(value);
+  document.querySelectorAll("#connection-editor button, #connection-catalog button, #connection-list button, #connection-vault-health button, #connection-agent-open").forEach((control) => {
+    control.disabled = connectionRequestPending;
+  });
+}
+
+function formatConnectionTime(value) {
+  if (!value) return "";
+  const date = new Date(Number(value) * 1000);
+  return Number.isNaN(date.valueOf()) ? "" : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
+}
+
+function connectionActionLabel(action) {
+  return ({ create: "Create", update: "Update", verify: "Verify", sync: "Sync", revoke: "Revoke", delete: "Remove" })[action] || action;
+}
+
+function connectionCapabilities(provider) {
+  const item = (connectionWorkspace.providers?.providers || []).find((entry) => entry.provider === provider)
+    || (connectionWorkspace.payload?.catalog || []).find((entry) => entry.provider === provider);
+  return Array.isArray(item?.capabilities) ? item.capabilities : [];
+}
+
+function safeVaultRefId(ref) {
+  const match = /^vault:\/\/frank\/([a-f0-9]{32})$/i.exec(String(ref || ""));
+  return match ? match[1] : "";
+}
+
+function renderConnectionOverview(payload, vault, providers) {
+  const host = $("#connection-overview");
+  if (!host) return;
+  const items = payload?.connections || [];
+  const counts = Object.fromEntries(["setup_needed", "connected", "verified", "error"].map((status) => [status, items.filter((item) => item.status === status).length]));
+  const cards = [
+    ["Configured", counts.connected, "connected", "Connected means configured and awaiting verification."],
+    ["Verified", counts.verified, "verified", "Only a provider receipt can move a connection here."],
+    ["Setup needed", counts.setup_needed, "setup_needed", "No provider-ready credential is recorded."],
+    ["Errors", counts.error, "error", "Safe provider code/category only; details stay upstream."],
+    ["Vault", String(vault?.status || "setup_needed").replaceAll("_", " "), `vault-${vault?.status || "setup_needed"}`, vault?.message || "Vault status is unavailable."],
+  ];
+  host.replaceChildren(...cards.map(([label, value, status, note]) => {
+    const card = node("article", "connection-summary-card");
+    card.append(node("span", "home-provider", label), node("strong", `connection-summary-value status-${status}`, String(value)), node("span", "connection-summary-note", note));
+    return card;
+  }));
+  const configuredProviders = (providers?.providers || []).filter((item) => item.status === "ready").length;
+  const footer = node("p", "connection-summary-foot", `${items.length} binding${items.length === 1 ? "" : "s"} · ${configuredProviders} provider adapter${configuredProviders === 1 ? "" : "s"} available · status remains provider-owned`);
+  host.append(footer);
+}
+
+function renderConnectionAttention(items) {
+  const host = $("#connection-attention");
+  if (!host) return;
+  host.replaceChildren();
+  if (!items.length) {
+    host.append(node("p", "connection-empty", "No open attention items."));
+    return;
+  }
+  for (const item of items.slice(0, 8)) {
+    const row = node("div", "connection-attention-row");
+    const label = item.target?.provider || item.target?.connection_id || "Connection operation";
+    const detail = item.result?.error_category || item.result?.error_code || item.state || "attention";
+    row.append(node("strong", "", label), node("span", "", `${connectionActionLabel(item.action)} · ${String(detail).replaceAll("_", " ")}`));
+    host.append(row);
+  }
+}
+
+function renderVaultHealth(vault, bindings, secrets) {
+  const host = $("#connection-vault-health");
+  if (!host) return;
+  host.replaceChildren();
+  const state = String(vault?.status || "setup_needed");
+  const card = node("div", "connection-vault-card");
+  card.append(node("span", `connection-status status-${state}`, state.replaceAll("_", " ")), node("p", "", vault?.message || "Secure vault status is unavailable."));
+  card.append(node("p", "home-truth", `${(bindings?.bindings || []).length} opaque provider binding${(bindings?.bindings || []).length === 1 ? "" : "s"}. Frank cannot reveal secret values.`));
+  const inventory = node("div", "connection-vault-inventory");
+  inventory.append(node("h3", "", "Vault metadata inventory"));
+  const records = secrets?.secrets || [];
+  if (!records.length) inventory.append(node("p", "connection-empty", "No vault metadata recorded."));
+  for (const record of records) {
+    const row = node("div", "connection-vault-row");
+    row.append(node("strong", "", record.secret_name || "Write-only secret"), node("span", "", `${record.provider || "unbound"} · ${record.scope_kind || "global"} · v${record.version || 0} · ${record.status || "recorded"}`), node("code", "", record.ref || "opaque ref"));
+    if (safeVaultRefId(record.ref)) row.append(button("Delete vault secret", () => deleteVaultSecret({ name: record.secret_name || "this secret", credential_ref: record.ref }), "home-inline-button danger-text"));
+    inventory.append(row);
+  }
+  card.append(inventory);
+  const bindingList = node("div", "connection-binding-list");
+  bindingList.append(node("h3", "", "Provider bindings"));
+  const providerBindings = bindings?.bindings || [];
+  if (!providerBindings.length) bindingList.append(node("p", "connection-empty", "No provider bindings recorded."));
+  for (const binding of providerBindings) {
+    const row = node("div", "connection-vault-row");
+    row.append(node("strong", "", binding.provider || "Provider"), node("span", "", `${binding.consumer || "consumer"} · ${(binding.capabilities || []).join(" · ")}`), node("code", "", binding.ref || "opaque ref"));
+    bindingList.append(row);
+  }
+  card.append(bindingList);
+  host.append(card);
+}
+
+function renderConnectionActivity(items) {
+  const host = $("#connection-activity");
+  if (!host) return;
+  host.replaceChildren();
+  if (!items.length) {
+    host.append(node("p", "connection-empty", "No connection activity yet."));
+    return;
+  }
+  for (const item of items.slice(0, 12)) {
+    const row = node("article", "connection-activity-row");
+    const heading = node("div", "connection-activity-heading");
+    heading.append(node("strong", "", `${item.actor || item.source || "Frank"} · ${connectionActionLabel(item.action)}`), node("span", `connection-status status-${item.state || "planned"}`, String(item.state || "planned").replaceAll("_", " ")));
+    const detail = item.result?.error_category || item.result?.error_code || item.result?.provider_receipt || item.result?.outcome || "Recorded action";
+    row.append(heading, node("p", "", `${item.target?.provider || item.target?.connection_id || "workspace"} · ${detail}`), node("time", "quiet", formatConnectionTime(item.updated_at)));
+    host.append(row);
+  }
+}
+
+function renderConnections(payload, providerPayload = {}, vault = {}, bindings = {}, attention = [], activity = [], secrets = {}) {
+  connectionWorkspace = { payload, providers: providerPayload, vault, bindings, attention, activity };
+  renderConnectionOverview(payload, vault, providerPayload);
+  renderConnectionAttention(attention);
+  renderVaultHealth(vault, bindings, secrets);
+  renderConnectionActivity(activity);
   const catalog = $("#connection-catalog");
   const saved = $("#connection-list");
-  catalog.replaceChildren();
-  saved.replaceChildren();
-  for (const item of payload.catalog || []) {
+  catalog?.replaceChildren();
+  saved?.replaceChildren();
+  const providers = providerPayload.providers || payload.catalog || [];
+  for (const item of providers) {
     const card = node("article", "w-card connection-catalog-card");
-    card.append(node("span", "home-provider", item.provider), node("h3", "", item.title), node("p", "", item.description));
-    const capabilities = node("p", "connection-capabilities", (item.capabilities || []).join(" · "));
+    const status = item.status || item.setup_mode || "setup_needed";
+    card.append(node("span", "home-provider", item.provider), node("h3", "", item.title || item.provider), node("p", "", item.setup_note || item.description || "Provider capability boundary."));
+    card.append(node("span", `connection-status status-${status}`, String(status).replaceAll("_", " ")));
+    card.append(node("p", "connection-capabilities", (item.capabilities || []).join(" · ") || "No capabilities advertised."));
     const actions = node("div", "tool-actions");
-    actions.append(button("Add connection", () => editConnection({ provider: item.provider, name: item.title, capabilities: item.capabilities }), "home-inline-button"));
-    if (item.setup_url) {
+    actions.append(button("Add connection", () => editConnection({ provider: item.provider, name: item.title || item.provider, capabilities: item.capabilities }), "home-inline-button"));
+    const setupUrl = safeExternalUrl(item.setup_url);
+    if (setupUrl) {
       const link = node("a", "tool-link", "Secure setup");
-      link.href = item.setup_url;
-      link.target = "_blank";
-      link.rel = "noopener noreferrer";
-      actions.append(link);
+      link.href = setupUrl; link.target = "_blank"; link.rel = "noopener noreferrer"; actions.append(link);
     }
-    if (item.provider === "activepieces") card.append(node("p", "home-truth", "Credentials are configured in Activepieces. A future Hermes adapter will read MCP status only."));
-    card.append(capabilities, actions);
-    catalog.append(card);
+    card.append(actions); catalog?.append(card);
   }
-  if (!(payload.connections || []).length) {
-    saved.append(node("div", "connection-empty", "No connections recorded yet."));
-  }
-  for (const item of payload.connections || []) {
-    const row = button("", () => editConnection(item), "connection-row");
-    const primary = node("span", "connection-primary");
+  const connections = payload.connections || [];
+  if (!connections.length) saved?.append(node("div", "connection-empty", "No connections recorded yet. Add a provider binding to begin."));
+  for (const item of connections) {
+    const row = node("article", "connection-row");
+    const primary = node("div", "connection-primary");
     primary.append(node("strong", "", item.name), node("span", "", `${item.provider} · ${item.scope_kind}${item.scope_id ? ` / ${item.scope_id}` : ""}`));
-    const status = node("span", `connection-status status-${item.status}`, connectionStatusLabel(item.status));
-    row.append(primary, status);
-    saved.append(row);
+    const state = node("div", "connection-row-state");
+    state.append(node("span", `connection-status status-${item.status}`, connectionStatusLabel(item.status)), node("span", "connection-row-revision", `rev ${item.revision || 0}`));
+    const actions = node("div", "connection-row-actions");
+    for (const [label, handler, className] of [
+      ["Edit", () => editConnection(item), "home-inline-button"],
+      ["Verify", () => runConnectionAction("verify", item), "home-inline-button"],
+      ["Sync", () => runConnectionAction("sync", item), "home-inline-button"],
+      ["Revoke provider access", () => runConnectionAction("revoke", item), "home-inline-button danger-text"],
+      ["Remove Frank record", () => runConnectionAction("delete", item), "home-inline-button danger-text"],
+    ]) {
+      const control = button(label, handler, className); control.dataset.connectionAction = "true"; actions.append(control);
+    }
+    if (safeVaultRefId(item.credential_ref)) {
+      const control = button("Delete vault secret", () => deleteVaultSecret(item), "home-inline-button danger-text");
+      control.dataset.connectionAction = "true"; actions.append(control);
+    }
+    row.append(primary, state, actions); saved?.append(row);
   }
 }
 
 async function loadConnections() {
-  const payload = await requestJson("/api/connections");
-  renderConnections(payload);
+  const [payload, vault, providers, bindings, secrets, attention, activity] = await Promise.all([
+    requestJson("/api/connections"),
+    requestJson("/api/vault/status").catch(() => ({ status: "unavailable", message: "Secure vault status is unavailable." })),
+    requestJson("/api/provider-broker/catalog").catch(() => ({ providers: [] })),
+    requestJson("/api/provider-broker/bindings").catch(() => ({ bindings: [] })),
+    requestJson("/api/vault/secrets").catch(() => ({ secrets: [] })),
+    requestJson("/api/connections/attention?limit=50").catch(() => ({ items: [] })),
+    requestJson("/api/connections/activity?limit=50&latest=1").catch(() => ({ items: [] })),
+  ]);
+  renderConnections(payload, providers, vault, bindings, attention.items || [], activity.items || [], secrets);
   return payload;
+}
+
+function syncConnectionScope() {
+  const global = $("#connection-scope-kind")?.value === "global";
+  const scope = $("#connection-scope-id");
+  if (!scope) return;
+  scope.disabled = global; scope.required = !global;
+  if (global) scope.value = "";
 }
 
 function editConnection(item = null) {
   connectionEditId = item?.id || "";
+  connectionEditItem = item;
   $("#connection-form-title").textContent = item?.id ? "Edit connection" : "Add connection";
   $("#connection-provider").value = item?.provider || "api";
   $("#connection-name").value = item?.name || "";
   $("#connection-scope-kind").value = item?.scope_kind || "global";
   $("#connection-scope-id").value = item?.scope_id || "";
-  $("#connection-status-field").value = item?.status || "setup_needed";
   $("#connection-ref").value = item?.connection_ref || "";
-  $("#connection-credential-ref").value = item?.credential_ref || "";
   $("#connection-admin-url").value = item?.admin_url || "";
-  $("#connection-capabilities").value = (item?.capabilities || []).join(", ");
   $("#connection-notes").value = item?.notes || "";
+  $("#connection-secret").value = "";
+  const resend = $("#connection-provider").value === "resend";
+  $("#connection-secret-row").hidden = !resend;
+  $("#connection-secret-label").firstChild.textContent = item?.id ? "Rotate Resend API key " : "Resend API key ";
   $("#connection-delete").hidden = !item?.id;
-  syncConnectionScope();
   $("#connection-form-error").textContent = "";
+  syncConnectionScope();
   openToolEditor($("#connection-editor"), $("#connection-name"));
 }
 
-function syncConnectionScope() {
-  const global = $("#connection-scope-kind").value === "global";
-  $("#connection-scope-id").disabled = global;
-  $("#connection-scope-id").required = !global;
-  if (global) $("#connection-scope-id").value = "";
+async function applyConnectionPlan(action, item, body = {}) {
+  const target = { provider: body.provider || item?.provider || "", connection_id: item?.id || "", project: body.scope_id || item?.scope_id || "", environment: "live" };
+  const plan = await requestJson("/api/connections/plan", {
+    method: "POST", idempotencyKey: freshIdempotencyKey(`plan-${action}`),
+    body: JSON.stringify({ action, target, body, expected_revision: item?.revision ?? null }),
+  });
+  if (plan.plan?.confirmation_required) {
+    const confirmed = window.confirm(`${connectionActionLabel(action)} ${item?.name || "this connection"}? This cannot be undone from Frank.`);
+    if (!confirmed) return null;
+  }
+  const applied = await requestJson("/api/connections/apply", {
+    method: "POST", idempotencyKey: freshIdempotencyKey(`apply-${action}`),
+    body: JSON.stringify({ plan_id: plan.plan.plan_id, confirmation_token: plan.plan.confirmation_token || "" }),
+  });
+  const initial = applied.action || {};
+  if (applied.pending || ["waiting_for_provider", "running"].includes(initial.state)) {
+    $("#connections-status").textContent = "Waiting for Hermes provider receipt…";
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+      const latest = await requestJson("/api/connections/activity?limit=50&latest=1").catch(() => ({ items: [] }));
+      const match = (latest.items || []).find((entry) => entry.correlation_id === initial.correlation_id || entry.correlation_id === plan.plan.plan_id);
+      if (match && !["waiting_for_provider", "running", "planned", "awaiting_confirmation"].includes(match.state)) return match;
+    }
+    return initial;
+  }
+  return initial;
+}
+
+async function runConnectionAction(action, item) {
+  if (connectionRequestPending) return;
+  setConnectionBusy(true);
+  try {
+    $("#connections-status").textContent = `${connectionActionLabel(action)} queued…`;
+    await applyConnectionPlan(action, item, {});
+    await loadConnections();
+    $("#connections-status").textContent = `${connectionActionLabel(action)} recorded. Provider truth will appear in the receipt.`;
+  } catch (error) {
+    $("#connections-status").textContent = error.message || "Connection action failed.";
+  } finally {
+    setConnectionBusy(false);
+  }
+}
+
+async function deleteVaultSecret(item) {
+  if (connectionRequestPending) return;
+  const refId = safeVaultRefId(item.credential_ref);
+  if (!refId) return;
+  setConnectionBusy(true);
+  let confirmationToken = "";
+  let receiptId = "";
+  let deletePayload = null;
+  try {
+    const plan = await requestJson(`/api/vault/secrets/${refId}/delete-plan`, {
+      method: "POST", idempotencyKey: freshIdempotencyKey("vault-delete-plan"), body: JSON.stringify({}),
+    });
+    confirmationToken = typeof plan.confirmation_token === "string" ? plan.confirmation_token : "";
+    receiptId = typeof plan.receipt_id === "string" ? plan.receipt_id : "";
+    if (!confirmationToken || !receiptId) throw new Error("Secure vault did not return a delete confirmation.");
+    const confirmed = window.confirm(`Delete the vault secret for ${item.name}? This removes the secret from the secure vault and leaves the Frank record for reconciliation.`);
+    if (!confirmed) return;
+    deletePayload = { confirmation_token: confirmationToken, provider_receipt: { receipt_id: receiptId } };
+    await requestJson(`/api/vault/secrets/${refId}`, {
+      method: "DELETE", idempotencyKey: freshIdempotencyKey("vault-delete"), body: JSON.stringify(deletePayload),
+    });
+    confirmationToken = "";
+    receiptId = "";
+    deletePayload.confirmation_token = "";
+    deletePayload.provider_receipt = null;
+    $("#connections-status").textContent = "Vault secret deleted. The Frank record remains for review.";
+    await loadConnections();
+  } catch (error) {
+    $("#connections-status").textContent = error.message || "Vault secret could not be deleted.";
+  } finally {
+    confirmationToken = "";
+    receiptId = "";
+    if (deletePayload) {
+      deletePayload.confirmation_token = "";
+      deletePayload.provider_receipt = null;
+    }
+    setConnectionBusy(false);
+  }
+}
+
+async function rotateResendSecret(item, value) {
+  const refId = safeVaultRefId(item?.credential_ref);
+  if (!refId) throw new Error("This connection has no vault secret to rotate.");
+  await requestJson(`/api/vault/secrets/${refId}/rotate`, { method: "POST", idempotencyKey: freshIdempotencyKey("vault-rotate"), body: JSON.stringify({ secret_value: value }) });
+}
+
+async function createResendSecret(fields, value) {
+  const scopeKind = fields.scope_kind === "project" ? "project" : "global";
+  const response = await requestJson("/api/vault/secrets", {
+    method: "POST", idempotencyKey: freshIdempotencyKey("vault-create"),
+    body: JSON.stringify({ project_id: "frank", environment: "live", secret_path: "/frank/connections", secret_name: "RESEND_API_KEY", scope_kind: scopeKind, scope_id: scopeKind === "project" ? fields.scope_id : "", provider: "resend", capabilities: ["email.send", "email.status"], secret_value: value }),
+  });
+  const ref = response.secret?.ref || "";
+  if (!ref) throw new Error("Secure vault did not return an opaque reference.");
+  try {
+    await requestJson("/api/provider-broker/bindings", {
+      method: "POST", idempotencyKey: freshIdempotencyKey("vault-bind"),
+      body: JSON.stringify({ vault_ref: ref, provider: "resend", capabilities: ["email.send", "email.status"] }),
+    });
+  } catch (error) {
+    const reconciliation = new Error("Attention: the vault secret was stored but provider binding did not complete. Reconcile the opaque vault reference from Connections.");
+    reconciliation.reconciliationRef = ref;
+    reconciliation.cause = error;
+    throw reconciliation;
+  }
+  return ref;
+}
+
+async function submitConnectionForm(event) {
+  event.preventDefault();
+  if (connectionRequestPending) return;
+  setConnectionBusy(true);
+  const secretInput = $("#connection-secret");
+  const secret = secretInput?.value || "";
+  if (secretInput) secretInput.value = "";
+  const fields = {
+    provider: $("#connection-provider").value,
+    name: $("#connection-name").value,
+    scope_kind: $("#connection-scope-kind").value,
+    scope_id: $("#connection-scope-id").value,
+    connection_ref: $("#connection-ref").value,
+    admin_url: $("#connection-admin-url").value,
+    capabilities: connectionCapabilities($("#connection-provider").value),
+    notes: $("#connection-notes").value,
+  };
+  try {
+    $("#connection-form-error").textContent = "";
+    $("#connections-status").textContent = "Preparing secure connection update…";
+    if (secret && connectionEditItem?.id) {
+      await rotateResendSecret(connectionEditItem, secret);
+    } else if (secret && fields.provider !== "resend") {
+      throw new Error("Only Resend key entry is supported here; configure other providers in their secure UI.");
+    } else if (secret) {
+      fields.credential_ref = await createResendSecret(fields, secret);
+      fields.status = "connected";
+    } else if (!connectionEditId) {
+      fields.status = "setup_needed";
+    }
+    await applyConnectionPlan(connectionEditId ? "update" : "create", connectionEditItem, fields);
+    closeToolEditor($("#connection-editor"));
+    connectionEditId = ""; connectionEditItem = null;
+    await loadConnections();
+    $("#connections-status").textContent = "Metadata saved. Configured and verified remain separate.";
+  } catch (error) {
+    $("#connection-form-error").textContent = error.message || "Connection could not be saved.";
+    const reconciliationRef = error.reconciliationRef || fields.credential_ref;
+    if (reconciliationRef) {
+      $("#connections-status").textContent = `Attention: secure vault metadata needs reconciliation. Opaque ref: ${reconciliationRef}`;
+    }
+  } finally {
+    setConnectionBusy(false);
+  }
+}
+
+async function openConnectionsAgent() {
+  try {
+    const sessions = await requestJson("/api/chat/sessions");
+    let session = (sessions.sessions || []).find((item) => item.title === "Connections Agent");
+    if (!session) {
+      const created = await requestJson("/api/chat/sessions", { method: "POST", body: JSON.stringify({ title: "Connections Agent" }) });
+      session = created.session;
+    }
+    window.dispatchEvent(new CustomEvent("frank:open-chat-session", { detail: { id: session.id } }));
+  } catch (error) { $("#connections-status").textContent = error.message || "Connections Agent session unavailable."; }
 }
 
 export async function openConnections() {
   setTopActions([button("Add connection", () => editConnection(), "home-action home-action-primary")]);
-  $("#connections-status").textContent = "Loading connection catalog…";
+  $("#connections-status").textContent = "Loading workspace…";
+  requestAnimationFrame(() => $("#connections-heading")?.focus({ preventScroll: true }));
   try {
     await loadConnections();
-    $("#connections-status").textContent = "Statuses are recorded in Frank; provider systems remain authoritative.";
-  } catch (error) {
-    $("#connections-status").textContent = error.message;
-  }
+    $("#connections-status").textContent = "Statuses are recorded in Frank; provider systems and Hermes receipts remain authoritative.";
+  } catch (error) { $("#connections-status").textContent = error.message || "Connections workspace unavailable."; }
 }
 
 export function setupHomePlatform() {
@@ -833,46 +1158,17 @@ export function setupHomePlatform() {
       $("#widget-form-error").textContent = error.message;
     }
   });
-
   $("#connection-editor-close")?.addEventListener("click", () => closeToolEditor($("#connection-editor")));
   $("#connection-scope-kind")?.addEventListener("change", syncConnectionScope);
-  $("#connection-form")?.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const capabilities = $("#connection-capabilities").value.split(",").map((value) => value.trim().toLowerCase()).filter(Boolean);
-    const payload = {
-      provider: $("#connection-provider").value,
-      name: $("#connection-name").value,
-      scope_kind: $("#connection-scope-kind").value,
-      scope_id: $("#connection-scope-id").value,
-      status: $("#connection-status-field").value,
-      connection_ref: $("#connection-ref").value,
-      credential_ref: $("#connection-credential-ref").value,
-      admin_url: $("#connection-admin-url").value,
-      capabilities,
-      notes: $("#connection-notes").value,
-    };
-    try {
-      await requestJson(connectionEditId ? `/api/connections/${encodeURIComponent(connectionEditId)}` : "/api/connections", {
-        method: connectionEditId ? "PATCH" : "POST", body: JSON.stringify(payload),
-      });
-      closeToolEditor($("#connection-editor"));
-      connectionEditId = "";
-      await loadConnections();
-      $("#connections-status").textContent = "Connection metadata saved. Provider configuration was not changed.";
-    } catch (error) {
-      $("#connection-form-error").textContent = error.message;
-    }
+  $("#connection-provider")?.addEventListener("change", () => {
+    const resend = $("#connection-provider").value === "resend";
+    $("#connection-secret-row").hidden = !resend;
   });
+  $("#connection-form")?.addEventListener("submit", submitConnectionForm);
   $("#connection-delete")?.addEventListener("click", async () => {
-    if (!connectionEditId || !window.confirm("Remove this connection record? Provider credentials and configuration are not changed.")) return;
-    try {
-      await requestJson(`/api/connections/${encodeURIComponent(connectionEditId)}`, { method: "DELETE" });
-      closeToolEditor($("#connection-editor"));
-      connectionEditId = "";
-      await loadConnections();
-      $("#connections-status").textContent = "Connection record removed. Provider configuration was not changed.";
-    } catch (error) {
-      $("#connection-form-error").textContent = error.message;
-    }
+    if (!connectionEditId || !connectionEditItem) return;
+    await runConnectionAction("delete", connectionEditItem);
+    closeToolEditor($("#connection-editor"));
   });
+  $("#connection-agent-open")?.addEventListener("click", openConnectionsAgent);
 }

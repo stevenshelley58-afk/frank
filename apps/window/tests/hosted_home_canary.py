@@ -1,4 +1,9 @@
-"""VPS-only acceptance canary for Frank homes, widgets, and connections."""
+"""VPS-only acceptance canary for Frank homes, widgets, and connections.
+
+The candidate transport may be loopback while mutations use the production
+allowlisted origin. Override ``FRANK_CANARY_ORIGIN`` only for a matching
+candidate origin.
+"""
 from __future__ import annotations
 
 import json
@@ -9,6 +14,7 @@ import urllib.request
 
 
 BASE_URL = os.environ.get("FRANK_CANARY_URL", "http://127.0.0.1:8080").rstrip("/")
+CANARY_ORIGIN = os.environ.get("FRANK_CANARY_ORIGIN", "https://frank.fail").rstrip("/")
 HERMES_AGENT_KEY = os.environ.get("HERMES_CONNECTIONS_AGENT_KEY", "").strip()
 
 
@@ -20,7 +26,7 @@ def request(path: str, *, method: str = "GET", payload: dict | None = None, head
         method=method,
         headers={
             "Content-Type": "application/json",
-            "Origin": BASE_URL,
+            "Origin": CANARY_ORIGIN,
             **({"Idempotency-Key": f"canary-{time.time_ns()}"} if method in {"POST", "PATCH", "DELETE"} else {}),
             **(headers or {}),
         },

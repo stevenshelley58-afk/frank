@@ -185,22 +185,30 @@
           </aside>
         </div>
       </section>
-      <section class="view" data-view="connections">
+      <section class="view" data-view="connections" aria-labelledby="connections-heading">
         <div class="tool-workspace">
           <div class="tool-workspace-main">
             <div class="tool-workspace-intro">
-              <div><span class="home-kicker">Tools</span><h2>Connections</h2><p>Provider setup, capabilities, and recorded health in one place. Credentials stay in OpenBao or the provider; Hermes owns execution.</p></div>
-              <span id="connections-status" aria-live="polite">Loading connection catalog…</span>
+              <div><span class="home-kicker">Tools</span><h2 id="connections-heading" tabindex="-1">Connections</h2><p>One control plane for provider bindings, vault health, Hermes work, and safe receipts. Frank stores metadata and opaque references; Hermes executes.</p></div>
+              <span id="connections-status" aria-live="polite">Loading workspace…</span>
             </div>
-            <section class="connections-section"><div class="section-heading"><h2>Connection catalog</h2><span>Resend · Stripe · Activepieces · MCP · API</span></div><div class="connection-catalog" id="connection-catalog"></div></section>
-            <section class="connections-section"><div class="section-heading"><h2>Recorded connections</h2><span>Changing status here does not change a provider.</span></div><div class="connection-list" id="connection-list"></div></section>
+            <div class="connection-overview" id="connection-overview" aria-live="polite"></div>
+            <div class="connection-columns">
+              <section class="connections-section connection-panel"><div class="section-heading"><h2>Attention</h2><span>Recorded issues and pending work</span></div><div class="connection-attention-list" id="connection-attention"></div></section>
+              <section class="connections-section connection-panel"><div class="section-heading"><h2>Vault health</h2><span>Write-only secret boundary</span></div><div id="connection-vault-health"></div></section>
+            </div>
+            <section class="connections-section"><div class="section-heading"><h2>Provider capabilities</h2><span>Adapters remain Hermes-owned</span></div><div class="connection-catalog" id="connection-catalog"></div></section>
+            <section class="connections-section"><div class="section-heading"><h2>Connection bindings</h2><span>Configured is not verified</span></div><div class="connection-list" id="connection-list"></div></section>
+            <div class="connection-columns">
+              <section class="connections-section connection-panel"><div class="section-heading"><h2>Activity &amp; receipts</h2><span>Newest first</span></div><div class="connection-activity" id="connection-activity"></div></section>
+              <section class="connections-section connection-panel"><div class="section-heading"><h2>Connections Agent</h2><span>Private Hermes session</span></div><div class="connection-agent-card"><p>Ask Hermes to inspect, verify, sync, or repair this same workspace. Agent work is recorded in the activity ledger.</p><button type="button" class="home-action home-action-primary" id="connection-agent-open">Open Connections Agent in Chat</button><p class="home-truth">Frank never runs an agent loop or holds Hermes credentials in the browser.</p></div></section>
+            </div>
           </div>
           <aside class="tool-editor" id="connection-editor" hidden role="dialog" aria-modal="true" aria-labelledby="connection-form-title" tabindex="-1">
             <div class="tool-editor-head"><div><span class="home-kicker">Connection</span><h2 id="connection-form-title">Add connection</h2></div><button type="button" id="connection-editor-close" aria-label="Close connection editor">×</button></div>
-            <form id="connection-form">
+            <form id="connection-form" autocomplete="off">
               <div class="tool-form-pair">
-                <label>Provider<select id="connection-provider"><option value="resend">Resend</option><option value="stripe">Stripe</option><option value="activepieces">Activepieces</option><option value="mcp">MCP</option><option value="api">API</option></select></label>
-                <label>Recorded status<select id="connection-status-field"><option value="setup_needed">Setup needed</option><option value="connected">Connected</option><option value="verified">Verified</option><option value="error">Error</option></select></label>
+                <label>Provider<select id="connection-provider"><option value="resend">Resend</option><option value="mautic-smtp">Mautic SMTP</option><option value="stripe">Stripe</option><option value="activepieces">Activepieces</option><option value="mcp">MCP</option><option value="api">API</option></select></label>
               </div>
               <label>Name<input id="connection-name" maxlength="120" required placeholder="Blockwise Resend"></label>
               <div class="tool-form-pair">
@@ -208,13 +216,15 @@
                 <label>Scope ID<input id="connection-scope-id" maxlength="80" placeholder="blockwise"></label>
               </div>
               <label>Provider connection reference<input id="connection-ref" maxlength="300" placeholder="ap://connections/resend-main"></label>
-              <label>Credential reference<input id="connection-credential-ref" maxlength="300" placeholder="openbao://frank/connections/resend-main"></label>
               <label>Secure setup/admin link<input id="connection-admin-url" type="url" maxlength="500" placeholder="https://"></label>
-              <label>Capabilities<input id="connection-capabilities" maxlength="500" placeholder="email.send, email.status"></label>
+              <div id="connection-secret-row" class="connection-secret-row">
+                <label id="connection-secret-label">Resend API key <span class="home-provider">write-only</span><input id="connection-secret" type="password" inputmode="text" autocomplete="off" spellcheck="false" maxlength="512" placeholder="Paste once; it is sent to the secure vault"></label>
+                <p class="account-help" id="connection-secret-help">The value is never echoed, stored by Frank, or shown again. Leave blank when only editing metadata.</p>
+              </div>
               <label>Notes<textarea id="connection-notes" maxlength="600" rows="4" placeholder="Non-secret setup notes"></textarea></label>
-              <p class="account-help">Never paste a password, API key, OAuth token, card number, or bank detail. Activepieces credentials are configured in its secure UI; Frank records only the reference and status.</p>
+              <p class="account-help">Provider status is read-only here. Use Verify, Sync, Revoke provider access, Remove Frank record, or Delete vault secret from the binding row.</p>
               <div class="account-error" id="connection-form-error" role="alert"></div>
-              <div class="account-form-actions"><button type="button" class="account-delete" id="connection-delete" hidden>Remove record</button><button type="submit" class="btn">Save metadata</button></div>
+              <div class="account-form-actions"><button type="button" class="account-delete" id="connection-delete" hidden>Remove Frank record</button><button type="submit" class="btn">Save metadata</button></div>
             </form>
           </aside>
         </div>

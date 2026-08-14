@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -20,6 +21,7 @@ from werkzeug.exceptions import HTTPException
 
 import home_defaults
 import home_providers
+import connections_agent
 
 
 api = Blueprint("home_platform", __name__)
@@ -27,11 +29,24 @@ api = Blueprint("home_platform", __name__)
 
 @api.errorhandler(HTTPException)
 def _api_error(error: HTTPException):
-    return jsonify({"error": error.description}), error.code
+    response = jsonify({"error": error.description})
+    response.status_code = error.code
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@api.errorhandler(connections_agent.ContractError)
+def _connection_contract_error(error: connections_agent.ContractError):
+    response = jsonify({"error": error.message, "code": error.code})
+    response.status_code = error.status
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 DATA_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 HOME_STORE_FILE = Path(os.environ.get("HOME_STORE_FILE", str(DATA_DIR / "home-layouts.json")))
 CONNECTIONS_FILE = Path(os.environ.get("CONNECTIONS_STORE_FILE", str(DATA_DIR / "connections.json")))
+CONNECTION_ACTIONS_FILE = Path(os.environ.get("CONNECTION_ACTIONS_FILE", str(DATA_DIR / "connection-actions.jsonl")))
+CONNECTION_PLANS_FILE = Path(os.environ.get("CONNECTION_PLANS_FILE", str(DATA_DIR / "connection-plans.json")))
 
 MAX_WIDGETS_PER_HOME = 25
 ENTITY_KINDS = {"project", "tool", "agent", "service"}
@@ -43,7 +58,7 @@ CONNECTION_FIELDS = {
     "provider", "name", "scope_kind", "scope_id", "status", "connection_ref",
     "credential_ref", "admin_url", "capabilities", "notes", "last_verified_at",
 }
-CONNECTION_PUBLIC_FIELDS = CONNECTION_FIELDS | {"id", "created_at", "updated_at"}
+CONNECTION_PUBLIC_FIELDS = CONNECTION_FIELDS | {"id", "created_at", "updated_at", "revision"}
 SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
 OPAQUE_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,299}$")
 VAULT_REFERENCE = re.compile(
@@ -74,6 +89,20 @@ _account_loader: Callable[[], list[dict]] = lambda: []
 _hermes_health: Callable[[], dict] = lambda: {"ok": False, "reason": "not configured"}
 _hermes_sessions: Callable[[], dict] | None = None
 _roots: dict[str, Path] = {}
+_connection_service: connections_agent.ConnectionsMutationService | None = None
+_connections_agent_key = os.environ.get("HERMES_CONNECTIONS_AGENT_KEY", "").strip()
+_connections_agent_profile = os.environ.get("HERMES_CONNECTIONS_AGENT_PROFILE", "default").strip() or "default"
+_connection_allowed_origins = {
+    item.strip().rstrip("/") for item in os.environ.get(
+        "FRANK_CONNECTION_ALLOWED_ORIGINS",
+        "https://frank.fail,http://localhost,http://localhost:5000,http://127.0.0.1,http://127.0.0.1:5000,http://127.0.0.1:8080",
+    ).split(",") if item.strip()
+}
+_connection_rate_lock = threading.RLock()
+_connection_rate: dict[tuple[str, str], list[float]] = {}
+CONNECTION_REQUEST_BYTES = 64 * 1024
+CONNECTION_RATE_WINDOW = 60
+CONNECTION_RATE_LIMIT = 120
 
 
 BUILTIN_WIDGETS = [
@@ -233,13 +262,34 @@ def configure(
     hermes_health: Callable[[], dict],
     roots: dict[str, Path],
     hermes_sessions: Callable[[], dict] | None = None,
+    hermes_connections_agent_key: str | None = None,
+    hermes_connections_agent_profile: str | None = None,
+    connection_allowed_origins: list[str] | None = None,
 ) -> None:
-    global _project_loader, _account_loader, _hermes_health, _hermes_sessions, _roots
+    global _project_loader, _account_loader, _hermes_health, _hermes_sessions, _roots, _connection_service
+    global _connections_agent_key, _connections_agent_profile, _connection_allowed_origins
     _project_loader = project_loader
     _account_loader = account_loader
     _hermes_health = hermes_health
     _hermes_sessions = hermes_sessions
     _roots = roots
+    if hermes_connections_agent_key is not None:
+        _connections_agent_key = str(hermes_connections_agent_key).strip()
+    if hermes_connections_agent_profile is not None:
+        _connections_agent_profile = str(hermes_connections_agent_profile).strip() or "default"
+    if connection_allowed_origins is not None:
+        _connection_allowed_origins = {str(item).strip().rstrip("/") for item in connection_allowed_origins if str(item).strip()}
+    _connection_service = connections_agent.ConnectionsMutationService(
+        load_store=_connection_store,
+        save_store=_write_connection_store,
+        clean_connection=_clean_connection,
+        public_connection=_public_connection,
+        normalize_plan=_normalize_connection_plan,
+        delete_allowed=_connection_delete_allowed,
+        scope_change_allowed=lambda connection_id: _connection_delete_allowed(connection_id),
+        ledger_path=CONNECTION_ACTIONS_FILE,
+        plans_path=CONNECTION_PLANS_FILE,
+    )
 
 
 def _now() -> int:
@@ -275,6 +325,18 @@ def _connection_store() -> dict:
     if data.get("version") != 1 or not isinstance(data.get("connections"), list):
         return {"version": 1, "connections": []}
     return data
+
+
+def _write_connection_store(data: dict) -> None:
+    _write_json(CONNECTIONS_FILE, data)
+
+
+def _connection_delete_allowed(connection_id: str) -> bool:
+    return not any(
+        instance.get("config", {}).get("connection_id") == connection_id
+        for home in _home_store().get("homes", {}).values() if isinstance(home, dict)
+        for instance in home.get("instances", [])
+    )
 
 
 def _clean_id(value: object, label: str) -> str:
@@ -752,6 +814,32 @@ def _clean_connection(body: dict, existing: dict | None = None) -> dict:
     item.setdefault("id", uuid.uuid4().hex[:16])
     item.setdefault("created_at", now)
     return item
+
+
+def _normalize_connection_plan(action: str, target: dict, body: dict) -> tuple[dict, dict]:
+    """Validate through the owning connection schema before plan persistence."""
+    if not isinstance(body, dict):
+        raise connections_agent.ContractError("request body must be an object")
+    normalized_target = dict(target or {})
+    if action in {"create", "update"}:
+        connection_id = str(normalized_target.get("connection_id") or "")
+        existing = None
+        if action == "update":
+            existing = next((item for item in _connection_store().get("connections", []) if item.get("id") == connection_id), None)
+            if not existing:
+                raise connections_agent.ContractError("connection not found", 404, "connection_not_found")
+        try:
+            cleaned = _clean_connection(body, existing)
+        except HTTPException as error:
+            raise connections_agent.ContractError("connection metadata rejected") from error
+        fields = set(CONNECTION_FIELDS)
+        normalized_body = {key: cleaned[key] for key in fields} if action == "create" else {key: cleaned[key] for key in body if key in fields}
+        normalized_target["provider"] = normalized_target.get("provider") or cleaned.get("provider", "")
+        normalized_target["connection_id"] = connection_id
+        return normalized_target, normalized_body
+    if body:
+        raise connections_agent.ContractError("this action does not accept a mutation body")
+    return normalized_target, {}
 
 
 @api.get("/api/connections")
