@@ -13,7 +13,7 @@ PACKAGE_SPEC.loader.exec_module(PACKAGE)
 
 from ad_intelligence.core import (
     AdIntelligenceManifest, PublicClassification, PublicCopy, PublicCreative,
-    PublicMedia, build_release, export_public,
+    PublicMedia, PublicObservation, build_release, export_public,
 )
 from ad_intelligence.pipeline import PipelineRun, StageFailure
 from ad_intelligence.protocol import ALLOWED_ACTIONS, ALLOWED_EVENTS, validate_action, validate_event_name
@@ -23,10 +23,49 @@ class AdIntelligenceToolTest(unittest.TestCase):
     RELEASE_EVIDENCE = {
         "provenance_refs": ("source://a-1",),
         "trace_refs": ("trace://run-1",),
-        "settings_refs": ("settings://ad-radar/v1",),
-        "qa_receipt_ref": "receipt://qa/run-1",
-        "sanitization_receipt_refs": ("receipt://pii/run-1", "receipt://secret/run-1"),
+        "settings_revision": 1,
+        "settings_ref": "settings://ad-radar/1",
+        "qa_receipt": {
+            "decision": "pass",
+            "receipt_ref": "receipt://qa/run-1",
+            "checked_at": "2026-08-14T00:00:01Z",
+        },
+        "sanitization_receipts": {
+            "pii_scan": {"status": "passed", "receipt_id": "pii-scan-1", "scanned_at": "2026-08-14T00:00:01Z"},
+            "secret_scan": {"status": "passed", "receipt_id": "secret-scan-1", "scanned_at": "2026-08-14T00:00:01Z"},
+        },
     }
+
+    @staticmethod
+    def public_payload():
+        return export_public(
+            "blockwise",
+            "2026-08-14T00:00:00Z",
+            [PublicCreative(
+                "a-1",
+                "https://public.example/ad",
+                advertiser="Example",
+                copy=PublicCopy(headline="A public ad"),
+                observed=PublicObservation("2026-08-13T00:00:00Z", "2026-08-14T00:00:00Z"),
+                media=(PublicMedia("media://a-1", "image", 1200, 800),),
+                classification=PublicClassification(
+                    "listing",
+                    .95,
+                    receipt_refs=("receipt://classification/a-1",),
+                    provenance_refs=("source://a-1",),
+                ),
+            )],
+        )
+
+    def release(self, *, project_scope="blockwise", evidence=None):
+        return build_release(
+            "release-1",
+            "1.0.0",
+            "2026-08-14T00:00:01Z",
+            project_scope,
+            self.public_payload(),
+            **(evidence or self.RELEASE_EVIDENCE),
+        )
 
     def test_home_manifest_is_declarative_and_exactly_scoped(self):
         path = Path(__file__).parents[1] / "tools" / "ad-intelligence" / "home.json"
@@ -56,6 +95,12 @@ class AdIntelligenceToolTest(unittest.TestCase):
         self.assertEqual(set(declarative["hermes"]["event_kinds"]), set(ALLOWED_EVENTS))
         self.assertEqual(declarative["trace"]["schema"], "schema://frank.tool-app-trace/v1")
         self.assertEqual(set(declarative["trace"]["event_kinds"]), set(ALLOWED_EVENTS))
+        public_schema = json.loads((PACKAGE_DIR / "schemas" / "public-export.schema.json").read_text(encoding="utf-8"))
+        release_schema = json.loads((PACKAGE_DIR / "schemas" / "release.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(public_schema["$id"], "schema://frank.ad-intelligence-public/v1")
+        self.assertEqual(release_schema["$id"], declarative["release_schema"])
+        self.assertFalse(public_schema["additionalProperties"])
+        self.assertFalse(release_schema["additionalProperties"])
 
     def test_run_advances_and_publishes_only_in_order(self):
         run = PipelineRun("run-1", AdIntelligenceManifest())
@@ -83,7 +128,7 @@ class AdIntelligenceToolTest(unittest.TestCase):
         with self.assertRaises(ValueError): run.retry_delay_seconds(0)
 
     def test_public_export_has_no_contact_or_outreach_shape(self):
-        result = export_public("blockwise", "2026-08-14T00:00:00Z", [PublicCreative("a-1", "https://public.example/ad", advertiser="Example", copy=PublicCopy(headline="A public ad"), media=(PublicMedia("media://a-1", "image", 1200, 800),), classification=PublicClassification("listing", .95))])
+        result = self.public_payload()
         self.assertEqual(result["schema"], "schema://frank.ad-intelligence-public/v1")
         self.assertEqual(set(result["creatives"][0]), {"id", "source_ref", "advertiser", "market", "category", "copy", "destination_ref", "observed", "media", "classification"})
         self.assertEqual(set(result["creatives"][0]["classification"]), {"label", "confidence", "receipt_refs", "provenance_refs"})
@@ -104,6 +149,18 @@ class AdIntelligenceToolTest(unittest.TestCase):
         with self.assertRaises(ValueError): PublicCreative("bad", "https://public.example/ad", classification={"raw_payload": "secret"})
         with self.assertRaises(TypeError): PublicClassification("listing", .9, rationale={"recipient": "person"})
 
+    def test_public_export_rejects_invalid_time_order_and_numeric_types(self):
+        with self.assertRaises(ValueError): export_public("blockwise", "not-a-timestamp", [])
+        with self.assertRaises(ValueError): PublicObservation("2026-08-14T01:00:00Z", "2026-08-14T00:00:00Z")
+        with self.assertRaises(ValueError): PublicMedia("media://a-1", "image", True, 800)
+        with self.assertRaises(ValueError): PublicClassification("listing", True)
+        with self.assertRaises(ValueError):
+            export_public(
+                "blockwise",
+                "2026-08-14T00:00:00Z",
+                [PublicCreative("a-1", "https://public.example/ad", observed=PublicObservation(last_seen="2026-08-14T00:00:01Z"))],
+            )
+
     def test_hermes_protocol_contracts(self):
         self.assertEqual(validate_action("approve-publish"), "approve-publish")
         self.assertEqual(validate_event_name("publish-completed"), "publish-completed")
@@ -113,35 +170,69 @@ class AdIntelligenceToolTest(unittest.TestCase):
         with self.assertRaises(ValueError): validate_event_name("arbitrary_event")
 
     def test_release_is_immutable_and_sanitized(self):
-        payload = export_public("blockwise", "2026-08-14T00:00:00Z", [PublicCreative("a-1", "https://public.example/ad", classification=PublicClassification("listing", .95, receipt_refs=("receipt://a-1",), provenance_refs=("source://a-1",)))])
-        release = build_release("release-1", "1.0.0", "blockwise", payload, **self.RELEASE_EVIDENCE)
+        release = self.release()
         self.assertTrue(release.immutable)
-        self.assertTrue(release.pii_sanitized and release.secret_sanitized and release.qa_approved)
         self.assertEqual(release.to_dict()["status"], "released")
+        self.assertEqual(release.to_dict()["released_at"], "2026-08-14T00:00:01Z")
         self.assertEqual(release.to_dict()["schema"], "schema://frank.ad-intelligence-release/v1")
         self.assertEqual(release.to_dict()["tool_id"], "ad-intelligence")
         self.assertEqual(release.to_dict()["pipeline_id"], "ad-radar-pipeline")
         self.assertEqual(release.to_dict()["pipeline_version"], "1.0.0")
         self.assertEqual(release.to_dict()["consumer_compatibility"], ["ad-intelligence-public-v1"])
-        self.assertEqual(release.to_dict()["qa_receipt_ref"], "receipt://qa/run-1")
-        self.assertEqual(len(release.to_dict()["sanitization_receipt_refs"]), 2)
-        self.assertEqual(len(release.to_dict()["release_hash"]), 64)
+        self.assertEqual(release.to_dict()["settings_revision"], 1)
+        self.assertEqual(release.to_dict()["qa_receipt"]["decision"], "pass")
+        self.assertEqual(release.to_dict()["sanitization_receipts"]["pii_scan"]["status"], "passed")
+        self.assertEqual(release.to_dict()["checksum"], "84afae4e14dace7517dd135cfbe45fd513cb7b85163bd72790b16b2f6c1a6e18")
+        self.assertEqual(release.to_dict()["release_hash"], "f0046362b6bd2317c30f7f16e4ee786a351982b9d89f0827feeddb93f5cf90fe")
         with self.assertRaises(ValueError):
             replace(release, project_scope="other-project")
+        with self.assertRaises(ValueError):
+            replace(release, consumer_compatibility=("other-v1",))
         with self.assertRaises(TypeError): release.public_export["project"] = "other"
+        with self.assertRaises(TypeError): release.qa_receipt["decision"] = "fail"
 
+        payload = self.public_payload()
         private_payload = json.loads(json.dumps(payload))
         private_payload["creatives"][0]["copy"]["prompt_ref"] = "private"
-        with self.assertRaises(ValueError): build_release("release-2", "1.0.0", "blockwise", private_payload, **self.RELEASE_EVIDENCE)
+        with self.assertRaises(ValueError): build_release("release-2", "1.0.0", "2026-08-14T00:00:01Z", "blockwise", private_payload, **self.RELEASE_EVIDENCE)
         pii_payload = json.loads(json.dumps(payload))
         pii_payload["creatives"][0]["copy"]["body"] = "Call +61 400 123 456"
-        with self.assertRaises(ValueError): build_release("release-3", "1.0.0", "blockwise", pii_payload, **self.RELEASE_EVIDENCE)
+        with self.assertRaises(ValueError): build_release("release-3", "1.0.0", "2026-08-14T00:00:01Z", "blockwise", pii_payload, **self.RELEASE_EVIDENCE)
         private_ref_payload = json.loads(json.dumps(payload))
         private_ref_payload["creatives"][0]["source_ref"] = "openbao://private/source"
-        with self.assertRaises(ValueError): build_release("release-4", "1.0.0", "blockwise", private_ref_payload, **self.RELEASE_EVIDENCE)
+        with self.assertRaises(ValueError): build_release("release-4", "1.0.0", "2026-08-14T00:00:01Z", "blockwise", private_ref_payload, **self.RELEASE_EVIDENCE)
 
         with self.assertRaises(ValueError):
-            build_release("release-5", "1.0.0", "blockwise", payload, **{**self.RELEASE_EVIDENCE, "trace_refs": ()})
+            build_release("release-5", "1.0.0", "2026-08-14T00:00:01Z", "blockwise", payload, **{**self.RELEASE_EVIDENCE, "trace_refs": ()})
+
+    def test_release_matches_golden_fixture_and_strict_schema(self):
+        fixture = json.loads((PACKAGE_DIR / "fixtures" / "ad-radar-release-v1.json").read_text(encoding="utf-8"))
+        release = self.release().to_dict()
+        release_schema = json.loads((PACKAGE_DIR / "schemas" / "release.schema.json").read_text(encoding="utf-8"))
+        public_schema = json.loads((PACKAGE_DIR / "schemas" / "public-export.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(release, fixture)
+        self.assertEqual(set(fixture), set(release_schema["required"]))
+        self.assertEqual(set(fixture["public_export"]), set(public_schema["required"]))
+
+    def test_release_rejects_scope_private_metadata_and_inexact_receipts(self):
+        with self.assertRaises(ValueError): self.release(project_scope="other-project")
+        with self.assertRaises(ValueError):
+            self.release(evidence={**self.RELEASE_EVIDENCE, "trace_refs": ("trace://person@example.test",)})
+        with self.assertRaises(ValueError):
+            self.release(evidence={**self.RELEASE_EVIDENCE, "settings_ref": "openbao://private/settings"})
+        with self.assertRaises(ValueError):
+            self.release(evidence={**self.RELEASE_EVIDENCE, "settings_revision": True})
+        with self.assertRaises(ValueError):
+            self.release(evidence={**self.RELEASE_EVIDENCE, "qa_receipt": {**self.RELEASE_EVIDENCE["qa_receipt"], "notes": "extra"}})
+        bad_scans = json.loads(json.dumps(self.RELEASE_EVIDENCE["sanitization_receipts"]))
+        bad_scans["pii_scan"]["status"] = "failed"
+        with self.assertRaises(ValueError):
+            self.release(evidence={**self.RELEASE_EVIDENCE, "sanitization_receipts": bad_scans})
+        with self.assertRaises(ValueError):
+            build_release(
+                "release-1", "1.0.0", "2026-08-13T23:59:59Z", "blockwise",
+                self.public_payload(), **self.RELEASE_EVIDENCE,
+            )
 
 
 if __name__ == "__main__": unittest.main()

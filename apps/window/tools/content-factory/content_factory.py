@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from hashlib import sha256
+from datetime import datetime
 import json
 import re
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlsplit
+
+from tool_apps.canonical import canonical_sha256
 
 
 PIPELINE_SCHEMA = "schema://frank.tool-app-pipeline/v1"
@@ -53,6 +55,24 @@ EVENT_KINDS = frozenset(_PACKAGE_MANIFEST["hermes"]["event_kinds"])
 def _require_id(value: Any, label: str) -> str:
     if not isinstance(value, str) or not _DOMAIN_ID.fullmatch(value):
         raise ValueError(f"{label} must be a safe identifier")
+    return value
+
+
+def _require_scope_id(value: Any, label: str) -> str:
+    if not isinstance(value, str) or not _CORRELATION_ID.fullmatch(value):
+        raise ValueError(f"{label} must be a safe opaque scope identifier")
+    return value
+
+
+def _require_timestamp(value: Any, label: str) -> str:
+    if not isinstance(value, str):
+        raise ValueError(f"{label} must be an ISO-8601 timestamp with timezone")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ValueError(f"{label} must be an ISO-8601 timestamp with timezone") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} must be an ISO-8601 timestamp with timezone")
     return value
 
 
@@ -204,6 +224,11 @@ def _required_text(mapping: Mapping[str, Any], key: str, path: str) -> str:
     return value
 
 
+def _require_exact_keys(mapping: Mapping[str, Any], keys: set[str], path: str) -> None:
+    if set(mapping) != keys:
+        raise ValueError(f"{path} must contain exactly: {', '.join(sorted(keys))}")
+
+
 def public_release(release: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and return an immutable public article release."""
     _assert_public_tree(release)
@@ -214,58 +239,87 @@ def public_release(release: Mapping[str, Any]) -> dict[str, Any]:
     if release["schema"] != RELEASE_SCHEMA or release["tool_id"] != TOOL_ID:
         raise ValueError("release producer schema or tool identity is invalid")
     _require_id(release["project_id"], "project_id")
-    _require_id(release["workspace_id"], "workspace_id")
+    _require_scope_id(release["workspace_id"], "workspace_id")
     _require_id(release["release_id"], "release_id")
     _require_id(release["content_id"], "content_id")
-    if not isinstance(release["settings_revision"], int) or release["settings_revision"] < 0:
+    if type(release["settings_revision"]) is not int or release["settings_revision"] < 0:
         raise ValueError("settings_revision must be a non-negative integer")
     if release["pipeline_id"] != PROCESS_GRAPH["id"] or release["pipeline_version"] != PROCESS_GRAPH["version"] or not isinstance(release["pipeline_version"], str) or not _SEMVER.fullmatch(release["pipeline_version"]):
         raise ValueError("pipeline identity or version is invalid")
     compatibility = release["consumer_compatibility"]
     if not isinstance(compatibility, (list, tuple)) or not compatibility or any(not isinstance(item, str) or not _DOMAIN_ID.fullmatch(item) for item in compatibility):
         raise ValueError("consumer_compatibility must list safe compatibility IDs")
-    if not isinstance(release["version"], int) or release["version"] < 1 or release["immutable"] is not True:
+    if "article-release-v1" not in compatibility:
+        raise ValueError("consumer_compatibility must include article-release-v1")
+    if type(release["version"]) is not int or release["version"] < 1 or release["immutable"] is not True:
         raise ValueError("release version must be a positive immutable version")
     if release["status"] != "published" or release["channel"] not in CHANNELS:
         raise ValueError("release status or channel is invalid")
     _required_text(release, "title", "release")
+    if "summary" in release:
+        _required_text(release, "summary", "release")
     body = release["body"]
     if not isinstance(body, Mapping) or body.get("format") != "markdown":
         raise ValueError("release.body must be a markdown object")
+    _require_exact_keys(body, {"format", "content"}, "release.body")
     _required_text(body, "content", "release.body")
     if not isinstance(release["media"], list):
         raise ValueError("release.media must be a list")
+    media_ids: set[str] = set()
     for media in release["media"]:
-        if not isinstance(media, Mapping) or any(not media.get(key) for key in ("id", "url", "alt_text", "checksum")) or not _SHA256.fullmatch(str(media["checksum"])):
+        if not isinstance(media, Mapping) or any(not media.get(key) for key in ("id", "url", "alt_text", "checksum")) or not isinstance(media.get("alt_text"), str) or not _SHA256.fullmatch(str(media["checksum"])):
             raise ValueError("release.media items require id, url, alt_text, and sha256 checksum")
+        _require_exact_keys(media, {"id", "url", "alt_text", "checksum"}, "release.media[]")
         _require_id(media["id"], "media.id")
+        if media["id"] in media_ids:
+            raise ValueError("release.media IDs must be unique")
+        media_ids.add(media["id"])
         _safe_resource_ref(media["url"], "media.url")
     seo = release["seo"]
     if not isinstance(seo, Mapping) or not all(isinstance(seo.get(key), str) and seo[key].strip() for key in ("title", "description", "canonical_url")):
         raise ValueError("release.seo requires title, description, and canonical_url")
+    _require_exact_keys(seo, {"title", "description", "canonical_url"}, "release.seo")
     _safe_resource_ref(seo["canonical_url"], "seo.canonical_url")
     qa = release["qa_receipt"]
     if not isinstance(qa, Mapping) or qa.get("decision") != "pass" or not all(qa.get(key) for key in ("receipt_ref", "checked_at")):
         raise ValueError("release requires a passing QA receipt")
+    _require_exact_keys(qa, {"decision", "receipt_ref", "checked_at"}, "release.qa_receipt")
     _require_id(qa["receipt_ref"], "qa_receipt.receipt_ref")
+    _require_timestamp(qa["checked_at"], "qa_receipt.checked_at")
     approval = release["approval_receipt"]
     if not isinstance(approval, Mapping) or approval.get("decision") != "approve" or not all(approval.get(key) for key in ("receipt_ref", "decided_at")):
         raise ValueError("release requires an approval receipt with approve decision")
+    _require_exact_keys(approval, {"decision", "receipt_ref", "decided_at"}, "release.approval_receipt")
     _require_id(approval["receipt_ref"], "approval_receipt.receipt_ref")
+    _require_timestamp(approval["decided_at"], "approval_receipt.decided_at")
     provenance = release["provenance"]
     checksums = provenance.get("artifact_checksums") if isinstance(provenance, Mapping) else None
     if not isinstance(provenance, Mapping) or not provenance.get("trace_id") or not isinstance(checksums, Mapping) or not checksums or any(not _SHA256.fullmatch(str(value)) for value in checksums.values()):
         raise ValueError("release requires provenance and artifact checksums")
+    _require_exact_keys(provenance, {"trace_id", "artifact_checksums"}, "release.provenance")
+    if not isinstance(provenance["trace_id"], str) or not _CORRELATION_ID.fullmatch(provenance["trace_id"]):
+        raise ValueError("release.provenance.trace_id must be a safe trace identifier")
+    expected_checksums = {
+        "body": canonical_sha256(body),
+        "seo": canonical_sha256(seo),
+        **{f"media:{item['id']}": item["checksum"] for item in release["media"]},
+    }
+    if set(checksums) != set(expected_checksums) or any(checksums.get(key) != expected for key, expected in expected_checksums.items()):
+        raise ValueError("release artifact checksums are missing or do not match public artifacts")
     sanitization = release["sanitization_receipts"]
     if not isinstance(sanitization, Mapping):
         raise ValueError("release requires sanitization receipts")
+    _require_exact_keys(sanitization, {"pii_scan", "secret_scan"}, "release.sanitization_receipts")
     for scan_name in ("pii_scan", "secret_scan"):
         scan = sanitization.get(scan_name)
         if not isinstance(scan, Mapping) or scan.get("status") != "passed" or not all(scan.get(key) for key in ("receipt_id", "scanned_at")):
             raise ValueError(f"release requires a passed {scan_name}")
-    _required_text(release, "published_at", "release")
+        _require_exact_keys(scan, {"status", "receipt_id", "scanned_at"}, f"release.sanitization_receipts.{scan_name}")
+        _require_id(scan["receipt_id"], f"sanitization_receipts.{scan_name}.receipt_id")
+        _require_timestamp(scan["scanned_at"], f"sanitization_receipts.{scan_name}.scanned_at")
+    _require_timestamp(release["published_at"], "release.published_at")
     public = {key: deepcopy(release[key]) for key in ("schema", "tool_id", "project_id", "workspace_id", "settings_revision", "pipeline_id", "pipeline_version", "consumer_compatibility", "release_id", "content_id", "version", "immutable", "status", "channel", "title", "summary", "body", "media", "seo", "qa_receipt", "approval_receipt", "provenance", "sanitization_receipts", "published_at") if key in release}
-    public["release_hash"] = sha256(json.dumps(public, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    public["release_hash"] = canonical_sha256(public)
     return public
 
 

@@ -17,7 +17,7 @@ EXPECTED_TOOLS = {
 }
 PUBLISHING_TOOLS = {
     "ad-intelligence": "schema://frank.ad-intelligence-release/v1",
-    "ad-template-generator": "schema://frank.tool-app-release/v1",
+    "ad-template-generator": "schema://frank.ad-template-generator-release/v1",
     "content-factory": "schema://frank.content-factory-release/v1",
 }
 ADJUSTABLE_SETTINGS = {

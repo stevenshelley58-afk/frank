@@ -19,6 +19,15 @@ The request packet and trace contract record prompt refs/versions, project and
 style packs, model policy, placements, export targets, provider attempts, cost,
 hashes, evidence, and receipts. The package contains no provider SDK, image
 engine, Blockwise core type, or Frank-to-Blockwise generation dependency.
+Whole-release hashes use SHA-256 over RFC 8785 canonical JSON, excluding only
+the `release_hash` field itself.
+
+The public release identifies exactly one signed TemplatePack artifact. Its
+domain schema is `schema://frank.ad-template-generator-release/v1`; the nested
+artifact declares `blockwise.template-pack/v1`, a public HTTPS URL, lowercase
+SHA-256, and Ed25519 signature. Blockwise fetches that artifact and applies its
+existing frozen TemplatePack validator and importer. The release never embeds
+source material, prompts, provider state, or reviewer identity.
 
 ## Reuse and integration seam
 

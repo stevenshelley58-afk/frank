@@ -10,11 +10,13 @@ from __future__ import annotations
 from copy import deepcopy
 from dataclasses import asdict, dataclass
 from datetime import datetime
-import hashlib
 import json
 from pathlib import Path
 import re
 from typing import Any, Mapping
+from urllib.parse import parse_qsl, urlsplit
+
+from tool_apps.canonical import canonical_sha256
 
 
 MANIFEST = json.loads((Path(__file__).resolve().parent / "manifest.json").read_text(encoding="utf-8"))
@@ -41,10 +43,16 @@ ADJUSTABLE_KEYS = frozenset(
 
 HERMES_COMMANDS = tuple(MANIFEST["hermes"]["actions"])
 HERMES_EVENTS = tuple(MANIFEST["hermes"]["event_kinds"])
+RELEASE_SCHEMA = "schema://frank.ad-template-generator-release/v1"
+TEMPLATE_PACK_SCHEMA = "blockwise.template-pack/v1"
+CONSUMER_COMPATIBILITY = ("blockwise-template-pack-v1",)
 
 SAFE_REF = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:/-]{0,159}$")
 SHA256 = re.compile(r"^[0-9a-fA-F]{64}$")
 SECRET = re.compile(r"(?:secret|token|password|api[_-]?key|private[_-]?key|-----BEGIN)", re.I)
+HTML_OR_CODE = re.compile(r"</?[a-z][^>]*>|javascript\s*:|-----BEGIN ", re.I)
+PII_VALUE = re.compile(r"(?:\b[^\s@]+@[^\s@]+\.[^\s@]+\b|\+?\d[\d ()-]{7,}\d)")
+SIGNATURE = re.compile(r"^[A-Za-z0-9+/=_-]{16,512}$")
 QA_THRESHOLD_KEYS = frozenset({"identity_leakage", "copy_mismatch", "visual_defects", "asset_replacement"})
 RELEASE_FORBIDDEN_PARTS = (
     "private", "prompt", "provider", "model", "reviewer", "token", "secret",
@@ -53,6 +61,7 @@ RELEASE_FORBIDDEN_PARTS = (
 RELEASE_FORBIDDEN_EXACT = frozenset(
     {"source", "source_ref", "source_hash", "source_bytes", "source_image", "private_input", "private_inputs"}
 )
+_TOKEN_QUERY_KEYS = frozenset({"token", "access_token", "refresh_token", "api_key", "apikey", "key", "secret", "signature", "sig", "auth", "authorization"})
 
 
 def _missing(value: Any, fields: tuple[str, ...]) -> list[str]:
@@ -165,61 +174,6 @@ def validate_trace(trace: dict[str, Any]) -> list[str]:
     return errors
 
 
-def _forbidden_release_paths(value: Any, path: str = "release") -> list[str]:
-    errors: list[str] = []
-    if isinstance(value, Mapping):
-        for key, child in value.items():
-            normalized = str(key).lower().replace("-", "_")
-            if normalized in RELEASE_FORBIDDEN_EXACT or any(part in normalized for part in RELEASE_FORBIDDEN_PARTS) or ("source" in normalized and normalized != "source_free"):
-                errors.append(f"{path}.{key} is forbidden in a source-free release")
-            errors.extend(_forbidden_release_paths(child, f"{path}.{key}"))
-    elif isinstance(value, (list, tuple)):
-        for index, child in enumerate(value):
-            errors.extend(_forbidden_release_paths(child, f"{path}[{index}]"))
-    return errors
-
-
-def _receipt_errors(receipt: Any, label: str, fields: tuple[str, ...]) -> list[str]:
-    if not isinstance(receipt, Mapping):
-        return [f"{label} must be an object"]
-    errors = [f"missing {label}.{field}" for field in _missing(receipt, fields)]
-    for field in ("ref", "receipt_id", "reviewer_ref", "provider", "model", "policy"):
-        if field in receipt:
-            errors.extend(_safe_ref(receipt[field], f"{label}.{field}"))
-    return errors
-
-
-@dataclass(frozen=True)
-class ImmutableRelease:
-    """Typed, source-free release record accepted by Frank Releases."""
-
-    schema: str
-    tool_id: str
-    scope: Mapping[str, str]
-    release_version: str
-    release_id: str
-    status: str
-    settings_revision: str
-    settings_ref: str
-    pipeline_id: str
-    pipeline_version: str
-    consumer_compatibility: Mapping[str, str]
-    artifact_refs: tuple[str, ...]
-    artifact_provenance: tuple[Mapping[str, Any], ...]
-    output_checksums: Mapping[str, str]
-    receipt_refs: tuple[str, ...]
-    trace_ref: str
-    qa_decision: Mapping[str, Any]
-    approval_decision: Mapping[str, Any]
-    sanitization_receipt: Mapping[str, Any]
-    release_hash: str
-    immutable: bool = True
-    source_free: bool = True
-
-    def as_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
 def _valid_timestamp(value: Any) -> bool:
     if not isinstance(value, str):
         return False
@@ -230,111 +184,162 @@ def _valid_timestamp(value: Any) -> bool:
     return parsed.tzinfo is not None
 
 
+def _exact_keys(value: Any, fields: set[str], label: str) -> list[str]:
+    if not isinstance(value, Mapping):
+        return [f"{label} must be an object"]
+    if set(value) != fields:
+        return [f"{label} must contain exactly: {', '.join(sorted(fields))}"]
+    return []
+
+
+def _release_tree_errors(value: Any, path: str = "release", key: str = "") -> list[str]:
+    errors: list[str] = []
+    if isinstance(value, Mapping):
+        for child_key, child in value.items():
+            if not isinstance(child_key, str):
+                errors.append(f"{path} contains a non-string key")
+                continue
+            normalized = child_key.lower().replace("-", "_")
+            if normalized in RELEASE_FORBIDDEN_EXACT or any(part in normalized for part in RELEASE_FORBIDDEN_PARTS) or ("source" in normalized and normalized != "source_free"):
+                errors.append(f"{path}.{child_key} is forbidden in a source-free release")
+            errors.extend(_release_tree_errors(child, f"{path}.{child_key}", child_key))
+    elif isinstance(value, (list, tuple)):
+        for index, child in enumerate(value):
+            errors.extend(_release_tree_errors(child, f"{path}[{index}]", key))
+    elif isinstance(value, str):
+        pii_exempt_key = key in {"checked_at", "decided_at", "released_at", "sha256", "signature", "release_hash"}
+        if HTML_OR_CODE.search(value) or SECRET.search(value) or (not pii_exempt_key and PII_VALUE.search(value)):
+            errors.append(f"{path} contains private, executable, or PII-like text")
+        if key in {"artifact_ref"} and value.lower().startswith(("file:", "openbao:", "vault:", "secret:")):
+            errors.append(f"{path} cannot use a private reference scheme")
+    elif value is not None and not isinstance(value, (bool, int, float)):
+        errors.append(f"{path} contains a non-JSON value")
+    return errors
+
+
+def _public_https_url(value: Any, label: str) -> list[str]:
+    if not isinstance(value, str):
+        return [f"{label} must be a public HTTPS URL"]
+    parsed = urlsplit(value)
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        return [f"{label} must be a public HTTPS URL"]
+    if any(key.casefold() in _TOKEN_QUERY_KEYS for key, _ in parse_qsl(parsed.query, keep_blank_values=True)):
+        return [f"{label} must not contain credential-like query parameters"]
+    return []
+
+
+@dataclass(frozen=True)
+class ImmutableRelease:
+    """Exact immutable release identifying one signed public TemplatePack."""
+
+    schema: str
+    tool_id: str
+    scope: Mapping[str, str]
+    release_version: str
+    release_id: str
+    status: str
+    settings_revision: int
+    settings_ref: str
+    pipeline_id: str
+    pipeline_version: str
+    consumer_compatibility: tuple[str, ...]
+    template_pack: Mapping[str, Any]
+    provenance: Mapping[str, str]
+    trace_ref: str
+    qa_receipt: Mapping[str, str]
+    approval_receipt: Mapping[str, str]
+    sanitization_receipt: Mapping[str, str]
+    released_at: str
+    release_hash: str
+    immutable: bool = True
+    source_free: bool = True
+
+    def as_dict(self) -> dict[str, Any]:
+        result = asdict(self)
+        result["consumer_compatibility"] = list(self.consumer_compatibility)
+        return result
+
+
 def _canonical_release_hash(value: Mapping[str, Any]) -> str:
     payload = {key: item for key, item in value.items() if key != "release_hash"}
-    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), default=list).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return canonical_sha256(payload)
 
 
 def validate_release(release: Mapping[str, Any] | ImmutableRelease) -> list[str]:
-    """Validate an immutable release and reject attempted source leakage."""
+    """Validate the exact source-free TemplatePack release envelope."""
     value = release.as_dict() if isinstance(release, ImmutableRelease) else dict(release)
-    errors = _forbidden_release_paths(value)
-    required = ("schema", "tool_id", "scope", "release_version", "release_id", "status", "settings_revision", "settings_ref", "pipeline_id", "pipeline_version", "consumer_compatibility", "artifact_refs", "artifact_provenance", "output_checksums", "receipt_refs", "trace_ref", "qa_decision", "approval_decision", "sanitization_receipt", "release_hash")
-    errors.extend(f"missing release.{field}" for field in _missing(value, required))
-    for field in ("schema", "tool_id", "release_version", "release_id", "settings_revision", "settings_ref", "pipeline_id", "pipeline_version", "trace_ref"):
+    fields = {
+        "schema", "tool_id", "scope", "release_version", "release_id", "status",
+        "settings_revision", "settings_ref", "pipeline_id", "pipeline_version",
+        "consumer_compatibility", "template_pack", "provenance", "trace_ref",
+        "qa_receipt", "approval_receipt", "sanitization_receipt", "released_at",
+        "release_hash", "immutable", "source_free",
+    }
+    errors = _exact_keys(value, fields, "release")
+    errors.extend(_release_tree_errors(value))
+    for field in ("schema", "tool_id", "release_version", "release_id", "settings_ref", "pipeline_id", "pipeline_version", "trace_ref"):
         errors.extend(_safe_ref(value.get(field), f"release.{field}"))
-    if value.get("schema") != "schema://frank.tool-app-release/v1":
-        errors.append("release.schema is unsupported")
+    if value.get("schema") != RELEASE_SCHEMA or value.get("tool_id") != MANIFEST["id"]:
+        errors.append("release schema or tool identity is unsupported")
     scope = value.get("scope")
-    if not isinstance(scope, Mapping) or scope.get("kind") not in {"project", "workspace"}:
-        errors.append("release.scope.kind must be project or workspace")
-    elif not isinstance(scope.get("id"), str):
-        errors.append("release.scope.id is required")
-    else:
-        errors.extend(_safe_ref(scope["id"], "release.scope.id"))
-    compatibility = value.get("consumer_compatibility")
-    if not isinstance(compatibility, Mapping) or not compatibility:
-        errors.append("release.consumer_compatibility must be non-empty")
-    else:
-        for key, item in compatibility.items():
-            errors.extend(_safe_ref(key, "release.consumer_compatibility.key"))
-            errors.extend(_safe_ref(item, f"release.consumer_compatibility.{key}"))
-    if value.get("status") != "released":
-        errors.append("release.status must be released")
-    if value.get("tool_id") != MANIFEST["id"]:
-        errors.append("release.tool_id is unsupported")
+    errors.extend(_exact_keys(scope, {"kind", "id"}, "release.scope"))
+    if isinstance(scope, Mapping):
+        if scope.get("kind") not in {"project", "workspace"}:
+            errors.append("release.scope.kind must be project or workspace")
+        errors.extend(_safe_ref(scope.get("id"), "release.scope.id"))
+    if value.get("release_version") != "1.0.0" or value.get("status") != "released":
+        errors.append("release version or status is unsupported")
+    if type(value.get("settings_revision")) is not int or value["settings_revision"] < 0:
+        errors.append("release.settings_revision must be a non-negative integer")
+    if value.get("pipeline_id") != PIPELINE_ENTRY["id"] or value.get("pipeline_version") != PIPELINE_ENTRY["version"]:
+        errors.append("release pipeline identity or version is unsupported")
+    if tuple(value.get("consumer_compatibility", ())) != CONSUMER_COMPATIBILITY:
+        errors.append("release.consumer_compatibility is unsupported")
     if value.get("immutable") is not True or value.get("source_free") is not True:
         errors.append("release must be immutable and source_free")
-    if not isinstance(value.get("release_hash"), str) or not SHA256.fullmatch(value.get("release_hash", "")):
-        errors.append("release.release_hash must be 64 hexadecimal characters")
+
+    pack = value.get("template_pack")
+    errors.extend(_exact_keys(pack, {"schema", "pack_id", "artifact_ref", "sha256", "signature_algorithm", "signature"}, "release.template_pack"))
+    if isinstance(pack, Mapping):
+        if pack.get("schema") != TEMPLATE_PACK_SCHEMA:
+            errors.append("release.template_pack.schema is unsupported")
+        errors.extend(_safe_ref(pack.get("pack_id"), "release.template_pack.pack_id"))
+        errors.extend(_public_https_url(pack.get("artifact_ref"), "release.template_pack.artifact_ref"))
+        if not isinstance(pack.get("sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", pack["sha256"]):
+            errors.append("release.template_pack.sha256 must be lowercase SHA-256")
+        if pack.get("signature_algorithm") != "ed25519" or not isinstance(pack.get("signature"), str) or not SIGNATURE.fullmatch(pack["signature"]):
+            errors.append("release.template_pack must contain an Ed25519 signature")
+
+    provenance = value.get("provenance")
+    errors.extend(_exact_keys(provenance, {"artifact_ref", "artifact_receipt_ref"}, "release.provenance"))
+    if isinstance(provenance, Mapping):
+        errors.extend(_safe_ref(provenance.get("artifact_receipt_ref"), "release.provenance.artifact_receipt_ref"))
+        if isinstance(pack, Mapping) and provenance.get("artifact_ref") != pack.get("artifact_ref"):
+            errors.append("release.provenance.artifact_ref must match template_pack.artifact_ref")
+
+    receipt_specs = (
+        ("qa_receipt", {"decision", "receipt_ref", "checked_at"}, "pass", "checked_at"),
+        ("approval_receipt", {"decision", "gate", "receipt_ref", "decided_at"}, "approved", "decided_at"),
+        ("sanitization_receipt", {"decision", "receipt_ref", "checked_at"}, "pass", "checked_at"),
+    )
+    for field, receipt_fields, decision, timestamp_field in receipt_specs:
+        receipt = value.get(field)
+        errors.extend(_exact_keys(receipt, receipt_fields, f"release.{field}"))
+        if isinstance(receipt, Mapping):
+            if receipt.get("decision") != decision:
+                errors.append(f"release.{field}.decision is unsupported")
+            if field == "approval_receipt" and receipt.get("gate") != "native-pixel-human-approval":
+                errors.append("release.approval_receipt.gate is unsupported")
+            errors.extend(_safe_ref(receipt.get("receipt_ref"), f"release.{field}.receipt_ref"))
+            if not _valid_timestamp(receipt.get(timestamp_field)):
+                errors.append(f"release.{field}.{timestamp_field} must be an ISO-8601 timestamp with timezone")
+    if not _valid_timestamp(value.get("released_at")):
+        errors.append("release.released_at must be an ISO-8601 timestamp with timezone")
+    if not isinstance(value.get("release_hash"), str) or not re.fullmatch(r"[0-9a-f]{64}", value.get("release_hash", "")):
+        errors.append("release.release_hash must be lowercase SHA-256")
     elif _canonical_release_hash(value) != value["release_hash"]:
         errors.append("release.release_hash is not the canonical release hash")
-    if value.get("pipeline_id") != PIPELINE_ENTRY["id"]:
-        errors.append("release.pipeline_id is unsupported")
-    if value.get("pipeline_version") != PIPELINE_ENTRY["version"]:
-        errors.append("release.pipeline_version is unsupported")
-    artifact_refs = value.get("artifact_refs")
-    if not isinstance(artifact_refs, (list, tuple)) or not artifact_refs:
-        errors.append("artifact_refs must be non-empty")
-    else:
-        for ref in artifact_refs:
-            errors.extend(_safe_ref(ref, "artifact_refs[]"))
-    provenance = value.get("artifact_provenance")
-    if not isinstance(provenance, (list, tuple)) or not provenance:
-        errors.append("artifact_provenance must be non-empty")
-    else:
-        for item in provenance:
-            if not isinstance(item, Mapping):
-                errors.append("artifact_provenance entries must be objects")
-                continue
-            errors.extend(f"missing artifact_provenance.{field}" for field in _missing(item, ("artifact_ref", "kind", "created_at", "receipt_ref")))
-            errors.extend(_safe_ref(item.get("artifact_ref"), "artifact_provenance.artifact_ref"))
-            errors.extend(_safe_ref(item.get("kind"), "artifact_provenance.kind"))
-            errors.extend(_safe_ref(item.get("receipt_ref"), "artifact_provenance.receipt_ref"))
-            if not _valid_timestamp(item.get("created_at")):
-                errors.append("artifact_provenance.created_at must be an ISO-8601 timestamp with timezone")
-    checksums = value.get("output_checksums")
-    if not isinstance(checksums, Mapping) or not checksums:
-        errors.append("output_checksums must be non-empty")
-    else:
-        for ref, checksum in checksums.items():
-            errors.extend(_safe_ref(ref, "output_checksums[]"))
-            if not isinstance(checksum, str) or not SHA256.fullmatch(checksum):
-                errors.append(f"output_checksums.{ref} must be 64 hexadecimal characters")
-    if isinstance(artifact_refs, (list, tuple)) and isinstance(provenance, (list, tuple)) and isinstance(checksums, Mapping):
-        artifact_set = set(artifact_refs)
-        provenance_set = {item.get("artifact_ref") for item in provenance if isinstance(item, Mapping)}
-        checksum_set = set(checksums)
-        if artifact_set != provenance_set or artifact_set != checksum_set or len(artifact_set) != len(artifact_refs):
-            errors.append("artifact_refs, artifact_provenance refs, and output_checksums keys must be exactly equal")
-    receipt_refs = value.get("receipt_refs")
-    if not isinstance(receipt_refs, (list, tuple)) or not receipt_refs:
-        errors.append("receipt_refs must be non-empty")
-    else:
-        for ref in receipt_refs:
-            errors.extend(_safe_ref(ref, "receipt_refs[]"))
-    errors.extend(_safe_ref(value.get("trace_ref"), "trace_ref"))
-    errors.extend(_safe_ref(value.get("settings_ref"), "settings_ref"))
-    qa = value.get("qa_decision")
-    if not isinstance(qa, Mapping) or qa.get("decision") != "pass":
-        errors.append("qa_decision.decision must be pass")
-    elif not isinstance(qa.get("receipt_ref"), str):
-        errors.append("qa_decision.receipt_ref is required")
-    approval = value.get("approval_decision")
-    if not isinstance(approval, Mapping) or approval.get("decision") != "approved" or approval.get("gate") != "native-pixel-human-approval":
-        errors.append("approval_decision must record approved native-pixel human approval")
-    elif not isinstance(approval.get("receipt_ref"), str):
-        errors.append("approval_decision.receipt_ref is required")
-    sanitization = value.get("sanitization_receipt")
-    if not isinstance(sanitization, Mapping) or sanitization.get("decision") != "pass" or not isinstance(sanitization.get("ref"), str):
-        errors.append("sanitization_receipt must record a passing opaque receipt ref")
-    for label, decision in (("qa_decision", qa), ("approval_decision", approval)):
-        if isinstance(decision, Mapping):
-            errors.extend(_safe_ref(decision.get("receipt_ref"), f"{label}.receipt_ref"))
-    if isinstance(sanitization, Mapping):
-        errors.extend(_safe_ref(sanitization.get("ref"), "sanitization_receipt.ref"))
-    return errors
+    return sorted(set(errors))
 
 
 def build_immutable_release(
@@ -343,23 +348,22 @@ def build_immutable_release(
     scope: Mapping[str, str],
     release_version: str,
     release_id: str,
-    settings_revision: str,
+    settings_revision: int,
     settings_ref: str,
     pipeline_id: str,
     pipeline_version: str,
-    consumer_compatibility: Mapping[str, str],
-    artifact_refs: list[str],
-    artifact_provenance: list[Mapping[str, Any]],
-    output_checksums: Mapping[str, str],
-    receipt_refs: list[str],
+    consumer_compatibility: tuple[str, ...],
+    template_pack: Mapping[str, Any],
+    provenance: Mapping[str, str],
     trace_ref: str,
-    qa_decision: Mapping[str, Any],
-    approval_decision: Mapping[str, Any],
-    sanitization_receipt: Mapping[str, Any],
+    qa_receipt: Mapping[str, str],
+    approval_receipt: Mapping[str, str],
+    sanitization_receipt: Mapping[str, str],
+    released_at: str,
 ) -> ImmutableRelease:
-    """Build a release only after all source-free receipts are present."""
+    """Build a release only after one signed source-free TemplatePack is ready."""
     release = ImmutableRelease(
-        schema="schema://frank.tool-app-release/v1",
+        schema=RELEASE_SCHEMA,
         tool_id=tool_id,
         scope=dict(scope),
         release_version=release_version,
@@ -369,15 +373,14 @@ def build_immutable_release(
         settings_ref=settings_ref,
         pipeline_id=pipeline_id,
         pipeline_version=pipeline_version,
-        consumer_compatibility=dict(consumer_compatibility),
-        artifact_refs=tuple(artifact_refs),
-        artifact_provenance=tuple(artifact_provenance),
-        output_checksums=dict(output_checksums),
-        receipt_refs=tuple(receipt_refs),
+        consumer_compatibility=tuple(consumer_compatibility),
+        template_pack=dict(template_pack),
+        provenance=dict(provenance),
         trace_ref=trace_ref,
-        qa_decision=dict(qa_decision),
-        approval_decision=dict(approval_decision),
+        qa_receipt=dict(qa_receipt),
+        approval_receipt=dict(approval_receipt),
         sanitization_receipt=dict(sanitization_receipt),
+        released_at=released_at,
         release_hash="0" * 64,
     )
     release = ImmutableRelease(**{**release.as_dict(), "release_hash": _canonical_release_hash(release.as_dict())})

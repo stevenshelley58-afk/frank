@@ -63,6 +63,27 @@ class ToolAppContractTest(unittest.TestCase):
             with self.assertRaises(ContractError):
                 discover_tool_homes(root)
 
+    def test_tool_home_discovery_rejects_package_directory_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as outside:
+            outside_dir = Path(outside) / "weekly-report"
+            outside_dir.mkdir()
+            (outside_dir / "manifest.json").write_text("{}", encoding="utf-8")
+            (outside_dir / "home.json").write_text("{}", encoding="utf-8")
+            (Path(root) / "weekly-report").symlink_to(outside_dir, target_is_directory=True)
+            with self.assertRaises(ContractError):
+                discover_tool_homes(root)
+
+    def test_tool_home_discovery_rejects_home_manifest_symlink_escape(self):
+        with tempfile.TemporaryDirectory() as root, tempfile.TemporaryDirectory() as outside:
+            app_dir = Path(root) / "weekly-report"
+            app_dir.mkdir()
+            (app_dir / "manifest.json").write_text("{}", encoding="utf-8")
+            outside_home = Path(outside) / "home.json"
+            outside_home.write_text("{}", encoding="utf-8")
+            (app_dir / "home.json").symlink_to(outside_home)
+            with self.assertRaises(ContractError):
+                discover_tool_homes(root)
+
     def test_discovery_loads_versioned_manifests_and_rejects_mismatch(self):
         with tempfile.TemporaryDirectory() as root:
             app_dir = Path(root) / "weekly-report"

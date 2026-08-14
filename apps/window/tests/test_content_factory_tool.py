@@ -15,18 +15,20 @@ class ContentFactoryToolTests(unittest.TestCase):
 
     def valid_release(self):
         checksum = "a" * 64
+        body = {"format": "markdown", "content": "# Article\n\nPublic content."}
+        seo = {"title": "A public article", "description": "A public description.", "canonical_url": "https://example/article"}
         return {
             "release_id": "release-1", "content_id": "content-1", "version": 1, "immutable": True,
             "schema": "schema://frank.content-factory-release/v1", "tool_id": "content-factory",
-            "project_id": "blockwise", "workspace_id": "workspace-1", "settings_revision": 3,
+            "project_id": "blockwise", "workspace_id": "123e4567-e89b-42d3-a456-426614174000", "settings_revision": 3,
             "pipeline_id": "content-factory-pipeline", "pipeline_version": "1.0.0", "consumer_compatibility": ["article-release-v1"],
             "status": "published", "channel": "web", "title": "A public article",
-            "body": {"format": "markdown", "content": "# Article\n\nPublic content."},
+            "body": body,
             "media": [{"id": "hero-1", "url": "https://cdn.example/hero.png", "alt_text": "Article hero", "checksum": checksum}],
-            "seo": {"title": "A public article", "description": "A public description.", "canonical_url": "https://example/article"},
+            "seo": seo,
             "qa_receipt": {"decision": "pass", "receipt_ref": "qa-1", "checked_at": "2026-08-14T00:00:00Z"},
             "approval_receipt": {"decision": "approve", "receipt_ref": "approval-1", "decided_at": "2026-08-14T00:00:00Z"},
-            "provenance": {"trace_id": "trace-1", "artifact_checksums": {"article": checksum}},
+            "provenance": {"trace_id": "trace-1", "artifact_checksums": {"body": content_factory.canonical_sha256(body), "seo": content_factory.canonical_sha256(seo), "media:hero-1": checksum}},
             "sanitization_receipts": {"pii_scan": {"status": "passed", "receipt_id": "pii-scan-1", "scanned_at": "2026-08-14T00:00:00Z"}, "secret_scan": {"status": "passed", "receipt_id": "secret-scan-1", "scanned_at": "2026-08-14T00:00:00Z"}},
             "published_at": "2026-08-14T00:00:00Z",
         }
@@ -77,7 +79,11 @@ class ContentFactoryToolTests(unittest.TestCase):
     def test_public_release_requires_approval_and_provenance(self):
         release = content_factory.public_release(self.valid_release())
         self.assertTrue(release["immutable"])
-        self.assertEqual(len(release["release_hash"]), 64)
+        self.assertEqual(release["provenance"]["artifact_checksums"]["body"], "e3c8a183c1ea4ac90727ae984b3ff7d97f0e3bd386523970adbc3f6a30874d7f")
+        self.assertEqual(release["provenance"]["artifact_checksums"]["seo"], "26fa6a3578413037c4f44f88247ed69dedc71e3c0727ea589aa3e0c318486791")
+        self.assertEqual(release["release_hash"], "ac0f1819a79b3c42ab604f4092b6bcb2928cb312462062e2416334cfb447a803")
+        fixture = self.load_json("fixtures/content-release-v1.json")
+        self.assertEqual(release, fixture)
         missing_approval = self.valid_release()
         del missing_approval["approval_receipt"]
         with self.assertRaises(ValueError):
@@ -86,6 +92,75 @@ class ContentFactoryToolTests(unittest.TestCase):
         del missing_qa["qa_receipt"]
         with self.assertRaises(ValueError):
             content_factory.public_release(missing_qa)
+        bad_artifact_hash = self.valid_release()
+        bad_artifact_hash["provenance"]["artifact_checksums"]["body"] = "b" * 64
+        with self.assertRaises(ValueError):
+            content_factory.public_release(bad_artifact_hash)
+        missing_compatibility = self.valid_release()
+        missing_compatibility["consumer_compatibility"] = ["some-other-consumer-v1"]
+        with self.assertRaises(ValueError):
+            content_factory.public_release(missing_compatibility)
+
+    def test_public_release_schema_is_closed_and_matches_manifest(self):
+        schema = self.load_json("release.schema.json")
+        manifest = self.load_json("manifest.json")
+        self.assertEqual(schema["$id"], manifest["release_schema"])
+        self.assertFalse(schema["additionalProperties"])
+        for definition in schema["$defs"].values():
+            self.assertFalse(definition["additionalProperties"])
+
+    def test_public_release_rejects_extra_nested_contract_fields(self):
+        cases = (
+            ("body", "draft_notes"),
+            ("seo", "keywords"),
+            ("qa_receipt", "operator"),
+            ("approval_receipt", "reason"),
+            ("provenance", "source"),
+        )
+        for section, field in cases:
+            with self.subTest(section=section, field=field):
+                invalid = self.valid_release()
+                invalid[section][field] = "not-public"
+                with self.assertRaises(ValueError):
+                    content_factory.public_release(invalid)
+
+    def test_public_release_rejects_type_time_and_identity_ambiguity(self):
+        cases = (
+            ("settings_revision", True),
+            ("version", True),
+            ("published_at", "yesterday"),
+        )
+        for field, value in cases:
+            with self.subTest(field=field):
+                invalid = self.valid_release()
+                invalid[field] = value
+                with self.assertRaises(ValueError):
+                    content_factory.public_release(invalid)
+
+        invalid_trace = self.valid_release()
+        invalid_trace["provenance"]["trace_id"] = 123
+        with self.assertRaises(ValueError):
+            content_factory.public_release(invalid_trace)
+
+        invalid_alt = self.valid_release()
+        invalid_alt["media"][0]["alt_text"] = 123
+        with self.assertRaises(ValueError):
+            content_factory.public_release(invalid_alt)
+
+        invalid_summary = self.valid_release()
+        invalid_summary["summary"] = {"text": "not-a-string"}
+        with self.assertRaises(ValueError):
+            content_factory.public_release(invalid_summary)
+
+        duplicate_media = self.valid_release()
+        duplicate_media["media"].append(dict(duplicate_media["media"][0]))
+        with self.assertRaises(ValueError):
+            content_factory.public_release(duplicate_media)
+
+        invalid_receipt_time = self.valid_release()
+        invalid_receipt_time["approval_receipt"]["decided_at"] = "2026-08-14"
+        with self.assertRaises(ValueError):
+            content_factory.public_release(invalid_receipt_time)
 
     def test_public_release_rejects_nested_leakage(self):
         leaked = self.valid_release()

@@ -17,9 +17,12 @@ from .contracts import (
     validate_pipeline,
 )
 from .home_manifest import discover_tool_homes, validate_home_manifest
+from .canonical import canonical_json, canonical_sha256
 
 __all__ = [
     "ContractError",
+    "canonical_json",
+    "canonical_sha256",
     "MANIFEST_SCHEMA",
     "GRAPH_SCHEMA",
     "PIPELINE_SCHEMA",

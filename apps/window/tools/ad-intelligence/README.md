@@ -21,11 +21,22 @@ systems without changing the package's data boundaries.
   Public classification exposes only sanitized label, confidence, receipt refs, and
   provenance refs; prompt refs, prompt versions, models, and rationale remain private
   execution metadata in traces.
-- `build_release` wraps that export in an immutable release with an export checksum,
-  a canonical whole-release hash, project scope, fixed pipeline identity/version,
-  non-empty provenance/trace/settings refs, QA and sanitization receipt refs, and
-  recursive PII/secret sanitization. Public asset/source refs cannot point at private
-  vault or filesystem schemes.
+- `build_release` wraps that export in one closed immutable release. Its project scope
+  must match the export project. It carries one positive integer settings revision and
+  one settings ref, non-empty provenance and trace refs, a timestamped passing QA
+  receipt, and exact timestamped passing PII and secret scan receipts. The old boolean
+  claims and ambiguous settings/receipt arrays are not part of this contract.
+- `consumer_compatibility` is exactly `["ad-intelligence-public-v1"]`. Release and
+  observation timestamps are timezone-bearing ISO-8601 values; observations cannot
+  run backwards or occur after export generation, and release cannot predate export.
+- The complete release envelope is recursively checked for PII-like contact values,
+  secrets, markup, and private vault/filesystem schemes before publication.
+- Both hashes use SHA-256 over RFC 8785 canonical JSON. The whole-release hash
+  excludes only its own `release_hash` field.
+- Machine-readable contracts live in `schemas/public-export.schema.json` and
+  `schemas/release.schema.json`; both close every object with
+  `additionalProperties: false`. `fixtures/ad-radar-release-v1.json` is the golden
+  producer-consumer fixture and includes the expected public checksum and release hash.
 - Browser access is expressed by an adapter boundary. Prefer Playwright/CDP-compatible
   adapters for browser work; do not bake a provider SDK into this package.
 - Domain Tools own/version manifests, declarative nodes/edges, immutable settings

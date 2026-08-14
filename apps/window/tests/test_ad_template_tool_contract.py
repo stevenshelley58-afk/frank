@@ -7,6 +7,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 TOOL = ROOT / "tools" / "ad-template-generator"
+GOLDEN_RELEASE = ROOT / "tests" / "fixtures" / "releases" / "ad-template-generator-v1.json"
 
 
 def load_contract():
@@ -82,6 +83,7 @@ class AdTemplateToolContractTest(unittest.TestCase):
 
     def test_release_stage_is_after_human_native_pixel_approval(self):
         self.assertEqual(self.manifest["schema"], "schema://frank.tool-app-manifest/v1")
+        self.assertEqual(self.manifest["release_schema"], "schema://frank.ad-template-generator-release/v1")
         self.assertEqual(self.manifest["scopes"], ["project", "workspace"])
         self.assertEqual(self.manifest["settings"]["schema"], "schema://frank.tool-app-settings/v1")
         for field in ("name", "description", "version", "scopes", "settings", "pipelines", "capabilities", "connectors", "schedules", "thresholds", "approval_gates", "hermes", "trace"):
@@ -123,25 +125,36 @@ class AdTemplateToolContractTest(unittest.TestCase):
             "scope": {"kind": "project", "id": "blockwise"},
             "release_version": "1.0.0",
             "release_id": "release-1",
-            "settings_revision": "revision-1",
+            "settings_revision": 1,
             "settings_ref": "hermes://settings/revision-1",
             "pipeline_id": "reference-clone-release",
             "pipeline_version": "1.0.0",
-            "consumer_compatibility": {"schema": "schema://frank.release-consumer/v1", "version": "1.0.0"},
-            "artifact_refs": ["hermes://artifacts/release-1/feed"],
-            "artifact_provenance": [{"artifact_ref": "hermes://artifacts/release-1/feed", "kind": "finished-raster", "created_at": "2026-08-14T00:00:00Z", "receipt_ref": "hermes://receipts/artifact-1"}],
-            "output_checksums": {"hermes://artifacts/release-1/feed": "b" * 64},
-            "receipt_refs": ["hermes://receipts/qa-1", "hermes://receipts/approval-1"],
+            "consumer_compatibility": ("blockwise-template-pack-v1",),
+            "template_pack": {
+                "schema": "blockwise.template-pack/v1",
+                "pack_id": "pack-golden-001-v1",
+                "artifact_ref": "https://frank.fail/releases/pack-golden-001-v1.json",
+                "sha256": "b" * 64,
+                "signature_algorithm": "ed25519",
+                "signature": "base64-ed25519-signature-placeholder",
+            },
+            "provenance": {
+                "artifact_ref": "https://frank.fail/releases/pack-golden-001-v1.json",
+                "artifact_receipt_ref": "hermes://receipts/artifact-1",
+            },
             "trace_ref": "hermes://traces/run-1",
-            "settings_ref": "hermes://settings/revision-1",
-            "qa_decision": {"decision": "pass", "receipt_ref": "hermes://receipts/qa-1"},
-            "approval_decision": {"decision": "approved", "gate": "native-pixel-human-approval", "receipt_ref": "hermes://receipts/approval-1"},
-            "sanitization_receipt": {"decision": "pass", "ref": "hermes://receipts/sanitization-1"},
+            "qa_receipt": {"decision": "pass", "receipt_ref": "hermes://receipts/qa-1", "checked_at": "2026-08-14T00:00:00Z"},
+            "approval_receipt": {"decision": "approved", "gate": "native-pixel-human-approval", "receipt_ref": "hermes://receipts/approval-1", "decided_at": "2026-08-14T00:01:00Z"},
+            "sanitization_receipt": {"decision": "pass", "receipt_ref": "hermes://receipts/sanitization-1", "checked_at": "2026-08-14T00:02:00Z"},
+            "released_at": "2026-08-14T00:03:00Z",
         }
         release = self.contract.build_immutable_release(**valid)
         self.assertEqual(self.contract.validate_release(release), [])
+        self.assertEqual(release.release_hash, "793f20dee498be21c417a55e6a8822368359985e13b55abb06f6da82b8c9100f")
         public = release.as_dict()
-        self.assertEqual(public["schema"], "schema://frank.tool-app-release/v1")
+        self.assertEqual(public, json.loads(GOLDEN_RELEASE.read_text(encoding="utf-8")))
+        self.assertEqual(public["schema"], "schema://frank.ad-template-generator-release/v1")
+        self.assertEqual(public["template_pack"]["schema"], "blockwise.template-pack/v1")
         self.assertNotIn("prompt_receipt", public)
         self.assertNotIn("model_receipt", public)
         self.assertNotIn("reviewer_ref", str(public))
@@ -149,19 +162,43 @@ class AdTemplateToolContractTest(unittest.TestCase):
         leaked["source_ref"] = "hermes://private/source"
         self.assertTrue(any("forbidden" in error for error in self.contract.validate_release(leaked)))
         missing_approval = dict(valid)
-        missing_approval["approval_decision"] = {}
+        missing_approval["approval_receipt"] = {}
         with self.assertRaises(ValueError):
             self.contract.build_immutable_release(**missing_approval)
         missing_sanitization = dict(valid)
         missing_sanitization["sanitization_receipt"] = {}
         with self.assertRaises(ValueError):
             self.contract.build_immutable_release(**missing_sanitization)
-        mismatched = dict(valid)
-        mismatched["output_checksums"] = {"hermes://artifacts/release-1/other": "b" * 64}
-        self.assertTrue(any("exactly equal" in error for error in self.contract.validate_release(mismatched)))
+        mismatched = release.as_dict()
+        mismatched["provenance"]["artifact_ref"] = "https://frank.fail/releases/other.json"
+        mismatched["release_hash"] = self.contract._canonical_release_hash(mismatched)
+        self.assertTrue(any("must match" in error for error in self.contract.validate_release(mismatched)))
         bad_timestamp = dict(valid)
-        bad_timestamp["artifact_provenance"] = [dict(valid["artifact_provenance"][0], created_at="not-a-timestamp")]
+        bad_timestamp["qa_receipt"] = dict(valid["qa_receipt"], checked_at="not-a-timestamp")
         self.assertTrue(any("ISO-8601" in error for error in self.contract.validate_release(bad_timestamp)))
+
+        unknown = release.as_dict()
+        unknown["notes"] = "public-looking but undeclared"
+        unknown["release_hash"] = self.contract._canonical_release_hash(unknown)
+        self.assertTrue(any("must contain exactly" in error for error in self.contract.validate_release(unknown)))
+
+        pii = release.as_dict()
+        pii["provenance"]["artifact_receipt_ref"] = "person@example.com"
+        pii["release_hash"] = self.contract._canonical_release_hash(pii)
+        self.assertTrue(any("PII-like" in error for error in self.contract.validate_release(pii)))
+
+        wrong_compatibility = dict(valid, consumer_compatibility=("some-other-consumer-v1",))
+        with self.assertRaises(ValueError):
+            self.contract.build_immutable_release(**wrong_compatibility)
+
+    def test_release_schema_is_strict_and_matches_golden_fixture(self):
+        schema = json.loads((TOOL / "release.schema.json").read_text(encoding="utf-8"))
+        self.assertEqual(schema["$id"], "schema://frank.ad-template-generator-release/v1")
+        self.assertFalse(schema["additionalProperties"])
+        for definition in schema["$defs"].values():
+            self.assertFalse(definition["additionalProperties"])
+        fixture = json.loads(GOLDEN_RELEASE.read_text(encoding="utf-8"))
+        self.assertEqual(self.contract.validate_release(fixture), [])
 
 
 if __name__ == "__main__":

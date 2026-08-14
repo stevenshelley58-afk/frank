@@ -5,6 +5,7 @@
   "name": "Ad Radar",
   "description": "Discover and compare public advertising creative through Hermes-owned research execution.",
   "release_schema": "schema://frank.ad-intelligence-release/v1",
+  "public_export_schema": "schema://frank.ad-intelligence-public/v1",
   "scopes": ["project"],
   "settings": {
     "schema": "schema://frank.tool-app-settings/v1",

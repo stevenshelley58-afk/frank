@@ -43,21 +43,40 @@ def validate_home_manifest(manifest: Any) -> dict[str, Any]:
 
 def discover_tool_homes(tools_root: str | Path) -> list[dict[str, Any]]:
     """Load one exact non-executable home manifest for every Tool package."""
-    root = Path(tools_root)
+    try:
+        root = Path(tools_root).resolve(strict=True)
+    except OSError as exc:
+        raise ContractError("tool discovery root must be a directory") from exc
     if not root.is_dir():
         raise ContractError("tool discovery root must be a directory")
     homes = []
     for directory in sorted(root.iterdir(), key=lambda item: item.name):
-        if not directory.is_dir() or not _ID.fullmatch(directory.name):
+        if not _ID.fullmatch(directory.name):
             continue
-        if not (directory / "manifest.json").is_file():
+        if directory.is_symlink():
+            raise ContractError(f"tool app directory cannot be a symlink: {directory.name}")
+        if not directory.is_dir():
             continue
-        home_file = directory / "home.json"
+        try:
+            resolved_directory = directory.resolve(strict=True)
+            resolved_directory.relative_to(root)
+        except (OSError, ValueError) as exc:
+            raise ContractError(f"tool app directory escapes discovery root: {directory.name}") from exc
+        manifest_file = resolved_directory / "manifest.json"
+        if manifest_file.is_symlink():
+            raise ContractError(f"tool app manifest cannot be a symlink: {directory.name}")
+        if not manifest_file.is_file():
+            continue
+        home_file = resolved_directory / "home.json"
+        if home_file.is_symlink():
+            raise ContractError(f"tool home manifest cannot be a symlink: {directory.name}")
         if not home_file.is_file():
             raise ContractError(f"tool app {directory.name} is missing home.json")
         try:
+            manifest_file.resolve(strict=True).relative_to(resolved_directory)
+            home_file.resolve(strict=True).relative_to(resolved_directory)
             home = validate_home_manifest(json.loads(home_file.read_text(encoding="utf-8")))
-        except (OSError, json.JSONDecodeError, ContractError) as exc:
+        except (OSError, ValueError, json.JSONDecodeError, ContractError) as exc:
             raise ContractError(f"invalid tool home {directory.name}: {exc}") from exc
         if home["id"] != directory.name:
             raise ContractError(f"tool home id does not match directory: {directory.name}")

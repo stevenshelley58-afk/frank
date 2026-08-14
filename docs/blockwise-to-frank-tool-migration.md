@@ -87,6 +87,16 @@ runtime ownership only.
   capability; OpenBao remains entirely behind Connections, and vault/provider/
   credential references never appear in those Tool contracts.
 
+Authoritative storage and execution ownership is fixed:
+
+| Concern | Authoritative owner | Frank behavior | Forbidden duplicate |
+| --- | --- | --- | --- |
+| Tool manifests and pipeline definitions | Domain Tool package | Validate and render the registered declaration | Second manifest, pipeline, or per-Tool registry |
+| Settings revisions, schedules, commands, approvals, evidence, releases, and receipts | Hermes/data plane | Submit typed requests and render authorized projections | Frank settings/release database, queue, scheduler, or executor |
+| Traces | Hermes/domain runtime through the existing OpenTelemetry path | Render the authorized redacted projection and deep-link the existing provider when available | Frank trace backend or per-Tool trace store |
+| Credentials and provider authorization | Connections/OpenBao | Refer only to a non-secret `connection_id` and capability | Secret, provider credential, or vault reference in Tool data |
+| Customer transaction, RLS, lead lifecycle, editing, and publishing state | Blockwise | Consume accepted immutable releases through explicit adapters | Frank/Hermes writes to Blockwise private tables without an accepted adapter |
+
 ### 0.4 Named capability destinations
 
 Use these exact Frank tool IDs and directories. Phase P2 creates them when
@@ -94,8 +104,10 @@ absent; when they are already present on the reviewed integration branch,
 validate and reuse them rather than creating parallel packages:
 
 Each Tool directory has one canonical dashboard manifest at `home.json`.
-`default_widget_ids` remains empty (`[]`) until shared widget IDs land; do not
-invent Tool-specific default widget IDs.
+Before the final Dashboard+Connections handoff, `default_widget_ids` remains
+empty (`[]`); do not invent Tool-specific or provisional widget IDs. P3B must
+replace that temporary empty state with the approved truthful blueprint for
+each Tool before the six Tools ship.
 
 | Tool ID | Frank mini-app directory | Hermes responsibility | Blockwise result, if any |
 | --- | --- | --- | --- |
@@ -182,6 +194,23 @@ git diff --name-status -- frank/template-factory
 Record the output. Do not run git restore, git checkout, git reset,
 git clean, or any broad delete in that checkout.
 
+Never implement or stage this migration in that dirty canonical checkout. From
+the canonical repository, create a clean dedicated worktree at the recorded
+`origin/main` revision. Use one branch and worktree per lane:
+
+```bash
+git worktree add -b codex/blockwise-frank-migration /tmp/blockwise-frank-migration origin/main
+cd /tmp/blockwise-frank-migration
+test -z "$(git status --porcelain)"
+git rev-parse HEAD
+```
+
+If the branch or directory already exists, stop and ask the integration lead
+for its recorded path; do not reuse, delete, or reset it. Frank agents use the
+same rule with a separate Frank worktree per lane. The integration lead records
+each lane's repository, absolute worktree, branch, base SHA, owned path
+allowlist, and final SHA before accepting a handoff.
+
 ### 1.3 Discovery checks before any move or delete
 
 ```bash
@@ -205,9 +234,9 @@ Disposition meanings:
   evidence until the adapter is accepted.
 - DELETE AFTER CUTOVER: remove only after the replacement is live in the
   target environment, all importers are gone, and the acceptance gate passes.
-- DATABASE ARCHIVE: preserve migration history; archive non-empty runtime
-  data into legacy_archive after row counts and export checks. Never delete
-  schema history.
+- DATABASE ARCHIVE: DBA/operator-only preservation under section 6.3. A
+  low-context application agent records the approved evidence but runs no
+  archive SQL and never deletes schema history.
 
 ### 2.1 Frank current paths
 
@@ -219,7 +248,7 @@ Disposition meanings:
 | apps/window/web/js/app.js | KEEP / ADAPT | Add tool navigation only through the existing registry/home contracts; do not build a second application shell. |
 | apps/window/web/js/registry.js | KEEP | Use the versioned widget catalog; do not create a second widget runtime. |
 | apps/window/web/js/widgets.js | KEEP / ADAPT | Register tool summaries and status views only; execution goes to Hermes. |
-| apps/window/web/js/homes.js | KEEP / ADAPT | Use the existing entity-home flow and exact tool manifest contract in Appendix A. |
+| apps/window/web/js/homes.js | KEEP / ADAPT | Use the existing entity-home flow and exact dashboard home manifest contract in section 5.1. Do not edit before the final combined-main handoff. |
 | apps/window/Dockerfile, docker-compose.yml, Caddyfile, deploy.sh | KEEP | No deployment in this task. Do not patch production files in place. |
 | apps/window/tools/** | MOVE / ADAPT target | Put reusable mini-app views/adapters here, one directory per named tool. No local agent loop, scheduler, database, secret, or provider runtime. |
 
@@ -259,7 +288,7 @@ legacy paths listed in section (c) of docs/plans/PRODUCT-REBUILD.md.
 | hermes/tools/research-runtime/** | DELETE AFTER CUTOVER | Stop the supervisor process first; then remove runtime source and binaries in the second Blockwise removal commit. |
 | hermes/tools/meta-library-capture/** | DELETE AFTER CUTOVER | Same supervisor and second-commit gate as research-runtime. |
 | infra/hermes/Dockerfile, infra/hermes/main-wrapper.sh | MOVE / ADAPT then DELETE AFTER CUTOVER | Remove only research-runtime wiring; preserve remaining Hermes image/runtime behavior. |
-| infra/coolify/docker-compose.research.yml | DELETE AFTER CUTOVER | Remove after supervisor shutdown and VPS smoke check. |
+| infra/coolify/docker-compose.research.yml | DELETE AFTER CUTOVER | Remove only after a committed central Hermes data-plane owner is deployed and a controlled restart proves that it returns the same database healthy. Supervisor shutdown or a contract-only Tool package is insufficient. Otherwise KEEP it and mark D2 BLOCKED. |
 | hermes/skills/{blockwise-ad-collector,blockwise-ad-classifier,blockwise-agent-census,blockwise-coverage-auditor,blockwise-defect-investigator,blockwise-location-ad-search,blockwise-page-resolver,blockwise-operator-chat} | MOVE / ADAPT then DELETE AFTER CUTOVER | Re-home only the capabilities needed by the Frank/Hermes Ad Intelligence tool. Delete obsolete research-ops skills after parity evidence. |
 | src/app/(customer)/ad-radar/** | KEEP | Optional customer Ad Radar remains a customer read surface. It must read the customer-safe projection, not the private research database. |
 | src/app/api/research/{ad-radar,ads,advertisers,locations,swipe-file}/** | KEEP | Keep only customer-safe read APIs listed in the canonical plan. No operator scraper or private research writes. |
@@ -353,7 +382,8 @@ Implement these as shared Hermes/Frank contracts, not per-tool duplicates:
   sanitization status, retention class, and access scope.
 - QA/compliance gates that produce blocking or passing evidence before a
   release is public or a provider write is allowed.
-- A release registry for immutable public releases, checksums, provenance,
+- A Hermes/data-plane release registry for immutable public releases,
+  checksums, provenance,
   schema version, source trace, approvals, and consumer compatibility.
 - Schedules displayed by Frank but created, leased, executed, retried, and
   audited by Hermes. Frank must not become a scheduler.
@@ -381,6 +411,38 @@ that independent workflow, keep it as Hermes capabilities/nodes reused by the
 existing tools. Customer lifecycle/transaction mail, leads/workers,
 property/suburb, and AdStudio editing stay Blockwise-owned.
 
+The accepted Knowledge Library remains a separate future graph provider, not a
+Tool. It may project authorized topology through `schema://frank.graph/v1`, but
+it changes no Tool manifest, settings, command, event, trace, or adapter field
+and gives Frank no direct vector/memory database access.
+
+After the importer audit, the existing lead-ad, instant-form, and page-builder
+capabilities may become one future Campaign Builder Tool only if they form an
+independent project-agnostic operator workflow with their own approvals and
+immutable release lifecycle. Otherwise keep them as Hermes capabilities used
+by Content Factory or Blockwise customer publishing. Do not create three Tools
+from three skills.
+
+Before cleanup, create a reviewed cleanup manifest for both repositories. Each
+row contains `path`, `current_owner`, `disposition`, `replacement`, `gate`, and
+`evidence`. The only dispositions are KEEP, MOVE/ADAPT, DELETE AFTER CUTOVER,
+and DATABASE ARCHIVE. The integration lead rejects any deletion not present in
+that manifest. Include old Frank prototypes and docs, stale Blockwise operator
+docs, and `frank/template-factory/**`. The latter remains operator-owned and is
+not eligible for staging or deletion until its dirty VPS diff is reconciled,
+template release parity passes, and importers are zero. Preserve historical
+migrations and completed migration evidence.
+
+The cleanup manifest must include this legacy-home replacement map:
+
+| Legacy home/stub | Canonical owner and route decision | Removal gate |
+| --- | --- | --- |
+| `ad-templates` | `ad-template-generator`; route the legacy entry to the accepted Tool home through the shared home runtime | The Tool home opens, its truthful default blueprint renders, and back/refresh behavior passes before the stub is removed |
+| `campaigns` | Mautic remains campaign/segment authority; resolve the legacy entry to the existing registered Campaigns/Mautic home. Do not create or route to an Outreach/Mail campaign Tool. | The Dashboard owner supplies the exact registered home ID after combined-main handoff, and the route works with real scoped state and no duplicate campaign store before the stub is removed |
+
+Do not guess the registered Campaigns home ID before handoff and do not remove
+either stub because a card or manifest merely exists.
+
 ## 3. Execution phases, lanes, gates, and dependencies
 
 ### 3.1 Phase IDs
@@ -388,16 +450,22 @@ property/suburb, and AdStudio editing stay Blockwise-owned.
 | ID | Lane | Owner | Prerequisites | Exact actions | Expected evidence | Rollback | Stop conditions |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | P0 | Baseline | Integration lead | None | Fetch Blockwise origin/main; record revisions, statuses, path inventory, and VPS frank/template-factory deletion evidence. | Revision ae89ca5 or newer, saved git status, plan present, mismatch recorded. | Discard only the new report, never user work. | Do not proceed when authority files cannot be read or the canonical revision is unknown. |
-| P1 | Contracts | Hermes + Frank | P0 | Define the home manifest, settings revisions, fixed graph, trace, command/event, release, and consumer adapter contracts in tests/fixtures. | Versioned fixtures validate exact fields and reject secrets/code/HTML. | Revert contract-only commit. | Do not proceed when a field is ambiguous, mutable output is proposed, or a secret appears in a fixture. |
-| P2A | Template Generator | Hermes/Frank tool agent | P1 | Adapt frank/template-factory and ad-template-pack-contract into ad-template-generator; emit signed immutable sanitized TemplatePacks. | Pack contains provenance, checksums, QA/compliance status, no PII, and passes consumer import tests. | Keep old source/adapter active; do not delete Blockwise consumer code. | Do not proceed when public pack contains source private data, PII, mutable URLs, or failed QA. |
-| P2B | Ad Intelligence / Prospect | Hermes/Frank research agent | P1 | Adapt B1 research and scripts/research/** into ad-intelligence and prospect-discovery; deploy the replacement execution/data plane under the approved Hermes owner; publish customer-safe ad/prospect read models or artifacts. | Replacement runtime and database ownership are restart-tested; read-model export is sanitized, scoped, traced, and independently consumable. | Leave B1 runtime, database compose ownership, and customer read path unchanged. | Do not proceed when the replacement is contract-only, the live database has no verified new owner, private research tables are exposed, enrichment is unverified, or customer Ad Radar projection is stale. |
-| P2C | Outreach / Mail | Hermes/Frank communications agent | P1 | Build display/config surfaces and command adapters; preserve Blockwise lead lifecycle, email-service, Resend, and Mautic boundaries. | Transaction/demo/lead email tests pass; no duplicate delivery client or campaign store. | Keep console and customer importers until replacement is proven. | Do not proceed when any lifecycle email path is unowned or delivery would bypass policy/audit. |
+| P1 | Contracts | Hermes + Frank | P0 | Freeze exact home, settings, pipeline, trace, command/event, per-domain release, and consumer fixtures. Record all cross-language hash inputs. | Versioned fixtures validate exact fields, RFC 8785 hashes, and rejection of secrets/code/HTML. | Revert contract-only commit. | Do not proceed while a producer and consumer disagree on any field, type, receipt, pipeline version, compatibility ID, or hash input. |
+| P2A | Template Generator | Hermes/Frank tool agent | P1 | Adapt clean `origin/main` template source and ad-template-pack-contract into ad-template-generator; emit checksum-addressed immutable sanitized TemplatePacks. Do not reconcile the dirty VPS source in this lane. | Pack contains provenance, checksums, QA/compliance status, no PII, and passes consumer fixture tests. | Keep old source/adapter active; do not delete Blockwise consumer code. | Do not proceed when public pack contains source private data, PII, mutable URLs, failed QA, or an unverified release hash. |
+| P2B-R | Ad Intelligence implementation | Hermes/Frank research agent | P1 | Adapt private ad collection/classification into ad-intelligence and publish only the customer-safe Ad Radar projection. Prepare, but do not deploy, the replacement runtime/data-plane definition. | Private evidence and public projection are separately scoped; release fixture, sanitization, and runtime tests pass. | Leave B1 runtime, database compose ownership, and customer read path unchanged. | Do not proceed when private research tables are exposed, the projection is stale, or the replacement is contract-only. |
+| P2B-P | Prospect Discovery implementation | Hermes/Frank prospect agent | P1 | Adapt only discovery/enrichment/verification scripts into prospect-discovery. Use a separate store/contract and release verified prospect artifacts; never write customer leads directly. | Independent prospect fixture preserves attribution, validation, verification, revert metadata, scope, and trace. | Leave enrichment scripts and customer leads unchanged. | Do not proceed when prospect data shares mutable Ad Radar state, enrichment is unverified, or a direct lead write exists. |
+| P2B-R-DEP | Research data-plane deployment gate | Hermes/VPS operators | Accepted P2B-R commit and separate deploy approval | Deploy the committed central Hermes data-plane owner using its deploy runbook; perform a controlled restart and prove it returns `blockwise-research-db` healthy. This table records a gate and does not itself authorize deployment. | Replacement compose/config path, deployed SHA, container identity, health output, and restart evidence. | Stop the replacement owner and restore the old owner only through the approved deploy rollback. | Stop while the replacement owner is uncommitted, contract-only, not deployed, or not restart-proven. Never remove the old compose here. |
+| P2C-O | Outreach | Hermes/Frank communications agent | P1; live execution additionally requires accepted P2B-P releases | Build the declarative outreach Tool and typed Hermes commands for audience, approval, schedule, policy, and outcomes. | Idempotency, policy, trace, and approved prospect-release fixtures pass. | Keep existing customer lead paths; disable the new command capability. | Do not proceed when outreach reads mutable prospect state or bypasses approval/provider policy. |
+| P2C-M | Mail | Hermes/Frank communications agent | P1 | Build the declarative inbound/outbound mailbox Tool and typed Hermes commands while preserving Mautic, Resend, customer lifecycle mail, and Connections. | Transaction/demo/lead email tests pass; no duplicate delivery client or campaign store. | Keep console and customer importers until replacement is proven. | Do not proceed when any lifecycle email path is unowned or delivery bypasses policy/audit. |
 | P2D | Content Factory | Hermes/Frank content agent | P1 | Adapt B2 pages/API/lib/skills into content-factory; produce reviewed immutable blog releases. | Completed release has QA, provenance, checksum, no PII, and adapter fixture passes. | Keep B2 runtime active. | Do not proceed when image skills/listing-scraper consumers are unresolved. |
-| P3 | Frank integration | Frank agent | P1, relevant P2* | Add tool homes/manifest, widgets, settings/revision views, release registry views, schedule views, and Hermes command/event display. | Frank unit tests, syntax checks, browser desktop/mobile checks, explicit unavailable/error states. | Revert Frank-only integration commit; keep Hermes/Blockwise source untouched. | Do not proceed when UI adds local execution, local secrets, arbitrary code/HTML, or a second navigation shell. |
-| P4 | Blockwise adapters | Blockwise adapter agent | P2A, P2B, P2D | Implement explicit adapters for TemplatePacks, optional Ad Radar/read model, and completed blog releases. Keep customer surfaces and transaction mail. | Adapter tests consume only immutable sanitized releases and enforce checksums/provenance. | Disable adapter feature flag and retain existing customer path. | Do not proceed when adapter reads private Hermes state, mutable drafts, or unscoped data. |
-| G1 | Integration gate | Reviewer | P3, P4 | Run all acceptance matrices and end-to-end consumer checks against fixtures/preview. | All required rows pass; no PII/secrets; trace links are present. | Return failing lane to its owner; no deletes. | Do not proceed when any critical row fails. |
-| D1 | Blockwise commit one | Blockwise operator | G1 | Remove operator/UI/lib surfaces and references; keep customer AdStudio, optional Ad Radar/read model, property/suburb, customer ops, worker, and protected mail. Archive non-empty retired data first. | npm run check, typecheck, tests, route/referrer grep clean, archive counts recorded. | Revert commit one; do not touch schema history. | Do not proceed when importers remain or row counts are missing. |
-| D2 | VPS/runtime commit two | Blockwise operator + VPS operator | D1 plus verified P2B runtime/data ownership transfer | Verify the replacement Hermes runtime and new database compose owner can restart, stop the retired research supervisor, then remove only retired Blockwise runtime/infra/ops wiring and commit. | Replacement database owner and runtime are healthy after restart; old supervisor is stopped; no orphan process; both compose/config checks pass; commit is exact. | Restore the committed runtime/infra paths; restore the old compose owner only when the new owner is stopped; restart through the approved deploy runbook. | Do not proceed while `blockwise-research-db` is still owned only by the Blockwise compose file, when the replacement data plane is contract-only, when supervisor identity is uncertain, when a process remains, or when the deploy revision is uncommitted. |
+| P3A | Isolated shared Frank implementation | Frank graph agent | P1 and accepted graph spec | On its isolated branch, implement only the shared adapter/provider/workbench and tests. Domain packages add no JavaScript, CSS, HTML, routes, screens, widgets, or settings stores. Do not touch frozen dashboard/home integration files. | Shared schema fixtures, unit/syntax checks, one maxGraph dependency, and no production registration changes. | Revert the isolated Frank-only commit. | Stop on a second renderer/store, domain UI, execution, external provider/network/database call, or edit to a frozen shared file. |
+| P4A | Blockwise adapter scaffolds | Blockwise adapter agents | P1 | In separate worktrees, implement Template Pack, Ad Radar, and Completed Blog adapters against the frozen producer fixtures. | Positive and negative fixture tests validate exact schemas, receipts, compatibility, scope, and RFC 8785 hashes. | Disable the unconnected adapter; retain current customer path. | Stop when a contract field or hash input is ambiguous. |
+| P4B | Producer-consumer compatibility | Producer owner + Blockwise adapter owner | P4A plus the relevant P2A, P2B-R, or P2D commit | Run each actual producer payload through its real consumer and pin the accepted release identity. | Cross-language fixtures and end-to-end adapter tests pass without translation or invented fields. | Return the mismatched lane; no deletion or cutover. | Stop on any producer/consumer difference or private/mutable input. |
+| P3B | Final Frank registration | Frank integration agent + Tool owners | P3A, relevant Tool packages, and final combined-main dashboard handoff | Rebase once onto the recorded combined-main SHA. For each Tool, expose one truthful read-only snapshot/provider through the shared runtime, approve its distinct default blueprint, then register through the one discovery seam. Add graph only after `frank.graph.v1` merges. Run desktop/mobile verification. | Six real-state provider fixtures, six approved blueprints, startup discovery, fail-closed registration, scoped Connections/current-work/output/receipt evidence, shared graph/trace evidence when available, and final tests pass. | Revert the registration commit; keep the Tool unshipped rather than restore a fake or empty default. | Stop before the combined-main handoff; when a Tool has only fake/demo state or an empty/generic-only default; or on any second registry, bespoke Tool UI, provisional widget ID, fake live health, or unapproved shared-file change. |
+| P3C | Frank legacy cleanup | Frank integration agent | P3B and approved Frank cleanup-manifest rows | In a clean allowlisted worktree, remove only obsolete Frank prototypes/docs/stubs whose canonical home and route already pass. Preserve shared history and current runtime files. | Exact cleanup diff, route/browser tests, no dangling refs, and rollback SHA. | Revert the Frank cleanup commit. | Stop when a path is absent from the cleanup manifest or replacement route/default/provider is not green. |
+| G1 | Integration gate | Reviewer | P2A, P2B-R, P2B-P, P2B-R-DEP, P2C-O, P2C-M, P2D, P3C, P4B | Run all acceptance matrices and end-to-end consumer checks against the deployed preview and accepted releases. | All required rows pass; no PII/secrets; trace links and DB ownership evidence are present. | Return failing lane to its owner; no deletes. | Do not proceed when any critical row fails. |
+| D1 | Blockwise commit one | Blockwise operator | G1 | From a clean allowlisted worktree, remove operator/UI/lib surfaces and references; keep customer AdStudio, optional Ad Radar/read model, property/suburb, customer ops, worker, and protected mail. Attach approved DBA archive evidence and never absorb the dirty template-factory diff. | npm run check, typecheck, tests, route/referrer grep clean, DBA evidence recorded, staged paths allowlisted. | Revert commit one; do not touch schema history or user work. | Do not proceed when importers remain, DBA evidence is missing, the template-factory diff is unresolved, or a staged path is unlisted. |
+| D2 | VPS/runtime commit two | Blockwise operator + VPS operator | D1 plus verified P2B-R-DEP ownership transfer | Reverify the replacement Hermes runtime and database owner, stop the exact retired research supervisor, then remove only retired Blockwise runtime/infra/ops wiring and commit from the clean migration worktree. | Replacement database owner and runtime remain healthy; old supervisor is stopped; no orphan process; both compose/config checks pass; commit is allowlisted. | Restore the committed runtime/infra paths; restore the old compose owner only when the new owner is stopped; restart through the approved deploy runbook. | Do not proceed while `blockwise-research-db` is still owned only by the Blockwise compose file, when the replacement data plane is contract-only, when supervisor identity is uncertain, when a process remains, or when the deploy revision is uncommitted. |
 | G2 | Release gate | Reviewer + operators | D2 | Verify Frank, Hermes/VPS, Blockwise, data/security, and desktop/mobile acceptance matrices. | Signed report with commands, URLs/fixtures, traces, counts, and rollback revision. | Keep customer-only Blockwise and old adapter disabled; no destructive cleanup. | Do not proceed when any critical security, lifecycle mail, or customer read-model check fails. |
 
 ### 3.2 Mermaid dependency graph
@@ -406,27 +474,47 @@ property/suburb, and AdStudio editing stay Blockwise-owned.
 flowchart TD
   P0["P0 Baseline: fetch origin/main and record evidence"] --> P1["P1 Shared contracts"]
   P1 --> A["P2A Ad Template Generator"]
-  P1 --> B["P2B Ad Intelligence + Prospect Discovery"]
-  P1 --> C["P2C Outreach + Mail"]
+  P1 --> BR["P2B-R Ad Intelligence implementation"]
+  P1 --> BP["P2B-P Prospect Discovery implementation"]
+  P1 --> CO["P2C-O Outreach"]
+  P1 --> CM["P2C-M Mail"]
   P1 --> D["P2D Content Factory"]
-  P1 --> F["P3 Frank homes/widgets/settings/releases"]
-  A --> E["P4 Blockwise adapters"]
-  B --> E
-  D --> E
-  C --> G["G1 integration acceptance"]
-  E --> G
-  F --> G
+  P1 --> F["P3A isolated shared Frank implementation"]
+  P1 --> E["P4A adapter scaffolds from frozen fixtures"]
+  A --> V["P4B real producer-consumer verification"]
+  BR --> V
+  D --> V
+  E --> V
+  BR --> DEP["P2B-R-DEP deploy and restart-test central DB owner"]
+  F --> FI["P3B truthful providers + approved defaults on final combined main"]
+  A --> FI
+  BR --> FI
+  BP --> FI
+  CO --> FI
+  CM --> FI
+  D --> FI
+  BP --> G
+  CO --> G["G1 integration acceptance"]
+  CM --> G
+  D --> G
+  V --> G
+  FI --> FC["P3C allowlisted Frank legacy cleanup after route proof"]
+  FC --> G
+  DEP --> G
   G --> D1["D1 Blockwise commit 1: operator/UI/lib + docs cleanup"]
-  B --> DB["P2B data plane: transfer and restart-test DB ownership"]
   D1 --> D2["D2 verify new DB owner, stop supervisor, then runtime/infra commit 2"]
-  DB --> D2
+  DEP --> D2
   D2 --> G2["G2 final acceptance and rollback evidence"]
 ```
 
-Lanes P2A, P2B, P2C, P2D, and the non-destructive part of P3 may run
-in parallel after P1. P4 is sequenced after the relevant producer lane.
-G1, D1, D2, and G2 are strict gates. No delete lane runs in parallel
-with a consumer cutover or supervisor shutdown.
+P2A, P2B-R, P2B-P, P2C-O package work, P2C-M, P2D, P3A, and P4A may run
+in parallel after P1 because they use separate worktrees and path allowlists.
+P4B waits for each real producer. Outreach package work may start after P1,
+but live execution waits for an accepted Prospect release. P3B waits for the
+final combined-main dashboard handoff. P2B-R-DEP is operator-only and waits for
+an accepted committed implementation. P3C waits for P3B replacement-route
+proof. G1, D1, D2, and G2 are strict gates. No delete lane runs in parallel
+with cutover, deployment, or supervisor shutdown.
 
 ## 4. Mechanical lane instructions
 
@@ -438,7 +526,7 @@ with a consumer cutover or supervisor shutdown.
    asset, prompt, and credential reference. Hash source and public artifacts.
 3. Put execution in Hermes; put display/configuration in
    apps/window/tools/ad-template-generator/.
-4. Emit a release containing only the Appendix D public release fields.
+4. Emit a release containing only the exact Template Pack row in section 5.5a.
 5. Run source-vs-public hash checks and the Blockwise import adapter fixture.
 6. Do not delete customer AdStudio paths or schema history.
 
@@ -446,26 +534,49 @@ Required stop: an output is not public if it contains a private source asset,
 customer media, raw prompt credential, PII, provider token, or mutable draft
 reference.
 
-### Lane B — Ad Intelligence / Ad Radar and Prospect Discovery
+### Lane B-R — Ad Intelligence / Ad Radar
 
-1. Separate private collection/classification/enrichment from customer-safe
-   read models.
-2. Adapt B1 operator research and scripts/research/** into Hermes tools.
-3. Preserve evidence IDs, source URLs/IDs, classifier version, enrichment
-   method, verification result, revert metadata, and trace IDs.
-4. Publish a sanitized Ad Radar read model only through the explicit adapter.
-5. Keep Blockwise customer Ad Radar optional but valid; disabled is not deleted.
-6. Keep customer leads, provider lead workers, customer operations, and
-   transaction mail untouched.
+1. Keep private collection, raw evidence, classification, and retention behind
+   the Hermes data plane. Frank receives only authorized summaries and refs.
+2. Adapt B1 operator research into the `ad-intelligence` Tool without moving
+   enrichment-email scripts into its store or release contract.
+3. Preserve evidence IDs, source URLs/IDs, classifier version, media QA,
+   settings revision, receipt refs, and trace IDs.
+4. Publish only the sanitized customer-safe Ad Radar read model through the
+   exact release and Blockwise adapter contract.
+5. Keep Blockwise customer Ad Radar optional but valid; disabled is an explicit
+   supported state, not permission to delete the read model.
+6. Prepare the replacement runtime/data-plane definition, but leave deployment
+   to P2B-R-DEP and leave the old compose owner untouched.
 
-Required stop: a tool attempts to query private research tables directly from
-Blockwise, writes an unverified email into customer leads, or drops a
-customer-safe projection without a replacement.
+Required stop: Blockwise or Frank queries private research tables, private
+evidence reaches the public projection, the customer projection becomes stale,
+or a contract-only package is presented as a deployed database owner.
+
+### Lane B-P — Prospect Discovery and Enrichment
+
+1. Adapt only the confirmed discovery, enrichment, verification, statistics,
+   and repair scripts into the `prospect-discovery` Tool.
+2. Give prospect candidates an independent contract, access scope, retention
+   rule, and Hermes data-plane authoritative store. Do not use the Ad Radar
+   public projection as a prospect database and do not add prospect fields to
+   the Ad Radar release.
+3. Preserve source attribution, validation, AU checks, verification result,
+   revert flags, repair evidence, and trace IDs.
+4. Release only verified sanitized prospects. Link to shared public evidence by
+   opaque source/evidence ID; do not copy private ad evidence into the release.
+5. Never write Blockwise customer leads directly. Outreach consumes only an
+   approved immutable Prospect release through its declared boundary.
+
+Required stop: an enrichment is unverified, the prospect Tool shares mutable
+Ad Radar state, a release contains PII beyond its approved scope, or any direct
+customer-lead write exists.
 
 ### Lane C — Outreach and Mail
 
-1. Build Frank views for audience, approval, policy, schedule, command status,
-   and delivery outcome.
+1. Build declarative Tool contracts for outreach audience, approval, policy,
+   schedule, command status, delivery outcome, inbound mailbox state, and
+   approved outbound commands. Shared Frank surfaces render them.
 2. Send execution commands to Hermes; do not send directly from Frank.
 3. Keep Mautic as campaign/segment owner and Resend as delivery provider.
 4. Keep src/lib/email/lead-lifecycle.ts, src/lib/email/resend-client.ts,
@@ -493,25 +604,86 @@ customer importer, or a blog output is published without QA/provenance.
 
 ### Lane E — Frank integration
 
-1. Use the existing entity-home and widget registry contracts.
-2. Add one tool manifest per named tool with the exact fields in Appendix A.
-3. Use settings revision forms with plain text/select/number/date controls;
-   reject code, HTML, secrets, arbitrary provider URLs, and arbitrary calls.
-4. Display Hermes events and released outputs; display explicit empty,
+1. P3A works only on its isolated branch. Implement the single shared
+   `tool-manifest` adapter, provider, `graph-workbench`, and tests from the
+   accepted graph spec.
+2. Before the final combined-main handoff, do not edit
+   `apps/window/home_defaults.py`, `home_platform.py`, registry/runtime files,
+   production routes, or shared shell/home files. Do not merge P3A.
+3. Domain Tool directories contain declarative `home.json`, `manifest.json`,
+   schemas, pipelines, plus a pure read-only snapshot adapter and fixtures.
+   The adapter receives already-authorized runtime/package state as input and
+   performs no I/O. Tool packages register no JavaScript, CSS, HTML, route,
+   screen, widget, renderer, settings store, network/database/provider call.
+4. P3B records the final combined-main SHA, rebases once, and uses only
+   `discover_tool_homes(tools_root) -> register_entity_profile(manifest)`.
+   There is no second registry.
+5. Before a Tool ships, its owner exposes at least one truthful read-only
+   snapshot/provider through the existing shared provider runtime. It reads
+   real package/runtime state already supplied through the authorized boundary;
+   it makes no provider/network/database call and reports unavailable when the
+   source is unavailable. Fake packs are excluded or visibly labeled demo, and
+   no fixture or manifest value may be rendered as live health.
+6. The Dashboard owner approves one distinct default blueprint per Tool. Using
+   only known shared widget IDs, it must cover: overview; scoped Connections
+   attention/coverage; current work or latest output; and receipts/evidence.
+   Empty or generic-only defaults are a P3B failure. Keep defaults empty before
+   handoff; bind approved defaults only after the provider fixtures are green.
+   Add `entity-graph` only after `/api/capabilities` advertises
+   `frank.graph.v1` and the shared graph provider/widget is green.
+7. Shared settings forms use schema-backed controls and reject code, HTML,
+   secrets, arbitrary provider URLs, and arbitrary calls. Shared views display
+   authorized Hermes events, releases, schedules, and explicit ready, empty,
    attention, unavailable, and error states.
-5. Keep Accounts, Connections/OpenBao, chat, widget runtime, and Hermes as the
+8. Keep Accounts, Connections/OpenBao, chat, widget runtime, and Hermes as the
    existing shared surfaces.
+9. Only after P3B passes, P3C removes the exact approved Frank cleanup-manifest
+   rows in a clean worktree with an explicit path allowlist. Verify the
+   replacement route, defaults, provider state, dangling references, tests, and
+   browser behavior before committing. Do not remove migration history.
 
-Required stop: a Frank change adds a local queue, scheduler, model loop,
-memory store, provider credential store, or second chat transcript.
+Required stop: the combined-main SHA is missing, a Frank change touches a
+frozen file before handoff, a Tool lacks a truthful provider or approved
+blueprint, a fake/demo fixture is presented as live, or the change adds domain
+UI, a second registry/renderer, local queue, scheduler, model loop,
+memory/trace/settings/release store, provider credential store, or second chat
+transcript.
+
+For P3C, the integration lead creates `/tmp/frank-p3c-allowlist.txt` from only
+the approved Frank cleanup-manifest rows. Start clean, make the listed edits,
+then verify and stage only that list:
+
+```bash
+test -z "$(git status --porcelain)"
+test -s /tmp/frank-p3c-allowlist.txt
+# Make only the approved cleanup edits, then continue.
+git diff --check
+git diff --name-only | sort -u > /tmp/frank-p3c-changed.txt
+test -z "$(comm -23 /tmp/frank-p3c-changed.txt <(sort -u /tmp/frank-p3c-allowlist.txt))"
+(cd apps/window && python -m unittest discover -s tests)
+find apps/window -type f -name '*.js' -print0 | xargs -0 -n1 node --check
+git add -A --pathspec-from-file=/tmp/frank-p3c-allowlist.txt
+test -z "$(git diff --cached --name-only | sort -u | comm -23 - <(sort -u /tmp/frank-p3c-allowlist.txt))"
+git diff --cached --name-status
+git commit -m "Retire replaced Frank tool stubs and docs"
+git show --name-status --stat HEAD
+```
+
+Run the required browser route/default/provider checks before the P3C commit.
+Source rollback is
+`git revert <recorded-P3C-SHA>` on a clean branch.
 
 ### Lane F — Blockwise adapters and removal
 
-1. Add adapters before deleting producers. Each adapter must validate schema
-   version, release ID, checksum, provenance, sanitization, scope, and
-   compatibility.
-2. Keep all customer surfaces explicitly listed in the canonical rebuild plan.
-3. Run D1 and D2 exactly as written in section 6; never combine them.
+1. P4A builds each adapter in a separate clean worktree against the exact P1
+   fixture before any producer or customer path is removed. Validate schema,
+   release ID, RFC 8785 hashes, artifact checksums, receipts, provenance,
+   sanitization, scope, pipeline identity/version, and compatibility.
+2. P4B runs the real producer payload through the real consumer without a
+   translation shim. Pin the accepted release ID/hash and producer/consumer
+   SHAs in evidence.
+3. Keep all customer surfaces explicitly listed in the canonical rebuild plan.
+4. Run D1 and D2 exactly as written in section 6; never combine them.
 
 ## 5. Shared contracts
 
@@ -536,7 +708,11 @@ The canonical per-Tool dashboard filename is
 }
 ```
 
-Until shared widget IDs land, `default_widget_ids` must remain `[]`.
+Before the final Dashboard+Connections handoff, `default_widget_ids` must
+remain `[]`. During P3B, the Dashboard owner supplies the approved known shared
+widget IDs for that Tool's distinct blueprint after its truthful read-only
+provider passes. The six Tools cannot ship with empty or generic-only defaults.
+`entity-graph` remains absent until `frank.graph.v1` is available.
 
 kind is exactly the literal 'tool'. id is stable and URL-safe. Arrays
 contain capability/widget IDs. `connection_capabilities` lists required
@@ -547,53 +723,70 @@ contract change and fixtures.
 
 ### 5.2 Settings revisions
 
-Every tool setting change creates a new immutable revision. The revision must
-record, at minimum:
+Every Tool setting change creates a new immutable revision. The canonical
+runtime envelope contains exactly `schema`, `scope`, `revision`, and
+`settings`:
 
 ```json
 {
-  "tool_id": "content-factory",
+  "schema": "schema://frank.tool-app-settings/v1",
+  "scope": {"kind": "project", "id": "blockwise"},
   "revision": 3,
-  "prompt": "plain text or approved prompt reference",
-  "style": "plain text style profile reference",
-  "model": "approved model profile ID",
-  "threshold": { "qa": 0.95 },
-  "schedule": { "enabled": false, "cron": null, "timezone": "Australia/Perth" },
-  "project_pack": "pack://project/example/v1",
-  "created_at": "2026-08-14T00:00:00Z",
-  "created_by": "operator-ref",
-  "status": "draft"
+  "settings": {
+    "prompt_refs": {"draft": "prompt://content/draft/v3"},
+    "tone_style": {"profile": "style://brand/blockwise/v2"},
+    "model_policy": {"id": "model-policy://content/default/v1"}
+  }
 }
 ```
 
-The allowed setting domains are prompt, style, model, threshold, schedule,
-and project pack. A settings revision may contain only a non-secret
-`connection_id` and the required capability ID where a connection is needed.
-OpenBao is entirely behind Connections. Reject vault/provider/credential
+The example `settings` keys are Content Factory properties, not a common Frank
+settings object. Each Tool may expose adjustable prompt/style/model policy,
+threshold, schedule reference, project-pack reference, or connection binding
+only when that exact property is declared by its canonical
+`manifest.json.settings` schema. Frank validates that schema and never invents
+or silently reinterprets a property. Prompt/instruction content is resolved
+through Hermes; manifests and graph snapshots carry approved references and
+versions, not secret bodies. A connection setting contains only a non-secret
+`connection_id` and required capability ID. Reject vault/provider/credential
 references, secrets, access tokens, credentials, arbitrary code, HTML, shell
-commands, and provider-specific opaque secret values.
+commands, and provider-specific opaque secret values. Saving appends a new
+scoped revision and never mutates an old one.
 
-### 5.3 Fixed versioned graph
+### 5.3 Fixed versioned pipeline
 
-Each run references a fixed graph version:
+Each Tool owns canonical pipeline definitions in `manifest.json`. A pipeline
+uses exactly `schema`, optional `id` and `version`, `{id, kind}` nodes, and
+`{from, to}` edges:
 
 ```json
 {
-  "graph_id": "content-factory",
-  "graph_version": "1.0.0",
+  "schema": "schema://frank.tool-app-pipeline/v1",
+  "id": "content-factory-pipeline",
+  "version": "1.0.0",
   "nodes": [{ "id": "draft", "kind": "task" }, { "id": "qa", "kind": "gate" }],
   "edges": [{ "from": "draft", "to": "qa" }]
 }
 ```
 
-A run never silently follows the latest graph. A changed graph gets a new
-version, and an old run remains attributable to its original graph.
+A run pins the Tool manifest version, pipeline ID/version, and immutable
+settings revision. It never silently follows latest. `graph_id` is not
+domain-authored: `ToolManifestAdapter` derives `tool:<tool-id>` for global
+scope or `project:<project-id>/tool:<tool-id>` for project scope. The generated
+`schema://frank.graph/v1` envelope is an in-memory or disposable projection,
+never a second checked-in pipeline or authoritative graph state.
+
+There is no manifest `sha256` field. The provider computes
+`manifest_sha256` out of band as SHA-256 over UTF-8 RFC 8785 JCS of the complete
+canonical `manifest.json`. The runtime may expose it as derived
+`source.sha256`; never write it back into the manifest or exclude a self-field.
 
 ### 5.3a Shared graph implementation decision
 
 This decision is fixed for every tool:
 
-- maxGraph under its Apache-2.0 license is the sole graph renderer.
+- `@maxgraph/core` under its Apache-2.0 license is the sole graph renderer;
+  pin its exact accepted version in the implementation lockfile.
 - CodeMirror 6 is the prompt/instruction inspector.
 - vanilla-jsoneditor with Ajv is used only when editing a schema-backed
   payload.
@@ -606,6 +799,16 @@ This decision is fixed for every tool:
   UI, execution, or settings stores.
 - Preserve the existing trace, slot-trace, and trace-view hooks while wiring
   the shared graph projection.
+- Use the existing normalized OpenTelemetry path and provider deep links; do
+  not install or persist a second trace backend.
+
+Before adding a dependency, inventory the current package and lock files. The
+implementation handoff records the exact pinned version and license for
+`@maxgraph/core`, CodeMirror 6, vanilla-jsoneditor, and Ajv; includes the
+lockfile diff; runs the repository's dependency/license audit; and searches the
+dependency tree and source for Cytoscape, React Flow, Rete, LiteGraph, or a
+custom second renderer. Unknown, floating, duplicated, or incompatible
+dependencies BLOCK P3B.
 
 The accepted contract is
 `docs/specs/shared-graph-trace-contract.md` at source revision
@@ -617,30 +820,37 @@ checked-in manifest or pipeline.
 The one shared implementation registers `graph`, `slot-graph`,
 `entity-graph`, `graph-workbench`, and `tool-manifest`. The existing `trace`
 and `slot-trace` hosts use the same workbench with a `run.trace` lens, and
-`trace-view` remains a deprecated compatibility alias. A Tool keeps
-`default_widget_ids: []` until `/api/capabilities` advertises
-`frank.graph.v1`; only then may the shared runtime select `entity-graph`.
+`trace-view` remains a deprecated compatibility alias. Before the combined-main
+handoff, a Tool keeps `default_widget_ids: []`. During P3B it receives its
+approved non-graph shared blueprint after its truthful provider passes;
+`entity-graph` may be added only after `/api/capabilities` advertises
+`frank.graph.v1` and that shared provider/widget passes.
 Integration remains BLOCKED until this shared implementation lands on the
 accepted dashboard base. Domain agents must not invent adapter fields, widget
 IDs, routes, or a temporary renderer.
 
 ### 5.4 OTel-style traces and events
 
-Every command, provider call, QA gate, release, and adapter import carries:
+Every command, provider call, QA gate, release, and adapter import correlates to
+the canonical `schema://frank.tool-app-trace/v1` record and authorized
+OpenTelemetry spans. The following is an illustrative redacted OTLP-style span,
+not a second Frank trace schema:
 
 ```json
 {
-  "trace_id": "hex-trace-id",
-  "span_id": "hex-span-id",
-  "parent_span_id": "hex-parent-id",
+  "trace_id": "0123456789abcdef0123456789abcdef",
+  "span_id": "0123456789abcdef",
+  "parent_span_id": "fedcba9876543210",
   "name": "template.release",
   "start_time": "2026-08-14T00:00:00Z",
   "end_time": "2026-08-14T00:00:01Z",
   "status": "ok",
   "attributes": {
-    "tool_id": "ad-template-generator",
-    "project_id": "blockwise",
-    "release_id": "release://template-pack/example/v1"
+    "frank.tool.id": "ad-template-generator",
+    "frank.project.id": "blockwise",
+    "frank.pipeline.id": "reference-clone-release",
+    "frank.pipeline.revision": "1.0.0",
+    "frank.receipt.ref": "receipt://template/example/qa"
   },
   "events": [{ "name": "qa.passed", "attributes": { "gate": "public-sanitize" } }]
 }
@@ -648,6 +858,10 @@ Every command, provider call, QA gate, release, and adapter import carries:
 
 Do not put secrets, raw customer PII, full email addresses, prompt secrets, or
 provider tokens in span attributes/events. Use opaque IDs and counts.
+`trace_id` is lowercase 32-hex and `span_id` is lowercase 16-hex. Use only the
+stable `frank.*` correlation attributes and each Tool manifest's trace/event
+allowlists. Frank renders the supplied authorized record and does not fabricate
+a trace from chat, events, or source code.
 
 ### 5.5 Immutable public release
 
@@ -657,14 +871,20 @@ must include:
 - `schema`, `release_id`, `tool_id`, version, and final status;
 - artifact URLs or storage references that contain no credentials;
 - SHA-256 checksums for every artifact;
-- source/provenance references, graph version, settings revision, QA gates,
+- source/provenance references, pipeline version, settings revision, QA gates,
   approvals, and trace ID;
-- sanitization result and compatibility range;
+- sanitization result and consumer compatibility declaration;
 - no PII, customer media, private source ads, secrets, tokens, or mutable
   working-draft pointers.
 
 Consumers pin a release ID/checksum. A new output is a new release; never
 mutate a public release in place.
+
+All structured JSON checksums and release hashes use SHA-256 over RFC 8785
+JSON Canonicalization Scheme bytes. A whole-release hash excludes only its
+own `release_hash` field. Producers use Python `rfc8785`; JavaScript consumers
+use the RFC 8785 `canonicalize` package. Do not replace either side with a
+handwritten key sorter or locale-aware comparison.
 
 The identity field is always named `schema`; do not introduce aliases such as
 `producer_schema`. Domain payloads may differ, but every publishing Tool must
@@ -672,18 +892,51 @@ declare its release schema in `manifest.json`, include matching `schema` and
 `tool_id` fields in each release, and validate both before a consumer reads the
 payload.
 
+### 5.5a Frozen producer-consumer release matrix
+
+P1 freezes these identities and public shapes before producer and adapter work
+starts. Producer code, its fixture, and the Blockwise consumer fixture must be
+byte-compatible; no adapter may rename a field or translate a receipt.
+
+| Release | Exact producer identity | Exact compatibility and gates | Hash/checksum input | Canonical producer contract |
+| --- | --- | --- | --- | --- |
+| Template Pack | `schema://frank.ad-template-generator-release/v1`; tool `ad-template-generator`; pipeline `reference-clone-release` version `1.0.0`; status `released`; `immutable: true`; `source_free: true` | Compatibility is exactly `["blockwise-template-pack-v1"]`. `template_pack` is exactly `{schema:"blockwise.template-pack/v1",pack_id,artifact_ref,sha256,signature_algorithm:"ed25519",signature}`. Provenance binds the same artifact URL to an artifact receipt. QA, native-pixel approval, sanitization, and release timestamps are exact timezone-bearing receipt shapes. | `template_pack.sha256` addresses the fetched pack bytes. `release_hash` is SHA-256 over RFC 8785 JCS of the complete public release excluding only `release_hash`. | `apps/window/tools/ad-template-generator/release.schema.json` and `apps/window/tests/fixtures/releases/ad-template-generator-v1.json` |
+| Ad Radar | `schema://frank.ad-intelligence-release/v1`; tool `ad-intelligence`; pipeline `ad-radar-pipeline` version `1.0.0`; public export `schema://frank.ad-intelligence-public/v1`; status `released`; `immutable: true` | Compatibility is exactly `["ad-intelligence-public-v1"]`. Project scope equals the export project. The release carries non-empty unique provenance/trace refs, integer settings revision plus one settings ref, exact timestamped passing QA receipt, and exact timestamped passing PII/secret scan receipts. | `checksum` is SHA-256 over RFC 8785 JCS of `public_export`. `release_hash` is SHA-256 over RFC 8785 JCS of the complete release envelope excluding only `release_hash`. | `apps/window/tools/ad-intelligence/schemas/*.json` and `apps/window/tools/ad-intelligence/fixtures/ad-radar-release-v1.json` |
+| Verified Prospect | P1 adds `release_schema: schema://frank.prospect-discovery-release/v1` to the canonical manifest; tool `prospect-discovery`; pipeline `discover-enrich-qualify` version `1.0.0`; status `released`; `immutable: true` | `consumer_compatibility` contains exact ID `prospect-release-v1`. Each candidate is exactly `prospect_ref`, opaque `contact_ref`, `evidence_refs`, `qualification`, and `verification_receipt_ref`; qualification is exactly `decision`, `score`, and `policy_ref`. The envelope has non-empty settings, trace, sanitization, and verification receipt refs. It contains no email address, phone, raw provider payload, consent claim, or direct Blockwise lead ID. Outreach resolves authorized opaque refs through Hermes. | `release_hash` is SHA-256 over RFC 8785 JCS of the complete public release excluding only `release_hash`. Referenced private/contact records remain behind the Hermes data plane and are not hash-expanded into the public release. | P1 must add `apps/window/tools/prospect-discovery/` producer, schema, and Outreach consumer fixtures before P2B-P can pass |
+| Completed Blog | `schema://frank.content-factory-release/v1`; tool `content-factory`; pipeline `content-factory-pipeline` version `1.0.0`; status `published`; `immutable: true` | `consumer_compatibility` contains exact ID `article-release-v1`. QA is exactly `{"decision":"pass","receipt_ref":"...","checked_at":"..."}`; approval exactly `{"decision":"approve","receipt_ref":"...","decided_at":"..."}`; sanitization exactly `{"pii_scan":{"status":"passed","receipt_id":"...","scanned_at":"..."},"secret_scan":{"status":"passed","receipt_id":"...","scanned_at":"..."}}`. | `provenance.artifact_checksums.body` and `.seo` hash their RFC 8785 JCS objects; each `media:<id>` equals that media checksum. `release_hash` hashes the complete public release excluding only `release_hash`. | `apps/window/tools/content-factory/release.schema.json` and `apps/window/tools/content-factory/fixtures/content-release-v1.json` |
+
+All JSON hashes above use SHA-256 over UTF-8 RFC 8785 JSON Canonicalization
+Scheme bytes. Python uses pinned `rfc8785`; JavaScript uses pinned
+`canonicalize`. Do not use a handwritten sorter, `localeCompare`, whitespace-
+sensitive JSON, or implementation-specific number formatting. Each producer's
+`manifest.json.release_schema` must equal the release `schema`. Unsupported
+pipeline versions or compatibility IDs fail closed.
+
+Outreach and Mail are command/event/receipt Tools in v1; they do not publish a
+Blockwise-consumable public release. Do not invent release schemas for them.
+
 ### 5.6 Hermes command/event boundary
 
-Frank sends commands; Hermes executes and emits events:
+Frank constructs only `schema://frank.tool-app-command/v1` envelopes accepted
+by the canonical Tool validator. Hermes executes and emits ordered
+`schema://frank.tool-app-event/v1` envelopes:
 
 ```text
-Frank -> Hermes: command.requested(command_id, tool_id, graph_version,
-                                    settings_revision, project_pack,
-                                    idempotency_key, trace_id)
+Frank -> Hermes: validated command envelope with Tool ID, runtime scope,
+                 selected settings revision, declared action, validated input,
+                 idempotency key, and trace context
 Hermes -> Frank: command.accepted / command.progress / command.blocked /
                  command.failed / command.completed
 Hermes -> Frank: release.published(release_id, checksum, provenance, trace_id)
 ```
+
+The labels above describe lifecycle meaning, not permission to invent event
+kinds or fields. Emit only the event kinds and exact envelope fields accepted
+by that Tool's canonical manifest and validator.
+
+Do not add `graph_version`, `project_pack`, or any other convenience field
+unless that exact field exists in the canonical command validator. The adapter
+does not reinterpret pipeline/settings data into new command fields.
 
 Commands are authenticated, scoped, idempotent, policy-checked, and
 trace-linked. Events are append-only, safe to replay, and contain summaries or
@@ -695,13 +948,15 @@ does not execute provider calls.
 Required adapters:
 
 1. Template Pack adapter: validates a public TemplatePack release,
-   checksum, pack schema, asset allowlist, provenance, and workspace-safe
-   import before customer AdStudio can choose it.
+   RFC 8785 release hash, pack schema, asset allowlist, provenance, and
+   workspace-safe import before customer AdStudio can choose it.
 2. Ad Radar adapter: reads the optional customer-safe Ad Radar projection;
-   it never reads private research tables or raw VPS evidence. Disabled
+   it verifies both the RFC 8785 public-export checksum and whole-release hash,
+   and never reads private research tables or raw VPS evidence. Disabled
    feature state remains a valid explicit response.
 3. Completed Blog Release adapter: imports only a completed, QA-passed,
-   immutable blog release with provenance and sanitized media/content. It does
+   immutable blog release with exact artifact checksums, an RFC 8785 release
+   hash, provenance, and sanitized media/content. It does
    not import an in-progress Content Factory run.
 
 ## 6. Exact Blockwise removal sequence
@@ -709,16 +964,25 @@ Required adapters:
 This is the only deletion sequence. It is intentionally two commits. Do not
 combine them, and do not delete schema history.
 
+Both commits are prepared in the clean dedicated Blockwise migration worktree,
+never in `/projects/blockwise` while it contains the operator-owned
+`frank/template-factory/**` diff. Before each commit, the integration lead
+creates `/tmp/bw-d1-allowlist.txt` or `/tmp/bw-d2-allowlist.txt` from the
+approved cleanup manifest, with one exact repository-relative path per line.
+No wildcard, repository root, `.` entry, or unrelated path is allowed.
+
 ### 6.1 Commit one: operator/UI/lib plus docs cleanup
 
 Prerequisites: G1 passed, customer adapters are available, customer email
-tests pass, row counts/archives are recorded, and the Blockwise checkout is on
-the target branch with no unrelated changes.
+tests pass, required DBA archive evidence is recorded, and the clean dedicated
+Blockwise worktree is on the recorded target branch with no unrelated changes.
 
 Run a dry inventory first:
 
 ```bash
 git status --short --branch
+test -z "$(git status --porcelain)"
+test -s /tmp/bw-d1-allowlist.txt
 git grep -n -E 'operator/research|operator/content|operator/email|createResearchServiceClient|sendOperatorEmail' -- src tests next.config.ts docs
 ```
 
@@ -745,10 +1009,15 @@ Make the following changes in one commit:
 6. Remove stale docs/runbook references to the deleted Blockwise-owned
    operator surfaces. Do not remove migration history or customer product
    documentation.
-7. Archive non-empty deprecated runtime data before dropping application
-   references. Use legacy_archive tables with source table, original primary
-   key, archived timestamp, and migration revision. Preserve row counts and
-   checksums in the report.
+7. Attach the approved DBA archive decision/evidence for every deprecated
+   table before dropping application references. A low-context migration agent
+   does not create, copy, alter, or drop database tables.
+8. For `frank/template-factory/**`, accept only an operator-reconciled base
+   revision. If that base already contains the approved removal and Template
+   Pack parity/importer-zero evidence exists, record it; do not restage it. If
+   the dirty VPS diff is still unresolved, leave the path untouched and mark
+   the Blockwise legacy cleanup BLOCKED. Never absorb the raw dirty diff into
+   BW-1.
 
 Then run:
 
@@ -757,18 +1026,28 @@ npm run check
 npm run typecheck
 git grep -n -E 'operator/research|operator/content|operator/email' -- src tests next.config.ts docs || true
 git diff --check
-git diff --name-status HEAD~1..HEAD
+git diff --name-status
+git diff --name-only | sort -u > /tmp/bw-d1-changed.txt
+comm -23 /tmp/bw-d1-changed.txt <(sort -u /tmp/bw-d1-allowlist.txt)
+test -z "$(comm -23 /tmp/bw-d1-changed.txt <(sort -u /tmp/bw-d1-allowlist.txt))"
 ```
 
 Commit exactly the operator/UI/lib/docs change:
 
 ```bash
-git add -A -- ':!supabase/migrations/**'
+git add -A --pathspec-from-file=/tmp/bw-d1-allowlist.txt
+git diff --cached --quiet -- frank/template-factory
+test -z "$(git diff --cached --name-only | sort -u | comm -23 - <(sort -u /tmp/bw-d1-allowlist.txt))"
+git diff --cached --name-status
 git commit -m "BW-1 remove retired operator surfaces and references"
+git show --name-status --stat HEAD
 ```
 
-Do not stage supabase/migrations/** for deletion. If a migration is required
-for an archive, add a new tested migration; never rewrite or remove history.
+Do not stage supabase/migrations/** for deletion. An archive migration is a
+separately approved, tested DBA change referenced by evidence; never let this
+low-context deletion commit invent, rewrite, or remove schema history. Source
+rollback is `git revert <recorded-BW-1-SHA>` on a clean branch; do not reset or
+restore the dirty canonical checkout.
 
 ### 6.2 Commit two: VPS runtime/infra after supervisor stop
 
@@ -792,6 +1071,10 @@ git status --short --branch
 supervisorctl status
 ps auxww | grep -E 'research-runtime|meta-library-capture|supabase-supervisor' | grep -v grep
 ```
+
+The VPS commands identify and stop the retired process only. Return to the
+recorded clean migration worktree before editing or staging repository files.
+Verify `test -s /tmp/bw-d2-allowlist.txt` and record its checksum.
 
 Stop only the exact research supervisor/service identified in the output. Do
 not guess a service name and do not stop the customer worker, Hermes base
@@ -826,36 +1109,46 @@ git diff --check
 git grep -n -E 'research-runtime|meta-library-capture|docker-compose.research' -- hermes infra worker src tests || true
 npm run check
 npm run typecheck
+git diff --name-only | sort -u > /tmp/bw-d2-changed.txt
+test -z "$(comm -23 /tmp/bw-d2-changed.txt <(sort -u /tmp/bw-d2-allowlist.txt))"
 ```
 
 Commit exactly the runtime/infra change:
 
 ```bash
-git add -A
+git add -A --pathspec-from-file=/tmp/bw-d2-allowlist.txt
+git diff --cached --quiet -- frank/template-factory
+test -z "$(git diff --cached --name-only | sort -u | comm -23 - <(sort -u /tmp/bw-d2-allowlist.txt))"
+git diff --cached --name-status
 git commit -m "BW-2 remove retired research runtime and infra"
+git show --name-status --stat HEAD
 ```
 
 Do not deploy from an uncommitted checkout. This runbook does not authorize a
 deployment; the separate VPS deploy runbook must deploy the exact committed
 revision and verify the supervisor remains stopped.
 
-### 6.3 Database archive procedure
+### 6.3 Database archive procedure — DBA/operator only
 
-Use this procedure for any deprecated table discovered during cutover:
+A low-context application agent stops after identifying a candidate table from
+the importer inventory and migration history. It must not run ad hoc SQL,
+`SELECT`, `COPY`, `CREATE TABLE`, `ALTER`, `DROP`, `pg_dump`, or `pg_restore`.
 
-1. Identify the table from the actual code/importer inventory and migration
-   history. Do not infer a table from a filename.
-2. Record exact row count, primary-key count, min/max timestamps, and a
-   checksum/export location.
-3. If the count is zero, record the zero count and retain schema history.
-4. If the count is non-zero, create legacy_archive.<source_table> with the
-   original row plus archived_at, archive_reason, and source_revision.
-5. Verify archived row count equals the pre-archive count and that RLS/private
-   data is not exposed through a public adapter.
-6. Only then remove application references or drop the runtime table in a new
-   tested migration. Never delete the original migration file.
+The DBA/operator supplies an approved archive sub-runbook containing:
 
-Stop when counts, checksums, ownership, or retention requirements are unknown.
+1. exact database owner, table, primary key, retention owner, and reason;
+2. the already verified backup/checksum used for rollback;
+3. a reviewed versioned migration and transaction/locking plan;
+4. approved pre-count, primary-key count, min/max timestamps, and checksum;
+5. exact `legacy_archive` destination and RLS/private-data rules;
+6. post-count/checksum equality and a tested restore command; and
+7. operator approval before any application reference or runtime table is
+   removed.
+
+The migration agent records only approved aggregates and artifact paths. It
+never copies row contents into a report, release, trace, or Git. Stop when the
+sub-runbook, counts, checksums, ownership, retention, or restore evidence is
+unknown.
 
 ## 7. Acceptance matrices
 
@@ -867,14 +1160,18 @@ artifact. BLOCK means do not cut over or delete.
 | Check | Evidence | Result |
 | --- | --- | --- |
 | Tool homes use exact manifest fields and kind: "tool" | JSON fixture and /api/homes/tool/<id> response |  |
+| Each of six Tools has a truthful read-only provider and distinct approved nonempty default blueprint at ship | Real-state provider fixtures plus registered blueprint IDs |  |
+| Tool defaults cover overview, scoped Connections attention/coverage, current work/output, and receipts | Dashboard fixture and browser evidence for all six Tools |  |
+| Demo/fake packs are excluded or labeled and no fake manifest value renders as live health | Negative provider fixtures and browser/source check |  |
 | Tool cards show ready, empty, attention, unavailable, and error states | Browser capture or test fixture |  |
-| Settings revisions reject secrets, code, and HTML | API tests with rejection responses |  |
+| Settings revisions use exactly schema/scope/revision/settings and validate only Tool-declared properties | Canonical fixture plus rejection tests |  |
 | Commands go to Hermes and events render in Frank | Trace ID plus browser/event fixture |  |
 | Releases show provenance and checksum | Release registry fixture |  |
 | Schedules are display/config only | No local scheduler process; Hermes event evidence |  |
 | Graph uses maxGraph only and projects through ToolManifestAdapter | `schema://frank.graph/v1` fixture plus renderer dependency check |  |
 | Prompt inspector is CodeMirror 6 and payload editor is vanilla-jsoneditor + Ajv only | Browser/source check; no Cytoscape/React Flow/custom renderer |  |
 | Existing trace, slot-trace, and trace-view hooks remain connected | Trace-view smoke evidence |  |
+| Legacy ad-templates resolves to ad-template-generator and Campaigns follows the recorded Mautic/canonical route decision | Route tests before stub removal |  |
 | Accounts, Connections/OpenBao, widget runtime, and chat are not duplicated | Route/source grep and UI smoke |  |
 | python -m unittest discover -s tests from apps/window passes | Test output |  |
 | node --check passes for every Frank JavaScript file | Command output |  |
@@ -887,10 +1184,13 @@ artifact. BLOCK means do not cut over or delete.
 | One profile default is used | Hermes configuration and command trace |  |
 | Commands are authenticated, scoped, idempotent, and trace-linked | Event fixture and trace |  |
 | Graph/settings revisions are pinned | Run record |  |
+| Ad Intelligence and Prospect Discovery use separate contracts/stores and correlate only by approved opaque evidence IDs | Ownership/config audit and negative cross-store tests |  |
+| Prospect releases contain only opaque contact/evidence refs and Outreach rejects mutable, unverified, or consent-implying candidates | Producer/consumer fixtures and negative boundary tests |  |
 | Domain Tools own/version graph manifests, nodes/edges, settings revisions, and Hermes envelopes | Contract fixture and source ownership check |  |
 | maxGraph is the sole renderer; no tool-specific graph/execution/settings store exists | Dependency/source inventory |  |
 | QA/compliance gates block failed releases | Negative gate test |  |
 | Public releases are immutable and checksummed | Registry/storage verification |  |
+| Python producers and JavaScript consumers produce identical RFC 8785 hashes | Cross-language fixtures for all three release types |  |
 | Research supervisor is stopped before D2 | supervisorctl and ps evidence |  |
 | No orphan research runtime remains | Process/container inventory |  |
 | Research database has one committed owner and survives a controlled restart before old compose removal | Replacement compose path/revision plus health and restart evidence |  |
@@ -908,6 +1208,7 @@ artifact. BLOCK means do not cut over or delete.
 | Transaction and lead lifecycle mail still works | lead-lifecycle/Resend tests and test delivery evidence |  |
 | Mautic campaigns/segments are not duplicated | Source/runtime inventory |  |
 | Completed blog release adapter accepts only immutable QA-passed output | Adapter fixture |  |
+| Ad Radar release contains no prospect/enrichment fields and Prospect release cannot write customer leads | Negative boundary tests |  |
 | No operator research/content/mail route remains after D1 | Route grep and test output |  |
 | Customer adapters do not invent or consume graph fields before final spec/adapter fields land | Integration review evidence |  |
 
@@ -920,7 +1221,7 @@ artifact. BLOCK means do not cut over or delete.
 | Workspace/RLS scope is preserved | Existing Blockwise tests plus adapter negative tests |  |
 | Read-only VPS mounts remain read-only in Frank | Compose/mount inspection |  |
 | Dotfiles, credentials, databases, and Hermes state are not exposed by Frank | File API traversal tests |  |
-| Non-empty deprecated tables have legacy_archive copies | Row counts/checksums/archive migration |  |
+| Any non-empty deprecated table has an operator-approved DBA archive sub-runbook and verified legacy_archive evidence | Approved migration, pre/post aggregates, checksum, and restore evidence |  |
 | Schema migration history is intact | git ls-files supabase/migrations comparison |  |
 | Customer lifecycle email has an owner and idempotency | Mail trace/test evidence |  |
 
@@ -939,7 +1240,8 @@ artifact. BLOCK means do not cut over or delete.
 ## 8. Copy/paste agent prompts
 
 Use one prompt per lane. Each agent must report commands, evidence, changed
-paths, blockers, and rollback revision. Agents must not broaden scope.
+paths, blockers, rollback revision, absolute worktree, branch, base SHA, and
+final SHA. Agents use separate clean worktrees and must not broaden scope.
 
 ### Prompt A — Ad Template Generator
 
@@ -950,42 +1252,67 @@ Ad Template Generator lane. Inspect frank/template-factory/**,
 packages/ad-template-pack-contract/**, and the existing customer AdStudio
 importer. Put execution behind Hermes and the reusable visual mini-app under
 apps/window/tools/ad-template-generator/. Emit immutable sanitized TemplatePack
-fixtures with provenance, SHA-256 checksums, QA/compliance evidence, and no PII
-or secrets. Do not edit Frank server/home files, do not delete Blockwise
-customer AdStudio, do not touch schema history, and do not deploy. Stop if the
-VPS has uncommitted frank/template-factory deletions or if a public artifact is
-not sanitized. Run the lane checks and report exact evidence and rollback.
+fixtures with the exact section 5.5a identity, RFC 8785 release hash,
+provenance, output checksums, QA/approval/sanitization receipts, and no PII or
+secrets. Work from a clean origin/main worktree. Record but never touch or
+reconcile the known dirty VPS frank/template-factory diff. Do not edit shared
+Frank home/server/runtime files, delete customer AdStudio, touch schema
+history, or deploy. Stop if a public artifact is not sanitized or the real
+producer and consumer fixture differ. Report exact evidence and rollback.
 ```
 
-### Prompt B — Ad Intelligence and Prospect Discovery
+### Prompt B-R — Ad Intelligence / Ad Radar
 
 ```text
 Read docs/blockwise-to-frank-tool-migration.md and both repositories' authority
-files. Work only on Ad Intelligence/Ad Radar and Prospect Discovery &
-Enrichment. Inventory B1 operator research, hermes/tools research runtime,
-scripts/research/** enrichment scripts, and customer-safe Ad Radar/read-model
-paths from origin/main. Adapt execution to Hermes and display/configuration to
-apps/window/tools/ad-intelligence/ and apps/window/tools/prospect-discovery/.
-Preserve evidence, verification/revert metadata, scope, and traces. Keep
-customer Ad Radar optional, customer leads, worker/**, customer operations,
-and transaction/lead email. Do not delete anything, edit Frank server/home
-files, expose private research state, or deploy. Stop on unresolved importers,
-stale read models, or unverified enrichment. Report exact paths and tests.
+files. Work only on P2B-R Ad Intelligence/Ad Radar. Inventory B1 operator
+research, the research runtime, and customer-safe Ad Radar/read-model paths
+from origin/main. Keep collection/raw evidence private behind Hermes and emit
+only the exact section 5.5a sanitized Ad Radar release. Do not move prospect or
+email-enrichment data into this Tool. Prepare but do not deploy the replacement
+runtime/data-plane definition. Keep optional customer Ad Radar, customer leads,
+worker/**, customer operations, and lifecycle mail. Do not delete or edit
+shared Frank home/server/runtime files. Stop on private exposure, stale read
+model, unresolved importer, or any claim that contract code owns the live DB.
 ```
 
-### Prompt C — Outreach and Mail
+### Prompt B-P — Prospect Discovery and Enrichment
 
 ```text
 Read docs/blockwise-to-frank-tool-migration.md and both repositories' authority
-files. Work only on Outreach and Mail. Build display/configuration and command
-contracts for apps/window/tools/outreach/ and apps/window/tools/mail/, with
-execution through Hermes. Do not duplicate Accounts, Connections/OpenBao,
-Mautic campaigns/segments, Resend delivery, chat, or Hermes. Keep and test
-src/lib/email/lead-lifecycle.ts, src/lib/email/resend-client.ts,
-src/lib/operator/email-service.ts, suburb actions, and demo-request email.
-Do not delete the operator mailbox console until its customer importers are
-refactored and tested. Do not deploy or edit Frank server/home files. Stop on
-any unowned lifecycle email path or missing idempotency/trace evidence.
+files. Work only on P2B-P Prospect Discovery. Inventory the confirmed discovery,
+enrichment, verification, statistics, and repair scripts. Build
+apps/window/tools/prospect-discovery/ with an independent store/contract,
+retention scope, verification gate, revert metadata, and trace. Do not add
+prospect fields to Ad Radar, share mutable Ad Radar state, write customer leads,
+or expose unapproved PII. Outreach may consume only an approved immutable
+Prospect release. Do not delete, deploy, or edit shared Frank files. Stop on an
+unverified enrichment, direct lead write, or unresolved attribution/revert path.
+```
+
+### Prompt C-O — Outreach
+
+```text
+Read the runbook and authority files. Work only on P2C-O under
+apps/window/tools/outreach/. Build declarative audience, approval, policy,
+schedule, typed Hermes command, and outcome contracts. Use only approved
+immutable Prospect release IDs; never query mutable prospect research or write
+Blockwise leads. Do not duplicate Connections, Mautic, Resend, chat, Hermes, or
+provider stores. Do not edit shared Frank files or deploy. Stop on missing
+idempotency, approval, policy, trace, or provider receipt evidence.
+```
+
+### Prompt C-M — Mail
+
+```text
+Read the runbook and authority files. Work only on P2C-M under
+apps/window/tools/mail/. Build declarative inbound mailbox state and approved
+outbound Hermes command contracts. Keep and test Blockwise lead lifecycle,
+Resend client, operator email-service customer importers, suburb actions, and
+demo-request email. Mautic remains campaign/segment owner and Connections owns
+authorization. Do not send from Frank, duplicate a delivery/campaign store,
+edit shared Frank files, delete the console, or deploy. Stop on any unowned
+lifecycle path or missing idempotency/policy/trace/provider receipt.
 ```
 
 ### Prompt D — Content Factory
@@ -995,42 +1322,85 @@ Read docs/blockwise-to-frank-tool-migration.md, both repositories' authority
 files, and origin/main:docs/plans/PRODUCT-REBUILD.md. Work only on Content
 Factory. Adapt the B2 operator content pages/routes/components,
 src/lib/content-engine/**, tests/content-engine/**, and the confirmed blog
-skills to Hermes plus apps/window/tools/content-factory/. Preserve fixed graph
-versions, prompt/style/model settings revisions, QA/compliance, evidence,
-provenance, checksums, traces, and immutable completed blog releases. Verify
+skills to Hermes plus apps/window/tools/content-factory/. Preserve pinned
+manifest/pipeline/settings revisions, adjustable schema-declared prompt/style/
+model policies, QA/compliance, evidence, provenance, RFC 8785 hashes, traces,
+and the exact section 5.5a completed blog release. Verify
 blockwise-image-* and blockwise-listing-scraper consumers before deletion. Do
 not delete customer routes, lead tools, schema history, or deploy. Stop on an
 unresolved image/listing importer or failed release gate. Report evidence and
 rollback.
 ```
 
-### Prompt E — Frank integration
+### Prompt E-A — Isolated shared Frank implementation
 
 ```text
-Read docs/blockwise-to-frank-tool-migration.md, Frank AGENTS.md, and
-docs/PROJECT.md. Work only on the Frank visual integration lane after the
-producer contracts exist. Use the existing homes/widgets/Connections/chat
-boundaries. Register exact tool manifests with id, name, kind:'tool', blurb,
-capabilities[], default_widget_ids[], and connection_capabilities[]. Show
-settings revisions, Hermes command/events, immutable releases, schedules, and
-explicit ready/empty/attention/unavailable/error states. Never add an agent
-loop, scheduler, secret store, arbitrary code/HTML, or duplicate runtime. Do
-not deploy. Run Python tests and node --check and report desktop/mobile
-evidence. Stop on any server/home boundary change not explicitly approved.
+Read the runbook, Frank AGENTS.md, docs/PROJECT.md, and the accepted graph spec.
+Work only on P3A in an isolated branch. Implement the one shared adapter,
+read-only provider boundary, graph-workbench, and tests. Use pinned maxGraph,
+CodeMirror 6, vanilla-jsoneditor, Ajv, and the existing OTel path exactly as
+specified. Do not edit home_defaults.py, home_platform.py, registry/runtime,
+production routes, shell/home files, or domain Tool UI; do not register, merge,
+or deploy. Stop on a second renderer/store/backend, execution, or external
+provider/network/database call. Report dependency/license audit and tests.
 ```
 
-### Prompt F — Blockwise adapters
+### Prompt E-B — Final dashboard registration
+
+```text
+Start only after the Dashboard+Connections owner sends the final combined-main
+SHA and approved registration instructions. Record that SHA and rebase P3A once.
+For each of the six Tools, require a truthful read-only snapshot/provider from
+real authorized package/runtime state; exclude or label demo packs and never
+render fake live health. Obtain a distinct approved default blueprint covering
+overview, scoped Connections attention/coverage, current work/output, and
+receipts using only known shared widgets. Register homes only through
+discover_tool_homes(tools_root) -> register_entity_profile(manifest). Defaults
+were empty before this handoff but may not be empty/generic-only at ship. Add
+entity-graph only after frank.graph.v1 is green. Verify legacy ad-templates
+routes to ad-template-generator and legacy campaigns resolves to the exact
+registered Campaigns/Mautic home supplied by the Dashboard owner before
+removing either stub. Do not add bespoke UI or a second registry.
+```
+
+### Prompt E-C — Frank legacy cleanup
+
+```text
+Start only after P3B passes. Work from the approved Frank cleanup manifest in a
+clean worktree with an exact file allowlist. Remove only obsolete prototypes,
+docs, and stubs whose replacement provider, blueprint, and route have passed.
+The ad-templates legacy entry must resolve to ad-template-generator. Campaigns
+must resolve to the exact registered Campaigns/Mautic home supplied after
+handoff, never an Outreach/Mail campaign Tool; do not guess the home ID.
+Search for dangling references, run all Frank tests and browser checks, and
+report the exact diff and rollback SHA. Do not remove shared runtime files,
+migration history, or any unlisted path.
+```
+
+### Prompt F-A — Blockwise adapter scaffolds
 
 ```text
 Read docs/blockwise-to-frank-tool-migration.md and the fetched canonical
-origin/main plan. Work only on Blockwise consumer adapters. Keep customer
+origin/main plan. Work only on P4A in separate clean worktrees. Keep customer
 AdStudio, optional Ad Radar/read-model APIs/libs, property/suburb, customer
 operations, worker/**, Resend, and lead-lifecycle mail. Implement and test
 adapters for immutable sanitized TemplatePacks, customer-safe Ad Radar
-read-model releases, and completed blog releases. Validate schema, release ID,
-checksum, provenance, sanitization, workspace scope, and compatibility. Do not
-read private Hermes/research state, delete operator paths, modify schema
-history, or deploy. Stop on missing evidence or any lifecycle-mail regression.
+read-model releases, and completed blog releases against the exact frozen P1
+fixtures. Validate every section 5.5a field, RFC 8785 hash, artifact checksum,
+receipt, scope, pipeline identity/version, and compatibility ID. Do not read
+private Hermes/research state, add translation fields, delete, modify schema
+history, or deploy. Stop on any ambiguity.
+```
+
+### Prompt F-B — Producer-consumer compatibility
+
+```text
+For one release only, run the real accepted producer payload through the real
+P4A Blockwise consumer. Compare the complete public envelope with the frozen
+fixture and verify cross-language RFC 8785 hashes. Record producer SHA,
+consumer SHA, release ID/hash, command, and result. Do not repair a mismatch in
+an integration shim. Return it to the owning producer or consumer lane. Do not
+delete, cut over, or deploy.
 ```
 
 ### Prompt G — Integration/reviewer
@@ -1041,11 +1411,12 @@ the completed lanes mechanically against every acceptance matrix. Verify the
 canonical revision, path dispositions, exact home/settings/graph/trace/release
 contracts, adapter fixtures, customer AdStudio and optional Ad Radar behavior,
 lead lifecycle mail, workspace/RLS scope, archive counts, and desktop/mobile
-behavior. Confirm D1 and D2 are separate and that D2 stops the exact research
-supervisor before runtime/infra deletion. Do not edit application code, delete
-anything, restore frank/template-factory user work, or deploy. Return PASS or
-BLOCK for every matrix row with command/output evidence, unresolved
-importers, and the precise rollback revision.
+behavior. Verify six truthful Tool providers and approved nonempty defaults,
+the two legacy route decisions, and that fake packs/health are not live state.
+Confirm D1 and D2 use clean worktrees and staging allowlists, remain separate,
+and that D2 stops the exact research supervisor only after the replacement DB
+owner survives restart. Do not edit, delete, restore user work, or deploy.
+Return PASS or BLOCK for every row with evidence and rollback revision.
 ```
 
 ## 9. Final handoff checklist
@@ -1065,8 +1436,11 @@ npm run typecheck
 The handoff must name:
 
 - canonical Blockwise revision and Frank revision;
-- each lane owner and final status;
+- each lane owner, absolute worktree, branch, base/final SHA, path allowlist,
+  and final status;
 - every moved/adapted/deleted path and every protected KEEP path;
+- the reviewed two-repository cleanup manifest and proof no staged path fell
+  outside the D1/D2 allowlists or into `frank/template-factory/**`;
 - archive table names, pre/post counts, and checksums;
 - the verified rollback artifact paths
   `/srv/blockwise/backups/research/frank-migration-research-20260814T082207Z.dump`,
@@ -1074,6 +1448,12 @@ The handoff must name:
   copying or exposing their contents;
 - supervisor stop command and process evidence;
 - release IDs/checksums consumed by Blockwise;
+- producer/consumer SHAs and cross-language RFC 8785 fixture results for the
+  Template Pack, Ad Radar, and Completed Blog releases, plus the verified
+  Prospect producer/Outreach consumer fixture and hash result;
+- the six truthful Tool provider fixtures, six approved default blueprints,
+  fake/demo labeling evidence, and the recorded `ad-templates` and `campaigns`
+  legacy route decisions;
 - the accepted graph specification path, source revision, exact shared
   registration IDs, and `ToolManifestAdapter` verification evidence;
 - traces for representative template, research/prospect, mail/outreach, and

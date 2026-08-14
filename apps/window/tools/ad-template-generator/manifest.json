@@ -3,7 +3,7 @@
   "id": "ad-template-generator",
   "name": "Ad Template Generator",
   "description": "Reference-clone ad templates with visible QA, native-pixel human approval, and immutable source-free releases.",
-  "release_schema": "schema://frank.tool-app-release/v1",
+  "release_schema": "schema://frank.ad-template-generator-release/v1",
   "version": "1.0.0",
   "kind": "tool",
   "scopes": ["project", "workspace"],
