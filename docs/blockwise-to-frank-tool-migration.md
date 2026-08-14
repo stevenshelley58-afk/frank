@@ -389,14 +389,14 @@ property/suburb, and AdStudio editing stay Blockwise-owned.
 | P0 | Baseline | Integration lead | None | Fetch Blockwise origin/main; record revisions, statuses, path inventory, and VPS frank/template-factory deletion evidence. | Revision ae89ca5 or newer, saved git status, plan present, mismatch recorded. | Discard only the new report, never user work. | Do not proceed when authority files cannot be read or the canonical revision is unknown. |
 | P1 | Contracts | Hermes + Frank | P0 | Define the home manifest, settings revisions, fixed graph, trace, command/event, release, and consumer adapter contracts in tests/fixtures. | Versioned fixtures validate exact fields and reject secrets/code/HTML. | Revert contract-only commit. | Do not proceed when a field is ambiguous, mutable output is proposed, or a secret appears in a fixture. |
 | P2A | Template Generator | Hermes/Frank tool agent | P1 | Adapt frank/template-factory and ad-template-pack-contract into ad-template-generator; emit signed immutable sanitized TemplatePacks. | Pack contains provenance, checksums, QA/compliance status, no PII, and passes consumer import tests. | Keep old source/adapter active; do not delete Blockwise consumer code. | Do not proceed when public pack contains source private data, PII, mutable URLs, or failed QA. |
-| P2B | Ad Intelligence / Prospect | Hermes/Frank research agent | P1 | Adapt B1 research and scripts/research/** into ad-intelligence and prospect-discovery; publish customer-safe ad/prospect read models or artifacts. | Read-model export is sanitized, scoped, traced, and independently consumable. | Leave B1 runtime and customer read path unchanged. | Do not proceed when private research tables are exposed, enrichment is unverified, or customer Ad Radar projection is stale. |
+| P2B | Ad Intelligence / Prospect | Hermes/Frank research agent | P1 | Adapt B1 research and scripts/research/** into ad-intelligence and prospect-discovery; deploy the replacement execution/data plane under the approved Hermes owner; publish customer-safe ad/prospect read models or artifacts. | Replacement runtime and database ownership are restart-tested; read-model export is sanitized, scoped, traced, and independently consumable. | Leave B1 runtime, database compose ownership, and customer read path unchanged. | Do not proceed when the replacement is contract-only, the live database has no verified new owner, private research tables are exposed, enrichment is unverified, or customer Ad Radar projection is stale. |
 | P2C | Outreach / Mail | Hermes/Frank communications agent | P1 | Build display/config surfaces and command adapters; preserve Blockwise lead lifecycle, email-service, Resend, and Mautic boundaries. | Transaction/demo/lead email tests pass; no duplicate delivery client or campaign store. | Keep console and customer importers until replacement is proven. | Do not proceed when any lifecycle email path is unowned or delivery would bypass policy/audit. |
 | P2D | Content Factory | Hermes/Frank content agent | P1 | Adapt B2 pages/API/lib/skills into content-factory; produce reviewed immutable blog releases. | Completed release has QA, provenance, checksum, no PII, and adapter fixture passes. | Keep B2 runtime active. | Do not proceed when image skills/listing-scraper consumers are unresolved. |
 | P3 | Frank integration | Frank agent | P1, relevant P2* | Add tool homes/manifest, widgets, settings/revision views, release registry views, schedule views, and Hermes command/event display. | Frank unit tests, syntax checks, browser desktop/mobile checks, explicit unavailable/error states. | Revert Frank-only integration commit; keep Hermes/Blockwise source untouched. | Do not proceed when UI adds local execution, local secrets, arbitrary code/HTML, or a second navigation shell. |
 | P4 | Blockwise adapters | Blockwise adapter agent | P2A, P2B, P2D | Implement explicit adapters for TemplatePacks, optional Ad Radar/read model, and completed blog releases. Keep customer surfaces and transaction mail. | Adapter tests consume only immutable sanitized releases and enforce checksums/provenance. | Disable adapter feature flag and retain existing customer path. | Do not proceed when adapter reads private Hermes state, mutable drafts, or unscoped data. |
 | G1 | Integration gate | Reviewer | P3, P4 | Run all acceptance matrices and end-to-end consumer checks against fixtures/preview. | All required rows pass; no PII/secrets; trace links are present. | Return failing lane to its owner; no deletes. | Do not proceed when any critical row fails. |
 | D1 | Blockwise commit one | Blockwise operator | G1 | Remove operator/UI/lib surfaces and references; keep customer AdStudio, optional Ad Radar/read model, property/suburb, customer ops, worker, and protected mail. Archive non-empty retired data first. | npm run check, typecheck, tests, route/referrer grep clean, archive counts recorded. | Revert commit one; do not touch schema history. | Do not proceed when importers remain or row counts are missing. |
-| D2 | VPS/runtime commit two | Blockwise operator + VPS operator | D1 | Stop the research supervisor, remove research runtime/infra/ops skills, edit Hermes image/wrapper wiring, then commit. | Supervisor stopped, no orphan process, compose/config check passes, commit is exact. | Restore the committed runtime/infra paths and restart only through the approved deploy runbook. | Do not proceed when supervisor identity is uncertain, process remains, or deploy revision is not committed. |
+| D2 | VPS/runtime commit two | Blockwise operator + VPS operator | D1 plus verified P2B runtime/data ownership transfer | Verify the replacement Hermes runtime and new database compose owner can restart, stop the retired research supervisor, then remove only retired Blockwise runtime/infra/ops wiring and commit. | Replacement database owner and runtime are healthy after restart; old supervisor is stopped; no orphan process; both compose/config checks pass; commit is exact. | Restore the committed runtime/infra paths; restore the old compose owner only when the new owner is stopped; restart through the approved deploy runbook. | Do not proceed while `blockwise-research-db` is still owned only by the Blockwise compose file, when the replacement data plane is contract-only, when supervisor identity is uncertain, when a process remains, or when the deploy revision is uncommitted. |
 | G2 | Release gate | Reviewer + operators | D2 | Verify Frank, Hermes/VPS, Blockwise, data/security, and desktop/mobile acceptance matrices. | Signed report with commands, URLs/fixtures, traces, counts, and rollback revision. | Keep customer-only Blockwise and old adapter disabled; no destructive cleanup. | Do not proceed when any critical security, lifecycle mail, or customer read-model check fails. |
 
 ### 3.2 Mermaid dependency graph
@@ -416,7 +416,9 @@ flowchart TD
   E --> G
   F --> G
   G --> D1["D1 Blockwise commit 1: operator/UI/lib + docs cleanup"]
-  D1 --> D2["D2 stop supervisor, then runtime/infra commit 2"]
+  B --> DB["P2B data plane: transfer and restart-test DB ownership"]
+  D1 --> D2["D2 verify new DB owner, stop supervisor, then runtime/infra commit 2"]
+  DB --> D2
   D2 --> G2["G2 final acceptance and rollback evidence"]
 ```
 
@@ -759,7 +761,15 @@ for an archive, add a new tested migration; never rewrite or remove history.
 
 Prerequisites: commit one is pushed and green; the target commit SHA is
 recorded; the VPS operator has identified the exact research supervisor
-process from the runbook; no customer worker depends on it.
+process from the runbook; no customer worker depends on it; the approved
+Hermes data-plane deployment owns the research database through a committed
+compose/configuration definition; and a controlled restart has proved that
+the replacement owner brings the database back healthy. A contract-only Frank
+Tool package does not satisfy this prerequisite.
+
+Stop immediately if `blockwise-research-db` is still owned only by
+`/srv/blockwise/release-6d7f4f9/infra/coolify/docker-compose.research.yml`.
+Do not delete or edit away the only restart definition for a healthy database.
 
 On the VPS, before changing files:
 
@@ -780,13 +790,17 @@ supervisorctl status <exact-research-supervisor-name>
 ps auxww | grep -E 'research-runtime|meta-library-capture|supabase-supervisor' | grep -v grep || true
 ```
 
-Then make the second commit containing only VPS runtime/infra removal:
+Record the exact committed replacement compose/configuration path, deployed
+revision, database container identity, health output, and restart evidence.
+Then make the second commit containing only retired VPS runtime/infra removal:
 
 1. Delete hermes/tools/research-runtime/**.
 2. Delete hermes/tools/meta-library-capture/**.
 3. Remove their wiring from infra/hermes/Dockerfile and
    infra/hermes/main-wrapper.sh without removing unrelated Hermes tools.
-4. Delete infra/coolify/docker-compose.research.yml.
+4. Delete infra/coolify/docker-compose.research.yml only after the replacement
+   committed owner is deployed and restart-tested. If it remains the only
+   owner of `blockwise-research-db`, KEEP it and mark D2 BLOCKED.
 5. Delete the research-ops skills listed in B1 after the replacement skill
    inventory is confirmed. Keep cleanup/reviewer/artifact-packager skills.
 6. Keep customer AdStudio, optional Ad Radar/read model, property/suburb,
@@ -866,6 +880,7 @@ artifact. BLOCK means do not cut over or delete.
 | Public releases are immutable and checksummed | Registry/storage verification |  |
 | Research supervisor is stopped before D2 | supervisorctl and ps evidence |  |
 | No orphan research runtime remains | Process/container inventory |  |
+| Research database has one committed owner and survives a controlled restart before old compose removal | Replacement compose path/revision plus health and restart evidence |  |
 | Credentials remain behind the Connections/OpenBao boundary | Secret/config audit |  |
 
 ### 7.3 Blockwise
