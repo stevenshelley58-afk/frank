@@ -105,9 +105,15 @@ class ToolAppContractTest(unittest.TestCase):
             store.update("project:frank", {"prompt_ref": "new"}, 0)
         with self.assertRaises(ContractError):
             store.update("project:frank", {"token": "plain-text"}, 1)
+        for unsafe in ({"options": {"api_key": "plain-text"}}, {"connection": {"vault_ref": "openbao://forbidden"}}, {"provider_ref": "provider-1"}):
+            with self.subTest(unsafe=unsafe), self.assertRaises(ContractError):
+                store.update("project:frank", unsafe, 1)
+        positive = store.update("project:frank", {"connection_id": "connection-1", "capability": "reports.read"}, 1)
+        self.assertEqual(positive["revision"], 2)
         first["settings"]["prompt_ref"] = "changed"
-        self.assertEqual(store.read("project:frank")["settings"]["prompt_ref"], "openbao://frank/prompts/report")
-        self.assertEqual(len(store.history("project:frank")), 1)
+        self.assertEqual(store.history("project:frank")[0]["settings"]["prompt_ref"], "openbao://frank/prompts/report")
+        self.assertEqual(store.read("project:frank")["settings"]["connection_id"], "connection-1")
+        self.assertEqual(len(store.history("project:frank")), 2)
 
     def test_command_event_trace_adapter_are_ordered_envelopes(self):
         request = command("weekly-report", "run", "project:frank", {"style": "brief"}, request_id="req-1")

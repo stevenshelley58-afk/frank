@@ -254,6 +254,7 @@ class SettingRevisionStore:
             raise ContractError(f"stale settings revision: expected {expected_revision}, current {current['revision']}")
         _require(settings, dict, "settings")
         _walk_safe(settings, "settings")
+        _validate_setting_keys(settings)
         record = {"schema": SETTING_SCHEMA, "scope": current["scope"], "revision": expected_revision + 1, "settings": copy.deepcopy(settings)}
         self._revisions.setdefault(key, []).append(copy.deepcopy(record))
         return copy.deepcopy(record)
