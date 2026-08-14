@@ -9,18 +9,22 @@ from .content_factory import (
     ARTIFACT_TAXONOMY,
     CHANNELS,
     CONTENT_FACTORY_MANIFEST,
+    HOME_PROFILE,
     PROCESS_GRAPH,
     build_command,
     build_event,
     build_withdrawal_tombstone,
     public_release,
+    home_profile,
     validate_process_graph,
     validate_pack,
     validate_run_request,
 )
+from .home_snapshot import build_home_snapshot
 
 __all__ = [
     "CONTENT_FACTORY_MANIFEST",
+    "HOME_PROFILE",
     "PROCESS_GRAPH",
     "CHANNELS",
     "ARTIFACT_TAXONOMY",
@@ -31,4 +35,6 @@ __all__ = [
     "validate_process_graph",
     "validate_pack",
     "validate_run_request",
+    "build_home_snapshot",
+    "home_profile",
 ]

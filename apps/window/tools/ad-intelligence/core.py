@@ -25,6 +25,34 @@ def _load_pipeline_stages() -> tuple[str, ...]:
 PIPELINE_STAGES = _load_pipeline_stages()
 RELEASE_SCHEMA = "schema://frank.ad-intelligence-release/v1"
 TOOL_ID = "ad-intelligence"
+HOME_PROFILE = MappingProxyType({
+    "id": "ad-intelligence",
+    "name": "Ad Radar",
+    "kind": "tool",
+    "blurb": "Discover and compare public advertising creative through an auditable Hermes-owned pipeline.",
+    "capabilities": (
+        "public-ad-discovery",
+        "creative-classification",
+        "media-quality-assurance",
+        "evidence-and-receipts",
+    ),
+    "default_widget_ids": (),
+    "connection_capabilities": ("browser-public-read",),
+})
+
+
+def home_profile() -> dict[str, Any]:
+    """Return a mutable JSON-shaped copy of the frozen package profile."""
+    return {
+        key: list(value) if isinstance(value, tuple) else value
+        for key, value in HOME_PROFILE.items()
+    }
+TOOL_SCOPES = ("project",)
+ADJUSTABLE_SETTINGS = (
+    "taxonomy", "sources", "cadence", "prompt_ref", "prompt_version",
+    "style_preset", "model_policy", "media_policy", "thresholds", "retention",
+    "approval_policy", "connection",
+)
 
 _PIPELINE_MANIFEST = json.loads((Path(__file__).parent / "manifest.json").read_text(encoding="utf-8"))["pipelines"][0]
 PIPELINE_ID = _PIPELINE_MANIFEST["id"]

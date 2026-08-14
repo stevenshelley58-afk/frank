@@ -7,6 +7,7 @@ from datetime import datetime
 import json
 import re
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlsplit
 
@@ -32,6 +33,30 @@ PIPELINE_SCHEMA = _PACKAGE_MANIFEST["pipelines"][0]["schema"]
 MANIFEST_SCHEMA = _PACKAGE_MANIFEST["schema"]
 PROCESS_GRAPH = deepcopy(next(pipeline for pipeline in _PACKAGE_MANIFEST["pipelines"] if pipeline["id"] == "content-factory-pipeline"))
 CONTENT_FACTORY_MANIFEST = deepcopy(_PACKAGE_MANIFEST)
+HOME_PROFILE = MappingProxyType({
+    "id": "content-factory",
+    "name": "Content Factory",
+    "kind": "tool",
+    "blurb": "Hermes-owned content planning, production, review, and release contracts.",
+    "capabilities": (
+        "research-to-release",
+        "parallel-channel-branches",
+        "resume-rerun",
+        "quarantine",
+        "immutable-release",
+        "withdrawal-tombstones",
+    ),
+    "default_widget_ids": (),
+    "connection_capabilities": (),
+})
+
+
+def home_profile() -> dict[str, Any]:
+    """Return a mutable JSON-shaped copy of the frozen package profile."""
+    return {
+        key: list(value) if isinstance(value, tuple) else value
+        for key, value in HOME_PROFILE.items()
+    }
 RELEASE_SCHEMA = _PACKAGE_MANIFEST["release_schema"]
 TOOL_ID = _PACKAGE_MANIFEST["id"]
 

@@ -2,6 +2,7 @@
   "schema": "schema://frank.tool-app-manifest/v1",
   "id": "prospect-discovery",
   "version": "0.1.1",
+  "release_schema": "schema://frank.prospect-discovery-release/v1",
   "name": "Prospect Discovery",
   "description": "Public-contact discovery, enrichment evidence, and qualification. No outreach or delivery.",
   "scopes": ["profile", "project", "workspace"],

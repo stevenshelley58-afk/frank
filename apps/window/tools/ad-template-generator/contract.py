@@ -13,6 +13,7 @@ from datetime import datetime
 import json
 from pathlib import Path
 import re
+from types import MappingProxyType
 from typing import Any, Mapping
 from urllib.parse import parse_qsl, urlsplit
 
@@ -20,6 +21,30 @@ from tool_apps.canonical import canonical_sha256
 
 
 MANIFEST = json.loads((Path(__file__).resolve().parent / "manifest.json").read_text(encoding="utf-8"))
+HOME_PROFILE = MappingProxyType({
+    "id": "ad-template-generator",
+    "name": "Ad Template Generator",
+    "kind": "tool",
+    "blurb": "Reference-clone ad templates with visible QA, human native-pixel approval, and immutable releases.",
+    "capabilities": (
+        "inspect-source-provenance",
+        "extract-customer-input-contract",
+        "clone-reference-to-safe-sample",
+        "review-quality-evidence",
+        "approve-native-pixels",
+        "issue-source-free-release",
+    ),
+    "default_widget_ids": (),
+    "connection_capabilities": ("image.generate",),
+})
+
+
+def home_profile() -> dict[str, Any]:
+    """Return a mutable JSON-shaped copy of the frozen package profile."""
+    return {
+        key: list(value) if isinstance(value, tuple) else value
+        for key, value in HOME_PROFILE.items()
+    }
 PIPELINE_ENTRY = MANIFEST["pipelines"][0]
 PIPELINE_GRAPH_NODES = tuple(node["id"] for node in PIPELINE_ENTRY["nodes"])
 PIPELINE_GRAPH_EDGES = tuple((edge["from"], edge["to"]) for edge in PIPELINE_ENTRY["edges"])
