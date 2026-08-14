@@ -1391,12 +1391,13 @@ read-only provider boundary, graph-workbench, and tests. Use pinned maxGraph,
 CodeMirror 6, vanilla-jsoneditor, Ajv, and the existing OTel path exactly as
 specified. Do not edit home_defaults.py, home_platform.py, registry/runtime,
 production routes, shell/home files, or domain Tool UI; do not register, merge,
-or deploy. Validate the current exact event/trace v1 envelopes, but keep
+or deploy. Do not implement an event/trace validator in the graph package;
+after integration, reuse only the canonical Tool contract validator. Keep
 `run.trace` unavailable and do not advertise event/trace adapter support until
 the trace-correlation stop condition in section 5.3a is cleared by an approved
-versioned contract. Stop on a second renderer/store/backend, invented v1
-fields, execution, or external provider/network/database call. Report
-dependency/license audit and tests.
+versioned contract. Stop on a second renderer/store/backend, duplicate or
+invented v1 fields/validators, execution, or external provider/network/database
+call. Report dependency/license audit and tests.
 ```
 
 ### Prompt E-B — Final dashboard registration
