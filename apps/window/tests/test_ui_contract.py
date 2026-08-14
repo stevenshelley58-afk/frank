@@ -31,6 +31,26 @@ class UiContractTest(unittest.TestCase):
         self.assertIn("att-image-pending", styles)
         self.assertIn("att-folder-pending", styles)
 
+    def test_accounts_tool_is_secret_safe_and_responsive(self):
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        script = (WEB / "js" / "app.js").read_text(encoding="utf-8")
+        widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
+        styles = (WEB / "app.css").read_text(encoding="utf-8")
+
+        self.assertIn('data-view="accounts"', html)
+        self.assertIn('id="account-credential"', html)
+        self.assertIn('role="dialog"', html)
+        self.assertIn('id="account-results-status" aria-live="polite"', html)
+        self.assertNotIn('type="password"', html)
+        self.assertIn('id: "account-manager"', widgets)
+        self.assertIn('id: "campaigns"', widgets)
+        self.assertIn('accountRequest("/api/accounts")', script)
+        self.assertIn("accountEditorKeydown", script)
+        self.assertIn('aria-pressed="${selected}"', script)
+        self.assertIn(".account-editor", styles)
+        self.assertIn("max-width: 1100px", styles)
+        self.assertIn(".rail-item { min-height: 44px; }", styles)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -9,6 +9,7 @@ const TITLES = {
   project: ["Project", ""],
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
+  accounts: ["Accounts", "Project identities and service access"],
   trace: ["Trace", "One run, fully visible"],
   releases: ["Releases", "Signed and verified"],
 };
@@ -21,7 +22,8 @@ function show(id) {
   $("#view-sub").textContent = id === "hub"
     ? (chatSessions.find((chat) => chat.id === currentChatId)?.title || "")
     : sub;
-  $$(".rail-item[data-view]").forEach((b) => b.classList.toggle("is-on", b.dataset.view === id));
+  const railView = id === "accounts" ? "tools" : id;
+  $$(".rail-item[data-view]").forEach((b) => b.classList.toggle("is-on", b.dataset.view === railView));
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
@@ -66,6 +68,13 @@ $$(".chip").forEach((c) => {
     const slot = sl.querySelector("[data-widget]");
     if (slot) mount(slot.dataset.widget, slot, {});
   });
+});
+
+window.addEventListener("frank:view", (event) => {
+  if (event.detail === "accounts") {
+    show("accounts");
+    loadAccounts();
+  }
 });
 
 function escapeHtml(s) {
@@ -1202,10 +1211,268 @@ function setupExplorer() {
   syncNav();
 }
 
+/* ---------------- accounts tool ---------------- */
+
+const ACCOUNT_STATUS_LABELS = {
+  planned: "Planned",
+  setup: "Setup needed",
+  ready: "Ready",
+  attention: "Needs attention",
+  disabled: "Disabled",
+};
+let accountState = { items: [], scope: "all", query: "", emailTools: null, loading: false, error: "" };
+
+function accountProjects() {
+  return [{ id: "main", name: "Main" }, ...(projects.projects || []).map((project) => ({ id: project.id, name: project.name }))];
+}
+
+function accountProjectName(id) {
+  return accountProjects().find((project) => project.id === id)?.name || id || "Main";
+}
+
+async function accountRequest(url, options = {}) {
+  const response = await fetch(url, options);
+  if (!response.ok) {
+    let message = "The account could not be saved.";
+    try {
+      const text = await response.text();
+      const match = text.match(/<p>([^<]+)<\/p>/i);
+      if (match?.[1]) message = match[1];
+    } catch { /* use the plain fallback */ }
+    throw new Error(message);
+  }
+  return response.json();
+}
+
+function renderAccountScopes() {
+  const host = $("#account-scopes");
+  if (!host) return;
+  const scopes = [{ id: "all", name: "All accounts" }, ...accountProjects()];
+  host.innerHTML = scopes.map((scope) => {
+    const count = scope.id === "all"
+      ? accountState.items.length
+      : accountState.items.filter((item) => item.project_id === scope.id).length;
+    const selected = accountState.scope === scope.id;
+    return `<button type="button" class="account-scope${selected ? " is-on" : ""}" data-account-scope="${escapeHtml(scope.id)}" aria-pressed="${selected}">
+      <span>${escapeHtml(scope.name)}</span><small>${count}</small>
+    </button>`;
+  }).join("");
+  host.querySelectorAll("[data-account-scope]").forEach((button) => {
+    button.addEventListener("click", () => {
+      accountState.scope = button.dataset.accountScope;
+      renderAccounts();
+    });
+  });
+}
+
+function connectorLabel(status) {
+  return ({ ready: "Ready", configured: "Configured", error: "Needs attention" })[status] || "Setup needed";
+}
+
+function renderEmailStack() {
+  const host = $("#email-stack");
+  if (!host) return;
+  const emailCount = accountState.items.filter((item) => item.kind === "email").length;
+  const projectCount = new Set(accountState.items.filter((item) => item.kind === "email").map((item) => item.project_id)).size;
+  const resend = accountState.emailTools?.resend;
+  const mautic = accountState.emailTools?.mautic;
+  host.innerHTML = `
+    <div class="email-stack-item"><strong>Mail identities</strong><span>${emailCount ? `${emailCount} across ${projectCount} project${projectCount === 1 ? "" : "s"}` : "None registered"}</span></div>
+    <div class="email-stack-item"><strong>Sending · Resend</strong><span>${connectorLabel(resend?.status)}${resend?.mcp_status && resend.mcp_status !== "unconfigured" ? ` · MCP ${connectorLabel(resend.mcp_status).toLowerCase()}` : ""}</span></div>
+    <div class="email-stack-item"><strong>Campaigns · Mautic</strong><span>${connectorLabel(mautic?.status)}</span></div>`;
+}
+
+function filteredAccounts() {
+  const query = accountState.query.trim().toLowerCase();
+  return accountState.items.filter((item) => {
+    if (accountState.scope !== "all" && item.project_id !== accountState.scope) return false;
+    if (!query) return true;
+    return [item.name, item.identity, item.provider, item.purpose, accountProjectName(item.project_id)]
+      .some((value) => String(value || "").toLowerCase().includes(query));
+  });
+}
+
+function renderAccountList() {
+  const host = $("#account-list");
+  if (!host) return;
+  const status = $("#account-results-status");
+  if (accountState.loading) {
+    host.innerHTML = `<div class="account-empty"><h2>Loading accounts…</h2></div>`;
+    if (status) status.textContent = "Loading accounts";
+    return;
+  }
+  if (accountState.error) {
+    host.innerHTML = `<div class="account-empty"><h2>Accounts unavailable</h2><p>${escapeHtml(accountState.error)}</p></div>`;
+    if (status) status.textContent = "Accounts unavailable";
+    return;
+  }
+  const items = filteredAccounts();
+  if (status) status.textContent = `${items.length} account${items.length === 1 ? "" : "s"} shown`;
+  if (!items.length) {
+    const scoped = accountState.scope !== "all" || accountState.query;
+    host.innerHTML = `<div class="account-empty"><h2>${scoped ? "No matching accounts" : "No accounts yet"}</h2><p>${scoped ? "Change the project or search." : "Add the main address, then one identity for each project."}</p></div>`;
+    return;
+  }
+  host.innerHTML = `<div class="account-list-head"><span>Account</span><span>Project</span><span>Provider</span><span>Status</span></div>${items.map((item) => `
+    <button type="button" class="account-row" data-account-id="${escapeHtml(item.id)}">
+      <span class="account-primary"><strong>${escapeHtml(item.name)}</strong><span>${escapeHtml(item.identity)}</span></span>
+      <span class="account-cell">${escapeHtml(accountProjectName(item.project_id))}</span>
+      <span class="account-cell">${escapeHtml(item.provider || item.kind)}</span>
+      <span class="account-status" data-status="${escapeHtml(item.status)}">${escapeHtml(ACCOUNT_STATUS_LABELS[item.status] || item.status)}</span>
+    </button>`).join("")}`;
+  host.querySelectorAll("[data-account-id]").forEach((button) => {
+    button.addEventListener("click", () => openAccountEditor(accountState.items.find((item) => item.id === button.dataset.accountId)));
+  });
+}
+
+function renderAccounts() {
+  renderAccountScopes();
+  renderEmailStack();
+  renderAccountList();
+}
+
+function renderAccountProjectOptions(selected = "main") {
+  const select = $("#account-project");
+  select.innerHTML = accountProjects().map((project) => `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)}</option>`).join("");
+  select.value = accountProjects().some((project) => project.id === selected) ? selected : "main";
+}
+
+let accountEditorReturnFocus = null;
+
+function accountEditorKeydown(event) {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeAccountEditor();
+    return;
+  }
+  if (event.key !== "Tab") return;
+  const focusable = [...$("#account-editor").querySelectorAll("button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])")]
+    .filter((element) => !element.hidden);
+  if (!focusable.length) return;
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (event.shiftKey && document.activeElement === first) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && document.activeElement === last) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function openAccountEditor(item = null) {
+  accountEditorReturnFocus = document.activeElement;
+  const form = $("#account-form");
+  form.reset();
+  $("#account-error").textContent = "";
+  $("#account-id").value = item?.id || "";
+  renderAccountProjectOptions(item?.project_id || (accountState.scope !== "all" ? accountState.scope : "main"));
+  $("#account-kind").value = item?.kind || "email";
+  $("#account-status").value = item?.status || "planned";
+  $("#account-name").value = item?.name || "";
+  $("#account-identity").value = item?.identity || "";
+  $("#account-provider").value = item?.provider || "";
+  $("#account-purpose").value = item?.purpose || "";
+  $("#account-url").value = item?.admin_url || "";
+  $("#account-credential").value = item?.credential_ref || "";
+  $("#account-notes").value = item?.notes || "";
+  $("#account-form-title").textContent = item ? "Edit account" : "Add account";
+  $("#account-delete").hidden = !item;
+  $("#account-editor").hidden = false;
+  $(".account-scopes").inert = true;
+  $(".accounts-browser").inert = true;
+  $("#accounts").classList.add("is-editing");
+  $("#account-name").focus();
+}
+
+function closeAccountEditor() {
+  $("#account-editor").hidden = true;
+  $(".account-scopes").inert = false;
+  $(".accounts-browser").inert = false;
+  $("#accounts").classList.remove("is-editing");
+  $("#account-error").textContent = "";
+  const returnTarget = accountEditorReturnFocus?.isConnected ? accountEditorReturnFocus : $("#account-add");
+  accountEditorReturnFocus = null;
+  returnTarget?.focus();
+}
+
+async function loadAccounts() {
+  accountState.loading = true;
+  accountState.error = "";
+  renderAccountList();
+  try {
+    const [accountsResult, toolsResult] = await Promise.allSettled([
+      accountRequest("/api/accounts"),
+      accountRequest("/api/email-tools"),
+    ]);
+    if (accountsResult.status === "rejected") throw accountsResult.reason;
+    accountState.items = accountsResult.value.accounts || [];
+    accountState.emailTools = toolsResult.status === "fulfilled" ? toolsResult.value : null;
+  } catch (error) {
+    accountState.items = [];
+    accountState.error = error.message || "Try again.";
+  } finally {
+    accountState.loading = false;
+    renderAccounts();
+  }
+}
+
+function setupAccounts() {
+  $("#accounts-back")?.addEventListener("click", () => { closeAccountEditor(); show("tools"); mountAll("tools", $("#slot-tools"), {}); });
+  $("#account-add")?.addEventListener("click", () => openAccountEditor());
+  $("#account-cancel")?.addEventListener("click", closeAccountEditor);
+  $("#account-editor")?.addEventListener("keydown", accountEditorKeydown);
+  $("#account-search")?.addEventListener("input", (event) => { accountState.query = event.target.value; renderAccountList(); });
+  $("#account-form")?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const id = $("#account-id").value;
+    const payload = {
+      project_id: $("#account-project").value,
+      kind: $("#account-kind").value,
+      status: $("#account-status").value,
+      name: $("#account-name").value,
+      identity: $("#account-identity").value,
+      provider: $("#account-provider").value,
+      purpose: $("#account-purpose").value,
+      admin_url: $("#account-url").value,
+      credential_ref: $("#account-credential").value,
+      notes: $("#account-notes").value,
+    };
+    const submit = event.submitter;
+    submit.disabled = true;
+    $("#account-error").textContent = "";
+    try {
+      await accountRequest(id ? `/api/accounts/${id}` : "/api/accounts", {
+        method: id ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      closeAccountEditor();
+      await loadAccounts();
+    } catch (error) {
+      $("#account-error").textContent = error.message;
+    } finally {
+      submit.disabled = false;
+    }
+  });
+  $("#account-delete")?.addEventListener("click", async () => {
+    const id = $("#account-id").value;
+    if (!id || !window.confirm("Remove this account record? Credentials in the vault will not be changed.")) return;
+    try {
+      await accountRequest(`/api/accounts/${id}`, { method: "DELETE" });
+      closeAccountEditor();
+      await loadAccounts();
+    } catch (error) {
+      $("#account-error").textContent = error.message;
+    }
+  });
+}
+
 /* ---------------- boot ---------------- */
 
 setupChat();
 setupExplorer();
+setupAccounts();
 
 fetch("/api/projects")
   .then((r) => r.json())
