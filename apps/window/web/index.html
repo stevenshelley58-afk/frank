@@ -7,7 +7,7 @@
 <title>Frank</title>
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
-<link rel="stylesheet" href="/app.css?v=20260814-customer-accounts">
+<link rel="stylesheet" href="/app.css?v=20260814-entity-homes">
 </head>
 <body>
 <div class="app">
@@ -50,7 +50,7 @@
 
   <main class="main">
     <header class="topbar">
-      <h1 id="view-title">Hub</h1>
+      <h1 id="view-title" tabindex="-1">Hub</h1>
       <span class="sub" id="view-sub"></span>
       <div class="right" id="top-actions"></div>
     </header>
@@ -108,7 +108,12 @@
         </div>
       </section>
 
-      <section class="view" data-view="project"><div class="grid" id="slot-project"></div></section>
+      <section class="view" data-view="project">
+        <div class="home-surface">
+          <div class="home-context"><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
+          <div class="grid home-grid" id="slot-project"></div>
+        </div>
+      </section>
 
       <section class="view" data-view="files">
         <div class="explorer">
@@ -146,6 +151,74 @@
       </section>
 
       <section class="view" data-view="tools"><div class="grid" id="slot-tools"></div></section>
+      <section class="view" data-view="entity-home">
+        <div class="home-surface">
+          <div class="entity-home-heading"><div><span class="home-kicker" id="entity-home-kind">Tool</span><h2 id="entity-home-name">Home</h2></div><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
+          <div class="grid home-grid" id="slot-entity-home"></div>
+        </div>
+      </section>
+      <section class="view" data-view="widget-builder">
+        <div class="tool-workspace">
+          <div class="tool-workspace-main">
+            <div class="tool-workspace-intro">
+              <div><span class="home-kicker">Tools</span><h2>Widget Builder</h2><p>Create safe reusable display widgets. Connected operational widgets stay code-reviewed and provider-owned.</p></div>
+              <span id="builder-status" aria-live="polite">Loading widget catalog…</span>
+            </div>
+            <div id="widget-catalog"></div>
+          </div>
+          <aside class="tool-editor" id="widget-builder-editor" hidden role="dialog" aria-modal="true" aria-labelledby="widget-form-title" tabindex="-1">
+            <div class="tool-editor-head"><div><span class="home-kicker">Widget</span><h2 id="widget-form-title">New widget</h2></div><button type="button" id="widget-builder-close" aria-label="Close widget editor">×</button></div>
+            <form id="widget-form">
+              <label>Type<select id="widget-kind"><option value="note">Note</option><option value="link">Link</option></select></label>
+              <label>Title<input id="widget-title" maxlength="80" required placeholder="Project brief"></label>
+              <label>Description<input id="widget-description" maxlength="180" placeholder="What this widget shows"></label>
+              <label>Body<textarea id="widget-body" maxlength="800" rows="5" placeholder="Plain text only"></textarea></label>
+              <div class="tool-form-pair">
+                <label>Link label<input id="widget-label" maxlength="80" placeholder="Open resource"></label>
+                <label>Secure link<input id="widget-url" type="url" maxlength="500" placeholder="https://"></label>
+              </div>
+              <fieldset class="tool-fieldset"><legend>Compatible homes</legend><label><input type="checkbox" name="widget-surface" value="project" checked> Projects</label><label><input type="checkbox" name="widget-surface" value="tool" checked> Tools</label><label><input type="checkbox" name="widget-surface" value="agent" checked> Agents</label><label><input type="checkbox" name="widget-surface" value="service" checked> Services</label></fieldset>
+              <p class="account-help">Widgets accept plain text and secure links only. API keys, passwords, provider code, and arbitrary HTML are rejected.</p>
+              <div class="account-error" id="widget-form-error" role="alert"></div>
+              <div class="account-form-actions"><button type="submit" class="btn">Save widget</button></div>
+            </form>
+          </aside>
+        </div>
+      </section>
+      <section class="view" data-view="connections">
+        <div class="tool-workspace">
+          <div class="tool-workspace-main">
+            <div class="tool-workspace-intro">
+              <div><span class="home-kicker">Tools</span><h2>Connections</h2><p>Provider setup, capabilities, and recorded health in one place. Credentials stay in OpenBao or the provider; Hermes owns execution.</p></div>
+              <span id="connections-status" aria-live="polite">Loading connection catalog…</span>
+            </div>
+            <section class="connections-section"><div class="section-heading"><h2>Connection catalog</h2><span>Resend · Stripe · Activepieces · MCP · API</span></div><div class="connection-catalog" id="connection-catalog"></div></section>
+            <section class="connections-section"><div class="section-heading"><h2>Recorded connections</h2><span>Changing status here does not change a provider.</span></div><div class="connection-list" id="connection-list"></div></section>
+          </div>
+          <aside class="tool-editor" id="connection-editor" hidden role="dialog" aria-modal="true" aria-labelledby="connection-form-title" tabindex="-1">
+            <div class="tool-editor-head"><div><span class="home-kicker">Connection</span><h2 id="connection-form-title">Add connection</h2></div><button type="button" id="connection-editor-close" aria-label="Close connection editor">×</button></div>
+            <form id="connection-form">
+              <div class="tool-form-pair">
+                <label>Provider<select id="connection-provider"><option value="resend">Resend</option><option value="stripe">Stripe</option><option value="activepieces">Activepieces</option><option value="mcp">MCP</option><option value="api">API</option></select></label>
+                <label>Recorded status<select id="connection-status-field"><option value="setup_needed">Setup needed</option><option value="connected">Connected</option><option value="verified">Verified</option><option value="error">Error</option></select></label>
+              </div>
+              <label>Name<input id="connection-name" maxlength="120" required placeholder="Blockwise Resend"></label>
+              <div class="tool-form-pair">
+                <label>Scope<select id="connection-scope-kind"><option value="global">All Frank</option><option value="project">Project</option><option value="tool">Tool</option><option value="agent">Agent</option><option value="service">Service</option></select></label>
+                <label>Scope ID<input id="connection-scope-id" maxlength="80" placeholder="blockwise"></label>
+              </div>
+              <label>Provider connection reference<input id="connection-ref" maxlength="300" placeholder="ap://connections/resend-main"></label>
+              <label>Credential reference<input id="connection-credential-ref" maxlength="300" placeholder="openbao://frank/connections/resend-main"></label>
+              <label>Secure setup/admin link<input id="connection-admin-url" type="url" maxlength="500" placeholder="https://"></label>
+              <label>Capabilities<input id="connection-capabilities" maxlength="500" placeholder="email.send, email.status"></label>
+              <label>Notes<textarea id="connection-notes" maxlength="600" rows="4" placeholder="Non-secret setup notes"></textarea></label>
+              <p class="account-help">Never paste a password, API key, OAuth token, card number, or bank detail. Activepieces credentials are configured in its secure UI; Frank records only the reference and status.</p>
+              <div class="account-error" id="connection-form-error" role="alert"></div>
+              <div class="account-form-actions"><button type="button" class="account-delete" id="connection-delete" hidden>Remove record</button><button type="submit" class="btn">Save metadata</button></div>
+            </form>
+          </aside>
+        </div>
+      </section>
       <section class="view" data-view="accounts">
         <div class="accounts" id="accounts">
           <aside class="account-scopes" aria-label="Account projects">
@@ -241,6 +314,6 @@
   </div>
   <div class="media-stage" id="media-stage"></div>
 </div>
-<script type="module" src="/js/app.js?v=20260814-live-hermes-chat"></script>
+<script type="module" src="/js/app.js?v=20260814-entity-homes-chat"></script>
 </body>
 </html>
