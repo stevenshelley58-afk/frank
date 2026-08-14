@@ -20,8 +20,11 @@ The manifest describes a displayable app: supported scopes, a JSON-Schema-like
 settings object, capabilities, connectors, schedules, thresholds,
 approval-gates, and declarative pipelines. Pipeline nodes and edges are data;
 cycles, duplicate IDs, unknown endpoints, unsafe IDs, HTML, and secret-like
-values are rejected. Credentials are metadata only and must be strict vault
-references such as `openbao://frank/connections/main`.
+values are rejected. Pipeline nodes and edges are exact data-only shapes
+(`{id, kind}` and `{from, to}`). Tool manifests and settings select existing
+Connections with non-secret `connection_id` and capability lists only; they do
+not contain credentials, vault references, provider identifiers, secrets,
+tokens, passwords, API keys, or connection/connector refs.
 
 Settings are stored as immutable, append-only scoped revisions. Updates require
 the current revision, making concurrent edits explicit. Valid scopes are

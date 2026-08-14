@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import re
 from pathlib import Path
 from typing import Any, Iterable
@@ -24,7 +25,6 @@ GRAPH_SCHEMA = "schema://frank.graph/v1"
 SCOPE_KINDS = frozenset({"global", "profile", "project", "workspace", "session"})
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _VERSION = re.compile(r"^\d+\.\d+\.\d+$")
-_VAULT_REF = re.compile(r"^(?:openbao|vault|secret)://[A-Za-z0-9._/@-]+$")
 _HTML = re.compile(r"<\/?[A-Za-z][^>]*>|javascript\s*:", re.I)
 _SECRET = re.compile(
     r"(?:-----BEGIN [A-Z ]+-----|\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]+|"
@@ -32,6 +32,12 @@ _SECRET = re.compile(
     re.I,
 )
 _SECRET_KEYS = re.compile(r"(?:password|passwd|token|api[_-]?key|private[_-]?key|secret)$", re.I)
+_EXECUTABLE_KEYS = frozenset({"callback", "handler", "code", "script", "executable"})
+_FORBIDDEN_SETTING_KEYS = re.compile(
+    r"(?:credential|vault|provider|secret|token|password|passwd|api[_-]?key|"
+    r"connection[_-]?ref|connector[_-]?ref)",
+    re.I,
+)
 
 
 class ContractError(ValueError):
@@ -43,18 +49,55 @@ def _require(value: Any, kind: type, path: str) -> None:
         raise ContractError(f"{path} must be {kind.__name__}")
 
 
-def _walk_safe(value: Any, path: str = "payload", key: str = "") -> None:
-    if isinstance(value, str):
+def _walk_safe(value: Any, path: str = "payload", key: str = "", active: set[int] | None = None) -> None:
+    """Validate a finite, acyclic JSON value and reject executable-shaped keys."""
+    active = set() if active is None else active
+    if value is None or type(value) in (bool, int):
+        return
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ContractError(f"non-finite number at {path}")
+        return
+    if type(value) is str:
         if _HTML.search(value) or _SECRET.search(value):
             raise ContractError(f"unsafe markup or secret-like value at {path}")
-        if _SECRET_KEYS.search(key) and not _VAULT_REF.fullmatch(value):
-            raise ContractError(f"secret fields must be strict vault refs at {path}")
-    elif isinstance(value, dict):
+        if _SECRET_KEYS.search(key):
+            raise ContractError(f"secret fields are not allowed at {path}")
+    elif type(value) is dict:
+        if id(value) in active:
+            raise ContractError(f"cyclic value at {path}")
+        active.add(id(value))
+        try:
+            for child_key, child_value in value.items():
+                if not isinstance(child_key, str):
+                    raise ContractError(f"JSON object keys must be strings at {path}")
+                if child_key.lower() in _EXECUTABLE_KEYS:
+                    raise ContractError(f"executable key is not allowed at {path}.{child_key}")
+                _walk_safe(child_value, f"{path}.{child_key}", child_key, active)
+        finally:
+            active.remove(id(value))
+    elif type(value) is list:
+        if id(value) in active:
+            raise ContractError(f"cyclic value at {path}")
+        active.add(id(value))
+        try:
+            for index, child_value in enumerate(value):
+                _walk_safe(child_value, f"{path}[{index}]", key, active)
+        finally:
+            active.remove(id(value))
+    else:
+        raise ContractError(f"value at {path} is not JSON-compatible")
+
+
+def _validate_setting_keys(value: Any, path: str = "settings") -> None:
+    if isinstance(value, dict):
         for child_key, child_value in value.items():
-            _walk_safe(child_value, f"{path}.{child_key}", str(child_key))
+            if isinstance(child_key, str) and _FORBIDDEN_SETTING_KEYS.search(child_key):
+                raise ContractError(f"sensitive connection setting is not allowed at {path}.{child_key}")
+            _validate_setting_keys(child_value, f"{path}.{child_key}")
     elif isinstance(value, list):
         for index, child_value in enumerate(value):
-            _walk_safe(child_value, f"{path}[{index}]", key)
+            _validate_setting_keys(child_value, f"{path}[{index}]")
 
 
 def validate_scope(scope: Any) -> dict[str, str]:
@@ -87,6 +130,8 @@ def validate_pipeline(pipeline: Any) -> dict[str, Any]:
     node_ids: set[str] = set()
     for index, node in enumerate(nodes):
         _require(node, dict, f"pipeline.nodes[{index}]")
+        if set(node) != {"id", "kind"}:
+            raise ContractError(f"pipeline node fields are restricted at {index}")
         node_id = node.get("id")
         if not isinstance(node_id, str) or not _ID.fullmatch(node_id) or node_id in node_ids:
             raise ContractError(f"invalid or duplicate pipeline node id at {index}")
@@ -96,6 +141,8 @@ def validate_pipeline(pipeline: Any) -> dict[str, Any]:
     adjacency = {node_id: [] for node_id in node_ids}
     for index, edge in enumerate(edges):
         _require(edge, dict, f"pipeline.edges[{index}]")
+        if set(edge) != {"from", "to"}:
+            raise ContractError(f"pipeline edge fields are restricted at {index}")
         source, target = edge.get("from"), edge.get("to")
         if source not in node_ids or target not in node_ids or source == target:
             raise ContractError(f"pipeline edge references an invalid node at {index}")
@@ -139,6 +186,8 @@ def validate_manifest(manifest: Any) -> dict[str, Any]:
     _require(settings, dict, "manifest.settings")
     if settings.get("schema") != SETTING_SCHEMA or not isinstance(settings.get("properties"), dict):
         raise ContractError("manifest.settings must be a versioned object schema")
+    _walk_safe(settings, "manifest.settings")
+    _validate_setting_keys(settings)
     pipelines = manifest.get("pipelines", [])
     if not isinstance(pipelines, list):
         raise ContractError("manifest.pipelines must be a list")

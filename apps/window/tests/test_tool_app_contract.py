@@ -15,6 +15,7 @@ from tool_apps.contracts import (
     discover_tool_apps,
     validate_manifest,
     validate_pipeline,
+    _walk_safe,
 )
 
 
@@ -25,7 +26,7 @@ def manifest(**overrides):
         "scopes": ["project"], "settings": {"schema": SETTING_SCHEMA, "properties": {
             "prompt_ref": {"type": "string"}, "prompt_version": {"type": "string"},
             "style_preset": {"type": "string"}, "model_policy": {"type": "object"},
-            "connector_ref": {"type": "string"}, "schedule": {"type": "string"},
+            "connection_id": {"type": "string"}, "capabilities": {"type": "array"}, "schedule": {"type": "string"},
             "threshold": {"type": "number"}, "approval_gate": {"type": "boolean"},
         }}, "pipelines": [{"schema": PIPELINE_SCHEMA, "nodes": [
             {"id": "start", "kind": "trigger"}, {"id": "run", "kind": "hermes-command"}],
@@ -63,12 +64,38 @@ class ToolAppContractTest(unittest.TestCase):
             with self.subTest(payload=payload):
                 with self.assertRaises(ContractError):
                     validate_manifest(payload)
-        self.assertEqual(validate_manifest(manifest(settings={"schema": SETTING_SCHEMA, "properties": {"secret_ref": {"type": "string"}}}))["id"], "weekly-report")
+        with self.assertRaises(ContractError):
+            validate_manifest(manifest(settings={"schema": SETTING_SCHEMA, "properties": {"secret_ref": {"type": "string"}}}))
+
+    def test_declarative_values_are_strict_json_and_executable_keys_are_rejected(self):
+        for value in (float("nan"), float("inf"), b"bytes", ("tuple",), object(), {1: "non-string key"}):
+            with self.subTest(value=type(value).__name__), self.assertRaises(ContractError):
+                _walk_safe(value)
+        cycle = []
+        cycle.append(cycle)
+        with self.assertRaises(ContractError):
+            _walk_safe(cycle)
+        cyclic_settings = {"schema": SETTING_SCHEMA, "properties": {}}
+        cyclic_settings["loop"] = cyclic_settings
+        with self.assertRaises(ContractError):
+            validate_manifest(manifest(settings=cyclic_settings))
+        with self.assertRaises(ContractError):
+            _walk_safe({"nested": {"handler": "not executable"}})
+
+        forbidden = ("credential", "vault_ref", "provider", "secret", "token", "password", "api_key", "connection_ref", "connector_ref")
+        for field in forbidden:
+            with self.subTest(field=field), self.assertRaises(ContractError):
+                validate_manifest(manifest(settings={"schema": SETTING_SCHEMA, "properties": {field: {"type": "string"}}}))
+        self.assertEqual(validate_manifest(manifest(settings={"schema": SETTING_SCHEMA, "properties": {"connection_id": {"type": "string"}, "capabilities": {"type": "array"}}}))["id"], "weekly-report")
 
     def test_pipeline_is_acyclic_and_has_known_edges(self):
         cyclic = {"schema": PIPELINE_SCHEMA, "nodes": [{"id": "a", "kind": "step"}, {"id": "b", "kind": "step"}], "edges": [{"from": "a", "to": "b"}, {"from": "b", "to": "a"}]}
         with self.assertRaises(ContractError):
             validate_pipeline(cyclic)
+        with self.assertRaises(ContractError):
+            validate_pipeline({"schema": PIPELINE_SCHEMA, "nodes": [{"id": "a", "kind": "step", "callback": "run"}], "edges": []})
+        with self.assertRaises(ContractError):
+            validate_pipeline({"schema": PIPELINE_SCHEMA, "nodes": [{"id": "a", "kind": "step"}, {"id": "b", "kind": "step"}], "edges": [{"from": "a", "to": "b", "handler": "run"}]})
 
     def test_settings_are_scoped_optimistic_and_immutable(self):
         store = SettingRevisionStore(["project"])
