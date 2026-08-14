@@ -1,6 +1,5 @@
 /**
- * Room folder-binding wire schemas — FS-02 (master plan §8G, docs/plans/
- * FS_PREP.md).
+ * Room folder-binding wire schemas.
  *
  * Snake_case at the boundary (FRANK-§12.3 convention, same as `workbench.ts`);
  * the internal TypeScript stays camelCase. A binding is a *declaration* — the

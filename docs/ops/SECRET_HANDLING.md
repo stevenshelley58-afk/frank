@@ -78,7 +78,8 @@ against the **full git history** on every push and pull request.
    `--force` style overrides without AG-0 sign-off.
 3. Purge from history (`git filter-repo`), force-update, and confirm
    `gh api repos/.../secret-scanning/alerts` shows the alert resolved.
-4. Record the incident in `docs/plans/EXECUTION_STATUS.md`.
+4. Record the incident in the private security tracker; do not put secret
+   material in the repository.
 
 ## Where each secret actually lives
 

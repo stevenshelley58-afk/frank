@@ -9,7 +9,7 @@ factory activity, and signs releases.
 If code in this repository loads a skill, chooses a model, stores agent memory,
 or creates another agent runtime, it is in the wrong place.
 
-The current build plan is `.build/FRANK-REBUILD.md`.
+The current product brief is `docs/PROJECT.md`.
 
 ## Authoritative VPS layout
 

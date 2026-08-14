@@ -1,6 +1,5 @@
 /**
- * RoomFolderBindingStore — the PostgreSQL persistence for room folder bindings
- * (FS-02, master plan §8G, docs/plans/FS_PREP.md).
+ * RoomFolderBindingStore — the PostgreSQL persistence for room folder bindings.
  *
  * A folder binding declares, per room, that a synced folder (FS-01) is attached
  * to the room's workbenches: which folder source on the device, its path on the

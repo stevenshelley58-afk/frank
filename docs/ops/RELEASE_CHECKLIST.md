@@ -51,7 +51,7 @@ evidence, not a mental check.
 
 - [ ] Release manifest updated (GOV-05): task status, branch, commit, CI,
       preview, gate per merged task.
-- [ ] `docs/plans/EXECUTION_STATUS.md` reflects merged work and gate state.
+- [ ] The release PR records merged work, gate state, and the exact revision.
 - [ ] Human-gated items (e.g., Telegram bot token) confirmed injected via
       OpenBao/env in the target environment — not present anywhere in the
       repository.

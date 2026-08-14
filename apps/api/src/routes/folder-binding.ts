@@ -1,6 +1,5 @@
 /**
- * `/v1/rooms/:roomId/folder-bindings` — FS-02 room folder bindings backend
- * (master plan §8G FS-02, docs/plans/FS_PREP.md).
+ * `/v1/rooms/:roomId/folder-bindings` — room folder bindings backend.
  *
  *     POST   /v1/rooms/:roomId/folder-bindings         create/upsert a binding
  *     GET    /v1/rooms/:roomId/folder-bindings         list the room's bindings
