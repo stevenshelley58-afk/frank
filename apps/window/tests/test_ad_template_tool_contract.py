@@ -140,6 +140,7 @@ class AdTemplateToolContractTest(unittest.TestCase):
         release = self.contract.build_immutable_release(**valid)
         self.assertEqual(self.contract.validate_release(release), [])
         public = release.as_dict()
+        self.assertEqual(public["schema"], "schema://frank.tool-app-release/v1")
         self.assertNotIn("prompt_receipt", public)
         self.assertNotIn("model_receipt", public)
         self.assertNotIn("reviewer_ref", str(public))

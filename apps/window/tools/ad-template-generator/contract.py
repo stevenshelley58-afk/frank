@@ -193,7 +193,7 @@ def _receipt_errors(receipt: Any, label: str, fields: tuple[str, ...]) -> list[s
 class ImmutableRelease:
     """Typed, source-free release record accepted by Frank Releases."""
 
-    producer_schema: str
+    schema: str
     tool_id: str
     scope: Mapping[str, str]
     release_version: str
@@ -240,12 +240,12 @@ def validate_release(release: Mapping[str, Any] | ImmutableRelease) -> list[str]
     """Validate an immutable release and reject attempted source leakage."""
     value = release.as_dict() if isinstance(release, ImmutableRelease) else dict(release)
     errors = _forbidden_release_paths(value)
-    required = ("producer_schema", "tool_id", "scope", "release_version", "release_id", "status", "settings_revision", "settings_ref", "pipeline_id", "pipeline_version", "consumer_compatibility", "artifact_refs", "artifact_provenance", "output_checksums", "receipt_refs", "trace_ref", "qa_decision", "approval_decision", "sanitization_receipt", "release_hash")
+    required = ("schema", "tool_id", "scope", "release_version", "release_id", "status", "settings_revision", "settings_ref", "pipeline_id", "pipeline_version", "consumer_compatibility", "artifact_refs", "artifact_provenance", "output_checksums", "receipt_refs", "trace_ref", "qa_decision", "approval_decision", "sanitization_receipt", "release_hash")
     errors.extend(f"missing release.{field}" for field in _missing(value, required))
-    for field in ("producer_schema", "tool_id", "release_version", "release_id", "settings_revision", "settings_ref", "pipeline_id", "pipeline_version", "trace_ref"):
+    for field in ("schema", "tool_id", "release_version", "release_id", "settings_revision", "settings_ref", "pipeline_id", "pipeline_version", "trace_ref"):
         errors.extend(_safe_ref(value.get(field), f"release.{field}"))
-    if value.get("producer_schema") != "schema://frank.tool-app-release/v1":
-        errors.append("release.producer_schema is unsupported")
+    if value.get("schema") != "schema://frank.tool-app-release/v1":
+        errors.append("release.schema is unsupported")
     scope = value.get("scope")
     if not isinstance(scope, Mapping) or scope.get("kind") not in {"project", "workspace"}:
         errors.append("release.scope.kind must be project or workspace")
@@ -357,7 +357,7 @@ def build_immutable_release(
 ) -> ImmutableRelease:
     """Build a release only after all source-free receipts are present."""
     release = ImmutableRelease(
-        producer_schema="schema://frank.tool-app-release/v1",
+        schema="schema://frank.tool-app-release/v1",
         tool_id=tool_id,
         scope=dict(scope),
         release_version=release_version,
