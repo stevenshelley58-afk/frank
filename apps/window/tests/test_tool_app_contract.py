@@ -39,12 +39,14 @@ def manifest(**overrides):
 
 class ToolAppContractTest(unittest.TestCase):
     def test_tool_owned_home_manifest_is_exact_and_non_executable(self):
-        home_path = Path(__file__).parents[1] / "tool_apps" / "weekly_report" / "home.json"
-        home = json.loads(home_path.read_text(encoding="utf-8"))
-        self.assertEqual(tuple(home), ("id", "name", "kind", "blurb", "capabilities", "default_widget_ids", "connection_capabilities"))
+        home = {"id": "weekly-report", "name": "Weekly report", "kind": "tool", "blurb": "Review a project report.", "capabilities": ["reports.read"], "default_widget_ids": [], "connection_capabilities": []}
         self.assertEqual(validate_home_manifest(home)["kind"], "tool")
+        reordered = {key: home[key] for key in reversed(home)}
+        self.assertEqual(validate_home_manifest(reordered)["id"], "weekly-report")
         with self.assertRaises(ContractError):
             validate_home_manifest({**home, "callback": "run()"})
+        with self.assertRaises(ContractError):
+            validate_home_manifest({key: value for key, value in home.items() if key != "blurb"})
 
     def test_discovery_loads_versioned_manifests_and_rejects_mismatch(self):
         with tempfile.TemporaryDirectory() as root:
@@ -88,6 +90,28 @@ class ToolAppContractTest(unittest.TestCase):
         seen = []
         self.assertEqual(HermesAdapter(lambda _request: emitted, seen.append).dispatch(request), emitted)
         self.assertEqual(seen, emitted)
+
+    def test_command_event_and_trace_reject_invalid_envelopes(self):
+        for tool_id, action in (("Weekly Report", "run"), ("weekly-report", "run now")):
+            with self.assertRaises(ContractError):
+                command(tool_id, action, "project:frank", {})
+        for kwargs in (
+            {"request_id": "bad id"}, {"kind": "not an event"}, {"status": "unknown"},
+            {"timestamp": float("inf")}, {"data": []},
+        ):
+            with self.subTest(kwargs=kwargs), self.assertRaises(ContractError):
+                values = {"request_id": "req-1", "sequence": 0, "kind": "started", "data": {}}
+                values.update(kwargs)
+                event(**values)
+        valid = event("req-1", 0, "started", {})
+        for invalid in (
+            {**valid, "schema": "other"}, {**valid, "sequence": 1},
+            {**valid, "request_id": "req-2"},
+        ):
+            with self.subTest(invalid=invalid), self.assertRaises(ContractError):
+                trace("req-1", [invalid])
+        with self.assertRaises(ContractError):
+            trace("req-1", [valid, {**valid, "sequence": 0}])
 
 
 if __name__ == "__main__":

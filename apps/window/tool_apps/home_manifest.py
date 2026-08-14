@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import copy
-import re
 from typing import Any
 
 from .contracts import ContractError, _ID, _walk_safe
@@ -11,10 +10,11 @@ from .contracts import ContractError, _ID, _walk_safe
 HOME_MANIFEST_FIELDS = (
     "id", "name", "kind", "blurb", "capabilities", "default_widget_ids", "connection_capabilities",
 )
+HOME_MANIFEST_FIELD_SET = frozenset(HOME_MANIFEST_FIELDS)
 
 
 def validate_home_manifest(manifest: Any) -> dict[str, Any]:
-    if not isinstance(manifest, dict) or tuple(manifest) != HOME_MANIFEST_FIELDS:
+    if not isinstance(manifest, dict) or set(manifest) != HOME_MANIFEST_FIELD_SET:
         raise ContractError("tool home manifest must contain exactly the required fields")
     if not isinstance(manifest["id"], str) or not _ID.fullmatch(manifest["id"]):
         raise ContractError("home manifest id must be a safe kebab-case identifier")

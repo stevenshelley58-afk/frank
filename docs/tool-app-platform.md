@@ -8,12 +8,13 @@ or executes an app. The tool manifest is versioned with
 
 The home manifest is intentionally separate from the tool manifest and must
 contain exactly these fields: `{id, name, kind, blurb, capabilities[],
-default_widget_ids[], connection_capabilities[]}`. `kind` is exactly `tool`.
+default_widget_ids[], connection_capabilities[]}`. JSON object order is not
+significant. `kind` is exactly `tool`.
 It contains no callbacks, executable code, credentials, provider calls, or
 widget implementations. The shared dashboard runtime validates and registers
-it, renders only known widget IDs, and fails closed. The reference package in
-this change owns `apps/window/tool_apps/weekly_report/home.json` with that
-exact shape.
+it, renders only known widget IDs, and fails closed. Each real domain tool
+package owns its own `home.json`; this platform package contains only the
+validator and inline contract tests, not a runtime tool.
 
 The manifest describes a displayable app: supported scopes, a JSON-Schema-like
 settings object, capabilities, connectors, schedules, thresholds,
