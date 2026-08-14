@@ -4,10 +4,8 @@
 # root (see infra/docker-compose.dev.yml).
 FROM node:22.23.2-alpine3.23@sha256:46825fbbd4e996a78b7a2cdc08d75e38a5a505bdab95dcda55605359bf124bc6
 
-# ffmpeg = video thumbnail frame grabs for the Console Files module
-# (image thumbnails use `sharp`, a native module pulled by pnpm).
-# git = the /api/worktrees live-status route shells out to it (reads the
-# repo bind-mounted read-only at FRANK_EXPLORER_ROOT).
+# ffmpeg/git: retained for image stability; explorer/worktrees routes that
+# needed them were deleted in Wave 1.
 RUN apk add --no-cache ffmpeg git
 
 RUN corepack enable && corepack prepare pnpm@10.28.0 --activate

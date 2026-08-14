@@ -57,7 +57,7 @@ describe('production codegraph staged-input contract', () => {
       'source: "${FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH:?FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH is required}"',
     );
     expect(compose).not.toContain(
-      '${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/production/codegraph-projects.json',
+      '${FRANK_RELEASE_SOURCE:-/projects/frank}/infra/production/codegraph-projects.json',
     );
     expect(compose).not.toMatch(/source: "\$\{FRANK_RELEASE_SOURCE[^\n]+"\n\s+target: \/repositories\/frank/);
 

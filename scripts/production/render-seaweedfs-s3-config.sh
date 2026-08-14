@@ -8,8 +8,8 @@ case "$mode" in scoped|--with-bootstrap) ;; *) echo "usage: $0 [--with-bootstrap
 if [[ "$mode" == '--with-bootstrap' ]]; then
   : "${FRANK_S3_BOOTSTRAP_ACCESS_KEY:?}" "${FRANK_S3_BOOTSTRAP_SECRET_KEY:?}"
 fi
-template="${FRANK_SEAWEEDFS_S3_TEMPLATE:-/srv/frank/repo/infra/compose/seaweedfs/s3.json.tmpl}"
-target="${FRANK_SEAWEEDFS_S3_CONFIG:-/srv/frank/secrets/seaweedfs/s3.json}"
+template="${FRANK_SEAWEEDFS_S3_TEMPLATE:-/projects/frank/infra/compose/seaweedfs/s3.json.tmpl}"
+target="${FRANK_SEAWEEDFS_S3_CONFIG:-/frank/deployed/secrets/seaweedfs/s3.json}"
 test -f "$template" && test ! -L "$template"; install -d -o root -g root -m 0700 -- "${target%/*}"
 tmp="$(mktemp "${target}.XXXXXX")"; trap 'rm -f -- "$tmp"' EXIT
 node --input-type=module - "$template" "$tmp" "$mode" <<'NODE'

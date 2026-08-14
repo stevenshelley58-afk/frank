@@ -8,8 +8,6 @@ import {
 describe('browser Domain API allowlist', () => {
   it('permits only the shell and Console operation surface', () => {
     expect(isAllowedBrowserOperation('GET', '/v1/frame')).toBe(true);
-    expect(isAllowedBrowserOperation('GET', '/v1/missions')).toBe(true);
-    expect(isAllowedBrowserOperation('GET', '/v1/missions/mission-1')).toBe(true);
     expect(isAllowedBrowserOperation('POST', '/v1/chats')).toBe(true);
     expect(isAllowedBrowserOperation('POST', '/v1/chat/turns')).toBe(true);
     expect(isAllowedBrowserOperation('GET', '/v1/chat/turns/turn-1/events')).toBe(true);
@@ -22,7 +20,6 @@ describe('browser Domain API allowlist', () => {
     expect(isAllowedBrowserOperation('POST', '/v1/work/item-1/commands/ready')).toBe(true);
     expect(isAllowedBrowserOperation('POST', '/v1/work/item-1/commands/cancel')).toBe(true);
     expect(isAllowedBrowserOperation('POST', '/v1/codegraph/project-1/refresh')).toBe(true);
-    expect(isAllowedBrowserOperation('POST', '/v1/missions')).toBe(false);
     expect(isAllowedBrowserOperation('POST', '/v1/system/rebuild')).toBe(false);
   });
 

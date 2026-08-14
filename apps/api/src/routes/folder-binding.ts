@@ -43,8 +43,8 @@ import {
 } from '../schema/folder-binding.js';
 import type { ActionBoundary } from '../services/action-boundary.js';
 import { ownerCommandInfluence } from '../services/action-boundary.js';
-import type { RoomFolderBindingRecord } from '../services/workbench/folder-binding-store.js';
-import { RoomFolderBindingStore } from '../services/workbench/folder-binding-store.js';
+import type { RoomFolderBindingRecord } from '../services/folder-binding/folder-binding-store.js';
+import { RoomFolderBindingStore } from '../services/folder-binding/folder-binding-store.js';
 import { registerRoute } from '../plugins/route-handler.js';
 import type { RouteHandlerDependencies } from '../plugins/route-handler.js';
 

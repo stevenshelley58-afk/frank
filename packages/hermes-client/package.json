@@ -1,0 +1,27 @@
+{
+  "name": "@frank/hermes-client",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Pass-through streaming client for the Hermes Agent API server (OpenAI-compatible). Sends a message to a Hermes profile and yields text/tool/done/error events. Pure transport: it does not interpret, summarise, filter or store anything.",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "echo 'lint: hermes-client (schema + dependency gates run at repo root)'"
+  },
+  "dependencies": {
+    "openai": "7.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.2",
+    "typescript": "5.7.2",
+    "vitest": "2.1.8"
+  },
+  "frank": {
+    "layer": "packages",
+    "mayDependOn": []
+  }
+}

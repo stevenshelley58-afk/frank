@@ -228,7 +228,7 @@
 | FRANK-§8.1 | Decision | FRANK-§8 | role/builder | — | — | owned |
 | FRANK-§8.2 | Protocol boundaries | FRANK-§8 | role/builder | — | — | owned |
 | FRANK-§8.2.1 | MCP 2026-07-28 implementation contract | FRANK-§8 | steven | — | — | owned |
-| FRANK-§8.3 | Shared memory and skills | FRANK-§8 | role/builder | — | — | owned |
+| FRANK-§8.3 | Shared memory and skills | FRANK-§8 | role/builder | apps/api/src/test/skills.test.ts :: "W3-2 skills list + detail + path safety" | — | owned |
 | FRANK-§8.4 | Harness selection | FRANK-§8 | role/builder | — | — | owned |
 | FRANK-§9 | Model Broker and inference capacity | — | role/builder | — | — | owned |
 | FRANK-§9.1 | Two-layer design | FRANK-§9 | role/builder | — | — | owned |

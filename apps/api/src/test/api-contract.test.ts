@@ -809,8 +809,6 @@ describe('ADR-017 OpenAPI', () => {
     };
     expect(document.openapi).toBe('3.1.0');
     expect(Object.keys(document.paths).sort()).toEqual([
-      '/v1/brain/save',
-      '/v1/brain/search',
       '/v1/capture',
       // CH-06: outbox poll/ack for the channels listener.
       '/v1/channels/outbox',
@@ -827,20 +825,17 @@ describe('ADR-017 OpenAPI', () => {
       '/v1/codegraph/{project}/refresh',
       '/v1/codegraph/{project}/spec',
       '/v1/codegraph/{project}/status',
-      // Durable autonomous mission create/read/stop contract.
-      '/v1/missions',
-      '/v1/missions/{id}',
-      '/v1/missions/{id}/stop',
+      // W3-1: read-only project file browser.
+      '/v1/files',
       // CH-06: room↔channel bindings (Frank owns the binding).
       '/v1/rooms/{roomId}/channel-bindings',
       '/v1/rooms/{roomId}/channel-bindings/{id}',
-      // FS-05: room Files listing (artifacts across the room's workbenches).
-      '/v1/rooms/{roomId}/files',
       // FS-02: room folder bindings (declaration records; enforcement is FS-03).
       '/v1/rooms/{roomId}/folder-bindings',
       '/v1/rooms/{roomId}/folder-bindings/{id}',
-      // Frozen contract: room workbench list (UI-07 Running/waiting surfaces).
-      '/v1/rooms/{roomId}/workbenches',
+      // W3-2: skills page — read-only library browser.
+      '/v1/skills',
+      '/v1/skills/{id}',
       '/v1/system/health',
       '/v1/system/live',
       '/v1/system/ready',
@@ -850,21 +845,6 @@ describe('ADR-017 OpenAPI', () => {
       '/v1/work/{id}/commands/{command}',
       '/v1/work/{id}/history',
       '/v1/work/{id}/provenance',
-      // WB-05: the workbench front door (frozen contract WORKBENCH_API_CONTRACT.md).
-      '/v1/workbenches',
-      '/v1/workbenches/{id}',
-      // WB-08: artifact registration + reopen-with-note.
-      '/v1/workbenches/{id}/artifacts',
-      // FS-05: publish a registered artifact's preview to the preview lane.
-      '/v1/workbenches/{id}/artifacts/{artifactId}/preview',
-      // HITL-01: decision seam (normal decision work item + pause).
-      '/v1/workbenches/{id}/decisions',
-      // WB-08: Central reopens a done workbench with a note.
-      '/v1/workbenches/{id}/reopen',
-      // FS-03: staged shared writes (propose; approval lands via the decision).
-      '/v1/workbenches/{id}/staged-writes',
-      // WB-07: first-class Stop (leash + cancellation).
-      '/v1/workbenches/{id}/stop',
     ]);
 
     const readRoles = ['owner', 'operator', 'builder', 'service_identity'];
@@ -942,7 +922,7 @@ describe('ADR-017 OpenAPI', () => {
         expect(operation).toHaveProperty('requestBody' in operation ? 'requestBody' : 'responses');
       }
     }
-    expect(operations).toBe(46);
+    expect(operations).toBe(33);
   });
 
   it('never documents an operation that can return secret-class data', async () => {

@@ -1,33 +1,25 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 
 import { useAuth, useData } from '@/components/providers';
 import { useCommandPalette } from '@/components/command-palette';
 import { DEFAULT_ROOMS, type Room } from '@/lib/rooms';
-import { frankStream, StreamAbortedError, turnInfoToMessageMeta, type TurnInfo } from '@/lib/frank';
+// Chat streaming now goes through FrankChat → POST /v1/chat/turns SSE (W2-2).
+// The legacy frankStream() → /api/chat SSE path has been removed.
 import {
-  appendMessage,
-  cancelChatTurn,
   createConversation,
-  listChatTurnEvents,
   listConversations,
-  listMessages,
   patchConversation,
+  profileForProject,
   resolveDecision,
-  submitChatTurn,
-  type ChatMessageRow,
   type Conversation,
   type PendingDecision,
 } from '@/lib/chat-api';
-import { chatTurnInput, type ChatTurnDraft } from '@/lib/chat-turn-input';
 import { getFrame, type FrameResponse } from '@/lib/frame';
-import { stopMission } from '@/lib/missions/client';
-import { WORKBENCH_API } from '@/lib/workbench/types';
-import { ChatThread } from './chat-thread';
-import { ComposerBar, type ModelOption } from './composer-bar';
+import { FrankChat, type FrankChatHandle } from '@/components/chat/frank-chat';
+import type { ModelOption } from './composer-bar';
 import { LivingFrame } from './living-frame';
 import { useHarnesses } from '@/lib/use-harnesses';
 import { useCalendar } from '@/lib/use-calendar';
@@ -45,9 +37,6 @@ const PROJECTS: Room[] = DEFAULT_ROOMS;
 const displayName = (room: Room): string => (room.isHome === true ? 'Frank' : room.name);
 const projectOf = (id: string): Room => PROJECTS.find((p) => p.id === id) ?? PROJECTS[0]!;
 
-/** A rough context gauge: real token accounting lands with the kernel's pack. */
-const CONTEXT_BUDGET_CHARS = 180_000;
-
 /* ------------------------------------------------------------------ */
 
 export function FrankShell() {
@@ -59,7 +48,6 @@ export function FrankShell() {
 
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [decisions, setDecisions] = useState<PendingDecision[]>([]);
-  const [messages, setMessages] = useState<ChatMessageRow[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [homeProject, setHomeProject] = useState<string>('central');
   const [expanded, setExpanded] = useState<Set<string>>(new Set(['central']));
@@ -70,14 +58,14 @@ export function FrankShell() {
   const [desktopFrameOpen, setDesktopFrameOpen] = useState(true);
   const [mobileFrameOpen, setMobileFrameOpen] = useState(false);
   const [railOpen, setRailOpen] = useState(false);
-  const [streamingText, setStreamingText] = useState<string | null>(null);
+  const [chatRunning, setChatRunning] = useState(false);
   const [draftModel, setDraftModel] = useState('auto');
   const [availableModels, setAvailableModels] = useState<ModelOption[]>([]);
   const [frame, setFrame] = useState<FrameResponse | null>(null);
   const [frameError, setFrameError] = useState<string | null>(null);
   const frameEtag = useRef<string | null>(null);
-  const activeTurnRef = useRef<string | null>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const frankChatRef = useRef<FrankChatHandle | null>(null);
+  const freshChatRef = useRef(false);
   const wasMobile = useRef<boolean | null>(null);
   const { providers: harnessProviders } = useHarnesses();
 
@@ -138,21 +126,7 @@ export function FrankShell() {
   }, [status, refreshConversations, refreshFrame]);
 
   useEffect(() => {
-    if (!api || activeId === null) {
-      setMessages([]);
-      return;
-    }
-    let cancelled = false;
-    void listMessages(api, activeId)
-      .then((rows) => {
-        if (!cancelled) setMessages(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setMessages([]);
-      });
-    return () => {
-      cancelled = true;
-    };
+    if (!api || activeId === null) return;
   }, [api, activeId]);
 
   /* ---------------- derived ---------------- */
@@ -168,17 +142,13 @@ export function FrankShell() {
     [conversations],
   );
 
-  const contextUsed = useMemo(() => {
-    const chars = messages.reduce((n, m) => n + m.body.length, 0);
-    return Math.min(1, chars / CONTEXT_BUDGET_CHARS);
-  }, [messages]);
-
   const projectName = useCallback((id: string) => displayName(projectOf(id)), []);
 
   /* ---------------- actions ---------------- */
 
   const openConversation = (id: string) => {
     setActiveId(id);
+    freshChatRef.current = false;
     const convo = conversations.find((c) => c.id === id);
     if (convo) {
       setExpanded((prev) => new Set(prev).add(convo.project_id));
@@ -236,185 +206,13 @@ export function FrankShell() {
     });
     setConversations((prev) => [created, ...prev]);
     setActiveId(created.id);
-    setMessages([]);
+    freshChatRef.current = true;
     return created;
   };
 
-  const legacySend = async (input: ChatTurnDraft) => {
-    if (!api) return;
-    const text = input.text;
-    const conversation = active ?? (await startChat(currentProjectId, text));
-    if (!conversation) return;
-
-    const userRow = await appendMessage(api, conversation.id, { kind: 'user', body: text });
-    setMessages((prev) => [...prev, userRow]);
-    await patchConversation(api, conversation.id, { running: true });
-    setConversations((prev) =>
-      prev.map((c) => (c.id === conversation.id ? { ...c, running: true } : c)),
-    );
-    void refreshFrame();
-
-    const controller = new AbortController();
-    abortRef.current = controller;
-    setStreamingText('');
-    let accumulated = '';
-    let turnInfo: TurnInfo = {};
-    let cancelled = false;
-
-    await frankStream(
-      text,
-      conversation.project_id,
-      {
-        onChunk: (chunk) => {
-          accumulated += chunk;
-          setStreamingText(accumulated);
-        },
-        onDone: (info) => {
-          turnInfo = info;
-        },
-        onError: (err) => {
-          accumulated = accumulated || `I couldn't reach my brain just then — ${err}`;
-        },
-      },
-      currentProject.name,
-      currentProject.agent,
-      controller.signal,
-      effectiveModel !== 'auto' ? effectiveModel : undefined,
-    ).catch((err: unknown) => {
-      if (err instanceof StreamAbortedError) {
-        cancelled = true;
-      } else {
-        accumulated = accumulated || 'The stream dropped before I could answer.';
-      }
-    });
-
-    setStreamingText(null);
-    abortRef.current = null;
-
-    if (cancelled) {
-      setConversations((prev) =>
-        prev.map((c) => (c.id === conversation.id ? { ...c, running: false } : c)),
-      );
-      // The local shell must stop immediately. The durable flag is a
-      // best-effort reconciliation: a failed patch must not turn Stop into an
-      // unhandled send failure or write an artificial assistant reply.
-      try {
-        await patchConversation(api, conversation.id, { running: false });
-      } catch {
-        // The authoritative Frame refresh below will reconcile a failed write.
-      }
-      void refreshFrame();
-      return;
-    }
-
-    const body = accumulated.trim() || 'Acknowledged.';
-    const agentRow = await appendMessage(api, conversation.id, {
-      kind: 'agent',
-      body,
-      // These are terminal facts supplied by /api/chat's SSE event.  Keep the
-      // wire names stable in persisted chat history, rather than deriving a
-      // route from the conversation preference after the fact.
-      meta: turnInfoToMessageMeta(turnInfo),
-    });
-    setMessages((prev) => [...prev, agentRow]);
-    await patchConversation(api, conversation.id, { running: false });
-    setConversations((prev) =>
-      prev.map((c) =>
-        c.id === conversation.id
-          ? { ...c, running: false, last_message_at: agentRow.created_at }
-          : c,
-      ),
-    );
-    void refreshFrame();
-  };
-
-  const send = async (draft: ChatTurnDraft): Promise<boolean> => {
-    if (!api) return false;
-    const text = draft.text.trim();
-    const conversation = active ?? (await startChat(currentProjectId, text));
-    if (!conversation) return false;
-    const idempotencyKey = crypto.randomUUID();
-    const input = chatTurnInput({ conversationId: conversation.id, idempotencyKey, draft: { ...draft, text }, model: effectiveModel, thinking: 'off' });
-    const turn = await submitChatTurn(api, input);
-    activeTurnRef.current = turn.turn_id;
-    const userRow: ChatMessageRow = { id: idempotencyKey, conversation_id: conversation.id, kind: 'user', body: text, meta: { attachment_ids: input.attachment_ids }, created_at: turn.created_at };
-    setMessages((prev) => [...prev, userRow]);
-    setConversations((prev) => prev.map((item) => item.id === conversation.id ? { ...item, running: true } : item));
-    setStreamingText('');
-    let accumulated = '';
-    let cursor = -1;
-    let terminal: 'completed' | 'failed' | 'cancelled' | null = null;
-    let completed = false;
-    try {
-      while (!terminal && activeTurnRef.current === turn.turn_id) {
-        const page = await listChatTurnEvents(api, turn.turn_id, cursor);
-        for (const event of page.events) {
-          cursor = Math.max(cursor, event.cursor);
-          if (event.kind === 'text' && typeof event.payload.text === 'string' && event.payload.text !== 'queued') {
-            accumulated += event.payload.text;
-            setStreamingText(accumulated);
-          }
-          if (event.kind === 'error' && typeof event.payload.message === 'string') accumulated = accumulated || event.payload.message;
-          if (event.kind === 'terminal' && ['completed', 'failed', 'cancelled'].includes(String(event.payload.state))) {
-            terminal = event.payload.state as typeof terminal;
-            completed = event.payload.state === 'completed';
-          }
-        }
-        if (!terminal) await new Promise<void>((resolve) => window.setTimeout(resolve, 500));
-      }
-      if (!terminal && activeTurnRef.current !== turn.turn_id) terminal = 'cancelled';
-    } finally {
-      setStreamingText(null);
-      if (activeTurnRef.current === turn.turn_id) activeTurnRef.current = null;
-      setConversations((prev) => prev.map((item) => item.id === conversation.id ? { ...item, running: false } : item));
-    }
-    const body = accumulated.trim() || (terminal === 'cancelled' ? 'Stopped.' : terminal === 'failed' ? 'The turn failed before producing a reply.' : 'Acknowledged.');
-    const agentRow: ChatMessageRow = { id: `${turn.turn_id}:reply`, conversation_id: conversation.id, kind: 'agent', body, meta: { turn_id: turn.turn_id, state: terminal }, created_at: new Date().toISOString() };
-    setMessages((prev) => [...prev, agentRow]);
-    void refreshConversations();
-    void refreshFrame();
-    return completed;
-  };
-
   const stop = () => {
-    const turnId = activeTurnRef.current;
-    activeTurnRef.current = null;
-    if (api && turnId) void cancelChatTurn(api, turnId).catch(() => undefined);
-    abortRef.current?.abort();
-    abortRef.current = null;
-    setStreamingText(null);
+    void frankChatRef.current?.cancel();
     void refreshFrame();
-  };
-
-  const stopWorkbench = async (id: string) => {
-    try {
-      const response = await fetch(WORKBENCH_API.stop(id), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ reason: 'Stopped from Living Frame', command_id: crypto.randomUUID() }),
-      });
-      if (!response.ok) throw new Error(`Workbench stop failed (${response.status}).`);
-      void refreshFrame();
-    } catch (error) {
-      setFrameError(error instanceof Error ? error.message : 'Workbench stop failed.');
-    }
-  };
-
-  const stopFrameMission = async (id: string) => {
-    try {
-      await stopMission(id, 'Stopped from Living Frame');
-      void refreshFrame();
-    } catch (error) {
-      setFrameError(error instanceof Error ? error.message : 'Mission stop failed.');
-    }
-  };
-
-  const changeModel = async (model: string) => {
-    setDraftModel(model);
-    if (api && active) {
-      await patchConversation(api, active.id, { model });
-      setConversations((prev) => prev.map((c) => (c.id === active.id ? { ...c, model } : c)));
-    }
   };
 
   /**
@@ -591,6 +389,29 @@ export function FrankShell() {
           )}
         </div>
 
+        <div className="border-t border-line px-2 pb-1.5 pt-2">
+          <SideLabel>Workspace</SideLabel>
+          <a
+            href="/files"
+            className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-[12.5px] font-medium text-ink2 transition-colors hover:bg-hover hover:text-ink"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted">
+              <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+            </svg>
+            Files
+          </a>
+          <a
+            href="/skills"
+            className="flex w-full items-center gap-2.5 rounded-[9px] px-2.5 py-2 text-[12.5px] font-medium text-ink2 transition-colors hover:bg-hover hover:text-ink"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0 text-muted">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+              <path d="M14 2v6h6" />
+            </svg>
+            Skills
+          </a>
+        </div>
+
         <div className="flex items-center gap-2.5 border-t border-line px-3 py-2.5">
           <span className="grid h-[30px] w-[30px] place-items-center rounded-full bg-ink text-[11px] font-bold text-shell">
             SF
@@ -599,16 +420,6 @@ export function FrankShell() {
             <b className="block text-[12.5px]">Steve</b>
             <span className="text-[10.5px] text-muted">Owner · full autonomy</span>
           </span>
-          <Link
-            href="/console"
-            className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[11px] font-medium text-muted transition-colors hover:bg-hover hover:text-ink"
-            aria-label="Console"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
-              <path d="m4 17 6-6-6-6M12 19h8" />
-            </svg>
-            <span>Console</span>
-          </Link>
         </div>
       </nav>
 
@@ -643,12 +454,6 @@ export function FrankShell() {
           <span className="hidden font-mono text-[9.5px] uppercase tracking-[0.1em] text-muted/80 sm:inline">
             {currentProject.agent}
           </span>
-          <Link
-            href="/console"
-            className="rounded-lg px-2.5 py-1.5 text-[12px] font-medium text-muted transition-colors hover:bg-hover hover:text-ink lg:hidden"
-          >
-            Console
-          </Link>
           <button
             onClick={() => setMobileFrameOpen((v) => !v)}
             id="living-frame-trigger"
@@ -660,14 +465,19 @@ export function FrankShell() {
           </button>
         </header>
 
-        {active ? (
-          <ChatThread
-            messages={messages}
-            streamingText={streamingText}
+        {active && api ? (
+          <FrankChat
+            ref={frankChatRef}
+            api={api}
+            conversationId={active.id}
+            profile={profileForProject(currentProjectId)}
+            restored={active !== null && !freshChatRef.current}
             agentLabel={currentProject.isHome ? 'Frank' : currentProject.agent}
             tint={currentProject.tint}
-            projectName={projectName}
-            onFollowDelegation={(projectId) => openHome(projectId)}
+            onRunningChange={setChatRunning}
+            onTitleChange={(title) => {
+              if (active) void patchConversation(api, active.id, { title });
+            }}
           />
         ) : (
           <ProjectHome
@@ -677,25 +487,6 @@ export function FrankShell() {
             onNew={() => void startChat(currentProjectId)}
           />
         )}
-
-        <ComposerBar
-          scopeLabel={currentProject.isHome ? 'Frank' : currentProject.name}
-          tint={currentProject.isHome ? null : currentProject.tint}
-          rgb={currentProject.isHome ? null : currentProject.rgb}
-          streaming={streamingText !== null}
-          disabled={status !== 'ready'}
-          model={effectiveModel}
-          models={availableModels}
-          thinking="off"
-          contextUsed={contextUsed}
-          conversationId={active?.id}
-          onSend={send}
-          onStop={stop}
-          onModelChange={(m) => void changeModel(m)}
-          onThinkingChange={() => {}}
-          onCompact={() => void startChat(currentProjectId)}
-          onNewChat={() => void startChat(currentProjectId)}
-        />
       </main>
 
         <LivingFrame
@@ -719,9 +510,7 @@ export function FrankShell() {
           onRetryToday={() => { void refreshToday(); void refreshCalendar(); }}
           onStopActiveChat={stop}
           activeChatId={activeId}
-          activeChatStreaming={streamingText !== null}
-          onStopWorkbench={(id) => void stopWorkbench(id)}
-          onStopMission={(id) => void stopFrameMission(id)}
+          activeChatStreaming={chatRunning}
       />
     </div>
   );

@@ -1,7 +1,7 @@
 -- FS-02 — room folder bindings (master plan §8G FS-02, docs/plans/FS_PREP.md).
 --
 -- A folder binding declares, per room, that a synced folder (FS-01 Syncthing
--- model: `/srv/frank/sync/<room-id>/<folder>` on the VPS) is attached to the
+-- model: `/frank/deployed/sync/<room-id>/<folder>` on the VPS) is attached to the
 -- room's workbenches. Each row carries the whole declaration FS-02 fixes:
 --
 --   folder_source   the synced folder's id/name (the source on the device)

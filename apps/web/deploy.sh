@@ -11,7 +11,7 @@
 # which have run, so replaying is a no-op).
 set -euo pipefail
 
-REPO="${FRANK_REPO:-/srv/frank}"
+REPO="${FRANK_REPO:-/frank/deployed}"
 COMPOSE_BASE="${FRANK_COMPOSE_BASE:-$REPO/infra/docker-compose.dev.yml}"
 COMPOSE_APP="${FRANK_COMPOSE_APP:-$REPO/repo/infra/production/docker-compose.app.yml}"
 COMPOSE_ARGS=(-f "$COMPOSE_BASE" -f "$COMPOSE_APP")

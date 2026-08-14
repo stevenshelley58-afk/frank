@@ -78,7 +78,7 @@ break multi-turn through Letta — the agent loop doesn't echo `reasoning_conten
 - Container: `frank-web-letta-v1` on `frank` network
 - DNS: `*.frank.fail` wildcard → VPS (grey-cloud, Caddy TLS)
 - Caddy: `letta-v1.frank.fail` → `frank-web-letta-v1:3001`
-- Letta: `/srv/frank/infra/letta/docker-compose.yml`
+- Letta: `/frank/deployed/infra/letta/docker-compose.yml`
 
 ## Next Steps
 

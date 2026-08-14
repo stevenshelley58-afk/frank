@@ -2671,8 +2671,11 @@
       "acceptance": null,
       "sourceSection": "FRANK-§8",
       "owner": "role/builder",
-      "implementation": [],
-      "test": null,
+      "implementation": [
+        "apps/api/src/routes/skills.ts",
+        "apps/web/src/app/skills"
+      ],
+      "test": "apps/api/src/test/skills.test.ts :: \"W3-2 skills list + detail + path safety\"",
       "threshold": null,
       "evidence": null,
       "status": "owned"
