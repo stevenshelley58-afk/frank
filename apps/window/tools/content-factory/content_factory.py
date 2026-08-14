@@ -207,7 +207,7 @@ def _required_text(mapping: Mapping[str, Any], key: str, path: str) -> str:
 def public_release(release: Mapping[str, Any]) -> dict[str, Any]:
     """Validate and return an immutable public article release."""
     _assert_public_tree(release)
-    required = ("schema", "tool_id", "project_id", "workspace_id", "settings_revision", "pipeline_id", "pipeline_version", "consumer_compatibility", "release_id", "content_id", "version", "immutable", "status", "channel", "title", "body", "media", "seo", "approval_receipt", "provenance", "sanitization_receipts", "published_at")
+    required = ("schema", "tool_id", "project_id", "workspace_id", "settings_revision", "pipeline_id", "pipeline_version", "consumer_compatibility", "release_id", "content_id", "version", "immutable", "status", "channel", "title", "body", "media", "seo", "qa_receipt", "approval_receipt", "provenance", "sanitization_receipts", "published_at")
     missing = [key for key in required if key not in release]
     if missing:
         raise ValueError(f"release missing required fields: {', '.join(missing)}")
@@ -244,6 +244,10 @@ def public_release(release: Mapping[str, Any]) -> dict[str, Any]:
     if not isinstance(seo, Mapping) or not all(isinstance(seo.get(key), str) and seo[key].strip() for key in ("title", "description", "canonical_url")):
         raise ValueError("release.seo requires title, description, and canonical_url")
     _safe_resource_ref(seo["canonical_url"], "seo.canonical_url")
+    qa = release["qa_receipt"]
+    if not isinstance(qa, Mapping) or qa.get("decision") != "pass" or not all(qa.get(key) for key in ("receipt_ref", "checked_at")):
+        raise ValueError("release requires a passing QA receipt")
+    _require_id(qa["receipt_ref"], "qa_receipt.receipt_ref")
     approval = release["approval_receipt"]
     if not isinstance(approval, Mapping) or approval.get("decision") != "approve" or not all(approval.get(key) for key in ("receipt_ref", "decided_at")):
         raise ValueError("release requires an approval receipt with approve decision")
@@ -260,7 +264,7 @@ def public_release(release: Mapping[str, Any]) -> dict[str, Any]:
         if not isinstance(scan, Mapping) or scan.get("status") != "passed" or not all(scan.get(key) for key in ("receipt_id", "scanned_at")):
             raise ValueError(f"release requires a passed {scan_name}")
     _required_text(release, "published_at", "release")
-    public = {key: deepcopy(release[key]) for key in ("schema", "tool_id", "project_id", "workspace_id", "settings_revision", "pipeline_id", "pipeline_version", "consumer_compatibility", "release_id", "content_id", "version", "immutable", "status", "channel", "title", "summary", "body", "media", "seo", "approval_receipt", "provenance", "sanitization_receipts", "published_at") if key in release}
+    public = {key: deepcopy(release[key]) for key in ("schema", "tool_id", "project_id", "workspace_id", "settings_revision", "pipeline_id", "pipeline_version", "consumer_compatibility", "release_id", "content_id", "version", "immutable", "status", "channel", "title", "summary", "body", "media", "seo", "qa_receipt", "approval_receipt", "provenance", "sanitization_receipts", "published_at") if key in release}
     public["release_hash"] = sha256(json.dumps(public, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
     return public
 

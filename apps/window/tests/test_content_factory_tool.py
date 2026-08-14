@@ -24,6 +24,7 @@ class ContentFactoryToolTests(unittest.TestCase):
             "body": {"format": "markdown", "content": "# Article\n\nPublic content."},
             "media": [{"id": "hero-1", "url": "https://cdn.example/hero.png", "alt_text": "Article hero", "checksum": checksum}],
             "seo": {"title": "A public article", "description": "A public description.", "canonical_url": "https://example/article"},
+            "qa_receipt": {"decision": "pass", "receipt_ref": "qa-1", "checked_at": "2026-08-14T00:00:00Z"},
             "approval_receipt": {"decision": "approve", "receipt_ref": "approval-1", "decided_at": "2026-08-14T00:00:00Z"},
             "provenance": {"trace_id": "trace-1", "artifact_checksums": {"article": checksum}},
             "sanitization_receipts": {"pii_scan": {"status": "passed", "receipt_id": "pii-scan-1", "scanned_at": "2026-08-14T00:00:00Z"}, "secret_scan": {"status": "passed", "receipt_id": "secret-scan-1", "scanned_at": "2026-08-14T00:00:00Z"}},
@@ -81,6 +82,10 @@ class ContentFactoryToolTests(unittest.TestCase):
         del missing_approval["approval_receipt"]
         with self.assertRaises(ValueError):
             content_factory.public_release(missing_approval)
+        missing_qa = self.valid_release()
+        del missing_qa["qa_receipt"]
+        with self.assertRaises(ValueError):
+            content_factory.public_release(missing_qa)
 
     def test_public_release_rejects_nested_leakage(self):
         leaked = self.valid_release()

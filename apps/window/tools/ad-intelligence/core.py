@@ -303,6 +303,8 @@ class AdIntelligenceRelease:
     provenance_refs: tuple[str, ...]
     trace_refs: tuple[str, ...]
     settings_refs: tuple[str, ...]
+    qa_receipt_ref: str
+    sanitization_receipt_refs: tuple[str, ...]
     qa_approved: bool
     pii_sanitized: bool
     secret_sanitized: bool
@@ -321,7 +323,10 @@ class AdIntelligenceRelease:
         for field_name, value in (("release_id", self.release_id), ("version", self.version), ("status", self.status), ("project_scope", self.project_scope), ("checksum", self.checksum)):
             _safe_text(value, field_name)
         if self.status != "released" or self.immutable is not True or not self.qa_approved or not self.pii_sanitized or not self.secret_sanitized: raise ValueError("release must be immutable, released, approved, and sanitized")
-        for field_name, values in (("provenance_refs", self.provenance_refs), ("trace_refs", self.trace_refs), ("settings_refs", self.settings_refs)): _validate_refs(values, field_name)
+        for field_name, values in (("provenance_refs", self.provenance_refs), ("trace_refs", self.trace_refs), ("settings_refs", self.settings_refs), ("sanitization_receipt_refs", self.sanitization_receipt_refs)):
+            _validate_refs(values, field_name)
+            if not values: raise ValueError(f"{field_name} must not be empty")
+        _safe_text(self.qa_receipt_ref, "qa_receipt_ref")
         _validate_refs(self.consumer_compatibility, "consumer_compatibility")
         if not self.consumer_compatibility: raise ValueError("consumer_compatibility must not be empty")
         payload = _validate_release_export(self.public_export)
@@ -338,16 +343,18 @@ class AdIntelligenceRelease:
             "immutable": self.immutable, "project_scope": self.project_scope,
             "checksum": self.checksum, "provenance_refs": list(self.provenance_refs),
             "trace_refs": list(self.trace_refs), "settings_refs": list(self.settings_refs),
+            "qa_receipt_ref": self.qa_receipt_ref,
+            "sanitization_receipt_refs": list(self.sanitization_receipt_refs),
             "qa_approved": self.qa_approved, "pii_sanitized": self.pii_sanitized,
             "secret_sanitized": self.secret_sanitized,
         }
         result["public_export"] = _thaw(self.public_export)
         return result
 
-def build_release(release_id: str, version: str, project_scope: str, public_export: dict[str, Any], *, provenance_refs: tuple[str, ...] = (), trace_refs: tuple[str, ...] = (), settings_refs: tuple[str, ...] = (), consumer_compatibility: tuple[str, ...] = ("ad-intelligence-public-v1",)) -> AdIntelligenceRelease:
+def build_release(release_id: str, version: str, project_scope: str, public_export: dict[str, Any], *, provenance_refs: tuple[str, ...], trace_refs: tuple[str, ...], settings_refs: tuple[str, ...], qa_receipt_ref: str, sanitization_receipt_refs: tuple[str, ...], consumer_compatibility: tuple[str, ...] = ("ad-intelligence-public-v1",)) -> AdIntelligenceRelease:
     payload = _validate_release_export(public_export)
     checksum = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
-    return AdIntelligenceRelease(release_id, version, "released", True, project_scope, checksum, provenance_refs, trace_refs, settings_refs, True, True, True, payload, consumer_compatibility=consumer_compatibility)
+    return AdIntelligenceRelease(release_id, version, "released", True, project_scope, checksum, provenance_refs, trace_refs, settings_refs, qa_receipt_ref, sanitization_receipt_refs, True, True, True, payload, consumer_compatibility=consumer_compatibility)
 
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict): return {key: _json_ready(child) for key, child in value.items()}

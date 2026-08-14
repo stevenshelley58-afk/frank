@@ -19,6 +19,14 @@ from ad_intelligence.protocol import ALLOWED_ACTIONS, ALLOWED_EVENTS, validate_a
 
 
 class AdIntelligenceToolTest(unittest.TestCase):
+    RELEASE_EVIDENCE = {
+        "provenance_refs": ("source://a-1",),
+        "trace_refs": ("trace://run-1",),
+        "settings_refs": ("settings://ad-radar/v1",),
+        "qa_receipt_ref": "receipt://qa/run-1",
+        "sanitization_receipt_refs": ("receipt://pii/run-1", "receipt://secret/run-1"),
+    }
+
     def test_home_manifest_is_declarative_and_exactly_scoped(self):
         path = Path(__file__).parents[1] / "tools" / "ad-intelligence" / "home.json"
         manifest = json.loads(path.read_text(encoding="utf-8"))
@@ -105,7 +113,7 @@ class AdIntelligenceToolTest(unittest.TestCase):
 
     def test_release_is_immutable_and_sanitized(self):
         payload = export_public("blockwise", "2026-08-14T00:00:00Z", [PublicCreative("a-1", "https://public.example/ad", classification=PublicClassification("listing", .95, receipt_refs=("receipt://a-1",), provenance_refs=("source://a-1",)))])
-        release = build_release("release-1", "1.0.0", "blockwise", payload, provenance_refs=("source://a-1",), trace_refs=("trace://run-1",), settings_refs=("settings://ad-radar/v1",))
+        release = build_release("release-1", "1.0.0", "blockwise", payload, **self.RELEASE_EVIDENCE)
         self.assertTrue(release.immutable)
         self.assertTrue(release.pii_sanitized and release.secret_sanitized and release.qa_approved)
         self.assertEqual(release.to_dict()["status"], "released")
@@ -114,17 +122,22 @@ class AdIntelligenceToolTest(unittest.TestCase):
         self.assertEqual(release.to_dict()["pipeline_id"], "ad-radar-pipeline")
         self.assertEqual(release.to_dict()["pipeline_version"], "1.0.0")
         self.assertEqual(release.to_dict()["consumer_compatibility"], ["ad-intelligence-public-v1"])
+        self.assertEqual(release.to_dict()["qa_receipt_ref"], "receipt://qa/run-1")
+        self.assertEqual(len(release.to_dict()["sanitization_receipt_refs"]), 2)
         with self.assertRaises(TypeError): release.public_export["project"] = "other"
 
         private_payload = json.loads(json.dumps(payload))
         private_payload["creatives"][0]["copy"]["prompt_ref"] = "private"
-        with self.assertRaises(ValueError): build_release("release-2", "1.0.0", "blockwise", private_payload)
+        with self.assertRaises(ValueError): build_release("release-2", "1.0.0", "blockwise", private_payload, **self.RELEASE_EVIDENCE)
         pii_payload = json.loads(json.dumps(payload))
         pii_payload["creatives"][0]["copy"]["body"] = "Call +61 400 123 456"
-        with self.assertRaises(ValueError): build_release("release-3", "1.0.0", "blockwise", pii_payload)
+        with self.assertRaises(ValueError): build_release("release-3", "1.0.0", "blockwise", pii_payload, **self.RELEASE_EVIDENCE)
         private_ref_payload = json.loads(json.dumps(payload))
         private_ref_payload["creatives"][0]["source_ref"] = "openbao://private/source"
-        with self.assertRaises(ValueError): build_release("release-4", "1.0.0", "blockwise", private_ref_payload)
+        with self.assertRaises(ValueError): build_release("release-4", "1.0.0", "blockwise", private_ref_payload, **self.RELEASE_EVIDENCE)
+
+        with self.assertRaises(ValueError):
+            build_release("release-5", "1.0.0", "blockwise", payload, **{**self.RELEASE_EVIDENCE, "trace_refs": ()})
 
 
 if __name__ == "__main__": unittest.main()
