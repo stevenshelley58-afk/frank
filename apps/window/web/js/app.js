@@ -154,11 +154,9 @@ async function loadChatMessages(chatId) {
 }
 async function selectChat(chatId) {
   if (!chatId) return;
+  if (chatAtts.length) await discardAttachments(chatAtts.slice(), true);
   currentChatId = chatId;
   localStorage.setItem("frank.chat", chatId);
-  chatAtts.forEach(releaseAttachmentPreview);
-  chatAtts = [];
-  renderAtts();
   renderChatNav();
   const selected = chatSessions.find((chat) => chat.id === chatId);
   $("#view-sub").textContent = selected?.title || "";
@@ -311,7 +309,7 @@ function releaseAttachmentPreview(attachment) {
   if (attachment?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(attachment.previewUrl);
 }
 function attachmentPayload(attachment) {
-  const { status, previewUrl, uploadPromise, uploadError, ...payload } = attachment;
+  const { status, previewUrl, uploadPromise, uploadError, batchKey, discarded, ...payload } = attachment;
   return payload;
 }
 function pendingAttachment(attachment, index) {
@@ -329,14 +327,78 @@ function pendingAttachment(attachment, index) {
   return `<span class="att-chip big ${attachment.status === "error" ? "is-error" : ""}">${escapeHtml(attachment.relative_path || attachment.name)} <em>${fmtSize(attachment.size)}${state}</em>
     <button type="button" class="att-x" data-i="${index}" aria-label="Remove">×</button></span>`;
 }
+function composerFolderKey(attachment) {
+  const path = String(attachment.relative_path || "").replace(/\\/g, "/");
+  const slash = path.indexOf("/");
+  return slash > 0 ? encodeURIComponent(`${attachment.batchKey || "batch"}|${path.slice(0, slash)}`) : "";
+}
+function pendingFolder(group) {
+  const uploading = group.items.some((attachment) => attachment.status === "uploading");
+  const failed = group.items.some((attachment) => attachment.status === "error");
+  const state = failed ? "failed" : uploading ? "uploading" : "ready";
+  const detail = `${group.items.length} item${group.items.length === 1 ? "" : "s"}${uploading ? " · uploading" : failed ? " · some failed" : ""}`;
+  return `<span class="att-folder-pending is-${state}">
+    <span class="att-folder-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9Z"/></svg></span>
+    <span class="att-folder-copy"><strong>${escapeHtml(group.name)}</strong><em>${detail}</em></span>
+    ${uploading ? '<span class="att-folder-spin" aria-label="Uploading folder"></span>' : ""}
+    <button type="button" class="att-x att-group-x" data-group-key="${escapeHtml(group.key)}" aria-label="Remove folder ${escapeHtml(group.name)}">×</button>
+  </span>`;
+}
+async function deleteUploadedAttachments(attachments) {
+  const ids = [...new Set(attachments.map((attachment) => attachment.id).filter(Boolean))];
+  if (!ids.length) return;
+  const response = await fetch("/api/chat/uploads", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ids }),
+  });
+  if (!response.ok) throw new Error(`Cleanup failed (HTTP ${response.status})`);
+}
+async function discardAttachments(attachments, silent = false) {
+  const removing = attachments.filter(Boolean);
+  if (!removing.length) return;
+  const removingSet = new Set(removing);
+  removing.forEach((attachment) => {
+    attachment.discarded = true;
+    releaseAttachmentPreview(attachment);
+  });
+  chatAtts = chatAtts.filter((attachment) => !removingSet.has(attachment));
+  renderAtts();
+  const waits = [...new Set(removing.map((attachment) => attachment.uploadPromise).filter(Boolean))];
+  await Promise.allSettled(waits);
+  try {
+    await deleteUploadedAttachments(removing);
+  } catch {
+    if (!silent) addChatMsg({ role: "sys", text: "Removed from the draft, but Frank could not clear the background upload.", ts: Date.now() / 1000 | 0 });
+  }
+}
 function renderAtts() {
   const row = $("#att-row");
-  row.innerHTML = chatAtts.map(pendingAttachment).join("");
+  const rendered = [];
+  const folders = new Map();
+  chatAtts.forEach((attachment, index) => {
+    const key = composerFolderKey(attachment);
+    if (!key) {
+      rendered.push({ kind: "item", html: pendingAttachment(attachment, index) });
+      return;
+    }
+    let group = folders.get(key);
+    if (!group) {
+      const path = String(attachment.relative_path || "").replace(/\\/g, "/");
+      group = { kind: "folder", key, name: path.slice(0, path.indexOf("/")), items: [] };
+      folders.set(key, group);
+      rendered.push(group);
+    }
+    group.items.push(attachment);
+  });
+  row.innerHTML = rendered.map((entry) => entry.kind === "folder" ? pendingFolder(entry) : entry.html).join("");
   row.classList.toggle("has-items", chatAtts.length > 0);
   $$(".att-x", row).forEach((button) => button.addEventListener("click", () => {
-    const [removed] = chatAtts.splice(Number(button.dataset.i), 1);
-    releaseAttachmentPreview(removed);
-    renderAtts();
+    if (button.dataset.groupKey) {
+      void discardAttachments(chatAtts.filter((attachment) => composerFolderKey(attachment) === button.dataset.groupKey));
+    } else {
+      void discardAttachments([chatAtts[Number(button.dataset.i)]]);
+    }
   }));
 }
 async function uploadFiles(items) {
@@ -355,6 +417,7 @@ async function uploadFiles(items) {
 async function stageFiles(items) {
   const selected = items.slice(0, 500);
   if (!selected.length) return;
+  const batchKey = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
   const staged = selected.map(({ file, path }) => ({
     name: file.name,
     relative_path: path || file.webkitRelativePath || file.name,
@@ -363,6 +426,7 @@ async function stageFiles(items) {
     status: "uploading",
     previewUrl: String(file.type || "").startsWith("image/") ? URL.createObjectURL(file) : "",
     uploadPromise: null,
+    batchKey,
   }));
   chatAtts.push(...staged);
   uploadsInFlight += staged.length;

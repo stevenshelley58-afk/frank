@@ -492,6 +492,44 @@ def chat_upload():
     return jsonify({"ok": True, "attachments": saved})
 
 
+@app.delete("/api/chat/uploads")
+def chat_upload_delete():
+    """Delete staged attachments that the user removed before sending."""
+    body = request.get_json(silent=True) or {}
+    raw_ids = body.get("ids")
+    if not isinstance(raw_ids, list) or not raw_ids:
+        abort(400, "no upload ids")
+    if len(raw_ids) > 500:
+        abort(413, "too many upload ids")
+
+    upload_root = UPLOAD_DIR.resolve()
+    targets = []
+    for raw_id in raw_ids:
+        upload_id = str(raw_id or "").replace("\\", "/").lstrip("/")
+        target = _upload_target(upload_id)
+        if target is None:
+            abort(400, "invalid upload id")
+        targets.append((upload_id, target))
+
+    deleted = []
+    missing = []
+    for upload_id, target in targets:
+        if not target.is_file():
+            missing.append(upload_id)
+            continue
+        target.unlink()
+        deleted.append(upload_id)
+        parent = target.parent
+        while parent != upload_root:
+            try:
+                parent.rmdir()
+            except OSError:
+                break
+            parent = parent.parent
+
+    return jsonify({"ok": True, "deleted": deleted, "missing": missing})
+
+
 @app.get("/api/chat/uploads/<path:upload_id>")
 def chat_upload_get(upload_id: str):
     target = _upload_target(upload_id)

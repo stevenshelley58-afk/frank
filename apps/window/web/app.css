@@ -265,6 +265,28 @@ a { color: inherit; text-decoration: none; }
   backdrop-filter: blur(4px);
 }
 .att-image-pending .att-x:hover { background: rgba(20,20,20,.92); color: #fff; }
+.att-folder-pending {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  min-width: 210px;
+  max-width: 300px;
+  min-height: 54px;
+  padding: 7px 38px 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--chip);
+}
+.att-folder-pending.is-failed { border-color: color-mix(in srgb, var(--bad) 45%, var(--line)); }
+.att-folder-icon { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; background: var(--bg); color: var(--mute); }
+.att-folder-icon svg { width: 18px; height: 18px; }
+.att-folder-copy { min-width: 0; display: flex; flex-direction: column; }
+.att-folder-copy strong { overflow: hidden; color: var(--ink); font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.att-folder-copy em { overflow: hidden; color: var(--faint); font-size: 10px; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.att-folder-pending .att-x { position: absolute; top: 7px; right: 7px; }
+.att-folder-spin { width: 12px; height: 12px; border: 1.5px solid var(--line); border-top-color: var(--ink); border-radius: 50%; animation: spin .8s linear infinite; }
 .att-uploading, .att-failed {
   position: absolute;
   left: 7px;

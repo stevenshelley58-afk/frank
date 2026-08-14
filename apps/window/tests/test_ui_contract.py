@@ -26,7 +26,10 @@ class UiContractTest(unittest.TestCase):
         self.assertIn("stageFiles(await filesFromTransfer", script)
         self.assertIn("function pendingAttachment", script)
         self.assertIn("await Promise.allSettled(waits)", script)
+        self.assertIn('method: "DELETE"', script)
+        self.assertIn("discardAttachments", script)
         self.assertIn("att-image-pending", styles)
+        self.assertIn("att-folder-pending", styles)
 
 
 if __name__ == "__main__":
