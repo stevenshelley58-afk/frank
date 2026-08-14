@@ -3,20 +3,17 @@
  *
  * Covers:
  *  - canonical-json: sorted keys, float policy, determinism, edge cases
- *  - ContextPackAssembler: assembly, signing, verification, tamper detection,
- *    memory recall integration, trust-label enforcement
+ *  - ContextPackAssembler: assembly, signing, verification, tamper detection
  */
 
 import { randomBytes } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 
-import { InMemoryMemoryProvider } from '@frank/memory';
 import { InMemoryKeyResolver } from '@frank/policy';
 
 import {
   ContextPackAssembler,
   MissingPackSigningKeyError,
-  UntrustedMemoryViolationError,
   canonicalJson,
 } from './index';
 import { NonCanonicalValueError } from './canonical-json';
@@ -94,22 +91,6 @@ function makeResolver(): InMemoryKeyResolver {
   return new InMemoryKeyResolver([[KEY_HANDLE, KEY]]);
 }
 
-function makeMemoryWithFacts(): InMemoryMemoryProvider {
-  const mem = new InMemoryMemoryProvider();
-  // Seed some facts asynchronously
-  const scope = { cellId: 'cell-1', ownerId: 'owner-1' };
-  // store is async but we can fire-and-forget for test setup
-  void mem.store({
-    messages: [
-      { role: 'user', content: 'The deploy target is production cluster us-east-1' },
-      { role: 'user', content: 'Steven prefers TypeScript strict mode' },
-      { role: 'user', content: 'The budget cap is $50 per run' },
-    ],
-    scope,
-  });
-  return mem;
-}
-
 function makeInput(overrides: Partial<Parameters<ContextPackAssembler['assemble']>[0]> = {}) {
   return {
     packId: 'pack-001',
@@ -137,8 +118,6 @@ function makeInput(overrides: Partial<Parameters<ContextPackAssembler['assemble'
       doNotAssume: ['production credentials are valid'],
     },
     now: '2026-08-01T12:00:00Z',
-    recallTopK: 5,
-    memoryScope: { cellId: 'cell-1', ownerId: 'owner-1' },
     signerId: SIGNER_ID,
     keyHandle: KEY_HANDLE,
     ...overrides,
@@ -147,7 +126,7 @@ function makeInput(overrides: Partial<Parameters<ContextPackAssembler['assemble'
 
 describe('ContextPackAssembler', () => {
   it('assembles a valid pack with all required fields', async () => {
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), makeResolver());
+    const assembler = new ContextPackAssembler(makeResolver());
     const pack = await assembler.assemble(makeInput());
 
     expect(pack.schema).toBe('frank.context-pack/v1');
@@ -174,7 +153,7 @@ describe('ContextPackAssembler', () => {
   });
 
   it('includes optional fields when provided', async () => {
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), makeResolver());
+    const assembler = new ContextPackAssembler(makeResolver());
     const pack = await assembler.assemble(
       makeInput({
         adrExcerpts: ['ADR-001: use HMAC for Slice 1'],
@@ -187,41 +166,30 @@ describe('ContextPackAssembler', () => {
   });
 
   it('omits optional fields when not provided', async () => {
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), makeResolver());
+    const assembler = new ContextPackAssembler(makeResolver());
     const pack = await assembler.assemble(makeInput());
 
     expect(pack.adrExcerpts).toBeUndefined();
     expect(pack.relatedWork).toBeUndefined();
   });
 
-  it('recalls memory into the memory section', async () => {
-    const mem = makeMemoryWithFacts();
-    // Wait for store to complete
-    await new Promise((r) => setTimeout(r, 10));
-
-    const assembler = new ContextPackAssembler(mem, makeResolver());
+  it('emits an empty memory section (memory system removed)', async () => {
+    const assembler = new ContextPackAssembler(makeResolver());
     const pack = await assembler.assemble(makeInput());
 
-    expect(pack.memory.recallQuery).toBe(makeInput().goal);
-    expect(pack.memory.backend).toBe('in-memory');
-    // Should recall at least the deploy-related fact
-    expect(pack.memory.recalled.length).toBeGreaterThan(0);
-    for (const fact of pack.memory.recalled) {
-      expect(fact.trust).toBe('generated-untrusted');
-      expect(fact.relevance).toBeGreaterThan(0);
-    }
+    // The contract still requires `memory`; with the memory system gone it is
+    // always empty rather than omitted (W1-2).
+    expect(pack.memory).toEqual({
+      recalled: [],
+      recallQuery: 'deploy the service to production cluster us-east-1',
+      backend: 'none',
+    });
   });
 
-  it('returns empty recalled array when nothing is relevant', async () => {
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), makeResolver());
-    const pack = await assembler.assemble(makeInput({ goal: 'zzz no match' }));
 
-    expect(pack.memory.recalled).toEqual([]);
-    expect(pack.memory.recallQuery).toBe('zzz no match');
-  });
 
   it('is reproducible: same inputs produce same hash', async () => {
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), makeResolver());
+    const assembler = new ContextPackAssembler(makeResolver());
     const input = makeInput();
     const pack1 = await assembler.assemble(input);
     const pack2 = await assembler.assemble(input);
@@ -232,7 +200,7 @@ describe('ContextPackAssembler', () => {
 
   it('verify returns true for an untampered pack', async () => {
     const resolver = makeResolver();
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), resolver);
+    const assembler = new ContextPackAssembler(resolver);
     const pack = await assembler.assemble(makeInput());
 
     expect(assembler.verify(pack, SIGNER_ID, KEY_HANDLE)).toBe(true);
@@ -240,7 +208,7 @@ describe('ContextPackAssembler', () => {
 
   it('verify returns false when the goal is tampered', async () => {
     const resolver = makeResolver();
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), resolver);
+    const assembler = new ContextPackAssembler(resolver);
     const pack = await assembler.assemble(makeInput());
 
     const tampered = { ...pack, goal: 'deploy to a DIFFERENT target' };
@@ -249,7 +217,7 @@ describe('ContextPackAssembler', () => {
 
   it('verify returns false when the signature is tampered', async () => {
     const resolver = makeResolver();
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), resolver);
+    const assembler = new ContextPackAssembler(resolver);
     const pack = await assembler.assemble(makeInput());
 
     const tampered = {
@@ -261,7 +229,7 @@ describe('ContextPackAssembler', () => {
 
   it('verify returns false when the content hash is tampered', async () => {
     const resolver = makeResolver();
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), resolver);
+    const assembler = new ContextPackAssembler(resolver);
     const pack = await assembler.assemble(makeInput());
 
     const tampered = {
@@ -273,18 +241,18 @@ describe('ContextPackAssembler', () => {
 
   it('verify returns false with wrong key', async () => {
     const resolver = makeResolver();
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), resolver);
+    const assembler = new ContextPackAssembler(resolver);
     const pack = await assembler.assemble(makeInput());
 
     // A different assembler with a different key
     const otherResolver = new InMemoryKeyResolver([[KEY_HANDLE, randomBytes(32)]]);
-    const otherAssembler = new ContextPackAssembler(new InMemoryMemoryProvider(), otherResolver);
+    const otherAssembler = new ContextPackAssembler(otherResolver);
     expect(otherAssembler.verify(pack, SIGNER_ID, KEY_HANDLE)).toBe(false);
   });
 
   it('verify returns false when key handle is unknown', async () => {
     const resolver = makeResolver();
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), resolver);
+    const assembler = new ContextPackAssembler(resolver);
     const pack = await assembler.assemble(makeInput());
 
     expect(assembler.verify(pack, SIGNER_ID, 'handle:nonexistent')).toBe(false);
@@ -292,63 +260,19 @@ describe('ContextPackAssembler', () => {
 
   it('throws MissingPackSigningKeyError when key is unavailable', async () => {
     const emptyResolver = new InMemoryKeyResolver([]);
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), emptyResolver);
+    const assembler = new ContextPackAssembler(emptyResolver);
 
     await expect(assembler.assemble(makeInput())).rejects.toThrow(MissingPackSigningKeyError);
   });
 
-  it('enforces generated-untrusted on recalled facts', async () => {
-    // A fake provider that returns a fact with the wrong trust label
-    const badMem = {
-      name: 'bad-mem',
-      async recall() {
-        return [
-          {
-            fact: 'I am trusted',
-            trust: 'verified-source' as const,
-            sourceId: 'mem://1',
-            classification: 'internal' as const,
-            relevance: 0.9,
-          },
-        ];
-      },
-      async store() { return { results: [] }; },
-      async list() { return []; },
-      async edit() { throw new Error('nope'); },
-      async expire() { throw new Error('nope'); },
-      async remove() { throw new Error('nope'); },
-      async health() { return { healthy: true, backend: 'bad-mem' }; },
-    };
-
-    const assembler = new ContextPackAssembler(badMem, makeResolver());
-    await expect(assembler.assemble(makeInput())).rejects.toThrow(UntrustedMemoryViolationError);
-  });
 
   it('pack is frozen (immutable)', async () => {
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), makeResolver());
+    const assembler = new ContextPackAssembler(makeResolver());
     const pack = await assembler.assemble(makeInput());
 
     expect(Object.isFrozen(pack)).toBe(true);
     expect(Object.isFrozen(pack.integrity)).toBe(true);
   });
 
-  it('respects recallTopK limit', async () => {
-    const mem = makeMemoryWithFacts();
-    await new Promise((r) => setTimeout(r, 10));
 
-    const assembler = new ContextPackAssembler(mem, makeResolver());
-    const pack = await assembler.assemble(makeInput({ recallTopK: 1 }));
-
-    expect(pack.memory.recalled.length).toBeLessThanOrEqual(1);
-  });
-
-  it('memory section uses empty array not omission for no recall', async () => {
-    const assembler = new ContextPackAssembler(new InMemoryMemoryProvider(), makeResolver());
-    const pack = await assembler.assemble(makeInput({ goal: 'completely unrelated zzz' }));
-
-    // Empty array, not undefined — "we looked and minimized to nothing"
-    expect(pack.memory.recalled).toEqual([]);
-    expect(pack.memory).toBeDefined();
-    expect(pack.memory.backend).toBe('in-memory');
-  });
 });

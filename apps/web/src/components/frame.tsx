@@ -9,8 +9,7 @@ import { briefFromToday } from '@/lib/frank';
 import { useCalendar } from '@/lib/use-calendar';
 import { useData, useToast } from './providers';
 import { clockTime, TIME_ZONE } from '@/lib/time';
-import { IconPin, IconPlus, IconTree } from './icons';
-import { WorktreesBody } from './worktree-panel';
+import { IconPin, IconPlus } from './icons';
 
 /* ------------------------------------------------------------------ */
 /* Living frame — ambient world-state around the chat (D2/D5/D10).     */
@@ -98,12 +97,6 @@ function CentralFrame() {
       {!hidden.has('running') && (
         <Widget title="Running" onRemove={() => remove('running')}>
           <RunningBody />
-        </Widget>
-      )}
-
-      {!hidden.has('worktrees') && (
-        <Widget title="Code status" icon={<IconTree size={12} />} onRemove={() => remove('worktrees')}>
-          <WorktreesBody />
         </Widget>
       )}
 

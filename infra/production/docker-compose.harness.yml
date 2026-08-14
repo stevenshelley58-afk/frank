@@ -36,7 +36,7 @@ services:
         source: frank-cell-seaweedfs-data
         target: /data
       - type: bind
-        source: /srv/frank/secrets/seaweedfs/s3.json
+        source: /frank/deployed/secrets/seaweedfs/s3.json
         target: /etc/seaweedfs/s3.json
         read_only: true
     networks: !override [frank-attachments]
@@ -57,7 +57,7 @@ services:
     image: "${FRANK_LITELLM_CURRENT_IMAGE:?reviewed LiteLLM digest required}"
     command: ["--config", "/etc/litellm/config.yaml", "--port", "4000"]
     networks: [frank, frank-model]
-    volumes: ["${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/harness/litellm/config.yaml:/etc/litellm/config.yaml:ro"]
+    volumes: ["${FRANK_RELEASE_SOURCE:-/projects/frank}/infra/harness/litellm/config.yaml:/etc/litellm/config.yaml:ro"]
     environment:
       # Admin key is mounted only in LiteLLM. Application virtual-key bootstrap is
       # external evidence; no runtime service receives this credential in this overlay.
@@ -115,7 +115,7 @@ services:
     networks: [frank, frank-attachments]
     volumes:
       - "frank-clamav-signatures:/var/lib/clamav"
-      - "${FRANK_RELEASE_SOURCE:-/srv/frank/repo}/infra/harness/clamav/clamd.conf:/etc/clamav/clamd.conf:ro"
+      - "${FRANK_RELEASE_SOURCE:-/projects/frank}/infra/harness/clamav/clamd.conf:/etc/clamav/clamd.conf:ro"
     init: true
     restart: unless-stopped
     read_only: true

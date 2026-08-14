@@ -1,13 +1,8 @@
 import type { ApiFetch, WorkSummary } from './api';
 
-export type FrameRunning =
-  | { kind: 'workbench'; id: string; work_item_id: string; room_id: string | null; state: string; updated_at: string }
-  | { kind: 'mission'; id: string; room_id: string; room_name: string; objective: string; state: string; updated_at: string }
-  | { kind: 'chat'; id: string; project_id: string; agent: string; title: string; model: string; thinking: string; running: true; last_message_at: string };
+export type FrameRunning = { kind: 'chat'; id: string; project_id: string; agent: string; title: string; model: string; thinking: string; running: true; last_message_at: string };
 
-export type FrameReceipt =
-  | { kind: 'workbench'; workbench_id: string; work_item_id: string; room_id: string | null; summary: string; published_at: string; published_by: string }
-  | { kind: 'chat'; message_id: string; conversation_id: string; project_id: string; body: string; created_at: string };
+export type FrameReceipt = { kind: 'chat'; message_id: string; conversation_id: string; project_id: string; body: string; created_at: string };
 
 export interface FrameResponse {
   waiting: WorkSummary[];

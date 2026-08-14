@@ -13,14 +13,15 @@
     "lint": "echo 'lint: api (schema + dependency gates run at repo root)'"
   },
   "dependencies": {
-    "@frank/adapter-harness-goose": "workspace:*",
     "@frank/adapter-postgres": "workspace:*",
     "@frank/contracts": "workspace:*",
+    "@frank/hermes-client": "workspace:*",
     "@frank/identity": "workspace:*",
     "@frank/kernel": "workspace:*",
     "@frank/policy": "workspace:*",
     "drizzle-orm": "0.45.2",
     "fastify": "5.10.0",
+    "gray-matter": "^4.0.3",
     "tsx": "4.23.11",
     "zod": "4.4.3"
   },
@@ -33,11 +34,11 @@
     "layer": "app",
     "mayDependOn": [
       "@frank/contracts",
+      "@frank/hermes-client",
       "@frank/policy",
       "@frank/identity",
       "@frank/kernel",
-      "@frank/adapter-postgres",
-      "@frank/adapter-harness-goose"
+      "@frank/adapter-postgres"
     ]
   }
 }

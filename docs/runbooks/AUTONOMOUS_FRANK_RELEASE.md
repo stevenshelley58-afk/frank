@@ -32,7 +32,7 @@ between the backup and smoke gates.
 - Database restore is never automatic. A failed release normally rolls the application
   images back while preserving forward-compatible schema changes.
 - The candidate production application definition is always the ordered pair
-  `/srv/frank/infra/docker-compose.dev.yml` then the reviewed
+  `/frank/deployed/infra/docker-compose.dev.yml` then the reviewed
   `$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml`. The release source is a
   separate clean immutable worktree; it is never the mutable central workspace. Never
   reverse the files or apply the overlay alone. When `FRANK_HARNESS_ENABLED=true`, it is
@@ -65,7 +65,7 @@ Before enabling the third unit, create (and record) only the external `frank-att
 and `frank-model` networks plus the existing `frank-cell-seaweedfs-data` volume. This is a
 reversible host prerequisite: removing an
 unused network is allowed; volumes are never removed. Render
-`/srv/frank/secrets/seaweedfs/s3.json` through `render-seaweedfs-s3-config.sh` at mode 0600
+`/frank/deployed/secrets/seaweedfs/s3.json` through `render-seaweedfs-s3-config.sh` at mode 0600
 before Compose; mounting the repository template or unresolved placeholders is forbidden.
 Immediately before the first Seaweed start, the release procedure renders a temporary
 bootstrap identity alongside those scoped identities. After bucket/lifecycle creation it
@@ -98,9 +98,9 @@ set -Eeuo pipefail
 set +x
 umask 077
 
-cd /srv/frank
+cd /frank/deployed
 release_id="$(date -u +%Y%m%dT%H%M%SZ)"
-evidence_dir="/srv/frank/release-evidence/$release_id"
+evidence_dir="/frank/deployed/release-evidence/$release_id"
 install -d -m 0700 -- "$evidence_dir"
 ```
 
@@ -117,16 +117,16 @@ test "${#FRANK_EXPECTED_COMMIT}" -eq 40
 printf '%s' "$FRANK_EXPECTED_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
 release_branch="release-$release_id"
 export FRANK_EXPECTED_BRANCH="$release_branch"
-export FRANK_RELEASE_SOURCE="/srv/frank/releases/${release_id}-${FRANK_EXPECTED_COMMIT:0:12}"
+export FRANK_RELEASE_SOURCE="/frank/deployed/releases/${release_id}-${FRANK_EXPECTED_COMMIT:0:12}"
 export FRANK_REPO_PATH="$FRANK_RELEASE_SOURCE"
-export FRANK_CODEGRAPH_INPUTS_HOST_PATH="/srv/frank/codegraph-inputs/${release_id}-${FRANK_EXPECTED_COMMIT:0:12}"
+export FRANK_CODEGRAPH_INPUTS_HOST_PATH="/frank/deployed/codegraph-inputs/${release_id}-${FRANK_EXPECTED_COMMIT:0:12}"
 export FRANK_CODEGRAPH_REGISTRY_HOST_PATH="$FRANK_CODEGRAPH_INPUTS_HOST_PATH/projects.json"
 export FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH="$FRANK_CODEGRAPH_INPUTS_HOST_PATH/repository"
 export FRANK_RELEASE_COMMIT="$FRANK_EXPECTED_COMMIT"
 export FRANK_CELL_ID='frank'
 export FRANK_API_AUDIENCE='frank.api'
-export FRANK_COMPOSE_FILE='/srv/frank/infra/docker-compose.dev.yml'
-export FRANK_DATA_PATH='/srv/frank'
+export FRANK_COMPOSE_FILE='/frank/deployed/infra/docker-compose.dev.yml'
+export FRANK_DATA_PATH='/frank/deployed'
 export FRANK_MAX_DISK_PERCENT='75'
 export FRANK_MIN_FREE_GIB='20'
 export FRANK_DISK_GATE_MODE='absolute'
@@ -183,15 +183,15 @@ into this runbook, a command log, or the evidence directory.
 ### 2A. Materialize the clean exact release worktree
 
 Use a dedicated bare cache. These commands do not read, fetch, reset, clean, or otherwise
-modify `/srv/frank/repo`, so a dirty primary checkout is left untouched. The unique branch
+modify `/projects/frank`, so a dirty primary checkout is left untouched. The unique branch
 allows preflight to prove both the exact reviewed commit and zero divergence from
 `origin/main` without relying on detached-HEAD exceptions:
 
 ```bash
 release_repo_url='https://github.com/stevenshelley58-afk/frank.git'
-release_cache_root='/srv/frank/release-cache'
+release_cache_root='/frank/deployed/release-cache'
 release_git_dir="$release_cache_root/frank.git"
-release_worktrees_root='/srv/frank/releases'
+release_worktrees_root='/frank/deployed/releases'
 
 install -d -m 0750 -- "$release_cache_root" "$release_worktrees_root"
 test "$(realpath -e -- "$release_cache_root")" = "$release_cache_root"
@@ -243,8 +243,8 @@ no write permission; unrelated users receive no access:
 
 ```bash
 test "$(id -u)" -eq 0
-test "$(realpath -e -- /srv/frank)" = '/srv/frank'
-test ! -L /srv/frank
+test "$(realpath -e -- /frank/deployed)" = '/frank/deployed'
+test ! -L /frank/deployed
 
 registry_source="$FRANK_RELEASE_SOURCE/infra/production/codegraph-projects.json"
 test "$(realpath -e -- "$FRANK_RELEASE_SOURCE")" = "$FRANK_RELEASE_SOURCE"
@@ -264,7 +264,7 @@ git -C "$FRANK_RELEASE_SOURCE" ls-files -s | awk '
   $1 != "100644" && $1 != "100755" { exit 42 }
 '
 
-codegraph_inputs_parent='/srv/frank/codegraph-inputs'
+codegraph_inputs_parent='/frank/deployed/codegraph-inputs'
 codegraph_staging_parent="$codegraph_inputs_parent/.staging"
 test "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH" = "$FRANK_CODEGRAPH_INPUTS_HOST_PATH/projects.json"
 test "$FRANK_CODEGRAPH_PROJECT_FRANK_HOST_PATH" = "$FRANK_CODEGRAPH_INPUTS_HOST_PATH/repository"
@@ -341,9 +341,9 @@ file-backed secret, not the signed web BFF identity token minted later from the 
 artifact:
 
 ```bash
-install -d -o root -g root -m 0700 -- /srv/frank/secrets
-control_token_file='/srv/frank/secrets/codegraph-control-token'
-control_token_tmp="$(mktemp /srv/frank/secrets/.codegraph-control-token.XXXXXX)"
+install -d -o root -g root -m 0700 -- /frank/deployed/secrets
+control_token_file='/frank/deployed/secrets/codegraph-control-token'
+control_token_tmp="$(mktemp /frank/deployed/secrets/.codegraph-control-token.XXXXXX)"
 trap 'rm -f -- "${control_token_tmp:-}"' EXIT
 
 openssl rand -hex 32 > "$control_token_tmp"
@@ -373,9 +373,9 @@ closed rather than create another key. It permits only the four stable Frank mod
 and `/chat/completions`, `/v1/chat/completions`, `/responses`, and `/v1/responses`.
 
 ```bash
-install -d -o root -g root -m 0700 -- /srv/frank/secrets/litellm
+install -d -o root -g root -m 0700 -- /frank/deployed/secrets/litellm
 export FRANK_LITELLM_CONTAINER='frank-litellm'
-export FRANK_LITELLM_VIRTUAL_KEY_FILE='/srv/frank/secrets/litellm/frank-api-virtual-key'
+export FRANK_LITELLM_VIRTUAL_KEY_FILE='/frank/deployed/secrets/litellm/frank-api-virtual-key'
 
 bash "$FRANK_RELEASE_SOURCE/scripts/production/bootstrap-litellm-virtual-key.sh"
 test "$(stat -c '%u:%g:%a' -- "$FRANK_LITELLM_VIRTUAL_KEY_FILE")" = '0:0:600'
@@ -386,9 +386,9 @@ replace an existing credential here; rotate both through a separately recorded, 
 Caddy/API/tusd restart.
 
 ```bash
-install -d -o root -g root -m 0700 -- /srv/frank/secrets/tusd
-tusd_gate_file='/srv/frank/secrets/tusd/gate-secret'
-tusd_hook_file='/srv/frank/secrets/tusd/hook-secret'
+install -d -o root -g root -m 0700 -- /frank/deployed/secrets/tusd
+tusd_gate_file='/frank/deployed/secrets/tusd/gate-secret'
+tusd_hook_file='/frank/deployed/secrets/tusd/hook-secret'
 test ! -e "$tusd_gate_file" && test ! -L "$tusd_gate_file"
 test ! -e "$tusd_hook_file" && test ! -L "$tusd_hook_file"
 openssl rand -hex 32 | install -o root -g root -m 0600 /dev/stdin "$tusd_gate_file"
@@ -851,9 +851,9 @@ completeness marker before the runtime environment can be changed:
 
 ```bash
 export FRANK_RELEASE_ID="$release_id"
-export FRANK_PRE_RELEASE_OVERLAY='/srv/frank/repo/infra/production/docker-compose.app.yml'
-export FRANK_PRE_RELEASE_CADDYFILE='/srv/frank/infra/Caddyfile'
-export FRANK_CODEGRAPH_BACKUP_ROOT='/srv/frank/backups/codegraph'
+export FRANK_PRE_RELEASE_OVERLAY='/projects/frank/infra/production/docker-compose.app.yml'
+export FRANK_PRE_RELEASE_CADDYFILE='/frank/deployed/infra/Caddyfile'
+export FRANK_CODEGRAPH_BACKUP_ROOT='/frank/deployed/backups/codegraph'
 
 bash "$FRANK_RELEASE_SOURCE/scripts/production/snapshot-codegraph-release.sh" \
   > "$evidence_dir/codegraph-snapshot.result" \
@@ -874,8 +874,8 @@ read/transform/verify/rename/receipt sequence. It writes only a public digest, m
 and a hash of the runtime file to evidence; it never prints the runtime contents.
 
 ```bash
-root_runtime_env='/srv/frank/secrets/production.env'
-root_runtime_lock='/srv/frank/secrets/production.env.lock'
+root_runtime_env='/frank/deployed/secrets/production.env'
+root_runtime_lock='/frank/deployed/secrets/production.env.lock'
 test "$(id -u)" -eq 0
 if [[ ! -e "$root_runtime_lock" ]]; then
   install -o root -g root -m 0600 /dev/null "$root_runtime_lock"
@@ -887,7 +887,7 @@ flock -x "$runtime_lock_fd"
 test -f "$root_runtime_env" && test ! -L "$root_runtime_env"
 test "$(stat -c '%u' -- "$root_runtime_env")" -eq 0
 
-rollback_config_dir="/srv/frank/config-rollback/$release_id"
+rollback_config_dir="/frank/deployed/config-rollback/$release_id"
 test ! -e "$rollback_config_dir"
 install -d -o root -g root -m 0700 -- "$rollback_config_dir"
 prior_workbench_image="$(awk -F= '
@@ -963,8 +963,8 @@ any credential material is generated or read:
 umask 077
 export FRANK_CELL_ID='frank'
 test "$FRANK_CELL_ID" = 'frank'
-domain_token_file='/srv/frank/secrets/domain-service-token'
-domain_token_tmp="$(mktemp /srv/frank/secrets/.domain-service-token.XXXXXX)"
+domain_token_file='/frank/deployed/secrets/domain-service-token'
+domain_token_tmp="$(mktemp /frank/deployed/secrets/.domain-service-token.XXXXXX)"
 trap 'rm -f -- "${domain_token_tmp:-}"' EXIT
 test "$(stat -c '%u:%g:%a' "$domain_token_tmp")" = '0:0:600'
 
@@ -1082,11 +1082,11 @@ export FRANK_WORKBENCH_MODEL_PROVIDER='<REVIEWED_PROVIDER_ID>'
 export FRANK_WORKBENCH_MODEL_BASE_URL='<REVIEWED_HTTPS_PROVIDER_BASE_URL>'
 export FRANK_WORKBENCH_MODEL='<REVIEWED_MODEL_ID>'
 export FRANK_MISSION_ORCHESTRATOR_ENABLED='true'
-export FRANK_MISSION_WORKSPACE_SOURCE='/srv/frank/workspaces/central'
+export FRANK_MISSION_WORKSPACE_SOURCE='/frank/deployed/workspaces/central'
 export FRANK_MISSION_PLANNER_MODEL='deepseek-v4-flash'
 export FRANK_MISSION_CHEAP_MODEL='deepseek-v4-flash'
 export FRANK_MISSION_STRONG_MODEL='deepseek-v4-pro'
-export FRANK_WORKSPACE_SOURCE_HOST_PATH='/srv/frank/workspaces/central'
+export FRANK_WORKSPACE_SOURCE_HOST_PATH='/frank/deployed/workspaces/central'
 
 export GOOSE_ACP_URL='<REVIEWED_WS_OR_WSS_URL>'
 export GOOSE_PROVIDER='<REVIEWED_GOOSE_PROVIDER_ID>'
@@ -1128,30 +1128,30 @@ Validate formats and the fully merged model without saving or printing the resol
 Compose document, because it contains injected values:
 
 ```bash
-base_compose='/srv/frank/infra/docker-compose.dev.yml'
+base_compose='/frank/deployed/infra/docker-compose.dev.yml'
 app_overlay="$FRANK_RELEASE_SOURCE/infra/production/docker-compose.app.yml"
 export FRANK_HARNESS_ENABLED="${FRANK_HARNESS_ENABLED:-false}"
 case "$FRANK_HARNESS_ENABLED" in true|false) ;; *) exit 1;; esac
 compose=(docker compose --env-file "$root_runtime_env" -f "$base_compose" -f "$app_overlay")
 if test "$FRANK_HARNESS_ENABLED" = true; then
-  export FRANK_RELEASE_STATE_ROOT="${FRANK_RELEASE_STATE_ROOT:-/srv/frank/release-state/harness}"
+  export FRANK_RELEASE_STATE_ROOT="${FRANK_RELEASE_STATE_ROOT:-/frank/deployed/release-state/harness}"
   export FRANK_HARNESS_CANDIDATE_SLOT="${FRANK_HARNESS_CANDIDATE_SLOT:-$FRANK_RELEASE_STATE_ROOT/candidate.env}"
   export FRANK_HARNESS_CURRENT_SLOT="${FRANK_HARNESS_CURRENT_SLOT:-$FRANK_RELEASE_STATE_ROOT/current.env}"
   export FRANK_HARNESS_ROLLBACK_SLOT="${FRANK_HARNESS_ROLLBACK_SLOT:-$FRANK_RELEASE_STATE_ROOT/rollback.env}"
   export FRANK_HARNESS_EVIDENCE_MANIFEST="${FRANK_HARNESS_EVIDENCE_MANIFEST:-$FRANK_RELEASE_STATE_ROOT/evidence-manifest.json}"
   : "${FRANK_HARNESS_EVIDENCE_URL:?HTTPS URL for hosted four-core candidate evidence required}"
   export FRANK_SEAWEEDFS_S3_TEMPLATE="$FRANK_RELEASE_SOURCE/infra/compose/seaweedfs/s3.json.tmpl"
-  export FRANK_SEAWEEDFS_S3_CONFIG='/srv/frank/secrets/seaweedfs/s3.json'
+  export FRANK_SEAWEEDFS_S3_CONFIG='/frank/deployed/secrets/seaweedfs/s3.json'
   # Private Compose DNS route implemented by the API attachment hook contract.
   export FRANK_TUSD_HOOK_URL='http://frank-api:3000/private/tusd/hooks'
-  export FRANK_LITELLM_VIRTUAL_KEY_FILE="${FRANK_LITELLM_VIRTUAL_KEY_FILE:-/srv/frank/secrets/litellm/frank-api-virtual-key}"
-  tusd_gate_file='/srv/frank/secrets/tusd/gate-secret'
-  tusd_hook_file='/srv/frank/secrets/tusd/hook-secret'
-  promoter_access_file='/srv/frank/secrets/seaweedfs/promoter-access-key'
-  promoter_secret_file='/srv/frank/secrets/seaweedfs/promoter-secret-key'
-  downloader_access_file='/srv/frank/secrets/seaweedfs/downloader-access-key'
-  downloader_secret_file='/srv/frank/secrets/seaweedfs/downloader-secret-key'
-  upload_capability_file='/srv/frank/secrets/attachments/upload-capability-hmac'
+  export FRANK_LITELLM_VIRTUAL_KEY_FILE="${FRANK_LITELLM_VIRTUAL_KEY_FILE:-/frank/deployed/secrets/litellm/frank-api-virtual-key}"
+  tusd_gate_file='/frank/deployed/secrets/tusd/gate-secret'
+  tusd_hook_file='/frank/deployed/secrets/tusd/hook-secret'
+  promoter_access_file='/frank/deployed/secrets/seaweedfs/promoter-access-key'
+  promoter_secret_file='/frank/deployed/secrets/seaweedfs/promoter-secret-key'
+  downloader_access_file='/frank/deployed/secrets/seaweedfs/downloader-access-key'
+  downloader_secret_file='/frank/deployed/secrets/seaweedfs/downloader-secret-key'
+  upload_capability_file='/frank/deployed/secrets/attachments/upload-capability-hmac'
   for secret_file in "$FRANK_LITELLM_VIRTUAL_KEY_FILE" "$tusd_gate_file" "$tusd_hook_file" "$promoter_access_file" "$promoter_secret_file" "$downloader_access_file" "$downloader_secret_file" "$upload_capability_file"; do
     test -f "$secret_file" && test ! -L "$secret_file"
     test "$(stat -c '%u:%g:%a' -- "$secret_file")" = '0:0:600'
@@ -1191,7 +1191,7 @@ printf '%s' "$FRANK_CODEGRAPH_IMAGE" | grep -Eq '^ghcr\.io/[a-z0-9][a-z0-9._-]*/
 printf '%s' "$FRANK_LETTA_EXPECTED_IMAGE" | grep -Eq '^[a-z0-9./:_-]+@sha256:[a-f0-9]{64}$'
 test "$FRANK_LETTA_CONTAINER" = 'frank-letta-server'
 printf '%s' "$FRANK_DOCKER_SOCKET_GID" | grep -Eq '^[0-9]+$'
-test "$(realpath -e -- "$FRANK_WORKSPACE_SOURCE_HOST_PATH")" = '/srv/frank/workspaces/central'
+test "$(realpath -e -- "$FRANK_WORKSPACE_SOURCE_HOST_PATH")" = '/frank/deployed/workspaces/central'
 test "$(realpath -e -- "$FRANK_RELEASE_SOURCE")" = "$(realpath -e -- "$FRANK_REPO_PATH")"
 test "$(stat -c '%u:%g:%a' "$FRANK_CODEGRAPH_CONTROL_TOKEN_FILE")" = '10001:10001:400'
 test "$(realpath -e -- "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH")" = "$FRANK_CODEGRAPH_REGISTRY_HOST_PATH"
@@ -1321,13 +1321,13 @@ install -m 0600 -- "$codegraph_snapshot/codegraph-volume-labels.tsv" \
   "$evidence_dir/codegraph-volume-labels.tsv"
 
 git -C "$FRANK_RELEASE_SOURCE" rev-parse HEAD > "$evidence_dir/git.candidate.txt"
-sha256sum /srv/frank/infra/docker-compose.dev.yml \
-  /srv/frank/infra/Caddyfile \
+sha256sum /frank/deployed/infra/docker-compose.dev.yml \
+  /frank/deployed/infra/Caddyfile \
   "$FRANK_PRE_RELEASE_OVERLAY" \
   "$FRANK_RELEASE_SOURCE/infra/production/Caddyfile.frank-production" \
   > "$evidence_dir/config.before.sha256"
 
-rollback_config_dir="/srv/frank/config-rollback/$release_id"
+rollback_config_dir="/frank/deployed/config-rollback/$release_id"
 test -d "$rollback_config_dir" && test ! -L "$rollback_config_dir"
 test "$(stat -c '%u:%g:%a' -- "$rollback_config_dir")" = '0:0:700'
 test -s "$rollback_config_dir/production.env.workbench.before"
@@ -1366,13 +1366,13 @@ with the database backup.
 
 ## 5. Create and verify the database backup
 
-The default output root is `/srv/frank/backups/postgres`; default retention is 35 days.
+The default output root is `/frank/deployed/backups/postgres`; default retention is 35 days.
 Retention only removes directories matching `frank-postgres-YYYYMMDDTHHMMSSZ` directly
 under the resolved backup root.
 
 ```bash
 export FRANK_DB_CONTAINER='frank-frank-db-1'
-export FRANK_BACKUP_DIR='/srv/frank/backups/postgres'
+export FRANK_BACKUP_DIR='/frank/deployed/backups/postgres'
 export FRANK_BACKUP_RETENTION_DAYS='35'
 
 bash "$FRANK_RELEASE_SOURCE/scripts/production/backup-postgres.sh" \
@@ -1493,7 +1493,7 @@ blocked. Once the candidate and image provenance are accepted, the bounded produ
 mutation is:
 
 ```bash
-install -m 0644 -- "$caddy_candidate" /srv/frank/infra/Caddyfile
+install -m 0644 -- "$caddy_candidate" /frank/deployed/infra/Caddyfile
 
 codegraph_wait_seconds=1920
 printf 'Starting Graphify-backed services; first extraction may take up to 30 minutes.\n' >&2
@@ -1567,7 +1567,7 @@ fi
 docker inspect frank-codegraph frank-frank-api-1 frank-web frank-frank-caddy-1 \
   --format '{{.Name}}\t{{.Image}}\t{{.State.Status}}\t{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' \
   > "$evidence_dir/containers.after.tsv"
-sha256sum /srv/frank/infra/Caddyfile > "$evidence_dir/caddy.after.sha256"
+sha256sum /frank/deployed/infra/Caddyfile > "$evidence_dir/caddy.after.sha256"
 ```
 
 The 1,920-second gate covers the supervisor's 1,800-second Graphify process timeout plus
@@ -1632,9 +1632,9 @@ of these services across the Graphify contract boundary:
 
 ```bash
 test -n "$codegraph_snapshot"
-root_runtime_env='/srv/frank/secrets/production.env'
-root_runtime_lock='/srv/frank/secrets/production.env.lock'
-rollback_config_dir="/srv/frank/config-rollback/$release_id"
+root_runtime_env='/frank/deployed/secrets/production.env'
+root_runtime_lock='/frank/deployed/secrets/production.env.lock'
+rollback_config_dir="/frank/deployed/config-rollback/$release_id"
 test -d "$rollback_config_dir" && test ! -L "$rollback_config_dir"
 test "$(stat -c '%u:%g:%a' -- "$rollback_config_dir")" = '0:0:700'
 test -f "$root_runtime_lock" && test ! -L "$root_runtime_lock"

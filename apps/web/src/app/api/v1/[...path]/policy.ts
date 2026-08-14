@@ -16,8 +16,8 @@ const CODEGRAPH_REFRESH = new RegExp(
 
 // The service token is intentionally never a general browser credential.
 const ALLOWED_OPERATIONS: readonly AllowedOperation[] = [
-  { method: 'GET', path: /^\/v1\/(?:today|work|frame|missions|chats)$/ },
-  { method: 'GET', path: /^\/v1\/(?:missions|chats)\/[^/]+$/ },
+  { method: 'GET', path: /^\/v1\/(?:today|work|frame|chats)$/ },
+  { method: 'GET', path: /^\/v1\/chats\/[^/]+$/ },
   { method: 'POST', path: /^\/v1\/chats$/ },
   { method: 'PATCH', path: /^\/v1\/chats\/[^/]+$/ },
   { method: 'GET', path: /^\/v1\/chats\/[^/]+\/messages$/ },
@@ -30,14 +30,15 @@ const ALLOWED_OPERATIONS: readonly AllowedOperation[] = [
   { method: 'POST', path: /^\/v1\/attachments\/uploads\/[^/]+\/capability$/ },
   { method: 'DELETE', path: /^\/v1\/attachments\/uploads\/[^/]+$/ },
   { method: 'POST', path: /^\/v1\/work\/[^/]+\/commands\/(?:start|pause|resume|ready|complete|cancel|approve|decline)$/ },
-  { method: 'GET', path: /^\/v1\/rooms\/[^/]+\/(?:folder-bindings|files|channel-bindings)$/ },
-  { method: 'POST', path: /^\/v1\/rooms\/[^/]+\/(?:folder-bindings|channel-bindings)$/ },
-  { method: 'DELETE', path: /^\/v1\/rooms\/[^/]+\/(?:folder-bindings|channel-bindings)\/[^/]+$/ },
-  { method: 'POST', path: /^\/v1\/workbenches\/[^/]+\/artifacts\/[^/]+\/preview$/ },
   { method: 'GET', path: /^\/v1\/codegraph\/projects$/ },
   { method: 'GET', path: CODEGRAPH_PROJECT_READ },
   { method: 'GET', path: CODEGRAPH_JOB_READ },
   { method: 'POST', path: CODEGRAPH_REFRESH },
+  // W3-1: read-only project file browser.
+  { method: 'GET', path: /^\/v1\/files$/ },
+  // W3-2: skills page (list + detail).
+  { method: 'GET', path: /^\/v1\/skills$/ },
+  { method: 'GET', path: /^\/v1\/skills\/[^/]+$/ },
 ];
 
 export function isAllowedBrowserOperation(method: string, pathname: string): boolean {

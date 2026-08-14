@@ -21,19 +21,19 @@ Every buildable task follows this loop:
 
 ```bash
 # New topic → auto-creates <topic>-v1:
-ssh vps '/srv/frank/infra/preview-deploy.sh onboarding-flow /path/to/output/'
+ssh vps '/frank/deployed/infra/preview-deploy.sh onboarding-flow /path/to/output/'
 # → https://preview.frank.fail/onboarding-flow-v1/
 
 # Same topic again → auto-bumps to -v2 (old versions preserved):
-ssh vps '/srv/frank/infra/preview-deploy.sh onboarding-flow /path/to/v2-output/'
+ssh vps '/frank/deployed/infra/preview-deploy.sh onboarding-flow /path/to/v2-output/'
 # → https://preview.frank.fail/onboarding-flow-v2/
 
 # Iterate in place (overwrite latest version, no bump):
-ssh vps '/srv/frank/infra/preview-deploy.sh onboarding-flow /path/to/output/ --update'
+ssh vps '/frank/deployed/infra/preview-deploy.sh onboarding-flow /path/to/output/ --update'
 # → https://preview.frank.fail/onboarding-flow-v2/ (overwritten)
 
 # Exact slug (no versioning — for one-offs, system pages):
-ssh vps '/srv/frank/infra/preview-deploy.sh my-exact-slug /path/to/thing/ --exact'
+ssh vps '/frank/deployed/infra/preview-deploy.sh my-exact-slug /path/to/thing/ --exact'
 # → https://preview.frank.fail/my-exact-slug/
 ```
 
@@ -56,7 +56,7 @@ sanitized to lowercase-hyphenated automatically.
 - Previews are PUBLIC (no auth) — don't put secrets in them
 - Previews are STATIC — for things needing a backend, deploy the real service
   and preview its frontend pointed at the live API
-- Old previews can be deleted: `ssh vps 'rm -rf /srv/frank/static/preview/<slug>'`
+- Old previews can be deleted: `ssh vps 'rm -rf /frank/deployed/static/preview/<slug>'`
 - `_`-prefixed slugs are reserved (e.g. `_system`)
 
 ### What this replaces

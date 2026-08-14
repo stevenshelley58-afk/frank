@@ -1,0 +1,179 @@
+{
+  "phase": "0C",
+  "generated": "2026-08-12T05:14:00Z",
+  "base_sha": "b5b338b1589454596130b30364f70d55cf34f644",
+  "workstreams": [
+    {
+      "id": "WS-DASHBOARD",
+      "name": "Dashboard / Project Home / Lakehouse",
+      "status": "frozen_packet_no_branch",
+      "historical_anchors": {
+        "dashboard_api": "db20ce85eab8e3f50a03d547ab338cb039d98282",
+        "dashboard_ui": "d852e87176d707423f4f245da3b2b54f8c3465f6",
+        "dashboard_contracts": "80f91f7fe3f325a3ed47039a8c8e730e9b42c961",
+        "lake": "7a965c23bbfb41ff776a8b80522db80397dc8d46"
+      },
+      "current_ref": null,
+      "fresh_clone_resolvable": false,
+      "note": "All Dashboard/Lake remote branches were deleted in cleanup. Historical SHAs are coordination anchors only. No current branch exists. Phase 0C requires owner to re-publish exact ranges before Phase 3.",
+      "migration": "0014_project_dashboard.sql",
+      "chat_owns_contract": false,
+      "chat_hot_file_conflicts": [
+        "adapters/storage/postgres/migrations/meta/_journal.json",
+        "adapters/storage/postgres/src/schema/index.ts",
+        "packages/contracts/src/index.ts",
+        "apps/web/src/components/shell/frank-shell.tsx",
+        "infra/production/docker-compose.app.yml",
+        "pnpm-lock.yaml"
+      ],
+      "supersession": "Awaiting owner to publish current accepted packet"
+    },
+    {
+      "id": "WS-NIGHT-WATCH",
+      "name": "Night Watch",
+      "status": "frozen_packet_no_branch",
+      "historical_anchors": {
+        "combined": "2e8544fd80eb569284e5b0d7f33cf68f30eed59e",
+        "contracts": "3e03b3c501f6e3359b016b08349a7e692e6edee6",
+        "core": "28fc0c1edcd55dd7c89a385e23fa6d04f80097b8",
+        "sources": "22dda8c050ae36453dbb15915797deffae0f679b",
+        "evaluation": "69eab184c9ca417e314649e9015e38b39f31f7ae",
+        "workflow": "569ffe6f6b8e61d4d393ba2ce749f63049f2853b",
+        "handover": "cd666d3859e0309d75120966672256ab4020d579"
+      },
+      "current_ref": null,
+      "fresh_clone_resolvable": false,
+      "note": "All Night Watch branches deleted in cleanup. Handover SHA cd666d3 was on deleted branch codex/night-watch-handover. Historical SHAs only. Owner must re-publish.",
+      "migration": "0015_night_watch.sql (not yet created)",
+      "chat_owns_contract": false,
+      "chat_hot_file_conflicts": [],
+      "supersession": "Awaiting owner"
+    },
+    {
+      "id": "WS-GRAPHIFY",
+      "name": "Graphify (CodeGraph)",
+      "status": "production_accepted",
+      "current_ref": "origin/main (b5b338b contains Graphify)",
+      "production_sha": "fead0c4b9e3cae60038b54f999a5066d165f8a2b",
+      "fresh_clone_resolvable": true,
+      "note": "Graphify is live on production VPS at fead0c4b. Current main (b5b338b) includes Graphify evolved code. Production acceptance receipt at /frank/deployed/release-evidence/20260811T223058Z/PRODUCTION_ACCEPTED.receipt.",
+      "migration": "none — Graphify has no DB migration",
+      "chat_owns_contract": false,
+      "chat_hot_file_conflicts": [
+        "infra/production/docker-compose.app.yml (shared CodeGraph service)",
+        "apps/api/src/routes/codegraph.ts"
+      ],
+      "supersession": "Graphify is live and stable. Chat must not break CodeGraph routes or Compose configuration."
+    },
+    {
+      "id": "WS-CHANNELS",
+      "name": "Channels (CH-03..CH-07)",
+      "status": "partially_merged_historical",
+      "current_ref": null,
+      "fresh_clone_resolvable": false,
+      "note": "CH-01/02 were merged earlier per build plan. CH-03 listener, CH-06 room binding, CH-07 outage isolation not yet built. All agent/ch/* branches deleted in cleanup.",
+      "migration": "none dedicated",
+      "chat_owns_contract": false,
+      "chat_hot_file_conflicts": [],
+      "supersession": "Out of scope for chat plan. Independent workstream."
+    },
+    {
+      "id": "WS-FILES",
+      "name": "Files/Folder Work (FS-*)",
+      "status": "partially_merged_historical",
+      "current_ref": null,
+      "fresh_clone_resolvable": false,
+      "note": "All agent/fs/* branches deleted. FS work was partially merged. Wave 3 (FS folders) not yet done per build plan.",
+      "migration": "0007_room_folder_binding, 0008_staged_write",
+      "chat_owns_contract": false,
+      "chat_hot_file_conflicts": [],
+      "supersession": "Out of scope for chat plan."
+    },
+    {
+      "id": "WS-WORKBENCH",
+      "name": "Workbench Core (WB-01..WB-09)",
+      "status": "merged_to_main",
+      "current_ref": "origin/main (b5b338b)",
+      "fresh_clone_resolvable": true,
+      "note": "WB-01..09 complete on main per build plan. WB-10 harness swap proof not yet done. Workbench uses HarnessBroker same as chat.",
+      "migration": "0004_workbench, 0005_workbench_decision",
+      "chat_owns_contract": false,
+      "chat_hot_file_conflicts": [
+        "apps/api/src/services/workbench/harness-executor.ts (shared broker path)",
+        "apps/api/src/server.ts (route registration)"
+      ],
+      "supersession": "Merged. Chat must not break workbench execution paths."
+    },
+    {
+      "id": "WS-OPEN-PR",
+      "name": "Open PR #74 (graphify-retirement-handover)",
+      "status": "open_pr_docs_only",
+      "current_ref": "origin/codex/graphify-retirement-handover",
+      "fresh_clone_resolvable": true,
+      "note": "Documentation-only PR — no code changes. Does not block chat work. Can be merged independently.",
+      "migration": "none",
+      "chat_owns_contract": false,
+      "chat_hot_file_conflicts": [],
+      "supersession": "Can be merged any time. Out of scope for chat."
+    }
+  ],
+  "migration_journal": {
+    "entries": [
+      "0000_canonical_domain",
+      "0001_domain_invariants",
+      "0002_run_state_machine",
+      "0003_brain",
+      "0004_workbench",
+      "0005_workbench_decision",
+      "0006_room_channel_binding",
+      "0007_room_folder_binding",
+      "0008_staged_write",
+      "0009_room_mission",
+      "0010_chat",
+      "0011_harness_gateway",
+      "0012_chat_turn_event",
+      "0013_attachment"
+    ],
+    "next_available": "0014",
+    "reserved": {
+      "0014": "Dashboard/Project Home (owner: Dashboard workstream)",
+      "0015": "Night Watch (owner: Night Watch workstream)"
+    },
+    "chat_owns": ["0011", "0012", "0013"],
+    "chat_must_not_create": ["0014+"]
+  },
+  "current_state": {
+    "active_worktrees": ["C:/Dev/Frank (main)"],
+    "stale_worktrees": [
+      ".worktrees/graphify-retirement-handover (PR #74)",
+      ".worktrees/project-home-handover (stale)",
+      ".worktrees/wave1-evidence-fix (locked, unremovable)",
+      "C:/Dev/Frank-chat-handover-v2 (standalone clone)"
+    ],
+    "remote_branches": [
+      "origin/main",
+      "origin/chat-first-shell (merged, can delete)",
+      "origin/codex/chat-completion-handover-v3 (stale handover)",
+      "origin/codex/graphify-retirement-handover (PR #74)",
+      "origin/codex/project-home-production-handover (stale)",
+      "origin/wip/pre-chat-shell-snapshot (stale)"
+    ],
+    "local_branches": [
+      "main",
+      "finishv1 (stale)",
+      "wip/pre-chat-shell-snapshot (stale)",
+      "codex/chat-completion-handover-v3 (tracking stale remote)",
+      "codex/graphify-retirement-handover (PR #74)",
+      "codex/project-home-production-handover (stale)"
+    ]
+  },
+  "summary": {
+    "total_workstreams": 7,
+    "active_production": 1,
+    "merged_to_main": 1,
+    "open_pr": 1,
+    "frozen_stale": 2,
+    "historical_partial": 2,
+    "blocker": "Dashboard and Night Watch frozen SHAs do not resolve from fresh clone. Phase 3 (compatibility) is blocked until owners re-publish exact packet ranges."
+  }
+}

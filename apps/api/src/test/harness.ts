@@ -23,7 +23,6 @@ import { buildServer } from '../server.js';
 import type { BuiltServer } from '../server.js';
 import type { EnrichmentDispatcher } from '../services/enrichment.js';
 import type { DomainStore } from '../services/store.js';
-import type { MissionRouteOrchestrator } from '../routes/missions.js';
 import type { CodegraphRouteDependencies } from '../routes/codegraph.js';
 import { FakeDomainStore } from './fake-store.js';
 
@@ -82,18 +81,10 @@ export interface BuildTestServerOptions {
   readonly now?: () => Date;
   readonly config?: Partial<AppConfig>;
   /**
-   * Raw Postgres handle; when given, DB-backed routes (brain, workbench)
-   * register — mirroring `main.ts`, which passes `store.db`.
+   * Raw Postgres handle; when given, DB-backed routes register — mirroring
+   * `main.ts`, which passes `store.db`.
    */
   readonly db?: import('@frank/adapter-postgres').FrankDatabase;
-  /** WB-06: workbench SSE live-poll interval (tests use a fast value). */
-  readonly workbenchPollIntervalMs?: number;
-  readonly chatTurnRunner?: import('../routes/chat-turns.js').ChatTurnRunner;
-  readonly chatTurnPollIntervalMs?: number;
-  /** FS-05: preview-lane deployer (tests inject FakePreviewDeployer). */
-  readonly previewDeployer?: import('../services/workbench/preview-backend.js').PreviewDeployer;
-  /** Mission route port; tests inject a deterministic in-memory fake. */
-  readonly missionOrchestrator?: MissionRouteOrchestrator;
   /** Isolated codegraph fixtures and service stub for route-contract tests. */
   readonly codegraph?: Pick<
     CodegraphRouteDependencies,
@@ -124,17 +115,6 @@ export function buildTestServer(options: BuildTestServerOptions = {}): TestServe
     identity: identityProvider,
     ...(options.enrichment === undefined ? {} : { enrichment: options.enrichment }),
     ...(options.db === undefined ? {} : { db: options.db }),
-    ...(options.workbenchPollIntervalMs === undefined
-      ? {}
-      : { workbenchPollIntervalMs: options.workbenchPollIntervalMs }),
-    ...(options.chatTurnRunner === undefined ? {} : { chatTurnRunner: options.chatTurnRunner }),
-    ...(options.chatTurnPollIntervalMs === undefined ? {} : { chatTurnPollIntervalMs: options.chatTurnPollIntervalMs }),
-    ...(options.previewDeployer === undefined
-      ? {}
-      : { previewDeployer: options.previewDeployer }),
-    ...(options.missionOrchestrator === undefined
-      ? {}
-      : { missionOrchestrator: options.missionOrchestrator }),
     ...(options.codegraph === undefined ? {} : { codegraph: options.codegraph }),
     now,
     startedAt: now(),

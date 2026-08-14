@@ -2,8 +2,8 @@
 set -euo pipefail
 
 LOG="/tmp/frank-rebuild.log"
-REPO="/srv/frank/repo"
-COMPOSE="/srv/frank/infra/docker-compose.dev.yml"
+REPO="/projects/frank"
+COMPOSE="/frank/deployed/infra/docker-compose.dev.yml"
 
 echo "=== Frank rebuild started at $(date -u) ===" > "$LOG"
 
@@ -14,7 +14,7 @@ git pull origin main >> "$LOG" 2>&1 || git pull >> "$LOG" 2>&1 || echo "git pull
 
 # 2. Rebuild containers
 echo "[2/4] Rebuilding containers..." >> "$LOG"
-cd /srv/frank/infra
+cd /frank/deployed/infra
 docker compose -f "$COMPOSE" build >> "$LOG" 2>&1
 
 # 3. Restart services

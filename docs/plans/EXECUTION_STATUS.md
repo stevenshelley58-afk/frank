@@ -3,6 +3,17 @@
 Source of truth for leases, merge order, and gate status. Updated by AG-0 only.
 Master plan: `docs/plans/FRANK_MASTER_PARALLEL_BUILD_PLAN.md`
 
+## ⚠️ 2026-08-13 — NEW DIRECTION: FRANK REBUILD (tracked in .build/STATE.md)
+
+The owner handed AG-0 a new rebuild plan (`docs/plans/FRANK_REBUILD_PLAN.md`):
+Frank becomes a window over Hermes — the harness layer, memory system,
+mission/workbench runners, and console/explorer/previews are DELETED (Wave 1),
+chat is rewired to Hermes (Wave 2), then factories + trace viewer (Waves 4-5),
+signing (Wave 6), hub widgets (Wave 7), graph + discovery (Wave 8).
+Task board: `.build/STATE.md`. Integration branch: `rebuild/wave1` (→ PR → main).
+The WB/CH/FS/SS rows below are the COMPLETED prior build; they are retained as
+history. Wave 1 supersedes the workbench runner (deleted in W1-3).
+
 ## Leases (shared-file hotspots)
 
 | Hotspot | Leased to | Since |
@@ -12,7 +23,7 @@ Master plan: `docs/plans/FRANK_MASTER_PARALLEL_BUILD_PLAN.md`
 | Contract exports (`packages/contracts/src/index.ts`) | AG-4 (CH-01 only, additive export) | wave-1 |
 | Schema registry (`docs/requirements/registry.json` hash) | AG-0 | — |
 | Migration journal (`adapters/storage/postgres/migrations/`) | AG-3 (WB-01; next number: **0004**) | wave-1 |
-| Docker Compose / VPS manifests (`/srv/frank/infra/`) | AG-3 (WB runner deployment only) | wave-1 |
+| Docker Compose / VPS manifests (`/frank/deployed/infra/`) | AG-3 (WB runner deployment only) | wave-1 |
 | `apps/web/src/app/globals.css` + Tailwind config | — (none; A-track done) | — |
 | App shell / rail / console registry | AG-2 (UI-07, after WB-06) | not started |
 | `AGENTS.md` + precedence docs | AG-0 | — |
@@ -42,7 +53,7 @@ Master plan: `docs/plans/FRANK_MASTER_PARALLEL_BUILD_PLAN.md`
 ## GOV-06: stably/orca re-review (recorded 2026-08-06)
 
 **Decision: CONTINUE-BUILD.** Evidence: 2026-08-02 repo review (session
-20260802_132510_8d702d, log: /srv/frank/repo/docs/research/repo-reviews.md)
+20260802_132510_8d702d, log: /projects/frank/docs/research/repo-reviews.md)
 rated orca 🟡 "evaluate later" — it is a cockpit for a fleet of coding agents
 in parallel git worktrees with a phone companion app. It owns no work items,
 no approval state machine, no fences, no receipts, no VPS control plane, and
