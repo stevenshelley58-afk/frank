@@ -1,0 +1,31 @@
+# Content Factory tool package
+
+This is a reusable, project-neutral contract package for Frank to display and
+forward Content Factory work to Hermes. It has no worker, model client,
+scheduler, queue claimer, publisher, credential store, or UI implementation.
+
+`home.json` is the exact seven-field, non-executable home manifest
+owned by this tool. The shared dashboard runtime registers it and renders only
+known widget IDs. `manifest.json` is the versioned tool-app contract;
+`blockwise-pack.json` adapts the current Blockwise content-engine skills and
+prompt references without making them core defaults.
+
+The fixed graph is research → brief → draft → edit → format/SEO/media, then
+parallel channel branches (web, email, social, ads, instant forms) →
+compliance → human approval → immutable release. Hermes owns scheduling,
+execution, model selection, persistence, tools, secrets, and publication.
+
+The pack maps the current Blockwise implementation in
+`hermes/tools/research-runtime/bin/content-engine.mjs`,
+`src/lib/content-engine/{contracts.ts,queue.ts}`, and `hermes/skills`.
+Shared image/page/ad skills are listed as
+non-blog consumers; they remain Hermes-owned and are not reimplemented here.
+
+Graph data projects through `ToolManifestAdapter` to
+`schema://frank.graph/v1`. The shared renderer is maxGraph (Apache-2.0);
+CodeMirror 6 is the prompt/instruction inspector and vanilla-jsoneditor + Ajv
+is the schema-backed payload editor. This package owns/version-controls graph
+data, immutable settings revisions, and Hermes envelopes only; it does not add
+a graph UI, graph execution, or a tool-specific settings store. OTel
+GenAI-style spans/events remain the trace interchange, including the existing
+trace, slot-trace, and trace-view hooks.

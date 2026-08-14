@@ -1,0 +1,9 @@
+{
+  "id": "content-factory",
+  "name": "Content Factory",
+  "kind": "tool",
+  "blurb": "Hermes-owned content planning, production, review, and release contracts.",
+  "capabilities": ["research-to-release", "parallel-channel-branches", "resume-rerun", "quarantine", "immutable-release", "withdrawal-tombstones"],
+  "default_widget_ids": [],
+  "connection_capabilities": []
+}
