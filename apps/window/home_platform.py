@@ -765,68 +765,274 @@ def connections_list():
     })
 
 
+def _connection_command(body: dict | None = None) -> tuple[dict, int | None, str, str, str, str]:
+    payload = dict(body or {})
+    expected_revision = payload.pop("expected_revision", None)
+    if expected_revision is not None and not isinstance(expected_revision, int):
+        abort(400, "expected_revision must be an integer")
+    idempotency_key = str(payload.pop("idempotency_key", request.headers.get("Idempotency-Key", "")) or "").strip()[:200]
+    try:
+        idempotency_key = connections_agent.ConnectionsMutationService.require_idempotency(idempotency_key)
+    except connections_agent.ContractError as error:
+        raise error
+    actor = "manual.browser"
+    correlation_id = str(request.headers.get("X-Correlation-Id", "") or "").strip()[:120]
+    confirmation_token = str(
+        payload.pop("confirmation_token", request.headers.get("X-Confirmation-Token", "")) or ""
+    ).strip()
+    return payload, expected_revision, idempotency_key, actor, confirmation_token, correlation_id
+
+
+def _connection_target(body: dict, connection_id: str = "") -> dict:
+    return {
+        "provider": body.get("provider", ""),
+        "connection_id": connection_id or body.get("connection_id", ""),
+        "consumer": body.get("consumer", ""),
+        "project": body.get("project", body.get("scope_id", "")),
+        "environment": body.get("environment", ""),
+    }
+
+
+def _require_same_origin() -> None:
+    """Reject browser writes unless Origin is in the explicit Frank allowlist."""
+    if request.headers.get("Sec-Fetch-Site", "").strip().lower() == "cross-site":
+        abort(403, "cross-origin connection mutation rejected")
+    origin = request.headers.get("Origin", "").strip()
+    if not origin or origin.lower() == "null":
+        abort(403, "same-origin connection mutation required")
+    parsed = urlparse(origin)
+    candidate = origin.rstrip("/")
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or candidate not in _connection_allowed_origins:
+        abort(403, "cross-origin connection mutation rejected")
+
+
+def _connection_request_guard(bucket: str) -> None:
+    if request.content_length and request.content_length > CONNECTION_REQUEST_BYTES:
+        abort(413, "connection request is too large")
+    # Content-Length is absent for chunked requests and is not a sufficient
+    # body-size authority. Cache the actual bytes before JSON parsing.
+    request_bytes = request.get_data(cache=True, as_text=False)
+    if len(request_bytes) > CONNECTION_REQUEST_BYTES:
+        abort(413, "connection request is too large")
+    key = (bucket, request.remote_addr or "unknown")
+    now = time.monotonic()
+    with _connection_rate_lock:
+        recent = [stamp for stamp in _connection_rate.get(key, []) if stamp > now - CONNECTION_RATE_WINDOW]
+        if len(recent) >= CONNECTION_RATE_LIMIT:
+            abort(429, "connection mutation rate limit exceeded")
+        recent.append(now)
+        _connection_rate[key] = recent
+
+
+def _require_hermes_agent_auth() -> None:
+    """Authenticate the narrow Hermes ingress with a separate service key."""
+    if not _connections_agent_key:
+        abort(503, "Hermes Connections Agent ingress is not configured")
+    authorization = request.headers.get("Authorization", "")
+    presented = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    if not presented or not secrets.compare_digest(presented, _connections_agent_key):
+        abort(401, "Hermes Connections Agent authentication required")
+    profile = request.headers.get("X-Hermes-Profile", "default").strip() or "default"
+    if profile != _connections_agent_profile or profile != "default":
+        abort(403, "Connections Agent must use the default Hermes profile")
+
+
+def _connection_service_or_abort() -> connections_agent.ConnectionsMutationService:
+    if _connection_service is None:
+        abort(503, "connections service is unavailable")
+    return _connection_service
+
+
+def _connection_result(result: dict, status: int = 200):
+    action = result.get("action") or {}
+    payload = {"action": action, "replayed": bool(result.get("replayed"))}
+    if result.get("connection") is not None:
+        payload["connection"] = result["connection"]
+    if action.get("result", {}).get("removed"):
+        payload["removed"] = action["result"].get("connection_id")
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def _connection_json(payload: dict, status: int = 200):
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+@api.post("/api/connections/plan")
+@api.post("/api/connections/agent/plan")
+def connections_plan():
+    _connection_request_guard("agent-plan" if request.path.startswith("/api/connections/agent/") else "manual-plan")
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        abort(400, "request body must be an object")
+    is_agent = request.path.startswith("/api/connections/agent/")
+    _require_hermes_agent_auth() if is_agent else _require_same_origin()
+    raw_payload = body.get("body") if isinstance(body.get("body"), dict) else body
+    command_payload = dict(raw_payload)
+    for command_field in ("idempotency_key", "expected_revision", "confirmation_token"):
+        if command_field not in command_payload and command_field in body:
+            command_payload[command_field] = body[command_field]
+    payload, expected_revision, idempotency_key, actor, _, _ = _connection_command(command_payload)
+    action = str(body.get("action") or "").strip().lower()
+    for field in ("action", "connection_id", "consumer", "project", "environment", "actor"):
+        payload.pop(field, None)
+    raw_target = body.get("target") if isinstance(body.get("target"), dict) else {}
+    target_input = dict(raw_target)
+    for field in ("provider", "connection_id", "consumer", "project", "environment"):
+        if field in body:
+            target_input[field] = body[field]
+    target = _connection_target(target_input, str(body.get("connection_id") or raw_target.get("connection_id", "")))
+    source = "connections-agent" if is_agent else "manual"
+    if is_agent:
+        actor = "hermes.connections-agent"
+    try:
+        result = _connection_service_or_abort().plan(
+            action=action, source=source, actor=actor, target=target, body=payload,
+            expected_revision=body.get("expected_revision", expected_revision), idempotency_key=idempotency_key,
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_json(result)
+
+
+@api.post("/api/connections/agent/apply")
+def connections_agent_apply():
+    _connection_request_guard("agent-apply")
+    _require_hermes_agent_auth()
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or not body.get("plan_id"):
+        abort(400, "plan_id is required")
+    if set(body) - {"plan_id", "confirmation_token", "idempotency_key", "provider_receipt", "provider_outcome", "provider_error_code", "provider_error_category"}:
+        abort(400, "unsupported apply fields")
+    confirmation = str(body.get("confirmation_token") or request.headers.get("X-Confirmation-Token", ""))
+    idempotency_key = str(body.get("idempotency_key") or request.headers.get("Idempotency-Key", ""))
+    try:
+        idempotency_key = connections_agent.ConnectionsMutationService.require_idempotency(idempotency_key)
+        result = _connection_service_or_abort().apply_plan(
+            plan_id=str(body["plan_id"]), confirmation_token=confirmation, idempotency_key=idempotency_key,
+            expected_source="connections-agent", authenticated_provider=True, executor_actor="hermes.connections-agent",
+            provider_receipt=str(body.get("provider_receipt") or ""), provider_outcome=str(body.get("provider_outcome") or ""),
+            provider_error_code=str(body.get("provider_error_code") or ""), provider_error_category=str(body.get("provider_error_category") or ""),
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result, 202 if result.get("pending") else 200)
+
+
+@api.post("/api/connections/apply")
+def connections_manual_apply():
+    _connection_request_guard("manual-apply")
+    _require_same_origin()
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or not body.get("plan_id"):
+        abort(400, "plan_id is required")
+    if set(body) - {"plan_id", "confirmation_token", "idempotency_key"}:
+        abort(400, "unsupported apply fields")
+    try:
+        key = connections_agent.ConnectionsMutationService.require_idempotency(
+            str(body.get("idempotency_key") or request.headers.get("Idempotency-Key", ""))
+        )
+        result = _connection_service_or_abort().apply_plan(
+            plan_id=str(body["plan_id"]), confirmation_token=str(body.get("confirmation_token") or ""),
+            idempotency_key=key, expected_source="manual",
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result, 202 if result.get("pending") else 200)
+
+
+@api.get("/api/connections/attention")
+def connections_attention():
+    limit = request.args.get("limit", default=50, type=int)
+    return jsonify({"schema": "schema://frank.connections-attention/v1", "items": _connection_service_or_abort().attention(limit=limit)})
+
+
+@api.get("/api/connections/activity")
+@api.get("/api/connections/events")
+def connections_activity():
+    after = request.args.get("after", default=0, type=int)
+    limit = request.args.get("limit", default=50, type=int)
+    items = _connection_service_or_abort().activity(after=after, limit=limit)
+    return jsonify({"schema": "schema://frank.connections-activity/v1", "after": after, "items": items})
+
+
+@api.get("/api/connections/receipts/<receipt_id>")
+def connections_receipt(receipt_id: str):
+    receipt = _connection_service_or_abort().receipt(receipt_id)
+    if not receipt:
+        abort(404, "receipt not found")
+    return jsonify({"schema": "schema://frank.connections-receipt/v1", "receipt": receipt})
+
+
+@api.after_request
+def _connections_no_store(response):
+    """Keep additive connection plans, activity, attention, and receipts private."""
+    if request.path.startswith("/api/connections/") and request.path != "/api/connections":
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 @api.post("/api/connections")
 def connections_create():
+    _connection_request_guard("manual-create")
+    _require_same_origin()
     body = request.get_json(silent=True) or {}
-    item = _clean_connection(body)
-    with _connections_lock:
-        store = _connection_store()
-        if any(existing.get("name", "").casefold() == item["name"].casefold() and existing.get("scope_kind") == item["scope_kind"] and existing.get("scope_id") == item["scope_id"] for existing in store["connections"]):
-            abort(409, "this connection already exists in the selected scope")
-        store["connections"].append(item)
-        _write_json(CONNECTIONS_FILE, store)
-    return jsonify({"connection": _public_connection(item)}), 201
+    payload, expected_revision, idempotency_key, actor, _, _ = _connection_command(body)
+    if expected_revision is not None:
+        abort(400, "expected_revision is not valid for connection creation")
+    try:
+        result = _connection_service_or_abort().execute(
+            action="create", source="manual", actor=actor, target=_connection_target(payload), body=payload,
+            expected_revision=expected_revision, idempotency_key=idempotency_key,
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result, 200 if result.get("replayed") else 201)
 
 
 @api.patch("/api/connections/<connection_id>")
 def connections_update(connection_id: str):
+    _connection_request_guard("manual-update")
+    _require_same_origin()
     connection_id = _clean_id(connection_id, "connection id")
     body = request.get_json(silent=True) or {}
-    with _home_lock, _connections_lock:
-        store = _connection_store()
-        index = next((position for position, item in enumerate(store["connections"]) if item.get("id") == connection_id), None)
-        if index is None:
-            abort(404, "connection not found")
-        previous = store["connections"][index]
-        item = _clean_connection(body, previous)
-        scope_changed = (
-            item.get("scope_kind") != previous.get("scope_kind")
-            or item.get("scope_id") != previous.get("scope_id")
+    payload, expected_revision, idempotency_key, actor, _, _ = _connection_command(body)
+    try:
+        result = _connection_service_or_abort().execute(
+            action="update", source="manual", actor=actor, target=_connection_target(payload, connection_id),
+            body=payload, expected_revision=expected_revision, idempotency_key=idempotency_key,
         )
-        if scope_changed and any(
-            instance.get("config", {}).get("connection_id") == connection_id
-            for home in _home_store()["homes"].values() if isinstance(home, dict)
-            for instance in home.get("instances", [])
-        ):
-            abort(409, "cannot change connection scope while home widgets are bound; unbind it first")
-        if any(
-            position != index
-            and existing.get("name", "").casefold() == item["name"].casefold()
-            and existing.get("scope_kind") == item["scope_kind"]
-            and existing.get("scope_id") == item["scope_id"]
-            for position, existing in enumerate(store["connections"])
-        ):
-            abort(409, "this connection already exists in the selected scope")
-        store["connections"][index] = item
-        _write_json(CONNECTIONS_FILE, store)
-    return jsonify({"connection": _public_connection(item)})
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result)
 
 
 @api.delete("/api/connections/<connection_id>")
 def connections_delete(connection_id: str):
+    _connection_request_guard("manual-delete")
+    _require_same_origin()
     connection_id = _clean_id(connection_id, "connection id")
-    with _home_lock, _connections_lock:
-        homes = _home_store()["homes"].values()
-        if any(
-            instance.get("config", {}).get("connection_id") == connection_id
-            for home in homes if isinstance(home, dict)
-            for instance in home.get("instances", [])
-        ):
-            abort(409, "remove this connection from home widgets before deleting it")
-        store = _connection_store()
-        before = len(store["connections"])
-        store["connections"] = [item for item in store["connections"] if item.get("id") != connection_id]
-        if len(store["connections"]) == before:
-            abort(404, "connection not found")
-        _write_json(CONNECTIONS_FILE, store)
-    return jsonify({"removed": connection_id})
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or not body.get("plan_id"):
+        abort(409, "use POST /api/connections/plan then POST /api/connections/apply for confirmed deletion")
+    if set(body) - {"plan_id", "confirmation_token", "idempotency_key"}:
+        abort(400, "unsupported delete fields")
+    try:
+        key = connections_agent.ConnectionsMutationService.require_idempotency(
+            str(body.get("idempotency_key") or request.headers.get("Idempotency-Key", ""))
+        )
+        result = _connection_service_or_abort().apply_plan(
+            plan_id=str(body["plan_id"]), confirmation_token=str(body.get("confirmation_token") or ""),
+            idempotency_key=key, expected_source="manual", expected_connection_id=connection_id,
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result)
