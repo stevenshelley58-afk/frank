@@ -3,15 +3,16 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="description" content="Frank is the private window and hub for projects, tools and Hermes.">
 <title>Frank</title>
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
-<link rel="stylesheet" href="/app.css?v=20260814-explorer-attachment-delete">
+<link rel="stylesheet" href="/app.css?v=20260814-accounts-explorer">
 </head>
 <body>
 <div class="app">
   <nav class="rail">
-    <a class="logo" href="/">
+    <a class="logo" href="/" aria-label="Frank home">
       <svg viewBox="0 0 88 87" fill="none" aria-hidden="true">
         <path fill="currentColor" d="M8 10.5 16 8h66l-8.5 14.5H27V85H8V10.5Z"/>
         <path fill="#E53C1F" d="M39 41h29l-9 16H30l9-16Z"/>
@@ -21,7 +22,7 @@
 
     <div class="rail-group">
       <div class="lbl">Workspace</div>
-      <button class="rail-item is-on" data-view="hub"><span class="dot"></span><span>Hub</span></button>
+      <button class="rail-item is-on" data-view="hub" aria-label="Hub"><span class="dot"></span><span>Hub</span></button>
       <div class="chat-nav-head">
         <span>Chats</span>
         <button type="button" id="new-chat" aria-label="Start a new chat" title="New chat">
@@ -30,18 +31,18 @@
       </div>
       <div class="chat-nav" id="chat-nav" aria-label="Hub chats"></div>
       <div class="project-rule"><span>Projects</span></div>
-      <button class="rail-item" data-project="blockwise"><span class="dot"></span><span>Blockwise</span></button>
-      <button class="rail-item" data-project="merrypaws"><span class="dot"></span><span>Merrypaws</span></button>
-      <button class="rail-item" data-project="elfwonder"><span class="dot"></span><span>Elf &amp; Wonder</span></button>
-      <button class="rail-item" data-project="pavone"><span class="dot"></span><span>Pavone</span></button>
+      <button class="rail-item" data-project="blockwise" aria-label="Blockwise"><span class="dot"></span><span>Blockwise</span></button>
+      <button class="rail-item" data-project="merrypaws" aria-label="Merrypaws"><span class="dot"></span><span>Merrypaws</span></button>
+      <button class="rail-item" data-project="elfwonder" aria-label="Elf &amp; Wonder"><span class="dot"></span><span>Elf &amp; Wonder</span></button>
+      <button class="rail-item" data-project="pavone" aria-label="Pavone"><span class="dot"></span><span>Pavone</span></button>
     </div>
 
     <div class="rail-group">
       <div class="lbl">Window</div>
-      <button class="rail-item" data-view="files"><span class="glyph">▤</span><span>Files</span></button>
-      <button class="rail-item" data-view="tools"><span class="glyph">⚙</span><span>Tools</span></button>
-      <button class="rail-item" data-view="trace"><span class="glyph">◉</span><span>Trace</span></button>
-      <button class="rail-item" data-view="releases"><span class="glyph">✓</span><span>Releases</span></button>
+      <button class="rail-item" data-view="files" aria-label="Files"><span class="glyph">▤</span><span>Files</span></button>
+      <button class="rail-item" data-view="tools" aria-label="Tools"><span class="glyph">⚙</span><span>Tools</span></button>
+      <button class="rail-item" data-view="trace" aria-label="Trace"><span class="glyph">◉</span><span>Trace</span></button>
+      <button class="rail-item" data-view="releases" aria-label="Releases"><span class="glyph">✓</span><span>Releases</span></button>
     </div>
 
     <div class="rail-foot">Frank — window only.<br>Hermes does the thinking.</div>
@@ -145,6 +146,53 @@
       </section>
 
       <section class="view" data-view="tools"><div class="grid" id="slot-tools"></div></section>
+      <section class="view" data-view="accounts">
+        <div class="accounts" id="accounts">
+          <aside class="account-scopes" aria-label="Account projects">
+            <div class="account-scope-label">Projects</div>
+            <div id="account-scopes"></div>
+          </aside>
+          <div class="accounts-browser">
+            <div class="account-toolbar">
+              <button type="button" class="account-back" id="accounts-back">← Tools</button>
+              <label class="account-search"><span class="sr-only">Search accounts</span><input id="account-search" type="search" placeholder="Search accounts"></label>
+              <button type="button" class="btn account-add" id="account-add">Add account</button>
+            </div>
+            <div class="email-stack" id="email-stack" aria-live="polite"></div>
+            <p class="sr-only" id="account-results-status" aria-live="polite"></p>
+            <div class="account-list" id="account-list"></div>
+          </div>
+          <aside class="account-editor" id="account-editor" hidden role="dialog" aria-modal="true" aria-labelledby="account-form-title" tabindex="-1">
+            <div class="account-editor-head">
+              <div><span class="account-kicker">Account</span><h2 id="account-form-title">Add account</h2></div>
+              <button type="button" id="account-cancel" aria-label="Close account editor">×</button>
+            </div>
+            <form id="account-form">
+              <input type="hidden" id="account-id">
+              <label>Project<select id="account-project" required></select></label>
+              <div class="account-form-pair">
+                <label>Type<select id="account-kind"><option value="email">Email address</option><option value="service">Service account</option><option value="domain">Domain</option></select></label>
+                <label>Status<select id="account-status"><option value="planned">Planned</option><option value="setup">Setup needed</option><option value="ready">Ready</option><option value="attention">Needs attention</option><option value="disabled">Disabled</option></select></label>
+              </div>
+              <label>Name<input id="account-name" maxlength="120" required placeholder="Blockwise main"></label>
+              <label>Identity<input id="account-identity" maxlength="240" required placeholder="hello@blockwise.sale"></label>
+              <div class="account-form-pair">
+                <label>Provider<input id="account-provider" maxlength="120" placeholder="Resend"></label>
+                <label>Purpose<input id="account-purpose" maxlength="160" placeholder="Main sender"></label>
+              </div>
+              <label>Admin link<input id="account-url" type="url" maxlength="500" placeholder="https://"></label>
+              <label>Credential reference<input id="account-credential" maxlength="300" placeholder="openbao://frank/email/blockwise"></label>
+              <p class="account-help">Passwords and API keys never live here. Store them in the shared vault and save only the reference.</p>
+              <label>Notes<textarea id="account-notes" maxlength="800" rows="3" placeholder="Non-secret setup notes"></textarea></label>
+              <div class="account-error" id="account-error" role="alert"></div>
+              <div class="account-form-actions">
+                <button type="button" class="account-delete" id="account-delete" hidden>Remove</button>
+                <button type="submit" class="btn">Save account</button>
+              </div>
+            </form>
+          </aside>
+        </div>
+      </section>
       <section class="view" data-view="trace"><div class="grid" id="slot-trace"></div></section>
       <section class="view" data-view="releases"><div class="grid" id="slot-releases"></div></section>
     </div>
@@ -165,6 +213,6 @@
   </div>
   <div class="media-stage" id="media-stage"></div>
 </div>
-<script type="module" src="/js/app.js?v=20260814-explorer-attachment-delete"></script>
+<script type="module" src="/js/app.js?v=20260814-accounts-explorer"></script>
 </body>
 </html>

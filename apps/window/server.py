@@ -22,6 +22,7 @@ CHAT_FILE = CHAT_DIR / "chat.jsonl"
 CHAT_INDEX = CHAT_DIR / "chats.json"
 CHAT_SESSIONS_DIR = CHAT_DIR / "chats"
 UPLOAD_DIR = CHAT_DIR / "uploads"
+ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accounts.json")))
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
@@ -47,6 +48,28 @@ CURATED_MODELS = [
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 _chat_lock = threading.RLock()
+_accounts_lock = threading.RLock()
+
+ACCOUNT_KINDS = {"email", "service", "domain"}
+ACCOUNT_STATUSES = {"planned", "setup", "ready", "attention", "disabled"}
+ACCOUNT_FIELDS = {
+    "project_id", "kind", "name", "identity", "provider", "purpose",
+    "admin_url", "credential_ref", "notes", "status",
+}
+FORBIDDEN_ACCOUNT_FIELDS = {
+    "password", "secret", "token", "api_key", "apikey", "private_key",
+    "access_key", "refresh_token",
+}
+VAULT_REFERENCE = re.compile(
+    r"^(?:vault|openbao|bitwarden|1password|pass|keyring|secret)://[A-Za-z0-9][A-Za-z0-9._/-]*$",
+    re.I,
+)
+SECRET_VALUE_PATTERNS = (
+    re.compile(r"\b(?:password|passphrase|api[_ -]?key|secret|access[_ -]?token|refresh[_ -]?token)\s*[:=]\s*\S+", re.I),
+    re.compile(r"\b(?:sk|re|ghp|github_pat|xox[baprs])_[A-Za-z0-9_-]{12,}\b", re.I),
+    re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"),
+)
+CONNECTOR_STATUSES = {"unconfigured", "configured", "ready", "error"}
 
 
 def jail(root_key: str, rel: str = "") -> Path:
@@ -59,6 +82,76 @@ def jail(root_key: str, rel: str = "") -> Path:
     except ValueError:
         abort(400, "path escapes root")
     return target
+
+
+def _write_accounts(data: dict) -> None:
+    ACCOUNTS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    temp = ACCOUNTS_FILE.with_suffix(".tmp")
+    temp.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    temp.replace(ACCOUNTS_FILE)
+
+
+def _ensure_accounts() -> dict:
+    with _accounts_lock:
+        if ACCOUNTS_FILE.exists():
+            try:
+                data = json.loads(ACCOUNTS_FILE.read_text(encoding="utf-8"))
+                if data.get("version") == 1 and isinstance(data.get("accounts"), list):
+                    return data
+            except (OSError, json.JSONDecodeError, AttributeError):
+                pass
+        data = {"version": 1, "accounts": []}
+        _write_accounts(data)
+        return data
+
+
+def _clean_account(body: dict, existing: dict | None = None) -> dict:
+    lowered = {str(key).lower() for key in body}
+    blocked = lowered & FORBIDDEN_ACCOUNT_FIELDS
+    if blocked:
+        abort(400, "credentials must be stored in the vault; save only credential_ref")
+
+    for key, value in body.items():
+        if str(key).lower() == "credential_ref":
+            continue
+        text = str(value or "")
+        if any(pattern.search(text) for pattern in SECRET_VALUE_PATTERNS):
+            abort(400, "credentials must be stored in the vault; remove the secret value")
+
+    item = dict(existing or {})
+    for field in ACCOUNT_FIELDS:
+        if field in body:
+            item[field] = re.sub(r"\s+", " ", str(body.get(field, ""))).strip()
+
+    item["project_id"] = item.get("project_id", "main")[:80] or "main"
+    item["kind"] = item.get("kind", "service").lower()
+    item["name"] = item.get("name", "")[:120]
+    item["identity"] = item.get("identity", "")[:240]
+    item["provider"] = item.get("provider", "")[:120]
+    item["purpose"] = item.get("purpose", "")[:160]
+    item["admin_url"] = item.get("admin_url", "")[:500]
+    item["credential_ref"] = item.get("credential_ref", "")[:300]
+    item["notes"] = item.get("notes", "")[:800]
+    item["status"] = item.get("status", "planned").lower()
+
+    if item["kind"] not in ACCOUNT_KINDS:
+        abort(400, "invalid account kind")
+    if item["status"] not in ACCOUNT_STATUSES:
+        abort(400, "invalid account status")
+    if not item["name"] or not item["identity"]:
+        abort(400, "name and identity are required")
+    if item["kind"] == "email" and not re.fullmatch(r"[^\s@]+@[^\s@]+\.[^\s@]+", item["identity"]):
+        abort(400, "email identity must be a valid email address")
+    if item["admin_url"] and not re.match(r"^https?://", item["admin_url"], re.I):
+        abort(400, "admin_url must use http or https")
+    if item["credential_ref"] and not VAULT_REFERENCE.fullmatch(item["credential_ref"]):
+        abort(400, "credential_ref must be an opaque vault locator such as openbao://frank/email/main")
+    return item
+
+
+def _connector_status(variable: str, fallback: str = "unconfigured") -> str:
+    status = os.environ.get(variable, "").strip().lower() or fallback
+    return status if status in CONNECTOR_STATUSES else "unconfigured"
 
 
 def _new_hermes_conversation() -> str:
@@ -256,6 +349,79 @@ def projects():
     if p.exists():
         return jsonify(json.loads(p.read_text(encoding="utf-8")))
     return jsonify({"projects": []})
+
+
+@app.get("/api/accounts")
+def accounts_list():
+    data = _ensure_accounts()
+    items = sorted(
+        data["accounts"],
+        key=lambda item: (
+            str(item.get("project_id", "main")).lower(),
+            str(item.get("name", "")).lower(),
+        ),
+    )
+    return jsonify({"accounts": items})
+
+
+@app.post("/api/accounts")
+def accounts_create():
+    body = request.get_json(silent=True) or {}
+    item = _clean_account(body)
+    now = int(time.time())
+    item.update({"id": secrets.token_hex(8), "created_at": now, "updated_at": now})
+    with _accounts_lock:
+        data = _ensure_accounts()
+        data["accounts"].append(item)
+        _write_accounts(data)
+    return jsonify({"ok": True, "account": item}), 201
+
+
+@app.patch("/api/accounts/<account_id>")
+def accounts_update(account_id: str):
+    body = request.get_json(silent=True) or {}
+    with _accounts_lock:
+        data = _ensure_accounts()
+        item = next((entry for entry in data["accounts"] if entry.get("id") == account_id), None)
+        if item is None:
+            abort(404)
+        cleaned = _clean_account(body, item)
+        cleaned["id"] = item["id"]
+        cleaned["created_at"] = item.get("created_at", int(time.time()))
+        cleaned["updated_at"] = int(time.time())
+        item.clear()
+        item.update(cleaned)
+        _write_accounts(data)
+    return jsonify({"ok": True, "account": item})
+
+
+@app.delete("/api/accounts/<account_id>")
+def accounts_delete(account_id: str):
+    with _accounts_lock:
+        data = _ensure_accounts()
+        before = len(data["accounts"])
+        data["accounts"] = [entry for entry in data["accounts"] if entry.get("id") != account_id]
+        if len(data["accounts"]) == before:
+            abort(404)
+        _write_accounts(data)
+    return jsonify({"ok": True})
+
+
+@app.get("/api/email-tools")
+def email_tools():
+    mautic_url = os.environ.get("MAUTIC_URL", "").strip()
+    mautic_fallback = "configured" if mautic_url else "unconfigured"
+    return jsonify({
+        "resend": {
+            "status": _connector_status("RESEND_CONNECTOR_STATUS"),
+            "mcp_status": _connector_status("RESEND_MCP_STATUS"),
+            "url": "https://resend.com/emails",
+        },
+        "mautic": {
+            "status": _connector_status("MAUTIC_CONNECTOR_STATUS", mautic_fallback),
+            "url": mautic_url,
+        },
+    })
 
 
 @app.get("/api/roots")
