@@ -1,4 +1,5 @@
 from pathlib import Path
+import re
 import unittest
 
 
@@ -57,6 +58,72 @@ class UiContractTest(unittest.TestCase):
         self.assertIn(".account-editor", styles)
         self.assertIn("max-width: 1100px", styles)
         self.assertIn(".rail-item { min-height: 44px; }", styles)
+
+    def test_entity_homes_add_tools_without_changing_the_live_rail(self):
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
+        widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
+        homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
+        registry = (WEB / "js" / "registry.js").read_text(encoding="utf-8")
+        styles = (WEB / "app.css").read_text(encoding="utf-8")
+
+        rail_views = re.findall(r'<button class="rail-item[^>]*data-view="([^"]+)"', html)
+        self.assertEqual(rail_views, ["hub", "files", "tools", "trace", "releases"])
+        rail_projects = re.findall(r'<button class="rail-item[^>]*data-project="([^"]+)"', html)
+        self.assertEqual(rail_projects, ["blockwise", "merrypaws", "elfwonder", "pavone"])
+
+        self.assertIn('data-view="entity-home"', html)
+        self.assertIn('data-view="widget-builder"', html)
+        self.assertIn('data-view="connections"', html)
+        self.assertIn('id="view-title" tabindex="-1"', html)
+        self.assertIn('id="widget-catalog"', html)
+        self.assertIn('id="connection-catalog"', html)
+        self.assertNotIn('type="password"', html)
+        self.assertIn('id: "connections"', widgets)
+        self.assertIn('id: "widget-builder"', widgets)
+        self.assertIn('id: "hermes-tool"', widgets)
+        self.assertIn("openProjectHome(currentProject)", app)
+        self.assertIn('window.addEventListener("frank:entity-home"', app)
+        self.assertIn("expected_revision", homes)
+        self.assertIn("Widget identity mismatch", homes)
+        self.assertIn('freshness !== "poll"', homes)
+        self.assertIn("window.setInterval(refreshPollingWidgets, 30_000)", homes)
+        self.assertIn("textContent", homes)
+        self.assertNotIn("innerHTML", homes)
+        self.assertIn("duplicate widget", registry)
+        self.assertIn("home-size-wide", styles)
+        self.assertIn(".tool-workspace", styles)
+
+    def test_widget_and_connection_editors_are_plain_text_reference_surfaces(self):
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
+        homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
+
+        self.assertIn("API keys, passwords, provider code, and arbitrary HTML are rejected", html)
+        self.assertIn("Never paste a password, API key, OAuth token, card number, or bank detail", html)
+        self.assertIn("Activepieces credentials are configured in its secure UI", html)
+        self.assertIn('id="connection-credential-ref"', html)
+        self.assertIn('id="connection-ref"', html)
+        self.assertIn('id="connection-status-field"', html)
+        self.assertIn('role="dialog" aria-modal="true"', html)
+        self.assertIn('tabindex="-1"', html)
+        self.assertIn('value="setup_needed"', html)
+        self.assertIn('value="connected"', html)
+        self.assertIn('value="verified"', html)
+        self.assertIn('value="error"', html)
+        self.assertIn("Provider configuration was not changed", homes)
+        self.assertIn('event.key === "Escape"', homes)
+        self.assertIn('event.key !== "Tab"', homes)
+        self.assertIn("inertModalBackground", homes)
+        self.assertIn('$(".rail")', homes)
+        self.assertIn('$(".topbar")', homes)
+        self.assertIn("restoreModalBackground", homes)
+        self.assertIn("closeHomeEditors({ restoreFocus: false })", app)
+        self.assertIn("restoreFocus = true", homes)
+        self.assertIn("offsetParent !== null", homes)
+        self.assertIn('setAttribute("inert", "")', homes)
+        self.assertIn("editorReturnFocus", homes)
+        self.assertIn("export function closeHomeEditors", homes)
 
 
 if __name__ == "__main__":
