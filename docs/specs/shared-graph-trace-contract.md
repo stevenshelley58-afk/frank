@@ -1,6 +1,6 @@
 # Shared graph and trace contract
 
-**Status:** Accepted contract; implementation pending
+**Status:** Accepted contract; implementation pending; Erratum 1 applied
 
 **Date:** 2026-08-14
 
@@ -32,19 +32,42 @@ provider is `ToolManifestAdapter`, a pure adapter from versioned domain Tool
 contracts plus optional settings and trace records into the shared graph and
 trace envelopes in this document.
 
+## Erratum 1: canonical Tool contracts
+
+The first committed draft incorrectly described a second, richer
+`schema://frank.tool-manifest/v1` shape. That schema is withdrawn and must not
+be implemented. Existing domain packages remain canonical. Their checked-in
+`manifest.json` files are not converted, wrapped, or regenerated.
+
+`ToolManifestAdapter` accepts the existing flat
+`schema://frank.tool-app-manifest/v1` contract through a pure normalization
+layer. The only generated representation is the runtime
+`schema://frank.graph/v1` response. It is a disposable projection, never a
+second checked-in pipeline definition or a new source of truth.
+
+The migration decision is therefore:
+
+| Choice | Decision |
+| --- | --- |
+| Convert canonical `manifest.json` in place | **No** |
+| Accept the existing schema through pure normalization | **Yes** |
+| Generate another persisted/check-in manifest or pipeline | **No** |
+| Generate an in-memory or rebuildable response/cache from the canonical manifest | **Yes**, only as `schema://frank.graph/v1` and never authoritative |
+
 ## Canonical schema identifiers
 
 These identifiers are exact and case-sensitive.
 
 | Schema ID | Owner | Purpose |
 | --- | --- | --- |
-| `schema://frank.tool-manifest/v1` | Domain Tool package | Declarative Tool identity and pipeline |
-| `schema://frank.tool-settings-revision/v1` | Hermes/domain Tool package | Immutable settings revision referenced by a manifest or run |
-| `schema://frank.hermes-command/v1` | Hermes boundary | Requested validate, demo, run, or commit operation |
-| `schema://frank.hermes-event/v1` | Hermes boundary | Ordered command progress, result, failure, artifact, and receipt event |
+| `schema://frank.tool-app-manifest/v1` | Domain Tool package | Canonical flat Tool identity, settings schema, and pipelines |
+| `schema://frank.tool-app-settings/v1` | Domain Tool package/runtime | Settings schema and append-only scoped settings revisions |
+| `schema://frank.tool-app-pipeline/v1` | Domain Tool package | Canonical pipeline with `{id, kind}` nodes and `{from, to}` edges |
+| `schema://frank.tool-app-command/v1` | Hermes boundary | Requested validate, demo, run, or commit operation |
+| `schema://frank.tool-app-event/v1` | Hermes boundary | Ordered command progress, result, failure, artifact, and receipt event |
+| `schema://frank.tool-app-trace/v1` | Domain Tool/Hermes boundary | Trace declaration and authorized OpenTelemetry-style run projection |
 | `schema://frank.tool-manifest-adapter/v1` | Frank | Adapter registration and compatibility declaration |
 | `schema://frank.graph/v1` | Frank | Renderer-neutral graph snapshot |
-| `schema://frank.trace/v1` | Frank | Redacted OpenTelemetry trace projection |
 
 Producers must reject an unsupported major version. Additive fields in a known
 major version are ignored unless declared in `extensions`. A producer must not
@@ -56,7 +79,7 @@ These identifiers are reserved for the one shared implementation.
 
 | Kind | ID | Status and use |
 | --- | --- | --- |
-| Full graph view | `graph` | New shared rail/view ID |
+| Full graph view | `graph` | New shared internal view ID opened from homes; not a rail item |
 | Full graph container | `slot-graph` | New maxGraph workbench host |
 | Trace view | `trace` | Existing view; becomes the run-trace lens of the same workbench |
 | Trace container | `slot-trace` | Existing host; mounts the same workbench in trace mode |
@@ -69,6 +92,52 @@ Domain packages register no JavaScript, CSS, HTML, view, or renderer. Once the
 Frank capability `frank.graph.v1` is available, a domain package may declare
 `entity-graph` as a default home widget. Until that capability is present, its
 default widget ID list remains empty.
+
+### Home widget manifest
+
+After the accepted modular-home runtime lands on `main`, Dashboard may add this
+exact built-in manifest to its shared catalog. It is not registered by a domain
+Tool package.
+
+```json
+{
+  "id": "entity-graph",
+  "version": "1.0.0",
+  "title": "Graph",
+  "description": "Read-only entity topology, settings, and run traces from registered providers.",
+  "surfaces": ["project", "tool", "agent", "service"],
+  "default_size": "wide",
+  "allowed_sizes": ["medium", "wide"],
+  "provider": "frank.graph",
+  "freshness": "on_demand",
+  "accepts_connection": false,
+  "multiple": false
+}
+```
+
+Its home provider registration is `home_providers.register("entity-graph")`.
+The provider returns the existing `schema://frank.widget-snapshot/v1` envelope
+with only `graph_schema`, `graph_id`, `graph_revision`, `lens`, `node_count`,
+`edge_count`, and `trace_ref` in `data`. The full graph is loaded from the
+read-only graph endpoint below. A provider that has no registered manifest or
+topology returns `setup_needed` or `unavailable`; it never extracts a graph
+from source code or invents nodes.
+
+### Read-only provider endpoints
+
+The shared provider boundary owns exactly these graph reads:
+
+| Method and path | Response | Rules |
+| --- | --- | --- |
+| `GET /api/graphs/<kind>/<entity_id>?lens=<lens>&settings_revision_id=<id>&trace_id=<id>` | `schema://frank.graph/v1` | `kind` is `project`, `tool`, `agent`, or `service`; IDs and lens are allowlisted; optional selectors are opaque and authorized |
+| `GET /api/traces/<trace_id>` | `schema://frank.tool-app-trace/v1` | `trace_id` is a lowercase 32-hex W3C trace ID; response is the authorized redacted projection |
+
+Allowed v1 lenses are `tool.pipeline`, `tool.settings`, `run.trace`,
+`system.topology`, `project.dependencies`, and `release.receipts`. Unknown
+lenses fail closed. Both endpoints are GET-only and never accept a filesystem
+path, URL, query language, provider name, SQL, code, or shell command. The
+browser talks only to Frank; Frank obtains authorized provider projections and
+never exposes a provider database or collector directly.
 
 ## `ToolManifestAdapter` contract
 
@@ -84,15 +153,16 @@ provider boundary after authorization and redaction.
   "id": "tool-manifest",
   "version": "1.0.0",
   "accepts": [
-    "schema://frank.tool-manifest/v1",
-    "schema://frank.tool-settings-revision/v1",
-    "schema://frank.hermes-event/v1",
+    "schema://frank.tool-app-manifest/v1",
+    "schema://frank.tool-app-settings/v1",
+    "schema://frank.tool-app-command/v1",
+    "schema://frank.tool-app-event/v1",
+    "schema://frank.tool-app-trace/v1",
     "OTLP/1.0"
   ],
   "produces": [
     "schema://frank.graph/v1",
-    "schema://frank.trace/v1",
-    "schema://frank.hermes-command/v1"
+    "schema://frank.tool-app-command/v1"
   ],
   "surfaces": ["graph", "trace", "project", "tool", "agent", "service"],
   "renderer": "graph-workbench"
@@ -105,91 +175,98 @@ The following JSON pointers are the complete v1 field set consumed by the
 adapter. Fields not listed here remain domain-owned and are not interpreted by
 Frank.
 
-#### Tool manifest: `schema://frank.tool-manifest/v1`
+#### Tool manifest: `schema://frank.tool-app-manifest/v1`
 
-| JSON pointer | Required | Type | Meaning |
-| --- | --- | --- | --- |
-| `/schema` | yes | string | Exact schema ID |
-| `/manifest_version` | yes | semver string | Domain contract version |
-| `/tool/id` | yes | stable ID string | Tool identity |
-| `/tool/name` | yes | string | User-facing name |
-| `/tool/description` | yes | string | Plain-text description |
-| `/tool/project_id` | yes | stable ID string | Owning Frank project/workspace |
-| `/tool/revision` | yes | string | Immutable Tool revision |
-| `/tool/source_ref` | yes | opaque string | Authorized source reference, never a raw secret-bearing path |
-| `/tool/sha256` | yes | `sha256:<hex>` | Integrity hash of the manifest revision |
-| `/pipeline/id` | yes | stable ID string | Pipeline identity |
-| `/pipeline/revision` | yes | string | Immutable pipeline revision |
-| `/pipeline/entry_node_ids` | yes | string array | One or more entry nodes |
-| `/pipeline/nodes` | yes | node array | Declarative nodes in source order |
-| `/pipeline/edges` | yes | edge array | Declarative edges in source order |
-| `/settings_schema_ref` | yes | opaque string | Settings validation contract |
-| `/active_settings_revision_ref` | no | opaque string | Currently selected immutable revision |
-| `/command_contract_ref` | yes | opaque string | Hermes command contract reference |
-| `/event_contract_ref` | yes | opaque string | Hermes event contract reference |
-| `/telemetry/service_name` | yes | string | OpenTelemetry `service.name` |
-| `/telemetry/instrumentation_scope` | yes | string | Instrumentation scope name |
-| `/telemetry/node_attribute_key` | yes | string | Must equal `frank.graph.node.id` in v1 |
+The adapter consumes the existing flat manifest. It does not require or create
+a nested `tool` or singular `pipeline` object.
 
-Each `/pipeline/nodes/*` object exposes exactly:
+| JSON pointer | Required by canonical contract | Adapter use |
+| --- | --- | --- |
+| `/schema` | yes | Exact `schema://frank.tool-app-manifest/v1` identifier |
+| `/id` | yes | Reusable Tool identity |
+| `/version` | yes | Semantic manifest version |
+| `/name` | yes | Graph title |
+| `/description` | yes | Graph description |
+| `/scopes` | yes | Allowed `global`, `profile`, `project`, `workspace`, and/or `session` render/settings scopes |
+| `/settings` | no; canonical default is an empty settings schema | Schema-backed editable settings definition |
+| `/pipelines` | no; canonical default is `[]` | Canonical pipeline definitions in source order |
+| `/capabilities` | no | Tool-level capability labels; never promoted to execution permission |
+| `/connectors` | no | Display-only connector requirements |
+| `/schedules` | no | Display-only Hermes-owned schedule declarations |
+| `/thresholds` | no | Display-only validated thresholds |
+| `/approval_gates` | no | Display-only approval declarations |
+| `/hermes` | no | Allowed action/event declarations; not executable callbacks |
+| `/trace` | no | `schema://frank.tool-app-trace/v1` declaration and event/attribute allowlists |
 
-| Field | Required | Type | Meaning |
-| --- | --- | --- | --- |
-| `id` | yes | stable ID string | Stable within the Tool across revisions |
-| `kind` | yes | enum | `input`, `prompt`, `instruction`, `transform`, `model`, `tool`, `decision`, `human`, `artifact`, or `output` |
-| `label` | yes | string | User-facing label |
-| `description` | yes | string | Plain-text description |
-| `settings_ref` | no | opaque string | Settings slot/revision reference |
-| `input_schema_ref` | no | opaque string | Input payload schema |
-| `output_schema_ref` | no | opaque string | Output payload schema |
-| `capabilities` | yes | enum array | Subset of `inspect`, `edit_prompt`, `edit_instructions`, `edit_payload`, `validate`, `demo`, `run`, `open_source` |
-| `classification` | yes | enum | `public`, `internal`, `private`, or `secret` |
-| `group_id` | no | stable ID string | Visual group/swimlane only |
+Other safe domain fields remain canonical but are ignored by adapter v1. The
+adapter never copies ignored fields into `extensions` automatically.
 
-`classification: secret` nodes are represented by identity and status only.
-Their prompt, payload, attributes, and source reference are never returned to
-the browser.
+Each `/pipelines/*` object uses the existing
+`schema://frank.tool-app-pipeline/v1` contract:
 
-Each `/pipeline/edges/*` object exposes exactly:
+- `schema` is required;
+- `id` and `version` are optional metadata already used by some packages;
+- `nodes` is a list whose items are exactly `{id, kind}`;
+- `edges` is a list whose items are exactly `{from, to}`.
 
-| Field | Required | Type | Meaning |
-| --- | --- | --- | --- |
-| `id` | yes | stable ID string | Stable within the Tool across revisions |
-| `from` | yes | node ID string | Source node |
-| `to` | yes | node ID string | Target node |
-| `from_port` | no | stable ID string | Source port |
-| `to_port` | no | stable ID string | Target port |
-| `kind` | yes | enum | `control`, `data`, `condition`, `error`, `retry`, or `artifact` |
-| `label` | no | string | User-facing label |
-| `condition_ref` | no | opaque string | Authorized condition reference, not executable code |
+Normalization is deterministic and does not enrich the domain definition:
 
-#### Settings revision: `schema://frank.tool-settings-revision/v1`
+- a missing pipeline `id` becomes `pipeline-<zero-based-index>` in the runtime
+  graph only;
+- a missing pipeline `version` uses the manifest `version` in the runtime
+  source metadata only;
+- node `label` is the exact node `id`, not a generated humanized label;
+- node `description` is absent, node capabilities are empty, and
+  classification is `unspecified` unless a future canonical manifest major
+  version adds those fields;
+- entry nodes are derived as nodes with no incoming edge;
+- an edge runtime ID is
+  `edge:<zero-based-index>:<from>:<to>`, and its derived kind is `control`;
+- source order is preserved; no node, edge, port, condition, group, or setting
+  reference is invented.
 
-| JSON pointer | Required | Type | Meaning |
-| --- | --- | --- | --- |
-| `/schema` | yes | string | Exact schema ID |
-| `/revision_id` | yes | stable ID string | Immutable revision identity |
-| `/tool_id` | yes | stable ID string | Must match manifest Tool |
-| `/pipeline_revision` | yes | string | Must match the rendered pipeline revision |
-| `/parent_revision_id` | no | stable ID string | Previous immutable revision |
-| `/created_at` | yes | RFC 3339 timestamp | Revision time |
-| `/created_by` | yes | opaque actor reference | Actor identity without credentials |
-| `/prompt_refs` | yes | reference array | `{slot, ref, version, sha256}`; no prompt body |
-| `/instruction_refs` | yes | reference array | `{slot, ref, version, sha256}`; no instruction body |
-| `/style` | yes | object | Validated style settings |
-| `/model_policy` | yes | object | Validated model allow/deny/escalation policy |
-| `/payload_policy` | yes | object | Validated payload schema, size, classification, and redaction policy |
-| `/sha256` | yes | `sha256:<hex>` | Integrity hash of the complete revision |
+#### Settings revision: `schema://frank.tool-app-settings/v1`
 
-Prompt, instruction, and payload editors fetch authorized content separately
-from Hermes using the opaque reference. A successful save creates a new
-settings revision; it never mutates an existing revision.
+The manifest `/settings` object is the property schema. A selected runtime
+settings revision uses the existing append-only record shape and contains
+exactly `schema`, `scope`, `revision`, and `settings`. `scope` is `{kind}` for
+global or `{kind, id}` for other declared scopes; `revision` is a non-negative
+integer; `settings` is the validated JSON value.
+
+Prompt, instruction, style, model-policy, and payload-policy values are Tool
+settings properties only when declared by that Tool's canonical settings
+schema. Frank does not impose a second common settings object. Authorized
+prompt or instruction content is resolved through Hermes; the manifest and
+graph projection contain references/versions, not secret content. A successful
+save appends a new scoped settings revision and never mutates an existing one.
+
+#### Reusable Tools, project context, and digests
+
+There is no `tool.project_id`. A Tool is reusable independently of a project.
+The adapter receives a separate runtime `render_scope` matching one of the
+manifest's declared scopes. A project rendering uses
+`{"kind":"project","id":"<project-id>"}`. A global rendering has no project
+ID. The resulting `graph_id` is `tool:<tool-id>` for global context or
+`project:<project-id>/tool:<tool-id>` for project context. The same manifest can
+therefore produce contextual graph instances without being copied or edited.
+
+There is no `tool.sha256` field. The provider computes `manifest_sha256`
+out-of-band as SHA-256 over the UTF-8 RFC 8785 JSON Canonicalization Scheme
+representation of the complete canonical manifest object. Whitespace and
+object-key order therefore do not change the digest. Because the digest is not
+inside `manifest.json`, there is no self-field to exclude. A future signature
+or digest belongs in a transport wrapper or companion record, not in the v1
+manifest. The runtime graph may expose the computed value as
+`source.sha256`; it is derived metadata, not domain-authored pipeline data.
 
 #### Runtime inputs
 
 The optional runtime input set is:
 
-- `events[]`: ordered `schema://frank.hermes-event/v1` envelopes;
+- `render_scope`: one canonical scope record selected outside the manifest;
+- `settings_revision`: one optional `schema://frank.tool-app-settings/v1` record;
+- `events[]`: ordered `schema://frank.tool-app-event/v1` envelopes;
+- `trace`: an optional `schema://frank.tool-app-trace/v1` run projection;
 - `spans[]`: OTLP span records using W3C trace/span identifiers;
 - `permissions[]`: effective Frank capabilities for the current actor;
 - `selection`: `{node_id?, edge_id?, trace_id?, span_id?}`;
@@ -208,9 +285,10 @@ does not invent settings, events, traces, costs, or status.
   "graph_revision": "sha256:...",
   "generated_at": "2026-08-14T00:00:00Z",
   "provider": {"id": "tool-manifest", "version": "1.0.0", "authority": "manifest"},
-  "scope": {"kind": "tool", "id": "content-factory", "project_id": "blockwise"},
+  "subject": {"kind": "tool", "id": "content-factory"},
+  "scope": {"kind": "project", "id": "blockwise"},
   "lens": "tool.pipeline",
-  "capabilities": ["inspect", "validate", "demo"],
+  "capabilities": ["inspect"],
   "nodes": [],
   "edges": [],
   "groups": [],
@@ -221,17 +299,18 @@ does not invent settings, events, traces, costs, or status.
 
 Every `nodes[]` item has exactly:
 
-- `id`: `project:<project_id>/tool:<tool_id>/node:<node_id>`;
+- `id`: `<graph_id>/pipeline:<pipeline_id>/node:<node_id>`;
 - `source_id`: original manifest node ID;
-- `kind`, `label`, and `description` from the manifest;
-- `scope`: `{kind, id, project_id}`;
+- `kind` from the manifest and `label` equal to the original node ID;
+- `scope`: the separately supplied `render_scope`;
 - `authority`: `manifest`, `settings`, `hermes`, `otel`, or `provider`;
-- `source`: `{ref, revision, sha256}`;
-- `classification`: `public`, `internal`, `private`, or `secret`;
+- `source`: `{manifest_id, manifest_version, pipeline_id, pipeline_version, sha256}`;
+- `classification`: `unspecified`, `public`, `internal`, `private`, or `secret`;
 - `freshness`: `{observed_at, expires_at?}`;
-- `capabilities`: manifest capabilities intersected with actor permissions;
-- `ports`: `[{id, direction, schema_ref}]` where direction is `in` or `out`;
-- `status`: `idle`, `queued`, `running`, `succeeded`, `failed`, `blocked`,
+- `capabilities`: empty for v1 manifest nodes, then intersected with actor
+  permissions for runtime overlays;
+- `ports`: empty for v1 manifest nodes;
+- `status`: `declared`, `queued`, `running`, `succeeded`, `failed`, `blocked`,
   `cancelled`, or `unavailable`;
 - `settings_revision_ref`: optional immutable revision reference;
 - `presentation`: `{group_id?, icon?, tone?}` with no executable styling;
@@ -239,12 +318,12 @@ Every `nodes[]` item has exactly:
 
 Every `edges[]` item has exactly:
 
-- `id`: `project:<project_id>/tool:<tool_id>/edge:<edge_id>`;
-- `source_id`: original manifest edge ID;
-- `from`, `to`, `from_port?`, and `to_port?`;
-- `kind`, `label?`, and `condition_ref?`;
+- `id`: `<graph_id>/pipeline:<pipeline_id>/edge:<index>:<from>:<to>`;
+- `source_id`: the zero-based canonical edge index;
+- `from` and `to` mapped to normalized node IDs;
+- `kind`: derived `control`; no label, ports, or condition reference in v1;
 - `authority`, `classification`, `source`, and `freshness`;
-- `status`: `idle`, `active`, `succeeded`, `failed`, or `unavailable`;
+- `status`: `declared`, `active`, `succeeded`, `failed`, or `unavailable`;
 - `presentation`: `{tone?, dashed?}`;
 - `extensions`: namespaced additive data only.
 
@@ -254,36 +333,19 @@ data and not Hermes state.
 
 ## Trace contract
 
-Hermes and domain runtimes emit OpenTelemetry spans. The adapter projects the
-authorized subset into `schema://frank.trace/v1` without creating a second
-trace store.
+The canonical manifest `/trace` object remains
+`schema://frank.tool-app-trace/v1`. It declares the Tool's instrumentation
+style, span prefix, allowed attributes/fields, and allowed event kinds. It is
+not replaced by a Frank-specific trace declaration.
 
-```json
-{
-  "schema": "schema://frank.trace/v1",
-  "trace_id": "32-lowercase-hex",
-  "run_id": "opaque-run-id",
-  "graph_id": "project:blockwise/tool:content-factory",
-  "pipeline_revision": "immutable-revision",
-  "settings_revision_id": "immutable-revision-id",
-  "mode": "demo",
-  "status": "succeeded",
-  "started_at": "2026-08-14T00:00:00Z",
-  "ended_at": "2026-08-14T00:00:01Z",
-  "root_span_id": "16-lowercase-hex",
-  "spans": [],
-  "artifacts": [],
-  "receipt_ref": "opaque-receipt-ref",
-  "redactions": [],
-  "extensions": {}
-}
-```
-
-Every `spans[]` item contains `span_id`, `parent_span_id?`, `node_id?`, `name`,
-`kind`, `status`, `started_at`, `ended_at?`, `duration_ms?`, `attributes`,
-`events`, and `links`. Every event contains `name`, `occurred_at`, and redacted
-`attributes`. Every artifact contains `id`, `kind`, `label`, `media_type`,
-`sha256`, `size`, and an authorized opaque `ref`.
+Hermes/domain runtimes emit OpenTelemetry spans and
+`schema://frank.tool-app-event/v1` envelopes. The adapter uses the Tool's trace
+allowlist to produce an in-memory run overlay for `schema://frank.graph/v1`.
+The read-only trace endpoint returns the canonical authorized
+`schema://frank.tool-app-trace/v1` run record supplied by the Hermes boundary;
+Frank does not persist or define a second trace envelope. If no canonical run
+record exists, the endpoint returns unavailable rather than synthesizing one
+from chat text.
 
 The following custom OpenTelemetry attributes are the stable correlation seam:
 
@@ -305,38 +367,34 @@ capture them.
 ## Commands and editing
 
 The workbench may construct but never execute
-`schema://frank.hermes-command/v1` envelopes. A command contains exactly:
-
-- `schema`, `command_id`, `issued_at`, `actor_ref`, and `idempotency_key`;
-- `project_id`, `tool_id`, `pipeline_revision`, and `settings_revision_id`;
-- `mode`: `validate`, `demo`, `run`, or `commit`;
-- `target`: `{kind, id, settings_ref?}`;
-- `input`: a validated payload or authorized opaque payload reference;
-- `capability_ref` and `policy_ref`;
-- `trace_context`: `{traceparent, tracestate?}`.
+`schema://frank.tool-app-command/v1` envelopes. The adapter does not introduce
+fields into that canonical command contract. It supplies the Tool ID, selected
+runtime scope, selected settings revision, declared Hermes action, validated
+input, and trace context only through fields accepted by the domain validator.
 
 `demo` is sandboxed by default. `run` and `commit` require an explicit Hermes
 capability and policy decision. Hermes returns ordered
-`schema://frank.hermes-event/v1` envelopes with `event_id`, `command_id`,
-`sequence`, `occurred_at`, `type`, `status`, `node_id?`, `trace_id?`,
-`span_id?`, `summary?`, `artifacts[]`, `error?`, and `receipt_ref?`.
+`schema://frank.tool-app-event/v1` envelopes. The graph workbench renders only
+validated fields declared by the canonical event and trace allowlists.
 
 ## Registration and migration
 
-1. Domain Tool packages publish `schema://frank.tool-manifest/v1` plus their
+1. Domain Tool packages publish `schema://frank.tool-app-manifest/v1` plus their
    immutable settings, Hermes envelope, and OpenTelemetry contracts. They do
    not publish UI code.
 2. Frank registers the one `tool-manifest` adapter and the one
    `graph-workbench` renderer.
-3. Frank adds the `graph` view with host `slot-graph` and registers the
-   `entity-graph` home widget.
+3. Frank adds the internal `graph` view with host `slot-graph`, the two
+   read-only provider endpoints above, and the exact `entity-graph` home widget
+   manifest. The live rail/menu is unchanged.
 4. The existing `trace` view and `slot-trace` mount `graph-workbench` with lens
    `run.trace`.
 5. The existing `trace-view` registration becomes a v1 compatibility alias.
    Saved layouts continue to work; new layouts use `entity-graph`.
 6. A domain package may add `entity-graph` to its default widget IDs only after
-   `/api/capabilities` reports `frank.graph.v1`. Before that, keep the list
-   empty so current Frank does not reject an unknown widget.
+   the shared `GET /api/widgets` catalog contains the exact manifest above.
+   Before that, keep the list empty so current Frank does not reject an unknown
+   widget.
 7. Opening a Tool home passes only `{kind: "tool", id: <tool_id>}`. Frank
    resolves the registered provider and renders the manifest; no domain route
    or screen is added.
