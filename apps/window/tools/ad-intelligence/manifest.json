@@ -19,7 +19,8 @@
       "media_policy": {"type": "object"},
       "thresholds": {"type": "object"},
       "retention": {"type": "object"},
-      "approval_policy": {"type": "object"}
+      "approval_policy": {"type": "object"},
+      "connection": {"type": "object", "properties": {"connection_id": {"type": "string"}, "capability": {"type": "string"}}}
     }
   },
   "pipelines": [{

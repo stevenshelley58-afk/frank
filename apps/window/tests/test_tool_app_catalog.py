@@ -20,6 +20,22 @@ PUBLISHING_TOOLS = {
     "ad-template-generator": "schema://frank.tool-app-release/v1",
     "content-factory": "schema://frank.content-factory-release/v1",
 }
+ADJUSTABLE_SETTINGS = {
+    "ad-intelligence": ("prompt_ref", "style_preset", "model_policy", "thresholds", "cadence"),
+    "ad-template-generator": ("prompt_ref", "style_pack_ref", "model_policy", "qa_thresholds", "retry_budget"),
+    "content-factory": ("prompt_refs", "tone_style", "model_policy", "thresholds", "schedule_ref"),
+    "mail": ("reply_classification.prompt_ref", "reply_classification.model_policy", "sync.poll_interval"),
+    "outreach": ("personalized_draft.prompt_ref", "personalized_draft.style_preset", "personalized_draft.model_policy", "sequence.timing"),
+    "prospect-discovery": ("qualification_policy.prompt_ref", "qualification_policy.model_policy", "qualification_policy.confidence_threshold"),
+}
+
+
+def setting_property(properties, dotted_path):
+    current = properties
+    for part in dotted_path.split("."):
+        current = current[part]
+        current = current.get("properties", {})
+    return True
 SAFE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 
 
@@ -44,6 +60,15 @@ class ToolAppCatalogTest(unittest.TestCase):
 
             if tool_id in PUBLISHING_TOOLS:
                 self.assertEqual(manifest.get("release_schema"), PUBLISHING_TOOLS[tool_id])
+
+            settings = manifest["settings"]["properties"]
+            for dotted_path in ADJUSTABLE_SETTINGS[tool_id]:
+                with self.subTest(tool_id=tool_id, setting=dotted_path):
+                    self.assertTrue(setting_property(settings, dotted_path))
+
+            if home["connection_capabilities"]:
+                self.assertIn("connection", settings, f"{tool_id} must select a shared Connection")
+                self.assertEqual(set(settings["connection"]["properties"]), {"connection_id", "capability"})
 
             hermes = manifest.get("hermes")
             self.assertIsInstance(hermes, dict, f"{tool_id}.hermes")
