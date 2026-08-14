@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Frank</title>
+<link rel="icon" href="/brand/mark.svg">
+<link rel="stylesheet" href="/tokens.css">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app">
+  <nav class="rail">
+    <a class="logo" href="/">
+      <svg viewBox="0 0 88 87" fill="none" aria-hidden="true">
+        <path fill="currentColor" d="M8 10.5 16 8h66l-8.5 14.5H27V85H8V10.5Z"/>
+        <path fill="#E53C1F" d="M39 41h29l-9 16H30l9-16Z"/>
+      </svg>
+      <span class="fn">Frank</span>
+    </a>
+
+    <div class="rail-group">
+      <div class="lbl">Workspace</div>
+      <button class="rail-item is-on" data-view="hub"><span class="dot"></span><span>Hub</span></button>
+      <div class="chat-nav-head">
+        <span>Chats</span>
+        <button type="button" id="new-chat" aria-label="Start a new chat" title="New chat">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <div class="chat-nav" id="chat-nav" aria-label="Hub chats"></div>
+      <div class="project-rule"><span>Projects</span></div>
+      <button class="rail-item" data-project="blockwise"><span class="dot"></span><span>Blockwise</span></button>
+      <button class="rail-item" data-project="merrypaws"><span class="dot"></span><span>Merrypaws</span></button>
+      <button class="rail-item" data-project="elfwonder"><span class="dot"></span><span>Elf &amp; Wonder</span></button>
+      <button class="rail-item" data-project="pavone"><span class="dot"></span><span>Pavone</span></button>
+    </div>
+
+    <div class="rail-group">
+      <div class="lbl">Window</div>
+      <button class="rail-item" data-view="files"><span class="glyph">▤</span><span>Files</span></button>
+      <button class="rail-item" data-view="tools"><span class="glyph">⚙</span><span>Tools</span></button>
+      <button class="rail-item" data-view="trace"><span class="glyph">◉</span><span>Trace</span></button>
+      <button class="rail-item" data-view="releases"><span class="glyph">✓</span><span>Releases</span></button>
+    </div>
+
+    <div class="rail-foot">Frank — window only.<br>Hermes does the thinking.</div>
+  </nav>
+
+  <main class="main">
+    <header class="topbar">
+      <h1 id="view-title">Hub</h1>
+      <span class="sub" id="view-sub"></span>
+      <div class="right" id="top-actions"></div>
+    </header>
+
+    <div class="content">
+      <section class="view is-on" data-view="hub">
+        <div class="chat">
+          <div class="chat-scroll" id="chat-scroll">
+            <div class="chat-empty" id="chat-empty">
+              <h2>Ask hub.</h2>
+              <p class="lede">It reads last night so you don’t have to.</p>
+              <div class="chips">
+                <button class="chip" data-slide="over">Overnight</button>
+                <button class="chip" data-slide="wait">Waiting</button>
+                <button class="chip" data-slide="run">Running</button>
+              </div>
+              <div class="slide" id="slide-over"><div data-widget="overnight"></div></div>
+              <div class="slide" id="slide-wait"><div data-widget="waiting"></div></div>
+              <div class="slide" id="slide-run"><div data-widget="running"></div></div>
+            </div>
+            <div class="chat-msgs" id="chat-msgs"></div>
+          </div>
+          <div class="chat-composer" id="chat-composer">
+            <div class="att-row" id="att-row"></div>
+            <form class="bar" id="bar" autocomplete="off">
+              <div class="attach-pick" id="attach-pick">
+                <button type="button" class="cb-btn" id="attach" title="Attach files or a folder" aria-label="Attach files or a folder">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M21 12.5 12.6 21a5 5 0 0 1-7-7l8.6-8.6a3.3 3.3 0 0 1 4.7 4.7L10 18.8a1.7 1.7 0 0 1-2.4-2.4L15 8.9"/></svg>
+                </button>
+                <div class="attach-menu" id="attach-menu" role="menu">
+                  <button type="button" id="pick-files" role="menuitem">Choose files</button>
+                  <button type="button" id="pick-folder" role="menuitem">Choose a folder</button>
+                </div>
+                <input type="file" id="file-input" multiple hidden>
+                <input type="file" id="folder-input" multiple webkitdirectory directory hidden>
+              </div>
+              <textarea id="chat-input" rows="1" placeholder="Message hub — drop a file anywhere here" aria-label="Message hub"></textarea>
+              <button type="button" class="cb-btn" id="mic" title="Voice input" aria-label="Voice input">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>
+              </button>
+              <div class="model-pick" id="model-pick">
+                <button type="button" class="model-btn" id="model-btn" title="Choose model"><span id="model-name">model</span>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m6 9 6 6 6-6"/></svg>
+                </button>
+                <div class="model-menu" id="model-menu" role="menu"></div>
+              </div>
+              <button type="button" class="go is-hidden" id="stop" aria-label="Stop">
+                <svg viewBox="0 0 24 24" fill="currentColor"><rect x="7" y="7" width="10" height="10" rx="1.5"/></svg>
+              </button>
+              <button type="submit" class="go" id="send" aria-label="Send">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+              </button>
+            </form>
+          </div>
+        </div>
+      </section>
+
+      <section class="view" data-view="project"><div class="grid" id="slot-project"></div></section>
+
+      <section class="view" data-view="files">
+        <div class="explorer">
+          <div class="exp-toolbar">
+            <button class="exp-nav" id="exp-back" title="Back" aria-label="Back">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M15 18l-6-6 6-6"/></svg>
+            </button>
+            <button class="exp-nav" id="exp-fwd" title="Forward" aria-label="Forward">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>
+            </button>
+            <button class="exp-nav" id="exp-up" title="Up one level" aria-label="Up one level">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+            </button>
+            <button class="exp-nav" id="exp-refresh" title="Refresh" aria-label="Refresh">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-2.6-6.3"/><path d="M21 3v6h-6"/></svg>
+            </button>
+            <div class="crumbs" id="exp-crumbs" aria-label="Current folder"></div>
+            <input class="exp-search" id="exp-search" placeholder="Search VPS" aria-label="Search this folder">
+          </div>
+          <div class="exp-body">
+            <aside class="exp-tree" id="exp-tree" aria-label="Folders"></aside>
+            <div class="exp-list-w" id="exp-list-w" tabindex="0">
+              <div class="exp-cols" id="exp-cols">
+                <button class="exp-col" data-sort="name" title="Sort by name">Name</button>
+                <button class="exp-col" data-sort="mtime" title="Sort by date modified">Date modified</button>
+                <button class="exp-col" data-sort="type" title="Sort by type">Type</button>
+                <button class="exp-col" data-sort="size" title="Sort by size">Size</button>
+                <span class="exp-pin-head" aria-hidden="true"></span>
+              </div>
+              <div class="exp-rows" id="exp-rows"></div>
+            </div>
+          </div>
+          <div class="exp-status" id="exp-status"></div>
+        </div>
+      </section>
+
+      <section class="view" data-view="tools"><div class="grid" id="slot-tools"></div></section>
+      <section class="view" data-view="trace"><div class="grid" id="slot-trace"></div></section>
+      <section class="view" data-view="releases"><div class="grid" id="slot-releases"></div></section>
+    </div>
+  </main>
+</div>
+<div class="ctx" id="ctx" hidden>
+  <button type="button" data-act="open">Open</button>
+  <button type="button" data-act="preview">Preview</button>
+  <button type="button" data-act="download">Download</button>
+  <button type="button" data-act="copy">Copy path</button>
+  <button type="button" data-act="pin" id="ctx-pin">Pin</button>
+  <button type="button" data-act="refresh">Refresh</button>
+</div>
+<div class="media-viewer" id="media-viewer" hidden role="dialog" aria-modal="true" aria-label="Media preview">
+  <div class="media-toolbar">
+    <a id="media-open" target="_blank" rel="noopener noreferrer">Open</a>
+    <button type="button" id="media-close" aria-label="Close preview">Close</button>
+  </div>
+  <div class="media-stage" id="media-stage"></div>
+</div>
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

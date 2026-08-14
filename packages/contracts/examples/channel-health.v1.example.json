@@ -1,8 +1,0 @@
-{
-  "healthy": false,
-  "connected": false,
-  "platform": "telegram",
-  "checkedAt": "2026-08-06T18:30:12.004Z",
-  "pendingDeliveryDepth": 3,
-  "detail": "long polling to api.telegram.org failed with ECONNRESET; retrying with backoff"
-}

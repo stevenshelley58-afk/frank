@@ -1,65 +1,29 @@
-# Frank
+# Frank project contract
 
-## Purpose
+Frank is a single, intentionally thin visual Window and Hub. It owns the user
+interface and a small transport boundary to Hermes. Hermes owns reasoning,
+models, memory, tools, skills, and execution.
 
-Frank is the visual window onto Steven's VPS. It shows conversations, project
-files, skills, traces, factory runs, and signed releases. Hermes is the only
-agent runtime: Frank forwards requests to Hermes and renders the results.
+The sole product source is `apps/window`. The previous Next.js/API platform,
+databases, caches, embedded skills, agent harnesses, and alternate preview
+applications were retired because they duplicated Hermes or produced multiple
+competing versions of Frank.
 
-## Boundaries
-
-Frank may:
-
-- display and submit Hermes conversations;
-- browse explicitly exposed project files and shared skills;
-- display deterministic traces and factory output;
-- sign, publish, and deliver approved release artifacts;
-- show project status assembled from authoritative project sources.
-
-Frank must not:
-
-- choose or call language models directly;
-- load skills or run an independent agent loop;
-- own a second memory store;
-- duplicate project source, the shared vault, or Hermes state;
-- treat previews, logs, caches, or build evidence as product source.
+The Window may grow through modular visual widgets, but those widgets remain
+views and controls over authoritative VPS or Hermes capabilities. They must not
+become independent brains or duplicate source/data owned elsewhere.
 
 ## VPS layout
 
-| Responsibility | Authoritative path |
+| Responsibility | Path |
 | --- | --- |
 | Frank source | `/projects/frank` |
-| Other project source | `/projects/<name>` |
+| Window data | `/srv/frank/data/window` |
+| Window secrets | `/srv/frank/secrets/window.env` |
 | Shared knowledge | `/srv/vault` |
 | Shared skills | `/srv/skills` |
-| Hermes profiles and state | `/home/hermes/.hermes` |
+| Project source | `/projects/<project>` |
+| Hermes state | `/home/hermes/.hermes` |
 
-The legacy `/frank/repo` and `/frank/deployed` trees are migration inputs only.
-New work belongs in `/projects/frank` and must originate from Git.
-
-## Repository shape
-
-- `apps/`: user-facing applications and services
-- `packages/`: shared product packages
-- `adapters/`: boundaries to external services and storage
-- `infra/`: checked-in deployment configuration
-- `skills/`: Frank-specific skill definitions, not the shared VPS library
-- `tools/` and `scripts/`: repository verification and release tooling
-- `docs/`: durable architecture, contracts, and runbooks
-
-Generated dependencies, build output, caches, previews, backups, release
-evidence, databases, secrets, and local agent state are not source and must not
-be committed or copied into the canonical project tree.
-
-## Change and release contract
-
-1. Start from the current default branch.
-2. Keep one implementation and one durable document per responsibility.
-3. Run `pnpm install --frozen-lockfile` when dependencies are needed.
-4. Run `pnpm verify` and `pnpm build` before release.
-5. Commit the exact revision being released.
-6. Deploy through the checked-in preview and production workflow.
-7. Keep persistent data and secrets outside the source checkout.
-
-If an experiment is retained, give it an owner and expiry. Otherwise remove it
-after 30 days.
+The Window container sees only `/projects`, `/srv/vault`, and `/srv/skills`
+through a read-only virtual `/vps` tree.

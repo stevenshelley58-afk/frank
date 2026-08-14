@@ -1,0 +1,106 @@
+(frank_security_headers) {
+    header {
+        -Server
+        -X-Powered-By
+        Strict-Transport-Security "max-age=31536000; includeSubDomains; preload"
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        Cross-Origin-Opener-Policy "same-origin"
+        Cross-Origin-Resource-Policy "same-origin"
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()"
+        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'"
+        Cache-Control "no-store, private"
+        X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+    }
+}
+
+frank.fail {
+    encode zstd gzip
+    import frank_security_headers
+
+    log {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                request>headers>Authorization delete
+                request>headers>Proxy-Authorization delete
+                request>headers>Cookie delete
+                request>uri delete
+                response>headers>Set-Cookie delete
+            }
+        }
+    }
+
+    route {
+        @pavone_root path /pavone
+        redir @pavone_root /pavone/ 308
+
+        @pavone path /pavone/*
+        handle @pavone {
+            request_body {
+                max_size 14MB
+            }
+            reverse_proxy pavone-demo:8787 {
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -Cookie
+                header_down -Set-Cookie
+            }
+        }
+
+        handle {
+            request_body {
+                max_size 260MB
+            }
+            basic_auth {
+                {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
+            }
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                flush_interval -1
+            }
+        }
+    }
+}
+
+preview.frank.fail {
+    root * /srv/frank/previews
+    file_server
+    try_files {path} {path}/index.html =404
+}
+
+tasks.frank.fail {
+    handle /api/* {
+        reverse_proxy plane-api-1:8000
+    }
+    handle /spaces/* {
+        reverse_proxy plane-space-1:3000
+    }
+    handle /admin/* {
+        reverse_proxy plane-admin-1:3000
+    }
+    handle {
+        reverse_proxy plane-web-1:3000
+    }
+}
+
+buzz.frank.fail {
+    reverse_proxy buzz-prod-relay-1:3000
+}
+
+ssh.frank.fail {
+    @tunnel path /ON7FY1wnnqFcDPrLQTplHdk1uY4DGV /ON7FY1wnnqFcDPrLQTplHdk1uY4DGV/*
+    handle @tunnel {
+        reverse_proxy 172.16.1.1:8080
+    }
+    respond 404
+}
+
+:80 {
+    respond "Frank is running." 200
+}

@@ -1,0 +1,65 @@
+name: frank
+
+services:
+  frank-window:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: frank-window:current
+    container_name: frank-window
+    restart: unless-stopped
+    env_file:
+      - ${FRANK_WINDOW_ENV_FILE:-/srv/frank/secrets/window.env}
+    environment:
+      FRANK_WEB: /web
+      CHAT_STORE_DIR: /data
+      HERMES_SHARED_UPLOAD_ROOT: /srv/frank/data/window/uploads
+      HERMES_API_URL: http://172.16.1.1:8642
+      HERMES_PROFILE: hub
+      VPS_ROOT: /vps
+      PORT: "8080"
+    volumes:
+      - /srv/frank/data/window:/data
+      - /projects:/vps/projects:ro
+      - /srv/vault:/vps/srv/vault:ro
+      - /srv/skills:/vps/srv/skills:ro
+    networks:
+      - frank
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=4)"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  frank-caddy:
+    image: caddy:2.8-alpine
+    container_name: frank-caddy
+    restart: unless-stopped
+    env_file:
+      - ${FRANK_WINDOW_ENV_FILE:-/srv/frank/secrets/window.env}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/frank/previews:/srv/frank/previews:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    networks:
+      - frank
+    depends_on:
+      frank-window:
+        condition: service_healthy
+
+volumes:
+  caddy_data:
+    name: frank_caddy_data
+  caddy_config:
+    name: frank_caddy_config
+
+networks:
+  frank:
+    external: true
+    name: frank
