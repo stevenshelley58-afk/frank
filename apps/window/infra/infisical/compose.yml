@@ -1,0 +1,83 @@
+name: infisical
+
+services:
+  backend:
+    image: infisical/infisical:v0.162.14@sha256:5afd9456b952b3dcd10ae10a819a617aef53a13bd88d70cf6fafe3c41a88b05c
+    container_name: infisical-backend
+    restart: unless-stopped
+    pull_policy: missing
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file:
+      - ${INFISICAL_ENV_FILE:-/srv/infisical/secrets/infisical.env}
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: "8080"
+    ports:
+      - "127.0.0.1:${INFISICAL_HOST_PORT:-18082}:8080"
+    tmpfs:
+      - /tmp:rw,exec,nosuid,nodev,size=128m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    networks:
+      - infisical
+      - frank
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/status').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  db:
+    image: postgres:16-alpine@sha256:44c4ee9810eff91f7eab4d822642e01115b1a9eccce4bcbdde7604752d68eac6
+    container_name: infisical-db
+    restart: unless-stopped
+    env_file:
+      - ${INFISICAL_ENV_FILE:-/srv/infisical/secrets/infisical.env}
+    volumes:
+      - infisical_pg_data:/var/lib/postgresql/data
+    networks:
+      - infisical
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready --username=\"$${POSTGRES_USER}\" --dbname=\"$${POSTGRES_DB}\""]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  redis:
+    image: redis:7.4-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
+    container_name: infisical-redis
+    restart: unless-stopped
+    env_file:
+      - ${INFISICAL_ENV_FILE:-/srv/infisical/secrets/infisical.env}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --save 60 1 --maxmemory-policy noeviction --requirepass \"$${REDIS_PASSWORD}\""]
+    volumes:
+      - infisical_redis_data:/data
+    networks:
+      - infisical
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+volumes:
+  infisical_pg_data:
+    name: infisical_pg_data
+  infisical_redis_data:
+    name: infisical_redis_data
+
+networks:
+  infisical:
+    name: infisical_private
+    internal: true
+  frank:
+    external: true
+    name: frank
