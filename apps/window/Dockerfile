@@ -3,8 +3,10 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
+COPY home_platform.py .
 COPY web /web
 ENV FRANK_WEB=/web
 ENV PORT=8080
 EXPOSE 8080
-CMD ["gunicorn", "-b", "0.0.0.0:8080", "--workers", "2", "--threads", "4", "--timeout", "0", "server:app"]
+# Frank's JSON stores use process-local locks; keep one worker and use threads.
+CMD ["gunicorn", "-b", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "0", "server:app"]
