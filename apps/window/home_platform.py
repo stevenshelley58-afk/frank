@@ -157,7 +157,7 @@ BUILTIN_WIDGETS = [
     {
         "id": "hermes-session", "version": "1.0.0", "title": "Hermes sessions",
         "description": "Read-only session and work summaries from Hermes.",
-        "surfaces": sorted(ENTITY_KINDS), "default_size": "wide",
+        "surfaces": ["agent"], "entity_scope": {"kind": "agent", "id": "hermes"}, "default_size": "wide",
         "allowed_sizes": ["medium", "wide"], "provider": "hermes.sessions",
         "freshness": "poll", "accepts_connection": False, "multiple": False,
     },
@@ -374,6 +374,15 @@ def _widget_by_id(widget_id: str, store: dict | None = None) -> dict | None:
     return next((item for item in _all_widgets(store) if item.get("id") == widget_id), None)
 
 
+def _widget_allowed_on_home(manifest: dict | None, kind: str, entity_id: str) -> bool:
+    if not manifest or kind not in manifest.get("surfaces", []):
+        return False
+    scope = manifest.get("entity_scope")
+    if not scope:
+        return True
+    return isinstance(scope, dict) and scope.get("kind") == kind and scope.get("id") == entity_id
+
+
 def _default_instances(kind: str, entity_id: str, entity: dict | None = None, store: dict | None = None) -> list[dict]:
     entity = entity or _entity(kind, entity_id)
     requested = home_defaults.default_widget_ids(kind, entity_id, entity.get("profile"))
@@ -381,7 +390,7 @@ def _default_instances(kind: str, entity_id: str, entity: dict | None = None, st
     result = []
     for widget_id in requested:
         manifest = by_id.get(widget_id)
-        if not manifest or kind not in manifest.get("surfaces", []):
+        if not _widget_allowed_on_home(manifest, kind, entity_id):
             continue
         result.append({
             "instance_id": f"{widget_id}-1",
@@ -433,7 +442,7 @@ def _clean_instances(raw: object, kind: str, entity_id: str, store: dict) -> lis
         if instance_id in seen_instances:
             abort(400, "duplicate widget instance id")
         manifest = _widget_by_id(widget_id, store)
-        if not manifest or kind not in manifest.get("surfaces", []):
+        if not _widget_allowed_on_home(manifest, kind, entity_id):
             abort(400, "widget is unavailable on this home")
         if not manifest.get("multiple") and widget_id in seen_widgets:
             abort(400, "this widget supports one instance per home")
@@ -485,6 +494,12 @@ def _public_connection(item: dict) -> dict:
 
 
 def _instance_snapshot(kind: str, entity_id: str, instance: dict) -> dict:
+    manifest = _widget_by_id(instance.get("widget_id"))
+    if not _widget_allowed_on_home(manifest, kind, entity_id):
+        return home_providers.snapshot(
+            "unavailable", "This widget is not available on this home.",
+            {"widget_id": instance.get("widget_id")}, now=_now(),
+        )
     entity = _entity(kind, entity_id)
     config = instance.get("config", {})
     all_connections = _connection_store().get("connections", [])

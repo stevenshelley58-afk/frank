@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Callable
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
-from urllib.request import Request, urlopen
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 
 Provider = Callable[["ProviderContext"], dict]
@@ -116,10 +116,20 @@ def _project_path(ctx: ProviderContext) -> tuple[Path | None, str]:
     return target, root_name
 
 
-def _git_directory(target: Path) -> Path | None:
+def _git_directory(target: Path, allowed_root: Path | None = None) -> Path | None:
+    allowed_root = (allowed_root or target.parent).resolve()
+
+    def contained(candidate: Path) -> Path | None:
+        resolved = candidate.resolve()
+        try:
+            resolved.relative_to(allowed_root)
+        except ValueError:
+            return None
+        return resolved
+
     git = target / ".git"
     if git.is_dir():
-        return git
+        return contained(git)
     if git.is_file():
         try:
             match = re.match(r"gitdir:\s*(.+)", git.read_text(encoding="utf-8").strip(), re.I)
@@ -128,12 +138,12 @@ def _git_directory(target: Path) -> Path | None:
         if not match:
             return None
         path = Path(match.group(1))
-        return path if path.is_absolute() else (target / path).resolve()
+        return contained(path if path.is_absolute() else target / path)
     return None
 
 
 def _git_branch(target: Path) -> str:
-    git = _git_directory(target)
+    git = _git_directory(target, target.parent)
     if not git:
         return "unknown"
     try:
@@ -144,7 +154,7 @@ def _git_branch(target: Path) -> str:
 
 
 def _repo_rows(target: Path, limit: int = 5) -> list[dict]:
-    git = _git_directory(target)
+    git = _git_directory(target, target.parent)
     if not git:
         return []
     candidates = [git / "logs" / "HEAD"]
@@ -346,26 +356,46 @@ def provider_catalog(ctx: ProviderContext) -> dict:
 
 @register("provider-coverage")
 def provider_coverage(ctx: ProviderContext) -> dict:
-    recorded = {str(item.get("provider")) for item in ctx.connections}
+    by_provider: dict[str, list[dict]] = {}
+    for connection in ctx.connections:
+        by_provider.setdefault(str(connection.get("provider") or ""), []).append(connection)
     rows = []
     for item in ctx.catalog:
-        connection = next((candidate for candidate in ctx.connections if candidate.get("provider") == item.get("provider")), None)
-        raw_status = str(connection.get("status") or "") if connection else ""
-        # A connection record is evidence of metadata only. Keep that state
-        # distinct from provider verification so setup/error records cannot
-        # accidentally look healthy in a coverage summary.
-        status = {
-            "connected": "recorded",
-            "verified": "verified",
-            "setup_needed": "setup_needed",
-            "error": "error",
-        }.get(raw_status, "recorded" if connection else "setup_needed")
-        rows.append({"provider": item.get("provider"), "name": item.get("title"), "status": status, "recorded": bool(connection)})
-    recorded_count = sum(1 for row in rows if row["provider"] in recorded)
+        provider = str(item.get("provider") or "")
+        matches = by_provider.get(provider, [])
+        statuses = {str(connection.get("status") or "") for connection in matches}
+        # Aggregate every record. Risk always wins, then pending setup or
+        # verification, and only an all-verified set can be verified.
+        if not matches:
+            status = "setup_needed"
+        elif "error" in statuses:
+            status = "error"
+        elif "setup_needed" in statuses:
+            status = "setup_needed"
+        elif "connected" in statuses:
+            status = "recorded"
+        elif statuses == {"verified"}:
+            status = "verified"
+        else:
+            status = "error"
+        records = sorted(({
+            "id": connection.get("id"), "name": connection.get("name"),
+            "status": connection.get("status"), "scope_kind": connection.get("scope_kind"),
+            "scope_id": connection.get("scope_id"),
+        } for connection in matches), key=lambda record: (
+            str(record.get("status") or ""), str(record.get("scope_kind") or ""),
+            str(record.get("scope_id") or ""), str(record.get("id") or ""),
+        ))
+        rows.append({
+            "provider": provider, "name": item.get("title"), "status": status,
+            "recorded": bool(matches), "record_count": len(records), "records": records,
+        })
+    recorded_count = sum(1 for row in rows if row["recorded"])
     verified = sum(1 for row in rows if row["status"] == "verified")
     configured = sum(1 for row in rows if row["status"] in {"recorded", "verified"})
     setup_needed = sum(1 for row in rows if row["status"] == "setup_needed")
     errors = sum(1 for row in rows if row["status"] == "error")
+    records_total = sum(row["record_count"] for row in rows)
     if errors:
         status = "error"
     elif setup_needed or configured != verified:
@@ -374,7 +404,8 @@ def provider_coverage(ctx: ProviderContext) -> dict:
         status = "ready" if rows else "setup_needed"
     return snapshot(status, f"{recorded_count} of {len(rows)} provider types have recorded metadata; {verified} verified.", {
         "rows": rows, "recorded": recorded_count, "verified": verified,
-        "configured": configured, "setup_needed": setup_needed, "error": errors, "total": len(rows),
+        "configured": configured, "setup_needed": setup_needed, "error": errors,
+        "total": len(rows), "records_total": records_total,
     }, [internal_link("Configure coverage", view="connections")], now=ctx.now)
 
 
@@ -389,6 +420,8 @@ def hermes_status(ctx: ProviderContext) -> dict:
 
 @register("hermes-session")
 def hermes_session(ctx: ProviderContext) -> dict:
+    if ctx.kind != "agent" or ctx.entity_id != "hermes":
+        return snapshot("unavailable", "Hermes session summaries are available only on the Hermes home.", {}, [internal_link("Open Hermes", kind="agent", entity_id="hermes", name="Hermes")], now=ctx.now)
     if not ctx.hermes_sessions:
         return snapshot("unavailable", "Hermes session summaries are not configured.", {}, [internal_link("Open Hub", view="hub")], now=ctx.now)
     try:
@@ -398,7 +431,7 @@ def hermes_session(ctx: ProviderContext) -> dict:
     if not result.get("ok", True):
         return snapshot("unavailable", "Hermes session summaries are unavailable.", {"reason": result.get("reason", "")}, [internal_link("Open Hub", view="hub")], now=ctx.now)
     sessions = list(result.get("sessions") or [])
-    rows = [{key: session.get(key) for key in ("id", "title", "updated_at", "message_count", "preview", "model")} for session in sessions[:6]]
+    rows = [{key: session.get(key) for key in ("id", "title", "updated_at", "message_count", "model")} for session in sessions[:6]]
     return snapshot("ready" if rows else "empty", f"{len(sessions)} Hermes session{'s' if len(sessions) != 1 else ''} available.", {"rows": rows, "total": len(sessions)}, [internal_link("Open Hub", view="hub")], now=ctx.now)
 
 
@@ -438,6 +471,14 @@ def quick_links(ctx: ProviderContext) -> dict:
     return snapshot("ready", f"{len(links)} safe shortcut{'s' if len(links) != 1 else ''} available.", {"count": len(links)}, links, now=ctx.now)
 
 
+class _NoRedirectHandler(HTTPRedirectHandler):
+    def redirect_request(self, _request, _file, _code, _message, _headers, _newurl):
+        return None
+
+
+_NO_REDIRECT_OPENER = build_opener(_NoRedirectHandler)
+
+
 def probe_profile_health(profile: dict, allowed_urls: set[str] | frozenset[str] | None = None) -> dict | None:
     """Probe only the exact health URL declared by the canonical profile."""
     url = str(profile.get("health") or "")
@@ -459,9 +500,9 @@ def probe_profile_health(profile: dict, allowed_urls: set[str] | frozenset[str] 
     started = time.monotonic()
     result: dict
     try:
-        with urlopen(Request(url, headers={"Accept": "application/json", "User-Agent": "Frank-Window/1"}), timeout=PROBE_TIMEOUT_SECONDS) as response:
+        with _NO_REDIRECT_OPENER.open(Request(url, headers={"Accept": "application/json", "User-Agent": "Frank-Window/1"}), timeout=PROBE_TIMEOUT_SECONDS) as response:
             status = int(getattr(response, "status", response.getcode()))
-        result = {"ok": 200 <= status < 400, "status": status, "latency_ms": round((time.monotonic() - started) * 1000)}
+        result = {"ok": 200 <= status < 300, "status": status, "latency_ms": round((time.monotonic() - started) * 1000)}
     except HTTPError as error:
         result = {"ok": False, "status": int(error.code), "reason": f"HTTP {error.code}", "latency_ms": round((time.monotonic() - started) * 1000)}
     except (URLError, TimeoutError, OSError) as error:

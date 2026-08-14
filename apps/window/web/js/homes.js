@@ -157,6 +157,12 @@ function manifestFor(widgetId) {
   return homeState.catalog.find((item) => item.id === widgetId);
 }
 
+function manifestCompatible(manifest) {
+  if (!manifest?.surfaces?.includes(homeState.home?.entity?.kind)) return false;
+  const scope = manifest.entity_scope;
+  return !scope || (scope.kind === homeState.home.entity.kind && scope.id === homeState.home.entity.id);
+}
+
 async function refreshCatalog(signal) {
   const [catalog, connections] = await Promise.all([
     requestJson("/api/widgets", { signal }),
@@ -283,7 +289,7 @@ function removeInstance(instanceId) {
 
 function addInstance(widgetId) {
   const manifest = manifestFor(widgetId);
-  if (!manifest || !manifest.surfaces?.includes(homeState.home.entity.kind)) return;
+  if (!manifest || !manifestCompatible(manifest)) return;
   if (!manifest.multiple && homeState.draft.some((item) => item.widget_id === widgetId)) {
     setHomeMessage(`${manifest.title} is already on this home.`, "error");
     return;
@@ -576,7 +582,7 @@ function gallery() {
   head.append(copy, button("Close", () => { homeState.gallery = false; renderHome(); }, "home-inline-button"));
   panel.append(head);
   const grid = node("div", "home-gallery-grid");
-  const available = homeState.catalog.filter((item) => item.surfaces?.includes(homeState.home.entity.kind));
+  const available = homeState.catalog.filter((item) => manifestCompatible(item));
   for (const manifest of available) {
     const item = node("article", "home-gallery-item");
     item.append(node("h3", "", manifest.title), node("p", "", manifest.description || "Reusable widget."));

@@ -85,6 +85,7 @@ class UiContractTest(unittest.TestCase):
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
+        platform = (WEB.parent / "home_platform.py").read_text(encoding="utf-8")
         registry = (WEB / "js" / "registry.js").read_text(encoding="utf-8")
         styles = (WEB / "app.css").read_text(encoding="utf-8")
 
@@ -125,6 +126,9 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('"campaigns"]', homes)
         self.assertIn('const isCentralConnections = homeState.home.entity.kind === "tool" && homeState.home.entity.id === "connections";', homes)
         self.assertIn("const availableConnections = isCentralConnections", homes)
+        self.assertIn("manifestCompatible", homes)
+        self.assertIn('"entity_scope": {"kind": "agent", "id": "hermes"}', platform)
+        self.assertIn("_widget_allowed_on_home", platform)
         self.assertIn('item?.kind !== "external"', homes)
         self.assertIn('url.protocol !== "https:"', homes)
         self.assertIn('new CustomEvent("frank:entity-home"', homes)
@@ -179,6 +183,8 @@ class UiContractTest(unittest.TestCase):
 
     def test_home_snapshot_renderer_live_payload_contract(self):
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
+        server = (WEB.parent / "server.py").read_text(encoding="utf-8")
+        providers = (WEB.parent / "home_providers.py").read_text(encoding="utf-8")
 
         self.assertIn('"empty", "setup_needed"', homes)
         self.assertIn("const normalized = Number.isFinite(numeric)", homes)
@@ -191,6 +197,8 @@ class UiContractTest(unittest.TestCase):
         self.assertNotIn('item?.kind === "https"', homes)
         for marker in ("Â", "â", "Ã"):
             self.assertNotIn(marker, homes)
+            self.assertNotIn(marker, server)
+        self.assertNotIn('"preview"', providers)
 
     def test_connections_home_sees_all_scopes_but_other_homes_are_scoped(self):
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")

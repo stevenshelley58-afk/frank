@@ -304,6 +304,17 @@ def _public_hermes_session(session: dict) -> dict:
     }
 
 
+def _public_hermes_session_list(payload: dict) -> list[dict] | None:
+    """Parse the production Hermes session-list shape used by chat and homes."""
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+        return None
+    return [
+        _public_hermes_session(item)
+        for item in payload["data"]
+        if isinstance(item, dict) and item.get("id")
+    ]
+
+
 def _message_text(content) -> str:
     if isinstance(content, str):
         return content
@@ -382,13 +393,13 @@ def hermes_session_summaries() -> dict:
         return {"ok": False, "reason": "HERMES_API_KEY is not set", "sessions": []}
     try:
         payload = hermes_request("/api/sessions?limit=20&include_children=true", timeout=3)
-        raw_sessions = payload.get("sessions", []) if isinstance(payload, dict) else []
-        if not isinstance(raw_sessions, list):
+        sessions = _public_hermes_session_list(payload)
+        if sessions is None:
             return {"ok": False, "reason": "Hermes returned an invalid session summary", "sessions": []}
         return {
             "ok": True,
             "profile": HERMES_PROFILE.strip() or "default",
-            "sessions": [_public_hermes_session(item) for item in raw_sessions if isinstance(item, dict)],
+            "sessions": sessions[:20],
         }
     except Exception as err:
         return {"ok": False, "reason": str(err).split("\n", 1)[0][:180], "sessions": []}
@@ -592,11 +603,7 @@ def chat_sessions_list():
         data = hermes_request("/api/sessions?limit=100&include_children=true")
     except Exception as err:
         return _hermes_error(err)
-    sessions = [
-        _public_hermes_session(item)
-        for item in data.get("data", [])
-        if isinstance(item, dict) and item.get("id")
-    ]
+    sessions = _public_hermes_session_list(data) or []
     return jsonify({"sessions": sessions, "profile": HERMES_PROFILE})
 
 

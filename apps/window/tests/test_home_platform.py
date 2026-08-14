@@ -1,8 +1,12 @@
 import base64
 import json
+import os
 import tempfile
+import threading
 import unittest
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError
 from unittest.mock import patch
 
 import home_platform
@@ -70,7 +74,7 @@ class HomePlatformApiTest(unittest.TestCase):
 
         home_providers._probe_cache.clear()
         allowed_urls = {item["health"] for item in server.DEFAULT_PROJECTS if item.get("health")}
-        with patch.object(home_providers, "urlopen", return_value=Response()) as opener:
+        with patch.object(home_providers._NO_REDIRECT_OPENER, "open", return_value=Response()) as opener:
             first = home_providers.probe_profile_health(server.DEFAULT_PROJECTS[0], allowed_urls)
             second = home_providers.probe_profile_health(server.DEFAULT_PROJECTS[0], allowed_urls)
         self.assertTrue(first["ok"])
@@ -78,17 +82,119 @@ class HomePlatformApiTest(unittest.TestCase):
         self.assertTrue(second["cached"])
         opener.assert_called_once()
 
-        with patch.object(home_providers, "urlopen") as opener:
+        with patch.object(home_providers._NO_REDIRECT_OPENER, "open") as opener:
             rejected = home_providers.probe_profile_health({"health": "https://untrusted.example/health"}, allowed_urls)
         self.assertFalse(rejected["ok"])
         self.assertIn("allowlisted", rejected["reason"])
         opener.assert_not_called()
 
         home_providers._probe_cache.clear()
-        with patch.object(home_providers, "urlopen", side_effect=OSError("offline")):
+        with patch.object(home_providers._NO_REDIRECT_OPENER, "open", side_effect=OSError("offline")):
             failed = home_providers.probe_profile_health(server.DEFAULT_PROJECTS[0], allowed_urls)
         self.assertFalse(failed["ok"])
         self.assertIn("offline", failed["reason"])
+
+        home_providers._probe_cache.clear()
+        with patch.object(
+            home_providers._NO_REDIRECT_OPENER,
+            "open",
+            side_effect=lambda request, timeout: (_ for _ in ()).throw(
+                HTTPError(request.full_url, 302, "redirect", {"Location": "http://169.254.169.254/"}, None)
+            ),
+        ) as opener:
+            redirected = home_providers.probe_profile_health(server.DEFAULT_PROJECTS[0], allowed_urls)
+        self.assertFalse(redirected["ok"])
+        self.assertEqual(redirected["status"], 302)
+        opener.assert_called_once()
+
+        class RedirectHandler(BaseHTTPRequestHandler):
+            hits = 0
+
+            def do_GET(self):
+                type(self).hits += 1
+                self.send_response(302)
+                self.send_header("Location", "http://127.0.0.1:1/internal")
+                self.end_headers()
+
+            def log_message(self, *_args):
+                return
+
+        redirect_server = ThreadingHTTPServer(("127.0.0.1", 0), RedirectHandler)
+        redirect_server.daemon_threads = True
+        redirect_thread = threading.Thread(target=redirect_server.serve_forever, daemon=True)
+        redirect_thread.start()
+        try:
+            with self.assertRaises(HTTPError) as raised:
+                home_providers._NO_REDIRECT_OPENER.open(
+                    home_providers.Request(f"http://127.0.0.1:{redirect_server.server_port}/"),
+                    timeout=1,
+                )
+            self.assertEqual(raised.exception.code, 302)
+            self.assertEqual(RedirectHandler.hits, 1)
+        finally:
+            redirect_server.shutdown()
+            redirect_server.server_close()
+            redirect_thread.join(timeout=1)
+
+    def test_hermes_home_summary_uses_production_data_shape_and_rejects_wrong_shape(self):
+        payload = {
+            "data": [{
+                "id": "session-1", "title": "Frank main", "source": "api_server",
+                "model": "deepseek-v4-pro", "started_at": 10, "last_active": 20,
+                "message_count": 3, "preview": "A redacted preview",
+            }],
+        }
+        with patch("server.HERMES_KEY", "configured-for-test"), patch("server.hermes_request", return_value=payload):
+            result = server.hermes_session_summaries()
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["sessions"][0]["id"], "session-1")
+        self.assertEqual(result["sessions"][0]["message_count"], 3)
+
+        with patch("server.HERMES_KEY", "configured-for-test"), patch("server.hermes_request", return_value={"sessions": payload["data"]}):
+            wrong_shape = server.hermes_session_summaries()
+        self.assertFalse(wrong_shape["ok"])
+        self.assertEqual(wrong_shape["sessions"], [])
+
+    def test_hermes_session_widget_is_scoped_to_hermes_and_omits_preview(self):
+        forbidden_targets = (("project", "blockwise"), ("tool", "connections"), ("service", "frank-window"), ("agent", "other"))
+        forged = {"instance_id": "hermes-session-forged", "widget_id": "hermes-session", "size": "wide", "config": {}}
+        for kind, entity_id in forbidden_targets:
+            with self.subTest(kind=kind, entity_id=entity_id):
+                home_platform._write_json(home_platform.HOME_STORE_FILE, {"version": 1, "homes": {}, "custom_widgets": []})
+                home = self.client.get(f"/api/homes/{kind}/{entity_id}").get_json()
+                self.assertNotIn("hermes-session", {item["widget_id"] for item in home["instances"]})
+                rejected = self.client.put(f"/api/homes/{kind}/{entity_id}", json={
+                    "expected_revision": home["revision"], "instances": [forged],
+                })
+                self.assertEqual(rejected.status_code, 400)
+
+                home_platform._write_json(home_platform.HOME_STORE_FILE, {
+                    "version": 1,
+                    "homes": {f"{kind}:{entity_id}": {"revision": 1, "instances": [forged], "updated_at": 0}},
+                    "custom_widgets": [],
+                })
+                unavailable = self.client.get(f"/api/homes/{kind}/{entity_id}/widgets/hermes-session-forged")
+                self.assertEqual(unavailable.status_code, 200)
+                self.assertEqual(unavailable.get_json()["status"], "unavailable")
+
+        home_platform._write_json(home_platform.HOME_STORE_FILE, {"version": 1, "homes": {}, "custom_widgets": []})
+        home_platform.configure(
+            project_loader=lambda: [{
+                "id": "blockwise", "name": "Blockwise", "root": "blockwise",
+                "default_widgets": ["entity-overview"],
+            }],
+            account_loader=lambda: [],
+            hermes_health=lambda: {"ok": True, "profile": "default"},
+            hermes_sessions=lambda: {"ok": True, "sessions": [{
+                "id": "session-1", "title": "Hermes session", "updated_at": 20,
+                "message_count": 3, "model": "test-model", "preview": "must not reach homes",
+            }]},
+            roots={"vps": self.project_root.parent.parent},
+        )
+        hermes = self.client.get("/api/homes/agent/hermes/widgets/hermes-session-1").get_json()
+        self.assertEqual(hermes["status"], "ready")
+        self.assertNotIn("preview", json.dumps(hermes))
+        self.assertEqual(hermes["data"]["rows"][0]["id"], "session-1")
 
     def tearDown(self):
         home_platform.HOME_STORE_FILE = self.original_home_file
@@ -285,6 +391,28 @@ class HomePlatformApiTest(unittest.TestCase):
         self.assertEqual(statuses["activepieces"], "setup_needed")
         self.assertEqual(snapshot["status"], "error")
 
+    def test_provider_coverage_aggregates_same_provider_records_order_independently(self):
+        records = [
+            {"name": "Resend error", "scope_kind": "global", "scope_id": "", "status": "error", "connection_ref": "resend://error/main"},
+            {"name": "Resend verified", "scope_kind": "project", "scope_id": "blockwise", "status": "verified", "connection_ref": "resend://verified/blockwise"},
+        ]
+
+        def coverage(order):
+            home_platform.CONNECTIONS_FILE.unlink(missing_ok=True)
+            for item in order:
+                response = self.client.post("/api/connections", json={
+                    "provider": "resend", **item,
+                })
+                self.assertEqual(response.status_code, 201, response.get_json())
+            snapshot = self.client.get("/api/homes/tool/connections/widgets/provider-coverage-1").get_json()
+            row = next(item for item in snapshot["data"]["rows"] if item["provider"] == "resend")
+            return snapshot["status"], row["status"], row["record_count"], [item["status"] for item in row["records"]]
+
+        first = coverage(records)
+        second = coverage(list(reversed(records)))
+        self.assertEqual(first, second)
+        self.assertEqual(first, ("error", "error", 2, ["error", "verified"]))
+
     def test_repository_reflog_rows_expose_display_names_without_emails(self):
         logs = self.project_root / ".git" / "logs"
         logs.mkdir(parents=True)
@@ -295,6 +423,28 @@ class HomePlatformApiTest(unittest.TestCase):
         rows = home_providers._repo_rows(self.project_root)
         self.assertEqual(rows[0]["author"], "Jane Operator")
         self.assertNotIn("@", rows[0]["author"])
+
+    def test_gitdir_stays_inside_projects_mount_for_linked_worktrees(self):
+        linked = self.project_root.parent / "linked-worktree"
+        linked.mkdir()
+        (linked / ".git").write_text(f"gitdir: {self.project_root / '.git'}\n", encoding="utf-8")
+        self.assertEqual(home_providers._git_directory(linked), (self.project_root / ".git").resolve())
+        self.assertEqual(home_providers._git_branch(linked), "main")
+
+        outside = Path(self.temp.name) / "outside-git"
+        (outside / "logs").mkdir(parents=True)
+        absolute_escape = self.project_root.parent / "absolute-escape"
+        absolute_escape.mkdir()
+        (absolute_escape / ".git").write_text(f"gitdir: {outside}\n", encoding="utf-8")
+        self.assertIsNone(home_providers._git_directory(absolute_escape))
+        self.assertEqual(home_providers._repo_rows(absolute_escape), [])
+
+        relative_escape = self.project_root.parent / "relative-escape"
+        relative_escape.mkdir()
+        relative_path = os.path.relpath(outside, relative_escape)
+        (relative_escape / ".git").write_text(f"gitdir: {relative_path}\n", encoding="utf-8")
+        self.assertIsNone(home_providers._git_directory(relative_escape))
+        self.assertEqual(home_providers._repo_rows(relative_escape), [])
 
     def test_current_tool_home_emitters_resolve_to_named_profiles_and_defaults(self):
         emitters = {
@@ -310,6 +460,36 @@ class HomePlatformApiTest(unittest.TestCase):
             self.assertNotIn("quick-links", profile.get("default_widgets", []))
             self.assertNotIn("work-status", profile.get("default_widgets", []))
             self.assertNotIn("recent-receipts", profile.get("default_widgets", []))
+
+    def test_every_builtin_profile_get_and_reset_use_its_declared_blueprint(self):
+        home_platform.configure(
+            project_loader=server._project_items,
+            account_loader=lambda: [],
+            hermes_health=lambda: {"ok": False, "reason": "test"},
+            roots={"vps": self.project_root.parent.parent},
+        )
+        profiles = [("project", item["id"], item) for item in server.DEFAULT_PROJECTS]
+        profiles.extend(
+            (kind, profile["id"], profile)
+            for key, profile in home_platform.home_defaults.API_ENTITY_PROFILES.items()
+            for kind, _entity_id in [key.split(":", 1)]
+        )
+        for kind, entity_id, profile in profiles:
+            with self.subTest(kind=kind, entity_id=entity_id):
+                declared = list(profile["default_widgets"])
+                if kind != "project":
+                    self.assertEqual(declared, list(home_platform.home_defaults.ENTITY_DEFAULT_WIDGET_IDS[f"{kind}:{entity_id}"]))
+                home = self.client.get(f"/api/homes/{kind}/{entity_id}").get_json()
+                self.assertEqual([item["widget_id"] for item in home["instances"]], declared)
+                saved = self.client.put(f"/api/homes/{kind}/{entity_id}", json={
+                    "expected_revision": home["revision"], "instances": list(reversed(home["instances"])),
+                })
+                self.assertEqual(saved.status_code, 200, saved.get_json())
+                reset = self.client.post(f"/api/homes/{kind}/{entity_id}/reset", json={
+                    "expected_revision": saved.get_json()["revision"],
+                })
+                self.assertEqual(reset.status_code, 200, reset.get_json())
+                self.assertEqual([item["widget_id"] for item in reset.get_json()["instances"]], declared)
 
     def test_entity_profile_registry_validates_copies_and_unknown_widgets_fail_closed(self):
         manifest = {

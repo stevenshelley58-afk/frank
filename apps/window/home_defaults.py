@@ -153,7 +153,7 @@ _BUILTIN_ENTITY_MANIFESTS: dict[str, dict] = {
         "capabilities": ["analytics.read"],
         "connection_capabilities": ["analytics.read"],
         "setup_only": True,
-        "default_widgets": ["entity-overview", "connections-summary", "connection-attention", "provider-coverage"],
+        "default_widgets": list(ENTITY_DEFAULT_WIDGET_IDS["service:umami"]),
     },
     "service:activepieces": {
         "id": "activepieces",
@@ -163,7 +163,7 @@ _BUILTIN_ENTITY_MANIFESTS: dict[str, dict] = {
         "capabilities": ["workflow.status", "connector.setup"],
         "connection_capabilities": ["workflow.status", "connector.setup"],
         "setup_only": True,
-        "default_widgets": ["entity-overview", "connections-summary", "connection-attention", "provider-coverage"],
+        "default_widgets": list(ENTITY_DEFAULT_WIDGET_IDS["service:activepieces"]),
     },
     "service:frank-window": {
         "id": "frank-window",
@@ -172,7 +172,7 @@ _BUILTIN_ENTITY_MANIFESTS: dict[str, dict] = {
         "blurb": "The display-only Window surface for Frank.",
         "capabilities": ["window.health", "homes.read"],
         "connection_capabilities": [],
-        "default_widgets": ["entity-overview", "connections-summary", "hermes-status", "provider-coverage"],
+        "default_widgets": list(ENTITY_DEFAULT_WIDGET_IDS["service:frank-window"]),
     },
 }
 
