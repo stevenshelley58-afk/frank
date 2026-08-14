@@ -15,7 +15,7 @@ services:
       CHAT_STORE_DIR: /data
       HERMES_SHARED_UPLOAD_ROOT: /srv/frank/data/window/uploads
       HERMES_API_URL: http://172.16.1.1:8642
-      HERMES_PROFILE: hub
+      HERMES_PROFILE: default
       VPS_ROOT: /vps
       PORT: "8080"
     volumes:

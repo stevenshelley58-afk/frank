@@ -4,6 +4,11 @@ Frank is a single, intentionally thin visual Window and Hub. It owns the user
 interface and a small transport boundary to Hermes. Hermes owns reasoning,
 models, memory, tools, skills, and execution.
 
+Hermes runs one profile on the VPS: `default`. Frank chats are ordinary,
+unassigned sessions in that profile. Blockwise, Merrypaws, Elf & Wonder,
+Pavone, and future bodies of work are projects/workspaces within the same
+profile; they are never separate Hermes profiles.
+
 The sole product source is `apps/window`. The previous Next.js/API platform,
 databases, caches, embedded skills, agent harnesses, and alternate preview
 applications were retired because they duplicated Hermes or produced multiple

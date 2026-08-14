@@ -14,6 +14,10 @@ only brain: reasoning, model selection, tools, skills, memory, and autonomous
 work belong to Hermes. Frank may forward requests and render results; it must
 not implement an agent loop or duplicate Hermes state.
 
+Hermes has one VPS profile (`default`). Frank is an unassigned session in that
+profile. Product bodies of work are projects/workspaces inside the profile,
+never additional Hermes profiles.
+
 ## Data and security
 
 - Browse only the explicit read-only mounts beneath `/vps` in the container.

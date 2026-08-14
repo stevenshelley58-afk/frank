@@ -31,6 +31,18 @@ class UiContractTest(unittest.TestCase):
         self.assertIn("att-image-pending", styles)
         self.assertIn("att-folder-pending", styles)
 
+    def test_chat_is_a_live_hermes_session_not_a_local_transcript(self):
+        script = (WEB / "js" / "app.js").read_text(encoding="utf-8")
+        dockerfile = (WEB.parent / "Dockerfile").read_text(encoding="utf-8")
+        compose = (WEB.parent / "docker-compose.yml").read_text(encoding="utf-8")
+
+        self.assertIn('/api/chat/sessions/${encodeURIComponent(currentChatId)}/model', script)
+        self.assertIn('ev === "assistant.delta"', script)
+        self.assertIn("refreshChatSessions(true)", script)
+        self.assertIn("window.setInterval", script)
+        self.assertIn('"--timeout", "0"', dockerfile)
+        self.assertIn("HERMES_PROFILE: default", compose)
+
     def test_accounts_tool_is_secret_safe_and_responsive(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         script = (WEB / "js" / "app.js").read_text(encoding="utf-8")
