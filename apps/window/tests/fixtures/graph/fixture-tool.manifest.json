@@ -6,7 +6,7 @@
   "description": "A canonical flat Tool manifest used only by the isolated graph tests.",
   "scopes": ["global", "project"],
   "settings": {
-    "type": "object",
+    "schema": "schema://frank.tool-app-settings/v1",
     "properties": {
       "mode": {"type": "string"}
     }

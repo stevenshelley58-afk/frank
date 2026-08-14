@@ -6,3 +6,7 @@ data
 *.db
 *.sqlite*
 *.log
+node_modules
+.npm-cache
+web/graph
+graph/isolated-harness.html

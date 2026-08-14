@@ -1,21 +1,23 @@
-"""Declarative assembly records for the one shared graph/trace workbench."""
+"""Declarative assembly records for the shared graph workbench."""
 
 from __future__ import annotations
 
 from copy import deepcopy
 
-CAPABILITIES = ["frank.graph.v1"]
+# This isolated branch deliberately advertises no live capability. Final
+# assembly can publish frank.graph.v1 only after the endpoints, home provider,
+# hosts, and renderer are registered together.
+CAPABILITIES: list[str] = []
 
-VIEW_REGISTRATIONS = [
+RESERVED_VIEW_REGISTRATIONS = [
     {"id": "graph", "host": "slot-graph", "renderer": "graph-workbench", "internal": True},
-    {"id": "trace", "host": "slot-trace", "renderer": "graph-workbench", "lens": "run.trace", "internal": True},
 ]
 
 WIDGET_MANIFEST = {
     "id": "entity-graph",
     "version": "1.0.0",
     "title": "Graph",
-    "description": "Read-only entity topology, settings, and run traces from registered providers.",
+    "description": "Read-only entity pipeline and settings graphs from registered providers.",
     "surfaces": ["project", "tool", "agent", "service"],
     "default_size": "wide",
     "allowed_sizes": ["medium", "wide"],
@@ -32,25 +34,26 @@ TOOL_MANIFEST_ADAPTER = {
     "accepts": [
         "schema://frank.tool-app-manifest/v1",
         "schema://frank.tool-app-settings/v1",
-        "schema://frank.tool-app-command/v1",
-        "schema://frank.tool-app-event/v1",
-        "schema://frank.tool-app-trace/v1",
         "OTLP/1.0",
     ],
-    "produces": ["schema://frank.graph/v1", "schema://frank.tool-app-command/v1"],
-    "surfaces": ["graph", "trace", "project", "tool", "agent", "service"],
+    "produces": ["schema://frank.graph/v1"],
+    "surfaces": ["graph", "project", "tool", "agent", "service"],
     "renderer": "graph-workbench",
 }
 
-ALIASES = {"trace-view": "graph-workbench"}
+RESERVED_ALIASES = {}
 
 
 def registration_blueprint() -> dict:
-    """Return copies suitable for the final runtime registration patch."""
+    """Describe only isolated components that are truthful before assembly.
+
+    Views, the home widget/provider, the public capability, and the legacy
+    alias remain absent until the final runtime wires every dependency.
+    """
     return deepcopy({
         "capabilities": CAPABILITIES,
-        "views": VIEW_REGISTRATIONS,
-        "widgets": [WIDGET_MANIFEST],
+        "views": [],
+        "widgets": [],
         "adapters": [TOOL_MANIFEST_ADAPTER],
-        "aliases": ALIASES,
+        "aliases": {},
     })

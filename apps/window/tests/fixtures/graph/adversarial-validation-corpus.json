@@ -1,0 +1,102 @@
+[
+  {
+    "id": "duplicate-node-capabilities",
+    "path": ["nodes", 0, "capabilities"],
+    "value": ["inspect", "inspect"]
+  },
+  {
+    "id": "duplicate-graph-capabilities",
+    "path": ["capabilities"],
+    "value": ["inspect", "inspect"]
+  },
+  {
+    "id": "unsafe-node-label",
+    "path": ["nodes", 0, "label"],
+    "value": "<b>private</b>"
+  },
+  {
+    "id": "forged-node-source",
+    "path": ["nodes", 0, "source", "pipeline_id"],
+    "value": "other"
+  },
+  {
+    "id": "forged-edge-source",
+    "path": ["edges", 0, "source", "pipeline_id"],
+    "value": "other"
+  },
+  {
+    "id": "unknown-node-group",
+    "path": ["nodes", 0, "presentation", "group_id"],
+    "value": "other"
+  },
+  {
+    "id": "negative-settings-revision",
+    "path": ["nodes", 0, "settings_revision_ref"],
+    "value": {
+      "schema": "schema://frank.tool-app-settings/v1",
+      "scope": {"kind": "global"},
+      "revision": -1
+    }
+  },
+  {
+    "id": "unsafe-integer-settings-revision",
+    "path": ["nodes", 0, "settings_revision_ref"],
+    "value": {
+      "schema": "schema://frank.tool-app-settings/v1",
+      "scope": {"kind": "global"},
+      "revision": 9007199254740992
+    }
+  },
+  {
+    "id": "unsafe-integer-edge-source-id",
+    "mutations": [
+      {
+        "path": ["edges", 0, "source_id"],
+        "value": 9007199254740992
+      },
+      {
+        "path": ["edges", 0, "id"],
+        "value": "tool:fixture-tool/pipeline:main/edge:9007199254740992:prepare:publish"
+      }
+    ]
+  },
+  {
+    "id": "unsafe-integer-group-order",
+    "mutations": [
+      {
+        "path": ["groups"],
+        "value": [
+          {
+            "id": "review-group",
+            "label": "Review",
+            "order": 9007199254740992
+          }
+        ]
+      },
+      {
+        "path": ["nodes", 0, "presentation"],
+        "value": {"group_id": "review-group"}
+      }
+    ]
+  },
+  {
+    "id": "empty-selection-node-id",
+    "path": ["extensions", "frank.graph.selection"],
+    "value": {"node_id": ""}
+  },
+  {
+    "id": "nonstring-selection-node-id",
+    "path": ["extensions", "frank.graph.selection"],
+    "value": {"node_id": 0}
+  },
+  {
+    "id": "empty-selection-edge-id",
+    "path": ["extensions", "frank.graph.selection"],
+    "value": {"edge_id": ""}
+  },
+  {
+    "id": "object-selection-edge-id",
+    "path": ["extensions", "frank.graph.selection"],
+    "value": {"edge_id": {"private": "body"}}
+  }
+]

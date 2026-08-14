@@ -1,4 +1,4 @@
-"""Isolated shared graph/trace contract implementation.
+"""Isolated shared graph contract implementation.
 
 The package is deliberately not imported by ``server.py`` yet. The final
 assembly lane can register its blueprint and copy the declarative records into

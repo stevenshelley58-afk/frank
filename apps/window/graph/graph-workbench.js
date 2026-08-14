@@ -1,6 +1,7 @@
 import "@maxgraph/core/css/common.css";
+import "./graph-workbench.css";
 import { Graph, InternalEvent, RubberBandHandler } from "@maxgraph/core";
-import { fetchGraphSnapshot } from "./graph-client.js";
+import { fetchGraphSnapshot, validateGraphSnapshot } from "./graph-client.js";
 
 const STATUS_COLORS = {
   declared: "#e7e4dc",
@@ -36,7 +37,7 @@ function graphStyle(status) {
 function buildToolbar(root, state) {
   const toolbar = $("div", "graph-toolbar");
   const lens = $("span", "graph-lens", state.lens);
-  const status = $("span", "graph-status", "Read-only provider projection");
+  const status = $("span", "graph-status", "Loading");
   const refresh = $("button", "graph-button", "Refresh");
   refresh.type = "button";
   refresh.addEventListener("click", () => state.load());
@@ -77,6 +78,13 @@ function renderSnapshot(state, snapshot) {
   state.meta.textContent = `${snapshot.nodes.length} nodes · ${snapshot.edges.length} edges · ${snapshot.graph_revision.slice(0, 18)}`;
 }
 
+function clearSnapshot(state) {
+  const parent = state.graph.getDefaultParent();
+  const existing = state.graph.getChildCells(parent, true, true);
+  if (existing.length) state.graph.removeCells(existing);
+  state.meta.textContent = "";
+}
+
 export function mountGraphWorkbench(root, options = {}) {
   root.replaceChildren();
   root.classList.add("graph-workbench");
@@ -87,19 +95,22 @@ export function mountGraphWorkbench(root, options = {}) {
     graph: null,
     meta: $("p", "graph-meta", "Loading graph projection…"),
     load: null,
+    loadGeneration: 0,
+    destroyed: false,
   };
   const heading = $("div", "graph-heading");
-  heading.append($("div", "graph-kicker", "Shared workbench"), $("h2", "graph-title", options.title || "Graph"));
-  const note = $("p", "graph-note", "Frank renders an authorized projection. Hermes remains the authority for settings, traces, and execution.");
+  heading.append($("h2", "graph-title", options.title || "Graph"));
   const controls = buildToolbar(root, state);
   const canvas = $("div", "graph-canvas");
   canvas.tabIndex = 0;
   canvas.setAttribute("role", "application");
   canvas.setAttribute("aria-label", "Read-only graph canvas. Use arrow keys to move between nodes.");
   const meta = state.meta;
-  const empty = $("p", "graph-empty", "No graph projection is available.");
-  root.prepend(heading, note);
-  root.append(canvas, meta, empty);
+  const empty = $("p", "graph-empty", "No graph available.");
+  const stage = $("div", "graph-stage");
+  stage.append(canvas, empty);
+  root.prepend(heading);
+  root.append(stage, meta);
 
   InternalEvent.disableContextMenu(canvas);
   const graph = new Graph(canvas);
@@ -112,7 +123,7 @@ export function mountGraphWorkbench(root, options = {}) {
   state.meta = meta;
   graph.addListener(InternalEvent.CLICK, (_sender, event) => {
     const cell = event.getProperty("cell");
-    if (cell?.value) controls.status.textContent = `Selected ${String(cell.value)} · read-only`;
+    if (cell?.value) controls.status.textContent = `Selected ${String(cell.value)}`;
   });
   canvas.addEventListener("keydown", (event) => {
     if (!["ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown"].includes(event.key)) return;
@@ -124,18 +135,41 @@ export function mountGraphWorkbench(root, options = {}) {
   });
 
   state.load = async () => {
+    const generation = ++state.loadGeneration;
+    clearSnapshot(state);
+    root.dataset.graphState = "loading";
     empty.hidden = true;
-    controls.status.textContent = "Loading authorized projection…";
+    controls.status.textContent = "Loading…";
     try {
-      const snapshot = await (options.load || fetchGraphSnapshot)({ kind: state.kind, entityId: state.entityId, lens: state.lens, settingsRevisionId: options.settingsRevisionId, traceId: options.traceId });
+      const params = { kind: state.kind, entityId: state.entityId, lens: state.lens, settingsRevisionId: options.settingsRevisionId };
+      const loaded = await (options.load || fetchGraphSnapshot)(params);
+      if (state.destroyed || generation !== state.loadGeneration) return;
+      const snapshot = validateGraphSnapshot(loaded, params);
       renderSnapshot(state, snapshot);
-      controls.status.textContent = "Read-only provider projection";
+      controls.status.textContent = "Ready";
+      const bounds = canvas.getBoundingClientRect();
+      root.dataset.canvasWidth = String(Math.round(bounds.width));
+      root.dataset.canvasHeight = String(Math.round(bounds.height));
+      root.dataset.graphState = "ready";
     } catch (error) {
+      if (state.destroyed || generation !== state.loadGeneration) return;
+      clearSnapshot(state);
       empty.hidden = false;
       controls.status.textContent = "Graph unavailable";
       state.meta.textContent = error.message || "Graph is unavailable.";
+      delete root.dataset.canvasWidth;
+      delete root.dataset.canvasHeight;
+      root.dataset.graphState = "unavailable";
     }
   };
   void state.load();
-  return { destroy: () => graph.destroy(), reload: state.load, graph };
+  return {
+    destroy: () => {
+      state.destroyed = true;
+      state.loadGeneration += 1;
+      graph.destroy();
+    },
+    reload: state.load,
+    graph,
+  };
 }

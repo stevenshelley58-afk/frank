@@ -5,37 +5,125 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Frank shared graph workbench harness</title>
   <link rel="stylesheet" href="./graph-workbench.bundle.css">
-  <link rel="stylesheet" href="./graph-workbench.css">
 </head>
 <body>
   <main id="workbench"></main>
   <script type="module">
     import { mountGraphWorkbench } from "./graph-workbench.bundle.js";
-    mountGraphWorkbench(document.querySelector("#workbench"), {
+    const query = new URLSearchParams(location.search);
+    let fail = false;
+    let calls = 0;
+    const graphId = "tool:fixture-tool";
+    const observedAt = "2026-08-14T00:00:00Z";
+    const source = {
+      manifest_id: "fixture-tool",
+      manifest_version: "0.1.1",
+      pipeline_id: "main",
+      pipeline_version: "0.1.1",
+      sha256: `sha256:${"d".repeat(64)}`,
+    };
+    const node = (id, label = id, entry = false) => ({
+      id: `${graphId}/pipeline:main/node:${id}`,
+      source_id: id,
+      kind: "step",
+      label,
+      scope: { kind: "global" },
+      authority: "manifest",
+      source: { ...source },
+      classification: "unspecified",
+      freshness: { observed_at: observedAt },
+      capabilities: [],
+      ports: [],
+      status: "declared",
+      presentation: {},
+      extensions: { "frank.graph.entry": entry },
+    });
+    const edge = (sourceId, from, to) => ({
+      id: `${graphId}/pipeline:main/edge:${sourceId}:${from}:${to}`,
+      source_id: sourceId,
+      from: `${graphId}/pipeline:main/node:${from}`,
+      to: `${graphId}/pipeline:main/node:${to}`,
+      kind: "control",
+      authority: "manifest",
+      classification: "unspecified",
+      source: { ...source },
+      freshness: { observed_at: observedAt },
+      status: "declared",
+      presentation: {},
+      extensions: {},
+    });
+    const snapshot = (label = "prepare", revision = "a") => ({
+      schema: "schema://frank.graph/v1",
+      graph_id: graphId,
+      graph_revision: `sha256:${revision.repeat(64)}`,
+      generated_at: observedAt,
+      provider: { id: "tool-manifest", version: "1.0.0", authority: "manifest" },
+      subject: { kind: "tool", id: "fixture-tool" },
+      scope: { kind: "global" },
+      lens: "tool.pipeline",
+      capabilities: ["inspect"],
+      nodes: [node("prepare", label, true), node("publish")],
+      edges: [edge(0, "prepare", "publish")],
+      groups: [],
+      trace_ref: null,
+      extensions: {},
+    });
+    const invalidSnapshot = (mode) => {
+      const value = snapshot();
+      if (mode === "revision") value.graph_revision = "invalid";
+      else if (mode === "unknown-root") value.injected = true;
+      else if (mode === "node-incomplete") delete value.nodes[0].source;
+      else if (mode === "html") value.nodes[0].label = "<b>unsafe</b>";
+      else if (mode === "control") value.nodes[0].label = "bad\u0001label";
+      else if (mode === "nonfinite") value.extensions = { "frank.graph.selection": { node_id: Number.NaN } };
+      else if (mode === "duplicate-node") value.nodes.push(structuredClone(value.nodes[0]));
+      else if (mode === "bad-reference") value.edges[0].to = `${graphId}/pipeline:main/node:missing`;
+      else if (mode === "duplicate-edge") {
+        value.nodes.push(node("archive"));
+        value.edges.push(edge(0, "prepare", "archive"));
+      }
+      else if (mode === "group-cycle") value.groups = [
+        { id: "one", label: "One", parent_id: "two" },
+        { id: "two", label: "Two", parent_id: "one" },
+      ];
+      return value;
+    };
+    const mounted = mountGraphWorkbench(document.querySelector("#workbench"), {
       kind: "tool",
       entityId: "fixture-tool",
       lens: "tool.pipeline",
       title: "Fixture tool",
-      load: async () => ({
-        schema: "schema://frank.graph/v1",
-        graph_id: "tool:fixture-tool",
-        graph_revision: "sha256:fixture",
-        generated_at: "2026-08-14T00:00:00Z",
-        provider: { id: "tool-manifest", version: "1.0.0", authority: "manifest" },
-        subject: { kind: "tool", id: "fixture-tool" },
-        scope: { kind: "global" },
-        lens: "tool.pipeline",
-        capabilities: ["frank.graph.v1", "inspect"],
-        nodes: [
-          { id: "tool:fixture-tool/pipeline:main/node:prepare", label: "prepare", status: "declared" },
-          { id: "tool:fixture-tool/pipeline:main/node:publish", label: "publish", status: "declared" },
-        ],
-        edges: [{ id: "tool:fixture-tool/pipeline:main/edge:0:prepare:publish", from: "tool:fixture-tool/pipeline:main/node:prepare", to: "tool:fixture-tool/pipeline:main/node:publish" }],
-        groups: [],
-        trace_ref: null,
-        extensions: {},
-      }),
+      load: async () => {
+        calls += 1;
+        const call = calls;
+        if (query.get("race") === "1") {
+          await new Promise((resolve) => setTimeout(resolve, call === 1 ? 180 : 10));
+          return call === 1 ? snapshot("stale", "b") : snapshot("latest", "c");
+        }
+        if (fail) {
+          await new Promise((resolve) => setTimeout(resolve, 40));
+          throw new Error("Graph is unavailable.");
+        }
+        if (query.get("invalid")) return invalidSnapshot(query.get("invalid"));
+        return snapshot();
+      },
     });
+    if (query.get("race") === "1") setTimeout(() => void mounted.reload(), 0);
+    if (query.get("failure") === "after-ready") {
+      const waitForReady = () => {
+        if (document.querySelector("#workbench").dataset.graphState === "ready") {
+          fail = true;
+          const pending = mounted.reload();
+          const workbench = document.querySelector("#workbench");
+          const canvas = workbench.querySelector(".graph-canvas");
+          document.body.dataset.pendingCleared = canvas.textContent.includes("prepare") || workbench.querySelector(".graph-meta").textContent ? "no" : "yes";
+          void pending;
+        } else {
+          requestAnimationFrame(waitForReady);
+        }
+      };
+      requestAnimationFrame(waitForReady);
+    }
   </script>
 </body>
 </html>
