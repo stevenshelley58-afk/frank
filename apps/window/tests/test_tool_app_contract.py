@@ -92,6 +92,8 @@ class ToolAppContractTest(unittest.TestCase):
         self.assertEqual(seen, emitted)
 
     def test_command_event_and_trace_reject_invalid_envelopes(self):
+        with self.assertRaises(ContractError):
+            command("weekly-report", "run", "project:frank", [])
         for tool_id, action in (("Weekly Report", "run"), ("weekly-report", "run now")):
             with self.assertRaises(ContractError):
                 command(tool_id, action, "project:frank", {})
@@ -130,6 +132,21 @@ class ToolAppContractTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             HermesAdapter(lambda _request: [invalid], emitted.append).dispatch(request)
         self.assertEqual(emitted, [])
+
+    def test_adapter_requires_strict_command_and_event_batches(self):
+        request = command("weekly-report", "run", "project:frank", {}, request_id="req-1")
+        for invalid_request in (
+            {**request, "extra": True}, {**request, "payload": []},
+            {**request, "scope": "tenant:other"}, {**request, "request_id": "req/1"},
+        ):
+            with self.subTest(invalid_request=invalid_request), self.assertRaises(ContractError):
+                HermesAdapter(lambda _request: [], lambda _event: self.fail("forwarded invalid command")).dispatch(invalid_request)
+        emitted = []
+        valid = event("req-1", 0, "started", {})
+        for result in ({"not": "a list"}, [valid, event("req-2", 1, "completed", {})]):
+            with self.subTest(result=result), self.assertRaises(ContractError):
+                HermesAdapter(lambda _request, result=result: result, emitted.append).dispatch(request)
+            self.assertEqual(emitted, [])
 
 
 if __name__ == "__main__":

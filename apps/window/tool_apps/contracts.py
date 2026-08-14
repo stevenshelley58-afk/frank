@@ -19,6 +19,7 @@ PIPELINE_SCHEMA = "schema://frank.tool-app-pipeline/v1"
 TRACE_SCHEMA = "schema://frank.tool-app-trace/v1"
 EVENT_SCHEMA = "schema://frank.tool-app-event/v1"
 COMMAND_SCHEMA = "schema://frank.tool-app-command/v1"
+GRAPH_SCHEMA = "schema://frank.graph/v1"
 
 SCOPE_KINDS = frozenset({"global", "profile", "project", "workspace", "session"})
 _ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")

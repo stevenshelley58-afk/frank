@@ -18,6 +18,7 @@ from .contracts import COMMAND_SCHEMA, EVENT_SCHEMA, TRACE_SCHEMA, ContractError
 _EVENT_STATUSES = frozenset({"ok", "error", "running", "cancelled", "blocked"})
 _REQUEST_ID = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$")
 _EVENT_FIELDS = frozenset({"schema", "request_id", "sequence", "kind", "status", "timestamp", "data"})
+_COMMAND_FIELDS = frozenset({"schema", "request_id", "tool_id", "action", "scope", "payload"})
 
 
 def _validate_request_id(request_id: Any) -> str:
@@ -33,13 +34,28 @@ def _validate_event_envelope(item: Any) -> dict[str, Any]:
     return item
 
 
+def _validate_command_envelope(request: Any) -> dict[str, Any]:
+    if not isinstance(request, dict) or set(request) != _COMMAND_FIELDS or request.get("schema") != COMMAND_SCHEMA:
+        raise ContractError("invalid Hermes command envelope")
+    for field in ("tool_id", "action"):
+        if not isinstance(request[field], str) or not _ID.fullmatch(request[field]):
+            raise ContractError(f"command {field} must be a safe identifier")
+    _validate_request_id(request["request_id"])
+    validate_scope(request["scope"])
+    if not isinstance(request["payload"], dict):
+        raise ContractError("command payload must be an object")
+    _walk_safe(request["payload"], "command.payload")
+    return request
+
+
 def command(tool_id: str, action: str, scope: Any, payload: dict[str, Any], *, request_id: str | None = None) -> dict[str, Any]:
     for field, value in (("tool_id", tool_id), ("action", action)):
         if not isinstance(value, str) or not _ID.fullmatch(value):
             raise ContractError(f"command {field} must be a safe identifier")
-    _walk_safe(payload, "command.payload")
+    if not isinstance(payload, dict):
+        raise ContractError("command payload must be an object")
     request_id = _validate_request_id(f"req-{uuid.uuid4()}" if request_id is None else request_id)
-    return {"schema": COMMAND_SCHEMA, "request_id": request_id, "tool_id": tool_id, "action": action, "scope": validate_scope(scope), "payload": copy.deepcopy(payload)}
+    return _validate_command_envelope({"schema": COMMAND_SCHEMA, "request_id": request_id, "tool_id": tool_id, "action": action, "scope": validate_scope(scope), "payload": copy.deepcopy(payload)})
 
 
 def event(request_id: str, sequence: int, kind: str, data: dict[str, Any], *, status: str = "ok", timestamp: float | None = None) -> dict[str, Any]:
@@ -80,10 +96,16 @@ class HermesAdapter:
         self.on_event = on_event or (lambda _event: None)
 
     def dispatch(self, request: dict[str, Any]) -> Any:
-        if request.get("schema") != COMMAND_SCHEMA:
-            raise ContractError("unsupported Hermes command schema")
+        request = _validate_command_envelope(request)
         result = self.forward(copy.deepcopy(request))
-        for item in result if isinstance(result, list) else []:
+        if not isinstance(result, list):
+            raise ContractError("Hermes command result must be a list of events")
+        validated_events = []
+        for item in result:
             _validate_event_envelope(item)
+            if item["request_id"] != request["request_id"]:
+                raise ContractError("Hermes event request_id does not match command")
+            validated_events.append(item)
+        for item in validated_events:
             self.on_event(copy.deepcopy(item))
         return result

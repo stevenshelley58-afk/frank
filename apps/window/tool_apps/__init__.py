@@ -7,6 +7,7 @@ the Window process, tests, or a future Hermes transport without coupling them.
 
 from .contracts import (
     MANIFEST_SCHEMA,
+    GRAPH_SCHEMA,
     PIPELINE_SCHEMA,
     SETTING_SCHEMA,
     ContractError,
@@ -20,6 +21,7 @@ from .home_manifest import validate_home_manifest
 __all__ = [
     "ContractError",
     "MANIFEST_SCHEMA",
+    "GRAPH_SCHEMA",
     "PIPELINE_SCHEMA",
     "SETTING_SCHEMA",
     "SettingRevisionStore",

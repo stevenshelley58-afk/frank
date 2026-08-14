@@ -34,6 +34,22 @@ selects models, applies policy, executes tools, manages connectors and
 approvals, and owns memory. Frank does not implement an agent loop or duplicate
 Hermes state.
 
+## Graph and inspection boundaries
+
+Domain Tools own and version their manifests, pipeline nodes and edges,
+immutable settings revisions, and Hermes envelopes. A later
+`ToolManifestAdapter` projects those domain-owned declarations to the shared
+`schema://frank.graph/v1` shape. Its final field mapping and spec path remain
+an integration dependency and are intentionally not guessed here.
+
+The sole graph renderer is maxGraph (Apache-2.0). CodeMirror 6 is reserved for
+prompt/instruction inspection, and vanilla-jsoneditor plus Ajv is reserved for
+schema-backed payload editing. This contract adds no graph UI, graph execution,
+or tool-specific settings store. Existing trace, slot-trace, and trace-view
+hooks remain the interchange/presentation integration points; the generic
+event envelopes here do not replace them. OTel GenAI-style spans/events are
+the intended trace interchange mapping.
+
 ## Reuse choices
 
 The contract follows JSON Schema conventions (`schema`, `type`, `properties`,
