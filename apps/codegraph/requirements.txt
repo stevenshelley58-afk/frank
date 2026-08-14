@@ -1,4 +1,0 @@
-# Graphify v0.9.39, pinned to the reviewed upstream source commit. Its [sql]
-# and [watch] extras are the only optional capabilities installed. In
-# particular: no MCP server and no semantic/LLM provider extras are present.
-graphifyy[sql,watch] @ https://github.com/Graphify-Labs/graphify/archive/50556baaea803e191947fdfcc2e0c22e2d4eb74d.tar.gz#sha256=14cc39a5eb89a112b6f2719ac36e238e40e474b28ef741fbe4694cafaae7d4c3

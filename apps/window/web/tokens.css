@@ -1,0 +1,28 @@
+/* Frank Window tokens — white. Source: DESIGN.md */
+:root {
+  --bg: #ffffff;
+  --card: #ffffff;
+  --ink: #111111;
+  --mute: #666666;
+  --faint: #999999;
+  --line: #ececec;
+  --chip: #f5f5f5;
+  --hover: #f6f6f6;
+  --mark: #e53c1f;
+  --ok: #3d6b4f;
+  --bad: #b42318;
+  --rules: #3d5a80;
+  --input-c: #3f6b4a;
+  --loop: #a15c2a;
+  --format: #5a4d7a;
+  --font: "Inter", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --r: 12px;
+  --r-sm: 8px;
+  --r-pill: 999px;
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}

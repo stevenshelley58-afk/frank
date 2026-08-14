@@ -1,46 +1,14 @@
-node_modules/
-dist/
-.turbo/
-*.tsbuildinfo
 .env
 .env.*
 !.env.example
-coverage/
-.DS_Store
-
-.next/
-
-# secrets
-.mem0.key
-
-# workspace cruft (never commit)
-.worktrees/
-mockups/
-projects/
-docs/product/
-infra/deploy-hook/
-.hermes/
-.tmp-*
-*.patch
-*.tar.gz
-preview.report.json
-HANDOVER*.md
-.light/
-.codex-preview-*/
-.aui-tmp/
-<<<<<<< HEAD
-
-# Registry generator build input — required by tools/registry/generate-registry.mjs (CI verify).
-!docs/product/FRANK_COMPLETE_BUILD_PLAN_AND_SPEC.md
-=======
-.cache/
-build/
 __pycache__/
-*.ttf
-*.otf
-*.woff
-*.woff2
-public/adstudio-samples/
-public/adstudio-templates/
-meta_ad_candidates/
->>>>>>> origin/main
+*.py[cod]
+.pytest_cache/
+node_modules/
+data/
+work/
+outputs/
+*.db
+*.sqlite*
+*.log
+.DS_Store
