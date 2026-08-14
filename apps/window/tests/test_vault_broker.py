@@ -2,6 +2,7 @@ import json
 import secrets
 import tempfile
 import threading
+import time
 import unittest
 import urllib.error
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -85,6 +86,10 @@ class _RedirectServer:
 class VaultBrokerApiTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        with vault_broker._rate_lock:
+            vault_broker._rate_events.clear()
+        with vault_broker._replay_lock:
+            vault_broker._replays.clear()
         self.upstream = _VaultUpstream()
         self.store = vault_broker.MetadataStore(Path(self.temp.name) / "vault-metadata.json")
         self.adapter = vault_broker.HermesVaultAdapter(
@@ -111,6 +116,22 @@ class VaultBrokerApiTest(unittest.TestCase):
             "provider": "resend",
             "capabilities": ["email.send"],
             "secret_value": self.upstream.secret_value,
+        }
+
+    def _delete_plan(self, ref):
+        ref_id = ref.rsplit("/", 1)[-1]
+        response = self.client.post(
+            f"/api/vault/secrets/{ref_id}/delete-plan", json={},
+            headers={**self.origin, "Idempotency-Key": "plan-" + secrets.token_hex(12)},
+        )
+        self.assertEqual(response.status_code, 201, response.get_data(as_text=True))
+        return response.get_json()
+
+    @staticmethod
+    def _delete_body(plan):
+        return {
+            "confirmation_token": plan["confirmation_token"],
+            "provider_receipt": {"receipt_id": plan["receipt_id"]},
         }
 
     def test_accidental_upstream_value_is_filtered_at_adapter_and_api_boundaries(self):
@@ -172,12 +193,128 @@ class VaultBrokerApiTest(unittest.TestCase):
         self.assertEqual(binding.status_code, 201, binding.get_data(as_text=True))
         self.assertEqual(binding.get_json()["binding"]["capabilities"], ["email.status"])
 
+        plan = self._delete_plan(ref)
         deleted = self.client.delete(
             "/api/vault/secrets/" + ref.rsplit("/", 1)[-1],
+            json=self._delete_body(plan),
             headers={**self.origin, "Idempotency-Key": "delete-" + secrets.token_hex(12)},
         )
         self.assertEqual(deleted.status_code, 200)
         self.assertEqual(self.client.get("/api/vault/secrets").get_json()["secrets"], [])
+
+        delete_call = self.upstream.calls[-1]
+        self.assertEqual(delete_call[0], "POST")
+        self.assertEqual(set(delete_call[2]), {
+            "project_id", "environment", "secret_path", "secret_name",
+            "confirmation_token", "provider_receipt",
+        })
+        self.assertEqual(delete_call[2]["confirmation_token"], plan["confirmation_token"])
+        self.assertEqual(delete_call[2]["provider_receipt"], {"receipt_id": plan["receipt_id"]})
+        self.assertNotIn("secret_value", delete_call[2])
+
+    def test_delete_confirmation_is_expiring_single_use_and_retry_safe(self):
+        created = self.client.post(
+            "/api/vault/secrets", json=self._create_body(),
+            headers={**self.origin, "Idempotency-Key": "plan-create-" + secrets.token_hex(8)},
+        ).get_json()["secret"]
+        ref = created["ref"]
+        ref_id = ref.rsplit("/", 1)[-1]
+
+        plan_key = "plan-replay-" + secrets.token_hex(8)
+        first_plan = self.client.post(
+            f"/api/vault/secrets/{ref_id}/delete-plan", json={},
+            headers={**self.origin, "Idempotency-Key": plan_key},
+        )
+        replay_plan = self.client.post(
+            f"/api/vault/secrets/{ref_id}/delete-plan", json={},
+            headers={**self.origin, "Idempotency-Key": plan_key},
+        )
+        self.assertEqual(first_plan.status_code, 201)
+        self.assertEqual(replay_plan.status_code, 200)
+        self.assertEqual(replay_plan.get_json(), first_plan.get_json())
+        plan = first_plan.get_json()
+        self.assertEqual(set(plan), {"confirmation_token", "receipt_id", "ref", "expires_at", "write_only"})
+        self.assertEqual(plan["ref"], ref)
+        self.assertNotIn(self.upstream.secret_value, first_plan.get_data(as_text=True))
+        persisted = self.store.path.read_text(encoding="utf-8")
+        self.assertNotIn(plan["confirmation_token"], persisted)
+        self.assertNotIn(self.upstream.secret_value, persisted)
+
+        missing = self.client.delete(
+            f"/api/vault/secrets/{ref_id}", json={},
+            headers={**self.origin, "Idempotency-Key": "delete-missing-" + secrets.token_hex(8)},
+        )
+        self.assertEqual(missing.status_code, 403)
+        self.assertEqual(missing.get_json()["error"]["code"], "delete_confirmation_invalid")
+
+        wrong_token = self._delete_body(plan)
+        wrong_token["confirmation_token"] = "A" * len(plan["confirmation_token"])
+        wrong = self.client.delete(
+            f"/api/vault/secrets/{ref_id}", json=wrong_token,
+            headers={**self.origin, "Idempotency-Key": "delete-wrong-" + secrets.token_hex(8)},
+        )
+        self.assertEqual(wrong.status_code, 403)
+        self.assertEqual(wrong.get_json()["error"]["code"], "delete_confirmation_invalid")
+
+        mismatch = self.client.delete(
+            "/api/vault/secrets/" + ("0" * 32), json=self._delete_body(plan),
+            headers={**self.origin, "Idempotency-Key": "delete-ref-" + secrets.token_hex(8)},
+        )
+        self.assertEqual(mismatch.status_code, 409)
+        self.assertEqual(mismatch.get_json()["error"]["code"], "delete_confirmation_ref_mismatch")
+
+        data = self.store._read()
+        data["plans"][0]["expires_at"] = time.time() - 1
+        self.store.write(data)
+        expired = self.client.delete(
+            f"/api/vault/secrets/{ref_id}", json=self._delete_body(plan),
+            headers={**self.origin, "Idempotency-Key": "delete-expired-" + secrets.token_hex(8)},
+        )
+        self.assertEqual(expired.status_code, 410)
+        self.assertEqual(expired.get_json()["error"]["code"], "delete_confirmation_expired")
+
+        # A new plan is independent and can complete the delete.
+        success_plan = self._delete_plan(ref)
+        delete_key = "delete-success-" + secrets.token_hex(8)
+        deleted = self.client.delete(
+            f"/api/vault/secrets/{ref_id}", json=self._delete_body(success_plan),
+            headers={**self.origin, "Idempotency-Key": delete_key},
+        )
+        self.assertEqual(deleted.status_code, 200)
+        replay = self.client.delete(
+            f"/api/vault/secrets/{ref_id}", json=self._delete_body(success_plan),
+            headers={**self.origin, "Idempotency-Key": delete_key},
+        )
+        self.assertEqual(replay.status_code, 200)
+        reused = self.client.delete(
+            f"/api/vault/secrets/{ref_id}", json=self._delete_body(success_plan),
+            headers={**self.origin, "Idempotency-Key": "delete-reused-" + secrets.token_hex(8)},
+        )
+        self.assertEqual(reused.status_code, 409)
+        self.assertEqual(reused.get_json()["error"]["code"], "delete_confirmation_replayed")
+
+    def test_failed_upstream_delete_leaves_confirmation_plan_available(self):
+        created = self.client.post(
+            "/api/vault/secrets", json=self._create_body(),
+            headers={**self.origin, "Idempotency-Key": "retry-create-" + secrets.token_hex(8)},
+        ).get_json()["secret"]
+        ref_id = created["ref"].rsplit("/", 1)[-1]
+        plan = self._delete_plan(created["ref"])
+        with patch.object(self.adapter, "delete", side_effect=vault_broker.VaultUnavailable()):
+            failed = self.client.delete(
+                f"/api/vault/secrets/{ref_id}", json=self._delete_body(plan),
+                headers={**self.origin, "Idempotency-Key": "retry-failed-" + secrets.token_hex(8)},
+            )
+        self.assertEqual(failed.status_code, 503)
+        stored_plan = self.store.find_plan(plan["receipt_id"])
+        self.assertIsNotNone(stored_plan)
+        self.assertFalse(stored_plan["consumed"])
+
+        retried = self.client.delete(
+            f"/api/vault/secrets/{ref_id}", json=self._delete_body(plan),
+            headers={**self.origin, "Idempotency-Key": "retry-success-" + secrets.token_hex(8)},
+        )
+        self.assertEqual(retried.status_code, 200, retried.get_data(as_text=True))
 
     def test_origin_size_and_permission_failures_are_honest_and_secret_free(self):
         denied = self.client.post(
@@ -264,13 +401,20 @@ class VaultBrokerApiTest(unittest.TestCase):
                             project_id="project", environment="dev", secret_path="/frank",
                             secret_name="RESEND_API_KEY", secret_value="runtime-only-value",
                         )
-                    self.assertEqual(len(source.requests), 1)
+                    with self.assertRaises(vault_broker.VaultRemoteError):
+                        adapter.delete(
+                            project_id="project", environment="dev", secret_path="/frank",
+                            secret_name="RESEND_API_KEY", confirmation_token="T" * 32,
+                            provider_receipt={"receipt_id": "a" * 32},
+                        )
+                    self.assertEqual(len(source.requests), 2)
                     self.assertEqual(source.requests[0]["authorization"], "Bearer dedicated-broker-key")
+                    self.assertEqual(source.requests[1]["authorization"], "Bearer dedicated-broker-key")
                     if target:
                         self.assertEqual(target.requests, [])
                         self.assertTrue(all(not item["authorization"] for item in target.requests))
                     else:
-                        self.assertEqual(len(source.requests), 1)
+                        self.assertEqual(len(source.requests), 2)
                 finally:
                     if source:
                         source.close()
@@ -350,11 +494,13 @@ class VaultBrokerApiTest(unittest.TestCase):
         self.assertEqual(rotated.get_json()["error"]["code"], "metadata_store_error")
         self.assertEqual(self.store.path.read_text(encoding="utf-8"), before_rotate)
 
+        plan = self._delete_plan(created["ref"])
         before_delete = self.store.path.read_text(encoding="utf-8")
         self.store.write = fail_write
         try:
             deleted = self.client.delete(
                 f"/api/vault/secrets/{ref_id}",
+                json=self._delete_body(plan),
                 headers={**self.origin, "Idempotency-Key": "atomic-delete-" + secrets.token_hex(8)},
             )
         finally:

@@ -9,6 +9,7 @@ reference, not the value.
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import os
 import re
@@ -39,6 +40,7 @@ MAX_REQUEST_BYTES = int(os.environ.get("FRANK_VAULT_MAX_REQUEST_BYTES", str(MAX_
 RATE_LIMIT = int(os.environ.get("FRANK_VAULT_RATE_LIMIT", "30"))
 RATE_WINDOW_SECONDS = int(os.environ.get("FRANK_VAULT_RATE_WINDOW_SECONDS", "60"))
 REPLAY_TTL_SECONDS = int(os.environ.get("FRANK_VAULT_REPLAY_TTL_SECONDS", "600"))
+DELETE_PLAN_TTL_SECONDS = int(os.environ.get("FRANK_VAULT_DELETE_PLAN_TTL_SECONDS", "300"))
 HTTP_TIMEOUT_SECONDS = float(os.environ.get("FRANK_VAULT_HTTP_TIMEOUT_SECONDS", "8"))
 HEALTH_CACHE_SECONDS = float(os.environ.get("FRANK_VAULT_HEALTH_CACHE_SECONDS", "10"))
 HEALTH_STATUS_MAP = {
@@ -51,6 +53,8 @@ SAFE_SEGMENT = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 SAFE_REF_ID = re.compile(r"^[a-f0-9]{32}$")
 SAFE_CAPABILITY = re.compile(r"^[a-z][a-z0-9_.-]{1,63}$")
 SAFE_IDEMPOTENCY = re.compile(r"^[A-Za-z0-9._~-]{16,128}$")
+SAFE_CONFIRMATION_TOKEN = re.compile(r"^[A-Za-z0-9_-]{32,256}$")
+SAFE_RECEIPT_ID = re.compile(r"^[a-f0-9]{32}$")
 SAFE_PROVIDER_PATH = re.compile(r"^/(?:[A-Za-z0-9._-]+/)*[A-Za-z0-9._-]*$")
 VAULT_REF_PREFIX = "vault://frank/"
 ALLOWED_METHODS = {"POST", "PATCH", "DELETE"}
@@ -61,6 +65,7 @@ CREATE_FIELDS = {
 }
 ROTATE_FIELDS = {"secret_value"}
 BIND_FIELDS = {"vault_ref", "provider", "capabilities"}
+DELETE_FIELDS = {"confirmation_token", "provider_receipt"}
 
 
 class VaultError(Exception):
@@ -243,7 +248,7 @@ class MetadataStore:
 
     def _read(self) -> dict:
         if not self.path.exists():
-            return {"version": 1, "records": [], "bindings": [], "audit": []}
+            return {"version": 1, "records": [], "bindings": [], "audit": [], "plans": []}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -252,13 +257,17 @@ class MetadataStore:
             raise MetadataStoreError()
         if not all(isinstance(data.get(key), list) for key in ("records", "bindings", "audit")):
             raise MetadataStoreError()
-        if any(not isinstance(item, dict) for key in ("records", "bindings", "audit") for item in data[key]):
+        plans = data.get("plans", [])
+        if not isinstance(plans, list):
+            raise MetadataStoreError()
+        if any(not isinstance(item, dict) for key in ("records", "bindings", "audit") for item in data[key]) or any(not isinstance(item, dict) for item in plans):
             raise MetadataStoreError()
         return {
             "version": 1,
             "records": [self._safe_record(item) for item in data.get("records", []) if isinstance(item, dict)],
             "bindings": [self._safe_binding(item) for item in data.get("bindings", []) if isinstance(item, dict)],
             "audit": [self._safe_audit(item) for item in data.get("audit", []) if isinstance(item, dict)][-200:],
+            "plans": [self._safe_plan(item) for item in plans if isinstance(item, dict)][-500:],
         }
 
     @staticmethod
@@ -284,6 +293,11 @@ class MetadataStore:
         fields = {"event_id", "operation", "ref", "provider", "consumer", "status", "at"}
         return {key: item[key] for key in fields if key in item}
 
+    @staticmethod
+    def _safe_plan(item: dict) -> dict:
+        fields = {"plan_id", "ref", "receipt_id", "token_hash", "expires_at", "consumed", "created_at"}
+        return {key: item[key] for key in fields if key in item}
+
     def write(self, data: dict) -> None:
         if self.path.exists():
             # A direct write must not be allowed to turn an unreadable store
@@ -294,6 +308,7 @@ class MetadataStore:
             "records": [self._safe_record(item) for item in data.get("records", [])],
             "bindings": [self._safe_binding(item) for item in data.get("bindings", [])],
             "audit": [self._safe_audit(item) for item in data.get("audit", [])][-200:],
+            "plans": [self._safe_plan(item) for item in data.get("plans", [])][-500:],
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
@@ -323,7 +338,8 @@ class MetadataStore:
         self.commit(record=record, audit_event=event)
 
     def commit(self, *, record: dict | None = None, remove_ref: str = "",
-               binding: dict | None = None, audit_event: dict | None = None) -> None:
+               binding: dict | None = None, plan: dict | None = None,
+               consume_plan_id: str = "", audit_event: dict | None = None) -> None:
         """Commit the complete metadata projection with one atomic replace."""
         with self.lock:
             data = self._read()
@@ -339,9 +355,25 @@ class MetadataStore:
                     if not (item.get("ref") == binding["ref"] and item.get("provider") == binding["provider"])
                 ]
                 data["bindings"].append(self._safe_binding(binding))
+            if plan is not None:
+                data["plans"] = [item for item in data["plans"] if item.get("plan_id") != plan["plan_id"]]
+                data["plans"].append(self._safe_plan(plan))
+            if consume_plan_id:
+                matched = False
+                for item in data["plans"]:
+                    if item.get("plan_id") == consume_plan_id:
+                        item["consumed"] = True
+                        matched = True
+                        break
+                if not matched:
+                    raise VaultError("delete_confirmation_invalid", "The delete confirmation is invalid.", 409)
             if audit_event is not None:
                 data["audit"].append(self._safe_audit(audit_event))
             self.write(data)
+
+    def find_plan(self, receipt_id: str) -> dict | None:
+        with self.lock:
+            return next((item for item in self._read()["plans"] if item.get("plan_id") == receipt_id), None)
 
     def remove(self, ref: str) -> None:
         with self.lock:
@@ -448,15 +480,48 @@ class Broker:
             )
         return _public_record(record)
 
-    def delete(self, ref: str) -> None:
-        record = self._record(ref)
+    def delete_plan(self, ref: str) -> dict:
+        self._record(ref)
+        now = int(time.time())
+        token = secrets.token_urlsafe(32)
+        receipt_id = secrets.token_hex(16)
+        plan = {
+            "plan_id": receipt_id,
+            "ref": ref,
+            "receipt_id": receipt_id,
+            "token_hash": hashlib.sha256(token.encode("utf-8")).hexdigest(),
+            "expires_at": now + max(1, DELETE_PLAN_TTL_SECONDS),
+            "consumed": False,
+            "created_at": now,
+        }
+        self.store.commit(
+            plan=plan,
+            audit_event={
+                "event_id": uuid.uuid4().hex, "operation": "delete-plan", "ref": ref,
+                "provider": "", "consumer": "", "status": "issued", "at": now,
+            },
+        )
+        return {
+            "confirmation_token": token,
+            "receipt_id": receipt_id,
+            "ref": ref,
+            "expires_at": plan["expires_at"],
+            "write_only": True,
+        }
+
+    def delete(self, ref: str, payload: dict) -> None:
         with self.lock:
+            token, receipt_id = _delete_confirmation(self.store, ref, payload)
+            record = self._record(ref)
             self.adapter.delete(
                 project_id=record["project_id"], environment=record["environment"],
                 secret_path=record["secret_path"], secret_name=record["secret_name"],
+                confirmation_token=token,
+                provider_receipt={"receipt_id": receipt_id},
             )
             self.store.commit(
                 remove_ref=ref,
+                consume_plan_id=receipt_id,
                 audit_event={"event_id": uuid.uuid4().hex, "operation": "delete", "ref": ref, "provider": record.get("provider", ""), "consumer": record.get("consumer", ""), "status": "deleted", "at": int(time.time())},
             )
 
@@ -591,6 +656,38 @@ def _vault_ref(value: object) -> str:
     if not text.startswith(VAULT_REF_PREFIX) or not SAFE_REF_ID.fullmatch(text.removeprefix(VAULT_REF_PREFIX)):
         raise VaultError("invalid_vault_reference", "The vault reference is invalid.", 400)
     return text
+
+
+def _delete_confirmation(store: MetadataStore, ref: str, payload: dict) -> tuple[str, str]:
+    """Validate a durable delete plan without exposing its token or contents."""
+    _validate_fields(payload, DELETE_FIELDS)
+    token = payload.get("confirmation_token")
+    receipt = payload.get("provider_receipt")
+    if not isinstance(token, str) or not SAFE_CONFIRMATION_TOKEN.fullmatch(token):
+        raise VaultError("delete_confirmation_invalid", "The delete confirmation is invalid.", 403)
+    if not isinstance(receipt, dict) or set(receipt) != {"receipt_id"}:
+        raise VaultError("delete_confirmation_invalid", "The delete confirmation is invalid.", 403)
+    receipt_id = receipt.get("receipt_id")
+    if not isinstance(receipt_id, str) or not SAFE_RECEIPT_ID.fullmatch(receipt_id):
+        raise VaultError("delete_confirmation_invalid", "The delete confirmation is invalid.", 403)
+    plan = store.find_plan(receipt_id)
+    if not plan:
+        raise VaultError("delete_confirmation_invalid", "The delete confirmation is invalid.", 409)
+    if plan.get("ref") != ref:
+        raise VaultError("delete_confirmation_ref_mismatch", "The delete confirmation does not match this reference.", 409)
+    if plan.get("consumed"):
+        raise VaultError("delete_confirmation_replayed", "The delete confirmation has already been used.", 409)
+    try:
+        expired = float(plan.get("expires_at", 0)) <= time.time()
+    except (TypeError, ValueError):
+        expired = True
+    if expired:
+        raise VaultError("delete_confirmation_expired", "The delete confirmation has expired.", 410)
+    expected_hash = plan.get("token_hash", "")
+    actual_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    if not isinstance(expected_hash, str) or not hmac.compare_digest(expected_hash, actual_hash):
+        raise VaultError("delete_confirmation_invalid", "The delete confirmation is invalid.", 403)
+    return token, receipt_id
 
 
 def _origin_allowed() -> bool:
@@ -773,9 +870,28 @@ def vault_rotate(ref_id: str):
     return jsonify(result), 200
 
 
+@api.post("/api/vault/secrets/<ref_id>/delete-plan")
+def vault_delete_plan(ref_id: str):
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        raise VaultError("request_invalid", "Request body must be an object.", 400)
+    _validate_fields(body, set())
+    ref = f"{VAULT_REF_PREFIX}{ref_id}"
+    operation_key, prior = _idempotent("delete-plan:" + ref_id, body)
+    if prior is not None:
+        return jsonify(prior), 200
+    try:
+        result = _broker.delete_plan(ref)
+    except Exception:
+        _release_idempotent(operation_key)
+        raise
+    _save_idempotent(operation_key, body, result)
+    return jsonify(result), 201
+
+
 @api.delete("/api/vault/secrets/<ref_id>")
 def vault_delete(ref_id: str):
-    body = request.get_json(silent=True) or {}
+    body = request.get_json(silent=True)
     if not isinstance(body, dict):
         raise VaultError("request_invalid", "Request body must be an object.", 400)
     ref = f"{VAULT_REF_PREFIX}{ref_id}"
@@ -783,7 +899,7 @@ def vault_delete(ref_id: str):
     if prior is not None:
         return jsonify(prior), 200
     try:
-        _broker.delete(ref)
+        _broker.delete(ref, body)
     except Exception:
         _release_idempotent(operation_key)
         raise

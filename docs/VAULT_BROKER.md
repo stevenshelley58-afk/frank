@@ -53,7 +53,8 @@ Bearer credential.
 | `GET /api/vault/secrets` | Lists only broker metadata and opaque `vault://frank/<id>` refs. |
 | `POST /api/vault/secrets` | Accepts one scoped `secret_value`, forwards create to Hermes, returns metadata only. |
 | `POST /api/vault/secrets/<id>/rotate` | Accepts one replacement `secret_value`, returns metadata only. |
-| `DELETE /api/vault/secrets/<id>` | Deletes by opaque ref; returns only the removed ref. |
+| `POST /api/vault/secrets/<id>/delete-plan` | Issues an expiring, single-use opaque `confirmation_token` plus `receipt_id` and ref metadata. The token hash is the only persisted plan material. |
+| `DELETE /api/vault/secrets/<id>` | Requires `{"confirmation_token":"...","provider_receipt":{"receipt_id":"..."}}`; forwards those safe confirmation fields to Hermes and returns only the removed ref. |
 | `GET /api/provider-broker/catalog` | Describes provider capabilities and honest setup state. |
 | `GET /api/provider-broker/bindings` | Lists least-privilege opaque-ref bindings. |
 | `POST /api/provider-broker/bindings` | Binds a vault ref to an approved provider consumer/capability subset. |
@@ -62,6 +63,20 @@ There is deliberately no read, reveal, raw Infisical, or arbitrary upstream
 proxy endpoint. The adapter filters even an accidentally value-bearing
 Hermes response before it crosses into Frank's response, persistence, or
 audit records.
+
+Delete plans are same-origin, no-store, bounded, and idempotent by
+`Idempotency-Key`. Repeating the same plan request with the same key returns
+the prior safe plan; a different key creates a separate plan. A delete plan
+is consumed only in the same atomic local projection that removes the ref and
+records the audit event. An upstream delete failure leaves the unused plan in
+place so a caller can retry with a new idempotency key. If the upstream delete
+succeeds but Frank cannot commit its local projection, Frank returns a safe
+metadata-store error and does not claim success; the plan remains unused for
+diagnosis/recovery, while the remote secret may already be gone. Expired,
+reference-mismatched, invalid, or reused plans fail closed. The Hermes-side
+broker receives `confirmation_token` and
+`provider_receipt:{"receipt_id":"..."}` alongside the validated location;
+Frank never exposes a generic proxy or reveal operation.
 
 ## Provider contracts
 
