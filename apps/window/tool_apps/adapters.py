@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import copy
 import math
+import re
 import time
 import uuid
 from typing import Any
@@ -15,6 +16,21 @@ from typing import Any
 from .contracts import COMMAND_SCHEMA, EVENT_SCHEMA, TRACE_SCHEMA, ContractError, _ID, _walk_safe, validate_scope
 
 _EVENT_STATUSES = frozenset({"ok", "error", "running", "cancelled", "blocked"})
+_REQUEST_ID = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._:-]{0,127})$")
+_EVENT_FIELDS = frozenset({"schema", "request_id", "sequence", "kind", "status", "timestamp", "data"})
+
+
+def _validate_request_id(request_id: Any) -> str:
+    if not isinstance(request_id, str) or not _REQUEST_ID.fullmatch(request_id):
+        raise ContractError("request_id must be a bounded safe identifier")
+    return request_id
+
+
+def _validate_event_envelope(item: Any) -> dict[str, Any]:
+    if not isinstance(item, dict) or set(item) != _EVENT_FIELDS or item.get("schema") != EVENT_SCHEMA:
+        raise ContractError("invalid Hermes event envelope")
+    event(item["request_id"], item["sequence"], item["kind"], item["data"], status=item["status"], timestamp=item["timestamp"])
+    return item
 
 
 def command(tool_id: str, action: str, scope: Any, payload: dict[str, Any], *, request_id: str | None = None) -> dict[str, Any]:
@@ -22,12 +38,12 @@ def command(tool_id: str, action: str, scope: Any, payload: dict[str, Any], *, r
         if not isinstance(value, str) or not _ID.fullmatch(value):
             raise ContractError(f"command {field} must be a safe identifier")
     _walk_safe(payload, "command.payload")
-    return {"schema": COMMAND_SCHEMA, "request_id": request_id or uuid.uuid4().hex, "tool_id": tool_id, "action": action, "scope": validate_scope(scope), "payload": copy.deepcopy(payload)}
+    request_id = _validate_request_id(f"req-{uuid.uuid4()}" if request_id is None else request_id)
+    return {"schema": COMMAND_SCHEMA, "request_id": request_id, "tool_id": tool_id, "action": action, "scope": validate_scope(scope), "payload": copy.deepcopy(payload)}
 
 
 def event(request_id: str, sequence: int, kind: str, data: dict[str, Any], *, status: str = "ok", timestamp: float | None = None) -> dict[str, Any]:
-    if not isinstance(request_id, str) or not _ID.fullmatch(request_id):
-        raise ContractError("event request_id must be a safe identifier")
+    _validate_request_id(request_id)
     if not isinstance(sequence, int) or sequence < 0:
         raise ContractError("event sequence must be non-negative")
     if not isinstance(kind, str) or not _ID.fullmatch(kind):
@@ -43,14 +59,11 @@ def event(request_id: str, sequence: int, kind: str, data: dict[str, Any], *, st
 
 
 def trace(request_id: str, events: list[dict[str, Any]]) -> dict[str, Any]:
-    if not isinstance(request_id, str) or not _ID.fullmatch(request_id):
-        raise ContractError("trace request_id must be a safe identifier")
+    _validate_request_id(request_id)
     if not isinstance(events, list):
         raise ContractError("trace events must be a list")
     for item in events:
-        if not isinstance(item, dict) or item.get("schema") != EVENT_SCHEMA:
-            raise ContractError("trace contains a non-event envelope")
-        event(item.get("request_id"), item.get("sequence"), item.get("kind"), item.get("data"), status=item.get("status"), timestamp=item.get("timestamp"))
+        _validate_event_envelope(item)
     sequences = [item["sequence"] for item in events]
     if any(item["request_id"] != request_id for item in events):
         raise ContractError("trace events must share request_id")
@@ -71,7 +84,6 @@ class HermesAdapter:
             raise ContractError("unsupported Hermes command schema")
         result = self.forward(copy.deepcopy(request))
         for item in result if isinstance(result, list) else []:
-            if not isinstance(item, dict) or item.get("schema") != EVENT_SCHEMA:
-                raise ContractError("Hermes returned a non-event envelope")
+            _validate_event_envelope(item)
             self.on_event(copy.deepcopy(item))
         return result

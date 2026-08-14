@@ -113,6 +113,24 @@ class ToolAppContractTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             trace("req-1", [valid, {**valid, "sequence": 0}])
 
+    def test_request_ids_use_their_own_bounded_contract(self):
+        uuid_like = "123e4567-e89b-12d3-a456-426614174000"
+        request = command("weekly-report", "run", "project:frank", {}, request_id=uuid_like)
+        self.assertEqual(request["request_id"], uuid_like)
+        generated = command("weekly-report", "run", "project:frank", {})["request_id"]
+        self.assertRegex(generated, r"^req-[A-Za-z0-9-]{1,127}$")
+        for unsafe in ("req 1", "req/1", ""):
+            with self.subTest(unsafe=unsafe), self.assertRaises(ContractError):
+                command("weekly-report", "run", "project:frank", {}, request_id=unsafe)
+
+    def test_adapter_validates_event_fields_before_emitting(self):
+        request = command("weekly-report", "run", "project:frank", {}, request_id="req-1")
+        emitted = []
+        invalid = {**event("req-1", 0, "started", {}), "status": "unknown"}
+        with self.assertRaises(ContractError):
+            HermesAdapter(lambda _request: [invalid], emitted.append).dispatch(request)
+        self.assertEqual(emitted, [])
+
 
 if __name__ == "__main__":
     unittest.main()
