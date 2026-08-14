@@ -1,8 +1,10 @@
 import json
 import secrets
 import tempfile
+import threading
 import unittest
 import urllib.error
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from unittest.mock import patch
 
@@ -39,6 +41,45 @@ class _VaultUpstream:
             "id": "remote-id", "secretKey": body.get("secret_name", "RESEND_API_KEY"),
             "version": len(self.calls), "secretValue": self.secret_value,
         }})
+
+
+class _RedirectServer:
+    def __init__(self, location=None):
+        self.location = location
+        self.requests = []
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            def do_POST(self):
+                owner.requests.append({
+                    "path": self.path,
+                    "authorization": self.headers.get("Authorization", ""),
+                })
+                if owner.location:
+                    self.send_response(302)
+                    self.send_header("Location", owner.location)
+                    self.end_headers()
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/json")
+                    self.end_headers()
+                    self.wfile.write(b"{}")
+
+            def log_message(self, *_args):
+                return
+
+        self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        self.thread.start()
+
+    @property
+    def url(self):
+        return f"http://127.0.0.1:{self.server.server_port}"
+
+    def close(self):
+        self.server.shutdown()
+        self.server.server_close()
+        self.thread.join(timeout=2)
 
 
 class VaultBrokerApiTest(unittest.TestCase):
@@ -203,6 +244,38 @@ class VaultBrokerApiTest(unittest.TestCase):
         health_calls = [call for call in self.upstream.calls if call[1].endswith("/health")]
         self.assertEqual(len(health_calls), 1)
         self.assertNotIn(self.upstream.secret_value, self.client.get("/api/vault/status").get_data(as_text=True))
+
+    def test_broker_requests_never_follow_same_or_cross_host_redirects(self):
+        for cross_host in (False, True):
+            with self.subTest(cross_host=cross_host):
+                target = _RedirectServer() if cross_host else None
+                source = None
+                try:
+                    location = (target.url + "/received") if target else None
+                    source = _RedirectServer(location)
+                    if not cross_host:
+                        source.location = source.url + "/same-host-second-hop"
+                    adapter = vault_broker.HermesVaultAdapter(
+                        base_url=source.url + "/api/vault-broker",
+                        key="dedicated-broker-key",
+                    )
+                    with self.assertRaises(vault_broker.VaultRemoteError):
+                        adapter.create(
+                            project_id="project", environment="dev", secret_path="/frank",
+                            secret_name="RESEND_API_KEY", secret_value="runtime-only-value",
+                        )
+                    self.assertEqual(len(source.requests), 1)
+                    self.assertEqual(source.requests[0]["authorization"], "Bearer dedicated-broker-key")
+                    if target:
+                        self.assertEqual(target.requests, [])
+                        self.assertTrue(all(not item["authorization"] for item in target.requests))
+                    else:
+                        self.assertEqual(len(source.requests), 1)
+                finally:
+                    if source:
+                        source.close()
+                    if target:
+                        target.close()
 
     def test_vault_status_has_exact_additive_state_mapping(self):
         expected = {

@@ -93,6 +93,13 @@ class MetadataStoreError(VaultError):
         super().__init__("metadata_store_error", "Secure-vault metadata is unavailable.", 503)
 
 
+class _NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Never replay a broker request, especially one carrying Authorization."""
+
+    def redirect_request(self, request, file, code, message, headers, newurl):
+        raise VaultRemoteError()
+
+
 class HermesVaultAdapter:
     """Frank's only production vault client.
 
@@ -106,7 +113,7 @@ class HermesVaultAdapter:
         configured_url = base_url if base_url is not None else os.environ.get("HERMES_VAULT_BROKER_URL", "").strip()
         self.base_url = configured_url.rstrip("/")
         self.key = key if key is not None else os.environ.get("HERMES_VAULT_BROKER_KEY", "").strip()
-        self.opener = opener or urllib.request.urlopen
+        self.opener = opener or urllib.request.build_opener(_NoRedirectHandler()).open
         self._health_lock = threading.RLock()
         self._health_cached_at = 0.0
         self._health_cached_status = "setup_needed"

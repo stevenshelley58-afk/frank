@@ -43,6 +43,9 @@ configuration. The Hermes-side deployment owns those values.
 All responses carry `Cache-Control: no-store`. Secret writes require an
 `Origin` accepted by `FRANK_VAULT_ALLOWED_ORIGINS`, a bounded JSON body, a
 valid `Idempotency-Key`, and the in-process rate/concurrency guards.
+Broker HTTP requests use an explicit no-redirect transport; any same-host or
+cross-host redirect is treated as a safe broker failure and never replays the
+Bearer credential.
 
 | Endpoint | Contract |
 | --- | --- |
