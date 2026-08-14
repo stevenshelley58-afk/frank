@@ -1,0 +1,9 @@
+{
+  "id": "weekly-report",
+  "name": "Weekly report",
+  "kind": "tool",
+  "blurb": "Review a project report.",
+  "capabilities": ["reports.read"],
+  "default_widget_ids": [],
+  "connection_capabilities": []
+}
