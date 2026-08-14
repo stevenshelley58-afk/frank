@@ -50,13 +50,16 @@ for this migration:
   `/srv/blockwise/backups/research/frank-migration-research-20260814T082207Z.dump.sha256`.
 - The checksum-verified counts manifest is at
   `/srv/blockwise/backups/research/frank-migration-research-20260814T082207Z.counts`.
+- Its checksum file is at
+  `/srv/blockwise/backups/research/frank-migration-research-20260814T082207Z.counts.sha256`.
 - The dump covers 39 `research`/`research_archive` tables and 4,977,532 total
   rows.
 
-This dump, its matching `.sha256`, and its `.counts` manifest are the mandatory
-rollback artifact. Never commit, copy, attach, or expose the dump, checksum,
-manifest contents, or row data in Git, a release, a trace, or a public Frank
-endpoint. Refer to the absolute paths only in operator evidence.
+This dump, its matching `.sha256`, its `.counts` manifest, and its matching
+`.counts.sha256` are the mandatory rollback artifact. Never commit, copy,
+attach, or expose the dump, checksum, manifest contents, or row data in Git, a
+release, a trace, or a public Frank endpoint. Refer to the absolute paths only
+in operator evidence.
 
 Supabase research schemas were already dropped after the earlier verified VPS
 cutover. Do not attempt to migrate, recreate, or re-drop those schemas. Any
@@ -66,7 +69,7 @@ runtime ownership only.
 ### 0.3 Final ownership law
 
 - Frank Window displays and configures. Frank owns tool homes, safe widgets,
-  connection references, release views, settings forms, and explicit state
+  connection status/configuration views, release views, settings forms, and explicit state
   rendering. Frank does not become a second brain.
 - Hermes executes models, tools, skills, schedules, provider calls, memory,
   policy, approvals, traces, and autonomous work. Hermes has the one VPS
@@ -78,13 +81,20 @@ runtime ownership only.
   templates, write blogs, or own the operator research runtime.
 - Existing customer transaction and lead lifecycle mail remains in Blockwise
   until an explicitly tested replacement exists. Existing Mautic campaign and
-  segment ownership, Resend delivery, Accounts, Connections/vault, the Frank
-  widget runtime, chat, and Hermes are not duplicated.
+  segment ownership, Resend delivery, Accounts, Connections, the Frank widget
+  runtime, chat, and Hermes are not duplicated. Tool settings and home
+  manifests use only a non-secret `connection_id` plus the required
+  capability; OpenBao remains entirely behind Connections, and vault/provider/
+  credential references never appear in those Tool contracts.
 
 ### 0.4 Named capability destinations
 
 Use these exact Frank tool IDs and directories. Create them only in a later
 implementation task; this runbook does not create them:
+
+Each Tool directory has one canonical dashboard manifest at `home.json`.
+`default_widget_ids` remains empty (`[]`) until shared widget IDs land; do not
+invent Tool-specific default widget IDs.
 
 | Tool ID | Frank mini-app directory | Hermes responsibility | Blockwise result, if any |
 | --- | --- | --- | --- |
@@ -149,15 +159,17 @@ For the live research database, verify metadata without dumping row data:
 docker ps --format '{{.Names}}\t{{.Status}}' | grep blockwise-research-db
 docker inspect blockwise-research-db --format '{{json .Config.Labels}}'
 sha256sum -c /srv/blockwise/backups/research/frank-migration-research-20260814T082207Z.dump.sha256
-cat /srv/blockwise/backups/research/frank-migration-research-20260814T082207Z.counts
+sha256sum -c /srv/blockwise/backups/research/frank-migration-research-20260814T082207Z.counts.sha256
+echo "Approved aggregate: 39 research/research_archive tables; 4,977,532 rows."
 ```
 
 Expected evidence is a healthy `blockwise-research-db`, the compose owner
 `/srv/blockwise/release-6d7f4f9/infra/coolify/docker-compose.research.yml`,
 only that database running from the research stack, a valid checksum, and a
-counts manifest reporting 39 research/research_archive tables and 4,977,532
-rows. Do not run `pg_dump`, `pg_restore`, `COPY`, unrestricted `SELECT`, or
-schema recreation as part of discovery; the fresh dump is already complete.
+valid counts-manifest checksum. Record only the approved aggregate of 39
+research/research_archive tables and 4,977,532 rows. Do not run `pg_dump`,
+`pg_restore`, `COPY`, unrestricted `SELECT`, or schema recreation as part of
+discovery; the fresh dump is already complete.
 
 If the checkout reports uncommitted frank/template-factory/** deletions:
 
@@ -333,8 +345,9 @@ Implement these as shared Hermes/Frank contracts, not per-tool duplicates:
   settings, each stored as a revision. Values are plain, auditable data; no
   secrets, executable code, or HTML.
 - Project packs containing scope, brand, audience, approved references,
-  output constraints, and connection capability references. Credentials stay
-  in OpenBao/Activepieces or the existing provider vault boundary.
+  output constraints, and required connection capability IDs. Credentials
+  stay behind Connections and OpenBao/Activepieces; Tool settings never carry
+  vault, provider, or credential references.
 - Evidence and assets with source identifiers, provenance, content hashes,
   sanitization status, retention class, and access scope.
 - QA/compliance gates that produce blocking or passing evidence before a
@@ -351,8 +364,21 @@ Implement these as shared Hermes/Frank contracts, not per-tool duplicates:
   Hermes envelopes; they project through `ToolManifestAdapter` to
   `schema://frank.graph/v1`.
 
-Do not duplicate Accounts, Connections/vault, the widget runtime, chat, Mautic
-campaigns or segments, Resend delivery, or Hermes itself.
+Do not duplicate Accounts, Connections/OpenBao, the widget runtime, chat,
+Mautic campaigns or segments, Resend delivery, or Hermes itself.
+
+### 2.9 What else should become modular
+
+The following are shared primitives, not new duplicate Tools: project packs,
+evidence/assets, QA and approvals, immutable releases, schedules, and
+observability. Tools consume their shared contracts and do not create their own
+stores, queues, schedulers, graph renderers, or settings systems.
+
+Media/asset production may become a future Asset Factory Tool only if it has
+an independent operator workflow, approvals, and release lifecycle. Without
+that independent workflow, keep it as Hermes capabilities/nodes reused by the
+existing tools. Customer lifecycle/transaction mail, leads/workers,
+property/suburb, and AdStudio editing stay Blockwise-owned.
 
 ## 3. Execution phases, lanes, gates, and dependencies
 
@@ -470,7 +496,7 @@ customer importer, or a blog output is published without QA/provenance.
    reject code, HTML, secrets, arbitrary provider URLs, and arbitrary calls.
 4. Display Hermes events and released outputs; display explicit empty,
    attention, unavailable, and error states.
-5. Keep Accounts, Connections/vault, chat, widget runtime, and Hermes as the
+5. Keep Accounts, Connections/OpenBao, chat, widget runtime, and Hermes as the
    existing shared surfaces.
 
 Required stop: a Frank change adds a local queue, scheduler, model loop,
@@ -492,6 +518,9 @@ The following contracts are normative for implementation and review.
 
 The manifest has exactly these fields:
 
+The canonical per-Tool dashboard filename is
+`apps/window/tools/<tool-id>/home.json`.
+
 ```json
 {
   "id": "ad-template-generator",
@@ -504,10 +533,14 @@ The manifest has exactly these fields:
 }
 ```
 
+Until shared widget IDs land, `default_widget_ids` must remain `[]`.
+
 kind is exactly the literal 'tool'. id is stable and URL-safe. Arrays
-contain capability/widget IDs, not credentials, URLs with embedded secrets,
-or executable instructions. Do not add fields without a versioned contract
-change and fixtures.
+contain capability/widget IDs. `connection_capabilities` lists required
+capability IDs only; it never contains a vault reference, provider reference,
+credential reference, or secret. Each Tool uses a non-secret `connection_id`
+when bound to a configured Connection. Do not add fields without a versioned
+contract change and fixtures.
 
 ### 5.2 Settings revisions
 
@@ -531,9 +564,11 @@ record, at minimum:
 ```
 
 The allowed setting domains are prompt, style, model, threshold, schedule,
-and project pack. Reject secrets, access tokens, credentials, arbitrary code,
-HTML, shell commands, and provider-specific opaque secret values. Connection
-references are opaque vault/provider references only.
+and project pack. A settings revision may contain only a non-secret
+`connection_id` and the required capability ID where a connection is needed.
+OpenBao is entirely behind Connections. Reject vault/provider/credential
+references, secrets, access tokens, credentials, arbitrary code, HTML, shell
+commands, and provider-specific opaque secret values.
 
 ### 5.3 Fixed versioned graph
 
@@ -807,7 +842,7 @@ artifact. BLOCK means do not cut over or delete.
 | Graph uses maxGraph only and projects through ToolManifestAdapter | `schema://frank.graph/v1` fixture plus renderer dependency check |  |
 | Prompt inspector is CodeMirror 6 and payload editor is vanilla-jsoneditor + Ajv only | Browser/source check; no Cytoscape/React Flow/custom renderer |  |
 | Existing trace, slot-trace, and trace-view hooks remain connected | Trace-view smoke evidence |  |
-| Accounts, Connections/vault, widget runtime, and chat are not duplicated | Route/source grep and UI smoke |  |
+| Accounts, Connections/OpenBao, widget runtime, and chat are not duplicated | Route/source grep and UI smoke |  |
 | python -m unittest discover -s tests from apps/window passes | Test output |  |
 | node --check passes for every Frank JavaScript file | Command output |  |
 
@@ -825,7 +860,7 @@ artifact. BLOCK means do not cut over or delete.
 | Public releases are immutable and checksummed | Registry/storage verification |  |
 | Research supervisor is stopped before D2 | supervisorctl and ps evidence |  |
 | No orphan research runtime remains | Process/container inventory |  |
-| Credentials remain in OpenBao/provider vault boundary | Secret/config audit |  |
+| Credentials remain behind the Connections/OpenBao boundary | Secret/config audit |  |
 
 ### 7.3 Blockwise
 
@@ -910,7 +945,7 @@ stale read models, or unverified enrichment. Report exact paths and tests.
 Read docs/blockwise-to-frank-tool-migration.md and both repositories' authority
 files. Work only on Outreach and Mail. Build display/configuration and command
 contracts for apps/window/tools/outreach/ and apps/window/tools/mail/, with
-execution through Hermes. Do not duplicate Accounts, Connections/vault,
+execution through Hermes. Do not duplicate Accounts, Connections/OpenBao,
 Mautic campaigns/segments, Resend delivery, chat, or Hermes. Keep and test
 src/lib/email/lead-lifecycle.ts, src/lib/email/resend-client.ts,
 src/lib/operator/email-service.ts, suburb actions, and demo-request email.
@@ -1001,8 +1036,8 @@ The handoff must name:
 - archive table names, pre/post counts, and checksums;
 - the verified rollback artifact paths
   `/srv/blockwise/backups/research/frank-migration-research-20260814T082207Z.dump`,
-  its `.sha256`, and its `.counts` manifest, without copying or exposing their
-  contents;
+  its `.sha256`, its `.counts` manifest, and its `.counts.sha256`, without
+  copying or exposing their contents;
 - supervisor stop command and process evidence;
 - release IDs/checksums consumed by Blockwise;
 - the final graph specification path and `ToolManifestAdapter` fields, or a
