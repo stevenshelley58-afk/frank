@@ -459,8 +459,8 @@ either stub because a card or manifest merely exists.
 | P2C-M | Mail | Hermes/Frank communications agent | P1 | Build the declarative inbound/outbound mailbox Tool and typed Hermes commands while preserving Mautic, Resend, customer lifecycle mail, and Connections. | Transaction/demo/lead email tests pass; no duplicate delivery client or campaign store. | Keep console and customer importers until replacement is proven. | Do not proceed when any lifecycle email path is unowned or delivery bypasses policy/audit. |
 | P2D | Content Factory | Hermes/Frank content agent | P1 | Adapt B2 pages/API/lib/skills into content-factory; produce reviewed immutable blog releases. | Completed release has QA, provenance, checksum, no PII, and adapter fixture passes. | Keep B2 runtime active. | Do not proceed when image skills/listing-scraper consumers are unresolved. |
 | P3A | Isolated shared Frank implementation | Frank graph agent | P1 and accepted graph spec | On its isolated branch, implement only the shared adapter/provider/workbench and tests. Domain packages add no JavaScript, CSS, HTML, routes, screens, widgets, or settings stores. Do not touch frozen dashboard/home integration files. | Shared schema fixtures, unit/syntax checks, one maxGraph dependency, and no production registration changes. | Revert the isolated Frank-only commit. | Stop on a second renderer/store, domain UI, execution, external provider/network/database call, or edit to a frozen shared file. |
-| P4A | Blockwise adapter scaffolds | Blockwise adapter agents | P1 | In separate worktrees, implement Template Pack, Ad Radar, and Completed Blog adapters against the frozen producer fixtures. | Positive and negative fixture tests validate exact schemas, receipts, compatibility, scope, and RFC 8785 hashes. | Disable the unconnected adapter; retain current customer path. | Stop when a contract field or hash input is ambiguous. |
-| P4B | Producer-consumer compatibility | Producer owner + Blockwise adapter owner | P4A plus the relevant P2A, P2B-R, or P2D commit | Run each actual producer payload through its real consumer and pin the accepted release identity. | Cross-language fixtures and end-to-end adapter tests pass without translation or invented fields. | Return the mismatched lane; no deletion or cutover. | Stop on any producer/consumer difference or private/mutable input. |
+| P4A | Blockwise adapter scaffolds | Blockwise adapter agents | P1 | In separate worktrees, implement unconnected Template Pack, Ad Radar, and Completed Blog adapters against the frozen producer fixtures. Add no production route, fetch, persistence, or cutover. A self-hash proves integrity, not producer authenticity. | Positive and negative fixture tests validate exact schemas, receipts, compatibility, scope, and RFC 8785 hashes; source audit proves the adapters are unreachable from production. | Disable the unconnected adapter; retain current customer path. | Stop when a contract field or hash input is ambiguous or when a scaffold is wired to production before P4B. |
+| P4B | Producer-consumer compatibility | Producer owner + Blockwise adapter owner | P4A plus the relevant P2A, P2B-R, or P2D commit | Run each actual producer payload through its real consumer over the authenticated, authorized Hermes release boundary; bind its release identity, caller scope, and delivery receipt before enabling any route or persistence. | Cross-language fixtures and end-to-end adapter tests pass without translation or invented fields; authenticated delivery/authorization evidence is recorded. | Return the mismatched lane; no deletion or cutover. | Stop on any producer/consumer difference, missing delivery authentication/authorization, scope mismatch, or private/mutable input. |
 | P3B | Final Frank registration | Frank integration agent + Tool owners | P3A, relevant Tool packages, and final combined-main dashboard handoff | Rebase once onto the recorded combined-main SHA. For each Tool, expose one truthful read-only snapshot/provider through the shared runtime, approve its distinct default blueprint, then register through the one discovery seam. Add graph only after `frank.graph.v1` merges. Run desktop/mobile verification. | Six real-state provider fixtures, six approved blueprints, startup discovery, fail-closed registration, scoped Connections/current-work/output/receipt evidence, shared graph/trace evidence when available, and final tests pass. | Revert the registration commit; keep the Tool unshipped rather than restore a fake or empty default. | Stop before the combined-main handoff; when a Tool has only fake/demo state or an empty/generic-only default; or on any second registry, bespoke Tool UI, provisional widget ID, fake live health, or unapproved shared-file change. |
 | P3C | Frank legacy cleanup | Frank integration agent | P3B and approved Frank cleanup-manifest rows | In a clean allowlisted worktree, remove only obsolete Frank prototypes/docs/stubs whose canonical home and route already pass. Preserve shared history and current runtime files. | Exact cleanup diff, route/browser tests, no dangling refs, and rollback SHA. | Revert the Frank cleanup commit. | Stop when a path is absent from the cleanup manifest or replacement route/default/provider is not green. |
 | G1 | Integration gate | Reviewer | P2A, P2B-R, P2B-P, P2B-R-DEP, P2C-O, P2C-M, P2D, P3C, P4B | Run all acceptance matrices and end-to-end consumer checks against the deployed preview and accepted releases. | All required rows pass; no PII/secrets; trace links and DB ownership evidence are present. | Return failing lane to its owner; no deletes. | Do not proceed when any critical row fails. |
@@ -797,8 +797,9 @@ This decision is fixed for every tool:
   `ToolManifestAdapter` to `schema://frank.graph/v1`.
 - Do not add Cytoscape, React Flow, a custom renderer, or tool-specific graph
   UI, execution, or settings stores.
-- Preserve the existing trace, slot-trace, and trace-view hooks while wiring
-  the shared graph projection.
+- Preserve the existing trace, slot-trace, and trace-view hooks unchanged
+  during P3A. Wire them to the shared workbench only after the correlation gate
+  below clears.
 - Use the existing normalized OpenTelemetry path and provider deep links; do
   not install or persist a second trace backend.
 
@@ -817,10 +818,31 @@ The accepted contract is
 disposable `schema://frank.graph/v1` projection. Do not create a second
 checked-in manifest or pipeline.
 
-The one shared implementation registers `graph`, `slot-graph`,
-`entity-graph`, `graph-workbench`, and `tool-manifest`. The existing `trace`
-and `slot-trace` hosts use the same workbench with a `run.trace` lens, and
-`trace-view` remains a deprecated compatibility alias. Before the combined-main
+#### Trace-correlation stop condition
+
+An independent implementation audit found a required compatibility gate that
+the accepted graph document does not yet resolve. The current canonical
+`tool_apps/adapters.py` v1 event envelope is exactly
+`{schema, request_id, sequence, kind, status, timestamp, data}`, and its trace
+record is exactly `{schema, request_id, events}`. Neither record contains a W3C
+`trace_id` or a versioned pipeline/node correlation field. Generic `data` is
+not a graph contract and must not be reinterpreted by Frank.
+
+Therefore P3A may implement and test only the shared renderer, provider
+boundary, and `tool.pipeline` / `tool.settings` projections against current v1.
+It must keep `run.trace` unavailable, omit active event/trace adapter claims,
+and leave the existing trace runtime untouched until the Tool/Hermes contract
+owner approves one versioned correlation contract. That future contract must
+bind the Tool, request, W3C trace, pipeline revision, and node identity without
+overloading `request_id`, adding guessed fields to v1, or copying prompt/model/
+tool bodies. A contract-only Tool package, an OTLP span by itself, or fields
+hidden inside generic event `data` do not clear this gate.
+
+After the trace-correlation stop condition clears, the one shared
+implementation registers `graph`, `slot-graph`, `entity-graph`,
+`graph-workbench`, and `tool-manifest`. Only then do the existing `trace` and
+`slot-trace` hosts use the same workbench with a `run.trace` lens, and
+`trace-view` becomes a deprecated compatibility alias. Before the combined-main
 handoff, a Tool keeps `default_widget_ids: []`. During P3B it receives its
 approved non-graph shared blueprint after its truthful provider passes;
 `entity-graph` may be added only after `/api/capabilities` advertises
@@ -831,16 +853,19 @@ IDs, routes, or a temporary renderer.
 
 ### 5.4 OTel-style traces and events
 
-Every command, provider call, QA gate, release, and adapter import correlates to
-the canonical `schema://frank.tool-app-trace/v1` record and authorized
-OpenTelemetry spans. The following is an illustrative redacted OTLP-style span,
+The target state, after the trace-correlation stop condition clears, correlates
+every command, provider call, QA gate, release, and adapter import to the
+canonical `schema://frank.tool-app-trace/v1` record and authorized
+OpenTelemetry spans. Before then, P3A may use strictly validated OTLP spans only
+to overlay declared pipeline status; it must not claim a Tool trace record or
+`run.trace` support. The following is an illustrative redacted OTLP-style span,
 not a second Frank trace schema:
 
 ```json
 {
-  "trace_id": "0123456789abcdef0123456789abcdef",
-  "span_id": "0123456789abcdef",
-  "parent_span_id": "fedcba9876543210",
+  "traceId": "0123456789abcdef0123456789abcdef",
+  "spanId": "0123456789abcdef",
+  "parentSpanId": "fedcba9876543210",
   "name": "template.release",
   "start_time": "2026-08-14T00:00:00Z",
   "end_time": "2026-08-14T00:00:01Z",
@@ -856,12 +881,15 @@ not a second Frank trace schema:
 }
 ```
 
-Do not put secrets, raw customer PII, full email addresses, prompt secrets, or
-provider tokens in span attributes/events. Use opaque IDs and counts.
-`trace_id` is lowercase 32-hex and `span_id` is lowercase 16-hex. Use only the
-stable `frank.*` correlation attributes and each Tool manifest's trace/event
-allowlists. Frank renders the supplied authorized record and does not fabricate
-a trace from chat, events, or source code.
+Do not put secrets, raw customer PII, full email addresses, prompts,
+completions, tool definitions, tool arguments/results, request/response bodies,
+or provider tokens in span attributes/events. Use opaque IDs, hashes, refs,
+counts, and token usage. `traceId` is a non-zero lowercase 32-hex W3C ID and
+`spanId` is a non-zero lowercase 16-hex W3C ID; aliases and duplicate
+correlation attributes are rejected. Use only the stable `frank.*` correlation
+attributes and each Tool manifest's trace/event allowlists. Frank renders the
+supplied authorized projection and does not fabricate a trace from chat,
+events, or source code.
 
 ### 5.5 Immutable public release
 
@@ -958,6 +986,28 @@ Required adapters:
    immutable blog release with exact artifact checksums, an RFC 8785 release
    hash, provenance, and sanitized media/content. It does
    not import an in-progress Content Factory run.
+
+Every consumer must also pass these fail-closed checks before P4A is accepted:
+
+- Validate the whole release envelope for private, provider, prospect,
+  outreach, PII, credential, and secret leakage; scanning only the nested
+  public payload is insufficient.
+- Reuse one server-side public URL guard. Reject credentials, fragments,
+  token-like query keys, localhost/private/link-local/reserved addresses, and
+  IPv4-mapped IPv6 private or loopback addresses.
+- Treat a Template Pack artifact checksum as a checksum of the bounded raw
+  response bytes. Verify it before JSON parsing; do not replace it with a JCS
+  hash of the parsed object. After schema/signature validation, require the
+  signed pack ID to equal the release/import pack ID before persistence.
+- Accept the producer's versioned safe opaque scope-ID syntax and bind it to
+  the caller target. A consumer must not narrow a canonical opaque ID to UUID
+  unless the producer contract itself requires UUID.
+
+Release hashes and artifact checksums detect mutation; they do not authenticate
+the producer. P4A adapters remain unreachable scaffolds. P4B may connect them
+only through the authenticated, authorized Hermes release boundary and must
+bind the delivery receipt, release identity/checksum, and caller scope before
+any Blockwise route, fetch, persistence, or customer cutover is enabled.
 
 ## 6. Exact Blockwise removal sequence
 
@@ -1165,12 +1215,12 @@ artifact. BLOCK means do not cut over or delete.
 | Demo/fake packs are excluded or labeled and no fake manifest value renders as live health | Negative provider fixtures and browser/source check |  |
 | Tool cards show ready, empty, attention, unavailable, and error states | Browser capture or test fixture |  |
 | Settings revisions use exactly schema/scope/revision/settings and validate only Tool-declared properties | Canonical fixture plus rejection tests |  |
-| Commands go to Hermes and events render in Frank | Trace ID plus browser/event fixture |  |
+| Commands go to Hermes and canonical events render in the existing Frank surface; graph trace remains BLOCK until the trace-correlation stop condition clears | Command/event fixture now; approved versioned Tool/request/W3C/pipeline/node correlation plus browser evidence before graph trace |  |
 | Releases show provenance and checksum | Release registry fixture |  |
 | Schedules are display/config only | No local scheduler process; Hermes event evidence |  |
 | Graph uses maxGraph only and projects through ToolManifestAdapter | `schema://frank.graph/v1` fixture plus renderer dependency check |  |
 | Prompt inspector is CodeMirror 6 and payload editor is vanilla-jsoneditor + Ajv only | Browser/source check; no Cytoscape/React Flow/custom renderer |  |
-| Existing trace, slot-trace, and trace-view hooks remain connected | Trace-view smoke evidence |  |
+| Existing trace, slot-trace, and trace-view hooks remain untouched during P3A; they use the shared workbench only after the trace-correlation stop condition clears | Pre-integration route smoke evidence; post-contract shared-workbench evidence |  |
 | Legacy ad-templates resolves to ad-template-generator and Campaigns follows the recorded Mautic/canonical route decision | Route tests before stub removal |  |
 | Accounts, Connections/OpenBao, widget runtime, and chat are not duplicated | Route/source grep and UI smoke |  |
 | python -m unittest discover -s tests from apps/window passes | Test output |  |
@@ -1341,8 +1391,12 @@ read-only provider boundary, graph-workbench, and tests. Use pinned maxGraph,
 CodeMirror 6, vanilla-jsoneditor, Ajv, and the existing OTel path exactly as
 specified. Do not edit home_defaults.py, home_platform.py, registry/runtime,
 production routes, shell/home files, or domain Tool UI; do not register, merge,
-or deploy. Stop on a second renderer/store/backend, execution, or external
-provider/network/database call. Report dependency/license audit and tests.
+or deploy. Validate the current exact event/trace v1 envelopes, but keep
+`run.trace` unavailable and do not advertise event/trace adapter support until
+the trace-correlation stop condition in section 5.3a is cleared by an approved
+versioned contract. Stop on a second renderer/store/backend, invented v1
+fields, execution, or external provider/network/database call. Report
+dependency/license audit and tests.
 ```
 
 ### Prompt E-B — Final dashboard registration
