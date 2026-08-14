@@ -34,12 +34,18 @@ class ToolBoundaryContractsTest(unittest.TestCase):
             "id", "name", "kind", "blurb", "capabilities",
             "default_widget_ids", "connection_capabilities",
         }
+        expected_connections = {
+            "prospect-discovery": ["public-source-read"],
+            "outreach": ["campaign-management", "segment-management", "outbound-delivery"],
+            "mail": ["mail-read", "mail-receipts", "mail-events"],
+        }
         for name in TOOL_NAMES:
             home = load_home_manifest(name)
             self.assertEqual(set(home), expected_fields)
             self.assertEqual(home["id"], name)
             self.assertEqual(home["kind"], "tool")
             self.assertEqual(home["default_widget_ids"], [])
+            self.assertEqual(home["connection_capabilities"], expected_connections[name])
             for field in ("capabilities", "default_widget_ids", "connection_capabilities"):
                 self.assertIsInstance(home[field], list)
 
@@ -81,19 +87,17 @@ class ToolBoundaryContractsTest(unittest.TestCase):
                 for node_id in node_ids:
                     visit(node_id)
             self.assertEqual(manifest["id"], name)
-            self.assertEqual(manifest["graph"]["schema"], "schema://frank.graph/v1")
-            self.assertEqual(manifest["graph"]["adapter"], "ToolManifestAdapter")
-            self.assertEqual(manifest["graph"]["pipeline_refs"], [pipeline["id"] for pipeline in manifest["pipelines"]])
-            self.assertTrue(manifest["graph"]["hermes_only"])
-            self.assertNotIn("nodes", manifest["graph"])
-            self.assertNotIn("edges", manifest["graph"])
-            for section in ("settings", "graph", "trace", "health", "hermes"):
+            self.assertNotIn("commands", manifest["hermes"])
+            self.assertNotIn("events", manifest["hermes"])
+            self.assertTrue(all(re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", action) for action in manifest["hermes"]["actions"]))
+            self.assertTrue(all(re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", kind) for kind in manifest["hermes"]["event_kinds"]))
+            for section in ("settings", "trace", "health", "hermes"):
                 self.assertIn(section, manifest)
 
     def test_prospect_discovery_stops_at_evidence_and_qualification(self):
         manifest = load_manifest("prospect-discovery")
         self.assertEqual(manifest["data_boundary"]["ad_intelligence"], "stable_subject_ref_only")
-        self.assertIn("outreach.delivery.request", manifest["hermes"]["forbidden_commands"])
+        self.assertIn("delivery-request", manifest["hermes"]["forbidden_actions"])
         self.assertNotIn("consent", manifest["data_boundary"]["owns"])
 
     def test_outreach_requires_immediate_policy_and_suppression_gate(self):
@@ -104,13 +108,13 @@ class ToolBoundaryContractsTest(unittest.TestCase):
         self.assertEqual(policy["send_gate_timing"], "all_checks_must_run_immediately_before_outreach_delivery_request")
         for required in ("approval", "legal_basis_evidence", "policy_check", "project_suppression_check", "global_suppression_check"):
             self.assertIn(required, policy["send_gate"])
-        self.assertIn("outreach.delivery.request", manifest["hermes"]["commands"])
+        self.assertIn("delivery-request", manifest["hermes"]["actions"])
         self.assertIn("delivery-request", manifest["capabilities"])
         for gate in ("approval", "legal-basis", "project-suppression", "global-suppression", "quiet-hours", "idempotency", "connection-capability"):
             self.assertIn(gate, manifest["approval_gates"])
-        self.assertIn("mail.raw_send", manifest["hermes"]["forbidden_commands"])
-        self.assertNotIn("mail.provider_send", manifest["hermes"]["commands"])
-        self.assertIn("outreach.delivery.requested", manifest["hermes"]["events"])
+        self.assertIn("raw-send", manifest["hermes"]["forbidden_actions"])
+        self.assertNotIn("provider-send", manifest["hermes"]["actions"])
+        self.assertIn("delivery-requested", manifest["hermes"]["event_kinds"])
         self.assertNotIn("replies", manifest["data_boundary"]["owns"])
         self.assertNotIn("bounces", manifest["data_boundary"]["owns"])
         self.assertNotIn("complaints", manifest["data_boundary"]["owns"])
@@ -121,10 +125,10 @@ class ToolBoundaryContractsTest(unittest.TestCase):
         self.assertIn("canonical_message_projections", manifest["data_boundary"]["owns"])
         for event in ("reply_events", "bounce_events", "complaint_events", "unsubscribe_events", "delivery_receipts"):
             self.assertIn(event, manifest["data_boundary"]["owns"])
-        self.assertNotIn("mail.raw_send", manifest["hermes"]["commands"])
-        self.assertIn("mail.raw_send", manifest["hermes"]["forbidden_commands"])
-        self.assertIn("mail.compose.intent", manifest["hermes"]["commands"])
-        self.assertIn("mail.reply.intent", manifest["hermes"]["commands"])
+        self.assertNotIn("raw-send", manifest["hermes"]["actions"])
+        self.assertIn("raw-send", manifest["hermes"]["forbidden_actions"])
+        self.assertIn("compose-intent", manifest["hermes"]["actions"])
+        self.assertIn("reply-intent", manifest["hermes"]["actions"])
         self.assertIn("provider_raw_message_bodies", manifest["data_boundary"]["never_owns"])
 
     def test_ad_intelligence_never_becomes_a_pii_surface(self):
@@ -162,8 +166,10 @@ class ToolBoundaryContractsTest(unittest.TestCase):
             trace = load_manifest(name)["trace"]
             self.assertEqual(trace["schema"], "schema://frank.tool-app-trace/v1")
             self.assertEqual(trace["instrumentation"], "opentelemetry")
+            self.assertIn("event_kinds", trace)
+            self.assertTrue(all(re.fullmatch(r"[a-z][a-z0-9]*(?:-[a-z0-9]+)*", kind) for kind in trace["event_kinds"]))
             self.assertTrue(trace["span_prefix"].startswith("frank."))
-            self.assertTrue(trace["events"])
+            self.assertTrue(trace["event_kinds"])
 
 
 if __name__ == "__main__":

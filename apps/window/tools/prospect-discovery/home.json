@@ -5,5 +5,5 @@
   "blurb": "Discover and qualify public prospects with source-backed evidence.",
   "capabilities": ["public contact discovery", "evidence review", "qualification"],
   "default_widget_ids": [],
-  "connection_capabilities": ["public-source-reference"]
+  "connection_capabilities": ["public-source-read"]
 }

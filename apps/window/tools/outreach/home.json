@@ -5,5 +5,5 @@
   "blurb": "Plan policy-gated outreach with approvals, suppression, and delivery records.",
   "capabilities": ["list planning", "sequence intent", "approval workflow", "suppression", "send ledger"],
   "default_widget_ids": [],
-  "connection_capabilities": ["campaign-reference", "delivery-adapter-reference", "vault-reference"]
+  "connection_capabilities": ["campaign-management", "segment-management", "outbound-delivery"]
 }

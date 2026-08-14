@@ -37,25 +37,19 @@
     "prospect_records_in_public_exports": false,
     "pii_policy": "public_contact_fields_are_minimized_and_must_carry_source_evidence"
   },
-  "graph": {
-    "schema": "schema://frank.graph/v1",
-    "adapter": "ToolManifestAdapter",
-    "pipeline_refs": ["discover-enrich-qualify"],
-    "hermes_only": true
-  },
   "trace": {
     "schema": "schema://frank.tool-app-trace/v1",
     "instrumentation": "opentelemetry",
     "span_prefix": "frank.prospect_discovery",
     "attributes": ["prospect.run_id", "prospect.source_type", "prospect.evidence_count", "prospect.qualification_state"],
-    "events": ["prospect.discovered", "prospect.enriched", "prospect.qualified", "prospect.rejected"]
+    "event_kinds": ["discovered", "enriched", "qualified", "rejected"]
   },
   "health": {"contract": "tool_health.v1", "checks": ["manifest_valid", "source_adapter_reachable", "evidence_attached", "pii_minimized"], "states": ["healthy", "degraded", "unavailable"]},
   "hermes": {
     "contract": "hermes_tool_boundary.v1",
-    "commands": ["prospect.discover", "prospect.enrich", "prospect.qualify"],
-    "events": ["prospect.discovered", "prospect.enriched", "prospect.qualified", "prospect.failed"],
-    "forbidden_commands": ["outreach.draft.create", "outreach.delivery.request", "mail.compose.intent"],
+    "actions": ["discover", "enrich", "qualify"],
+    "event_kinds": ["discovered", "enriched", "qualified", "failed"],
+    "forbidden_actions": ["draft-create", "delivery-request", "compose-intent"],
     "result_rule": "return_contact_refs_and_evidence_refs; never imply consent"
   }
 }
