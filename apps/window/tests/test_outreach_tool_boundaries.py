@@ -99,6 +99,9 @@ class ToolBoundaryContractsTest(unittest.TestCase):
         self.assertEqual(manifest["data_boundary"]["ad_intelligence"], "stable_subject_ref_only")
         self.assertIn("delivery-request", manifest["hermes"]["forbidden_actions"])
         self.assertNotIn("consent", manifest["data_boundary"]["owns"])
+        qualification = manifest["settings"]["properties"]["qualification_policy"]["properties"]
+        for field in ("prompt_ref", "prompt_version", "model_policy", "confidence_threshold", "evidence_threshold"):
+            self.assertIn(field, qualification)
 
     def test_outreach_requires_immediate_policy_and_suppression_gate(self):
         manifest = load_manifest("outreach")
@@ -109,6 +112,8 @@ class ToolBoundaryContractsTest(unittest.TestCase):
         for required in ("approval", "legal_basis_evidence", "policy_check", "project_suppression_check", "global_suppression_check"):
             self.assertIn(required, policy["send_gate"])
         self.assertIn("delivery-request", manifest["hermes"]["actions"])
+        self.assertIn("action-receipt-ref", manifest["hermes"]["actions"])
+        self.assertNotIn("ledger-record", manifest["hermes"]["actions"])
         self.assertIn("delivery-request", manifest["capabilities"])
         for gate in ("approval", "legal-basis", "project-suppression", "global-suppression", "quiet-hours", "idempotency", "connection-capability"):
             self.assertIn(gate, manifest["approval_gates"])
@@ -118,6 +123,11 @@ class ToolBoundaryContractsTest(unittest.TestCase):
         self.assertNotIn("replies", manifest["data_boundary"]["owns"])
         self.assertNotIn("bounces", manifest["data_boundary"]["owns"])
         self.assertNotIn("complaints", manifest["data_boundary"]["owns"])
+        self.assertNotIn("send_ledger", manifest["data_boundary"]["owns"])
+        self.assertNotIn("send_ledger", manifest["data_boundary"]["never_owns"])
+        self.assertIn("connection_action_receipt_refs", manifest["data_boundary"]["consumes"])
+        self.assertIn("action_receipt_projection_available", manifest["health"]["checks"])
+        self.assertIn("action-receipt-referenced", manifest["trace"]["event_kinds"])
 
     def test_mail_is_provider_neutral_and_cannot_send(self):
         manifest = load_manifest("mail")

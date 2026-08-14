@@ -10,7 +10,8 @@
     "properties": {
       "filters": {"type": "object", "properties": {"role": {"type": "string"}, "company": {"type": "string"}, "territory": {"type": "string"}, "industry": {"type": "string"}, "firmographic": {"type": "object"}}},
       "sources": {"type": "array", "items": {"type": "string"}},
-      "scoring": {"type": "object", "properties": {"fit": {"type": "number"}, "intent": {"type": "number"}, "evidence_quality": {"type": "number"}, "recency": {"type": "number"}}}
+      "scoring": {"type": "object", "properties": {"fit": {"type": "number"}, "intent": {"type": "number"}, "evidence_quality": {"type": "number"}, "recency": {"type": "number"}}},
+      "qualification_policy": {"type": "object", "properties": {"prompt_ref": {"type": "string"}, "prompt_version": {"type": "string"}, "model_policy": {"type": "string"}, "confidence_threshold": {"type": "number"}, "evidence_threshold": {"type": "number"}}}
     }
   },
   "pipelines": [{
