@@ -73,6 +73,62 @@ class ConnectionsAgentApiTest(unittest.TestCase):
         self.assertEqual(response.get_json()["plan"]["source"], "connections-agent")
         self.assertEqual(response.get_json()["plan"]["actor"], "hermes.connections-agent")
 
+    def test_agent_inspect_is_authenticated_bounded_newest_first_and_redacted(self):
+        missing = self.client.get("/api/connections/agent/inspect")
+        self.assertEqual(missing.status_code, 401)
+        wrong_key = self.client.get(
+            "/api/connections/agent/inspect",
+            headers={"Authorization": "Bearer wrong-key"},
+        )
+        self.assertEqual(wrong_key.status_code, 401)
+        wrong_profile = self.client.get(
+            "/api/connections/agent/inspect",
+            headers={**self.agent_headers, "X-Hermes-Profile": "other"},
+        )
+        self.assertEqual(wrong_profile.status_code, 403)
+        self.assertEqual(self.client.get(
+            "/api/connections/agent/inspect?activity_limit=0", headers=self.agent_headers,
+        ).status_code, 400)
+        self.assertEqual(self.client.get(
+            "/api/connections/agent/inspect?activity_limit=not-a-number", headers=self.agent_headers,
+        ).status_code, 400)
+        self.assertEqual(self.client.get(
+            "/api/connections/agent/inspect?unexpected=1", headers=self.agent_headers,
+        ).status_code, 400)
+
+        connection = self._create()
+        planned = self.client.post("/api/connections/agent/plan", json={
+            "action": "discover", "idempotency_key": "inspect-agent-plan-01",
+        }, headers=self.agent_headers)
+        self.assertEqual(planned.status_code, 200, planned.get_json())
+        applied = self.client.post("/api/connections/agent/apply", json={
+            "plan_id": planned.get_json()["plan"]["plan_id"],
+            "idempotency_key": "inspect-agent-apply-01",
+        }, headers=self.agent_headers)
+        self.assertEqual(applied.status_code, 200, applied.get_json())
+
+        capped = self.client.get(
+            "/api/connections/agent/inspect?activity_limit=999", headers=self.agent_headers,
+        )
+        self.assertEqual(capped.status_code, 200, capped.get_json())
+        payload = capped.get_json()
+        self.assertEqual(payload["schema"], "schema://frank.connections-agent-inspect/v1")
+        self.assertLessEqual(len(payload["activity"]), 50)
+        self.assertEqual([item["sequence"] for item in payload["activity"]], sorted(
+            (item["sequence"] for item in payload["activity"]), reverse=True,
+        ))
+        self.assertEqual(set(payload["connections"][0]), {
+            "id", "name", "provider", "status", "scope_kind", "scope_id",
+            "connection_ref", "credential_ref", "last_verified_at", "capabilities", "revision",
+        })
+        self.assertEqual(payload["connections"][0]["id"], connection["id"])
+        self.assertNotIn("admin_url", payload["connections"][0])
+        for item in [*payload["attention"], *payload["activity"]]:
+            self.assertNotIn("error", item)
+            self.assertNotIn("admin_url", json.dumps(item))
+            self.assertNotIn("credential_ref", json.dumps(item))
+            self.assertLessEqual(len(item), 14)
+
     def test_safe_verify_uses_shared_service_and_optimistic_revision(self):
         connection = self._create()
         plan = self.client.post("/api/connections/agent/plan", json={

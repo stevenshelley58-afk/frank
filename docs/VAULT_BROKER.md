@@ -27,7 +27,7 @@ Frank's runtime environment. Frank must not reuse the broad Hermes API key.
 Use placeholders in deployment configuration:
 
 ```dotenv
-HERMES_VAULT_BROKER_URL=http://172.16.1.1:8642/api/plugins/connections-agent/vault-broker
+HERMES_VAULT_BROKER_URL=
 HERMES_VAULT_BROKER_KEY=replace-with-dedicated-vault-broker-credential
 HERMES_CONNECTIONS_FRANK_URL=http://127.0.0.1:18080
 HERMES_CONNECTIONS_INFISICAL_URL=http://127.0.0.1:18082
@@ -49,6 +49,8 @@ The Connections Agent callback is private transport, not a public Caddy route.
 The Window container binds `127.0.0.1:18080` to its internal port 8080 so
 Hermes can call that loopback ingress with `Authorization` intact. Public
 Caddy behavior is unchanged and must not be used for agent callbacks.
+Set `HERMES_VAULT_BROKER_URL` only to the exact Hermes plugin route/port supplied
+by the Hermes deployment; no guessed dashboard or main-API port is valid.
 
 ## Write-only API
 

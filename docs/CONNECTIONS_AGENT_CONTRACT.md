@@ -23,6 +23,7 @@ configured and awaiting verification.
 | `POST /api/connections/apply` | Same-origin manual confirmation/apply endpoint. |
 | `POST /api/connections/agent/plan` | Authenticated Hermes-produced plan ingress. |
 | `POST /api/connections/agent/apply` | Authenticated application of a Hermes-issued plan. |
+| `GET /api/connections/agent/inspect?activity_limit=N` | Authenticated bounded Hermes read model: compatible connections, newest attention, and newest activity. `N` is capped at 50. |
 | `GET /api/connections/attention` | Latest unresolved action per correlation id. |
 | `GET /api/connections/activity` | Cursor-pollable safe action activity (`?after=<sequence>`); add `latest=1` for a newest-first page. |
 | `GET /api/connections/events` | Alias of the activity projection for widget polling. |
@@ -44,6 +45,16 @@ which is separate from the ordinary browser/session boundary, and require the
 `default` Hermes profile (`X-Hermes-Profile: default`). Source and actor are
 fixed by the trusted route/auth context as `connections-agent` and
 `hermes.connections-agent`; request payloads cannot forge them.
+
+The inspect seam is the single private Hermes read boundary. It accepts only
+the optional `activity_limit` query parameter, defaults to 50, and clamps it
+to 50; arbitrary paths and query parameters are rejected. It returns only the
+compatible connection fields plus newest safe attention and activity
+projections. Those projections contain opaque vault references and
+allowlisted receipt/result metadata only: no provider URLs, admin URLs,
+secrets, request bodies, or free-form provider error prose. The browser never
+calls this endpoint; the named Hermes Connections Agent uses it with the same
+Bearer key and `default` profile contract as the agent mutation routes.
 
 Mutation request bodies are capped at 64 KiB and are rate-limited per source
 address. Plans persist only normalized connection-schema deltas and allowlisted

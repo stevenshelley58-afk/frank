@@ -103,6 +103,7 @@ _connection_rate: dict[tuple[str, str], list[float]] = {}
 CONNECTION_REQUEST_BYTES = 64 * 1024
 CONNECTION_RATE_WINDOW = 60
 CONNECTION_RATE_LIMIT = 120
+CONNECTION_AGENT_INSPECT_MAX_ACTIVITY = 50
 
 
 BUILTIN_WIDGETS = [
@@ -953,6 +954,33 @@ def _connection_json(payload: dict, status: int = 200):
     return response
 
 
+def _agent_connection_projection(item: dict) -> dict:
+    """Return only the metadata Hermes needs to inspect Connections."""
+    public = _public_connection(item)
+    fields = (
+        "id", "name", "provider", "status", "scope_kind", "scope_id",
+        "connection_ref", "credential_ref", "last_verified_at", "capabilities", "revision",
+    )
+    return {field: public[field] for field in fields if field in public}
+
+
+def _agent_action_projection(item: dict) -> dict:
+    """Return a receipt-safe action without free-form error prose."""
+    fields = (
+        "sequence", "receipt_id", "correlation_id", "source", "actor", "action",
+        "state", "progress", "started_at", "updated_at", "completed_at",
+    )
+    projected = {field: item[field] for field in fields if field in item}
+    target = item.get("target") if isinstance(item.get("target"), dict) else {}
+    projected["target"] = {field: target[field] for field in ("provider", "connection_id", "consumer", "project", "environment") if field in target}
+    result = item.get("result") if isinstance(item.get("result"), dict) else {}
+    projected["result"] = {field: result[field] for field in (
+        "connection_id", "provider", "status", "revision", "removed", "verified_at",
+        "outcome", "pending", "provider_receipt", "error_code", "error_category",
+    ) if field in result}
+    return projected
+
+
 @api.post("/api/connections/plan")
 @api.post("/api/connections/agent/plan")
 def connections_plan():
@@ -1040,6 +1068,34 @@ def connections_manual_apply():
 def connections_attention():
     limit = request.args.get("limit", default=50, type=int)
     return jsonify({"schema": "schema://frank.connections-attention/v1", "items": _connection_service_or_abort().attention(limit=limit)})
+
+
+@api.get("/api/connections/agent/inspect")
+def connections_agent_inspect():
+    """Private, bounded read model for the authenticated Hermes Connections Agent."""
+    _require_hermes_agent_auth()
+    if set(request.args) - {"activity_limit"}:
+        abort(400, "unsupported inspect query")
+    values = request.args.getlist("activity_limit")
+    if len(values) > 1:
+        abort(400, "activity_limit must be provided once")
+    raw_limit = values[0] if values else str(CONNECTION_AGENT_INSPECT_MAX_ACTIVITY)
+    try:
+        requested_limit = int(raw_limit)
+    except (TypeError, ValueError):
+        abort(400, "activity_limit must be an integer")
+    if requested_limit < 1:
+        abort(400, "activity_limit must be positive")
+    limit = min(requested_limit, CONNECTION_AGENT_INSPECT_MAX_ACTIVITY)
+    service = _connection_service_or_abort()
+    with _connections_lock:
+        connections = [_agent_connection_projection(item) for item in _connection_store().get("connections", [])]
+    return _connection_json({
+        "schema": "schema://frank.connections-agent-inspect/v1",
+        "connections": connections,
+        "attention": [_agent_action_projection(item) for item in service.attention(limit=limit)],
+        "activity": [_agent_action_projection(item) for item in service.activity(limit=limit, latest=True)],
+    })
 
 
 @api.get("/api/connections/activity")
