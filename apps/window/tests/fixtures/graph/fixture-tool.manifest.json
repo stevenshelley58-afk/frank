@@ -1,0 +1,26 @@
+{
+  "schema": "schema://frank.tool-app-manifest/v1",
+  "id": "fixture-tool",
+  "version": "1.2.0",
+  "name": "Fixture Tool",
+  "description": "A canonical flat Tool manifest used only by the isolated graph tests.",
+  "scopes": ["global", "project"],
+  "settings": {
+    "type": "object",
+    "properties": {
+      "mode": {"type": "string"}
+    }
+  },
+  "pipelines": [
+    {
+      "schema": "schema://frank.tool-app-pipeline/v1",
+      "id": "main",
+      "version": "1.2.0",
+      "nodes": [
+        {"id": "prepare", "kind": "step"},
+        {"id": "publish", "kind": "step"}
+      ],
+      "edges": [{"from": "prepare", "to": "publish"}]
+    }
+  ]
+}

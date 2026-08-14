@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Frank shared graph workbench harness</title>
+  <link rel="stylesheet" href="./graph-workbench.bundle.css">
+  <link rel="stylesheet" href="./graph-workbench.css">
+</head>
+<body>
+  <main id="workbench"></main>
+  <script type="module">
+    import { mountGraphWorkbench } from "./graph-workbench.bundle.js";
+    mountGraphWorkbench(document.querySelector("#workbench"), {
+      kind: "tool",
+      entityId: "fixture-tool",
+      lens: "tool.pipeline",
+      title: "Fixture tool",
+      load: async () => ({
+        schema: "schema://frank.graph/v1",
+        graph_id: "tool:fixture-tool",
+        graph_revision: "sha256:fixture",
+        generated_at: "2026-08-14T00:00:00Z",
+        provider: { id: "tool-manifest", version: "1.0.0", authority: "manifest" },
+        subject: { kind: "tool", id: "fixture-tool" },
+        scope: { kind: "global" },
+        lens: "tool.pipeline",
+        capabilities: ["frank.graph.v1", "inspect"],
+        nodes: [
+          { id: "tool:fixture-tool/pipeline:main/node:prepare", label: "prepare", status: "declared" },
+          { id: "tool:fixture-tool/pipeline:main/node:publish", label: "publish", status: "declared" },
+        ],
+        edges: [{ id: "tool:fixture-tool/pipeline:main/edge:0:prepare:publish", from: "tool:fixture-tool/pipeline:main/node:prepare", to: "tool:fixture-tool/pipeline:main/node:publish" }],
+        groups: [],
+        trace_ref: null,
+        extensions: {},
+      }),
+    });
+  </script>
+</body>
+</html>
