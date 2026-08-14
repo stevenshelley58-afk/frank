@@ -14,7 +14,7 @@ def load_manifest(name):
 
 
 def load_home_manifest(name):
-    with (TOOLS / name / "home-manifest.json").open(encoding="utf-8") as manifest_file:
+    with (TOOLS / name / "home.json").open(encoding="utf-8") as manifest_file:
         return json.load(manifest_file)
 
 
@@ -82,10 +82,12 @@ class ToolBoundaryContractsTest(unittest.TestCase):
                     visit(node_id)
             self.assertEqual(manifest["id"], name)
             self.assertEqual(manifest["graph"]["schema"], "schema://frank.graph/v1")
-            self.assertEqual(manifest["graph"]["projection"]["adapter"], "ToolManifestAdapter")
-            self.assertEqual(manifest["graph"]["projection"]["renderer"], "maxGraph")
-            self.assertEqual(manifest["graph"]["execution"], "hermes_only")
-            for section in ("settings", "graph", "trace", "health", "widget", "hermes"):
+            self.assertEqual(manifest["graph"]["adapter"], "ToolManifestAdapter")
+            self.assertEqual(manifest["graph"]["pipeline_refs"], [pipeline["id"] for pipeline in manifest["pipelines"]])
+            self.assertTrue(manifest["graph"]["hermes_only"])
+            self.assertNotIn("nodes", manifest["graph"])
+            self.assertNotIn("edges", manifest["graph"])
+            for section in ("settings", "graph", "trace", "health", "hermes"):
                 self.assertIn(section, manifest)
 
     def test_prospect_discovery_stops_at_evidence_and_qualification(self):
@@ -146,6 +148,10 @@ class ToolBoundaryContractsTest(unittest.TestCase):
                 self.assertIn("prompt_version", draft)
                 self.assertNotIn("prompt", draft)
                 self.assertNotIn("provider_ref", draft)
+            classification = manifest["settings"]["properties"].get("reply_classification", {}).get("properties", {})
+            if "model_policy" in classification:
+                self.assertIn("prompt_ref", classification)
+                self.assertIn("prompt_version", classification)
             connection = manifest["settings"]["properties"]["connection"]["properties"] if "connection" in manifest["settings"]["properties"] else {}
             if connection:
                 self.assertIn("connection_id", connection)

@@ -39,11 +39,9 @@
   },
   "graph": {
     "schema": "schema://frank.graph/v1",
-    "projection": {"adapter": "ToolManifestAdapter", "renderer": "maxGraph", "prompt_inspector": "CodeMirror 6", "payload_editor": "vanilla-jsoneditor+Ajv"},
-    "execution": "hermes_only",
-    "settings_revisions": "shared_tool_contract_immutable",
-    "nodes": ["source", "contact", "evidence", "qualification", "stable_subject_ref"],
-    "edges": ["source->contact", "contact->evidence", "contact->qualification", "stable_subject_ref->contact"]
+    "adapter": "ToolManifestAdapter",
+    "pipeline_refs": ["discover-enrich-qualify"],
+    "hermes_only": true
   },
   "trace": {
     "schema": "schema://frank.tool-app-trace/v1",
@@ -53,7 +51,6 @@
     "events": ["prospect.discovered", "prospect.enriched", "prospect.qualified", "prospect.rejected"]
   },
   "health": {"contract": "tool_health.v1", "checks": ["manifest_valid", "source_adapter_reachable", "evidence_attached", "pii_minimized"], "states": ["healthy", "degraded", "unavailable"]},
-  "widget": {"contract": "tool_widget.v1", "id": "prospect-discovery", "surfaces": ["tool", "project"], "states": ["idle", "discovering", "needs_review", "ready", "error"], "read_models": ["qualification_summary", "evidence_summary", "source_health"], "actions": ["start_discovery", "review_evidence", "adjust_filters"]},
   "hermes": {
     "contract": "hermes_tool_boundary.v1",
     "commands": ["prospect.discover", "prospect.enrich", "prospect.qualify"],
