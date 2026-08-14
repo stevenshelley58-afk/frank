@@ -21,10 +21,11 @@ systems without changing the package's data boundaries.
   Public classification exposes only sanitized label, confidence, receipt refs, and
   provenance refs; prompt refs, prompt versions, models, and rationale remain private
   execution metadata in traces.
-- `build_release` wraps that export in an immutable, checksummed release record with
-  project scope, provenance/trace/settings refs, QA approval, and recursive PII/secret
-  sanitization. Public asset/source refs cannot point at private vault or filesystem
-  schemes.
+- `build_release` wraps that export in an immutable release with an export checksum,
+  a canonical whole-release hash, project scope, fixed pipeline identity/version,
+  non-empty provenance/trace/settings refs, QA and sanitization receipt refs, and
+  recursive PII/secret sanitization. Public asset/source refs cannot point at private
+  vault or filesystem schemes.
 - Browser access is expressed by an adapter boundary. Prefer Playwright/CDP-compatible
   adapters for browser work; do not bake a provider SDK into this package.
 - Domain Tools own/version manifests, declarative nodes/edges, immutable settings
@@ -60,20 +61,22 @@ or declare renderer/editor choices.
 
 ## Reuse boundary from Blockwise
 
-The actual checkout at `C:\Dev\Blockwise\hermes` was inspected before finalizing.
-These existing Hermes components are the intended implementations to invoke through
-adapters:
+The existing Blockwise `hermes/` source was inspected before finalizing. These
+components are transitional source implementations to adapt and deploy under the
+approved central Hermes runtime before Blockwise removal:
 
 | Existing component | Pipeline responsibility | Boundary decision |
 | --- | --- | --- |
-| `tools/meta-library-capture/bin/capture.mjs` | discover/resolve/capture | left in Hermes; its structured outcome is an adapter input |
-| `tools/research-runtime/bin/ad-classifier.mjs` | classify and image assessment | left in Hermes; model/provider policy stays with Hermes |
-| `tools/research-runtime/bin/ad-radar-accuracy-audit.mjs` | quality/health evidence | left in Hermes; mapped to health/trace receipts |
-| `tools/research-runtime/bin/media-quality-backfill.mjs` | media QA maintenance | left in Hermes; not reimplemented here |
-| `tools/research-runtime/bin/migrate-raw-evidence.mjs` | evidence retention/migration | left in Hermes; Frank never handles credentials or storage |
-| `tools/research-runtime/bin/customer-read-model-publisher.mjs` | optional customer projection | left in Hermes and kept out of the public creative export |
+| `tools/meta-library-capture/bin/capture.mjs` | discover/resolve/capture | adapt to central Hermes; its structured outcome is an adapter input |
+| `tools/research-runtime/bin/ad-classifier.mjs` | classify and image assessment | adapt to central Hermes; model/provider policy stays with Hermes |
+| `tools/research-runtime/bin/ad-radar-accuracy-audit.mjs` | quality/health evidence | adapt to central Hermes and map to health/trace receipts |
+| `tools/research-runtime/bin/media-quality-backfill.mjs` | media QA maintenance | adapt to central Hermes; do not reimplement it in Frank |
+| `tools/research-runtime/bin/migrate-raw-evidence.mjs` | evidence retention/migration | adapt to central Hermes; Frank never handles credentials or storage |
+| `tools/research-runtime/bin/customer-read-model-publisher.mjs` | optional customer projection | adapt to central Hermes and keep it out of the public creative export |
 
 Copied: none. Wrapped: only the provider-neutral `BrowserAdapter`,
 `TelemetryAdapter`, and `HermesAdapter` interfaces. Intentionally not moved: scraper
 logic, OpenRouter/Supabase access, raw evidence storage, OCR/media backfills, and the
 customer projection. This avoids a second scraper or a second customer data plane.
+The Blockwise copies remain protected until the central Hermes runtime and database
+owner are deployed, restart-tested, and accepted; only then may D2 remove them.
