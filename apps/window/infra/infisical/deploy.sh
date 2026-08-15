@@ -71,9 +71,7 @@ host_port="$(env_value INFISICAL_HOST_PORT)"
 [[ "$host_port" =~ ^[0-9]+$ ]] || die "INFISICAL_HOST_PORT must be numeric"
 (( host_port >= 1024 && host_port <= 65535 )) || die "INFISICAL_HOST_PORT must be between 1024 and 65535"
 
-docker network inspect frank >/dev/null 2>&1 || die "required external Docker network frank does not exist"
-
-config_json="$(docker compose --project-name infisical --env-file "$secret_file" -f "$compose_file" config --format json)" || die "compose configuration is invalid"
+config_json="$(INFISICAL_ENV_FILE="$secret_file" docker compose --project-name infisical --env-file "$secret_file" -f "$compose_file" config --format json)" || die "compose configuration is invalid"
 printf '%s' "$config_json" | python3 -c '
 import json, sys
 
@@ -90,6 +88,16 @@ for name in ("db", "redis"):
         raise SystemExit(f"{name} must not publish a host port")
 if "infisical" not in services["backend"].get("networks", {}):
     raise SystemExit("backend must use the private Infisical network")
+if set(services["backend"].get("networks", {})) != {"infisical"}:
+    raise SystemExit("backend must not join a shared Frank network")
+if set(services["db"].get("networks", {})) != {"infisical"} or set(services["redis"].get("networks", {})) != {"infisical"}:
+    raise SystemExit("database and Redis must stay on the private Infisical network")
+if set(services["db"].get("environment", {})) != {"POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PASSWORD"}:
+    raise SystemExit("database must receive only POSTGRES_* variables")
+if set(services["redis"].get("environment", {})) != {"REDIS_PASSWORD"}:
+    raise SystemExit("Redis must receive only REDIS_PASSWORD")
+if services["db"].get("env_file") or services["redis"].get("env_file"):
+    raise SystemExit("database and Redis must not receive the backend env file")
 ' || die "compose network/port policy failed"
 
 running_names="$(docker ps --filter "publish=$host_port" --format '{{.Names}}' || true)"
@@ -100,6 +108,6 @@ if [[ "$running_names" != "infisical-backend" ]] && curl --silent --output /dev/
   die "loopback port $host_port is already in use"
 fi
 
-docker compose --project-name infisical --env-file "$secret_file" -f "$compose_file" up -d
+INFISICAL_ENV_FILE="$secret_file" docker compose --project-name infisical --env-file "$secret_file" -f "$compose_file" up -d
 "$script_dir/check.sh"
 echo "Infisical CE is running privately at http://127.0.0.1:$host_port"

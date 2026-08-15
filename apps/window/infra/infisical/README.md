@@ -8,8 +8,10 @@ manifest digest. Postgres 16 Alpine and Redis 7.4 Alpine are also pinned by
 manifest digest. The backend publishes only `127.0.0.1:18082:8080` by default;
 the port is configurable through the generated external env file. Postgres and
 Redis have no host ports and use the internal `infisical_private` network.
-The backend also joins the existing external Docker network `frank`, but its
-only host reachability is the loopback binding. Caddy is not changed.
+All three services stay on that private network; the backend's only host
+reachability is the loopback binding. It does not join Frank's shared Docker
+network, so Caddy and the Frank container cannot reach it directly. Caddy is
+not changed.
 
 ## Files and secret boundary
 
@@ -23,11 +25,19 @@ only host reachability is the loopback binding. Caddy is not changed.
   environment to create the project, environment, fixed-scope CRUD role,
   project machine identity, Universal Auth method, and client secret. It stores only
   non-secret identity metadata in
-  `/srv/infisical/secrets/hermes-bootstrap.env`; when `HERMES_SECRET_FILE` is
-  supplied, the client credentials are written directly to that existing
-  Hermes-owned 0600 env file. It is never written to Frank or Git. `--emit-once`
-  is an explicit fallback for operators who cannot provide the Hermes path; it
-  is the only mode that prints credentials.
+  `/srv/infisical/secrets/hermes-bootstrap.env`. It requires an existing
+  `HERMES_CONFIG_FILE` and an explicit `HERMES_SECRET_FILE` path; if the latter
+  already exists, it must be a regular, non-symlink 0600 file. It receives only
+  the Universal Auth client ID and client secret through an atomic 0600
+  replacement. Credentials are never printed.
+  The config update targets only Hermes' `plugins.entries.connections-agent.settings`
+  subtree and preserves unrelated YAML. The script then runs an in-process
+  Universal Auth CRUD/denial canary and removes its temporary secret.
+- `resolve-hermes-python.sh` selects `HERMES_PYTHON` when provided, otherwise
+  checks `$HERMES_INSTALL_DIR/venv/bin/python`, `$HERMES_HOME/venv/bin/python`,
+  `$HERMES_HOME/venvs/hermes-dev/bin/python`, and
+  `~/.hermes/venvs/hermes-dev/bin/python` before system `python3`. The selected
+  interpreter must import `ruamel.yaml`; no package is installed by this bundle.
 - `test.sh` performs shell syntax, static policy, optional ShellCheck, and
   optional Compose validation.
 
@@ -67,22 +77,49 @@ ssh -N -L 18082:127.0.0.1:18082 <vps-host>
 Open `http://127.0.0.1:18082` through that tunnel, create the first admin
 account, and close the tunnel. No public DNS or port is needed. Obtain a
 short-lived admin API token from that account, then run the API bootstrap from
-the VPS without putting the token in a file:
+the VPS without putting the token in a file. Set the exact default-profile
+config path and Hermes-owned credentials file:
 
 ```bash
 cd /projects/frank/apps/window/infra/infisical
+HERMES_CONFIG_FILE=/home/hermes/.hermes/config.yaml \
 HERMES_SECRET_FILE=/srv/hermes/secrets/connections.env \
 INFISICAL_BOOTSTRAP_TOKEN='short-lived-admin-token' ./bootstrap-hermes.sh
 ```
 
-The path above is an example; set `HERMES_SECRET_FILE` to the actual Hermes
-0600 secret file. Frank must receive no Infisical token or client secret. The
-file contains only the canonical client ID and client secret for Universal Auth.
+The paths above are examples; set them to the actual default-profile
+`config.yaml` and Hermes 0600 secret file. `HERMES_PYTHON` may be set to the
+production Hermes venv interpreter when it is not discoverable. Frank must
+receive no Infisical token or client secret. The env file contains only the
+canonical client ID and client secret for Universal Auth.
 Hermes must use the client credentials to call
 `POST /api/v1/auth/universal-auth/login`, cache the short-lived access token in
 memory, reacquire it before expiry, and retry once on a 401. This bundle does
-not generate or persist `HERMES_CONNECTIONS_INFISICAL_TOKEN`; any static-token
-fallback must be independently configured by Hermes.
+not generate or persist a static Infisical token; any static-token fallback must
+be independently configured by Hermes.
+
+The bootstrap writes this exact non-secret settings block into the default
+profile's `config.yaml` (and only this subtree):
+
+```yaml
+plugins:
+  entries:
+    connections-agent:
+      settings:
+        enabled: true
+        frank_url: http://127.0.0.1:18080
+        infisical_url: http://127.0.0.1:18082
+        infisical_project_id: <project-id>
+        infisical_environment: production
+        secret_path: /hermes
+        resend_secret_name: RESEND_API_KEY
+```
+
+The behavior settings are config-authoritative; they are not written as
+`HERMES_CONNECTIONS_*` environment variables. The only Infisical credentials
+written to the 0600 env file are
+`HERMES_CONNECTIONS_INFISICAL_CLIENT_ID` and
+`HERMES_CONNECTIONS_INFISICAL_CLIENT_SECRET`.
 
 Hermes reads secrets with the v4 endpoint:
 
@@ -96,10 +133,13 @@ GET http://127.0.0.1:18082/api/v4/secrets
 
 The bootstrap defaults are the exact identity: project slug
 `frank-hermes-vault`, environment slug `production`, path `/hermes`, identity
-`hermes-vault-broker`, and custom project role `hermes-vault-reader`. The role
+`hermes-vault-broker`, and custom project role `hermes-vault-broker`. The role
 grants only secret `read`, `create`, `edit`, and `delete`, plus folder read,
 under that exact environment/path. Override the documented `INFISICAL_*`
 variables before the first bootstrap if a different identity is required.
+The bootstrap proves the identity has exactly one permanent project role, then
+logs in with Universal Auth and verifies create/read/edit/delete at
+`production:/hermes` while rejecting another path, environment, and project.
 
 ## Operations and rollback
 
@@ -140,8 +180,12 @@ revision and image digest, run `docker compose up -d`, and verify with
 upgrade, and rollback.
 
 For an upgrade, change the three pinned image references in a reviewed commit,
-run `./test.sh`, back up Postgres, then run `./deploy.sh`. A rollback is the
-same operation with the prior committed bundle; do not delete volumes.
+run `./test.sh`, back up Postgres, then run `./deploy.sh` and `./check.sh`. A
+rollback is the same operation with the prior committed bundle and the same
+named volumes; do not delete volumes. If bootstrap fails after a canary is
+created, its exit cleanup attempts deletion; verify the fixed path with the
+read-only list endpoint before retrying. The final bootstrap canary must pass
+before Hermes is restarted.
 
 ## Official references
 
@@ -152,5 +196,9 @@ same operation with the prior committed bundle; do not delete volumes.
 - [Universal Auth login API](https://infisical.com/docs/api-reference/endpoints/universal-auth/login)
 - [Universal Auth client secret API](https://infisical.com/docs/api-reference/endpoints/universal-auth/create-client-secret)
 - [Project roles and scoped permissions](https://infisical.com/docs/internals/permissions/project-permissions)
+- [Project identity membership API](https://infisical.com/docs/api-reference/endpoints/project-identities-membership/get-by-id)
+- [v4 create secret API](https://infisical.com/docs/api-reference/endpoints/secrets/create)
+- [v4 update secret API](https://infisical.com/docs/api-reference/endpoints/secrets/update)
+- [v4 delete secret API](https://infisical.com/docs/api-reference/endpoints/secrets/delete)
 - [v4 list secrets API](https://infisical.com/docs/api-reference/endpoints/secrets/list)
 - [Infisical image tags and digests](https://hub.docker.com/r/infisical/infisical/tags)

@@ -16,7 +16,7 @@ env_value() { awk -F= -v wanted="$1" '$1 == wanted {sub(/^[^=]*=/, ""); print; e
 host_port="$(env_value INFISICAL_HOST_PORT)"
 [[ "$host_port" =~ ^[0-9]+$ ]] || die "invalid INFISICAL_HOST_PORT"
 
-config_json="$(docker compose --project-name infisical --env-file "$secret_file" -f "$compose_file" config --format json)" || die "compose configuration is invalid"
+config_json="$(INFISICAL_ENV_FILE="$secret_file" docker compose --project-name infisical --env-file "$secret_file" -f "$compose_file" config --format json)" || die "compose configuration is invalid"
 printf '%s' "$config_json" | python3 -c '
 import json, sys
 
@@ -27,10 +27,27 @@ if len(ports) != 1 or ports[0].get("host_ip") not in {"127.0.0.1", "::1"}:
     raise SystemExit("the only published Infisical port must be loopback-only")
 if services["db"].get("ports") or services["redis"].get("ports"):
     raise SystemExit("database and Redis must not publish host ports")
+if set(services["backend"].get("networks", {})) != {"infisical"}:
+    raise SystemExit("backend must not join the shared Frank network")
+if set(services["db"].get("environment", {})) != {"POSTGRES_USER", "POSTGRES_DB", "POSTGRES_PASSWORD"}:
+    raise SystemExit("database must receive only POSTGRES_* variables")
+if set(services["redis"].get("environment", {})) != {"REDIS_PASSWORD"}:
+    raise SystemExit("Redis must receive only REDIS_PASSWORD")
+if services["db"].get("env_file") or services["redis"].get("env_file"):
+    raise SystemExit("database and Redis must not receive the backend env file")
 ' || die "compose port policy failed"
 
-docker network inspect frank >/dev/null 2>&1 || die "external Docker network frank is missing"
 docker inspect infisical-backend infisical-db infisical-redis >/dev/null 2>&1 || die "Infisical containers are not all present"
+
+actual_networks="$(docker inspect --format '{{json .NetworkSettings.Networks}}' infisical-backend)"
+printf '%s' "$actual_networks" | python3 -c '
+import json
+import sys
+
+networks = json.loads(sys.stdin.read())
+if set(networks) != {"infisical_private"}:
+    raise SystemExit("running backend is attached to a non-private network")
+' || die "running backend network policy failed"
 
 actual_bindings="$(docker inspect --format '{{json .HostConfig.PortBindings}}' infisical-backend)"
 printf '%s' "$actual_bindings" | python3 -c '

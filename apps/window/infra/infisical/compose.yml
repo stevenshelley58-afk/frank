@@ -27,7 +27,6 @@ services:
       - ALL
     networks:
       - infisical
-      - frank
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/status').then(r => { if (!r.ok) process.exit(1) }).catch(() => process.exit(1))"]
       interval: 10s
@@ -39,8 +38,10 @@ services:
     image: postgres:16-alpine@sha256:44c4ee9810eff91f7eab4d822642e01115b1a9eccce4bcbdde7604752d68eac6
     container_name: infisical-db
     restart: unless-stopped
-    env_file:
-      - ${INFISICAL_ENV_FILE:-/srv/infisical/secrets/infisical.env}
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER is required}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB is required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
     volumes:
       - infisical_pg_data:/var/lib/postgresql/data
     networks:
@@ -55,8 +56,8 @@ services:
     image: redis:7.4-alpine@sha256:e7723ff73d963f5cc6d9c4643ea3d989527a402a319239054e9472a7fb9219a2
     container_name: infisical-redis
     restart: unless-stopped
-    env_file:
-      - ${INFISICAL_ENV_FILE:-/srv/infisical/secrets/infisical.env}
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
     command: ["sh", "-c", "exec redis-server --appendonly yes --save 60 1 --maxmemory-policy noeviction --requirepass \"$${REDIS_PASSWORD}\""]
     volumes:
       - infisical_redis_data:/data
@@ -78,6 +79,3 @@ networks:
   infisical:
     name: infisical_private
     internal: true
-  frank:
-    external: true
-    name: frank
