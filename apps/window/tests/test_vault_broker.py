@@ -1,4 +1,6 @@
+import hashlib
 import json
+import logging
 import os
 import secrets
 import tempfile
@@ -28,6 +30,15 @@ class _Response:
         return self.payload
 
 
+class _LogCapture(logging.Handler):
+    def __init__(self):
+        super().__init__()
+        self.messages = []
+
+    def emit(self, record):
+        self.messages.append(record.getMessage())
+
+
 class _VaultUpstream:
     def __init__(self):
         self.calls = []
@@ -35,7 +46,8 @@ class _VaultUpstream:
 
     def __call__(self, request, timeout=None):
         body = json.loads(request.data.decode("utf-8")) if request.data else {}
-        self.calls.append((request.method, request.full_url, body, timeout))
+        headers = {name.lower(): value for name, value in request.header_items()}
+        self.calls.append((request.method, request.full_url, body, timeout, headers))
         if request.full_url.endswith("/health"):
             return _Response({"ok": True, "status": "verified", "secretValue": self.secret_value})
         # Simulate a bad upstream response that accidentally echoes a value.
@@ -96,7 +108,7 @@ class VaultBrokerApiTest(unittest.TestCase):
         self.upstream = _VaultUpstream()
         self.store = vault_broker.MetadataStore(Path(self.temp.name) / "vault-metadata.json")
         self.adapter = vault_broker.HermesVaultAdapter(
-            base_url="https://hermes.example.invalid/api/vault-broker",
+            base_url="https://hermes.example.invalid/api/plugins/connections-agent/vault-broker",
             key="hermes-test-broker-key",
             opener=self.upstream,
         )
@@ -147,7 +159,7 @@ class VaultBrokerApiTest(unittest.TestCase):
         adapter_response = self.adapter.create(
             project_id=body["project_id"], environment=body["environment"],
             secret_path=body["secret_path"], secret_name=body["secret_name"],
-            secret_value=body["secret_value"],
+            secret_value=body["secret_value"], idempotency_ref="adapter-test-ref",
         )
         self.assertNotIn("secretValue", json.dumps(adapter_response))
 
@@ -172,6 +184,72 @@ class VaultBrokerApiTest(unittest.TestCase):
         revealed = self.client.get("/api/vault/secrets/" + ref.rsplit("/", 1)[-1])
         self.assertEqual(revealed.status_code, 404)
         self.assertNotIn(self.upstream.secret_value, revealed.get_data(as_text=True))
+
+    def test_hermes_broker_request_contract_uses_durable_header_only_identity(self):
+        log_capture = _LogCapture()
+        root_logger = logging.getLogger()
+        root_logger.addHandler(log_capture)
+        self.addCleanup(root_logger.removeHandler, log_capture)
+        create_key = "client-create-idempotency-key"
+        created_response = self.client.post(
+            "/api/vault/secrets", json=self._create_body(),
+            headers={**self.origin, "Idempotency-Key": create_key},
+        )
+        self.assertEqual(created_response.status_code, 201, created_response.get_data(as_text=True))
+        created = created_response.get_json()["secret"]
+        create_call = self.upstream.calls[-1]
+
+        status_response = self.client.get("/api/vault/status")
+        self.assertEqual(status_response.status_code, 200)
+        health_call = self.upstream.calls[-1]
+
+        self.adapter.list_metadata(project_id="infisical-project")
+        list_call = self.upstream.calls[-1]
+
+        rotate_key = "client-rotate-idempotency-key"
+        rotated_response = self.client.post(
+            f"/api/vault/secrets/{created['ref'].rsplit('/', 1)[-1]}/rotate",
+            json={"secret_value": self.upstream.secret_value},
+            headers={**self.origin, "Idempotency-Key": rotate_key},
+        )
+        self.assertEqual(rotated_response.status_code, 200, rotated_response.get_data(as_text=True))
+        rotate_call = self.upstream.calls[-1]
+
+        plan = self._delete_plan(created["ref"])
+        delete_key = "client-delete-idempotency-key"
+        deleted_response = self.client.delete(
+            f"/api/vault/secrets/{created['ref'].rsplit('/', 1)[-1]}",
+            json={"confirmation_token": plan["confirmation_token"], "provider_receipt": {"receipt_id": plan["receipt_id"]}},
+            headers={**self.origin, "Idempotency-Key": delete_key},
+        )
+        self.assertEqual(deleted_response.status_code, 200, deleted_response.get_data(as_text=True))
+        delete_call = self.upstream.calls[-1]
+
+        self.assertEqual(
+            create_call[1],
+            "https://hermes.example.invalid/api/plugins/connections-agent/vault-broker/secrets/create",
+        )
+        for call in (health_call, list_call, create_call, rotate_call, delete_call):
+            headers = call[4]
+            self.assertEqual(headers["authorization"], "Bearer hermes-test-broker-key")
+            self.assertEqual(headers["content-type"], "application/json")
+            self.assertEqual(headers["x-hermes-profile"], "default")
+        self.assertNotIn("idempotency-key", health_call[4])
+        self.assertNotIn("idempotency-key", list_call[4])
+        self.assertEqual(create_call[4]["idempotency-key"], hashlib.sha256(f"create:{create_key}".encode("utf-8")).hexdigest())
+        self.assertEqual(rotate_call[4]["idempotency-key"], hashlib.sha256(f"rotate:{created['ref'].rsplit('/', 1)[-1]}:{rotate_key}".encode("utf-8")).hexdigest())
+        self.assertEqual(delete_call[4]["idempotency-key"], hashlib.sha256(f"delete:{created['ref'].rsplit('/', 1)[-1]}:{delete_key}".encode("utf-8")).hexdigest())
+        for call in (create_call, rotate_call, delete_call):
+            self.assertNotIn("idempotency_ref", call[2])
+            self.assertNotIn("idempotency_key", call[2])
+        raw_keys = (create_key, rotate_key, delete_key)
+        for raw_key in raw_keys:
+            self.assertNotIn(raw_key, json.dumps(self.upstream.calls))
+            self.assertNotIn(raw_key, "\n".join(log_capture.messages))
+            self.assertNotIn(raw_key, self.store.path.read_text(encoding="utf-8"))
+            self.assertNotIn(raw_key, created_response.get_data(as_text=True))
+            self.assertNotIn(raw_key, rotated_response.get_data(as_text=True))
+            self.assertNotIn(raw_key, deleted_response.get_data(as_text=True))
 
     def test_write_only_lifecycle_scoping_binding_and_replay_guard(self):
         body = self._create_body()
@@ -408,12 +486,14 @@ class VaultBrokerApiTest(unittest.TestCase):
                         adapter.create(
                             project_id="project", environment="dev", secret_path="/frank",
                             secret_name="RESEND_API_KEY", secret_value="runtime-only-value",
+                            idempotency_ref="redirect-create-ref",
                         )
                     with self.assertRaises((vault_broker.VaultRemoteError, vault_broker.VaultUnavailable)):
                         adapter.delete(
                             project_id="project", environment="dev", secret_path="/frank",
                             secret_name="RESEND_API_KEY", confirmation_token="T" * 32,
                             provider_receipt={"receipt_id": "a" * 32},
+                            idempotency_ref="redirect-delete-ref",
                         )
                     self.assertEqual(len(source.requests), 2)
                     self.assertEqual(source.requests[0]["authorization"], "Bearer dedicated-broker-key")

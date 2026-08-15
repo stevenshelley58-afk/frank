@@ -148,14 +148,22 @@ class HermesVaultAdapter:
             self._health_cached_at = time.monotonic()
             return self._health_cached_status
 
-    def _request(self, method: str, operation: str, body: dict | None = None) -> dict:
+    def _request(self, method: str, operation: str, body: dict | None = None,
+                 *, idempotency_ref: str | None = None) -> dict:
         if not self.base_url or not self.key:
             raise VaultUnavailable()
         raw_body = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+        headers = {
+            "Authorization": f"Bearer {self.key}",
+            "Content-Type": "application/json",
+            "X-Hermes-Profile": "default",
+        }
+        if idempotency_ref is not None:
+            headers["Idempotency-Key"] = idempotency_ref
         req = urllib.request.Request(
             f"{self.base_url}/secrets/{operation}",
             data=raw_body,
-            headers={"Authorization": f"Bearer {self.key}", "Content-Type": "application/json"},
+            headers=headers,
             method=method,
         )
         try:
@@ -181,14 +189,14 @@ class HermesVaultAdapter:
             raise VaultRemoteError() from None
         return decoded if isinstance(decoded, dict) else {}
 
-    def create(self, **kwargs) -> dict:
-        return _safe_remote_response(self._request("POST", "create", kwargs))
+    def create(self, *, idempotency_ref: str, **kwargs) -> dict:
+        return _safe_remote_response(self._request("POST", "create", kwargs, idempotency_ref=idempotency_ref))
 
-    def rotate(self, **kwargs) -> dict:
-        return _safe_remote_response(self._request("POST", "rotate", kwargs))
+    def rotate(self, *, idempotency_ref: str, **kwargs) -> dict:
+        return _safe_remote_response(self._request("POST", "rotate", kwargs, idempotency_ref=idempotency_ref))
 
-    def delete(self, **kwargs) -> dict:
-        return _safe_remote_response(self._request("POST", "delete", kwargs))
+    def delete(self, *, idempotency_ref: str, **kwargs) -> dict:
+        return _safe_remote_response(self._request("POST", "delete", kwargs, idempotency_ref=idempotency_ref))
 
     def list_metadata(self, **kwargs) -> list[dict]:
         response = self._request("POST", "list-metadata", kwargs)
@@ -565,7 +573,10 @@ class Broker:
             if replayed:
                 return dict(operation.get("response") or {}), True
             try:
-                response = self.adapter.create(**_backend_location(location), secret_value=value)
+                response = self.adapter.create(
+                    **_backend_location(location), secret_value=value,
+                    idempotency_ref=operation["idempotency_ref"],
+                )
             except VaultError as error:
                 self._mark_failed(operation, error)
                 raise
@@ -587,6 +598,7 @@ class Broker:
                 response = self.adapter.rotate(
                     project_id=record["project_id"], environment=record["environment"],
                     secret_path=record["secret_path"], secret_name=record["secret_name"], secret_value=value,
+                    idempotency_ref=operation["idempotency_ref"],
                 )
             except VaultError as error:
                 self._mark_failed(operation, error)
@@ -648,6 +660,7 @@ class Broker:
                     secret_path=record["secret_path"], secret_name=record["secret_name"],
                     confirmation_token=token,
                     provider_receipt={"receipt_id": receipt_id},
+                    idempotency_ref=operation["idempotency_ref"],
                 )
             except VaultError as error:
                 self._mark_failed(operation, error)
