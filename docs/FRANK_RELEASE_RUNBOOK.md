@@ -50,7 +50,10 @@ No step publishes the private ingress or weakens public Caddy header policy.
 
 7. **Deploy Frank.** Run `apps/window/deploy.sh` for the exact committed SHA.
    It validates the secret boundary, derives a Caddy env file containing only
-   basic-auth settings, builds the Window image, imports the runtime modules
+   basic-auth settings, and uses the existing private basic-auth hash solely
+   for Caddy's overwritten internal vault operator-attestation header. Caddy
+   must strip any incoming header and never log or return it. The deploy then
+   builds the Window image, imports the runtime modules
    inside the container, waits for the healthcheck, and runs the API health
    canary. Preserve `/srv/frank/data/window`, including chat data and uploads.
 

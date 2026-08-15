@@ -380,11 +380,12 @@ class ConnectionsMutationService:
                  clean_connection: Callable[[dict, dict | None], dict], public_connection: Callable[[dict], dict],
                  normalize_plan: Callable[[str, dict, dict], tuple[dict, dict]], delete_allowed: Callable[[str], bool],
                  scope_change_allowed: Callable[[str], bool] | None = None, ledger_path: Path, plans_path: Path,
-                 now: Callable[[], int] = _now):
+                 now: Callable[[], int] = _now, transition_lock: threading.RLock | None = None):
         self.load_store, self.save_store, self.clean_connection = load_store, save_store, clean_connection
         self.public_connection, self.normalize_plan, self.delete_allowed = public_connection, normalize_plan, delete_allowed
         self.scope_change_allowed, self.now = scope_change_allowed or (lambda _id: True), now
         self.lock = threading.RLock()
+        self.transition_lock = transition_lock or threading.RLock()
         self.ledger, self.plans = ActionLedger(ledger_path, now), PlanStore(plans_path, now)
 
     @staticmethod
@@ -461,7 +462,7 @@ class ConnectionsMutationService:
         if action not in ALL_ACTIONS:
             raise ContractError("unsupported connections action")
         key = self.require_idempotency(idempotency_key)
-        with self.lock:
+        with self.lock, self.transition_lock:
             normalized_target, normalized_body = self.normalize_plan(action, target or {}, body or {})
             normalized_target = _safe_target(normalized_target)
             _assert_safe_json(normalized_body)
@@ -477,6 +478,15 @@ class ConnectionsMutationService:
                 return {"plan": self._public_plan(plan), "action": _public_action(replay), "replayed": True}
             now = self.now()
             destructive = action in DESTRUCTIVE_ACTIONS
+            if destructive:
+                connection_id = normalized_target.get("connection_id")
+                current = next((item for item in self.load_store().get("connections", []) if item.get("id") == connection_id), None)
+                if not current:
+                    raise ContractError("connection not found", 404, "connection_not_found")
+                if not isinstance(expected_revision, int):
+                    raise ContractError("destructive plans require the current connection revision", 409, "revision_required")
+                if int(current.get("revision", 1)) != expected_revision:
+                    raise ContractError("connection changed; refresh and retry", 409, "revision_conflict")
             token = f"confirm-{secrets.token_urlsafe(18)}" if destructive else ""
             plan = {
                 "plan_id": f"plan-{uuid.uuid4().hex[:20]}", "action": action, "source": source,
@@ -512,7 +522,7 @@ class ConnectionsMutationService:
                    provider_error_code: str = "", provider_error_category: str = "",
                    authenticated_provider: bool = False, executor_actor: str | None = None) -> dict:
         key = self.require_idempotency(idempotency_key)
-        with self.lock:
+        with self.lock, self.transition_lock:
             plan = self.plans.get(str(plan_id or ""))
             if not plan:
                 raise ContractError("connection plan not found", 404, "plan_not_found")
@@ -604,7 +614,7 @@ class ConnectionsMutationService:
         action = str(action or "").strip().lower()
         if action not in ALL_ACTIONS:
             raise ContractError("unsupported connections action")
-        with self.lock:
+        with self.lock, self.transition_lock:
             normalized_target, normalized_body = self.normalize_plan(action, target or {}, body or {})
             normalized_target, normalized_body = _safe_target(normalized_target), normalized_body
             _assert_safe_json(normalized_body)

@@ -248,7 +248,7 @@ class MetadataStore:
 
     def _read(self) -> dict:
         if not self.path.exists():
-            return {"version": 1, "records": [], "bindings": [], "audit": [], "plans": []}
+            return {"version": 1, "records": [], "bindings": [], "audit": [], "plans": [], "operations": []}
         try:
             data = json.loads(self.path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -258,9 +258,10 @@ class MetadataStore:
         if not all(isinstance(data.get(key), list) for key in ("records", "bindings", "audit")):
             raise MetadataStoreError()
         plans = data.get("plans", [])
-        if not isinstance(plans, list):
+        operations = data.get("operations", [])
+        if not isinstance(plans, list) or not isinstance(operations, list):
             raise MetadataStoreError()
-        if any(not isinstance(item, dict) for key in ("records", "bindings", "audit") for item in data[key]) or any(not isinstance(item, dict) for item in plans):
+        if any(not isinstance(item, dict) for key in ("records", "bindings", "audit") for item in data[key]) or any(not isinstance(item, dict) for item in plans) or any(not isinstance(item, dict) for item in operations):
             raise MetadataStoreError()
         return {
             "version": 1,
@@ -268,6 +269,7 @@ class MetadataStore:
             "bindings": [self._safe_binding(item) for item in data.get("bindings", []) if isinstance(item, dict)],
             "audit": [self._safe_audit(item) for item in data.get("audit", []) if isinstance(item, dict)][-200:],
             "plans": [self._safe_plan(item) for item in plans if isinstance(item, dict)][-500:],
+            "operations": [self._safe_operation(item) for item in operations if isinstance(item, dict)][-500:],
         }
 
     @staticmethod
@@ -298,6 +300,24 @@ class MetadataStore:
         fields = {"plan_id", "ref", "receipt_id", "token_hash", "expires_at", "consumed", "created_at"}
         return {key: item[key] for key in fields if key in item}
 
+    @classmethod
+    def _safe_operation(cls, item: dict) -> dict:
+        """Persist only recovery metadata; values and raw request bodies never enter this store."""
+        fields = {
+            "operation_id", "operation", "idempotency_ref", "request_hash", "target", "ref",
+            "receipt_id", "state", "created_at", "updated_at", "error_code",
+        }
+        operation = {key: item[key] for key in fields if key in item}
+        if isinstance(item.get("record"), dict):
+            operation["record"] = cls._safe_record(item["record"])
+        response = item.get("response")
+        if isinstance(response, dict):
+            safe_response = {key: response[key] for key in ("removed", "write_only") if key in response}
+            if isinstance(response.get("secret"), dict):
+                safe_response["secret"] = cls._safe_record(response["secret"])
+            operation["response"] = safe_response
+        return operation
+
     def write(self, data: dict) -> None:
         if self.path.exists():
             # A direct write must not be allowed to turn an unreadable store
@@ -309,6 +329,7 @@ class MetadataStore:
             "bindings": [self._safe_binding(item) for item in data.get("bindings", [])],
             "audit": [self._safe_audit(item) for item in data.get("audit", [])][-200:],
             "plans": [self._safe_plan(item) for item in data.get("plans", [])][-500:],
+            "operations": [self._safe_operation(item) for item in data.get("operations", [])][-500:],
         }
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temp = self.path.with_name(f".{self.path.name}.{uuid.uuid4().hex}.tmp")
@@ -339,7 +360,8 @@ class MetadataStore:
 
     def commit(self, *, record: dict | None = None, remove_ref: str = "",
                binding: dict | None = None, plan: dict | None = None,
-               consume_plan_id: str = "", audit_event: dict | None = None) -> None:
+               consume_plan_id: str = "", audit_event: dict | None = None,
+               operation: dict | None = None) -> None:
         """Commit the complete metadata projection with one atomic replace."""
         with self.lock:
             data = self._read()
@@ -369,11 +391,32 @@ class MetadataStore:
                     raise VaultError("delete_confirmation_invalid", "The delete confirmation is invalid.", 409)
             if audit_event is not None:
                 data["audit"].append(self._safe_audit(audit_event))
-            self.write(data)
+            if operation is not None:
+                data["operations"] = [item for item in data["operations"] if item.get("operation_id") != operation.get("operation_id")]
+                data["operations"].append(self._safe_operation(operation))
+            try:
+                self.write(data)
+            except OSError:
+                raise MetadataStoreError() from None
 
     def find_plan(self, receipt_id: str) -> dict | None:
         with self.lock:
             return next((item for item in self._read()["plans"] if item.get("plan_id") == receipt_id), None)
+
+    def find_operation(self, operation_id: str) -> dict | None:
+        with self.lock:
+            return next((item for item in self._read()["operations"] if item.get("operation_id") == operation_id), None)
+
+    def active_operation(self, operation: str, target: str, *, excluding: str = "") -> dict | None:
+        with self.lock:
+            return next((item for item in self._read()["operations"]
+                         if item.get("operation") == operation and item.get("target") == target
+                         and item.get("operation_id") != excluding
+                         and item.get("state") in {"pending", "upstream-succeeded"}), None)
+
+    def operations(self) -> list[dict]:
+        with self.lock:
+            return self._read()["operations"]
 
     def remove(self, ref: str) -> None:
         with self.lock:
@@ -408,11 +451,93 @@ class Broker:
         self.adapter = adapter or HermesVaultAdapter()
         self.store = store or MetadataStore(VAULT_METADATA_FILE)
         self.lock = threading.RLock()
+        self._recover_completed_upstream_operations()
 
     def _ref(self) -> str:
         return VAULT_REF_PREFIX + secrets.token_hex(16)
 
-    def create(self, payload: dict) -> dict:
+    def _recover_completed_upstream_operations(self) -> None:
+        """Finish durable local projections after a process restart, never re-call upstream."""
+        with self.lock:
+            try:
+                operations = self.store.operations()
+            except MetadataStoreError:
+                # Keep the Flask process up so the existing fail-closed route
+                # handlers can return their safe metadata-store response.
+                return
+            for operation in operations:
+                if operation.get("state") == "upstream-succeeded":
+                    try:
+                        self._finalize_operation(operation)
+                    except MetadataStoreError:
+                        return
+
+    def _begin_operation(self, *, operation: str, idempotency_ref: str, request_hash: str,
+                         target: str, ref: str = "", record: dict | None = None,
+                         receipt_id: str = "") -> tuple[dict, bool]:
+        existing = self.store.find_operation(idempotency_ref)
+        if existing:
+            if (existing.get("operation") != operation or existing.get("request_hash") != request_hash
+                    or existing.get("target") != target):
+                raise VaultError("idempotency_key_reused", "The Idempotency-Key was reused with different data.", 409)
+            if existing.get("state") == "local-committed":
+                return existing, True
+            if existing.get("state") == "upstream-succeeded":
+                return self._finalize_operation(existing), True
+            if existing.get("state") == "pending":
+                raise VaultError("operation_reconciliation_required", "The secure-vault operation is awaiting reconciliation.", 503)
+            raise VaultError("operation_failed", "The secure-vault operation previously failed.", 409)
+        active = self.store.active_operation(operation, target)
+        if active:
+            raise VaultError("operation_reconciliation_required", "The secure-vault operation is awaiting reconciliation.", 503)
+        now = int(time.time())
+        created = {
+            "operation_id": idempotency_ref, "operation": operation,
+            "idempotency_ref": idempotency_ref, "request_hash": request_hash,
+            "target": target, "ref": ref, "receipt_id": receipt_id,
+            "state": "pending", "record": record or {},
+            "created_at": now, "updated_at": now,
+        }
+        self.store.commit(operation=created)
+        return created, False
+
+    def _mark_upstream_succeeded(self, operation: dict, *, record: dict | None, response: dict) -> dict:
+        updated = dict(operation)
+        updated.update({"state": "upstream-succeeded", "record": record or {}, "response": response, "updated_at": int(time.time())})
+        self.store.commit(operation=updated)
+        return updated
+
+    def _mark_failed(self, operation: dict, error: VaultError) -> None:
+        updated = dict(operation)
+        updated.update({"state": "failed", "error_code": error.code, "updated_at": int(time.time())})
+        try:
+            self.store.commit(operation=updated)
+        except MetadataStoreError:
+            pass
+
+    def _finalize_operation(self, operation: dict) -> dict:
+        """Atomically make a known upstream success visible locally exactly once."""
+        if operation.get("state") == "local-committed":
+            return operation
+        if operation.get("state") != "upstream-succeeded":
+            raise VaultError("operation_reconciliation_required", "The secure-vault operation is awaiting reconciliation.", 503)
+        now = int(time.time())
+        committed = dict(operation)
+        committed.update({"state": "local-committed", "updated_at": now})
+        record = operation.get("record") if isinstance(operation.get("record"), dict) else None
+        audit = {
+            "event_id": uuid.uuid4().hex, "operation": operation.get("operation", ""),
+            "ref": operation.get("ref", ""),
+            "provider": (record or {}).get("provider", ""), "consumer": (record or {}).get("consumer", ""),
+            "status": "deleted" if operation.get("operation") == "delete" else "stored", "at": now,
+        }
+        if operation.get("operation") == "delete":
+            self.store.commit(remove_ref=str(operation.get("ref") or ""), consume_plan_id=str(operation.get("receipt_id") or ""), audit_event=audit, operation=committed)
+        else:
+            self.store.commit(record=record, audit_event=audit, operation=committed)
+        return committed
+
+    def create(self, payload: dict, *, idempotency_ref: str, request_hash: str) -> tuple[dict, bool]:
         _validate_fields(payload, CREATE_FIELDS)
         value = _secret_value(payload)
         _scan_metadata(payload, CREATE_FIELDS - {"secret_value"}, secret_value=value)
@@ -426,59 +551,51 @@ class Broker:
             if adapter.setup_mode != "available":
                 raise VaultError("provider_setup_needed", adapter.setup_note, 409)
         with self.lock:
-            response = self.adapter.create(**_backend_location(location), secret_value=value)
             now = int(time.time())
             record = {
                 "ref": self._ref(), **location,
                 "provider": binding["provider"] if binding else "",
                 "consumer": binding["consumer"] if binding else "",
                 "capabilities": binding["capabilities"] if binding else [],
-                "status": "stored", "version": _remote_version(response),
+                "status": "stored", "version": 0,
                 "created_at": now, "updated_at": now,
             }
+            target = f"{location['project_id']}:{location['environment']}:{location['secret_path']}:{location['secret_name']}"
+            operation, replayed = self._begin_operation(operation="create", idempotency_ref=idempotency_ref, request_hash=request_hash, target=target, ref=record["ref"], record=record)
+            if replayed:
+                return dict(operation.get("response") or {}), True
             try:
-                self.store.add_with_audit(record, {"event_id": uuid.uuid4().hex, "operation": "create", "ref": record["ref"], "provider": record["provider"], "consumer": record["consumer"], "status": "stored", "at": now})
-            except MetadataStoreError:
-                try:
-                    self.adapter.delete(**_backend_location(location))
-                except Exception:
-                    pass
-                try:
-                    self.store.remove(record["ref"])
-                except Exception:
-                    pass
+                response = self.adapter.create(**_backend_location(location), secret_value=value)
+            except VaultError as error:
+                self._mark_failed(operation, error)
                 raise
-            except Exception:
-                # Best-effort cleanup avoids leaving an unmanaged secret. The
-                # failure exposed to Frank remains a fixed safe message.
-                try:
-                    self.adapter.delete(**_backend_location(location))
-                except Exception:
-                    pass
-                try:
-                    self.store.remove(record["ref"])
-                except Exception:
-                    pass
-                raise VaultRemoteError() from None
-        return _public_record(record)
+            record["version"] = _remote_version(response)
+            operation = self._mark_upstream_succeeded(operation, record=record, response={"secret": _public_record(record), "write_only": True})
+            committed = self._finalize_operation(operation)
+        return dict(committed["response"]), False
 
-    def rotate(self, ref: str, payload: dict) -> dict:
+    def rotate(self, ref: str, payload: dict, *, idempotency_ref: str, request_hash: str) -> tuple[dict, bool]:
         _validate_fields(payload, ROTATE_FIELDS)
         record = self._record(ref)
         value = _secret_value(payload)
         _scan_metadata(payload, ROTATE_FIELDS - {"secret_value"}, secret_value=value)
         with self.lock:
-            response = self.adapter.rotate(
-                project_id=record["project_id"], environment=record["environment"],
-                secret_path=record["secret_path"], secret_name=record["secret_name"], secret_value=value,
-            )
+            operation, replayed = self._begin_operation(operation="rotate", idempotency_ref=idempotency_ref, request_hash=request_hash, target=ref, ref=ref, record=record)
+            if replayed:
+                return dict(operation.get("response") or {}), True
+            try:
+                response = self.adapter.rotate(
+                    project_id=record["project_id"], environment=record["environment"],
+                    secret_path=record["secret_path"], secret_name=record["secret_name"], secret_value=value,
+                )
+            except VaultError as error:
+                self._mark_failed(operation, error)
+                raise
             record["version"] = _remote_version(response) or int(record.get("version") or 0) + 1
             record["updated_at"] = int(time.time())
-            self.store.commit(
-                record=record,
-                audit_event={"event_id": uuid.uuid4().hex, "operation": "rotate", "ref": ref, "provider": record.get("provider", ""), "consumer": record.get("consumer", ""), "status": "stored", "at": record["updated_at"]},
-            )
-        return _public_record(record)
+            operation = self._mark_upstream_succeeded(operation, record=record, response={"secret": _public_record(record), "write_only": True})
+            committed = self._finalize_operation(operation)
+        return dict(committed["response"]), False
 
     def delete_plan(self, ref: str) -> dict:
         self._record(ref)
@@ -509,21 +626,35 @@ class Broker:
             "write_only": True,
         }
 
-    def delete(self, ref: str, payload: dict) -> None:
+    def delete(self, ref: str, payload: dict, *, idempotency_ref: str, request_hash: str) -> tuple[dict, bool]:
         with self.lock:
+            _validate_fields(payload, DELETE_FIELDS)
+            receipt = payload.get("provider_receipt") if isinstance(payload.get("provider_receipt"), dict) else {}
+            # An existing idempotency record is safe to resume/replay without
+            # re-reading a consumed one-time confirmation. New requests prove
+            # confirmation first so invalid attempts cannot reserve the target.
+            if self.store.find_operation(idempotency_ref):
+                operation, replayed = self._begin_operation(operation="delete", idempotency_ref=idempotency_ref, request_hash=request_hash, target=ref, ref=ref, receipt_id=str(receipt.get("receipt_id") or ""))
+                if replayed:
+                    return dict(operation.get("response") or {}), True
             token, receipt_id = _delete_confirmation(self.store, ref, payload)
             record = self._record(ref)
-            self.adapter.delete(
-                project_id=record["project_id"], environment=record["environment"],
-                secret_path=record["secret_path"], secret_name=record["secret_name"],
-                confirmation_token=token,
-                provider_receipt={"receipt_id": receipt_id},
-            )
-            self.store.commit(
-                remove_ref=ref,
-                consume_plan_id=receipt_id,
-                audit_event={"event_id": uuid.uuid4().hex, "operation": "delete", "ref": ref, "provider": record.get("provider", ""), "consumer": record.get("consumer", ""), "status": "deleted", "at": int(time.time())},
-            )
+            operation, replayed = self._begin_operation(operation="delete", idempotency_ref=idempotency_ref, request_hash=request_hash, target=ref, ref=ref, receipt_id=receipt_id)
+            if replayed:
+                return dict(operation.get("response") or {}), True
+            try:
+                self.adapter.delete(
+                    project_id=record["project_id"], environment=record["environment"],
+                    secret_path=record["secret_path"], secret_name=record["secret_name"],
+                    confirmation_token=token,
+                    provider_receipt={"receipt_id": receipt_id},
+                )
+            except VaultError as error:
+                self._mark_failed(operation, error)
+                raise
+            operation = self._mark_upstream_succeeded(operation, record=record, response={"removed": ref, "write_only": True})
+            committed = self._finalize_operation(operation)
+        return dict(committed["response"]), False
 
     def _record(self, ref: str) -> dict:
         if not SAFE_REF_ID.fullmatch(ref.removeprefix(VAULT_REF_PREFIX)):
@@ -746,6 +877,28 @@ def _idempotent(operation: str, body: dict) -> tuple[str, dict | None]:
     return replay_key, None
 
 
+def _durable_operation_identity(operation: str, body: dict) -> tuple[str, str]:
+    """Return only hashes; neither client keys nor secret-containing bodies persist."""
+    key = request.headers.get("Idempotency-Key", "").strip()
+    if not SAFE_IDEMPOTENCY.fullmatch(key):
+        raise VaultError("idempotency_key_required", "A valid Idempotency-Key is required for secret writes.", 400)
+    operation_ref = hashlib.sha256(f"{operation}:{key}".encode("utf-8")).hexdigest()
+    request_hash = hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+    return operation_ref, request_hash
+
+
+def _operator_boundary() -> None:
+    """Require Caddy's overwritten internal attestation for every vault route."""
+    expected = os.environ.get("FRANK_BASIC_AUTH_HASH", "").strip()
+    presented = request.headers.get("X-Frank-Operator-Attestation", "").strip()
+    if not expected:
+        raise VaultError("operator_auth_unavailable", "The secure-vault operator boundary is unavailable.", 503)
+    if not presented:
+        raise VaultError("operator_auth_required", "Secure-vault operator authentication is required.", 401)
+    if not hmac.compare_digest(expected, presented):
+        raise VaultError("operator_auth_denied", "Secure-vault operator authentication was denied.", 403)
+
+
 def _save_idempotent(key: str, body: dict, response: dict) -> None:
     body_hash = hashlib.sha256(json.dumps(body, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
     with _replay_lock:
@@ -769,6 +922,8 @@ def _http_error(error: HTTPException):
 
 @api.before_request
 def _guards():
+    if request.path.startswith("/api/vault/") or request.path.startswith("/api/provider-broker/"):
+        _operator_boundary()
     if request.method in ALLOWED_METHODS and request.path.startswith(MUTATING_PATHS):
         if not _origin_allowed():
             raise VaultError("origin_denied", "The request origin is not allowed.", 403)
@@ -840,16 +995,9 @@ def vault_create():
     body = request.get_json(silent=True)
     if not isinstance(body, dict):
         raise VaultError("request_invalid", "Request body must be an object.", 400)
-    operation_key, prior = _idempotent("create", body)
-    if prior is not None:
-        return jsonify(prior), 200
-    try:
-        result = {"secret": _broker.create(body), "write_only": True}
-    except Exception:
-        _release_idempotent(operation_key)
-        raise
-    _save_idempotent(operation_key, body, result)
-    return jsonify(result), 201
+    operation_ref, request_hash = _durable_operation_identity("create", body)
+    result, replayed = _broker.create(body, idempotency_ref=operation_ref, request_hash=request_hash)
+    return jsonify(result), 200 if replayed else 201
 
 
 @api.post("/api/vault/secrets/<ref_id>/rotate")
@@ -858,15 +1006,8 @@ def vault_rotate(ref_id: str):
     if not isinstance(body, dict):
         raise VaultError("request_invalid", "Request body must be an object.", 400)
     ref = f"{VAULT_REF_PREFIX}{ref_id}"
-    operation_key, prior = _idempotent("rotate:" + ref_id, body)
-    if prior is not None:
-        return jsonify(prior), 200
-    try:
-        result = {"secret": _broker.rotate(ref, body), "write_only": True}
-    except Exception:
-        _release_idempotent(operation_key)
-        raise
-    _save_idempotent(operation_key, body, result)
+    operation_ref, request_hash = _durable_operation_identity("rotate:" + ref_id, body)
+    result, _replayed = _broker.rotate(ref, body, idempotency_ref=operation_ref, request_hash=request_hash)
     return jsonify(result), 200
 
 
@@ -895,16 +1036,8 @@ def vault_delete(ref_id: str):
     if not isinstance(body, dict):
         raise VaultError("request_invalid", "Request body must be an object.", 400)
     ref = f"{VAULT_REF_PREFIX}{ref_id}"
-    operation_key, prior = _idempotent("delete:" + ref_id, body)
-    if prior is not None:
-        return jsonify(prior), 200
-    try:
-        _broker.delete(ref, body)
-    except Exception:
-        _release_idempotent(operation_key)
-        raise
-    result = {"removed": ref, "write_only": True}
-    _save_idempotent(operation_key, body, result)
+    operation_ref, request_hash = _durable_operation_identity("delete:" + ref_id, body)
+    result, _replayed = _broker.delete(ref, body, idempotency_ref=operation_ref, request_hash=request_hash)
     return jsonify(result)
 
 

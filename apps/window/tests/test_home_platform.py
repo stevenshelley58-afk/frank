@@ -4,6 +4,7 @@ import os
 import tempfile
 import threading
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.error import HTTPError
@@ -408,6 +409,71 @@ class HomePlatformApiTest(unittest.TestCase):
         bound = [dict(item, config={"connection_id": service_connection["id"]}) if item["widget_id"] == "connections-summary" else item for item in central_home["instances"]]
         saved = self.client.put("/api/homes/tool/connections", json={"expected_revision": 0, "instances": bound})
         self.assertEqual(saved.status_code, 200, saved.get_json())
+
+    def test_legacy_connection_revision_migrates_once_and_corruption_fails_closed(self):
+        legacy = {
+            "version": 1,
+            "connections": [{
+                "id": "legacy-connection", "provider": "api", "name": "Legacy API",
+                "scope_kind": "global", "scope_id": "", "status": "connected",
+                "connection_ref": "api://legacy/main", "credential_ref": "", "capabilities": [],
+            }],
+        }
+        home_platform.CONNECTIONS_FILE.write_text(json.dumps(legacy), encoding="utf-8")
+        first = self.client.get("/api/connections")
+        self.assertEqual(first.status_code, 200, first.get_json())
+        self.assertEqual(first.get_json()["connections"][0]["revision"], 1)
+        persisted = home_platform.CONNECTIONS_FILE.read_text(encoding="utf-8")
+        self.assertEqual(json.loads(persisted)["connections"][0]["revision"], 1)
+        self.client.get("/api/connections")
+        self.assertEqual(home_platform.CONNECTIONS_FILE.read_text(encoding="utf-8"), persisted)
+
+        home_platform.CONNECTIONS_FILE.write_text(json.dumps({"version": 1, "connections": [{"id": "bad", "revision": "one"}]}), encoding="utf-8")
+        before = home_platform.CONNECTIONS_FILE.read_text(encoding="utf-8")
+        corrupt = self.client.get("/api/connections")
+        self.assertEqual(corrupt.status_code, 503)
+        self.assertEqual(home_platform.CONNECTIONS_FILE.read_text(encoding="utf-8"), before)
+
+    def test_binding_delete_race_never_leaves_a_dangling_or_out_of_scope_binding(self):
+        connection = self.client.post("/api/connections", json={
+            "provider": "api", "name": "Race target", "scope_kind": "global",
+            "status": "connected", "connection_ref": "api://race/target",
+        }).get_json()["connection"]
+        home = self.client.get("/api/homes/tool/connections").get_json()
+        instances = [dict(item, config={"connection_id": connection["id"]}) if item["widget_id"] == "connections-summary" else item for item in home["instances"]]
+        barrier = threading.Barrier(2)
+
+        def bind_home():
+            client = server.app.test_client()
+            barrier.wait(timeout=3)
+            return client.put("/api/homes/tool/connections", json={"expected_revision": 0, "instances": instances}).status_code
+
+        def delete_connection():
+            client = server.app.test_client()
+            barrier.wait(timeout=3)
+            origin = {"Origin": "http://localhost"}
+            plan_response = client.post("/api/connections/plan", json={
+                "action": "delete", "connection_id": connection["id"], "expected_revision": connection["revision"],
+                "idempotency_key": "binding-race-plan-01",
+            }, headers=origin)
+            if plan_response.status_code != 200:
+                return plan_response.status_code
+            plan = plan_response.get_json()["plan"]
+            return client.post("/api/connections/apply", json={
+                "plan_id": plan["plan_id"], "confirmation_token": plan["confirmation_token"],
+                "idempotency_key": "binding-race-apply-01",
+            }, headers=origin).status_code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            bound_status, deleted_status = list(pool.map(lambda fn: fn(), (bind_home, delete_connection)))
+        self.assertFalse(bound_status == 200 and deleted_status == 200)
+        saved = self.client.get("/api/homes/tool/connections").get_json()
+        bound_ids = {
+            item.get("config", {}).get("connection_id") for item in saved["instances"]
+            if item.get("config", {}).get("connection_id")
+        }
+        remaining = {item["id"] for item in self.client.get("/api/connections").get_json()["connections"]}
+        self.assertTrue(bound_ids <= remaining)
 
     def test_provider_coverage_distinguishes_recorded_verified_setup_and_error(self):
         for provider, name, status, ref in (

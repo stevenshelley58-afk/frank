@@ -98,6 +98,16 @@ marks provider work complete, verified, synced, or revoked from a plan alone.
 All routes use the same mutation service, append a reservation before any
 local mutation, append completion/failure afterward, and honor idempotency keys,
 one-time confirmation consumption, and `expected_revision` preconditions.
+Revoke and delete plans require the exact current connection `revision`; the
+revision is recorded with the action and target in the plan, then revalidated
+while applying the confirmation. A changed, missing, or replayed destructive
+plan fails with a safe `409` rather than mutating a newer connection.
+
+Home binding validation and connection delete/rescope share one Frank process
+transaction lock. Connection mutations take their service lock before that
+shared lock; home saves take the shared lock only. This makes binding
+validation plus persistence atomic against delete/rescope and prevents a
+dangling or out-of-scope widget binding.
 
 Required frontend delta: do not change the existing reusable widget files in
 this backend lane. The UI lane must send fresh idempotency keys, use the

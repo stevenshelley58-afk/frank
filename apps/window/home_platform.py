@@ -82,8 +82,11 @@ PROVIDER_SECRET = re.compile(
 )
 JWT_VALUE = re.compile(r"\b(?:eyJ[A-Za-z0-9_-]{4,}\.){2}[A-Za-z0-9_-]{4,}\b")
 
+# One shared transaction lock protects home bindings and connection scope/
+# deletion. Connection service methods always take their private service lock
+# first and then this lock; home saves take only this lock. Never invert it.
 _home_lock = threading.RLock()
-_connections_lock = threading.RLock()
+_connections_lock = _home_lock
 _project_loader: Callable[[], list[dict]] = lambda: []
 _account_loader: Callable[[], list[dict]] = lambda: []
 _hermes_health: Callable[[], dict] = lambda: {"ok": False, "reason": "not configured"}
@@ -288,6 +291,7 @@ def configure(
         normalize_plan=_normalize_connection_plan,
         delete_allowed=_connection_delete_allowed,
         scope_change_allowed=lambda connection_id: _connection_delete_allowed(connection_id),
+        transition_lock=_home_lock,
         ledger_path=CONNECTION_ACTIONS_FILE,
         plans_path=CONNECTION_PLANS_FILE,
     )
@@ -322,10 +326,33 @@ def _home_store() -> dict:
 
 
 def _connection_store() -> dict:
-    data = _read_json(CONNECTIONS_FILE, {"version": 1, "connections": []})
-    if data.get("version") != 1 or not isinstance(data.get("connections"), list):
-        return {"version": 1, "connections": []}
-    return data
+    """Read and atomically migrate valid legacy records to revision 1.
+
+    The shared transaction lock makes the first migration write safe alongside
+    home-binding validation and connection mutation. Corrupt state fails closed
+    instead of silently projecting a mutable empty store.
+    """
+    with _connections_lock:
+        if not CONNECTIONS_FILE.exists():
+            return {"version": 1, "connections": []}
+        try:
+            data = json.loads(CONNECTIONS_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raise connections_agent.ContractError("connection state is unavailable", 503, "state_corrupt") from None
+        if (not isinstance(data, dict) or data.get("version") != 1
+                or not isinstance(data.get("connections"), list)
+                or any(not isinstance(item, dict) for item in data["connections"])):
+            raise connections_agent.ContractError("connection state is unavailable", 503, "state_corrupt")
+        migrated = False
+        for item in data["connections"]:
+            if "revision" not in item:
+                item["revision"] = 1
+                migrated = True
+            elif not isinstance(item["revision"], int) or item["revision"] < 1:
+                raise connections_agent.ContractError("connection state is unavailable", 503, "state_corrupt")
+        if migrated:
+            _write_json(CONNECTIONS_FILE, data)
+        return data
 
 
 def _write_connection_store(data: dict) -> None:
@@ -333,11 +360,12 @@ def _write_connection_store(data: dict) -> None:
 
 
 def _connection_delete_allowed(connection_id: str) -> bool:
-    return not any(
-        instance.get("config", {}).get("connection_id") == connection_id
-        for home in _home_store().get("homes", {}).values() if isinstance(home, dict)
-        for instance in home.get("instances", [])
-    )
+    with _home_lock:
+        return not any(
+            instance.get("config", {}).get("connection_id") == connection_id
+            for home in _home_store().get("homes", {}).values() if isinstance(home, dict)
+            for instance in home.get("instances", [])
+        )
 
 
 def _clean_id(value: object, label: str) -> str:

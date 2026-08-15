@@ -20,6 +20,10 @@ class InfraContractTest(unittest.TestCase):
         self.assertNotIn("HERMES_CONNECTIONS_AGENT_KEY", caddy)
         self.assertNotIn("HERMES_VAULT_BROKER_KEY", caddy)
         self.assertNotIn("HERMES_API_KEY", caddy)
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        self.assertIn("header_up -X-Frank-Operator-Attestation", caddyfile)
+        self.assertIn("header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}", caddyfile)
+        self.assertIn("request>headers>X-Frank-Operator-Attestation delete", caddyfile)
 
     def test_release_runbook_orders_private_dependencies_before_frank(self):
         runbook = (ROOT / "docs" / "FRANK_RELEASE_RUNBOOK.md").read_text(encoding="utf-8")

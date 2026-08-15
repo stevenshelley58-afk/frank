@@ -129,6 +129,20 @@ class ConnectionsAgentApiTest(unittest.TestCase):
             self.assertNotIn("credential_ref", json.dumps(item))
             self.assertLessEqual(len(item), 14)
 
+    def test_agent_inspect_migrates_legacy_connection_revision_before_projection(self):
+        home_platform.CONNECTIONS_FILE.write_text(json.dumps({
+            "version": 1,
+            "connections": [{
+                "id": "legacy-inspect", "provider": "api", "name": "Legacy inspect",
+                "scope_kind": "global", "scope_id": "", "status": "connected",
+                "connection_ref": "api://legacy/inspect", "credential_ref": "", "capabilities": [],
+            }],
+        }), encoding="utf-8")
+        inspected = self.client.get("/api/connections/agent/inspect", headers=self.agent_headers)
+        self.assertEqual(inspected.status_code, 200, inspected.get_json())
+        self.assertEqual(inspected.get_json()["connections"][0]["revision"], 1)
+        self.assertEqual(json.loads(home_platform.CONNECTIONS_FILE.read_text(encoding="utf-8"))["connections"][0]["revision"], 1)
+
     def test_safe_verify_uses_shared_service_and_optimistic_revision(self):
         connection = self._create()
         plan = self.client.post("/api/connections/agent/plan", json={
@@ -338,6 +352,33 @@ class ConnectionsAgentApiTest(unittest.TestCase):
         self.assertTrue(plan_state["confirmation_consumed"])
         self.assertEqual(plan_state["confirmation_hash"], "")
 
+    def test_destructive_confirmation_is_revision_bound_at_plan_and_apply(self):
+        connection = self._create()
+        missing = self.client.post("/api/connections/plan", json={
+            "action": "delete", "connection_id": connection["id"],
+            "idempotency_key": "revision-missing-plan-01",
+        }, headers={"Origin": "http://localhost"})
+        self.assertEqual(missing.status_code, 409)
+        self.assertEqual(missing.get_json()["code"], "revision_required")
+
+        planned = self.client.post("/api/connections/plan", json={
+            "action": "delete", "connection_id": connection["id"],
+            "expected_revision": connection["revision"], "idempotency_key": "revision-bound-plan-01",
+        }, headers={"Origin": "http://localhost"})
+        self.assertEqual(planned.status_code, 200, planned.get_json())
+        plan = planned.get_json()["plan"]
+        changed = self.client.patch(f"/api/connections/{connection['id']}", json={
+            "notes": "Changed after confirmation was issued.", "idempotency_key": "revision-bound-update-01",
+        }, headers={"Origin": "http://localhost"})
+        self.assertEqual(changed.status_code, 200, changed.get_json())
+        stale = self.client.post("/api/connections/apply", json={
+            "plan_id": plan["plan_id"], "confirmation_token": plan["confirmation_token"],
+            "idempotency_key": "revision-bound-apply-01",
+        }, headers={"Origin": "http://localhost"})
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(stale.get_json()["code"], "revision_conflict")
+        self.assertEqual(self.client.get("/api/connections").get_json()["connections"][0]["revision"], changed.get_json()["connection"]["revision"])
+
     def test_manual_provider_apply_waits_then_authenticated_hermes_completes_it(self):
         connection = self._create()
         origin = {"Origin": "http://localhost"}
@@ -401,6 +442,7 @@ class ConnectionsAgentApiTest(unittest.TestCase):
 
         revoke_plan = self.client.post("/api/connections/agent/plan", json={
             "action": "revoke", "connection_id": connection["id"],
+            "expected_revision": failed.get_json()["action"]["result"]["revision"],
             "idempotency_key": "failure-revoke-plan-01",
         }, headers=self.agent_headers).get_json()["plan"]
         revoke_failed = self.client.post("/api/connections/agent/apply", json={

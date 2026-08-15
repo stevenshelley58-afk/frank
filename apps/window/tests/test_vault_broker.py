@@ -1,4 +1,5 @@
 import json
+import os
 import secrets
 import tempfile
 import threading
@@ -86,6 +87,8 @@ class _RedirectServer:
 class VaultBrokerApiTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
+        self.original_basic_hash = os.environ.get("FRANK_BASIC_AUTH_HASH")
+        os.environ["FRANK_BASIC_AUTH_HASH"] = "test-basic-auth-hash"
         with vault_broker._rate_lock:
             vault_broker._rate_events.clear()
         with vault_broker._replay_lock:
@@ -99,10 +102,15 @@ class VaultBrokerApiTest(unittest.TestCase):
         )
         vault_broker.configure(adapter=self.adapter, store=self.store)
         self.client = server.app.test_client()
+        self.client.environ_base["HTTP_X_FRANK_OPERATOR_ATTESTATION"] = "test-basic-auth-hash"
         self.origin = {"Origin": "https://frank.fail"}
 
     def tearDown(self):
         vault_broker.configure()
+        if self.original_basic_hash is None:
+            os.environ.pop("FRANK_BASIC_AUTH_HASH", None)
+        else:
+            os.environ["FRANK_BASIC_AUTH_HASH"] = self.original_basic_hash
         self.temp.cleanup()
 
     def _create_body(self):
@@ -464,9 +472,94 @@ class VaultBrokerApiTest(unittest.TestCase):
             )
         finally:
             self.store.write = original_write
-        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.status_code, 503)
         self.assertFalse(self.store.path.exists())
-        self.assertEqual([call[0] for call in self.upstream.calls], ["POST", "POST"])
+        self.assertEqual(self.upstream.calls, [])
+
+    def test_every_vault_and_provider_route_requires_caddy_operator_attestation(self):
+        missing = self.client.get(
+            "/api/vault/status", environ_overrides={"HTTP_X_FRANK_OPERATOR_ATTESTATION": ""},
+        )
+        forged_origin = self.client.get(
+            "/api/vault/secrets", headers={"Origin": "https://frank.fail", "X-Frank-Operator-Attestation": "forged"},
+        )
+        wrong_provider_key = self.client.get(
+            "/api/provider-broker/catalog", headers={"X-Frank-Operator-Attestation": "wrong"},
+        )
+        owner = self.client.get("/api/vault/status")
+        self.assertEqual(missing.status_code, 401)
+        self.assertEqual(forged_origin.status_code, 403)
+        self.assertEqual(wrong_provider_key.status_code, 403)
+        self.assertEqual(owner.status_code, 200)
+        self.assertNotIn("test-basic-auth-hash", "".join(response.get_data(as_text=True) for response in (missing, forged_origin, wrong_provider_key, owner)))
+
+    def test_restart_recovers_upstream_succeeded_rotate_without_repeating_remote_effect(self):
+        created = self.client.post(
+            "/api/vault/secrets", json=self._create_body(),
+            headers={**self.origin, "Idempotency-Key": "recover-create-" + secrets.token_hex(8)},
+        ).get_json()["secret"]
+        ref_id = created["ref"].rsplit("/", 1)[-1]
+        rotate_key = "recover-rotate-" + secrets.token_hex(8)
+        rotate_body = {"secret_value": "rotated-" + secrets.token_urlsafe(12)}
+        original_commit = self.store.commit
+
+        def fail_local_commit(**kwargs):
+            if kwargs.get("operation", {}).get("state") == "local-committed":
+                raise vault_broker.MetadataStoreError()
+            return original_commit(**kwargs)
+
+        with patch.object(self.store, "commit", side_effect=fail_local_commit):
+            interrupted = self.client.post(
+                f"/api/vault/secrets/{ref_id}/rotate", json=rotate_body,
+                headers={**self.origin, "Idempotency-Key": rotate_key},
+            )
+        self.assertEqual(interrupted.status_code, 503)
+        calls_after_remote = len(self.upstream.calls)
+        persisted = self.store.path.read_text(encoding="utf-8")
+        self.assertNotIn("rotated-", persisted)
+        self.assertIn("upstream-succeeded", persisted)
+
+        restarted_store = vault_broker.MetadataStore(self.store.path)
+        vault_broker.configure(adapter=self.adapter, store=restarted_store)
+        replay = self.client.post(
+            f"/api/vault/secrets/{ref_id}/rotate", json=rotate_body,
+            headers={**self.origin, "Idempotency-Key": rotate_key},
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(len(self.upstream.calls), calls_after_remote)
+        self.assertGreater(replay.get_json()["secret"]["version"], created["version"])
+
+    def test_restart_recovers_upstream_succeeded_delete_without_repeating_remote_effect(self):
+        created = self.client.post(
+            "/api/vault/secrets", json=self._create_body(),
+            headers={**self.origin, "Idempotency-Key": "recover-delete-create-" + secrets.token_hex(8)},
+        ).get_json()["secret"]
+        ref = created["ref"]
+        plan = self._delete_plan(ref)
+        delete_body = self._delete_body(plan)
+        delete_key = "recover-delete-" + secrets.token_hex(8)
+        original_commit = self.store.commit
+
+        def fail_local_commit(**kwargs):
+            if kwargs.get("operation", {}).get("state") == "local-committed":
+                raise vault_broker.MetadataStoreError()
+            return original_commit(**kwargs)
+
+        with patch.object(self.store, "commit", side_effect=fail_local_commit):
+            interrupted = self.client.delete(
+                "/api/vault/secrets/" + ref.rsplit("/", 1)[-1], json=delete_body,
+                headers={**self.origin, "Idempotency-Key": delete_key},
+            )
+        self.assertEqual(interrupted.status_code, 503)
+        calls_after_remote = len(self.upstream.calls)
+        vault_broker.configure(adapter=self.adapter, store=vault_broker.MetadataStore(self.store.path))
+        replay = self.client.delete(
+            "/api/vault/secrets/" + ref.rsplit("/", 1)[-1], json=delete_body,
+            headers={**self.origin, "Idempotency-Key": delete_key},
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(len(self.upstream.calls), calls_after_remote)
+        self.assertEqual(self.client.get("/api/vault/secrets").get_json()["secrets"], [])
 
     def test_rotate_delete_and_bind_metadata_projections_are_atomic(self):
         created = self.client.post(

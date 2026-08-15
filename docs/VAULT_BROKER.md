@@ -54,9 +54,15 @@ by the Hermes deployment; no guessed dashboard or main-API port is valid.
 
 ## Write-only API
 
-All responses carry `Cache-Control: no-store`. Secret writes require an
-`Origin` accepted by `FRANK_VAULT_ALLOWED_ORIGINS`, a bounded JSON body, a
-valid `Idempotency-Key`, and the in-process rate/concurrency guards.
+All responses carry `Cache-Control: no-store`. Every vault and provider-broker
+read or write requires Caddy's internal operator attestation in addition to
+the mutation `Origin` accepted by `FRANK_VAULT_ALLOWED_ORIGINS`. Caddy strips
+any incoming `X-Frank-Operator-Attestation` header and overwrites it with the
+existing private `FRANK_BASIC_AUTH_HASH`; Window performs a constant-time
+comparison against its own environment. Browser JavaScript never receives,
+sets, logs, or sees this header. Direct loopback requests and forged Origins
+therefore fail before vault metadata is projected. Secret writes also require
+a bounded JSON body, a valid `Idempotency-Key`, and rate/concurrency guards.
 Broker HTTP requests use an explicit no-redirect transport; any same-host or
 cross-host redirect is treated as a safe broker failure and never replays the
 Bearer credential.
@@ -78,6 +84,16 @@ proxy endpoint. The adapter filters even an accidentally value-bearing
 Hermes response before it crosses into Frank's response, persistence, or
 audit records.
 
+Create, rotate, and delete use a durable write-ahead operation record keyed by
+the operation plus an Idempotency-Key hash and safe target metadata. The state
+is exactly `pending`, `upstream-succeeded`, `local-committed`, or `failed`.
+Frank records the remote success before atomically publishing the local
+metadata projection; a restart resumes only `upstream-succeeded` projections
+and never repeats an uncertain remote mutation. Raw bodies, secret values,
+tokens, and provider error prose are not retained. An uncertain `pending`
+operation fails closed with a safe reconciliation status instead of attempting
+a second upstream call.
+
 Delete plans are same-origin, no-store, bounded, and idempotent by
 `Idempotency-Key`. Repeating the same plan request with the same key returns
 the prior safe plan; a different key creates a separate plan. A delete plan
@@ -85,8 +101,9 @@ is consumed only in the same atomic local projection that removes the ref and
 records the audit event. An upstream delete failure leaves the unused plan in
 place so a caller can retry with a new idempotency key. If the upstream delete
 succeeds but Frank cannot commit its local projection, Frank returns a safe
-metadata-store error and does not claim success; the plan remains unused for
-diagnosis/recovery, while the remote secret may already be gone. Expired,
+metadata-store error and does not claim success; the durable operation resumes
+the local projection after restart without repeating the remote delete.
+Expired,
 reference-mismatched, invalid, or reused plans fail closed. The Hermes-side
 broker receives `confirmation_token` and
 `provider_receipt:{"receipt_id":"..."}` alongside the validated location;
