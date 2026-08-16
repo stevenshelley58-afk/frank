@@ -146,13 +146,16 @@ GET http://127.0.0.1:18082/api/v4/secrets
 
 The bootstrap defaults are the exact identity: project slug
 `frank-hermes-vault`, environment slug `production`, path `/hermes`, identity
-`hermes-vault-broker`, and custom project role `hermes-vault-broker`. The role
-grants only secret `read`, `create`, `edit`, and `delete`, plus folder read,
-under that exact environment/path. Override the documented `INFISICAL_*`
-variables before the first bootstrap if a different identity is required.
-The bootstrap proves the identity has exactly one permanent project role, then
-logs in with Universal Auth and verifies create/read/edit/delete at
-`production:/hermes` while rejecting another path, environment, and project.
+`hermes-vault-broker`, and the built-in project role `admin`. Infisical
+Community Edition does not permit custom project roles, so the identity is an
+administrator only of this dedicated project. The Hermes broker independently
+locks every operation to `production:/hermes`; the project is not shared with
+another workload. Override the documented `INFISICAL_*` variables before the
+first bootstrap if a different identity is required. The bootstrap proves the
+identity has exactly one permanent project role, then logs in with Universal
+Auth and verifies create/read/edit/delete at `production:/hermes` while
+rejecting another project. The post-activation broker check verifies the
+fixed environment and path boundary enforced above Community Edition RBAC.
 
 ## Operations and rollback
 

@@ -13,7 +13,10 @@ environment_slug="${INFISICAL_ENVIRONMENT_SLUG:-production}"
 environment_name="${INFISICAL_ENVIRONMENT_NAME:-Production}"
 secret_path="${INFISICAL_SECRET_PATH:-/hermes}"
 identity_name="${INFISICAL_IDENTITY_NAME:-hermes-vault-broker}"
-role_slug="${INFISICAL_ROLE_SLUG:-hermes-vault-broker}"
+# Community Edition does not permit custom project roles. The identity is an
+# administrator of this otherwise-empty, dedicated project; the broker and its
+# canaries enforce the narrower production:/hermes runtime boundary.
+role_slug="admin"
 hermes_secret_file="${HERMES_SECRET_FILE:-}"
 hermes_config_file="${HERMES_CONFIG_FILE:-}"
 connections_enabled="${INFISICAL_CONNECTIONS_ENABLED:-true}"
@@ -144,8 +147,6 @@ run_universal_auth_canary() {
   local create_body="$bootstrap_tmp_dir/canary-create.json"
   local update_body="$bootstrap_tmp_dir/canary-update.json"
   local delete_body="$bootstrap_tmp_dir/canary-delete.json"
-  local denied_path_body="$bootstrap_tmp_dir/canary-denied-path.json"
-  local denied_environment_body="$bootstrap_tmp_dir/canary-denied-environment.json"
   local denied_project_body="$bootstrap_tmp_dir/canary-denied-project.json"
   local canary_session=""
 
@@ -224,28 +225,7 @@ PY
   canary_name=""
   canary_delete_body=""
 
-  for denied_kind in path environment project; do
-    case "$denied_kind" in
-      path)
-        denied_body="$denied_path_body"
-        denied_path="/hermes-denied"
-        denied_project="$project_id"
-        denied_environment="$environment_slug"
-        ;;
-      environment)
-        denied_body="$denied_environment_body"
-        denied_path="$secret_path"
-        denied_project="$project_id"
-        denied_environment="development"
-        ;;
-      project)
-        denied_body="$denied_project_body"
-        denied_path="$secret_path"
-        denied_project="00000000-0000-0000-0000-000000000000"
-        denied_environment="$environment_slug"
-        ;;
-    esac
-    CANARY_PROJECT_ID="$denied_project" CANARY_ENVIRONMENT="$denied_environment" CANARY_SECRET_PATH="$denied_path" python3 - "$denied_body" <<'PY'
+  CANARY_PROJECT_ID="00000000-0000-0000-0000-000000000000" CANARY_ENVIRONMENT="$environment_slug" CANARY_SECRET_PATH="$secret_path" python3 - "$denied_project_body" <<'PY'
 import json
 import os
 import sys
@@ -259,10 +239,9 @@ with open(sys.argv[1], "w", encoding="utf-8") as stream:
         "type": "shared",
     }, stream)
 PY
-    chmod 0600 -- "$denied_body"
-    expect_machine_denied POST "/api/v4/secrets/frank_hermes_denied_canary" "$denied_body" || die "Universal Auth canary unexpectedly allowed another $denied_kind"
-  done
-  echo "Universal Auth canary passed: CRUD allowed only at $environment_slug:$secret_path; other path/environment/project denied." >&2
+  chmod 0600 -- "$denied_project_body"
+  expect_machine_denied POST "/api/v4/secrets/frank_hermes_denied_canary" "$denied_project_body" || die "Universal Auth canary unexpectedly allowed another project"
+  echo "Universal Auth canary passed: CRUD allowed at $environment_slug:$secret_path; another project denied. Broker scope enforcement is verified after activation." >&2
 }
 
 machine_request() {
@@ -363,51 +342,7 @@ fi
 
 role_list="$(api GET "/api/v1/projects/$project_id/roles")"
 role_id="$(printf '%s' "$role_list" | json_find_id roles slug "$role_slug")"
-if [[ -z "$role_id" ]]; then
-  role_payload="$(python3 -c '
-import json
-import sys
-
-slug, environment, secret_path = sys.argv[1:]
-conditions = {"environment": environment, "secretPath": secret_path}
-print(json.dumps({
-    "slug": slug,
-    "name": "Hermes Vault Broker",
-    "description": "CRUD secret values only under the Hermes production path.",
-    "permissions": [
-        {"subject": "secrets", "action": "read", "conditions": conditions},
-        {"subject": "secrets", "action": "create", "conditions": conditions},
-        {"subject": "secrets", "action": "edit", "conditions": conditions},
-        {"subject": "secrets", "action": "delete", "conditions": conditions},
-        {"subject": "secret-folders", "action": "read", "conditions": conditions},
-    ],
-}))
-' "$role_slug" "$environment_slug" "$secret_path")"
-  role_response="$(api POST "/api/v1/projects/$project_id/roles" "$role_payload")"
-  role_id="$(printf '%s' "$role_response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["role"]["id"])')"
-fi
-[[ -n "$role_id" ]] || die "could not resolve the $role_slug project role"
-role_detail="$(api GET "/api/v1/projects/$project_id/roles/slug/$role_slug")"
-printf '%s' "$role_detail" | python3 -c '
-import json
-import sys
-
-payload = json.load(sys.stdin)
-environment, secret_path = sys.argv[1:]
-expected = {
-    ("secrets", "read", environment, secret_path),
-    ("secrets", "create", environment, secret_path),
-    ("secrets", "edit", environment, secret_path),
-    ("secrets", "delete", environment, secret_path),
-    ("secret-folders", "read", environment, secret_path),
-}
-actual = set()
-for permission in payload.get("role", payload).get("permissions", []):
-    conditions = permission.get("conditions") or {}
-    actual.add((permission.get("subject"), permission.get("action"), conditions.get("environment"), conditions.get("secretPath")))
-if actual != expected:
-    raise SystemExit("existing Hermes role does not exactly match the fixed CRUD policy")
-' "$environment_slug" "$secret_path" || die "Hermes role policy validation failed"
+[[ -n "$role_id" ]] || die "could not resolve the built-in $role_slug project role"
 
 identity_list="$(api GET "/api/v1/projects/$project_id/identities")"
 identity_id="$(printf '%s' "$identity_list" | json_find_id identities name "$identity_name")"
