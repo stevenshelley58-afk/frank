@@ -5,6 +5,20 @@ integration. It is executed only after the Frank revision, Hermes plugin
 contract, broker route/port, and Infisical bundle have been reviewed together.
 No step publishes the private ingress or weakens public Caddy header policy.
 
+## Safe base-Window release
+
+The Window may be released before the separately owned Hermes Connections
+Agent or vault broker exists. In that state, keep
+`HERMES_CONNECTIONS_AGENT_KEY`, `HERMES_VAULT_BROKER_KEY`, and
+`HERMES_VAULT_BROKER_URL` absent rather than inventing placeholders. The
+deployment requires only the existing Hermes API and Frank basic-auth values;
+authenticated agent routes remain disabled, and vault/provider health reports
+`setup_needed`. This is a fail-closed partial activation, not evidence that the
+private integrations are live.
+
+Run the full order below before adding any of those three values or claiming
+the private integrations are active.
+
 ## Release order
 
 1. **Validate `/srv/frank/secrets/window.env`.** Work on the VPS with the
