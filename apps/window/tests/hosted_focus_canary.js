@@ -81,40 +81,85 @@ function connect(url) {
   });
 }
 
+async function evaluateWithRetry(browser, expression) {
+  let lastError;
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    try {
+      return await browser.evaluate(expression);
+    } catch (error) {
+      lastError = error;
+      if (!/execution context was destroyed/i.test(String(error?.message || error))) throw error;
+      await sleep(500);
+    }
+  }
+  throw lastError;
+}
+
+async function removeProfile() {
+  let lastError;
+  for (let attempt = 0; attempt < 12; attempt += 1) {
+    try {
+      fs.rmSync(PROFILE, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+      if (!fs.existsSync(PROFILE)) {
+        await sleep(500);
+        if (!fs.existsSync(PROFILE)) return;
+      }
+    } catch (error) {
+      lastError = error;
+    }
+    await sleep(250);
+  }
+  if (fs.existsSync(PROFILE)) throw lastError || new Error(`Chrome profile cleanup failed: ${PROFILE}`);
+}
+
 async function main() {
   const chrome = spawn(CHROME, [
     "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
     `--remote-debugging-port=${PORT}`, `--user-data-dir=${PROFILE}`, "about:blank",
   ], { stdio: "ignore" });
+  let browser;
   try {
     await waitForDevTools();
     const page = await openPage();
-    const browser = await connect(page.webSocketDebuggerUrl);
-    const result = await browser.evaluate(`(async () => {
+    browser = await connect(page.webSocketDebuggerUrl);
+    const result = await evaluateWithRetry(browser, `(async () => {
       const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-      await wait(800);
+      await wait(1400);
       window.dispatchEvent(new CustomEvent("frank:widget-builder"));
       await wait(500);
-      document.querySelector("#top-actions button")?.click();
+      const opener = document.querySelector("#top-actions button");
+      opener?.focus();
+      opener?.click();
       await wait(150);
-      const opened = !document.querySelector("#widget-builder-editor")?.hidden;
+      const editor = document.querySelector("#widget-builder-editor");
+      const opened = !editor?.hidden;
+      editor?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+      await wait(100);
+      const directRestored = Boolean(editor?.hidden && document.activeElement === opener && document.querySelectorAll("[inert]").length === 0);
+      opener?.focus();
+      opener?.click();
+      await wait(150);
       window.dispatchEvent(new CustomEvent("frank:view", { detail: "accounts" }));
       await wait(150);
       return {
         opened,
+        directRestored,
+        editorHidden: Boolean(document.querySelector("#widget-builder-editor")?.hidden),
         view: document.querySelector(".view.is-on")?.dataset.view || "",
         activeElement: document.activeElement?.id || "",
         titleTabIndex: document.querySelector("#view-title")?.getAttribute("tabindex") || "",
+        inertCount: document.querySelectorAll("[inert]").length,
       };
     })()`);
-    if (!result.opened || result.view !== "accounts" || result.activeElement !== "view-title" || result.titleTabIndex !== "-1") {
+    if (!result.opened || !result.directRestored || !result.editorHidden || result.view !== "accounts" || result.activeElement !== "view-title" || result.titleTabIndex !== "-1" || result.inertCount !== 0) {
       throw new Error(`focus assertion failed: ${JSON.stringify(result)}`);
     }
     console.log(JSON.stringify({ status: "pass", ...result }));
-    browser.close();
   } finally {
+    try { browser?.close(); } catch {}
     await stopChrome(chrome);
-    fs.rmSync(PROFILE, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+    await sleep(500);
+    await removeProfile();
   }
 }
 

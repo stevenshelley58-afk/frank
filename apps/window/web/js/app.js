@@ -102,6 +102,14 @@ window.addEventListener("frank:connections", () => {
   openConnections();
 });
 
+window.addEventListener("frank:open-chat-session", async (event) => {
+  const sessionId = event.detail?.id;
+  if (!sessionId) return;
+  show("hub");
+  await selectChat(sessionId);
+  $("#chat-input")?.focus();
+});
+
 function escapeHtml(s) {
   return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }

@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import secrets
 import threading
 import time
 import uuid
@@ -18,17 +19,34 @@ from urllib.parse import urlparse
 from flask import Blueprint, abort, jsonify, request
 from werkzeug.exceptions import HTTPException
 
+import home_defaults
+import home_providers
+import connections_agent
+
 
 api = Blueprint("home_platform", __name__)
 
 
 @api.errorhandler(HTTPException)
 def _api_error(error: HTTPException):
-    return jsonify({"error": error.description}), error.code
+    response = jsonify({"error": error.description})
+    response.status_code = error.code
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@api.errorhandler(connections_agent.ContractError)
+def _connection_contract_error(error: connections_agent.ContractError):
+    response = jsonify({"error": error.message, "code": error.code})
+    response.status_code = error.status
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 DATA_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 HOME_STORE_FILE = Path(os.environ.get("HOME_STORE_FILE", str(DATA_DIR / "home-layouts.json")))
 CONNECTIONS_FILE = Path(os.environ.get("CONNECTIONS_STORE_FILE", str(DATA_DIR / "connections.json")))
+CONNECTION_ACTIONS_FILE = Path(os.environ.get("CONNECTION_ACTIONS_FILE", str(DATA_DIR / "connection-actions.jsonl")))
+CONNECTION_PLANS_FILE = Path(os.environ.get("CONNECTION_PLANS_FILE", str(DATA_DIR / "connection-plans.json")))
 
 MAX_WIDGETS_PER_HOME = 25
 ENTITY_KINDS = {"project", "tool", "agent", "service"}
@@ -40,7 +58,7 @@ CONNECTION_FIELDS = {
     "provider", "name", "scope_kind", "scope_id", "status", "connection_ref",
     "credential_ref", "admin_url", "capabilities", "notes", "last_verified_at",
 }
-CONNECTION_PUBLIC_FIELDS = CONNECTION_FIELDS | {"id", "created_at", "updated_at"}
+CONNECTION_PUBLIC_FIELDS = CONNECTION_FIELDS | {"id", "created_at", "updated_at", "revision"}
 SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9._-]{0,79}$")
 OPAQUE_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,299}$")
 VAULT_REFERENCE = re.compile(
@@ -64,12 +82,31 @@ PROVIDER_SECRET = re.compile(
 )
 JWT_VALUE = re.compile(r"\b(?:eyJ[A-Za-z0-9_-]{4,}\.){2}[A-Za-z0-9_-]{4,}\b")
 
+# One shared transaction lock protects home bindings and connection scope/
+# deletion. Connection service methods always take their private service lock
+# first and then this lock; home saves take only this lock. Never invert it.
 _home_lock = threading.RLock()
-_connections_lock = threading.RLock()
+_connections_lock = _home_lock
 _project_loader: Callable[[], list[dict]] = lambda: []
 _account_loader: Callable[[], list[dict]] = lambda: []
 _hermes_health: Callable[[], dict] = lambda: {"ok": False, "reason": "not configured"}
+_hermes_sessions: Callable[[], dict] | None = None
 _roots: dict[str, Path] = {}
+_connection_service: connections_agent.ConnectionsMutationService | None = None
+_connections_agent_key = os.environ.get("HERMES_CONNECTIONS_AGENT_KEY", "").strip()
+_connections_agent_profile = os.environ.get("HERMES_CONNECTIONS_AGENT_PROFILE", "default").strip() or "default"
+_connection_allowed_origins = {
+    item.strip().rstrip("/") for item in os.environ.get(
+        "FRANK_CONNECTION_ALLOWED_ORIGINS",
+        "https://frank.fail,http://localhost,http://localhost:5000,http://127.0.0.1,http://127.0.0.1:5000,http://127.0.0.1:8080",
+    ).split(",") if item.strip()
+}
+_connection_rate_lock = threading.RLock()
+_connection_rate: dict[tuple[str, str], list[float]] = {}
+CONNECTION_REQUEST_BYTES = 64 * 1024
+CONNECTION_RATE_WINDOW = 60
+CONNECTION_RATE_LIMIT = 120
+CONNECTION_AGENT_INSPECT_MAX_ACTIVITY = 50
 
 
 BUILTIN_WIDGETS = [
@@ -95,11 +132,46 @@ BUILTIN_WIDGETS = [
         "freshness": "on_demand", "accepts_connection": False, "multiple": False,
     },
     {
+        "id": "repository-activity", "version": "1.0.0", "title": "Repository activity",
+        "description": "Recent read-only Git changes from the mounted project checkout.",
+        "surfaces": ["project"], "default_size": "wide",
+        "allowed_sizes": ["medium", "wide"], "provider": "frank.git",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "project-files", "version": "1.0.0", "title": "Project files",
+        "description": "A compact summary of the mounted project root.",
+        "surfaces": ["project"], "default_size": "medium",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.files",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
         "id": "connections-summary", "version": "1.0.0", "title": "Connections",
         "description": "Recorded provider connections and setup issues.",
         "surfaces": sorted(ENTITY_KINDS), "default_size": "medium",
         "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.connections",
         "freshness": "on_demand", "accepts_connection": True, "multiple": False,
+    },
+    {
+        "id": "connection-attention", "version": "1.0.0", "title": "Connection attention",
+        "description": "Setup, verification, and connection errors needing review.",
+        "surfaces": sorted(ENTITY_KINDS), "default_size": "medium",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.connections",
+        "freshness": "poll", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "provider-catalog", "version": "1.0.0", "title": "Provider catalog",
+        "description": "Available provider capabilities and safe setup boundaries.",
+        "surfaces": ["project", "tool", "agent", "service"], "default_size": "wide",
+        "allowed_sizes": ["medium", "wide"], "provider": "frank.connections",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "provider-coverage", "version": "1.0.0", "title": "Provider coverage",
+        "description": "Recorded, verified, setup-needed, and error states by provider.",
+        "surfaces": sorted(ENTITY_KINDS), "default_size": "medium",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.connections",
+        "freshness": "poll", "accepts_connection": False, "multiple": False,
     },
     {
         "id": "accounts-summary", "version": "1.0.0", "title": "Accounts",
@@ -113,6 +185,13 @@ BUILTIN_WIDGETS = [
         "description": "Reachability of the sole Frank brain.",
         "surfaces": ["project", "tool", "agent", "service"], "default_size": "medium",
         "allowed_sizes": ["small", "medium", "wide"], "provider": "hermes.health",
+        "freshness": "poll", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "hermes-session", "version": "1.0.0", "title": "Hermes sessions",
+        "description": "Read-only session and work summaries from Hermes.",
+        "surfaces": ["agent"], "entity_scope": {"kind": "agent", "id": "hermes"}, "default_size": "wide",
+        "allowed_sizes": ["medium", "wide"], "provider": "hermes.sessions",
         "freshness": "poll", "accepts_connection": False, "multiple": False,
     },
     {
@@ -137,6 +216,13 @@ BUILTIN_WIDGETS = [
         "freshness": "poll", "accepts_connection": True, "multiple": False,
     },
     {
+        "id": "widget-catalog", "version": "1.0.0", "title": "Widget catalog",
+        "description": "Registered widgets and their compatible home surfaces.",
+        "surfaces": ["tool"], "default_size": "wide",
+        "allowed_sizes": ["medium", "wide"], "provider": "frank.widgets",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
         "id": "quick-links", "version": "1.0.0", "title": "Links",
         "description": "Safe shortcuts configured for this home.",
         "surfaces": sorted(ENTITY_KINDS), "default_size": "small",
@@ -145,12 +231,7 @@ BUILTIN_WIDGETS = [
     },
 ]
 
-DEFAULT_WIDGET_IDS = {
-    "project": ["entity-overview", "application-status", "connections-summary", "accounts-summary", "repository-status", "analytics-summary"],
-    "tool": ["entity-overview", "connections-summary", "accounts-summary", "work-status", "recent-receipts"],
-    "agent": ["entity-overview", "hermes-status", "connections-summary", "work-status", "recent-receipts"],
-    "service": ["entity-overview", "application-status", "connections-summary", "analytics-summary", "recent-receipts"],
-}
+DEFAULT_WIDGET_IDS = {kind: list(widget_ids) for kind, widget_ids in home_defaults.KIND_DEFAULT_WIDGET_IDS.items()}
 
 CONNECTION_CATALOG = [
     {
@@ -184,12 +265,36 @@ def configure(
     account_loader: Callable[[], list[dict]],
     hermes_health: Callable[[], dict],
     roots: dict[str, Path],
+    hermes_sessions: Callable[[], dict] | None = None,
+    hermes_connections_agent_key: str | None = None,
+    hermes_connections_agent_profile: str | None = None,
+    connection_allowed_origins: list[str] | None = None,
 ) -> None:
-    global _project_loader, _account_loader, _hermes_health, _roots
+    global _project_loader, _account_loader, _hermes_health, _hermes_sessions, _roots, _connection_service
+    global _connections_agent_key, _connections_agent_profile, _connection_allowed_origins
     _project_loader = project_loader
     _account_loader = account_loader
     _hermes_health = hermes_health
+    _hermes_sessions = hermes_sessions
     _roots = roots
+    if hermes_connections_agent_key is not None:
+        _connections_agent_key = str(hermes_connections_agent_key).strip()
+    if hermes_connections_agent_profile is not None:
+        _connections_agent_profile = str(hermes_connections_agent_profile).strip() or "default"
+    if connection_allowed_origins is not None:
+        _connection_allowed_origins = {str(item).strip().rstrip("/") for item in connection_allowed_origins if str(item).strip()}
+    _connection_service = connections_agent.ConnectionsMutationService(
+        load_store=_connection_store,
+        save_store=_write_connection_store,
+        clean_connection=_clean_connection,
+        public_connection=_public_connection,
+        normalize_plan=_normalize_connection_plan,
+        delete_allowed=_connection_delete_allowed,
+        scope_change_allowed=lambda connection_id: _connection_delete_allowed(connection_id),
+        transition_lock=_home_lock,
+        ledger_path=CONNECTION_ACTIONS_FILE,
+        plans_path=CONNECTION_PLANS_FILE,
+    )
 
 
 def _now() -> int:
@@ -221,10 +326,46 @@ def _home_store() -> dict:
 
 
 def _connection_store() -> dict:
-    data = _read_json(CONNECTIONS_FILE, {"version": 1, "connections": []})
-    if data.get("version") != 1 or not isinstance(data.get("connections"), list):
-        return {"version": 1, "connections": []}
-    return data
+    """Read and atomically migrate valid legacy records to revision 1.
+
+    The shared transaction lock makes the first migration write safe alongside
+    home-binding validation and connection mutation. Corrupt state fails closed
+    instead of silently projecting a mutable empty store.
+    """
+    with _connections_lock:
+        if not CONNECTIONS_FILE.exists():
+            return {"version": 1, "connections": []}
+        try:
+            data = json.loads(CONNECTIONS_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            raise connections_agent.ContractError("connection state is unavailable", 503, "state_corrupt") from None
+        if (not isinstance(data, dict) or data.get("version") != 1
+                or not isinstance(data.get("connections"), list)
+                or any(not isinstance(item, dict) for item in data["connections"])):
+            raise connections_agent.ContractError("connection state is unavailable", 503, "state_corrupt")
+        migrated = False
+        for item in data["connections"]:
+            if "revision" not in item:
+                item["revision"] = 1
+                migrated = True
+            elif not isinstance(item["revision"], int) or item["revision"] < 1:
+                raise connections_agent.ContractError("connection state is unavailable", 503, "state_corrupt")
+        if migrated:
+            _write_json(CONNECTIONS_FILE, data)
+        return data
+
+
+def _write_connection_store(data: dict) -> None:
+    _write_json(CONNECTIONS_FILE, data)
+
+
+def _connection_delete_allowed(connection_id: str) -> bool:
+    with _home_lock:
+        return not any(
+            instance.get("config", {}).get("connection_id") == connection_id
+            for home in _home_store().get("homes", {}).values() if isinstance(home, dict)
+            for instance in home.get("instances", [])
+        )
 
 
 def _clean_id(value: object, label: str) -> str:
@@ -304,8 +445,15 @@ def _project(entity_id: str) -> dict | None:
 
 def _entity(kind: str, entity_id: str) -> dict:
     project = _project(entity_id) if kind == "project" else None
-    name = str(project.get("name")) if project else entity_id.replace("-", " ").replace("_", " ").title()
-    return {"kind": kind, "id": entity_id, "name": name, "project": project}
+    profile = project or home_defaults.api_entity_profile(kind, entity_id)
+    name = str(profile.get("name")) if profile else entity_id.replace("-", " ").replace("_", " ").title()
+    return {
+        "kind": kind,
+        "id": entity_id,
+        "name": name,
+        "project": project,
+        "profile": profile,
+    }
 
 
 def _all_widgets(store: dict | None = None) -> list[dict]:
@@ -317,17 +465,31 @@ def _widget_by_id(widget_id: str, store: dict | None = None) -> dict | None:
     return next((item for item in _all_widgets(store) if item.get("id") == widget_id), None)
 
 
-def _default_instances(kind: str) -> list[dict]:
+def _widget_allowed_on_home(manifest: dict | None, kind: str, entity_id: str) -> bool:
+    if not manifest or kind not in manifest.get("surfaces", []):
+        return False
+    scope = manifest.get("entity_scope")
+    if not scope:
+        return True
+    return isinstance(scope, dict) and scope.get("kind") == kind and scope.get("id") == entity_id
+
+
+def _default_instances(kind: str, entity_id: str, entity: dict | None = None, store: dict | None = None) -> list[dict]:
+    entity = entity or _entity(kind, entity_id)
+    requested = home_defaults.default_widget_ids(kind, entity_id, entity.get("profile"))
     by_id = {item["id"]: item for item in BUILTIN_WIDGETS}
-    return [
-        {
+    result = []
+    for widget_id in requested:
+        manifest = by_id.get(widget_id)
+        if not _widget_allowed_on_home(manifest, kind, entity_id):
+            continue
+        result.append({
             "instance_id": f"{widget_id}-1",
             "widget_id": widget_id,
-            "size": by_id[widget_id]["default_size"],
+            "size": manifest["default_size"],
             "config": {},
-        }
-        for widget_id in DEFAULT_WIDGET_IDS[kind]
-    ]
+        })
+    return result
 
 
 def _clean_widget_config(config: object) -> dict:
@@ -371,7 +533,7 @@ def _clean_instances(raw: object, kind: str, entity_id: str, store: dict) -> lis
         if instance_id in seen_instances:
             abort(400, "duplicate widget instance id")
         manifest = _widget_by_id(widget_id, store)
-        if not manifest or kind not in manifest.get("surfaces", []):
+        if not _widget_allowed_on_home(manifest, kind, entity_id):
             abort(400, "widget is unavailable on this home")
         if not manifest.get("multiple") and widget_id in seen_widgets:
             abort(400, "this widget supports one instance per home")
@@ -384,7 +546,7 @@ def _clean_instances(raw: object, kind: str, entity_id: str, store: dict) -> lis
             abort(400, "this widget cannot bind a connection")
         if connection_id and connection_id not in connection_records:
             abort(400, "connection does not exist")
-        if connection_id and not _scope_matches(connection_records[connection_id], kind, entity_id):
+        if connection_id and not _connection_allowed_for_home(connection_records[connection_id], kind, entity_id):
             abort(400, "connection is outside this home scope")
         result.append({"instance_id": instance_id, "widget_id": widget_id, "size": size, "config": config})
         seen_instances.add(instance_id)
@@ -395,11 +557,13 @@ def _clean_instances(raw: object, kind: str, entity_id: str, store: dict) -> lis
 def _home_payload(kind: str, entity_id: str, store: dict) -> dict:
     key = f"{kind}:{entity_id}"
     saved = store["homes"].get(key)
+    entity = _entity(kind, entity_id)
+    defaults = _default_instances(kind, entity_id, entity, store)
     return {
         "schema": "schema://frank.home/v1",
-        "entity": _entity(kind, entity_id),
+        "entity": entity,
         "revision": int(saved.get("revision", 0)) if isinstance(saved, dict) else 0,
-        "instances": saved.get("instances", _default_instances(kind)) if isinstance(saved, dict) else _default_instances(kind),
+        "instances": saved.get("instances", defaults) if isinstance(saved, dict) else defaults,
         "updated_at": saved.get("updated_at") if isinstance(saved, dict) else None,
         "max_widgets": MAX_WIDGETS_PER_HOME,
     }
@@ -411,124 +575,55 @@ def _scope_matches(connection: dict, kind: str, entity_id: str) -> bool:
     )
 
 
+def _connection_allowed_for_home(connection: dict, kind: str, entity_id: str) -> bool:
+    """Central Connections can operate on all scopes; other homes are scoped."""
+    return (kind == "tool" and entity_id == "connections") or _scope_matches(connection, kind, entity_id)
+
+
 def _public_connection(item: dict) -> dict:
     return {key: value for key, value in item.items() if key in CONNECTION_PUBLIC_FIELDS}
 
 
-def _snapshot(status: str, summary: str, data: dict | None = None, links: list[dict] | None = None) -> dict:
-    return {
-        "schema": "schema://frank.widget-snapshot/v1",
-        "status": status,
-        "summary": summary,
-        "data": data or {},
-        "links": links or [],
-        "generated_at": _now(),
-        "source_truth": "provider",
-    }
-
-
 def _instance_snapshot(kind: str, entity_id: str, instance: dict) -> dict:
-    widget_id = instance["widget_id"]
+    manifest = _widget_by_id(instance.get("widget_id"))
+    if not _widget_allowed_on_home(manifest, kind, entity_id):
+        return home_providers.snapshot(
+            "unavailable", "This widget is not available on this home.",
+            {"widget_id": instance.get("widget_id")}, now=_now(),
+        )
     entity = _entity(kind, entity_id)
     config = instance.get("config", {})
-    connections = [
-        item for item in _connection_store().get("connections", [])
-        if _scope_matches(item, kind, entity_id)
-    ]
+    all_connections = _connection_store().get("connections", [])
+    # Connections is the central control-plane home and must see every scope;
+    # every other home receives only global plus its exact entity scope.
+    connections = [item for item in all_connections if _connection_allowed_for_home(item, kind, entity_id)]
     bound = next((item for item in connections if item.get("id") == config.get("connection_id")), None)
-
-    if widget_id == "entity-overview":
-        project = entity.get("project") or {}
-        return _snapshot("ready", f"{entity['name']} {kind}", {
-            "kind": kind,
-            "name": entity["name"],
-            "description": str(project.get("blurb") or "No description recorded."),
-        })
-    if widget_id == "connections-summary":
-        counts = {status: sum(1 for item in connections if item.get("status") == status) for status in sorted(CONNECTION_STATUSES)}
-        problems = counts["setup_needed"] + counts["error"]
-        state = "attention" if problems else ("ready" if connections else "empty")
-        summary = f"{len(connections)} recorded connection{'s' if len(connections) != 1 else ''}"
-        return _snapshot(state, summary, {
-            "counts": counts,
-            "connections": [
-                {"id": item.get("id"), "name": item.get("name"), "provider": item.get("provider"), "status": item.get("status")}
-                for item in connections[:4]
-            ],
-            "status_is_recorded": True,
-        })
-    if widget_id == "accounts-summary":
-        accounts = [item for item in _account_loader() if kind != "project" or item.get("project_id") == entity_id]
-        customers = sum(1 for item in accounts if item.get("kind") == "customer")
-        attention = sum(1 for item in accounts if item.get("status") == "attention")
-        return _snapshot("attention" if attention else ("ready" if accounts else "empty"), f"{len(accounts)} account records", {
-            "customers": customers, "attention": attention, "status_is_recorded": True,
-        })
-    if widget_id == "hermes-status":
-        health = _hermes_health() or {}
-        ok = bool(health.get("ok"))
-        return _snapshot("ready" if ok else "unavailable", "Hermes reachable" if ok else "Hermes unavailable", {
-            "profile": health.get("profile"), "reason": health.get("reason", ""),
-        })
-    if widget_id == "repository-status":
-        project = entity.get("project") or {}
-        root_name = str(project.get("root") or entity_id)
-        base = _roots.get("vps")
-        target = (base / "projects" / root_name).resolve() if base else None
-        allowed = (base / "projects").resolve() if base else None
-        if not target or not allowed:
-            return _snapshot("unavailable", "Repository mount is unavailable")
-        try:
-            target.relative_to(allowed)
-        except ValueError:
-            return _snapshot("error", "Repository path was rejected")
-        if not target.is_dir():
-            return _snapshot("empty", "Repository is not present on the VPS", {"root": root_name})
-        branch = "unknown"
-        try:
-            head = (target / ".git" / "HEAD").read_text(encoding="utf-8").strip()
-            branch = head.rsplit("/", 1)[-1] if head.startswith("ref:") else head[:12]
-        except OSError:
-            pass
-        return _snapshot("ready", f"Repository present on {branch}", {"root": root_name, "branch": branch})
-    if widget_id == "application-status":
-        project = entity.get("project") or {}
-        live = str(project.get("live") or "")
-        links = [{"label": "Open application", "url": live}] if live.startswith("https://") else []
-        if bound:
-            return _snapshot("ready" if bound.get("status") == "verified" else "attention", f"Recorded connection: {bound.get('status')}", {
-                "connection_id": bound.get("id"), "status_is_recorded": True,
-            }, links)
-        if live.startswith("https://"):
-            return _snapshot("attention", "Live URL recorded; health is not connected", {"health_connected": False}, links)
-        return _snapshot("empty", "No live application is recorded")
-    if widget_id == "analytics-summary":
-        analytics = bound or next((
-            item for item in connections
-            if "analytics.read" in item.get("capabilities", []) or "umami" in str(item.get("name", "")).lower()
-        ), None)
-        if not analytics:
-            return _snapshot("empty", "Connect an analytics provider such as Umami", {"metrics": []})
-        return _snapshot("attention", f"{analytics.get('name')} is registered; analytics adapter is not connected", {
-            "connection_id": analytics.get("id"), "status": analytics.get("status"), "metrics": [], "status_is_recorded": True,
-        })
-    if widget_id == "work-status":
-        return _snapshot("unavailable", "No Hermes work-event provider is connected", {"running": 0, "waiting": 0})
-    if widget_id == "recent-receipts":
-        return _snapshot("unavailable", "No receipt provider is connected", {"receipts": []})
-    if widget_id == "quick-links":
-        url = str(config.get("url") or "")
-        links = [{"label": config.get("label") or "Open link", "url": url}] if url.startswith("https://") else []
-        return _snapshot("ready" if links else "empty", config.get("body") or ("One shortcut" if links else "No link configured"), {}, links)
-    if widget_id.startswith("custom-"):
-        with _home_lock:
-            manifest = _widget_by_id(widget_id, _home_store()) or {}
-        definition = manifest.get("definition", {})
-        url = str(config.get("url") or definition.get("url") or "")
-        links = [{"label": config.get("label") or definition.get("label") or "Open link", "url": url}] if url.startswith("https://") else []
-        body = config.get("body") or definition.get("body") or "No content configured."
-        return _snapshot("ready", body, {}, links)
-    return _snapshot("error", "Widget provider is not registered")
+    accounts = list(_account_loader() or [])
+    catalog = _catalog()
+    store = _home_store()
+    allowed_health_urls = {
+        str(profile.get("health"))
+        for profile in (_project_loader() or [])
+        if isinstance(profile, dict) and profile.get("health")
+    }
+    context = home_providers.ProviderContext(
+        kind=kind,
+        entity_id=entity_id,
+        entity=entity,
+        project=entity.get("profile") or {},
+        connections=connections,
+        bound_connection=bound,
+        accounts=accounts,
+        hermes_health=_hermes_health,
+        hermes_sessions=_hermes_sessions,
+        roots=_roots,
+        catalog=catalog,
+        widget_catalog=_all_widgets(store),
+        now=_now(),
+        probe_health=lambda profile: home_providers.probe_profile_health(profile, allowed_health_urls),
+        extra={"config": config, "all_connections": all_connections},
+    )
+    return home_providers.render(instance["widget_id"], context)
 
 
 @api.get("/api/widgets")
@@ -666,7 +761,7 @@ def homes_reset(kind: str, entity_id: str):
             return jsonify({"error": "layout changed", "current": current}), 409
         store["homes"][f"{kind}:{entity_id}"] = {
             "revision": current["revision"] + 1,
-            "instances": _default_instances(kind),
+            "instances": _default_instances(kind, entity_id, current["entity"], store),
             "updated_at": _now(),
         }
         _write_json(HOME_STORE_FILE, store)
@@ -750,6 +845,32 @@ def _clean_connection(body: dict, existing: dict | None = None) -> dict:
     return item
 
 
+def _normalize_connection_plan(action: str, target: dict, body: dict) -> tuple[dict, dict]:
+    """Validate through the owning connection schema before plan persistence."""
+    if not isinstance(body, dict):
+        raise connections_agent.ContractError("request body must be an object")
+    normalized_target = dict(target or {})
+    if action in {"create", "update"}:
+        connection_id = str(normalized_target.get("connection_id") or "")
+        existing = None
+        if action == "update":
+            existing = next((item for item in _connection_store().get("connections", []) if item.get("id") == connection_id), None)
+            if not existing:
+                raise connections_agent.ContractError("connection not found", 404, "connection_not_found")
+        try:
+            cleaned = _clean_connection(body, existing)
+        except HTTPException as error:
+            raise connections_agent.ContractError("connection metadata rejected") from error
+        fields = set(CONNECTION_FIELDS)
+        normalized_body = {key: cleaned[key] for key in fields} if action == "create" else {key: cleaned[key] for key in body if key in fields}
+        normalized_target["provider"] = normalized_target.get("provider") or cleaned.get("provider", "")
+        normalized_target["connection_id"] = connection_id
+        return normalized_target, normalized_body
+    if body:
+        raise connections_agent.ContractError("this action does not accept a mutation body")
+    return normalized_target, {}
+
+
 @api.get("/api/connections")
 def connections_list():
     with _connections_lock:
@@ -761,68 +882,330 @@ def connections_list():
     })
 
 
+def _connection_command(body: dict | None = None) -> tuple[dict, int | None, str, str, str, str]:
+    payload = dict(body or {})
+    expected_revision = payload.pop("expected_revision", None)
+    if expected_revision is not None and not isinstance(expected_revision, int):
+        abort(400, "expected_revision must be an integer")
+    idempotency_key = str(payload.pop("idempotency_key", request.headers.get("Idempotency-Key", "")) or "").strip()[:200]
+    try:
+        idempotency_key = connections_agent.ConnectionsMutationService.require_idempotency(idempotency_key)
+    except connections_agent.ContractError as error:
+        raise error
+    actor = "manual.browser"
+    correlation_id = str(request.headers.get("X-Correlation-Id", "") or "").strip()[:120]
+    confirmation_token = str(
+        payload.pop("confirmation_token", request.headers.get("X-Confirmation-Token", "")) or ""
+    ).strip()
+    return payload, expected_revision, idempotency_key, actor, confirmation_token, correlation_id
+
+
+def _connection_target(body: dict, connection_id: str = "") -> dict:
+    return {
+        "provider": body.get("provider", ""),
+        "connection_id": connection_id or body.get("connection_id", ""),
+        "consumer": body.get("consumer", ""),
+        "project": body.get("project", body.get("scope_id", "")),
+        "environment": body.get("environment", ""),
+    }
+
+
+def _require_same_origin() -> None:
+    """Reject browser writes unless Origin is in the explicit Frank allowlist."""
+    if request.headers.get("Sec-Fetch-Site", "").strip().lower() == "cross-site":
+        abort(403, "cross-origin connection mutation rejected")
+    origin = request.headers.get("Origin", "").strip()
+    if not origin or origin.lower() == "null":
+        abort(403, "same-origin connection mutation required")
+    parsed = urlparse(origin)
+    candidate = origin.rstrip("/")
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc or candidate not in _connection_allowed_origins:
+        abort(403, "cross-origin connection mutation rejected")
+
+
+def _connection_request_guard(bucket: str) -> None:
+    if request.content_length and request.content_length > CONNECTION_REQUEST_BYTES:
+        abort(413, "connection request is too large")
+    # Content-Length is absent for chunked requests and is not a sufficient
+    # body-size authority. Cache the actual bytes before JSON parsing.
+    request_bytes = request.get_data(cache=True, as_text=False)
+    if len(request_bytes) > CONNECTION_REQUEST_BYTES:
+        abort(413, "connection request is too large")
+    key = (bucket, request.remote_addr or "unknown")
+    now = time.monotonic()
+    with _connection_rate_lock:
+        recent = [stamp for stamp in _connection_rate.get(key, []) if stamp > now - CONNECTION_RATE_WINDOW]
+        if len(recent) >= CONNECTION_RATE_LIMIT:
+            abort(429, "connection mutation rate limit exceeded")
+        recent.append(now)
+        _connection_rate[key] = recent
+
+
+def _require_hermes_agent_auth() -> None:
+    """Authenticate the narrow Hermes ingress with a separate service key."""
+    if not _connections_agent_key:
+        abort(503, "Hermes Connections Agent ingress is not configured")
+    authorization = request.headers.get("Authorization", "")
+    presented = authorization[7:].strip() if authorization.lower().startswith("bearer ") else ""
+    if not presented or not secrets.compare_digest(presented, _connections_agent_key):
+        abort(401, "Hermes Connections Agent authentication required")
+    profile = request.headers.get("X-Hermes-Profile", "default").strip() or "default"
+    if profile != _connections_agent_profile or profile != "default":
+        abort(403, "Connections Agent must use the default Hermes profile")
+
+
+def _connection_service_or_abort() -> connections_agent.ConnectionsMutationService:
+    if _connection_service is None:
+        abort(503, "connections service is unavailable")
+    return _connection_service
+
+
+def _connection_result(result: dict, status: int = 200):
+    action = result.get("action") or {}
+    payload = {"action": action, "replayed": bool(result.get("replayed"))}
+    if result.get("connection") is not None:
+        payload["connection"] = result["connection"]
+    if action.get("result", {}).get("removed"):
+        payload["removed"] = action["result"].get("connection_id")
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def _connection_json(payload: dict, status: int = 200):
+    response = jsonify(payload)
+    response.status_code = status
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["Pragma"] = "no-cache"
+    return response
+
+
+def _agent_connection_projection(item: dict) -> dict:
+    """Return only the metadata Hermes needs to inspect Connections."""
+    public = _public_connection(item)
+    fields = (
+        "id", "name", "provider", "status", "scope_kind", "scope_id",
+        "connection_ref", "credential_ref", "last_verified_at", "capabilities", "revision",
+    )
+    return {field: public[field] for field in fields if field in public}
+
+
+def _agent_action_projection(item: dict) -> dict:
+    """Return a receipt-safe action without free-form error prose."""
+    fields = (
+        "sequence", "receipt_id", "correlation_id", "source", "actor", "action",
+        "state", "progress", "started_at", "updated_at", "completed_at",
+    )
+    projected = {field: item[field] for field in fields if field in item}
+    target = item.get("target") if isinstance(item.get("target"), dict) else {}
+    projected["target"] = {field: target[field] for field in ("provider", "connection_id", "consumer", "project", "environment") if field in target}
+    result = item.get("result") if isinstance(item.get("result"), dict) else {}
+    projected["result"] = {field: result[field] for field in (
+        "connection_id", "provider", "status", "revision", "removed", "verified_at",
+        "outcome", "pending", "provider_receipt", "error_code", "error_category",
+    ) if field in result}
+    return projected
+
+
+@api.post("/api/connections/plan")
+@api.post("/api/connections/agent/plan")
+def connections_plan():
+    _connection_request_guard("agent-plan" if request.path.startswith("/api/connections/agent/") else "manual-plan")
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        abort(400, "request body must be an object")
+    is_agent = request.path.startswith("/api/connections/agent/")
+    _require_hermes_agent_auth() if is_agent else _require_same_origin()
+    raw_payload = body.get("body") if isinstance(body.get("body"), dict) else body
+    command_payload = dict(raw_payload)
+    for command_field in ("idempotency_key", "expected_revision", "confirmation_token"):
+        if command_field not in command_payload and command_field in body:
+            command_payload[command_field] = body[command_field]
+    payload, expected_revision, idempotency_key, actor, _, _ = _connection_command(command_payload)
+    action = str(body.get("action") or "").strip().lower()
+    for field in ("action", "connection_id", "consumer", "project", "environment", "actor"):
+        payload.pop(field, None)
+    raw_target = body.get("target") if isinstance(body.get("target"), dict) else {}
+    target_input = dict(raw_target)
+    for field in ("provider", "connection_id", "consumer", "project", "environment"):
+        if field in body:
+            target_input[field] = body[field]
+    target = _connection_target(target_input, str(body.get("connection_id") or raw_target.get("connection_id", "")))
+    source = "connections-agent" if is_agent else "manual"
+    if is_agent:
+        actor = "hermes.connections-agent"
+    try:
+        result = _connection_service_or_abort().plan(
+            action=action, source=source, actor=actor, target=target, body=payload,
+            expected_revision=body.get("expected_revision", expected_revision), idempotency_key=idempotency_key,
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_json(result)
+
+
+@api.post("/api/connections/agent/apply")
+def connections_agent_apply():
+    _connection_request_guard("agent-apply")
+    _require_hermes_agent_auth()
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or not body.get("plan_id"):
+        abort(400, "plan_id is required")
+    if set(body) - {"plan_id", "confirmation_token", "idempotency_key", "provider_receipt", "provider_outcome", "provider_error_code", "provider_error_category"}:
+        abort(400, "unsupported apply fields")
+    confirmation = str(body.get("confirmation_token") or request.headers.get("X-Confirmation-Token", ""))
+    idempotency_key = str(body.get("idempotency_key") or request.headers.get("Idempotency-Key", ""))
+    try:
+        idempotency_key = connections_agent.ConnectionsMutationService.require_idempotency(idempotency_key)
+        result = _connection_service_or_abort().apply_plan(
+            plan_id=str(body["plan_id"]), confirmation_token=confirmation, idempotency_key=idempotency_key,
+            expected_source="connections-agent", authenticated_provider=True, executor_actor="hermes.connections-agent",
+            provider_receipt=str(body.get("provider_receipt") or ""), provider_outcome=str(body.get("provider_outcome") or ""),
+            provider_error_code=str(body.get("provider_error_code") or ""), provider_error_category=str(body.get("provider_error_category") or ""),
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result, 202 if result.get("pending") else 200)
+
+
+@api.post("/api/connections/apply")
+def connections_manual_apply():
+    _connection_request_guard("manual-apply")
+    _require_same_origin()
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or not body.get("plan_id"):
+        abort(400, "plan_id is required")
+    if set(body) - {"plan_id", "confirmation_token", "idempotency_key"}:
+        abort(400, "unsupported apply fields")
+    try:
+        key = connections_agent.ConnectionsMutationService.require_idempotency(
+            str(body.get("idempotency_key") or request.headers.get("Idempotency-Key", ""))
+        )
+        result = _connection_service_or_abort().apply_plan(
+            plan_id=str(body["plan_id"]), confirmation_token=str(body.get("confirmation_token") or ""),
+            idempotency_key=key, expected_source="manual",
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result, 202 if result.get("pending") else 200)
+
+
+@api.get("/api/connections/attention")
+def connections_attention():
+    limit = request.args.get("limit", default=50, type=int)
+    return jsonify({"schema": "schema://frank.connections-attention/v1", "items": _connection_service_or_abort().attention(limit=limit)})
+
+
+@api.get("/api/connections/agent/inspect")
+def connections_agent_inspect():
+    """Private, bounded read model for the authenticated Hermes Connections Agent."""
+    _require_hermes_agent_auth()
+    if set(request.args) - {"activity_limit"}:
+        abort(400, "unsupported inspect query")
+    values = request.args.getlist("activity_limit")
+    if len(values) > 1:
+        abort(400, "activity_limit must be provided once")
+    raw_limit = values[0] if values else str(CONNECTION_AGENT_INSPECT_MAX_ACTIVITY)
+    try:
+        requested_limit = int(raw_limit)
+    except (TypeError, ValueError):
+        abort(400, "activity_limit must be an integer")
+    if requested_limit < 1:
+        abort(400, "activity_limit must be positive")
+    limit = min(requested_limit, CONNECTION_AGENT_INSPECT_MAX_ACTIVITY)
+    service = _connection_service_or_abort()
+    with _connections_lock:
+        connections = [_agent_connection_projection(item) for item in _connection_store().get("connections", [])]
+    return _connection_json({
+        "schema": "schema://frank.connections-agent-inspect/v1",
+        "connections": connections,
+        "attention": [_agent_action_projection(item) for item in service.attention(limit=limit)],
+        "activity": [_agent_action_projection(item) for item in service.activity(limit=limit, latest=True)],
+    })
+
+
+@api.get("/api/connections/activity")
+@api.get("/api/connections/events")
+def connections_activity():
+    after = request.args.get("after", default=0, type=int)
+    limit = request.args.get("limit", default=50, type=int)
+    latest = request.args.get("latest", "0").strip().lower() in {"1", "true"}
+    items = _connection_service_or_abort().activity(after=after, limit=limit, latest=latest)
+    return jsonify({"schema": "schema://frank.connections-activity/v1", "after": after, "latest": latest, "items": items})
+
+
+@api.get("/api/connections/receipts/<receipt_id>")
+def connections_receipt(receipt_id: str):
+    receipt = _connection_service_or_abort().receipt(receipt_id)
+    if not receipt:
+        abort(404, "receipt not found")
+    return jsonify({"schema": "schema://frank.connections-receipt/v1", "receipt": receipt})
+
+
+@api.after_request
+def _connections_no_store(response):
+    """Keep additive connection plans, activity, attention, and receipts private."""
+    if request.path.startswith("/api/connections/") and request.path != "/api/connections":
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Pragma"] = "no-cache"
+    return response
+
+
 @api.post("/api/connections")
 def connections_create():
+    _connection_request_guard("manual-create")
+    _require_same_origin()
     body = request.get_json(silent=True) or {}
-    item = _clean_connection(body)
-    with _connections_lock:
-        store = _connection_store()
-        if any(existing.get("name", "").casefold() == item["name"].casefold() and existing.get("scope_kind") == item["scope_kind"] and existing.get("scope_id") == item["scope_id"] for existing in store["connections"]):
-            abort(409, "this connection already exists in the selected scope")
-        store["connections"].append(item)
-        _write_json(CONNECTIONS_FILE, store)
-    return jsonify({"connection": _public_connection(item)}), 201
+    payload, expected_revision, idempotency_key, actor, _, _ = _connection_command(body)
+    if expected_revision is not None:
+        abort(400, "expected_revision is not valid for connection creation")
+    try:
+        result = _connection_service_or_abort().execute(
+            action="create", source="manual", actor=actor, target=_connection_target(payload), body=payload,
+            expected_revision=expected_revision, idempotency_key=idempotency_key,
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result, 200 if result.get("replayed") else 201)
 
 
 @api.patch("/api/connections/<connection_id>")
 def connections_update(connection_id: str):
+    _connection_request_guard("manual-update")
+    _require_same_origin()
     connection_id = _clean_id(connection_id, "connection id")
     body = request.get_json(silent=True) or {}
-    with _home_lock, _connections_lock:
-        store = _connection_store()
-        index = next((position for position, item in enumerate(store["connections"]) if item.get("id") == connection_id), None)
-        if index is None:
-            abort(404, "connection not found")
-        previous = store["connections"][index]
-        item = _clean_connection(body, previous)
-        scope_changed = (
-            item.get("scope_kind") != previous.get("scope_kind")
-            or item.get("scope_id") != previous.get("scope_id")
+    payload, expected_revision, idempotency_key, actor, _, _ = _connection_command(body)
+    try:
+        result = _connection_service_or_abort().execute(
+            action="update", source="manual", actor=actor, target=_connection_target(payload, connection_id),
+            body=payload, expected_revision=expected_revision, idempotency_key=idempotency_key,
         )
-        if scope_changed and any(
-            instance.get("config", {}).get("connection_id") == connection_id
-            for home in _home_store()["homes"].values() if isinstance(home, dict)
-            for instance in home.get("instances", [])
-        ):
-            abort(409, "cannot change connection scope while home widgets are bound; unbind it first")
-        if any(
-            position != index
-            and existing.get("name", "").casefold() == item["name"].casefold()
-            and existing.get("scope_kind") == item["scope_kind"]
-            and existing.get("scope_id") == item["scope_id"]
-            for position, existing in enumerate(store["connections"])
-        ):
-            abort(409, "this connection already exists in the selected scope")
-        store["connections"][index] = item
-        _write_json(CONNECTIONS_FILE, store)
-    return jsonify({"connection": _public_connection(item)})
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result)
 
 
 @api.delete("/api/connections/<connection_id>")
 def connections_delete(connection_id: str):
+    _connection_request_guard("manual-delete")
+    _require_same_origin()
     connection_id = _clean_id(connection_id, "connection id")
-    with _home_lock, _connections_lock:
-        homes = _home_store()["homes"].values()
-        if any(
-            instance.get("config", {}).get("connection_id") == connection_id
-            for home in homes if isinstance(home, dict)
-            for instance in home.get("instances", [])
-        ):
-            abort(409, "remove this connection from home widgets before deleting it")
-        store = _connection_store()
-        before = len(store["connections"])
-        store["connections"] = [item for item in store["connections"] if item.get("id") != connection_id]
-        if len(store["connections"]) == before:
-            abort(404, "connection not found")
-        _write_json(CONNECTIONS_FILE, store)
-    return jsonify({"removed": connection_id})
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or not body.get("plan_id"):
+        abort(409, "use POST /api/connections/plan then POST /api/connections/apply for confirmed deletion")
+    if set(body) - {"plan_id", "confirmation_token", "idempotency_key"}:
+        abort(400, "unsupported delete fields")
+    try:
+        key = connections_agent.ConnectionsMutationService.require_idempotency(
+            str(body.get("idempotency_key") or request.headers.get("Idempotency-Key", ""))
+        )
+        result = _connection_service_or_abort().apply_plan(
+            plan_id=str(body["plan_id"]), confirmation_token=str(body.get("confirmation_token") or ""),
+            idempotency_key=key, expected_source="manual", expected_connection_id=connection_id,
+        )
+    except connections_agent.ContractError as error:
+        raise error
+    return _connection_result(result)
