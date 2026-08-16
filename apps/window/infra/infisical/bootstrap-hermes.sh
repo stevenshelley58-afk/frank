@@ -351,7 +351,10 @@ if [[ -z "$identity_id" ]]; then
   identity_response="$(api POST "/api/v1/projects/$project_id/identities" "$identity_payload")"
   identity_id="$(printf '%s' "$identity_response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["identity"]["id"])')"
   membership_payload="$(python3 -c 'import json,sys; print(json.dumps({"roles":[{"role":sys.argv[1],"isTemporary":False}]}))' "$role_slug")"
-  api POST "/api/v1/projects/$project_id/memberships/identities/$identity_id" "$membership_payload" >/dev/null
+  # Current Infisical creates a no-access membership together with a
+  # project-scoped identity, so promote that membership instead of attempting
+  # to create a duplicate.
+  api PATCH "/api/v1/projects/$project_id/memberships/identities/$identity_id" "$membership_payload" >/dev/null
 else
   if [[ ! -f "$state_file" ]]; then
     [[ -n "$hermes_secret_file" && -f "$hermes_secret_file" ]] || die "identity already exists but bootstrap state is absent; refusing to create another credential"
