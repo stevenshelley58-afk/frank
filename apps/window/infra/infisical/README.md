@@ -150,7 +150,8 @@ The bootstrap defaults are the exact identity: project slug
 Community Edition does not permit custom project roles, so the identity is an
 administrator only of this dedicated project. The Hermes broker independently
 locks every operation to `production:/hermes`; the project is not shared with
-another workload. Override the documented `INFISICAL_*` variables before the
+another workload. Bootstrap creates the top-level `/hermes` folder explicitly
+because the v4 secrets API does not create missing paths. Override the documented `INFISICAL_*` variables before the
 first bootstrap if a different identity is required. The bootstrap proves the
 identity has exactly one permanent project role, then logs in with Universal
 Auth and verifies create/read/edit/delete at `production:/hermes` while
