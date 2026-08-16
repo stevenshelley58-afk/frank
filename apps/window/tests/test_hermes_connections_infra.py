@@ -98,6 +98,10 @@ class HermesConnectionsInfraTests(unittest.TestCase):
         self.assertEqual(raised.exception.code, "scope_denied")
 
     def test_config_and_plugin_require_exact_loopback_boundaries(self):
+        try:
+            import yaml  # noqa: F401
+        except ImportError:
+            self.skipTest("PyYAML belongs to the Hermes runtime, not the Window test environment")
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "config.yaml"
             config.write_text(

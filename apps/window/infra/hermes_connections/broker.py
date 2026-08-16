@@ -14,9 +14,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-import yaml
-
-
 MAX_BODY_BYTES = 65536
 MAX_RESPONSE_BYTES = 512 * 1024
 SAFE_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
@@ -40,6 +37,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def load_settings(config_path: Path | None = None) -> dict:
+    try:
+        import yaml
+    except ImportError:
+        raise BrokerError("hermes_yaml_unavailable", 503) from None
     home = Path(os.environ.get("HERMES_HOME", "/home/hermes/.hermes"))
     path = config_path or Path(os.environ.get("HERMES_CONFIG_FILE", str(home / "config.yaml")))
     data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}

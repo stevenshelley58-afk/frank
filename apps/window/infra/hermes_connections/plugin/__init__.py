@@ -9,9 +9,6 @@ import re
 import urllib.error
 import urllib.request
 
-import yaml
-
-
 SAFE_KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$")
 MAX_RESPONSE_BYTES = 512 * 1024
 
@@ -22,6 +19,10 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _settings() -> tuple[str, str]:
+    try:
+        import yaml
+    except ImportError:
+        raise RuntimeError("Hermes PyYAML dependency is unavailable") from None
     home = Path(os.environ.get("HERMES_HOME", "/home/hermes/.hermes"))
     config_path = Path(os.environ.get("HERMES_CONFIG_FILE", str(home / "config.yaml")))
     data = yaml.safe_load(config_path.read_text(encoding="utf-8")) or {}
