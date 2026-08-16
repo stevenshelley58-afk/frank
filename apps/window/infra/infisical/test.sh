@@ -13,6 +13,7 @@ import sys
 
 text = Path(sys.argv[1]).read_text(encoding="utf-8")
 bootstrap = Path(sys.argv[1]).with_name("bootstrap-hermes.sh").read_text(encoding="utf-8")
+instance_bootstrap = Path(sys.argv[1]).with_name("bootstrap-instance.sh").read_text(encoding="utf-8")
 merger = Path(sys.argv[1]).with_name("merge-hermes-config.py").read_text(encoding="utf-8")
 assert "127.0.0.1:${INFISICAL_HOST_PORT:-18082}:8080" in text
 assert '"0.0.0.0:' not in text
@@ -22,7 +23,8 @@ assert re.search(r"image:\s+postgres:16-alpine@sha256:[0-9a-f]{64}", text)
 assert re.search(r"image:\s+redis:7\.4-alpine@sha256:[0-9a-f]{64}", text)
 assert "name: infisical_pg_data" in text
 assert "name: infisical_redis_data" in text
-assert "internal: true" in text
+assert "internal: true" not in text
+assert "loopback-only publication" in text
 assert "ports:" in text
 assert text.count("env_file:") == 1, "only backend may receive the complete Infisical env file"
 assert "      - frank" not in text
@@ -41,6 +43,11 @@ assert "HERMES_CONNECTIONS_INFISICAL_PROJECT_ID=" not in bootstrap
 assert "HERMES_CONNECTIONS_INFISICAL_ENVIRONMENT=" not in bootstrap
 assert "HERMES_CONNECTIONS_INFISICAL_SECRET_PATH=" not in bootstrap
 assert "plugins.entries.connections-agent.settings" in merger
+assert "/api/v1/admin/bootstrap" in instance_bootstrap
+assert ".instance-bootstrap-token" in instance_bootstrap
+assert 'rm -f -- "$token_file"' in instance_bootstrap
+assert "identity.credentials.token" not in instance_bootstrap
+assert "print(admin_token" not in instance_bootstrap
 for key in ("enabled", "frank_url", "infisical_url", "infisical_project_id", "infisical_environment", "secret_path", "resend_secret_name"):
     assert f'"{key}"' in merger
 print("static policy checks passed")

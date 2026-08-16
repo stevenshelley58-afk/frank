@@ -128,10 +128,12 @@ Its status vocabulary remains exactly `setup_needed`, `connected`,
 verification. The vault/provider endpoints above are additive read models and
 do not replace the Connections store.
 
-This Frank commit implements only the client/boundary and safe metadata
-surface. It does not implement or claim that the Hermes-side vault broker
-service exists; `HERMES_VAULT_BROKER_URL` must point to that separately
-deployed service.
+The production Hermes-side activation bundle is tracked under
+`apps/window/infra/hermes_connections`. It installs a hardened systemd service
+as the dedicated `hermes` user, binds it only to Frank's private Docker gateway
+at `172.16.1.1:18083`, and authenticates to the private loopback Infisical CE
+service with Universal Auth credentials that never enter Frank. Frank receives
+only the exact private broker URL and its dedicated bearer credential.
 
 The additive provider catalog uses the constrained display states `ready`,
 `setup_needed`, and `error`: vault `verified` maps to `ready`; unavailable or

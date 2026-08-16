@@ -5,64 +5,55 @@ integration. It is executed only after the Frank revision, Hermes plugin
 contract, broker route/port, and Infisical bundle have been reviewed together.
 No step publishes the private ingress or weakens public Caddy header policy.
 
-## Safe base-Window release
+## Complete production release
 
-The Window may be released before the separately owned Hermes Connections
-Agent or vault broker exists. In that state, keep
-`HERMES_CONNECTIONS_AGENT_KEY`, `HERMES_VAULT_BROKER_KEY`, and
-`HERMES_VAULT_BROKER_URL` absent rather than inventing placeholders. The
-deployment requires only the existing Hermes API and Frank basic-auth values;
-authenticated agent routes remain disabled, and vault/provider health reports
-`setup_needed`. This is a fail-closed partial activation, not evidence that the
-private integrations are live.
+Activate private Infisical and the Hermes Connections bundle before the Window
+deploy. The activation generates dedicated keys on the VPS, bootstraps a
+fixed-scope Universal Auth identity, enables the opt-in Hermes plugin, starts
+the private broker, and writes only the two dedicated Frank credentials plus
+the private broker URL into Window's 0600 environment file.
 
-Run the full order below before adding any of those three values or claiming
-the private integrations are active.
+The base Window deploy remains fail-closed when these services are unavailable,
+which preserves recovery and rollback safety. A complete release is not signed
+off until the Hermes plugin, broker, and vault checks below are live.
 
 ## Release order
 
 1. **Validate `/srv/frank/secrets/window.env`.** Work on the VPS with the
    candidate SHA checked out at `/projects/frank`. Confirm the file exists, is
    a regular non-symlink, and is mode `0600`; refuse the release otherwise.
-   Do not print or copy the file to logs. Confirm that the Frank-required keys
-   are present, including the exact Hermes-supplied
-   `HERMES_VAULT_BROKER_URL`; never invent a dashboard or main-API port.
+   Do not print or copy the file to logs. Confirm the core Hermes API and Frank
+   basic-auth values are present. The activation bundle adds the broker values;
+   never invent a dashboard or main-API port.
 
-2. **Seed the Frank keys.** Populate the existing `window.env` through the
-   approved secret handoff, preserving its `0600` mode. The required values
-   are `HERMES_API_KEY`, basic-auth user/hash,
-   `HERMES_CONNECTIONS_AGENT_KEY`, `HERMES_VAULT_BROKER_KEY`, and the exact
-   `HERMES_VAULT_BROKER_URL`. Frank stores no Infisical client secret.
-
-3. **Start and private-canary Infisical.** From
+2. **Start and private-canary Infisical.** From
    `apps/window/infra/infisical`, run `./deploy.sh` and `./check.sh`. Confirm
    the service is bound only to `127.0.0.1:18082`, its health/status endpoint
    responds through the private path, and its database/Redis remain internal.
    Preserve named volumes; never use `docker compose down -v`.
 
-4. **Bootstrap Hermes config and credentials.** Run the accepted Infisical
-   bootstrap with the Hermes-owned `HERMES_SECRET_FILE`. Keep Universal Auth
+3. **Bootstrap Hermes config and credentials.** Run
+   `./bootstrap-instance.sh` from the Infisical bundle. Keep Universal Auth
    client credentials in Hermes' `0600` secret store, not in Frank, and place
    runtime callback/Infisical URLs in Hermes `config.yaml`, not Frank's root
    `.env.example`. The Frank callback URL is the private host-side
    `http://127.0.0.1:18080`.
 
-5. **Deploy and canary the Hermes Connections Agent.** Install the named
-   Connections Agent in Hermes' single `default` profile. Configure its exact
-   authenticated inspect and plan/apply seams and the exact broker route
-   supplied by the Hermes lane. Run the Hermes provider-receipt canary:
-   manual connected metadata -> Frank plan/apply `202 waiting_for_provider` ->
-   authenticated Hermes receipt -> verified. A direct metadata PATCH to
-   `verified` is not a valid canary.
+4. **Deploy the Hermes Connections Agent and broker.** Run `./deploy.sh` and
+   `./check.sh` from `apps/window/infra/hermes_connections`. The committed
+   `hermes_connections` bundle installs the named plugin in Hermes' single
+   `default` profile and starts the authenticated broker on Frank's private
+   Docker gateway. The bundle generates the dedicated keys without printing
+   them and gives Frank no Infisical identity or client secret.
 
-6. **Verify the private ports `18082` and `18080`.** Confirm Infisical remains
+5. **Verify private ports `18082`, `18083`, and `18080`.** Confirm Infisical remains
    loopback-only and the Frank Window is bound as
    `127.0.0.1:18080:8080`. Exercise the authenticated Hermes callback through
    that private path and verify Authorization is preserved. Public Caddy must
    continue stripping Authorization before proxying to the browser-facing
    Window; do not add a public unauthenticated callback route.
 
-7. **Deploy Frank.** Run `apps/window/deploy.sh` for the exact committed SHA.
+6. **Deploy Frank.** Run `apps/window/deploy.sh` for the exact committed SHA.
    It validates the secret boundary, derives a Caddy env file containing only
    basic-auth settings, and uses the existing private basic-auth hash solely
    for Caddy's overwritten internal vault operator-attestation header. Caddy
@@ -70,6 +61,12 @@ the private integrations are active.
    builds the Window image, imports the runtime modules
    inside the container, waits for the healthcheck, and runs the API health
    canary. Preserve `/srv/frank/data/window`, including chat data and uploads.
+
+7. **Run the end-to-end private canary.** Exercise authenticated Hermes inspect
+   and the vault health route through Frank. Then run the provider-receipt
+   sequence: connected metadata -> Frank plan/apply `202 waiting_for_provider`
+   -> authenticated Hermes receipt -> verified. A direct metadata PATCH to
+   `verified` is not a valid canary.
 
 ## Rollback
 

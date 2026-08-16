@@ -29,12 +29,12 @@ class InfraContractTest(unittest.TestCase):
         runbook = (ROOT / "docs" / "FRANK_RELEASE_RUNBOOK.md").read_text(encoding="utf-8")
         order = [
             "Validate `/srv/frank/secrets/window.env`",
-            "Seed the Frank keys",
             "Start and private-canary Infisical",
             "Bootstrap Hermes config and credentials",
-            "Deploy and canary the Hermes Connections Agent",
-            "Verify the private ports `18082` and `18080`",
+            "Deploy the Hermes Connections Agent and broker",
+            "Verify private ports `18082`, `18083`, and `18080`",
             "Deploy Frank",
+            "Run the end-to-end private canary",
         ]
         positions = [runbook.index(item) for item in order]
         self.assertEqual(positions, sorted(positions))

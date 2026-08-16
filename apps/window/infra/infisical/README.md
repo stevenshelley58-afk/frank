@@ -64,21 +64,34 @@ If port `18082` is already used, set `INFISICAL_HOST_PORT` before the first
 deploy. The value is then persisted in the external env file. `deploy.sh`
 refuses a port already in use and refuses any non-loopback compose binding.
 
-## One-time human bootstrap
+## One-time automated bootstrap
 
-The official Compose flow requires the first user to sign up as the instance
-administrator. This is the only UI step. It stays private: after deployment,
-create an SSH tunnel from the operator workstation:
+Infisical's official programmatic bootstrap endpoint creates the first local
+admin, organization, and instance-admin identity without exposing the UI. The
+wrapper generates a random admin password, stores it only in the root-owned
+`/srv/infisical/secrets/admin.env` recovery file, creates the fixed-scope
+Hermes Universal Auth identity, and discards the temporary instance-admin token
+after the CRUD/denial canary passes:
+
+```bash
+cd /projects/frank/apps/window/infra/infisical
+./bootstrap-instance.sh
+```
+
+For recovery UI access only, keep it private by creating an SSH tunnel from the
+operator workstation:
 
 ```bash
 ssh -N -L 18082:127.0.0.1:18082 <vps-host>
 ```
 
-Open `http://127.0.0.1:18082` through that tunnel, create the first admin
-account, and close the tunnel. No public DNS or port is needed. Obtain a
-short-lived admin API token from that account, then run the API bootstrap from
-the VPS without putting the token in a file. Set the exact default-profile
-config path and Hermes-owned credentials file:
+Open `http://127.0.0.1:18082` through that tunnel and use the VPS-only recovery
+credentials. Close the tunnel afterward. No public DNS or port is needed.
+
+The lower-level API bootstrap remains available for an existing manually
+managed Infisical instance. Supply a short-lived admin token only in the process
+environment and set the exact default-profile config and Hermes credentials
+paths:
 
 ```bash
 cd /projects/frank/apps/window/infra/infisical

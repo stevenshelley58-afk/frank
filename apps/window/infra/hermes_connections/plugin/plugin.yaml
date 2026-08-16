@@ -1,0 +1,5 @@
+name: connections-agent
+version: "1.0.0"
+description: Private Frank Connections tools for the single default Hermes profile
+requires_env:
+  - HERMES_CONNECTIONS_AGENT_KEY

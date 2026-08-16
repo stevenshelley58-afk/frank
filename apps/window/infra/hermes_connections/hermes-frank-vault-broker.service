@@ -1,0 +1,28 @@
+[Unit]
+Description=Hermes Frank Vault Broker
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+Environment="HOME=/home/hermes"
+Environment="HERMES_HOME=/home/hermes/.hermes"
+Environment="HERMES_CONFIG_FILE=/home/hermes/.hermes/config.yaml"
+Environment="HERMES_VAULT_BROKER_BIND=172.16.1.1"
+EnvironmentFile=/srv/hermes/secrets/connections.env
+ExecStart=/home/hermes/.hermes/hermes-agent/venv/bin/python /srv/frank/hermes-connections/broker.py
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ProtectSystem=strict
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

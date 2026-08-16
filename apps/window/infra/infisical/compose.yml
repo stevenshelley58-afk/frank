@@ -78,4 +78,6 @@ volumes:
 networks:
   infisical:
     name: infisical_private
-    internal: true
+    # A normal dedicated bridge is required for Docker to publish the backend
+    # on host loopback. Isolation comes from exclusive network membership plus
+    # loopback-only publication; Postgres and Redis publish no ports.
