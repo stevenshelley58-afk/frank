@@ -123,12 +123,14 @@ confirmation hashes, and request bodies are not included in ledger read models.
 
 ## Hermes registration boundary
 
-This Frank repository does not register a Hermes skill, private session, model,
-tool, or provider adapter. Runtime registration remains pending in Hermes. The
-intended registration is one named private Connections Agent skill/session
-inside the single `default` Hermes profile, invoking these two ingress routes
-with `HERMES_CONNECTIONS_AGENT_KEY`; it must call provider adapters through
-Hermes policy and use the returned receipts for follow-up. Until Hermes
-registers that skill/session and supplies the separate key, the Frank agent
-routes intentionally return `503` rather than implying that Frank can execute
-the agent.
+The production activation bundle lives under
+`apps/window/infra/hermes_connections`. It installs one opt-in
+`connections-agent` user plugin inside the single Hermes `default` profile and
+registers inspect, plan, and apply tools against Frank's loopback ingress. The
+plugin receives only the dedicated `HERMES_CONNECTIONS_AGENT_KEY` through the
+Hermes-owned 0600 environment file. Frank still does not host a private
+session, model, provider adapter, tool loop, or Infisical identity.
+
+Provider work remains subject to Hermes policy. The agent must use provider
+receipts for completion and safe code/category receipts for failure;
+registering the plugin does not weaken the evidence requirements above.
