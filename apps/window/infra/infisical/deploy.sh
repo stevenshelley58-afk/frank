@@ -109,5 +109,12 @@ if [[ "$running_names" != "infisical-backend" ]] && curl --silent --output /dev/
 fi
 
 INFISICAL_ENV_FILE="$secret_file" docker compose --project-name infisical --env-file "$secret_file" -f "$compose_file" up -d
+for attempt in $(seq 1 36); do
+  backend_health="$(docker inspect --format '{{if .State.Health}}{{.State.Health.Status}}{{else}}missing{{end}}' infisical-backend 2>/dev/null || true)"
+  [[ "$backend_health" == healthy ]] && break
+  [[ "$backend_health" != unhealthy ]] || die "backend became unhealthy during startup"
+  [[ "$attempt" -lt 36 ]] || die "backend did not become healthy within 180 seconds"
+  sleep 5
+done
 "$script_dir/check.sh"
 echo "Infisical CE is running privately at http://127.0.0.1:$host_port"
