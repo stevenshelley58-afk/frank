@@ -1,0 +1,61 @@
+{
+  "schema": "schema://frank.tool-app-manifest/v1",
+  "id": "outreach",
+  "version": "0.1.1",
+  "name": "Outreach",
+  "description": "Policy-gated outreach planning, approvals, suppression, and outbound delivery requests.",
+  "scopes": ["global", "profile", "project", "workspace", "session"],
+  "settings": {
+    "schema": "schema://frank.tool-app-settings/v1",
+    "properties": {
+      "filters": {"type": "object", "properties": {"role": {"type": "string"}, "company": {"type": "string"}, "territory": {"type": "string"}, "industry": {"type": "string"}}},
+      "sources": {"type": "array", "items": {"type": "string"}},
+      "scoring": {"type": "object", "properties": {"fit": {"type": "number"}, "intent": {"type": "number"}, "evidence_quality": {"type": "number"}}},
+      "personalized_draft": {"type": "object", "properties": {"prompt_ref": {"type": "string"}, "prompt_version": {"type": "string"}, "style_preset": {"type": "string"}, "model_capability": {"type": "string"}, "model_policy": {"type": "string"}}},
+      "sequence": {"type": "object", "properties": {"timing": {"type": "string"}, "limits": {"type": "object"}, "timezone": {"type": "string"}, "quiet_hours": {"type": "object"}}},
+      "approvals_and_suppression": {"type": "object", "properties": {"approval_mode": {"type": "string"}, "project_suppression": {"type": "boolean"}, "global_suppression": {"type": "boolean"}, "policy_version": {"type": "string"}}},
+      "connection": {"type": "object", "properties": {"connection_id": {"type": "string"}, "capability": {"type": "string"}}},
+      "reply_classification": {"type": "object", "properties": {"labels": {"type": "array"}, "prompt_ref": {"type": "string"}, "prompt_version": {"type": "string"}, "model_policy": {"type": "string"}, "confidence_threshold": {"type": "number"}}}
+    }
+  },
+  "pipelines": [{
+    "schema": "schema://frank.tool-app-pipeline/v1",
+    "id": "policy-gated-outbound",
+    "version": "1.0.0",
+    "nodes": [
+      {"id": "list", "kind": "list"},
+      {"id": "sequence", "kind": "sequence"},
+      {"id": "draft", "kind": "draft"},
+      {"id": "approval", "kind": "approval"},
+      {"id": "legal-basis", "kind": "legal-basis"},
+      {"id": "suppression", "kind": "suppression"},
+      {"id": "quiet-hours", "kind": "quiet-hours"},
+      {"id": "idempotency", "kind": "idempotency"},
+      {"id": "delivery-request", "kind": "delivery-request"},
+      {"id": "action-receipt-ref", "kind": "action-receipt-ref"}
+    ],
+    "edges": [
+      {"from": "list", "to": "sequence"}, {"from": "sequence", "to": "draft"}, {"from": "draft", "to": "approval"},
+      {"from": "approval", "to": "legal-basis"}, {"from": "legal-basis", "to": "suppression"}, {"from": "suppression", "to": "quiet-hours"},
+      {"from": "quiet-hours", "to": "idempotency"}, {"from": "idempotency", "to": "delivery-request"}, {"from": "delivery-request", "to": "action-receipt-ref"}
+    ]
+  }],
+  "capabilities": ["list-planning", "sequence-intent", "personalized-drafting", "approval-workflow", "suppression", "delivery-request", "action-receipt-ref"],
+  "connectors": [{"id": "mautic-campaigns", "capabilities": ["campaign-management", "segment-management"]}, {"id": "resend-delivery", "capabilities": ["outbound-delivery"]}],
+  "schedules": [{"id": "sequence-follow-up", "mode": "scheduled", "quiet_hours_aware": true}],
+  "thresholds": [{"id": "reply-confidence", "setting": "reply_classification.confidence_threshold", "minimum": 0}, {"id": "send-rate-limit", "setting": "sequence.limits", "minimum": 0}],
+  "approval_gates": ["approval", "legal-basis", "project-suppression", "global-suppression", "quiet-hours", "idempotency", "connection-capability"],
+  "data_boundary": {
+    "owns": ["lists", "sequence_intent", "approvals", "policy_decisions", "idempotency_decisions", "legal_basis_evidence", "project_suppression", "global_suppression", "action_receipt_refs"],
+    "consumes": ["prospect_refs", "public_evidence_refs", "mail_thread_refs", "mail_message_refs", "mail_reply_events", "mail_bounce_events", "mail_complaint_events", "mail_unsubscribe_events", "connection_action_receipt_refs"],
+    "never_owns": ["raw_mail_transport", "provider_credentials", "mail_thread_body_store", "canonical_replies", "canonical_bounces", "canonical_complaints", "canonical_connection_action_receipt"],
+    "ad_intelligence": "stable_subject_ref_only",
+    "prospect_records_in_ad_evidence": false,
+    "prospect_records_in_public_exports": false,
+    "pii_policy": "do_not_copy_ad_intelligence_pii_or_treat_scraped_availability_as_consent"
+  },
+  "trace": {"schema": "schema://frank.tool-app-trace/v1", "instrumentation": "opentelemetry", "span_prefix": "frank.outreach", "attributes": ["outreach.run_id", "outreach.project_id", "outreach.list_id", "outreach.sequence_id", "outreach.policy_version", "outreach.legal_basis", "outreach.connection_id", "outreach.suppression_result", "outreach.idempotency_key", "outreach.action_receipt_ref"], "event_kinds": ["draft-created", "approval-requested", "policy-checked", "delivery-requested", "delivery-blocked", "action-receipt-referenced", "mail-event-received"]},
+  "health": {"contract": "tool_health.v1", "checks": ["manifest_valid", "policy_loaded", "suppression_index_reachable", "connection_capability_present", "action_receipt_projection_available", "list_unsubscribe_configured", "send_implementation_absent"], "states": ["healthy", "degraded", "blocked", "unavailable"]},
+  "delivery_policy": {"provider_strategy": {"campaigns": "mautic_when_campaign_or_audience_management_fits", "delivery_adapter": "resend_when_delivery_is_selected", "raw_mail": "never_implemented"}, "list_unsubscribe": {"required": true, "headers": ["List-Unsubscribe", "List-Unsubscribe-Post"], "one_click": true}, "send_gate": ["approval", "legal_basis_evidence", "policy_check", "project_suppression_check", "global_suppression_check", "quiet_hours_check", "idempotency_check", "connection_capability_check"], "send_gate_timing": "all_checks_must_run_immediately_before_outreach_delivery_request", "scraped_availability_is_consent": false},
+  "hermes": {"contract": "hermes_tool_boundary.v1", "actions": ["list-build", "sequence-plan", "draft-create", "approval-request", "policy-check", "suppression-check", "delivery-request", "action-receipt-ref", "reply-classify"], "event_kinds": ["list-updated", "draft-created", "approval-requested", "policy-checked", "delivery-requested", "delivery-blocked", "action-receipt-referenced", "mail-event-received"], "forbidden_actions": ["raw-send", "provider-send", "prospect-enrich"], "result_rule": "delivery_request_may_execute_only_after_immediate_gates; Connections and Hermes own the canonical action receipt; Mautic and Resend own provider execution; Frank never sends directly"}
+}

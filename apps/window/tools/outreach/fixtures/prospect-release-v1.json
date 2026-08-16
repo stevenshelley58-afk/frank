@@ -1,0 +1,28 @@
+{
+  "schema": "schema://frank.prospect-discovery-release/v1",
+  "tool_id": "prospect-discovery",
+  "pipeline_id": "discover-enrich-qualify",
+  "pipeline_version": "1.0.0",
+  "consumer_compatibility": ["prospect-release-v1"],
+  "release_id": "prospect-release-1",
+  "version": "1.0.0",
+  "status": "released",
+  "released_at": "2026-08-14T00:00:00Z",
+  "immutable": true,
+  "project_scope": "blockwise",
+  "settings_revision": 1,
+  "settings_ref": "settings://prospect-discovery/blockwise/1",
+  "trace_refs": ["trace://prospect/run-1"],
+  "sanitization_receipt_refs": ["receipt://prospect/run-1/pii-scan", "receipt://prospect/run-1/secret-scan"],
+  "verification_receipt_refs": ["receipt://prospect/p-1/verified"],
+  "candidates": [
+    {
+      "prospect_ref": "prospect://verified/p-1",
+      "contact_ref": "contact://prospect/p-1",
+      "evidence_refs": ["evidence://prospect/p-1/source-1"],
+      "qualification": {"decision": "qualified", "score": 0.92, "policy_ref": "policy://prospect/qualification/v1"},
+      "verification_receipt_ref": "receipt://prospect/p-1/verified"
+    }
+  ],
+  "release_hash": "a81bf1484ceadf0b6e7a9b790cfe37439a41f9fcb169b3151c99a08fd020d4e9"
+}

@@ -1,0 +1,14 @@
+{
+  "schema": "schema://frank.ad-intelligence-pack/v1",
+  "id": "blockwise-real-estate",
+  "manifest_id": "ad-intelligence",
+  "project": "blockwise",
+  "taxonomy": {"categories": ["residential", "commercial", "land", "development"], "markets": ["Australia"], "languages": ["en"]},
+  "sources": [{"id": "approved-public-surfaces", "kind": "browser", "locator": "configured-by-hermes", "access": "public-only"}],
+  "cadence": {"mode": "weekly", "interval_minutes": 10080, "timezone": "Australia/Perth"},
+  "classification": {"prompt_ref": "prompt://ad-intelligence/classify/real-estate/v1", "prompt_version": "1", "style_preset": "real-estate-neutral", "model_policy": {"allowed": ["hermes-policy-selected"], "fallback": "quarantine", "temperature": 0}},
+  "media": {"required": true, "min_width": 640, "min_height": 360, "allowed_types": ["image", "video"], "ocr": false},
+  "thresholds": {"publish_confidence": 0.85, "max_missing_fields": 1, "max_retries": 3},
+  "retention": {"raw_days": 14, "normalized_days": 365, "receipts_days": 730},
+  "approval": {"publish": "human_or_hermes_policy", "new_source": "human", "low_confidence": "quarantine"}
+}

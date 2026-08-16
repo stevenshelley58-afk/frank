@@ -1,0 +1,85 @@
+{
+  "schema": "schema://frank.ad-intelligence-release/v1",
+  "tool_id": "ad-intelligence",
+  "pipeline_id": "ad-radar-pipeline",
+  "pipeline_version": "1.0.0",
+  "consumer_compatibility": [
+    "ad-intelligence-public-v1"
+  ],
+  "release_id": "release-1",
+  "version": "1.0.0",
+  "status": "released",
+  "released_at": "2026-08-14T00:00:01Z",
+  "immutable": true,
+  "project_scope": "blockwise",
+  "checksum": "84afae4e14dace7517dd135cfbe45fd513cb7b85163bd72790b16b2f6c1a6e18",
+  "provenance_refs": [
+    "source://a-1"
+  ],
+  "trace_refs": [
+    "trace://run-1"
+  ],
+  "settings_revision": 1,
+  "settings_ref": "settings://ad-radar/1",
+  "qa_receipt": {
+    "decision": "pass",
+    "receipt_ref": "receipt://qa/run-1",
+    "checked_at": "2026-08-14T00:00:01Z"
+  },
+  "sanitization_receipts": {
+    "pii_scan": {
+      "status": "passed",
+      "receipt_id": "pii-scan-1",
+      "scanned_at": "2026-08-14T00:00:01Z"
+    },
+    "secret_scan": {
+      "status": "passed",
+      "receipt_id": "secret-scan-1",
+      "scanned_at": "2026-08-14T00:00:01Z"
+    }
+  },
+  "release_hash": "f0046362b6bd2317c30f7f16e4ee786a351982b9d89f0827feeddb93f5cf90fe",
+  "public_export": {
+    "schema": "schema://frank.ad-intelligence-public/v1",
+    "project": "blockwise",
+    "generated_at": "2026-08-14T00:00:00Z",
+    "creatives": [
+      {
+        "id": "a-1",
+        "source_ref": "https://public.example/ad",
+        "advertiser": "Example",
+        "market": null,
+        "category": null,
+        "copy": {
+          "headline": "A public ad",
+          "body": null,
+          "cta": null
+        },
+        "destination_ref": null,
+        "observed": {
+          "first_seen": "2026-08-13T00:00:00Z",
+          "last_seen": "2026-08-14T00:00:00Z"
+        },
+        "media": [
+          {
+            "asset_ref": "media://a-1",
+            "kind": "image",
+            "width": 1200,
+            "height": 800,
+            "qa_status": "passed"
+          }
+        ],
+        "classification": {
+          "label": "listing",
+          "confidence": 0.95,
+          "receipt_refs": [
+            "receipt://classification/a-1"
+          ],
+          "provenance_refs": [
+            "source://a-1"
+          ]
+        }
+      }
+    ]
+  }
+}
