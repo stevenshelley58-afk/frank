@@ -50,6 +50,8 @@ assert "HERMES_CONNECTIONS_INFISICAL_PROJECT_ID=" not in bootstrap
 assert "HERMES_CONNECTIONS_INFISICAL_ENVIRONMENT=" not in bootstrap
 assert "HERMES_CONNECTIONS_INFISICAL_SECRET_PATH=" not in bootstrap
 assert "plugins.entries.connections-agent.settings" in merger
+assert 'os.chown(temp_path, owner_uid, owner_gid)' in merger
+assert 'existing.st_uid' in merger and 'existing.st_gid' in merger
 deploy = Path(sys.argv[1]).with_name("deploy.sh").read_text(encoding="utf-8")
 assert "backend did not become healthy within 180 seconds" in deploy
 assert "backend became unhealthy during startup" in deploy

@@ -63,7 +63,14 @@ def ensure_mapping(value: Any, label: str) -> Any:
     return value
 
 
-def atomic_write(yaml: Any, config_path: Path, document: Any, mode: int) -> None:
+def atomic_write(
+    yaml: Any,
+    config_path: Path,
+    document: Any,
+    mode: int,
+    owner_uid: int,
+    owner_gid: int,
+) -> None:
     directory = config_path.parent
     fd, temp_name = tempfile.mkstemp(prefix=f".{config_path.name}.", dir=directory)
     temp_path = Path(temp_name)
@@ -75,6 +82,11 @@ def atomic_write(yaml: Any, config_path: Path, document: Any, mode: int) -> None
         # chmod by path works for both the Linux VPS and local Windows checks;
         # the target's existing mode is retained before the atomic replacement.
         os.chmod(temp_path, stat.S_IMODE(mode))
+        # Bootstrap normally runs as root while Hermes owns config.yaml. Keep
+        # that ownership across the atomic replacement; an unprivileged owner
+        # already creates the temporary file with the correct identity.
+        if hasattr(os, "geteuid") and os.geteuid() == 0:
+            os.chown(temp_path, owner_uid, owner_gid)
         os.replace(temp_path, config_path)
         try:
             directory_fd = os.open(directory, os.O_RDONLY)
@@ -132,7 +144,15 @@ def main() -> int:
     if changed:
         for key, value in values.items():
             settings[key] = value
-        atomic_write(yaml, config_path, document, config_path.stat().st_mode)
+        existing = config_path.stat()
+        atomic_write(
+            yaml,
+            config_path,
+            document,
+            existing.st_mode,
+            existing.st_uid,
+            existing.st_gid,
+        )
         print(f"updated Hermes Connections Agent settings in {config_path}")
     else:
         print(f"Hermes Connections Agent settings already match {config_path}")
