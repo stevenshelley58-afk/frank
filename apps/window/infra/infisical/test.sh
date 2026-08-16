@@ -36,8 +36,11 @@ assert 'REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}' in text
 assert "HERMES_CONNECTIONS_INFISICAL_TOKEN" not in bootstrap
 assert "login_response" not in bootstrap
 assert "emit-once" not in bootstrap
-assert 'role_slug="${INFISICAL_ROLE_SLUG:-hermes-vault-broker}"' in bootstrap
-assert '"name": "Hermes Vault Broker"' in bootstrap
+assert 'role_slug="admin"' in bootstrap
+assert 'api POST "/api/v1/projects/$project_id/roles"' not in bootstrap
+assert 'built-in $role_slug project role' in bootstrap
+assert 'another project denied. Broker scope enforcement is verified after activation.' in bootstrap
+assert 'for denied_kind in path environment project' not in bootstrap
 assert "HERMES_CONNECTIONS_INFISICAL_URL=" not in bootstrap
 assert "HERMES_CONNECTIONS_INFISICAL_PROJECT_ID=" not in bootstrap
 assert "HERMES_CONNECTIONS_INFISICAL_ENVIRONMENT=" not in bootstrap

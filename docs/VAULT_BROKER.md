@@ -8,8 +8,12 @@ generic Infisical proxy.
 
 The Hermes-side broker may use the direct Infisical v4 secrets API against a
 self-hosted Community Edition instance. It must use a project-scoped token
-with only the required environment/path permissions, and must request
+bound to Frank's dedicated vault project, and must request
 `viewSecretValue=false` and `expandSecretReferences=false` for metadata lists.
+Community Edition blocks custom project roles, so the machine identity uses
+the built-in project-admin role inside that otherwise-empty project. The broker
+still rejects every project, environment, or path outside the configured
+`production:/hermes` boundary.
 The CE service-token scope is not equivalent to write-without-read access:
 Infisical service tokens can be provisioned with read and/or write access, but
 the broker must not claim that a read-capable token is write-only. Secret
