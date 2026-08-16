@@ -69,7 +69,12 @@ class ToolAppContractTest(unittest.TestCase):
             outside_dir.mkdir()
             (outside_dir / "manifest.json").write_text("{}", encoding="utf-8")
             (outside_dir / "home.json").write_text("{}", encoding="utf-8")
-            (Path(root) / "weekly-report").symlink_to(outside_dir, target_is_directory=True)
+            try:
+                (Path(root) / "weekly-report").symlink_to(outside_dir, target_is_directory=True)
+            except OSError as error:
+                if getattr(error, "winerror", None) == 1314:
+                    self.skipTest("Windows symlink privilege is unavailable")
+                raise
             with self.assertRaises(ContractError):
                 discover_tool_homes(root)
 
@@ -80,7 +85,12 @@ class ToolAppContractTest(unittest.TestCase):
             (app_dir / "manifest.json").write_text("{}", encoding="utf-8")
             outside_home = Path(outside) / "home.json"
             outside_home.write_text("{}", encoding="utf-8")
-            (app_dir / "home.json").symlink_to(outside_home)
+            try:
+                (app_dir / "home.json").symlink_to(outside_home)
+            except OSError as error:
+                if getattr(error, "winerror", None) == 1314:
+                    self.skipTest("Windows symlink privilege is unavailable")
+                raise
             with self.assertRaises(ContractError):
                 discover_tool_homes(root)
 
