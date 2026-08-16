@@ -36,7 +36,7 @@ fi
 if [[ ! -f "$secret_file" ]]; then
   tmp="$(mktemp "$secret_dir/.window.env.XXXXXX")"
   trap 'rm -f -- "$tmp"' EXIT
-  for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH HERMES_CONNECTIONS_AGENT_KEY HERMES_VAULT_BROKER_KEY HERMES_VAULT_BROKER_URL; do
+  for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH; do
     value=""
     for source in /frank/window/.env /frank/deployed/infra/.env; do
       [[ -f "$source" ]] || continue
@@ -49,19 +49,41 @@ if [[ ! -f "$secret_file" ]]; then
     }
     printf '%s\n' "$value" >> "$tmp"
   done
+  # Private Hermes extensions are optional until their separately deployed
+  # routes exist. Preserve exact values when an existing source has them, but
+  # never invent a key or broker URL merely to make a release pass.
+  for key in HERMES_CONNECTIONS_AGENT_KEY HERMES_VAULT_BROKER_KEY HERMES_VAULT_BROKER_URL; do
+    for source in /frank/window/.env /frank/deployed/infra/.env; do
+      [[ -f "$source" ]] || continue
+      value="$(grep -m1 -E "^${key}=" "$source" || true)"
+      if [[ -n "$value" ]]; then
+        printf '%s\n' "$value" >> "$tmp"
+        break
+      fi
+    done
+  done
   chmod 0600 "$tmp"
   mv -f -- "$tmp" "$secret_file"
   trap - EXIT
 fi
 
-# Validate the complete private ingress/broker contract before any build or
-# container replacement. Never print values from the secret file.
-for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH HERMES_CONNECTIONS_AGENT_KEY HERMES_VAULT_BROKER_KEY HERMES_VAULT_BROKER_URL; do
+# Validate the core Window boundary before any build or container replacement.
+# Private Hermes extensions remain fail-closed when their exact deployment
+# contract is absent; placeholders and guessed URLs are never accepted.
+for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH; do
   grep -q -E "^${key}=[^[:space:]]" "$secret_file" || {
     echo "missing required $key in $secret_file" >&2
     exit 1
   }
 done
+
+if ! grep -q -E '^HERMES_CONNECTIONS_AGENT_KEY=[^[:space:]]' "$secret_file"; then
+  echo "Connections Agent ingress is not configured; authenticated agent routes remain disabled." >&2
+fi
+if ! grep -q -E '^HERMES_VAULT_BROKER_KEY=[^[:space:]]' "$secret_file" \
+  || ! grep -q -E '^HERMES_VAULT_BROKER_URL=[^[:space:]]' "$secret_file"; then
+  echo "Hermes vault broker is not configured; vault/provider status remains setup_needed." >&2
+fi
 
 # Caddy receives only the two values required by its basic-auth directive.
 # Rebuild this derived file without ever passing Window or Hermes credentials

@@ -41,3 +41,13 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("rollback", runbook.lower())
         self.assertIn("chat data", runbook.lower())
         self.assertIn("non-symlink", runbook)
+
+    def test_deploy_keeps_unconfigured_hermes_extensions_fail_closed(self):
+        deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        required = deploy.split("# Validate the core Window boundary", 1)[1].split("done", 1)[0]
+        self.assertIn("HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH", required)
+        self.assertNotIn("HERMES_CONNECTIONS_AGENT_KEY", required)
+        self.assertNotIn("HERMES_VAULT_BROKER_KEY", required)
+        self.assertIn("Connections Agent ingress is not configured", deploy)
+        self.assertIn("vault/provider status remains setup_needed", deploy)
+        self.assertIn("never invent a key or broker URL", deploy)
