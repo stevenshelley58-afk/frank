@@ -340,6 +340,17 @@ if [[ -z "$environment_id" ]]; then
 fi
 [[ -n "$environment_id" ]] || die "could not resolve the $environment_slug environment"
 
+[[ "$secret_path" =~ ^/[A-Za-z0-9_-]+$ ]] || die "INFISICAL_SECRET_PATH must be one safe top-level folder"
+folder_name="${secret_path#/}"
+folder_list="$(api GET "/api/v2/folders?projectId=$project_id&environment=$environment_slug&path=%2F")"
+folder_id="$(printf '%s' "$folder_list" | json_find_id folders name "$folder_name")"
+if [[ -z "$folder_id" ]]; then
+  folder_payload="$(python3 -c 'import json,sys; print(json.dumps({"projectId":sys.argv[1],"environment":sys.argv[2],"name":sys.argv[3],"path":"/","description":"Private Hermes vault scope."}))' "$project_id" "$environment_slug" "$folder_name")"
+  folder_response="$(api POST '/api/v2/folders' "$folder_payload")"
+  folder_id="$(printf '%s' "$folder_response" | python3 -c 'import json,sys; print(json.load(sys.stdin)["folder"]["id"])')"
+fi
+[[ -n "$folder_id" ]] || die "could not resolve the $secret_path secret folder"
+
 role_list="$(api GET "/api/v1/projects/$project_id/roles")"
 role_id="$(printf '%s' "$role_list" | json_find_id roles slug "$role_slug")"
 [[ -n "$role_id" ]] || die "could not resolve the built-in $role_slug project role"
