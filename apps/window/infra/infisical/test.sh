@@ -43,6 +43,9 @@ assert "HERMES_CONNECTIONS_INFISICAL_PROJECT_ID=" not in bootstrap
 assert "HERMES_CONNECTIONS_INFISICAL_ENVIRONMENT=" not in bootstrap
 assert "HERMES_CONNECTIONS_INFISICAL_SECRET_PATH=" not in bootstrap
 assert "plugins.entries.connections-agent.settings" in merger
+deploy = Path(sys.argv[1]).with_name("deploy.sh").read_text(encoding="utf-8")
+assert "backend did not become healthy within 180 seconds" in deploy
+assert "backend became unhealthy during startup" in deploy
 assert "/api/v1/admin/bootstrap" in instance_bootstrap
 assert ".instance-bootstrap-token" in instance_bootstrap
 assert 'rm -f -- "$token_file"' in instance_bootstrap
