@@ -1,0 +1,16 @@
+{
+  "name": "frank-window-graph-workbench",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:graph": "node scripts/build-graph-workbench.mjs",
+    "test:graph": "node --test tests/graph_client.test.mjs",
+    "test:graph:browser": "npm run build:graph && node --test tests/graph_browser.test.mjs"
+  },
+  "dependencies": {
+    "@maxgraph/core": "0.24.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9"
+  }
+}

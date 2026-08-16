@@ -26,6 +26,7 @@ frank.fail {
             fields {
                 request>headers>Authorization delete
                 request>headers>Proxy-Authorization delete
+                request>headers>X-Frank-Operator-Attestation delete
                 request>headers>Cookie delete
                 request>uri delete
                 response>headers>Set-Cookie delete
@@ -62,6 +63,8 @@ frank.fail {
                 header_up X-Real-IP {remote_host}
                 header_up X-Forwarded-Proto https
                 header_up -Authorization
+                header_up -X-Frank-Operator-Attestation
+                header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}
                 flush_interval -1
             }
         }

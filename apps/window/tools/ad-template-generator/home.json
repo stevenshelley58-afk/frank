@@ -1,0 +1,16 @@
+{
+  "id": "ad-template-generator",
+  "name": "Ad Template Generator",
+  "kind": "tool",
+  "blurb": "Reference-clone ad templates with visible QA, human native-pixel approval, and immutable releases.",
+  "capabilities": [
+    "inspect-source-provenance",
+    "extract-customer-input-contract",
+    "clone-reference-to-safe-sample",
+    "review-quality-evidence",
+    "approve-native-pixels",
+    "issue-source-free-release"
+  ],
+  "default_widget_ids": [],
+  "connection_capabilities": ["image.generate"]
+}

@@ -1,0 +1,120 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://frank.ad-intelligence-public/v1",
+  "title": "Frank Ad Intelligence Public Export v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "project", "generated_at", "creatives"],
+  "properties": {
+    "schema": {"const": "schema://frank.ad-intelligence-public/v1"},
+    "project": {"type": "string", "minLength": 1},
+    "generated_at": {"type": "string", "format": "date-time"},
+    "creatives": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/creative"}
+    }
+  },
+  "$defs": {
+    "nullableText": {
+      "oneOf": [
+        {"type": "string", "minLength": 1},
+        {"type": "null"}
+      ]
+    },
+    "copy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["headline", "body", "cta"],
+      "properties": {
+        "headline": {"$ref": "#/$defs/nullableText"},
+        "body": {"$ref": "#/$defs/nullableText"},
+        "cta": {"$ref": "#/$defs/nullableText"}
+      }
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["first_seen", "last_seen"],
+      "properties": {
+        "first_seen": {
+          "oneOf": [
+            {"type": "string", "format": "date-time"},
+            {"type": "null"}
+          ]
+        },
+        "last_seen": {
+          "oneOf": [
+            {"type": "string", "format": "date-time"},
+            {"type": "null"}
+          ]
+        }
+      }
+    },
+    "media": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["asset_ref", "kind", "width", "height", "qa_status"],
+      "properties": {
+        "asset_ref": {"type": "string", "minLength": 1},
+        "kind": {"type": "string", "minLength": 1},
+        "width": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "height": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "qa_status": {"const": "passed"}
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["label", "confidence", "receipt_refs", "provenance_refs"],
+      "properties": {
+        "label": {"type": "string", "minLength": 1},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+        "receipt_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "provenance_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "creative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source_ref", "advertiser", "market", "category", "copy", "destination_ref", "observed", "media", "classification"],
+      "properties": {
+        "id": {"type": "string", "minLength": 1},
+        "source_ref": {"type": "string", "minLength": 1},
+        "advertiser": {"$ref": "#/$defs/nullableText"},
+        "market": {"$ref": "#/$defs/nullableText"},
+        "category": {"$ref": "#/$defs/nullableText"},
+        "copy": {"$ref": "#/$defs/copy"},
+        "destination_ref": {"$ref": "#/$defs/nullableText"},
+        "observed": {"$ref": "#/$defs/observation"},
+        "media": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/media"}
+        },
+        "classification": {
+          "oneOf": [
+            {"$ref": "#/$defs/classification"},
+            {"type": "null"}
+          ]
+        }
+      }
+    }
+  }
+}

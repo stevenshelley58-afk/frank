@@ -1,0 +1,59 @@
+{
+  "schema": "schema://frank.tool-app-manifest/v1",
+  "id": "prospect-discovery",
+  "version": "0.1.1",
+  "release_schema": "schema://frank.prospect-discovery-release/v1",
+  "name": "Prospect Discovery",
+  "description": "Public-contact discovery, enrichment evidence, and qualification. No outreach or delivery.",
+  "scopes": ["profile", "project", "workspace"],
+  "settings": {
+    "schema": "schema://frank.tool-app-settings/v1",
+    "properties": {
+      "filters": {"type": "object", "properties": {"role": {"type": "string"}, "company": {"type": "string"}, "territory": {"type": "string"}, "industry": {"type": "string"}, "firmographic": {"type": "object"}}},
+      "sources": {"type": "array", "items": {"type": "string"}},
+      "scoring": {"type": "object", "properties": {"fit": {"type": "number"}, "intent": {"type": "number"}, "evidence_quality": {"type": "number"}, "recency": {"type": "number"}}},
+      "qualification_policy": {"type": "object", "properties": {"prompt_ref": {"type": "string"}, "prompt_version": {"type": "string"}, "model_policy": {"type": "string"}, "confidence_threshold": {"type": "number"}, "evidence_threshold": {"type": "number"}}},
+      "connection": {"type": "object", "properties": {"connection_id": {"type": "string"}, "capability": {"type": "string"}}}
+    }
+  },
+  "pipelines": [{
+    "schema": "schema://frank.tool-app-pipeline/v1",
+    "id": "discover-enrich-qualify",
+    "version": "1.0.0",
+    "nodes": [
+      {"id": "discover", "kind": "discover"},
+      {"id": "enrich", "kind": "enrich"},
+      {"id": "evidence", "kind": "evidence"},
+      {"id": "qualify", "kind": "qualify"}
+    ],
+    "edges": [{"from": "discover", "to": "enrich"}, {"from": "enrich", "to": "evidence"}, {"from": "evidence", "to": "qualify"}]
+  }],
+  "capabilities": ["public-contact-discovery", "source-evidence", "qualification"],
+  "connectors": [{"id": "public-sources", "capabilities": ["public-source-read"]}],
+  "schedules": [{"id": "on-demand-discovery", "mode": "on_demand"}],
+  "thresholds": [{"id": "evidence-quality", "setting": "scoring.evidence_quality", "minimum": 0}],
+  "approval_gates": [],
+  "data_boundary": {
+    "owns": ["public_contact_enrichment", "source_evidence", "qualification"],
+    "never_owns": ["consent", "send_authorization", "mail_threads", "delivery_receipts"],
+    "ad_intelligence": "stable_subject_ref_only",
+    "prospect_records_in_ad_evidence": false,
+    "prospect_records_in_public_exports": false,
+    "pii_policy": "public_contact_fields_are_minimized_and_must_carry_source_evidence"
+  },
+  "trace": {
+    "schema": "schema://frank.tool-app-trace/v1",
+    "instrumentation": "opentelemetry",
+    "span_prefix": "frank.prospect_discovery",
+    "attributes": ["prospect.run_id", "prospect.source_type", "prospect.evidence_count", "prospect.qualification_state"],
+    "event_kinds": ["discovered", "enriched", "qualified", "rejected"]
+  },
+  "health": {"contract": "tool_health.v1", "checks": ["manifest_valid", "source_adapter_reachable", "evidence_attached", "pii_minimized"], "states": ["healthy", "degraded", "unavailable"]},
+  "hermes": {
+    "contract": "hermes_tool_boundary.v1",
+    "actions": ["discover", "enrich", "qualify"],
+    "event_kinds": ["discovered", "enriched", "qualified", "failed"],
+    "forbidden_actions": ["draft-create", "delivery-request", "compose-intent"],
+    "result_rule": "return_contact_refs_and_evidence_refs; never imply consent"
+  }
+}

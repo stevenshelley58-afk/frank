@@ -166,6 +166,7 @@ define({
   mount(el) {
     const actions = toolIntro(el, "Create reusable note and link widgets, then place them on any appropriate home.");
     actionButton(actions, "Open builder", () => emit("frank:widget-builder"));
+    actionButton(actions, "Home", () => emit("frank:entity-home", { kind: "tool", id: "widget-builder", name: "Widget Builder" }), "tool-secondary");
     const state = statusText(actions);
     fetch("/api/widgets")
       .then((response) => response.ok ? response.json() : Promise.reject(new Error("catalog unavailable")))

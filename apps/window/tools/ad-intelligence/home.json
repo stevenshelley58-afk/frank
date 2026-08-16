@@ -1,0 +1,9 @@
+{
+  "id": "ad-intelligence",
+  "name": "Ad Radar",
+  "kind": "tool",
+  "blurb": "Discover and compare public advertising creative through an auditable Hermes-owned pipeline.",
+  "capabilities": ["public-ad-discovery", "creative-classification", "media-quality-assurance", "evidence-and-receipts"],
+  "default_widget_ids": [],
+  "connection_capabilities": ["browser-public-read"]
+}

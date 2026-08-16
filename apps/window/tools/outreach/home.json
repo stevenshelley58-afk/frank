@@ -1,0 +1,9 @@
+{
+  "id": "outreach",
+  "name": "Outreach",
+  "kind": "tool",
+  "blurb": "Plan policy-gated outreach with approvals, suppression, and delivery records.",
+  "capabilities": ["list-planning", "sequence-intent", "approval-workflow", "suppression", "action-receipt-reference"],
+  "default_widget_ids": [],
+  "connection_capabilities": ["campaign-management", "segment-management", "outbound-delivery"]
+}
