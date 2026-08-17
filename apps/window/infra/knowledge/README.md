@@ -64,8 +64,9 @@ does not claim that services are running.
    The output contains filenames, hashes, tags, and links only. Refresh is an
    explicit operator job; this bundle does not claim a continuous Graphify or
    Obsidian watcher or automatic vault synchronisation.
-3. After the exact Frank release has written the root-owned approved SHA
-   receipt, activate the stack through the zero-argument fixed root helper
+3. After the exact Frank release has written the root-owned approved SHA and
+   helper checksum receipts (`/var/lib/frank/release/approved-sha` and
+   `/var/lib/frank/release/frank-knowledge-helper.sha256`), activate the stack through the zero-argument fixed root helper
    (`/usr/local/sbin/frank-knowledge-deploy`). It accepts no project, path, or
    environment overrides and serializes concurrent runs with `flock`.
    `install-root-helper.sh` installs only that helper. On the first release it

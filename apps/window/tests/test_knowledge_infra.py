@@ -639,10 +639,22 @@ class KnowledgeInfraContractTests(unittest.TestCase):
         self.assertIn("FIXED_PROJECT=project/frank", deploy)
         self.assertIn("flock -n 9", deploy)
         self.assertIn("APPROVED_SHA=/var/lib/frank/release/approved-sha", deploy)
+        self.assertIn("HELPER_RECEIPT=/var/lib/frank/release/frank-knowledge-helper.sha256", deploy)
         self.assertIn('git -C "$REPO_ROOT" status --porcelain --untracked-files=all', deploy)
         self.assertIn('"$approved_sha" == "$release_sha"', deploy)
         self.assertIn("HERMES_ALLOWED_NAMESPACES must be exactly project/frank", deploy)
         self.assertIn("FRANK_KNOWLEDGE_ALLOWED_PROJECTS must be exactly project/frank", deploy)
+        self.assertIn("capture_knowledge_state", deploy)
+        self.assertIn("restore_knowledge_services", deploy)
+        self.assertIn("prior_knowledge_id", deploy)
+        self.assertIn("knowledge_started=1", deploy)
+        for failure_gate in (
+            "Frank window restart failed",
+            "Hermes memory.provider selection failed",
+            "Hermes restart failed",
+            '"$SCRIPT_DIR/check.sh"',
+        ):
+            self.assertIn(failure_gate, deploy)
         self.assertIn("projection accepted: nodes=%d edges=%d", check)
         self.assertNotIn("read().decode())", check)
         self.assertIn("[[ $# -eq 0 ]]", helper)
@@ -654,6 +666,11 @@ class KnowledgeInfraContractTests(unittest.TestCase):
         self.assertIn("hermes ALL=(root) NOPASSWD: %s", installer)
         self.assertIn("legacy_backup", installer)
         self.assertIn("visudo -c", installer)
+        self.assertIn("HELPER_RECEIPT=/var/lib/frank/release/frank-knowledge-helper.sha256", installer)
+        self.assertIn('sha256sum "$helper_stage"', installer)
+        self.assertIn('mv -f -- "$receipt_stage" "$HELPER_RECEIPT"', installer)
+        self.assertIn("HELPER_RECEIPT=/var/lib/frank/release/frank-knowledge-helper.sha256", helper)
+        self.assertIn('approved_helper_sha', helper)
         self.assertIn('"$app/infra/knowledge/install-root-helper.sh"', (Path(__file__).parents[1] / "deploy.sh").read_text(encoding="utf-8"))
 
     def test_secret_parser_rejects_duplicates_unknown_control_and_symlinks(self):

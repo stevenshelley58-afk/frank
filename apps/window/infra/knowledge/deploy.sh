@@ -20,6 +20,8 @@ readonly APPROVED_SHA=/var/lib/frank/release/approved-sha
 readonly LOCK_FILE=/run/lock/frank-knowledge-deploy.lock
 readonly FIXED_PROJECT=project/frank
 readonly PROJECTION_URL=http://frank-knowledge-projection:8092/v2/knowledge/projection
+readonly HELPER_RECEIPT=/var/lib/frank/release/frank-knowledge-helper.sha256
+knowledge_services=(hermes-graphiti-provider frank-knowledge-projection neo4j)
 
 die() { echo "knowledge deploy: $*" >&2; exit 1; }
 [[ "$(id -u)" == 0 ]] || die "run as root"
@@ -67,6 +69,9 @@ config_backup_name="config.yaml.knowledge.$(date -u +%Y%m%dT%H%M%SZ)"
 committed=0
 frank_restarted=0
 hermes_restarted=0
+knowledge_state_captured=0
+knowledge_started=0
+declare -A prior_knowledge_id prior_knowledge_running
 
 restore_path() {
   local target="$1" saved="$2"
@@ -78,6 +83,42 @@ restore_path() {
   fi
 }
 
+capture_knowledge_state() {
+  local service container
+  for service in "${knowledge_services[@]}"; do
+    container="$(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --filter "label=com.docker.compose.service=$service" | head -n 1)"
+    prior_knowledge_id["$service"]="$container"
+    if [[ -n "$container" ]]; then
+      prior_knowledge_running["$service"]="$(docker inspect "$container" --format '{{.State.Running}}' 2>/dev/null || echo false)"
+    else
+      prior_knowledge_running["$service"]="false"
+    fi
+  done
+  knowledge_state_captured=1
+}
+
+restore_knowledge_services() {
+  [[ "$knowledge_started" == 1 && "$knowledge_state_captured" == 1 ]] || return 0
+  local service prior current
+  for service in "${knowledge_services[@]}"; do
+    prior="${prior_knowledge_id[$service]:-}"
+    current="$(docker ps -aq --filter "label=com.docker.compose.project=$COMPOSE_PROJECT" --filter "label=com.docker.compose.service=$service" | head -n 1)"
+    if [[ -z "$prior" ]]; then
+      [[ -z "$current" ]] || docker rm -f "$current" >/dev/null 2>&1
+    elif [[ "${prior_knowledge_running[$service]}" == true ]]; then
+      if docker inspect "$prior" >/dev/null 2>&1; then
+        [[ -z "$current" || "$current" == "$prior" ]] || docker rm -f "$current" >/dev/null 2>&1
+        docker start "$prior" >/dev/null 2>&1 || true
+      elif [[ -f "$HERMES_SECRET_FILE" ]]; then
+        docker compose --project-name "$COMPOSE_PROJECT" --env-file "$HERMES_SECRET_FILE" -f "$SCRIPT_DIR/compose.yml" up -d --no-deps "$service" >/dev/null 2>&1 || true
+      fi
+    else
+      [[ -z "$current" || "$current" == "$prior" ]] || docker rm -f "$current" >/dev/null 2>&1
+      docker stop "$prior" >/dev/null 2>&1 || true
+    fi
+  done
+}
+
 rollback() {
   local status=$?
   [[ "$committed" == 1 ]] && return "$status"
@@ -87,6 +128,7 @@ rollback() {
   restore_path "$FRANK_SECRET_FILE" "$backup/frank-secret"
   restore_path "$HERMES_RUNTIME_ENV" "$backup/runtime-env"
   restore_path "$HERMES_HOME/config.yaml" "$backup/$config_backup_name"
+  restore_knowledge_services
   for unit in hermes-gateway.service hermes-serve.service; do
     dropin="/etc/systemd/system/$unit.d/graphiti-memory.conf"
     restore_path "$dropin" "$backup/$(basename "$unit")-dropin"
@@ -163,6 +205,8 @@ chown root:root "$frank_stage"; chmod 0600 "$frank_stage"
 python3 "$SCRIPT_DIR/secret_env.py" "$frank_stage" frank >/dev/null
 
 docker compose --project-name "$COMPOSE_PROJECT" --env-file "$hermes_stage" -f "$SCRIPT_DIR/compose.yml" config >/dev/null || die "knowledge compose config failed"
+capture_knowledge_state
+knowledge_started=1
 docker compose --project-name "$COMPOSE_PROJECT" --env-file "$hermes_stage" -f "$SCRIPT_DIR/compose.yml" up -d --build
 for _ in $(seq 1 60); do
   ready=1

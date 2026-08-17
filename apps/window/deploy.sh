@@ -154,6 +154,9 @@ install -d -o root -g root -m 0755 -- "$release_dir"
 release_tmp="$(mktemp "$release_dir/.approved-sha.XXXXXX")"
 printf '%s\n' "$(git -C "$repo" rev-parse HEAD)" >"$release_tmp"
 chown root:root "$release_tmp"; chmod 0644 "$release_tmp"; mv -f -- "$release_tmp" "$release_dir/approved-sha"
+helper_sha_tmp="$(mktemp "$release_dir/.frank-knowledge-helper.sha256.XXXXXX")"
+sha256sum "$app/infra/knowledge/root-helper.sh" | awk '{print $1}' >"$helper_sha_tmp"
+chown root:root "$helper_sha_tmp"; chmod 0644 "$helper_sha_tmp"; mv -f -- "$helper_sha_tmp" "$release_dir/frank-knowledge-helper.sha256"
 "$app/infra/knowledge/install-root-helper.sh"
 curl --fail --silent --show-error --output /dev/null \
   --retry 10 --retry-delay 2 --retry-all-errors \

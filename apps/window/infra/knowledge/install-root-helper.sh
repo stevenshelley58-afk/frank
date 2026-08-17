@@ -8,6 +8,7 @@ readonly REPO_ROOT=/projects/frank
 readonly SOURCE=/projects/frank/apps/window/infra/knowledge/root-helper.sh
 readonly TARGET=/usr/local/sbin/frank-knowledge-deploy
 readonly SUDOERS=/etc/sudoers.d/frank-knowledge-deploy
+readonly HELPER_RECEIPT=/var/lib/frank/release/frank-knowledge-helper.sha256
 readonly LEGACY=/etc/sudoers.d/hermes-full-access
 readonly LEGACY_CONTENT='hermes ALL=(ALL:ALL) NOPASSWD: ALL'
 readonly ROLLBACK_DIR=/var/lib/frank/release/sudoers-rollback
@@ -17,7 +18,7 @@ die() { echo "frank knowledge helper install: $*" >&2; exit 1; }
 [[ "$(id -u)" == 0 ]] || die "root is required"
 [[ "$(realpath -e -- "$REPO_ROOT")" == "$REPO_ROOT" ]] || die "canonical repository is unavailable"
 [[ -f "$SOURCE" && ! -L "$SOURCE" ]] || die "committed helper is unavailable"
-for command_name in cmp install mktemp mv rm stat visudo; do
+for command_name in cmp install mktemp mv rm sha256sum stat visudo; do
   command -v "$command_name" >/dev/null 2>&1 || die "$command_name is required"
 done
 [[ ! -L /etc/sudoers.d && ! -L "$ROLLBACK_DIR" ]] || die "fixed system directory is a symlink"
@@ -31,10 +32,12 @@ legacy_removed=0
 helper_backup=""
 sudoers_backup=""
 legacy_backup=""
+receipt_backup=""
 changed=0
 committed=0
 helper_existing=0
 sudoers_existing=0
+receipt_existing=0
 
 restore_backup() {
   local backup="$1" target="$2" mode="$3"
@@ -44,7 +47,7 @@ restore_backup() {
 
 rollback() {
   local status=$?
-  rm -f -- "${helper_stage:-}" "${sudoers_stage:-}"
+  rm -f -- "${helper_stage:-}" "${sudoers_stage:-}" "${receipt_stage:-}"
   [[ "$committed" == 1 || "$changed" == 0 ]] && return "$status"
   set +e
   if [[ "$legacy_removed" == 1 ]]; then
@@ -59,6 +62,11 @@ rollback() {
     restore_backup "$helper_backup" "$TARGET" 0755
   elif [[ "$changed" == 1 && "$helper_existing" == 0 ]]; then
     rm -f -- "$TARGET"
+  fi
+  if [[ -n "$receipt_backup" ]]; then
+    restore_backup "$receipt_backup" "$HELPER_RECEIPT" 0644
+  elif [[ "$changed" == 1 && "$receipt_existing" == 0 ]]; then
+    rm -f -- "$HELPER_RECEIPT"
   fi
   visudo -c >/dev/null 2>&1
   return "$status"
@@ -98,9 +106,21 @@ else
   helper_backup=""
 fi
 
+if [[ -e "$HELPER_RECEIPT" || -L "$HELPER_RECEIPT" ]]; then
+  [[ -f "$HELPER_RECEIPT" && ! -L "$HELPER_RECEIPT" ]] || die "helper checksum receipt is not a regular file"
+  [[ "$(stat -c '%u:%g:%a' -- "$HELPER_RECEIPT")" == "0:0:644" ]] || die "helper checksum receipt ownership or mode is invalid"
+  receipt_existing=1
+  receipt_backup="$(mktemp "$ROLLBACK_DIR/frank-knowledge-helper-sha256.XXXXXX")"
+  install -o root -g root -m 0600 -- "$HELPER_RECEIPT" "$receipt_backup"
+fi
+
 helper_stage="$(mktemp /usr/local/sbin/.frank-knowledge-deploy.XXXXXX)"
 sudoers_stage="$(mktemp /etc/sudoers.d/.frank-knowledge-deploy.XXXXXX)"
+receipt_stage="$(mktemp /var/lib/frank/release/.frank-knowledge-helper.sha256.XXXXXX)"
 install -o root -g root -m 0755 -- "$SOURCE" "$helper_stage"
+helper_sha="$(sha256sum "$helper_stage" | awk '{print $1}')"
+printf '%s\n' "$helper_sha" >"$receipt_stage"
+chown root:root "$receipt_stage"; chmod 0644 "$receipt_stage"
 printf 'hermes ALL=(root) NOPASSWD: %s\n' "$TARGET" >"$sudoers_stage"
 chown root:root "$sudoers_stage"; chmod 0440 "$sudoers_stage"
 visudo -cf "$sudoers_stage" >/dev/null || die "sudoers rule validation failed"
@@ -108,6 +128,7 @@ visudo -cf "$sudoers_stage" >/dev/null || die "sudoers rule validation failed"
 changed=1
 mv -f -- "$helper_stage" "$TARGET"
 mv -f -- "$sudoers_stage" "$SUDOERS"
+mv -f -- "$receipt_stage" "$HELPER_RECEIPT"
 if [[ "$legacy_present" == 1 ]]; then
   rm -f -- "$LEGACY"
   legacy_removed=1
@@ -115,5 +136,5 @@ fi
 visudo -c >/dev/null || die "resulting sudoers configuration is invalid"
 committed=1
 trap - EXIT INT TERM
-rm -f -- "$helper_stage" "$sudoers_stage"
+rm -f -- "$helper_stage" "$sudoers_stage" "$receipt_stage"
 echo "installed fixed Frank knowledge helper"
