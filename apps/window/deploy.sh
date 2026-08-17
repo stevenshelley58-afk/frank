@@ -149,6 +149,11 @@ docker exec frank-window python -c \
   "import connections_agent, home_platform, server, tool_apps; assert connections_agent and home_platform and server and tool_apps"
 docker exec frank-window python -c \
   "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/health',timeout=5)); assert data['ok'] is True"
+release_dir=/var/lib/frank/release
+install -d -o root -g root -m 0755 -- "$release_dir"
+release_tmp="$(mktemp "$release_dir/.approved-sha.XXXXXX")"
+printf '%s\n' "$(git -C "$repo" rev-parse HEAD)" >"$release_tmp"
+chown root:root "$release_tmp"; chmod 0644 "$release_tmp"; mv -f -- "$release_tmp" "$release_dir/approved-sha"
 curl --fail --silent --show-error --output /dev/null \
   --retry 10 --retry-delay 2 --retry-all-errors \
   https://preview.frank.fail/frank-vps-file-explorer-v1/

@@ -52,8 +52,8 @@ does not claim that services are running.
 
 ## Operator model
 
-1. Create a per-project output directory outside the Frank source checkout and
-   run `python knowledge_runner.py project/<id> PROJECT --vault VAULT` with
+1. Create the fixed `project/frank` output directory outside the Frank source
+   checkout and run `python knowledge_runner.py project/frank PROJECT --vault VAULT` with
    `FRANK_KNOWLEDGE_ROOT=/srv/frank/knowledge` (or an equivalent private
    root). On the VPS, run the refresh as root or UID 65532; root refreshes
    normalize only generated output directories/files to UID/GID 65532 and
@@ -64,7 +64,13 @@ does not claim that services are running.
    The output contains filenames, hashes, tags, and links only. Refresh is an
    explicit operator job; this bundle does not claim a continuous Graphify or
    Obsidian watcher or automatic vault synchronisation.
-3. Deploy the provider and Neo4j on the VPS private network with `deploy.sh`.
+3. After the exact Frank release has written the root-owned approved SHA
+   receipt, activate the stack through the zero-argument fixed root helper
+   (`/usr/local/sbin/frank-knowledge-deploy`). It accepts no project, path, or
+   environment overrides and serializes concurrent runs with `flock`.
+   `install-root-helper.sh` installs only that helper and refuses unrelated
+   broad `NOPASSWD: ALL` sudo rules. Deploy the provider and Neo4j on the VPS
+   private network with the helper.
    Require separate `HERMES_GRAPHITI_PROVIDER_TOKEN` and
    `FRANK_KNOWLEDGE_PROJECTION_TOKEN` values, TLS at the ingress, and exact
    namespace/project allow-lists.

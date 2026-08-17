@@ -24,6 +24,7 @@ VAULT_DIR = ""
 GRAPHIFY_DIR = ""
 MAX_BODY = 8 * 1024 * 1024
 KNOWLEDGE_LENS = "knowledge.combined"
+FIXED_PROJECT = "project/frank"
 MAX_RECORDS = 10_000
 PROJECTION_QUERY = """
 MATCH (n)
@@ -95,8 +96,8 @@ def validate_config() -> tuple[str, tuple[str, ...]]:
         raise RuntimeError("FRANK_KNOWLEDGE_PROJECTION_TOKEN is required")
     raw = os.environ.get("FRANK_KNOWLEDGE_ALLOWED_PROJECTS", "")
     projects = tuple(value.strip() for value in raw.split(",") if value.strip())
-    if not projects or len(projects) != len(set(projects)):
-        raise RuntimeError("FRANK_KNOWLEDGE_ALLOWED_PROJECTS must be an exact non-empty allow-list")
+    if projects != (FIXED_PROJECT,):
+        raise RuntimeError("FRANK_KNOWLEDGE_ALLOWED_PROJECTS must be exactly project/frank")
     for project in projects:
         validate_project(project)
     return token, projects

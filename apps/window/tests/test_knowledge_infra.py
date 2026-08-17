@@ -631,6 +631,76 @@ class KnowledgeInfraContractTests(unittest.TestCase):
         self.assertIn("FRANK_KNOWLEDGE_ROOT", compose)
         self.assertIn("/knowledge:ro", compose)
 
+    def test_activation_is_fixed_namespace_root_gated_and_serialized(self):
+        deploy = (ROOT / "deploy.sh").read_text(encoding="utf-8")
+        check = (ROOT / "check.sh").read_text(encoding="utf-8")
+        helper = (ROOT / "root-helper.sh").read_text(encoding="utf-8")
+        installer = (ROOT / "install-root-helper.sh").read_text(encoding="utf-8")
+        self.assertIn("FIXED_PROJECT=project/frank", deploy)
+        self.assertIn("flock -n 9", deploy)
+        self.assertIn("APPROVED_SHA=/var/lib/frank/release/approved-sha", deploy)
+        self.assertIn('git -C "$REPO_ROOT" status --porcelain --untracked-files=all', deploy)
+        self.assertIn('"$approved_sha" == "$release_sha"', deploy)
+        self.assertIn("HERMES_ALLOWED_NAMESPACES must be exactly project/frank", deploy)
+        self.assertIn("FRANK_KNOWLEDGE_ALLOWED_PROJECTS must be exactly project/frank", deploy)
+        self.assertIn("projection accepted: nodes=%d edges=%d", check)
+        self.assertNotIn("read().decode())", check)
+        self.assertIn("[[ $# -eq 0 ]]", helper)
+        self.assertIn("env -i", helper)
+        self.assertIn('git -C "$REPO_ROOT" rev-parse HEAD', helper)
+        self.assertIn('"$approved" == "$sha"', helper)
+        self.assertIn("NOPASSWD: %s", installer)
+        self.assertNotIn("NOPASSWD: ALL", installer)
+
+    def test_secret_parser_rejects_duplicates_unknown_control_and_symlinks(self):
+        import sys
+        sys.path.insert(0, str(ROOT))
+        from secret_env import parse
+
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "knowledge.env"
+            def write(value):
+                path.write_bytes(value.encode("utf-8"))
+                path.chmod(0o600)
+            write("HERMES_ALLOWED_NAMESPACES=project/frank\n")
+            self.assertEqual(parse(path, "knowledge")["HERMES_ALLOWED_NAMESPACES"], "project/frank")
+            for invalid in (
+                "HERMES_ALLOWED_NAMESPACES=project/frank\nHERMES_ALLOWED_NAMESPACES=project/frank\n",
+                "UNKNOWN=value\n",
+                "HERMES_ALLOWED_NAMESPACES=project/frank\r\n",
+                "HERMES_ALLOWED_NAMESPACES=\n",
+            ):
+                write(invalid)
+                with self.assertRaises(ValueError):
+                    parse(path, "knowledge")
+            try:
+                link = Path(temp) / "link"
+                link.symlink_to(path)
+            except (OSError, NotImplementedError):
+                self.skipTest("symlinks unavailable")
+            with self.assertRaises(ValueError):
+                parse(link, "knowledge")
+            broken = Path(temp) / "broken"
+            broken.symlink_to(Path(temp) / "missing")
+            with self.assertRaises(ValueError):
+                parse(broken, "knowledge", allow_missing=True)
+
+    def test_projection_runtime_is_fixed_to_frank(self):
+        import sys
+        sys.path.insert(0, str(ROOT))
+        import projection_server
+        with patch.dict("os.environ", {
+            "FRANK_KNOWLEDGE_PROJECTION_TOKEN": "token",
+            "FRANK_KNOWLEDGE_ALLOWED_PROJECTS": "project/frank",
+        }, clear=True):
+            self.assertEqual(projection_server.validate_config()[1], ("project/frank",))
+        with patch.dict("os.environ", {
+            "FRANK_KNOWLEDGE_PROJECTION_TOKEN": "token",
+            "FRANK_KNOWLEDGE_ALLOWED_PROJECTS": "project/acme",
+        }, clear=True):
+            with self.assertRaises(RuntimeError):
+                projection_server.validate_config()
+
 
 if __name__ == "__main__":
     unittest.main()
