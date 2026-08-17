@@ -72,7 +72,8 @@ def snapshot(status: str, summary: str, data: dict | None = None, links: list[di
     }
 
 
-def internal_link(label: str, *, view: str | None = None, kind: str | None = None, entity_id: str | None = None, name: str | None = None) -> dict | None:
+def internal_link(label: str, *, view: str | None = None, kind: str | None = None, entity_id: str | None = None,
+                  name: str | None = None, action: str | None = None, provider: str | None = None) -> dict | None:
     if view is not None and view not in KNOWN_INTERNAL_VIEWS:
         return None
     if kind is not None and kind not in KNOWN_ENTITY_KINDS:
@@ -81,11 +82,19 @@ def internal_link(label: str, *, view: str | None = None, kind: str | None = Non
         return None
     if kind is not None and entity_id is None:
         return None
+    if action is not None and action != "add":
+        return None
+    if provider is not None and not SAFE_ID.fullmatch(str(provider)):
+        return None
+    if (action is not None or provider is not None) and view != "connections":
+        return None
     target = {key: value for key, value in {
         "view": view,
         "kind": kind,
         "id": entity_id,
         "name": name,
+        "action": action,
+        "provider": provider,
     }.items() if value is not None}
     return {"label": label, "kind": "internal", "target": target}
 
@@ -317,8 +326,16 @@ def connections_summary(ctx: ProviderContext) -> dict:
     connections = _scoped_connections(ctx)
     counts = {status: sum(1 for item in connections if item.get("status") == status) for status in ("setup_needed", "connected", "verified", "error")}
     pending = counts["setup_needed"] + counts["connected"] + counts["error"]
+    if not connections:
+        return snapshot("empty", "No apps are connected yet.", {
+            "connections": [],
+            "description": "Choose an available app below to give Frank a provider connection.",
+            "status_is_recorded": True,
+        }, [internal_link("Add a connection", view="connections", action="add")], now=ctx.now)
     status = "attention" if pending else ("ready" if counts["verified"] else "setup_needed")
-    return snapshot(status, f"{len(connections)} recorded connection{'s' if len(connections) != 1 else ''}.", {
+    summary = f"{len(connections)} recorded connection{'s' if len(connections) != 1 else ''}"
+    summary += f"; {pending} need{'s' if pending == 1 else ''} attention." if pending else "."
+    return snapshot(status, summary, {
         "counts": counts,
         "connections": [{
             "id": item.get("id"), "name": item.get("name"), "provider": item.get("provider"),
@@ -334,8 +351,8 @@ def connections_summary(ctx: ProviderContext) -> dict:
 def connection_attention(ctx: ProviderContext) -> dict:
     rows = _attention_connections(ctx)
     if not rows:
-        status = "ready" if ctx.connections else "setup_needed"
-        summary = "No connection setup, verification, or error items are recorded." if ctx.connections else "No connections are recorded yet."
+        status = "ready" if ctx.connections else "empty"
+        summary = "All recorded connections are clear." if ctx.connections else "Nothing needs attention yet."
     else:
         status = "attention"
         awaiting = sum(1 for item in rows if item.get("status") == "connected")
@@ -345,13 +362,19 @@ def connection_attention(ctx: ProviderContext) -> dict:
             if awaiting else
             f"{len(rows)} connection item{'s' if len(rows) != 1 else ''} need setup or review."
         )
-    return snapshot(status, summary, {"rows": [{"name": item.get("name"), "provider": item.get("provider"), "status": item.get("status")} for item in rows]}, [internal_link("Review setup", view="connections")], now=ctx.now)
+    actions = [internal_link("Review connections", view="connections")] if rows else []
+    return snapshot(status, summary, {"rows": [{"name": item.get("name"), "provider": item.get("provider"), "status": item.get("status")} for item in rows]}, actions, now=ctx.now)
 
 
 @register("provider-catalog")
 def provider_catalog(ctx: ProviderContext) -> dict:
-    rows = [{"provider": item.get("provider"), "name": item.get("title"), "capabilities": item.get("capabilities", []), "setup_mode": item.get("setup_mode")} for item in ctx.catalog]
-    return snapshot("ready", f"{len(rows)} provider types are available for setup.", {"rows": rows}, [internal_link("Open Connections", view="connections")], now=ctx.now)
+    rows = [{
+        "provider": item.get("provider"), "name": item.get("title"),
+        "capabilities": item.get("capabilities", []), "setup_mode": item.get("setup_mode"),
+        "open_source": bool(item.get("open_source")), "open_standard": bool(item.get("open_standard")),
+        "license": item.get("license", ""),
+    } for item in ctx.catalog]
+    return snapshot("ready", f"Choose from {len(rows)} available apps and connection types.", {"rows": rows}, [internal_link("Browse available apps", view="connections")], now=ctx.now)
 
 
 @register("provider-coverage")
@@ -396,13 +419,15 @@ def provider_coverage(ctx: ProviderContext) -> dict:
     setup_needed = sum(1 for row in rows if row["status"] == "setup_needed")
     errors = sum(1 for row in rows if row["status"] == "error")
     records_total = sum(row["record_count"] for row in rows)
-    if errors:
+    if not recorded_count:
+        status = "empty"
+    elif errors:
         status = "error"
     elif setup_needed or configured != verified:
         status = "attention" if recorded_count else "setup_needed"
     else:
         status = "ready" if rows else "setup_needed"
-    return snapshot(status, f"{recorded_count} of {len(rows)} provider types have recorded metadata; {verified} verified.", {
+    return snapshot(status, f"{recorded_count} of {len(rows)} app types have a saved connection; {verified} verified.", {
         "rows": rows, "recorded": recorded_count, "verified": verified,
         "configured": configured, "setup_needed": setup_needed, "error": errors,
         "total": len(rows), "records_total": records_total,
