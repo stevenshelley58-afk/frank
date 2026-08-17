@@ -146,7 +146,7 @@ done
 }
 
 docker exec frank-window python -c \
-  "import connections_agent, home_platform, server; assert connections_agent and home_platform and server"
+  "import connections_agent, home_platform, server, tool_apps; assert connections_agent and home_platform and server and tool_apps"
 docker exec frank-window python -c \
   "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/health',timeout=5)); assert data['ok'] is True"
 curl --fail --silent --show-error --output /dev/null \

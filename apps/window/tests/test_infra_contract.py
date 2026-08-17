@@ -10,7 +10,9 @@ class InfraContractTest(unittest.TestCase):
     def test_window_image_copies_all_imported_runtime_modules(self):
         dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("COPY connections_agent.py .", dockerfile)
-        self.assertIn('"import connections_agent, home_platform, server;', (APP / "deploy.sh").read_text(encoding="utf-8"))
+        self.assertIn("COPY tool_apps ./tool_apps", dockerfile)
+        self.assertIn("COPY tools ./tools", dockerfile)
+        self.assertIn('"import connections_agent, home_platform, server, tool_apps;', (APP / "deploy.sh").read_text(encoding="utf-8"))
 
     def test_caddy_receives_only_derived_basic_auth_env(self):
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")

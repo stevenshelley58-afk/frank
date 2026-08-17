@@ -19,6 +19,8 @@ COPY home_providers.py .
 COPY connections_agent.py .
 COPY provider_adapters.py .
 COPY vault_broker.py .
+COPY tool_apps ./tool_apps
+COPY tools ./tools
 COPY graph ./graph
 COPY web /web
 COPY --from=graph-build /build/web/dashboard /web/dashboard
