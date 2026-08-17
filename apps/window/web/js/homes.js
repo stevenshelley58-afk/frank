@@ -219,12 +219,13 @@ function homeEndpoint(home = homeState.home) {
 
 function homeControls() {
   const controls = [];
-  if (homeState.home?.entity.kind === "tool" && homeState.home?.entity.id === "connections") {
+  const isConnectionsHome = homeState.home?.entity.kind === "tool" && homeState.home?.entity.id === "connections";
+  if (isConnectionsHome) {
     controls.push(button("Manage connections", () => window.dispatchEvent(new CustomEvent("frank:connections")), "home-action home-action-primary"));
   }
   if (!homeState.editing) {
     controls.push(button("Add widget", () => beginEditing(true)));
-    controls.push(button("Edit layout", () => beginEditing(false), "home-action home-action-primary"));
+    controls.push(button("Edit layout", () => beginEditing(false), isConnectionsHome ? "home-action" : "home-action home-action-primary"));
   } else {
     controls.push(button("Add widget", () => { homeState.gallery = true; renderHome(); }));
     controls.push(button("Reset", resetHome));
@@ -448,7 +449,12 @@ function appendStatusNote(body, snapshot) {
 function validInternalTarget(item) {
   const target = item?.target;
   if (!target || typeof target !== "object") return null;
-  if (target.view && INTERNAL_VIEWS.has(target.view)) return { view: target.view };
+  if (target.view && INTERNAL_VIEWS.has(target.view)) {
+    const internal = { view: target.view };
+    if (target.view === "connections" && target.action === "add") internal.action = "add";
+    if (target.view === "connections" && /^[a-z0-9][a-z0-9._-]{0,79}$/.test(String(target.provider || ""))) internal.provider = String(target.provider);
+    return internal;
+  }
   if (!INTERNAL_KINDS.has(target.kind) || !/^[a-z0-9][a-z0-9._-]{0,79}$/.test(String(target.id || ""))) return null;
   return { kind: target.kind, id: String(target.id), name: String(target.name || target.id) };
 }
@@ -469,7 +475,9 @@ function appendSnapshotAction(parent, item) {
   const internal = validInternalTarget(item);
   if (item?.kind === "internal" && internal) {
     const action = button(label, () => {
-      if (internal.view) window.dispatchEvent(new CustomEvent("frank:view", { detail: internal.view }));
+      if (internal.view === "connections" && (internal.action || internal.provider)) {
+        window.dispatchEvent(new CustomEvent("frank:connections", { detail: internal }));
+      } else if (internal.view) window.dispatchEvent(new CustomEvent("frank:view", { detail: internal.view }));
       else window.dispatchEvent(new CustomEvent("frank:entity-home", { detail: internal }));
     }, "home-inline-button");
     parent.append(action);
@@ -710,7 +718,31 @@ function renderSnapshot(body, snapshot, widgetId = "") {
     ...(Array.isArray(data.connections) ? data.connections : []),
     ...(Array.isArray(data.recent) ? data.recent : []),
   ];
-  if (rowsData.length) {
+  if (widgetId === "provider-catalog" && rowsData.length) {
+    const providers = node("div", "home-provider-grid");
+    for (const item of rowsData) {
+      if (!item || typeof item !== "object") continue;
+      const name = String(item.name || item.provider || "Provider");
+      const provider = /^[a-z0-9][a-z0-9._-]{0,79}$/.test(String(item.provider || "")) ? String(item.provider) : "";
+      const tile = node("button", "home-provider-tile");
+      tile.type = "button";
+      tile.setAttribute("aria-label", `Add ${name} connection`);
+      tile.addEventListener("click", () => window.dispatchEvent(new CustomEvent("frank:connections", {
+        detail: { action: "add", provider, name, capabilities: Array.isArray(item.capabilities) ? item.capabilities : [] },
+      })));
+      const mark = node("span", "home-provider-mark", name.slice(0, 1).toUpperCase());
+      mark.setAttribute("aria-hidden", "true");
+      const copy = node("div", "home-provider-copy");
+      copy.append(node("strong", "", name));
+      const capabilityCount = Array.isArray(item.capabilities) ? item.capabilities.length : 0;
+      const foundation = item.open_source ? "Open source" : (item.open_standard ? "Open standard" : "");
+      const capabilityLabel = `${capabilityCount} capabilit${capabilityCount === 1 ? "y" : "ies"}`;
+      copy.append(node("span", "", foundation ? `${foundation} · ${capabilityLabel}` : capabilityLabel));
+      tile.append(mark, copy);
+      providers.append(tile);
+    }
+    if (providers.childElementCount) body.append(providers);
+  } else if (rowsData.length) {
     const rows = node("ul", "home-data-rows");
     for (const item of rowsData) {
       if (!item || typeof item !== "object") continue;
@@ -920,6 +952,8 @@ function renderHome() {
   host.classList.toggle("project-signal-grid", isProjectHome());
   host.classList.toggle("grid-stack", isProjectHome());
   host.classList.remove("project-grid-fallback");
+  host.dataset.homeKind = homeState.home.entity.kind;
+  host.dataset.homeId = homeState.home.entity.id;
   const instances = homeState.editing ? homeState.draft : homeState.home.instances;
   const generation = homeState.generation;
   if (!instances.length) {
@@ -1475,14 +1509,23 @@ async function openConnectionsAgent() {
   } catch (error) { $("#connections-status").textContent = error.message || "Connections Agent session unavailable."; }
 }
 
-export async function openConnections() {
+export async function openConnections(options = {}) {
   clearConnectionSecret();
   setTopActions([button("Add connection", () => editConnection(), "home-action home-action-primary")]);
   $("#connections-status").textContent = "Loading workspace…";
   requestAnimationFrame(() => $("#connections-heading")?.focus({ preventScroll: true }));
   try {
-    await loadConnections();
+    const payload = await loadConnections();
     $("#connections-status").textContent = "Statuses are recorded in Frank; provider systems and Hermes receipts remain authoritative.";
+    if (options?.action === "add" || options?.provider) {
+      const provider = String(options.provider || "");
+      const catalogItem = (payload.catalog || []).find((item) => item.provider === provider);
+      editConnection(catalogItem ? {
+        provider: catalogItem.provider,
+        name: String(options.name || catalogItem.title || catalogItem.provider),
+        capabilities: catalogItem.capabilities || [],
+      } : null);
+    }
   } catch (error) { $("#connections-status").textContent = error.message || "Connections workspace unavailable."; }
 }
 

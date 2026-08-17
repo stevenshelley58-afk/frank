@@ -54,10 +54,9 @@ PROJECT_DEFAULT_WIDGET_LAYOUTS: dict[str, dict[str, int]] = {
 ENTITY_DEFAULT_WIDGET_IDS: dict[str, tuple[str, ...]] = {
     "tool:connections": (
         "connections-summary",
-        "connection-attention",
         "provider-catalog",
+        "connection-attention",
         "provider-coverage",
-        "hermes-status",
     ),
     "tool:accounts": (
         "entity-overview",
@@ -102,6 +101,16 @@ ENTITY_DEFAULT_WIDGET_IDS: dict[str, tuple[str, ...]] = {
         "connections-summary",
         "hermes-status",
     ),
+}
+
+
+ENTITY_DEFAULT_WIDGET_SIZES: dict[str, dict[str, str]] = {
+    "tool:connections": {
+        "connections-summary": "wide",
+        "provider-catalog": "wide",
+        "connection-attention": "medium",
+        "provider-coverage": "medium",
+    },
 }
 
 
@@ -278,6 +287,11 @@ def default_widget_layout(kind: str, widget_id: str) -> dict[str, int] | None:
         return None
     layout = PROJECT_DEFAULT_WIDGET_LAYOUTS.get(widget_id)
     return dict(layout) if layout else None
+
+
+def default_widget_size(kind: str, entity_id: str, widget_id: str, fallback: str) -> str:
+    """Return an entity-specific default size without changing the widget contract."""
+    return ENTITY_DEFAULT_WIDGET_SIZES.get(f"{kind}:{entity_id}", {}).get(widget_id, fallback)
 
 
 def api_entity_profile(kind: str, entity_id: str) -> dict | None:

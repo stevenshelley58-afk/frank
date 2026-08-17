@@ -385,6 +385,8 @@ class HomePlatformApiTest(unittest.TestCase):
             catalog = self.client.get("/api/connections").get_json()["catalog"]
         activepieces = next(item for item in catalog if item["provider"] == "activepieces")
         self.assertEqual(activepieces["setup_url"], "https://flows.example/connections")
+        self.assertTrue(activepieces["open_source"])
+        self.assertEqual(activepieces["license"], "MIT")
         self.assertEqual(activepieces["adapter_status_map"], {
             "ACTIVE": "verified", "MISSING": "setup_needed", "ERROR": "error",
         })
@@ -445,11 +447,24 @@ class HomePlatformApiTest(unittest.TestCase):
         self.assertEqual(project["status"], "attention")
 
         central_home = self.client.get("/api/homes/tool/connections").get_json()
+        self.assertEqual(
+            [(item["widget_id"], item["size"]) for item in central_home["instances"]],
+            [
+                ("connections-summary", "wide"),
+                ("provider-catalog", "wide"),
+                ("connection-attention", "medium"),
+                ("provider-coverage", "medium"),
+            ],
+        )
         central_attention = self.client.get("/api/homes/tool/connections/widgets/connection-attention-1").get_json()
         self.assertIn("await verification", central_attention["summary"])
         bound = [dict(item, config={"connection_id": service_connection["id"]}) if item["widget_id"] == "connections-summary" else item for item in central_home["instances"]]
         saved = self.client.put("/api/homes/tool/connections", json={"expected_revision": 0, "instances": bound})
         self.assertEqual(saved.status_code, 200, saved.get_json())
+
+    def test_empty_connections_widget_opens_the_add_flow(self):
+        summary = self.client.get("/api/homes/tool/connections/widgets/connections-summary-1").get_json()
+        self.assertEqual(summary["links"][0]["target"], {"view": "connections", "action": "add"})
 
     def test_legacy_connection_revision_migrates_once_and_corruption_fails_closed(self):
         legacy = {
