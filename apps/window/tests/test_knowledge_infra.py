@@ -649,8 +649,12 @@ class KnowledgeInfraContractTests(unittest.TestCase):
         self.assertIn("env -i", helper)
         self.assertIn('git -C "$REPO_ROOT" rev-parse HEAD', helper)
         self.assertIn('"$approved" == "$sha"', helper)
-        self.assertIn("NOPASSWD: %s", installer)
-        self.assertNotIn("NOPASSWD: ALL", installer)
+        self.assertIn("LEGACY=/etc/sudoers.d/hermes-full-access", installer)
+        self.assertIn("LEGACY_CONTENT='hermes ALL=(ALL:ALL) NOPASSWD: ALL'", installer)
+        self.assertIn("hermes ALL=(root) NOPASSWD: %s", installer)
+        self.assertIn("legacy_backup", installer)
+        self.assertIn("visudo -c", installer)
+        self.assertIn('"$app/infra/knowledge/install-root-helper.sh"', (Path(__file__).parents[1] / "deploy.sh").read_text(encoding="utf-8"))
 
     def test_secret_parser_rejects_duplicates_unknown_control_and_symlinks(self):
         import sys

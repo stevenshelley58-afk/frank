@@ -154,6 +154,7 @@ install -d -o root -g root -m 0755 -- "$release_dir"
 release_tmp="$(mktemp "$release_dir/.approved-sha.XXXXXX")"
 printf '%s\n' "$(git -C "$repo" rev-parse HEAD)" >"$release_tmp"
 chown root:root "$release_tmp"; chmod 0644 "$release_tmp"; mv -f -- "$release_tmp" "$release_dir/approved-sha"
+"$app/infra/knowledge/install-root-helper.sh"
 curl --fail --silent --show-error --output /dev/null \
   --retry 10 --retry-delay 2 --retry-all-errors \
   https://preview.frank.fail/frank-vps-file-explorer-v1/

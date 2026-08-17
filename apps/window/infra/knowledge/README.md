@@ -68,9 +68,11 @@ does not claim that services are running.
    receipt, activate the stack through the zero-argument fixed root helper
    (`/usr/local/sbin/frank-knowledge-deploy`). It accepts no project, path, or
    environment overrides and serializes concurrent runs with `flock`.
-   `install-root-helper.sh` installs only that helper and refuses unrelated
-   broad `NOPASSWD: ALL` sudo rules. Deploy the provider and Neo4j on the VPS
-   private network with the helper.
+   `install-root-helper.sh` installs only that helper. On the first release it
+   verifies and root-only backs up the legacy one-line Hermes broad rule before
+   removing it; unrelated users' sudo rules are left untouched. Subsequent
+   Frank releases run this installer as part of the normal Window deployment.
+   Deploy the provider and Neo4j on the VPS private network with the helper.
    Require separate `HERMES_GRAPHITI_PROVIDER_TOKEN` and
    `FRANK_KNOWLEDGE_PROJECTION_TOKEN` values, TLS at the ingress, and exact
    namespace/project allow-lists.
