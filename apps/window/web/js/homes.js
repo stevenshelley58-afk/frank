@@ -461,7 +461,9 @@ function validInternalTarget(item) {
 
 function safeExternalUrl(value) {
   try {
-    const url = new URL(String(value || ""), window.location.href);
+    const raw = String(value || "").trim();
+    if (!raw) return null;
+    const url = new URL(raw, window.location.href);
     if (url.protocol !== "https:") return null;
     if (url.username || url.password) return null;
     return url.href;

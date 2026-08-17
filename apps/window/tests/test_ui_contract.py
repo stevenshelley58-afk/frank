@@ -151,6 +151,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn("_widget_allowed_on_home", platform)
         self.assertIn('item?.kind !== "external"', homes)
         self.assertIn('url.protocol !== "https:"', homes)
+        self.assertIn('if (!raw) return null;', homes)
         self.assertIn('new CustomEvent("frank:entity-home"', homes)
         self.assertIn("duplicate widget", registry)
         self.assertIn("home-size-wide", styles)
