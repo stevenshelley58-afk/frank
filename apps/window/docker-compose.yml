@@ -27,7 +27,6 @@ services:
     volumes:
       - /srv/frank/data/window:/data
       - /projects:/vps/projects:ro
-      - /srv/vault:/vps/srv/vault:ro
       - /srv/skills:/vps/srv/skills:ro
     networks:
       - frank

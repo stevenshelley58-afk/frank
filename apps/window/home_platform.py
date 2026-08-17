@@ -22,6 +22,7 @@ from werkzeug.exceptions import HTTPException
 import home_defaults
 import home_providers
 import connections_agent
+from graph.blueprint import WIDGET_MANIFEST as GRAPH_WIDGET_MANIFEST
 
 
 api = Blueprint("home_platform", __name__)
@@ -110,6 +111,7 @@ CONNECTION_AGENT_INSPECT_MAX_ACTIVITY = 50
 
 
 BUILTIN_WIDGETS = [
+    dict(GRAPH_WIDGET_MANIFEST),
     {
         "id": "entity-overview", "version": "1.0.0", "title": "Overview",
         "description": "Identity, purpose, and current recorded state.",
@@ -305,6 +307,8 @@ def configure(
     hermes_connections_agent_key: str | None = None,
     hermes_connections_agent_profile: str | None = None,
     connection_allowed_origins: list[str] | None = None,
+    graph_reader: Callable[..., dict | None] | None = None,
+    graph_available: Callable[[str, str], bool] | None = None,
 ) -> None:
     global _project_loader, _account_loader, _hermes_health, _hermes_sessions, _roots, _connection_service
     global _connections_agent_key, _connections_agent_profile, _connection_allowed_origins
@@ -331,6 +335,7 @@ def configure(
         ledger_path=CONNECTION_ACTIONS_FILE,
         plans_path=CONNECTION_PLANS_FILE,
     )
+    home_providers.configure_graph_reader(graph_reader, graph_available)
 
 
 def _now() -> int:
@@ -506,6 +511,8 @@ def _widget_by_id(widget_id: str, store: dict | None = None) -> dict | None:
 def _widget_allowed_on_home(manifest: dict | None, kind: str, entity_id: str) -> bool:
     if not manifest or kind not in manifest.get("surfaces", []):
         return False
+    if manifest.get("id") == "entity-graph" and not home_providers.graph_available(kind, entity_id):
+        return False
     scope = manifest.get("entity_scope")
     if not scope:
         return True
@@ -515,6 +522,11 @@ def _widget_allowed_on_home(manifest: dict | None, kind: str, entity_id: str) ->
 def _default_instances(kind: str, entity_id: str, entity: dict | None = None, store: dict | None = None) -> list[dict]:
     entity = entity or _entity(kind, entity_id)
     requested = home_defaults.default_widget_ids(kind, entity_id, entity.get("profile"))
+    # The graph manifest explicitly declares both surfaces. Add its project
+    # instance only when the Hermes-owned knowledge projection is configured;
+    # a missing provider never creates a misleading empty widget.
+    if kind == "project" and "entity-graph" not in requested and home_providers.graph_available(kind, entity_id):
+        requested.append("entity-graph")
     by_id = {item["id"]: item for item in BUILTIN_WIDGETS}
     result = []
     for widget_id in requested:

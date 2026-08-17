@@ -4,21 +4,16 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-# This isolated branch deliberately advertises no live capability. Final
-# assembly can publish frank.graph.v1 only after the endpoints, home provider,
-# hosts, and renderer are registered together.
-CAPABILITIES: list[str] = []
-
-RESERVED_VIEW_REGISTRATIONS = [
-    {"id": "graph", "host": "slot-graph", "renderer": "graph-workbench", "internal": True},
-]
+# The capability is backed by the shared read-only workbench and two explicit
+# Hermes-owned projections: Tool pipelines (v1) and project knowledge (v2).
+CAPABILITIES: list[str] = ["frank.graph.v1", "frank.graph.v2"]
 
 WIDGET_MANIFEST = {
     "id": "entity-graph",
     "version": "1.0.0",
     "title": "Graph",
-    "description": "Read-only entity pipeline and settings graphs from registered providers.",
-    "surfaces": ["project", "tool", "agent", "service"],
+    "description": "Read-only Tool pipeline and project knowledge graph.",
+    "surfaces": ["project", "tool"],
     "default_size": "wide",
     "allowed_sizes": ["medium", "wide"],
     "provider": "frank.graph",
@@ -33,27 +28,37 @@ TOOL_MANIFEST_ADAPTER = {
     "version": "1.0.0",
     "accepts": [
         "schema://frank.tool-app-manifest/v1",
-        "schema://frank.tool-app-settings/v1",
-        "OTLP/1.0",
     ],
     "produces": ["schema://frank.graph/v1"],
-    "surfaces": ["graph", "project", "tool", "agent", "service"],
+    "surfaces": ["tool"],
+    "renderer": "graph-workbench",
+}
+
+KNOWLEDGE_PROJECTION_ADAPTER = {
+    "schema": "schema://frank.knowledge-projection-adapter/v1",
+    "id": "hermes-knowledge-projection",
+    "version": "1.0.0",
+    "accepts": ["schema://frank.graph/v2"],
+    "produces": ["schema://frank.graph/v2"],
+    "surfaces": ["project"],
+    "lens": "knowledge.combined",
     "renderer": "graph-workbench",
 }
 
 RESERVED_ALIASES = {}
 
 
-def registration_blueprint() -> dict:
-    """Describe only isolated components that are truthful before assembly.
-
-    Views, the home widget/provider, the public capability, and the legacy
-    alias remain absent until the final runtime wires every dependency.
-    """
+def production_registration_blueprint() -> dict:
+    """Describe the assembled capability after its runtime dependencies exist."""
     return deepcopy({
         "capabilities": CAPABILITIES,
         "views": [],
-        "widgets": [],
-        "adapters": [TOOL_MANIFEST_ADAPTER],
-        "aliases": {},
+        "widgets": [WIDGET_MANIFEST],
+        "adapters": [TOOL_MANIFEST_ADAPTER, KNOWLEDGE_PROJECTION_ADAPTER],
+        "aliases": RESERVED_ALIASES,
     })
+
+
+def registration_blueprint() -> dict:
+    """Return the live assembled registration consumed by Frank Window."""
+    return production_registration_blueprint()

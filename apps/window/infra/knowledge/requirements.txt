@@ -1,0 +1,3 @@
+# Exact pins reviewed 2026-08-17. Install only in the provider environment.
+graphiti-core==0.29.3
+graphifyy==0.9.45

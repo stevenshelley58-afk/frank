@@ -22,11 +22,8 @@ ADAPTER_VERSION = "1.0.0"
 
 ENTITY_KINDS = frozenset({"project", "tool", "agent", "service"})
 SCOPES = frozenset({"global", "profile", "project", "workspace", "session"})
-LENSES = frozenset({
-    "tool.pipeline",
-    "tool.settings",
-})
-ADAPTER_LENSES = frozenset({"tool.pipeline", "tool.settings"})
+LENSES = frozenset({"tool.pipeline"})
+ADAPTER_LENSES = frozenset({"tool.pipeline"})
 NODE_STATUSES = frozenset({"declared", "queued", "running", "succeeded", "failed", "blocked", "cancelled", "unavailable"})
 EDGE_STATUSES = frozenset({"declared", "active", "succeeded", "failed", "unavailable"})
 SAFE_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")

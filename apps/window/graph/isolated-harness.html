@@ -13,7 +13,9 @@
     const query = new URLSearchParams(location.search);
     let fail = false;
     let calls = 0;
+    const rendererSequence = [];
     const graphId = "tool:fixture-tool";
+    const projectGraphId = "project:fixture-project";
     const observedAt = "2026-08-14T00:00:00Z";
     const source = {
       manifest_id: "fixture-tool",
@@ -52,7 +54,67 @@
       presentation: {},
       extensions: {},
     });
-    const snapshot = (label = "prepare", revision = "a") => ({
+    const projectSource = (sourceType, id) => ({
+      provider_id: sourceType === "code" ? "repository" : sourceType,
+      provider_version: "1.0.0",
+      source_type: sourceType,
+      source_ref: `${sourceType}/${id}`,
+      sha256: `sha256:${"e".repeat(64)}`,
+    });
+    const projectNode = (id, sourceType, label = id) => ({
+      id: `${projectGraphId}/node:${id}`,
+      source_id: id,
+      kind: sourceType,
+      label,
+      scope: { kind: "project", id: "fixture-project" },
+      authority: "provider",
+      source: projectSource(sourceType, id),
+      classification: "internal",
+      freshness: { observed_at: observedAt },
+      capabilities: [],
+      ports: [],
+      status: "declared",
+      presentation: { group_id: `${projectGraphId}/group:${sourceType}` },
+      extensions: {},
+    });
+    const projectEdge = (sourceId, from, to) => ({
+      id: `${projectGraphId}/edge:${sourceId}`,
+      source_id: sourceId,
+      from: `${projectGraphId}/node:${from}`,
+      to: `${projectGraphId}/node:${to}`,
+      kind: "relation",
+      authority: "provider",
+      classification: "internal",
+      source: projectSource("memory", sourceId),
+      freshness: { observed_at: observedAt },
+      status: "declared",
+      presentation: {},
+      extensions: {},
+    });
+    const projectSnapshot = (large = false) => {
+      const types = ["code", "vault", "memory"];
+      const nodes = types.map((type) => projectNode(`${type}-root`, type, type[0].toUpperCase() + type.slice(1)));
+      if (large) for (let index = 0; index < 4997; index += 1) nodes.push(projectNode(`memory-${index}`, "memory"));
+      const edges = [];
+      for (let index = 0; index < Math.min(10000, nodes.length - 1); index += 1) edges.push(projectEdge(`link-${index}`, nodes[index].source_id, nodes[index + 1].source_id));
+      return {
+        schema: "schema://frank.graph/v2",
+        graph_id: projectGraphId,
+        graph_revision: `sha256:${"f".repeat(64)}`,
+        generated_at: observedAt,
+        provider: { id: "knowledge", version: "1.0.0", authority: "provider" },
+        subject: { kind: "project", id: "fixture-project" },
+        scope: { kind: "project", id: "fixture-project" },
+        lens: "knowledge.combined",
+        capabilities: ["inspect"],
+        nodes,
+        edges,
+        groups: types.map((type, index) => ({ id: `${projectGraphId}/group:${type}`, label: type[0].toUpperCase() + type.slice(1), parent_id: null, order: index })),
+        trace_ref: null,
+        extensions: {},
+      };
+    };
+    const snapshot = (label = "prepare", revision = "a", large = false) => ({
       schema: "schema://frank.graph/v1",
       graph_id: graphId,
       graph_revision: `sha256:${revision.repeat(64)}`,
@@ -62,13 +124,22 @@
       scope: { kind: "global" },
       lens: "tool.pipeline",
       capabilities: ["inspect"],
-      nodes: [node("prepare", label, true), node("publish")],
+      nodes: large ? [node("prepare", label, true), node("publish"), ...Array.from({ length: 120 }, (_, index) => node(`step-${index}`))] : [node("prepare", label, true), node("publish")],
       edges: [edge(0, "prepare", "publish")],
       groups: [],
       trace_ref: null,
       extensions: {},
     });
     const invalidSnapshot = (mode) => {
+      if (mode?.startsWith("v2-")) {
+        const value = projectSnapshot();
+        if (mode === "v2-unknown-root") value.injected = true;
+        else if (mode === "v2-bad-source") value.nodes[0].source.source_ref = "<private>";
+        else if (mode === "v2-bad-reference") value.edges.push(projectEdge("link-0", "code-root", "missing"));
+        else if (mode === "v2-too-many-nodes") value.nodes = Array.from({ length: 5001 }, (_, index) => projectNode(`memory-${index}`, "memory"));
+        else if (mode === "v2-trace") value.trace_ref = { trace_id: "forbidden" };
+        return value;
+      }
       const value = snapshot();
       if (mode === "revision") value.graph_revision = "invalid";
       else if (mode === "unknown-root") value.injected = true;
@@ -89,13 +160,18 @@
       return value;
     };
     const mounted = mountGraphWorkbench(document.querySelector("#workbench"), {
-      kind: "tool",
-      entityId: "fixture-tool",
-      lens: "tool.pipeline",
-      title: "Fixture tool",
+      kind: query.get("project") === "1" ? "project" : "tool",
+      entityId: query.get("project") === "1" ? "fixture-project" : "fixture-tool",
+      lens: query.get("project") === "1" ? "knowledge.combined" : "tool.pipeline",
+      title: query.get("project") === "1" ? "Fixture project" : "Fixture tool",
       load: async () => {
         calls += 1;
         const call = calls;
+        if (query.get("project") === "1") return query.get("invalid")?.startsWith("v2-") ? invalidSnapshot(query.get("invalid")) : projectSnapshot(query.get("large-project") === "1");
+        if (query.get("cycle") === "1") {
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          return snapshot(call === 2 ? "small" : "large", call === 2 ? "a" : "c", call !== 2);
+        }
         if (query.get("race") === "1") {
           await new Promise((resolve) => setTimeout(resolve, call === 1 ? 180 : 10));
           return call === 1 ? snapshot("stale", "b") : snapshot("latest", "c");
@@ -107,8 +183,16 @@
         if (query.get("invalid")) return invalidSnapshot(query.get("invalid"));
         return snapshot();
       },
+      onRenderer: (renderer) => {
+        rendererSequence.push(renderer);
+        document.body.dataset.rendererSequence = rendererSequence.join(",");
+      },
     });
     if (query.get("race") === "1") setTimeout(() => void mounted.reload(), 0);
+    if (query.get("cycle") === "1") {
+      setTimeout(() => void mounted.reload(), 80);
+      setTimeout(() => void mounted.reload(), 160);
+    }
     if (query.get("failure") === "after-ready") {
       const waitForReady = () => {
         if (document.querySelector("#workbench").dataset.graphState === "ready") {

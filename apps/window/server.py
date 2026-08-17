@@ -9,6 +9,8 @@ import re
 import secrets
 import threading
 import time
+from types import MappingProxyType
+from copy import deepcopy
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -19,6 +21,16 @@ from flask import Flask, Response, abort, jsonify, request, send_file, send_from
 import home_platform
 import home_defaults
 import vault_broker
+from graph.provider import (
+    KNOWLEDGE_LENS,
+    KnowledgeProjectionClient,
+    KnowledgeProjectionProvider,
+    ReadOnlyProvider,
+    ProviderUnavailable,
+    create_blueprint as create_graph_blueprint,
+    manifest_reader,
+)
+from tool_apps import discover_tool_apps
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
@@ -49,6 +61,32 @@ CURATED_MODELS = [
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 _accounts_lock = threading.RLock()
+
+_authorized_tool_manifests = MappingProxyType({
+    item["id"]: deepcopy(item)
+    for item in discover_tool_apps(Path(__file__).resolve().parent / "tools")
+})
+_graph_provider = ReadOnlyProvider(graph_reader=manifest_reader(_authorized_tool_manifests))
+_knowledge_projection = KnowledgeProjectionProvider(KnowledgeProjectionClient.from_environment())
+
+
+def _graph_projection(**kwargs):
+    if kwargs.get("kind") == "project":
+        try:
+            return _knowledge_projection.graph(**kwargs)
+        except ProviderUnavailable:
+            return None
+    try:
+        return _graph_provider.graph(**kwargs)
+    except ProviderUnavailable:
+        return None
+
+
+def _graph_available(kind: str, entity_id: str) -> bool:
+    if kind == "project":
+        return bool(_knowledge_projection.client and _knowledge_projection.client.configured_for(entity_id))
+    manifest = _authorized_tool_manifests.get(entity_id) if kind == "tool" else None
+    return isinstance(manifest, dict) and "global" in manifest.get("scopes", [])
 
 ACCOUNT_KINDS = {"customer", "email", "service", "domain"}
 ACCOUNT_STATUSES = {"planned", "setup", "ready", "attention", "disabled"}
@@ -903,8 +941,11 @@ home_platform.configure(
     hermes_health=hermes_reachable,
     hermes_sessions=hermes_session_summaries,
     roots=ROOTS,
+    graph_reader=_graph_projection,
+    graph_available=_graph_available,
 )
 app.register_blueprint(home_platform.api)
+app.register_blueprint(create_graph_blueprint(_graph_provider, _knowledge_projection))
 app.register_blueprint(vault_broker.api)
 
 

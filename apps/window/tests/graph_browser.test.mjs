@@ -5,14 +5,23 @@ import { existsSync } from "node:fs";
 import { copyFile, cp, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, extname, resolve } from "node:path";
+import { dirname, extname, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import { inflateSync } from "node:zlib";
 
 const execute = promisify(execFile);
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const chrome = [process.env.CHROME_BIN, "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"].find((item) => item && existsSync(item));
+const chrome = [process.env.CHROME_BIN, "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe", "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"].find((item) => item && existsSync(item));
+
+async function runChrome(args, options = {}) {
+  const profile = await mkdtemp(resolve(tmpdir(), "frank-graph-chrome-profile-"));
+  try {
+    return await execute(chrome, [`--user-data-dir=${profile}`, ...args], options);
+  } finally {
+    await rm(profile, { recursive: true, force: true });
+  }
+}
 
 function mime(path) {
   return ({ ".html": "text/html", ".js": "text/javascript", ".css": "text/css", ".gif": "image/gif" })[extname(path)] || "application/octet-stream";
@@ -21,8 +30,10 @@ function mime(path) {
 async function server(servedRoot) {
   const instance = createServer(async (request, response) => {
     try {
-      const path = resolve(servedRoot, `.${new URL(request.url, "http://localhost").pathname}`);
-      if (!path.startsWith(servedRoot + "/")) throw new Error("outside root");
+      const relative = decodeURIComponent(new URL(request.url, "http://localhost").pathname).replace(/^[/\\]+/, "");
+      const path = resolve(servedRoot, relative);
+      const base = resolve(servedRoot);
+      if (path !== base && !path.startsWith(`${base}${sep}`)) throw new Error("outside root");
       const body = await readFile(path);
       response.writeHead(200, { "Content-Type": mime(path), "Cache-Control": "no-store" });
       response.end(body);
@@ -36,7 +47,7 @@ async function server(servedRoot) {
 }
 
 async function chromeDom(url) {
-  const { stdout } = await execute(chrome, [
+  const { stdout } = await runChrome([
     "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
     "--virtual-time-budget=3000", "--dump-dom", url,
   ], { maxBuffer: 8 * 1024 * 1024 });
@@ -119,13 +130,16 @@ test("isolated maxGraph harness has a nonzero, nonblank canvas and clears stale 
     const url = `http://127.0.0.1:${port}/isolated-harness.html`;
     const readyDom = await chromeDom(url);
     assert.match(readyDom, /data-graph-state="ready"/);
+    assert.match(readyDom, /class="graph-canvas"[^>]*tabindex="0"/i);
+    assert.match(readyDom, /aria-describedby="graph-instructions-\d+"/);
+    assert.match(readyDom, /Focus the graph and press Enter or Space/);
     const width = Number(readyDom.match(/data-canvas-width="(\d+)"/)?.[1]);
     const height = Number(readyDom.match(/data-canvas-height="(\d+)"/)?.[1]);
     assert.ok(width >= 300 && height >= 280, `canvas was only ${width}x${height}`);
     assert.match(readyDom, /<svg[^>]*>/);
 
     const screenshot = resolve(directory, "graph.png");
-    await execute(chrome, [
+    await runChrome([
       "--headless=new", "--no-sandbox", "--disable-gpu", "--hide-scrollbars",
       "--virtual-time-budget=3000", "--window-size=1200,800", `--screenshot=${screenshot}`, url,
     ]);
@@ -167,5 +181,61 @@ test("isolated maxGraph harness has a nonzero, nonblank canvas and clears stale 
     if (http) await new Promise((resolveClose) => http.close(resolveClose));
     await rm(directory, { recursive: true, force: true });
     assert.equal(existsSync(productionHarness), false);
+  }
+});
+
+test("renderer lifecycle can switch Sigma, maxGraph, and Sigma without stale hosts", { skip: !chrome }, async () => {
+  const productionRoot = resolve(root, "web/graph");
+  const directory = await mkdtemp(resolve(tmpdir(), "frank-graph-cycle-"));
+  const testRoot = resolve(directory, "graph");
+  let http = null;
+  try {
+    await mkdir(testRoot, { recursive: true });
+    await Promise.all([
+      copyFile(resolve(root, "graph/isolated-harness.html"), resolve(testRoot, "isolated-harness.html")),
+      copyFile(resolve(productionRoot, "graph-workbench.bundle.js"), resolve(testRoot, "graph-workbench.bundle.js")),
+      copyFile(resolve(productionRoot, "graph-workbench.bundle.css"), resolve(testRoot, "graph-workbench.bundle.css")),
+    ]);
+    http = await server(testRoot);
+    const dom = await chromeDom(`http://127.0.0.1:${http.address().port}/isolated-harness.html?cycle=1`);
+    assert.match(dom, /data-graph-state="ready"/);
+    assert.match(dom, /data-renderer-sequence="sigma,maxgraph,sigma"/);
+    assert.match(dom, /data-graph-renderer="sigma"/);
+    assert.doesNotMatch(dom, /data-graph-renderer="maxgraph"/);
+    assert.match(dom, /class="graph-renderer-host graph-sigma-host"/);
+    assert.match(dom, /class="graph-renderer-host graph-max-host"/);
+  } finally {
+    if (http) await new Promise((resolveClose) => http.close(resolveClose));
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("project knowledge harness validates v2, uses Sigma, and renders the group legend", { skip: !chrome }, async () => {
+  const productionRoot = resolve(root, "web/graph");
+  const directory = await mkdtemp(resolve(tmpdir(), "frank-graph-project-"));
+  const testRoot = resolve(directory, "graph");
+  let http = null;
+  try {
+    await mkdir(testRoot, { recursive: true });
+    await Promise.all([
+      copyFile(resolve(root, "graph/isolated-harness.html"), resolve(testRoot, "isolated-harness.html")),
+      copyFile(resolve(productionRoot, "graph-workbench.bundle.js"), resolve(testRoot, "graph-workbench.bundle.js")),
+      copyFile(resolve(productionRoot, "graph-workbench.bundle.css"), resolve(testRoot, "graph-workbench.bundle.css")),
+    ]);
+    http = await server(testRoot);
+    const base = `http://127.0.0.1:${http.address().port}/isolated-harness.html`;
+    const dom = await chromeDom(`${base}?project=1`);
+    assert.match(dom, /data-graph-state="ready"/);
+    assert.match(dom, /data-graph-renderer="sigma"/);
+    assert.match(dom, />Code</);
+    assert.match(dom, />Vault</);
+    assert.match(dom, />Memory</);
+    for (const mode of ["v2-unknown-root", "v2-bad-source", "v2-bad-reference", "v2-too-many-nodes", "v2-trace"]) {
+      const invalid = await chromeDom(`${base}?project=1&invalid=${mode}`);
+      assert.match(invalid, /data-graph-state="unavailable"/, mode);
+    }
+  } finally {
+    if (http) await new Promise((resolveClose) => http.close(resolveClose));
+    await rm(directory, { recursive: true, force: true });
   }
 });

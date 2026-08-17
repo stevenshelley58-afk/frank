@@ -1,4 +1,18 @@
 const $ = (selector, root = document) => root.querySelector(selector);
+import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js";
+
+const graphMounts = new WeakMap();
+
+function destroyGraphMount(body) {
+  const handle = graphMounts.get(body);
+  if (!handle) return;
+  try { handle.destroy?.(); } finally { graphMounts.delete(body); }
+}
+
+function destroyGraphMounts(root) {
+  if (!root) return;
+  root.querySelectorAll?.(".home-widget-body").forEach(destroyGraphMount);
+}
 
 const homeState = {
   generation: 0,
@@ -31,6 +45,7 @@ function isProjectHome() {
 }
 
 function destroyHomeGrid() {
+  destroyGraphMounts(homeState.host);
   if (!homeState.grid) return;
   homeState.grid.destroy(false);
   homeState.grid = null;
@@ -683,7 +698,18 @@ function renderProjectSnapshot(body, snapshot, widgetId) {
 
 function renderSnapshot(body, snapshot, widgetId = "") {
   disposeProjectCharts(body);
+  destroyGraphMount(body);
   body.replaceChildren();
+  if (widgetId === "entity-graph" && snapshot.data?.graph && typeof snapshot.data.graph === "object") {
+    const handle = mountGraphWorkbench(body, {
+      kind: snapshot.entity_kind || "tool",
+      entityId: snapshot.entity_id || "",
+      title: "Graph",
+      load: async () => snapshot.data.graph,
+    });
+    graphMounts.set(body, handle);
+    return;
+  }
   if (renderProjectSnapshot(body, snapshot, widgetId)) return;
   const summary = node("p", "home-summary", scalarValue(snapshot.summary) || "No summary available.");
   const statusValue = displayStatus(snapshot.status);
@@ -803,6 +829,7 @@ async function loadSnapshot(card, body, instance, generation) {
     renderSnapshot(body, snapshot, instance.widget_id);
   } catch (error) {
     if (generation !== homeState.generation || !card.isConnected) return;
+    destroyGraphMount(body);
     body.replaceChildren(node("p", "home-error", error.message || "Widget unavailable."));
     body.append(button("Retry", () => loadSnapshot(card, body, instance, generation), "home-inline-button"));
   }
@@ -949,6 +976,7 @@ function renderHome() {
   destroyHomeGrid();
   homeControls();
   const host = homeState.host;
+  destroyGraphMounts(host);
   host.replaceChildren();
   host.classList.add("home-grid");
   host.classList.toggle("project-signal-grid", isProjectHome());
@@ -985,6 +1013,7 @@ async function openHome(kind, id, host) {
   homeState.gallery = false;
   homeState.savePending = false;
   host.classList.add("home-grid");
+  destroyGraphMounts(host);
   host.replaceChildren(node("p", "home-loading", "Loading home…"));
   setTopActions();
   setHomeMessage("Loading live widget connections…");
@@ -998,6 +1027,7 @@ async function openHome(kind, id, host) {
     renderHome();
   } catch (error) {
     if (error.name === "AbortError" || generation !== homeState.generation) return;
+    destroyGraphMounts(host);
     host.replaceChildren(node("p", "home-error", error.message || "Home unavailable."));
     setHomeMessage("Home unavailable.", "error");
   }

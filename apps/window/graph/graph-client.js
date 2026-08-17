@@ -1,5 +1,8 @@
 export const GRAPH_SCHEMA = "schema://frank.graph/v1";
-export const GRAPH_LENSES = new Set(["tool.pipeline", "tool.settings"]);
+export const COMBINED_GRAPH_SCHEMA = "schema://frank.graph/v2";
+export const COMBINED_GRAPH_LENS = "knowledge.combined";
+export const GRAPH_LENSES = new Set(["tool.pipeline"]);
+export const COMBINED_GRAPH_LENSES = new Set([COMBINED_GRAPH_LENS]);
 
 const SETTINGS_SCHEMA = "schema://frank.tool-app-settings/v1";
 const SHA256 = /^sha256:[0-9a-f]{64}$/;
@@ -10,12 +13,14 @@ const NAMESPACED = /^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$/;
 const HTML_OR_SCRIPT = /<\/?[A-Za-z][^>]*>|javascript\s*:/i;
 const CONTROL = /[\u0000-\u001f\u007f]/;
 const SECRET = /-----BEGIN [A-Z ]+-----|\b(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]+|\bBearer\s+[A-Za-z0-9._~+/=-]{16,}|\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/i;
-const ENTITY_KINDS = new Set(["project", "tool", "agent", "service"]);
 const SCOPES = new Set(["global", "profile", "project", "workspace", "session"]);
 const AUTHORITIES = new Set(["manifest", "settings", "hermes", "otel", "provider"]);
 const CLASSIFICATIONS = new Set(["unspecified", "public", "internal", "private", "secret"]);
 const NODE_STATUSES = new Set(["declared", "queued", "running", "succeeded", "failed", "blocked", "cancelled", "unavailable"]);
 const EDGE_STATUSES = new Set(["declared", "active", "succeeded", "failed", "unavailable"]);
+const GENERIC_TOKEN = /^[A-Za-z0-9][A-Za-z0-9._:/+-]*$/;
+const SAFE_REFERENCE = /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/;
+const PROJECT_ID = /^[a-z0-9][a-z0-9._-]{0,63}$/;
 
 function object(value, label) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} is invalid`);
@@ -131,7 +136,7 @@ export function validateGraphSnapshot(value, expected = {}) {
   if (!AUTHORITIES.has(provider.authority)) throw new Error("Graph provider authority is invalid");
 
   const subject = exact(graph.subject, ["kind", "id"], "Graph subject");
-  if (!ENTITY_KINDS.has(subject.kind)) throw new Error("Graph subject is invalid");
+  if (subject.kind !== "tool") throw new Error("Graph subject is invalid");
   safeText(subject.id, "Graph subject identity", OPAQUE_ID);
   if ((expected.kind || expected.entityId) && (subject.kind !== expected.kind || subject.id !== expected.entityId)) throw new Error("Graph subject does not match the request");
   const graphScope = scope(graph.scope);
@@ -149,7 +154,6 @@ export function validateGraphSnapshot(value, expected = {}) {
   const nodeSources = new Map();
   const nodeSourceIds = new Map();
   const nodeRuntimePipelineIds = new Map();
-  const settingsRevisions = new Set();
   for (const [index, rawNode] of graph.nodes.entries()) {
     const label = `Graph node ${index}`;
     const node = exact(rawNode, [
@@ -186,7 +190,6 @@ export function validateGraphSnapshot(value, expected = {}) {
       const revision = exact(node.settings_revision_ref, ["schema", "scope", "revision"], `${label} settings revision`);
       const revisionScope = scope(revision.scope);
       if (revision.schema !== SETTINGS_SCHEMA || !sameScope(revisionScope, graphScope) || !Number.isSafeInteger(revision.revision) || revision.revision < 0) throw new Error("Graph settings revision is invalid");
-      settingsRevisions.add(String(revision.revision));
     }
   }
 
@@ -262,20 +265,208 @@ export function validateGraphSnapshot(value, expected = {}) {
       if (!edgeIds.has(selection.edge_id)) throw new Error("Graph selection is invalid");
     }
   }
-  if (expected.settingsRevisionId && !settingsRevisions.has(String(expected.settingsRevisionId))) throw new Error("Graph settings revision does not match the request");
+  return graph;
+}
+
+// v2 deliberately has its own validator.  The Tool pipeline contract above is
+// kept byte-for-byte compatible so a knowledge provider cannot accidentally
+// broaden what the v1 adapter accepts.
+function boundedJson(value, label, active = new Set(), state = { depth: 0, entries: 0, chars: 0 }) {
+  if (value === null || typeof value === "boolean") return;
+  if (typeof value === "string") {
+    if (value.length > 2048 || CONTROL.test(value) || HTML_OR_SCRIPT.test(value) || SECRET.test(value)) throw new Error(`${label} is unsafe`);
+    state.chars += value.length;
+    if (state.chars > 32768) throw new Error(`${label} is too large`);
+    return;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) throw new Error(`${label} is non-finite`);
+    return;
+  }
+  if (typeof value !== "object" || active.has(value)) throw new Error(`${label} is invalid`);
+  if (state.depth >= 8) throw new Error(`${label} is too deep`);
+  active.add(value);
+  state.depth += 1;
+  try {
+    const entries = Array.isArray(value) ? value.entries() : Object.entries(value);
+    let count = 0;
+    for (const item of entries) {
+      if (++count > 128 || ++state.entries > 4096) throw new Error(`${label} is too large`);
+      const key = Array.isArray(value) ? String(item[0]) : item[0];
+      if (!Array.isArray(value) && (CONTROL.test(key) || HTML_OR_SCRIPT.test(key) || key.length > 128)) throw new Error(`${label} has an unsafe field`);
+      boundedJson(item[1], `${label}.${key}`, active, state);
+    }
+  } finally {
+    state.depth -= 1;
+    active.delete(value);
+  }
+}
+
+function boundedMetadata(value, label) {
+  if (value === null) return;
+  if (!value || typeof value !== "object") throw new Error(`${label} must be JSON metadata`);
+  const active = new Set();
+  const visit = (item) => {
+    if (!item || typeof item !== "object") return;
+    if (active.has(item)) throw new Error(`${label} is cyclic`);
+    active.add(item);
+    try {
+      if (!Array.isArray(item)) {
+        for (const [key, child] of Object.entries(item)) {
+          if (/(?:token|secret|password|private|credential|authorization|prompt|payload|raw[_-]?body|gen[_-]?ai)/i.test(key)) throw new Error(`${label}.${key} is sensitive`);
+          visit(child);
+        }
+      } else item.forEach(visit);
+    } finally { active.delete(item); }
+  };
+  visit(value);
+  boundedJson(value, label);
+}
+
+function genericSource(value, label) {
+  const result = exact(value, ["provider_id", "provider_version", "source_type", "source_ref", "sha256"], label);
+  safeText(result.provider_id, `${label}.provider_id`, OPAQUE_ID, 160);
+  safeText(result.provider_version, `${label}.provider_version`, SAFE_REFERENCE, 160);
+  safeText(result.source_type, `${label}.source_type`, OPAQUE_ID, 160);
+  safeText(result.source_ref, `${label}.source_ref`, SAFE_REFERENCE, 640);
+  safeText(result.sha256, `${label}.sha256`, SHA256);
+  return result;
+}
+
+function genericPresentation(value, label) {
+  const result = exact(value, [], label, ["group_id", "icon", "tone"]);
+  for (const [key, item] of Object.entries(result)) safeText(item, `${label}.${key}`, key === "group_id" ? GRAPH_ID : OPAQUE_ID, key === "group_id" ? 320 : 128);
+  return result;
+}
+
+function genericRef(value, label, known, prefix) {
+  safeText(value, label, GRAPH_ID, 320);
+  if (!value.startsWith(prefix) || !known.has(value)) throw new Error(`${label} is unknown`);
+  return value;
+}
+
+export function validateCombinedGraphSnapshot(value, expected = {}) {
+  try {
+    const encoded = JSON.stringify(value);
+    if (typeof encoded !== "string" || new TextEncoder().encode(encoded).length > 8 * 1024 * 1024) throw new Error("Combined graph body is too large");
+  } catch (error) {
+    throw new Error(`Combined graph body is invalid: ${error.message}`);
+  }
+  const graph = exact(value, [
+    "schema", "graph_id", "graph_revision", "generated_at", "provider", "subject", "scope",
+    "lens", "capabilities", "nodes", "edges", "groups", "trace_ref", "extensions",
+  ], "Combined graph response");
+  if (graph.schema !== COMBINED_GRAPH_SCHEMA) throw new Error("Unexpected combined graph response");
+  safeText(graph.graph_id, "Combined graph identity", GRAPH_ID, 320);
+  safeText(graph.graph_revision, "Combined graph revision", SHA256);
+  timestamp(graph.generated_at, "Combined graph generated_at");
+  const provider = exact(graph.provider, ["id", "version", "authority"], "Combined graph provider");
+  safeText(provider.id, "Combined graph provider identity", OPAQUE_ID, 128);
+  safeText(provider.version, "Combined graph provider version", SEMVER);
+  if (!AUTHORITIES.has(provider.authority)) throw new Error("Combined graph provider authority is invalid");
+  const subject = exact(graph.subject, ["kind", "id"], "Combined graph subject");
+  if (subject.kind !== "project") throw new Error("Combined graph subject is invalid");
+  safeText(subject.id, "Combined graph subject identity", PROJECT_ID);
+  if ((expected.kind || expected.entityId) && (expected.kind !== "project" || subject.id !== expected.entityId)) throw new Error("Combined graph subject does not match the request");
+  const graphScope = exact(graph.scope, ["kind", "id"], "Combined graph scope");
+  if (graphScope.kind !== "project" || graphScope.id !== subject.id) throw new Error("Combined graph scope is invalid");
+  safeText(graphScope.id, "Combined graph scope identity", PROJECT_ID);
+  if (!(graph.graph_id === `project:${subject.id}` || graph.graph_id.startsWith(`project:${subject.id}/`))) throw new Error("Combined graph identity does not match its project subject");
+  if (graph.lens !== COMBINED_GRAPH_LENS || (expected.lens && expected.lens !== graph.lens)) throw new Error("Combined graph lens is invalid");
+  if (!Array.isArray(graph.capabilities) || graph.capabilities.length > 128) throw new Error("Combined graph capabilities are invalid");
+  uniqueIds(graph.capabilities, "Combined graph capabilities");
+  for (const capability of graph.capabilities) safeText(capability, "Combined graph capability", OPAQUE_ID, 160);
+  if (!Array.isArray(graph.nodes) || !Array.isArray(graph.edges) || !Array.isArray(graph.groups)) throw new Error("Combined graph response is incomplete");
+  if (graph.nodes.length > 5000 || graph.edges.length > 10000 || graph.groups.length > 5000) throw new Error("Combined graph exceeds its size bound");
+
+  const nodeIds = new Set();
+  for (const [index, rawNode] of graph.nodes.entries()) {
+    const label = `Combined graph node ${index}`;
+    const node = exact(rawNode, [
+      "id", "source_id", "kind", "label", "scope", "authority", "source", "classification",
+      "freshness", "capabilities", "ports", "status", "presentation", "extensions",
+    ], label, ["metadata"]);
+    safeText(node.source_id, `${label} source identity`, OPAQUE_ID, 160);
+    safeText(node.id, `${label} identity`, GRAPH_ID, 320);
+    if (!node.id.startsWith(`${graph.graph_id}/`) || nodeIds.has(node.id)) throw new Error("Combined graph node identity is invalid or duplicated");
+    nodeIds.add(node.id);
+    safeText(node.kind, `${label} kind`, OPAQUE_ID, 160);
+    safeText(node.label, `${label} label`, null, 1024);
+    const nodeScope = scope(node.scope);
+    if (!sameScope(nodeScope, graphScope) || !AUTHORITIES.has(node.authority) || !CLASSIFICATIONS.has(node.classification)) throw new Error("Combined graph node provenance is invalid");
+    freshness(node.freshness, `${label} freshness`);
+    genericSource(node.source, `${label} source`);
+    if (!Array.isArray(node.capabilities) || node.capabilities.length > 128) throw new Error(`${label} capabilities are invalid`);
+    uniqueIds(node.capabilities, `${label} capabilities`);
+    for (const capability of node.capabilities) safeText(capability, `${label} capability`, OPAQUE_ID, 160);
+    if (!Array.isArray(node.ports) || node.ports.length) throw new Error("Combined graph node ports are invalid");
+    if (!NODE_STATUSES.has(node.status)) throw new Error("Combined graph node status is invalid");
+    genericPresentation(node.presentation, `${label} presentation`);
+    if (Object.keys(node.extensions).length) throw new Error(`${label} extensions are not supported`);
+    if (Object.hasOwn(node, "metadata")) boundedMetadata(node.metadata, `${label} metadata`);
+  }
+
+  const edgeIds = new Set();
+  for (const [index, rawEdge] of graph.edges.entries()) {
+    const label = `Combined graph edge ${index}`;
+    const edge = exact(rawEdge, ["id", "source_id", "from", "to", "kind", "authority", "classification", "source", "freshness", "status", "presentation", "extensions"], label, ["metadata"]);
+    if (!(typeof edge.source_id === "string" || (Number.isSafeInteger(edge.source_id) && edge.source_id >= 0))) throw new Error(`${label} source identity is invalid`);
+    if (typeof edge.source_id === "string") safeText(edge.source_id, `${label} source identity`, OPAQUE_ID, 160);
+    safeText(edge.id, `${label} identity`, GRAPH_ID, 320);
+    if (!edge.id.startsWith(`${graph.graph_id}/`) || edgeIds.has(edge.id)) throw new Error("Combined graph edge identity is invalid or duplicated");
+    edgeIds.add(edge.id);
+    if (!(typeof edge.kind === "string" && new Set(["relation", "association", "dependency", "reference", "control"]).has(edge.kind)) || !AUTHORITIES.has(edge.authority) || !CLASSIFICATIONS.has(edge.classification) || !EDGE_STATUSES.has(edge.status)) throw new Error("Combined graph edge declaration is invalid");
+    genericRef(edge.from, `${label}.from`, nodeIds, `${graph.graph_id}/`);
+    genericRef(edge.to, `${label}.to`, nodeIds, `${graph.graph_id}/`);
+    genericSource(edge.source, `${label} source`);
+    freshness(edge.freshness, `${label} freshness`);
+    const presentation = exact(edge.presentation, [], `${label} presentation`, ["tone", "dashed"]);
+    if (Object.hasOwn(presentation, "tone")) safeText(presentation.tone, `${label}.presentation.tone`, GENERIC_TOKEN, 128);
+    if (Object.hasOwn(presentation, "dashed") && typeof presentation.dashed !== "boolean") throw new Error("Combined graph edge presentation is invalid");
+    if (Object.keys(edge.extensions).length) throw new Error(`${label} extensions are not supported`);
+    if (Object.hasOwn(edge, "metadata")) boundedMetadata(edge.metadata, `${label} metadata`);
+  }
+
+  const groupIds = new Set();
+  for (const [index, rawGroup] of graph.groups.entries()) {
+    const label = `Combined graph group ${index}`;
+    const group = exact(rawGroup, ["id", "label", "parent_id", "order"], label, ["metadata"]);
+    safeText(group.id, `${label} identity`, GRAPH_ID, 320);
+    if (!group.id.startsWith(`${graph.graph_id}/`) || groupIds.has(group.id)) throw new Error("Combined graph group identity is invalid or duplicated");
+    safeText(group.label, `${label} label`, null, 1024);
+    groupIds.add(group.id);
+    if (group.parent_id !== null) safeText(group.parent_id, `${label}.parent identity`, GRAPH_ID, 320);
+    if (!Number.isSafeInteger(group.order) || group.order < 0) throw new Error("Combined graph group order is invalid");
+    if (Object.hasOwn(group, "metadata")) boundedMetadata(group.metadata, `${label} metadata`);
+  }
+  for (const group of graph.groups) if (group.parent_id !== null && !groupIds.has(group.parent_id)) throw new Error("Combined graph group parent is unknown");
+  const visitingGroups = new Set();
+  const visitedGroups = new Set();
+  const visitGroup = (groupId) => {
+    if (visitingGroups.has(groupId)) throw new Error("Combined graph groups must be acyclic");
+    if (visitedGroups.has(groupId)) return;
+    visitingGroups.add(groupId);
+    const group = graph.groups.find((item) => item.id === groupId);
+    if (group?.parent_id) visitGroup(group.parent_id);
+    visitingGroups.delete(groupId);
+    visitedGroups.add(groupId);
+  };
+  for (const groupId of groupIds) visitGroup(groupId);
+  for (const node of graph.nodes) {
+    if (Object.hasOwn(node.presentation, "group_id")) genericRef(node.presentation.group_id, "Combined graph node group", groupIds, `${graph.graph_id}/`);
+  }
+  if (graph.trace_ref !== null) throw new Error("Combined graph response cannot advertise a trace");
+  if (Object.keys(graph.extensions).length) throw new Error("Combined graph extensions are not supported");
   return graph;
 }
 
 export function graphEndpoint(params) {
-  const allowed = new Set(["kind", "entityId", "lens", "settingsRevisionId"]);
+  const allowed = new Set(["kind", "entityId", "lens"]);
   if (!params || typeof params !== "object" || Object.keys(params).some((key) => !allowed.has(key))) throw new Error("Unsupported graph selector");
-  const { kind, entityId, lens = "tool.pipeline", settingsRevisionId = "" } = params;
-  if (!ENTITY_KINDS.has(kind) || !OPAQUE_ID.test(String(entityId || "")) || !GRAPH_LENSES.has(lens)) throw new Error("Invalid graph request");
+  const { kind, entityId, lens = kind === "project" ? COMBINED_GRAPH_LENS : "tool.pipeline" } = params;
+  if (!new Set(["tool", "project"]).has(kind) || !OPAQUE_ID.test(String(entityId || ""))) throw new Error("Invalid graph request");
+  if ((kind === "tool" && lens !== "tool.pipeline") || (kind === "project" && lens !== COMBINED_GRAPH_LENS)) throw new Error("Invalid graph request");
   const query = new URLSearchParams({ lens });
-  if (settingsRevisionId) {
-    if (!OPAQUE_ID.test(settingsRevisionId)) throw new Error("Invalid settings revision selector");
-    query.set("settings_revision_id", settingsRevisionId);
-  }
   return `/api/graphs/${encodeURIComponent(kind)}/${encodeURIComponent(entityId)}?${query}`;
 }
 
@@ -283,5 +474,5 @@ export async function fetchGraphSnapshot(params, fetchImpl = globalThis.fetch) {
   const response = await fetchImpl(graphEndpoint(params), { headers: { Accept: "application/json" } });
   const body = await response.json().catch(() => ({}));
   if (!response.ok) throw new Error(body.error || "Graph is unavailable");
-  return validateGraphSnapshot(body, params);
+  return params?.kind === "project" ? validateCombinedGraphSnapshot(body, params) : validateGraphSnapshot(body, params);
 }

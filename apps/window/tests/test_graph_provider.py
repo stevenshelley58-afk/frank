@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from flask import Flask
 
 from graph.contract import normalize_manifest
-from graph.provider import ProviderUnavailable, ReadOnlyProvider, create_blueprint, redact_allowlisted_fields
+from graph.provider import ProviderUnavailable, ReadOnlyProvider, create_blueprint, manifest_reader, redact_allowlisted_fields
 
 
 TRACE_ID = "0123456789abcdef0123456789abcdef"
@@ -96,6 +96,13 @@ class GraphProviderTest(unittest.TestCase):
     def graph_client(self, graph=GRAPH):
         return self.client(ReadOnlyProvider(graph_reader=lambda **kwargs: copy.deepcopy(graph)))
 
+    def test_live_manifest_reader_only_projects_tool_pipeline_graphs(self):
+        reader = manifest_reader({"fixture-tool": MANIFEST})
+        graph = reader(kind="tool", entity_id="fixture-tool", selectors={"lens": "tool.pipeline"})
+        self.assertEqual(graph["lens"], "tool.pipeline")
+        self.assertIsNone(reader(kind="project", entity_id="fixture-tool", selectors={"lens": "tool.pipeline"}))
+        self.assertIsNone(reader(kind="tool", entity_id="fixture-tool", selectors={"lens": "tool.settings"}))
+
     def test_unregistered_provider_fails_closed_without_fallback_store(self):
         response = self.client(ReadOnlyProvider()).get("/api/graphs/tool/fixture-tool")
         self.assertEqual(response.status_code, 503)
@@ -115,6 +122,8 @@ class GraphProviderTest(unittest.TestCase):
         self.assertEqual(seen["kind"], "tool")
         self.assertEqual(client.post("/api/graphs/tool/fixture-tool").status_code, 405)
         self.assertEqual(client.get("/api/graphs/tool/fixture-tool?source=/vps/secrets").status_code, 400)
+        self.assertEqual(client.get("/api/graphs/tool/fixture-tool?lens=tool.settings").status_code, 400)
+        self.assertEqual(client.get("/api/graphs/tool/fixture-tool?settings_revision_id=4").status_code, 400)
         self.assertEqual(client.get("/api/graphs/unknown/fixture-tool").status_code, 404)
         self.assertEqual(client.get(f"/api/graphs/tool/fixture-tool?trace_id={TRACE_ID}").status_code, 400)
 
@@ -132,7 +141,6 @@ class GraphProviderTest(unittest.TestCase):
         wrong_scope = copy.deepcopy(GRAPH)
         wrong_scope["scope"] = {"kind": "project", "id": "other"}
         cases.append((wrong_scope, "/api/graphs/tool/fixture-tool?lens=tool.pipeline"))
-        cases.append((GRAPH, "/api/graphs/tool/fixture-tool?lens=tool.pipeline&settings_revision_id=4"))
         for graph, path in cases:
             with self.subTest(path=path):
                 self.assertEqual(self.graph_client(graph).get(path).status_code, 503)
@@ -311,7 +319,7 @@ class GraphProviderTest(unittest.TestCase):
         response = self.graph_client(graph).get("/api/graphs/tool/fixture-tool?lens=tool.pipeline")
         self.assertEqual(response.status_code, 200)
 
-    def test_graph_accepts_maximum_javascript_safe_settings_revision(self):
+    def test_graph_endpoint_rejects_settings_revision_selector(self):
         graph = copy.deepcopy(GRAPH)
         graph["nodes"][0]["settings_revision_ref"] = {
             "schema": "schema://frank.tool-app-settings/v1",
@@ -322,7 +330,7 @@ class GraphProviderTest(unittest.TestCase):
         response = client.get(
             "/api/graphs/tool/fixture-tool?lens=tool.pipeline&settings_revision_id=9007199254740991"
         )
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 400)
 
     def test_graph_accepts_maximum_javascript_safe_edge_source_and_group_order(self):
         graph = copy.deepcopy(GRAPH)

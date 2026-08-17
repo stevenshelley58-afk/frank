@@ -21,6 +21,8 @@ from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 Provider = Callable[["ProviderContext"], dict]
 PROVIDERS: dict[str, Provider] = {}
+_graph_reader: Callable[..., dict | None] | None = None
+_graph_available: Callable[[str, str], bool] | None = None
 _probe_cache: dict[str, tuple[float, dict]] = {}
 _probe_lock = threading.RLock()
 PROBE_CACHE_SECONDS = 15
@@ -59,6 +61,24 @@ def register(*widget_ids: str):
         return function
 
     return decorator
+
+
+def configure_graph_reader(reader: Callable[..., dict | None] | None, available: Callable[[str, str], bool] | None = None) -> None:
+    """Register the live, read-only graph projection callback."""
+    global _graph_reader, _graph_available
+    _graph_reader = reader
+    _graph_available = available
+
+
+def graph_available(kind: str, entity_id: str) -> bool:
+    if _graph_available is not None:
+        return bool(_graph_available(kind, entity_id))
+    if _graph_reader is None or kind != "tool":
+        return False
+    try:
+        return isinstance(_graph_reader(kind=kind, entity_id=entity_id, selectors={"lens": "tool.pipeline"}), dict)
+    except Exception:
+        return False
 
 
 def snapshot(status: str, summary: str, data: dict | None = None, links: list[dict] | None = None, *, now: int = 0) -> dict:
@@ -530,6 +550,21 @@ def provider_catalog(ctx: ProviderContext) -> dict:
         "license": item.get("license", ""),
     } for item in ctx.catalog]
     return snapshot("ready", f"Choose from {len(rows)} available apps and connection types.", {"rows": rows}, [internal_link("Browse available apps", view="connections")], now=ctx.now)
+
+
+@register("entity-graph")
+def entity_graph(ctx: ProviderContext) -> dict:
+    """Render the graph endpoint's truthful envelope as a home snapshot."""
+    if _graph_reader is None:
+        return snapshot("unavailable", "Graph projection is not connected.", now=ctx.now)
+    lens = "knowledge.combined" if ctx.kind == "project" else "tool.pipeline"
+    try:
+        graph = _graph_reader(kind=ctx.kind, entity_id=ctx.entity_id, selectors={"lens": lens})
+    except Exception:
+        graph = None
+    if not isinstance(graph, dict):
+        return snapshot("unavailable", "No graph projection is available for this entity.", now=ctx.now)
+    return snapshot("ready", "Read-only graph projection.", {"graph": graph}, now=ctx.now)
 
 
 @register("provider-coverage")

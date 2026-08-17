@@ -1,5 +1,5 @@
 import { build } from "esbuild";
-import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { access, copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 
@@ -23,6 +23,18 @@ await build({
   legalComments: "eof",
 });
 
-const packageMetadata = JSON.parse(await readFile(resolve(root, "node_modules/@maxgraph/core/package.json"), "utf8"));
-if (packageMetadata.license !== "Apache-2.0") throw new Error("@maxgraph/core license is not Apache-2.0");
-await copyFile(resolve(root, "node_modules/@maxgraph/core/LICENSE"), resolve(outputRoot, "maxgraph-APACHE-2.0.txt"));
+const dependencies = [
+  ["@maxgraph/core", "maxgraph-APACHE-2.0.txt", "Apache-2.0"],
+  ["sigma", "sigma-MIT.txt", "MIT"],
+  ["graphology", "graphology-MIT.txt", "MIT"],
+];
+for (const [name, licenseFile, expectedLicense] of dependencies) {
+  const packageRoot = resolve(root, "node_modules", name);
+  const packageMetadata = JSON.parse(await readFile(resolve(packageRoot, "package.json"), "utf8"));
+  if (packageMetadata.license !== expectedLicense) throw new Error(`${name} license is not ${expectedLicense}`);
+  const licenseSource = resolve(packageRoot, "LICENSE");
+  const licenseTextSource = resolve(packageRoot, "LICENSE.txt");
+  let source = licenseTextSource;
+  try { await access(licenseSource); source = licenseSource; } catch { /* package uses LICENSE.txt */ }
+  await copyFile(source, resolve(outputRoot, licenseFile));
+}

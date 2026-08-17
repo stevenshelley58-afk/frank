@@ -1,9 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { graphEndpoint, validateGraphSnapshot } from "../graph/graph-client.js";
+import { delimiter, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+import { COMBINED_GRAPH_LENS, graphEndpoint, validateCombinedGraphSnapshot, validateGraphSnapshot } from "../graph/graph-client.js";
+import { chooseGraphRenderer, MAXGRAPH_NODE_THRESHOLD, MAXGRAPH_EDGE_THRESHOLD } from "../graph/renderer-policy.js";
 
 const adversarialCorpus = JSON.parse(readFileSync(new URL("./fixtures/graph/adversarial-validation-corpus.json", import.meta.url), "utf8"));
+const appRoot = fileURLToPath(new URL("..", import.meta.url));
 
 const digest = `sha256:${"d".repeat(64)}`;
 const graphId = "tool:fixture-tool";
@@ -72,16 +77,150 @@ const graph = {
 const copy = () => structuredClone(graph);
 const expected = { kind: "tool", entityId: "fixture-tool", lens: "tool.pipeline" };
 
+const combinedSource = {
+  provider_id: "repository",
+  provider_version: "1.0.0",
+  source_type: "code",
+  source_ref: "repo/README.md",
+  sha256: digest,
+};
+const combinedNode = (id, sourceType = "code", group = sourceType) => ({
+  id: `project:fixture-project/node:${id}`,
+  source_id: id,
+  kind: "document",
+  label: id,
+  scope: { kind: "project", id: "fixture-project" },
+  authority: "provider",
+  source: { ...combinedSource, source_type: sourceType, source_ref: `${sourceType}/${id}` },
+  classification: "internal",
+  freshness: { observed_at: observed },
+  capabilities: [],
+  ports: [],
+  status: "declared",
+  presentation: { group_id: `project:fixture-project/group:${group}` },
+  extensions: {},
+});
+const combinedGraph = {
+  schema: "schema://frank.graph/v2",
+  graph_id: "project:fixture-project",
+  graph_revision: `sha256:${"b".repeat(64)}`,
+  generated_at: observed,
+  provider: { id: "knowledge", version: "1.0.0", authority: "provider" },
+  subject: { kind: "project", id: "fixture-project" },
+  scope: { kind: "project", id: "fixture-project" },
+  lens: COMBINED_GRAPH_LENS,
+  capabilities: ["inspect"],
+  nodes: [combinedNode("readme", "code"), combinedNode("secret", "vault"), combinedNode("memory", "memory")],
+  edges: [],
+  groups: [
+    { id: "project:fixture-project/group:code", label: "Code", parent_id: null, order: 0 },
+    { id: "project:fixture-project/group:vault", label: "Vault", parent_id: null, order: 1 },
+    { id: "project:fixture-project/group:memory", label: "Memory", parent_id: null, order: 2 },
+  ],
+  trace_ref: null,
+  extensions: {},
+};
+const combinedExpected = { kind: "project", entityId: "fixture-project", lens: COMBINED_GRAPH_LENS };
+
 test("graph client validates the complete provider envelope and GET selectors", () => {
   assert.equal(validateGraphSnapshot(graph, expected), graph);
-  assert.equal(graphEndpoint({ ...expected, settingsRevisionId: "4" }), "/api/graphs/tool/fixture-tool?lens=tool.pipeline&settings_revision_id=4");
+  assert.equal(graphEndpoint(expected), "/api/graphs/tool/fixture-tool?lens=tool.pipeline");
+  assert.throws(() => graphEndpoint({ ...expected, settingsRevisionId: "4" }));
+  assert.equal(graphEndpoint({ kind: "project", entityId: "fixture-project" }), "/api/graphs/project/fixture-project?lens=knowledge.combined");
   assert.throws(() => graphEndpoint({ ...expected, lens: "tool.execute" }));
   assert.throws(() => graphEndpoint({ ...expected, traceId: "0123456789abcdef0123456789abcdef" }));
   assert.throws(() => validateGraphSnapshot({ ...graph, schema: "schema://frank.graph/v2" }, expected));
   assert.throws(() => validateGraphSnapshot({ ...graph, subject: { kind: "tool", id: "other" } }, expected));
+  assert.throws(() => validateGraphSnapshot({ ...graph, subject: { kind: "project", id: "fixture-tool" }, graph_id: "project:fixture-tool" }, { kind: "project", entityId: "fixture-tool", lens: "tool.pipeline" }));
   assert.throws(() => validateGraphSnapshot({ ...graph, lens: "run.trace" }, expected));
   assert.throws(() => validateGraphSnapshot({ ...graph, graph_revision: "sha256:bad" }, expected));
   assert.throws(() => validateGraphSnapshot({ ...graph, trace_ref: { trace_id: "0123456789abcdef0123456789abcdef" } }, expected));
+});
+
+test("combined project graph uses a separate strict v2 validator and endpoint", () => {
+  assert.equal(validateCombinedGraphSnapshot(combinedGraph, combinedExpected), combinedGraph);
+  assert.equal(graphEndpoint({ kind: "project", entityId: "fixture-project" }), "/api/graphs/project/fixture-project?lens=knowledge.combined");
+  assert.throws(() => graphEndpoint({ kind: "project", entityId: "fixture-project", lens: "tool.pipeline" }));
+  assert.throws(() => validateGraphSnapshot(combinedGraph, combinedExpected));
+  assert.throws(() => validateCombinedGraphSnapshot({ ...combinedGraph, schema: "schema://frank.graph/v1" }, combinedExpected));
+  assert.throws(() => validateCombinedGraphSnapshot({ ...combinedGraph, subject: { kind: "tool", id: "fixture-project" } }, combinedExpected));
+  assert.throws(() => validateCombinedGraphSnapshot({ ...combinedGraph, scope: { kind: "global" } }, combinedExpected));
+  assert.throws(() => validateCombinedGraphSnapshot({ ...combinedGraph, trace_ref: { trace_id: "forbidden" } }, combinedExpected));
+});
+
+test("the Python knowledge serializer is accepted by both graph validators", () => {
+  const knowledgeRoot = resolve(appRoot, "infra", "knowledge");
+  const pythonPath = [knowledgeRoot, appRoot, process.env.PYTHONPATH].filter(Boolean).join(delimiter);
+  const source = [
+    "import json",
+    "from graph.provider import validate_knowledge_graph",
+    "from knowledge_projection import build_combined_projection",
+    "graph = build_combined_projection('project/frank', generated_at='2026-08-17T00:00:00Z', graphiti=[{'group_id': 'project/frank', 'uuid': 'memory-1', 'name': 'Memory'}], vault={'schema': 'frank.vault-projection.v1', 'content': False, 'notes': []}, graphify={'nodes': [], 'links': []})",
+    "validate_knowledge_graph(graph, project_id='frank')",
+    "print(json.dumps(graph, separators=(',', ':'))) ",
+  ].join("; ");
+  const payload = JSON.parse(execFileSync(process.env.PYTHON || "python", ["-c", source], {
+    cwd: appRoot,
+    env: { ...process.env, PYTHONPATH: pythonPath },
+    encoding: "utf8",
+  }));
+  assert.equal(validateCombinedGraphSnapshot(payload, { kind: "project", entityId: "frank", lens: COMBINED_GRAPH_LENS }), payload);
+});
+
+test("project identity validation uses the 64-character provider boundary", () => {
+  const validId = "a" + "b".repeat(63);
+  const valid = { ...combinedGraph, graph_id: `project:${validId}`, subject: { kind: "project", id: validId }, scope: { kind: "project", id: validId }, nodes: [], edges: [], groups: [] };
+  assert.doesNotThrow(() => validateCombinedGraphSnapshot(valid, { kind: "project", entityId: validId, lens: COMBINED_GRAPH_LENS }));
+  const invalidId = `${validId}c`;
+  assert.throws(() => validateCombinedGraphSnapshot({ ...valid, graph_id: `project:${invalidId}`, subject: { kind: "project", id: invalidId }, scope: { kind: "project", id: invalidId } }, { kind: "project", entityId: invalidId, lens: COMBINED_GRAPH_LENS }));
+});
+
+test("combined graph rejects forged references, raw source data, and size overflows", () => {
+  const unknownRoot = structuredClone(combinedGraph);
+  unknownRoot.injected = true;
+  const badSource = structuredClone(combinedGraph);
+  badSource.nodes[0].source.payload = "raw provider body";
+  const badReference = structuredClone(combinedGraph);
+  badReference.nodes[0].presentation.group_id = "project:fixture-project/group:missing";
+  const badGroup = structuredClone(combinedGraph);
+  badGroup.groups[0].id = "code";
+  const tooManyNodes = structuredClone(combinedGraph);
+  tooManyNodes.nodes = Array.from({ length: 5001 }, (_, index) => combinedNode(`node-${index}`));
+  for (const candidate of [unknownRoot, badSource, badReference, badGroup, tooManyNodes]) assert.throws(() => validateCombinedGraphSnapshot(candidate, combinedExpected));
+});
+
+test("combined knowledge graphs always use Sigma and expose bounded group legend styles", () => {
+  assert.equal(chooseGraphRenderer(combinedGraph), "sigma");
+  const workbench = readFileSync(new URL("../graph/graph-workbench.js", import.meta.url), "utf8");
+  const css = readFileSync(new URL("../graph/graph-workbench.css", import.meta.url), "utf8");
+  assert.match(workbench, /COMBINED_GRAPH_LENS/);
+  assert.match(workbench, /graph-group-legend/);
+  assert.match(workbench, /GROUP_COLORS/);
+  assert.match(css, /graph-legend-swatch/);
+});
+
+test("graph workbench selects Sigma for large current-v1 projections", () => {
+  assert.equal(chooseGraphRenderer(graph), "maxgraph");
+  assert.equal(chooseGraphRenderer({ ...graph, nodes: Array.from({ length: MAXGRAPH_NODE_THRESHOLD + 1 }, (_, index) => ({ id: String(index) })) }), "sigma");
+  assert.equal(chooseGraphRenderer({ ...graph, edges: Array.from({ length: MAXGRAPH_EDGE_THRESHOLD + 1 }, (_, index) => ({ id: String(index) })) }), "sigma");
+});
+
+test("graph renderer hosts have a bounded, visible layout contract", () => {
+  const css = readFileSync(new URL("../graph/graph-workbench.css", import.meta.url), "utf8");
+  assert.match(css, /\.graph-renderer-host\s*\{[^}]*position:\s*absolute/);
+  assert.match(css, /\.graph-renderer-host\s*\{[^}]*height:\s*100%/);
+  assert.match(css, /\.graph-max-host, \.graph-sigma-host\s*\{[^}]*visibility:\s*hidden/);
+  assert.match(css, /data-active/);
+  assert.match(readFileSync(new URL("../graph/graph-workbench.js", import.meta.url), "utf8"), /state\.maxHost\.dataset\.active/);
+  assert.match(readFileSync(new URL("../graph/graph-workbench.js", import.meta.url), "utf8"), /state\.sigmaHost\.dataset\.active/);
+});
+
+test("home lifecycle tears down graph mounts before rerender and grid removal", () => {
+  const homes = readFileSync(new URL("../web/js/homes.js", import.meta.url), "utf8");
+  assert.match(homes, /const graphMounts = new WeakMap\(\)/);
+  assert.match(homes, /function renderSnapshot\(body, snapshot, widgetId = ""\) \{[\s\S]*?destroyGraphMount\(body\);[\s\S]*?body\.replaceChildren\(\)/);
+  assert.match(homes, /function destroyHomeGrid\(\) \{\s*destroyGraphMounts\(homeState\.host\);[\s\S]*?homeState\.grid\.destroy\(false\)/);
+  assert.match(homes, /async function openHome\(kind, id, host\) \{[\s\S]*?destroyHomeGrid\(\);/);
 });
 
 test("graph client rejects unknown, incomplete, active-content, control, and nonfinite payloads", () => {
@@ -124,15 +263,29 @@ test("graph client rejects duplicate identities and dangling or forged relations
   }
 });
 
-test("graph client binds settings selectors to immutable graph references", () => {
+test("graph client does not expose a settings graph or selector", () => {
+  const settingsGraph = copy();
+  settingsGraph.lens = "tool.settings";
+  assert.throws(() => validateGraphSnapshot(settingsGraph, expected));
+  assert.throws(() => graphEndpoint({ ...expected, lens: "tool.settings" }));
+
+  const pipelineReference = copy();
+  pipelineReference.nodes[0].settings_revision_ref = {
+    schema: "schema://frank.tool-app-settings/v1",
+    scope: { kind: "global" },
+    revision: 4,
+  };
+  assert.equal(validateGraphSnapshot(pipelineReference, expected), pipelineReference);
+});
+
+test("graph client validates settings references without treating them as a live selector", () => {
   const settingsGraph = copy();
   settingsGraph.nodes[0].settings_revision_ref = {
     schema: "schema://frank.tool-app-settings/v1",
     scope: { kind: "global" },
     revision: 4,
   };
-  assert.equal(validateGraphSnapshot(settingsGraph, { ...expected, settingsRevisionId: "4" }), settingsGraph);
-  assert.throws(() => validateGraphSnapshot(settingsGraph, { ...expected, settingsRevisionId: "5" }));
+  assert.equal(validateGraphSnapshot(settingsGraph, expected), settingsGraph);
 
   const boundaryGraph = copy();
   boundaryGraph.nodes[0].settings_revision_ref = {
@@ -141,7 +294,7 @@ test("graph client binds settings selectors to immutable graph references", () =
     revision: Number.MAX_SAFE_INTEGER,
   };
   assert.equal(
-    validateGraphSnapshot(boundaryGraph, { ...expected, settingsRevisionId: String(Number.MAX_SAFE_INTEGER) }),
+    validateGraphSnapshot(boundaryGraph, expected),
     boundaryGraph,
   );
 });
