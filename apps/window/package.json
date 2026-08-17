@@ -3,12 +3,15 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "build:dashboard": "node scripts/build-dashboard-vendor.mjs",
     "build:graph": "node scripts/build-graph-workbench.mjs",
     "test:graph": "node --test tests/graph_client.test.mjs",
     "test:graph:browser": "npm run build:graph && node --test tests/graph_browser.test.mjs"
   },
   "dependencies": {
-    "@maxgraph/core": "0.24.0"
+    "@maxgraph/core": "0.24.0",
+    "echarts": "6.1.0",
+    "gridstack": "13.1.2"
   },
   "devDependencies": {
     "esbuild": "0.25.9"

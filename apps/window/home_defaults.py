@@ -11,10 +11,13 @@ import re
 
 KIND_DEFAULT_WIDGET_IDS: dict[str, tuple[str, ...]] = {
     "project": (
-        "entity-overview",
-        "repository-status",
-        "project-files",
-        "connection-attention",
+        "project-signal",
+        "accounts-summary",
+        "connections-summary",
+        "repository-pulse",
+        "project-attention",
+        "project-activity",
+        "project-quick-paths",
     ),
     "tool": (
         "entity-overview",
@@ -32,6 +35,19 @@ KIND_DEFAULT_WIDGET_IDS: dict[str, tuple[str, ...]] = {
         "connections-summary",
         "provider-coverage",
     ),
+}
+
+
+PROJECT_HOME_BLUEPRINT_VERSION = 2
+PROJECT_DEFAULT_WIDGET_IDS = KIND_DEFAULT_WIDGET_IDS["project"]
+PROJECT_DEFAULT_WIDGET_LAYOUTS: dict[str, dict[str, int]] = {
+    "project-signal": {"x": 0, "y": 0, "w": 4, "h": 2},
+    "accounts-summary": {"x": 4, "y": 0, "w": 2, "h": 2},
+    "connections-summary": {"x": 6, "y": 0, "w": 2, "h": 2},
+    "repository-pulse": {"x": 8, "y": 0, "w": 4, "h": 2},
+    "project-attention": {"x": 0, "y": 2, "w": 5, "h": 3},
+    "project-activity": {"x": 5, "y": 2, "w": 4, "h": 3},
+    "project-quick-paths": {"x": 9, "y": 2, "w": 3, "h": 3},
 }
 
 
@@ -246,12 +262,22 @@ API_ENTITY_PROFILES = _REGISTERED_ENTITY_PROFILES
 
 def default_widget_ids(kind: str, entity_id: str, profile: dict | None = None) -> list[str]:
     """Return a copy of the profile-owned blueprint, then safe fallbacks."""
+    if kind == "project":
+        return list(PROJECT_DEFAULT_WIDGET_IDS)
     declared = None
     if isinstance(profile, dict):
         declared = profile.get("default_widget_ids", profile.get("default_widgets"))
     if isinstance(declared, list) and declared:
         return [str(widget_id) for widget_id in declared]
     return list(ENTITY_DEFAULT_WIDGET_IDS.get(f"{kind}:{entity_id}", KIND_DEFAULT_WIDGET_IDS.get(kind, ())))
+
+
+def default_widget_layout(kind: str, widget_id: str) -> dict[str, int] | None:
+    """Return a copy of the default responsive-grid placement for project widgets."""
+    if kind != "project":
+        return None
+    layout = PROJECT_DEFAULT_WIDGET_LAYOUTS.get(widget_id)
+    return dict(layout) if layout else None
 
 
 def api_entity_profile(kind: str, entity_id: str) -> dict | None:

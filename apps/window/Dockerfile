@@ -3,7 +3,9 @@ WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci --ignore-scripts
 COPY graph ./graph
+COPY dashboard ./dashboard
 COPY scripts ./scripts
+RUN npm run build:dashboard
 RUN npm run build:graph
 
 FROM python:3.12-slim
@@ -19,6 +21,7 @@ COPY provider_adapters.py .
 COPY vault_broker.py .
 COPY graph ./graph
 COPY web /web
+COPY --from=graph-build /build/web/dashboard /web/dashboard
 COPY --from=graph-build /build/web/graph /web/graph
 ENV FRANK_WEB=/web
 ENV PORT=8080

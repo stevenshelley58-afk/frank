@@ -7,7 +7,8 @@
 <title>Frank</title>
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
-<link rel="stylesheet" href="/app.css?v=20260814-entity-homes">
+<link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
+<link rel="stylesheet" href="/app.css?v=20260817-signal-board">
 </head>
 <body>
 <div class="app">
@@ -110,6 +111,18 @@
 
       <section class="view" data-view="project">
         <div class="home-surface">
+          <div class="project-dashboard-heading">
+            <div>
+              <span class="project-dashboard-kicker"><i id="project-dashboard-dot"></i>Project · live signal</span>
+              <h2 id="project-dashboard-name">Project</h2>
+              <p id="project-dashboard-blurb">Project workspace.</p>
+            </div>
+            <div class="project-dashboard-badges">
+              <span class="project-dashboard-status" id="project-dashboard-status">Loading status</span>
+              <span class="project-dashboard-setup" id="project-dashboard-setup">Checking setup</span>
+              <a class="project-dashboard-open" id="project-dashboard-open" target="_blank" rel="noopener noreferrer" hidden>Open app ↗</a>
+            </div>
+          </div>
           <div class="home-context"><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
           <div class="grid home-grid" id="slot-project"></div>
         </div>
@@ -324,6 +337,7 @@
   </div>
   <div class="media-stage" id="media-stage"></div>
 </div>
-<script type="module" src="/js/app.js?v=20260814-entity-homes-chat"></script>
+<script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
+<script type="module" src="/js/app.js?v=20260817-signal-board"></script>
 </body>
 </html>

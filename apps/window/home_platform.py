@@ -118,6 +118,41 @@ BUILTIN_WIDGETS = [
         "freshness": "on_demand", "accepts_connection": False, "multiple": False,
     },
     {
+        "id": "project-signal", "version": "1.0.0", "title": "Project signal",
+        "description": "Live project health, branch, services, and setup signal.",
+        "surfaces": ["project"], "default_size": "small",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.overview",
+        "freshness": "poll", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "repository-pulse", "version": "1.0.0", "title": "Repository pulse",
+        "description": "Recent repository activity grouped into a compact live chart.",
+        "surfaces": ["project"], "default_size": "small",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.git",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "project-attention", "version": "1.0.0", "title": "Needs attention",
+        "description": "Project setup and provider gaps collected into one action queue.",
+        "surfaces": ["project"], "default_size": "medium",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.overview",
+        "freshness": "poll", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "project-activity", "version": "1.0.0", "title": "Recent activity",
+        "description": "Current application and repository events for this project.",
+        "surfaces": ["project"], "default_size": "small",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.overview",
+        "freshness": "poll", "accepts_connection": False, "multiple": False,
+    },
+    {
+        "id": "project-quick-paths", "version": "1.0.0", "title": "Quick paths",
+        "description": "Project-scoped shortcuts to the live app and Frank surfaces.",
+        "surfaces": ["project"], "default_size": "small",
+        "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.links",
+        "freshness": "on_demand", "accepts_connection": False, "multiple": False,
+    },
+    {
         "id": "application-status", "version": "1.0.0", "title": "Application",
         "description": "Recorded live URL and health-connection state.",
         "surfaces": ["project", "service"], "default_size": "medium",
@@ -322,6 +357,8 @@ def _home_store() -> dict:
     data = _read_json(HOME_STORE_FILE, {"version": 1, "homes": {}, "custom_widgets": []})
     if data.get("version") != 1 or not isinstance(data.get("homes"), dict) or not isinstance(data.get("custom_widgets"), list):
         return {"version": 1, "homes": {}, "custom_widgets": []}
+    if _migrate_project_home_blueprints(data):
+        _write_json(HOME_STORE_FILE, data)
     return data
 
 
@@ -483,13 +520,54 @@ def _default_instances(kind: str, entity_id: str, entity: dict | None = None, st
         manifest = by_id.get(widget_id)
         if not _widget_allowed_on_home(manifest, kind, entity_id):
             continue
-        result.append({
+        layout = home_defaults.default_widget_layout(kind, widget_id)
+        instance = {
             "instance_id": f"{widget_id}-1",
             "widget_id": widget_id,
-            "size": manifest["default_size"],
+            "size": (
+                "wide" if layout and layout["w"] >= 9 else
+                "medium" if layout and layout["w"] >= 5 else
+                "small" if layout else manifest["default_size"]
+            ),
             "config": {},
-        })
+        }
+        if layout:
+            instance["layout"] = layout
+        result.append(instance)
     return result
+
+
+def _migrate_project_home_blueprints(store: dict) -> bool:
+    """Replace pre-Signal-Board project homes once, preserving non-project homes."""
+    changed = False
+    for key, saved in list(store.get("homes", {}).items()):
+        if not key.startswith("project:") or not isinstance(saved, dict):
+            continue
+        if int(saved.get("blueprint_version", 0) or 0) >= home_defaults.PROJECT_HOME_BLUEPRINT_VERSION:
+            continue
+        entity_id = key.split(":", 1)[1]
+        entity = _entity("project", entity_id)
+        saved["instances"] = _default_instances("project", entity_id, entity, store)
+        saved["revision"] = max(0, int(saved.get("revision", 0) or 0)) + 1
+        saved["updated_at"] = _now()
+        saved["blueprint_version"] = home_defaults.PROJECT_HOME_BLUEPRINT_VERSION
+        changed = True
+    return changed
+
+
+def _clean_widget_layout(raw: object, kind: str) -> dict[str, int] | None:
+    if raw is None:
+        return None
+    if kind != "project" or not isinstance(raw, dict) or set(raw) != {"x", "y", "w", "h"}:
+        abort(400, "widget layout is invalid")
+    if any(isinstance(raw[key], bool) or not isinstance(raw[key], int) for key in ("x", "y", "w", "h")):
+        abort(400, "widget layout values must be integers")
+    layout = {key: int(raw[key]) for key in ("x", "y", "w", "h")}
+    if not (0 <= layout["x"] <= 11 and 0 <= layout["y"] <= 99 and 1 <= layout["w"] <= 12 and 1 <= layout["h"] <= 6):
+        abort(400, "widget layout is outside the project grid")
+    if layout["x"] + layout["w"] > 12:
+        abort(400, "widget layout exceeds the project grid")
+    return layout
 
 
 def _clean_widget_config(config: object) -> dict:
@@ -548,7 +626,11 @@ def _clean_instances(raw: object, kind: str, entity_id: str, store: dict) -> lis
             abort(400, "connection does not exist")
         if connection_id and not _connection_allowed_for_home(connection_records[connection_id], kind, entity_id):
             abort(400, "connection is outside this home scope")
-        result.append({"instance_id": instance_id, "widget_id": widget_id, "size": size, "config": config})
+        cleaned = {"instance_id": instance_id, "widget_id": widget_id, "size": size, "config": config}
+        layout = _clean_widget_layout(entry.get("layout"), kind)
+        if layout:
+            cleaned["layout"] = layout
+        result.append(cleaned)
         seen_instances.add(instance_id)
         seen_widgets.add(widget_id)
     return result
@@ -565,6 +647,10 @@ def _home_payload(kind: str, entity_id: str, store: dict) -> dict:
         "revision": int(saved.get("revision", 0)) if isinstance(saved, dict) else 0,
         "instances": saved.get("instances", defaults) if isinstance(saved, dict) else defaults,
         "updated_at": saved.get("updated_at") if isinstance(saved, dict) else None,
+        "blueprint_version": (
+            int(saved.get("blueprint_version", 0)) if isinstance(saved, dict) else
+            home_defaults.PROJECT_HOME_BLUEPRINT_VERSION if kind == "project" else 0
+        ),
         "max_widgets": MAX_WIDGETS_PER_HOME,
     }
 
@@ -740,6 +826,7 @@ def homes_save(kind: str, entity_id: str):
         revision = current["revision"] + 1
         store["homes"][f"{kind}:{entity_id}"] = {
             "revision": revision, "instances": instances, "updated_at": _now(),
+            "blueprint_version": home_defaults.PROJECT_HOME_BLUEPRINT_VERSION if kind == "project" else 0,
         }
         _write_json(HOME_STORE_FILE, store)
         return jsonify(_home_payload(kind, entity_id, store))
@@ -763,6 +850,7 @@ def homes_reset(kind: str, entity_id: str):
             "revision": current["revision"] + 1,
             "instances": _default_instances(kind, entity_id, current["entity"], store),
             "updated_at": _now(),
+            "blueprint_version": home_defaults.PROJECT_HOME_BLUEPRINT_VERSION if kind == "project" else 0,
         }
         _write_json(HOME_STORE_FILE, store)
         return jsonify(_home_payload(kind, entity_id, store))

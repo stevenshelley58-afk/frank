@@ -207,7 +207,12 @@ class HomePlatformApiTest(unittest.TestCase):
 
                 home_platform._write_json(home_platform.HOME_STORE_FILE, {
                     "version": 1,
-                    "homes": {f"{kind}:{entity_id}": {"revision": 1, "instances": [forged], "updated_at": 0}},
+                    "homes": {f"{kind}:{entity_id}": {
+                        "revision": 1,
+                        "instances": [forged],
+                        "updated_at": 0,
+                        "blueprint_version": home_platform.home_defaults.PROJECT_HOME_BLUEPRINT_VERSION,
+                    }},
                     "custom_widgets": [],
                 })
                 unavailable = self.client.get(f"/api/homes/{kind}/{entity_id}/widgets/hermes-session-forged")
@@ -252,7 +257,12 @@ class HomePlatformApiTest(unittest.TestCase):
         home = response.get_json()
         self.assertEqual(home["schema"], "schema://frank.home/v1")
         self.assertEqual(home["revision"], 0)
-        self.assertEqual(len(home["instances"]), 6)
+        self.assertEqual(
+            [item["widget_id"] for item in home["instances"]],
+            list(home_platform.home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
+        )
+        self.assertTrue(all(set(item["layout"]) == {"x", "y", "w", "h"} for item in home["instances"]))
+        self.assertEqual(home["blueprint_version"], home_platform.home_defaults.PROJECT_HOME_BLUEPRINT_VERSION)
         self.assertEqual(home["entity"]["name"], "Blockwise")
 
         reversed_instances = list(reversed(home["instances"]))
@@ -271,9 +281,9 @@ class HomePlatformApiTest(unittest.TestCase):
         self.assertEqual(stale.status_code, 409)
         self.assertEqual(stale.get_json()["current"]["revision"], 1)
 
-        repository = self.client.get("/api/homes/project/blockwise/widgets/repository-status-1")
-        self.assertEqual(repository.status_code, 200)
-        self.assertEqual(repository.get_json()["data"]["branch"], "main")
+        signal = self.client.get("/api/homes/project/blockwise/widgets/project-signal-1")
+        self.assertEqual(signal.status_code, 200)
+        self.assertEqual(signal.get_json()["data"]["branch"], "main")
 
         accounts = self.client.get("/api/homes/project/blockwise/widgets/accounts-summary-1")
         self.assertEqual(accounts.get_json()["data"]["customers"], 1)
@@ -282,7 +292,34 @@ class HomePlatformApiTest(unittest.TestCase):
         reset = self.client.post("/api/homes/project/blockwise/reset", json={"expected_revision": 1})
         self.assertEqual(reset.status_code, 200)
         self.assertEqual(reset.get_json()["revision"], 2)
-        self.assertEqual(reset.get_json()["instances"][0]["widget_id"], "entity-overview")
+        self.assertEqual(reset.get_json()["instances"][0]["widget_id"], "project-signal")
+
+    def test_existing_project_layout_migrates_once_to_signal_board(self):
+        home_platform._write_json(home_platform.HOME_STORE_FILE, {
+            "version": 1,
+            "homes": {
+                "project:blockwise": {
+                    "revision": 4,
+                    "instances": [{
+                        "instance_id": "entity-overview-1",
+                        "widget_id": "entity-overview",
+                        "size": "wide",
+                        "config": {},
+                    }],
+                    "updated_at": 10,
+                },
+            },
+            "custom_widgets": [],
+        })
+        migrated = self.client.get("/api/homes/project/blockwise").get_json()
+        self.assertEqual(migrated["revision"], 5)
+        self.assertEqual(migrated["blueprint_version"], home_platform.home_defaults.PROJECT_HOME_BLUEPRINT_VERSION)
+        self.assertEqual(
+            [item["widget_id"] for item in migrated["instances"]],
+            list(home_platform.home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
+        )
+        repeated = self.client.get("/api/homes/project/blockwise").get_json()
+        self.assertEqual(repeated["revision"], 5)
 
     def test_home_rejects_unknown_duplicate_oversized_and_cross_scope_widgets(self):
         home = self.client.get("/api/homes/project/blockwise").get_json()
@@ -291,6 +328,9 @@ class HomePlatformApiTest(unittest.TestCase):
 
         duplicate = [home["instances"][0], {**home["instances"][0], "instance_id": "entity-overview-2"}]
         self.assertEqual(self.client.put("/api/homes/project/blockwise", json={"expected_revision": 0, "instances": duplicate}).status_code, 400)
+
+        invalid_layout = [{**home["instances"][0], "layout": {"x": 11, "y": 0, "w": 2, "h": 2}}]
+        self.assertEqual(self.client.put("/api/homes/project/blockwise", json={"expected_revision": 0, "instances": invalid_layout}).status_code, 400)
 
         oversized = [
             {"instance_id": f"quick-links-{index}", "widget_id": "quick-links", "size": "small", "config": {}}
