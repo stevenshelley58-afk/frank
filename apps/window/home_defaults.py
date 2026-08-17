@@ -38,10 +38,9 @@ KIND_DEFAULT_WIDGET_IDS: dict[str, tuple[str, ...]] = {
 ENTITY_DEFAULT_WIDGET_IDS: dict[str, tuple[str, ...]] = {
     "tool:connections": (
         "connections-summary",
-        "connection-attention",
         "provider-catalog",
+        "connection-attention",
         "provider-coverage",
-        "hermes-status",
     ),
     "tool:accounts": (
         "entity-overview",
@@ -86,6 +85,16 @@ ENTITY_DEFAULT_WIDGET_IDS: dict[str, tuple[str, ...]] = {
         "connections-summary",
         "hermes-status",
     ),
+}
+
+
+ENTITY_DEFAULT_WIDGET_SIZES: dict[str, dict[str, str]] = {
+    "tool:connections": {
+        "connections-summary": "wide",
+        "provider-catalog": "wide",
+        "connection-attention": "medium",
+        "provider-coverage": "medium",
+    },
 }
 
 
@@ -252,6 +261,11 @@ def default_widget_ids(kind: str, entity_id: str, profile: dict | None = None) -
     if isinstance(declared, list) and declared:
         return [str(widget_id) for widget_id in declared]
     return list(ENTITY_DEFAULT_WIDGET_IDS.get(f"{kind}:{entity_id}", KIND_DEFAULT_WIDGET_IDS.get(kind, ())))
+
+
+def default_widget_size(kind: str, entity_id: str, widget_id: str, fallback: str) -> str:
+    """Return an entity-specific default size without changing the widget contract."""
+    return ENTITY_DEFAULT_WIDGET_SIZES.get(f"{kind}:{entity_id}", {}).get(widget_id, fallback)
 
 
 def api_entity_profile(kind: str, entity_id: str) -> dict | None:

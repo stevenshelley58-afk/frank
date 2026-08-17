@@ -146,29 +146,29 @@ BUILTIN_WIDGETS = [
         "freshness": "on_demand", "accepts_connection": False, "multiple": False,
     },
     {
-        "id": "connections-summary", "version": "1.0.0", "title": "Connections",
-        "description": "Recorded provider connections and setup issues.",
+        "id": "connections-summary", "version": "1.0.0", "title": "Connected apps",
+        "description": "Apps and services with a recorded Frank connection.",
         "surfaces": sorted(ENTITY_KINDS), "default_size": "medium",
         "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.connections",
         "freshness": "on_demand", "accepts_connection": True, "multiple": False,
     },
     {
-        "id": "connection-attention", "version": "1.0.0", "title": "Connection attention",
-        "description": "Setup, verification, and connection errors needing review.",
+        "id": "connection-attention", "version": "1.0.0", "title": "Needs attention",
+        "description": "Connections that need setup, verification, or repair.",
         "surfaces": sorted(ENTITY_KINDS), "default_size": "medium",
         "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.connections",
         "freshness": "poll", "accepts_connection": False, "multiple": False,
     },
     {
-        "id": "provider-catalog", "version": "1.0.0", "title": "Provider catalog",
-        "description": "Available provider capabilities and safe setup boundaries.",
+        "id": "provider-catalog", "version": "1.0.0", "title": "Available apps",
+        "description": "Apps and connection types that Frank can use.",
         "surfaces": ["project", "tool", "agent", "service"], "default_size": "wide",
         "allowed_sizes": ["medium", "wide"], "provider": "frank.connections",
         "freshness": "on_demand", "accepts_connection": False, "multiple": False,
     },
     {
-        "id": "provider-coverage", "version": "1.0.0", "title": "Provider coverage",
-        "description": "Recorded, verified, setup-needed, and error states by provider.",
+        "id": "provider-coverage", "version": "1.0.0", "title": "Coverage",
+        "description": "Connection state across available app types.",
         "surfaces": sorted(ENTITY_KINDS), "default_size": "medium",
         "allowed_sizes": ["small", "medium", "wide"], "provider": "frank.connections",
         "freshness": "poll", "accepts_connection": False, "multiple": False,
@@ -245,12 +245,13 @@ CONNECTION_CATALOG = [
     {
         "provider": "activepieces", "title": "Activepieces", "description": "Open-source connectors and workflows.",
         "capabilities": ["workflow.run", "workflow.status", "connector.setup"], "setup_mode": "activepieces",
+        "open_source": True, "license": "MIT",
         "adapter_status_map": {"ACTIVE": "verified", "MISSING": "setup_needed", "ERROR": "error"},
         "adapter_note": "Future Hermes adapter reads Activepieces MCP status; credentials are configured in Activepieces UI.",
     },
     {
         "provider": "mcp", "title": "MCP", "description": "A tool exposed to Hermes through an MCP boundary.",
-        "capabilities": ["tool.invoke", "tool.status"], "setup_mode": "reference",
+        "capabilities": ["tool.invoke", "tool.status"], "setup_mode": "reference", "open_standard": True,
     },
     {
         "provider": "api", "title": "API", "description": "A generic API connection registered for later provider adapters.",
@@ -486,7 +487,7 @@ def _default_instances(kind: str, entity_id: str, entity: dict | None = None, st
         result.append({
             "instance_id": f"{widget_id}-1",
             "widget_id": widget_id,
-            "size": manifest["default_size"],
+            "size": home_defaults.default_widget_size(kind, entity_id, widget_id, manifest["default_size"]),
             "config": {},
         })
     return result

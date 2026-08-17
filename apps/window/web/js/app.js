@@ -81,6 +81,9 @@ window.addEventListener("frank:view", (event) => {
   if (event.detail === "accounts") {
     show("accounts");
     loadAccounts();
+  } else if (event.detail === "connections") {
+    show("connections");
+    openConnections();
   }
 });
 
@@ -97,9 +100,9 @@ window.addEventListener("frank:widget-builder", () => {
   openWidgetBuilder();
 });
 
-window.addEventListener("frank:connections", () => {
+window.addEventListener("frank:connections", (event) => {
   show("connections");
-  openConnections();
+  openConnections(event.detail || {});
 });
 
 window.addEventListener("frank:open-chat-session", async (event) => {
