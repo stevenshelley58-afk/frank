@@ -17,6 +17,7 @@ from pathlib import Path
 from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory, stream_with_context
 
 import home_platform
+import home_defaults
 import vault_broker
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
@@ -84,26 +85,26 @@ DEFAULT_PROJECTS = [
         "blurb": "Meta ads workflow for real-estate teams.",
         "live": "https://blockwise.sale", "health": "https://blockwise.sale/api/health",
         "capabilities": ["application.health", "repository.activity", "repository.summary", "project.files", "accounts.directory", "connections.read", "analytics.setup"],
-        "default_widgets": ["entity-overview", "application-status", "repository-activity", "repository-status", "project-files", "accounts-summary", "connection-attention", "analytics-summary"],
+        "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },
     {
         "id": "merrypaws", "name": "Merrypaws", "root": "merrypaws",
         "blurb": "Merrypaws project workspace and storefront operations.",
         "capabilities": ["repository.activity", "repository.summary", "project.files", "accounts.directory", "connections.read", "analytics.setup"],
-        "default_widgets": ["entity-overview", "repository-activity", "repository-status", "project-files", "accounts-summary", "connection-attention", "analytics-summary"],
+        "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },
     {
         "id": "elfwonder", "name": "Elf & Wonder", "root": "elfandwonder",
         "blurb": "Elf & Wonder project workspace.",
         "capabilities": ["repository.activity", "repository.summary", "project.files", "connections.read", "analytics.setup"],
-        "default_widgets": ["entity-overview", "repository-activity", "repository-status", "project-files", "connection-attention", "analytics-summary"],
+        "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },
     {
         "id": "pavone", "name": "Pavone", "root": "pavone-demo",
         "blurb": "Pavone automotive project workspace.",
         "live": "https://pavoneauto.com", "health": "https://pavoneauto.com/api/health",
         "capabilities": ["application.health", "repository.activity", "repository.summary", "project.files", "accounts.directory", "connections.read", "analytics.setup"],
-        "default_widgets": ["entity-overview", "application-status", "repository-activity", "repository-status", "project-files", "accounts-summary", "connection-attention", "analytics-summary"],
+        "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },
 ]
 

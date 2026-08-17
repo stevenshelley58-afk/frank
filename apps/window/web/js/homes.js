@@ -12,7 +12,38 @@ const homeState = {
   host: null,
   savePending: false,
   refreshTimer: null,
+  grid: null,
 };
+
+const PROJECT_GRID_COLUMNS = 12;
+const PROJECT_DEFAULT_LAYOUTS = {
+  "project-signal": { x: 0, y: 0, w: 4, h: 2 },
+  "accounts-summary": { x: 4, y: 0, w: 2, h: 2 },
+  "connections-summary": { x: 6, y: 0, w: 2, h: 2 },
+  "repository-pulse": { x: 8, y: 0, w: 4, h: 2 },
+  "project-attention": { x: 0, y: 2, w: 5, h: 3 },
+  "project-activity": { x: 5, y: 2, w: 4, h: 3 },
+  "project-quick-paths": { x: 9, y: 2, w: 3, h: 3 },
+};
+
+function isProjectHome() {
+  return homeState.home?.entity?.kind === "project";
+}
+
+function destroyHomeGrid() {
+  if (!homeState.grid) return;
+  homeState.grid.destroy(false);
+  homeState.grid = null;
+}
+
+function projectLayout(instance) {
+  if (instance?.layout && ["x", "y", "w", "h"].every((key) => Number.isInteger(instance.layout[key]))) {
+    return { ...instance.layout };
+  }
+  if (PROJECT_DEFAULT_LAYOUTS[instance?.widget_id]) return { ...PROJECT_DEFAULT_LAYOUTS[instance.widget_id] };
+  const width = instance?.size === "wide" ? 12 : instance?.size === "small" ? 3 : 6;
+  return { x: 0, y: 0, w: width, h: 2 };
+}
 
 let builderEditId = "";
 let connectionEditId = "";
@@ -158,6 +189,7 @@ export function clearHomeActions() {
   homeState.controller?.abort();
   window.clearInterval(homeState.refreshTimer);
   homeState.refreshTimer = null;
+  destroyHomeGrid();
   clearConnectionSecret();
   setTopActions();
 }
@@ -279,6 +311,12 @@ function moveInstance(instanceId, delta) {
   const index = homeState.draft.findIndex((item) => item.instance_id === instanceId);
   const next = index + delta;
   if (index < 0 || next < 0 || next >= homeState.draft.length) return;
+  if (isProjectHome()) {
+    const currentLayout = projectLayout(homeState.draft[index]);
+    const nextLayout = projectLayout(homeState.draft[next]);
+    homeState.draft[index].layout = nextLayout;
+    homeState.draft[next].layout = currentLayout;
+  }
   [homeState.draft[index], homeState.draft[next]] = [homeState.draft[next], homeState.draft[index]];
   renderHome();
 }
@@ -289,6 +327,12 @@ function resizeInstance(instanceId) {
   if (!item || !manifest) return;
   const sizes = manifest.allowed_sizes || ["medium"];
   item.size = sizes[(sizes.indexOf(item.size) + 1) % sizes.length];
+  if (isProjectHome()) {
+    const layout = projectLayout(item);
+    layout.w = item.size === "wide" ? 12 : item.size === "small" ? 3 : 6;
+    layout.x = Math.min(layout.x, PROJECT_GRID_COLUMNS - layout.w);
+    item.layout = layout;
+  }
   renderHome();
 }
 
@@ -309,7 +353,20 @@ function addInstance(widgetId) {
     return;
   }
   const suffix = crypto.randomUUID().replaceAll("-", "").slice(0, 10);
-  homeState.draft.push({ instance_id: `${widgetId.slice(0, 60)}-${suffix}`, widget_id: widgetId, size: manifest.default_size, config: {} });
+  const instance = { instance_id: `${widgetId.slice(0, 60)}-${suffix}`, widget_id: widgetId, size: manifest.default_size, config: {} };
+  if (isProjectHome()) {
+    const bottom = homeState.draft.reduce((maximum, entry) => {
+      const layout = projectLayout(entry);
+      return Math.max(maximum, layout.y + layout.h);
+    }, 0);
+    instance.layout = {
+      x: 0,
+      y: bottom,
+      w: manifest.default_size === "wide" ? 12 : manifest.default_size === "small" ? 3 : 6,
+      h: 2,
+    };
+  }
+  homeState.draft.push(instance);
   homeState.gallery = false;
   setHomeMessage(`${manifest.title} added. Save to connect its data.`);
   renderHome();
@@ -437,8 +494,195 @@ function appendSnapshotAction(parent, item) {
   return true;
 }
 
+function disposeProjectCharts(body) {
+  body.querySelectorAll("[data-project-chart]").forEach((host) => {
+    host._resizeObserver?.disconnect();
+    host._chart?.dispose();
+  });
+}
+
+function updateProjectHeading(snapshot) {
+  const badge = $("#project-dashboard-status");
+  const dot = $("#project-dashboard-dot");
+  const setup = $("#project-dashboard-setup");
+  if (!badge || !dot) return;
+  const status = displayStatus(snapshot.status);
+  badge.textContent = status === "ready" ? "Application live" : status === "error" ? "Needs attention" : "Setup in progress";
+  badge.dataset.status = status;
+  dot.dataset.status = status;
+  if (setup) {
+    const count = Number(snapshot.data?.setup_items || 0);
+    setup.textContent = `${count} setup item${count === 1 ? "" : "s"}`;
+  }
+}
+
+function renderProjectSignal(body, snapshot) {
+  updateProjectHeading(snapshot);
+  const data = snapshot.data || {};
+  const status = displayStatus(snapshot.status);
+  const signal = node("div", "project-signal-line");
+  signal.append(node("span", "project-signal-ring", status === "ready" ? "OK" : status === "error" ? "!" : "…"));
+  const copy = node("div", "project-signal-copy");
+  copy.append(node("strong", "", scalarValue(snapshot.summary) || "Project status"));
+  copy.append(node("span", "", scalarValue(data.health_summary) || "Provider status is available."));
+  signal.append(copy);
+  const footer = node("div", "project-signal-footer");
+  for (const [value, label] of [
+    [data.branch || "unknown", "branch"],
+    [Number(data.live_services || 0), "live service"],
+    [Number(data.setup_items || 0), "setup items"],
+  ]) {
+    const item = node("span");
+    item.append(node("strong", "", String(value)), document.createTextNode(` ${label}${label === "live service" && value !== 1 ? "s" : ""}`));
+    footer.append(item);
+  }
+  body.append(signal, footer);
+}
+
+function renderRepositoryPulse(body, snapshot) {
+  const data = snapshot.data || {};
+  const points = Array.isArray(data.points) ? data.points.filter((item) => item && Number.isFinite(item.value)) : [];
+  if (!points.length) {
+    body.append(node("span", `home-status-pill status-${displayStatus(snapshot.status)}`, displayStatus(snapshot.status).replaceAll("_", " ")));
+    body.append(node("p", "home-summary", scalarValue(snapshot.summary) || "No repository activity yet."));
+    return;
+  }
+  const chartHost = node("div", "project-pulse-chart");
+  chartHost.dataset.projectChart = "repository-pulse";
+  chartHost.setAttribute("role", "img");
+  chartHost.setAttribute("aria-label", `Repository activity: ${points.map((item) => `${item.label}, ${item.value}`).join("; ")}`);
+  body.append(chartHost);
+  const echarts = window.FrankDashboardVendor?.echarts;
+  if (!echarts) {
+    const fallback = node("div", "project-pulse-fallback");
+    const maximum = Math.max(...points.map((item) => item.value), 1);
+    for (const item of points) {
+      const bar = node("span");
+      bar.style.height = `${Math.max(8, Math.round((item.value / maximum) * 100))}%`;
+      bar.title = `${item.label}: ${item.value}`;
+      fallback.append(bar);
+    }
+    chartHost.append(fallback);
+    return;
+  }
+  requestAnimationFrame(() => {
+    if (!chartHost.isConnected) return;
+    const chart = echarts.init(chartHost, null, { renderer: "svg" });
+    chartHost._chart = chart;
+    chart.setOption({
+      animationDuration: 450,
+      aria: { enabled: true, decal: { show: false } },
+      grid: { top: 8, right: 4, bottom: 18, left: 4 },
+      tooltip: { trigger: "axis", backgroundColor: "#111", borderWidth: 0, textStyle: { color: "#fff", fontSize: 10 } },
+      xAxis: {
+        type: "category", boundaryGap: false, data: points.map((item) => item.label),
+        axisLine: { show: false }, axisTick: { show: false }, axisLabel: { color: "#6b6b6b", fontSize: 9 },
+      },
+      yAxis: { type: "value", show: false, minInterval: 1 },
+      series: [{
+        name: "Repository events", type: "line", smooth: 0.35, symbol: "none",
+        data: points.map((item) => item.value),
+        lineStyle: { color: "#111", width: 2 }, areaStyle: { color: "rgba(17,17,17,.08)" },
+      }],
+    });
+    const observer = new ResizeObserver(() => chart.resize());
+    observer.observe(chartHost);
+    chartHost._resizeObserver = observer;
+  });
+}
+
+function renderProjectMetric(body, snapshot, widgetId) {
+  const data = snapshot.data || {};
+  let value = 0;
+  let label = "records";
+  if (widgetId === "accounts-summary") {
+    value = Number(data.total || 0);
+  } else {
+    const counts = data.counts && typeof data.counts === "object" ? data.counts : {};
+    const total = ["setup_needed", "connected", "verified", "error"].reduce((sum, key) => sum + Number(counts[key] || 0), 0);
+    value = `${Number(counts.verified || 0)}/${total}`;
+    label = "verified";
+  }
+  body.append(node("strong", "project-metric-value", String(value)));
+  body.append(node("span", "project-metric-label", label));
+  const state = node("span", `project-metric-state status-${displayStatus(snapshot.status)}`,
+    displayStatus(snapshot.status) === "ready" ? "Ready" : scalarValue(snapshot.summary) || "Setup available");
+  body.append(state);
+}
+
+function renderProjectAttention(body, snapshot) {
+  const rows = Array.isArray(snapshot.data?.rows) ? snapshot.data.rows : [];
+  if (!rows.length) {
+    body.append(node("p", "project-clear-state", "Nothing needs attention."));
+    return;
+  }
+  const list = node("ul", "project-attention-list");
+  rows.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const row = node("li", "project-attention-row");
+    row.append(node("i", `project-attention-dot status-${displayStatus(item.status)}`));
+    const copy = node("div", "project-attention-copy");
+    copy.append(node("strong", "", scalarValue(item.subject) || "Setup item"));
+    copy.append(node("span", "", scalarValue(item.detail) || "Review this project setting."));
+    row.append(copy);
+    if (item.link) appendSnapshotAction(row, item.link);
+    list.append(row);
+  });
+  body.append(list);
+}
+
+function renderProjectActivity(body, snapshot) {
+  const timeline = Array.isArray(snapshot.data?.timeline) ? snapshot.data.timeline : [];
+  const list = node("ol", "project-activity-list");
+  timeline.forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const row = node("li", "project-activity-row");
+    row.append(node("i", `project-activity-dot status-${displayStatus(item.status)}`));
+    const copy = node("div", "project-activity-copy");
+    copy.append(node("strong", "", scalarValue(item.title) || "Project event"));
+    const detail = scalarValue(item.detail);
+    if (detail) copy.append(node("span", "", detail));
+    row.append(copy);
+    const timestamp = safeTimestamp(item.timestamp || item.at);
+    if (timestamp) row.append(timestamp);
+    list.append(row);
+  });
+  body.append(list);
+}
+
+function renderProjectQuickPaths(body, snapshot) {
+  const links = node("div", "project-quick-links");
+  (snapshot.links || []).forEach((item) => appendSnapshotAction(links, item));
+  body.append(links);
+  const ready = Number(snapshot.data?.ready || 0);
+  const total = Math.max(1, Number(snapshot.data?.total || 4));
+  const coverage = node("div", "project-coverage");
+  const label = node("div", "project-coverage-label");
+  label.append(node("span", "", "Widget coverage"), node("span", "", `${ready} of ${total} ready`));
+  const track = node("div", "project-coverage-track");
+  const value = node("span");
+  value.style.width = `${Math.min(100, Math.round((ready / total) * 100))}%`;
+  track.append(value);
+  coverage.append(label, track);
+  body.append(coverage);
+}
+
+function renderProjectSnapshot(body, snapshot, widgetId) {
+  if (!isProjectHome()) return false;
+  if (widgetId === "project-signal") renderProjectSignal(body, snapshot);
+  else if (widgetId === "accounts-summary" || widgetId === "connections-summary") renderProjectMetric(body, snapshot, widgetId);
+  else if (widgetId === "repository-pulse") renderRepositoryPulse(body, snapshot);
+  else if (widgetId === "project-attention") renderProjectAttention(body, snapshot);
+  else if (widgetId === "project-activity") renderProjectActivity(body, snapshot);
+  else if (widgetId === "project-quick-paths") renderProjectQuickPaths(body, snapshot);
+  else return false;
+  return true;
+}
+
 function renderSnapshot(body, snapshot, widgetId = "") {
+  disposeProjectCharts(body);
   body.replaceChildren();
+  if (renderProjectSnapshot(body, snapshot, widgetId)) return;
   const summary = node("p", "home-summary", scalarValue(snapshot.summary) || "No summary available.");
   const statusValue = displayStatus(snapshot.status);
   const status = node("span", `home-status-pill status-${statusValue}`, statusValue.replaceAll("_", " "));
@@ -584,6 +828,7 @@ function scheduleHomeRefresh() {
 function widgetCard(instance, index, generation) {
   const manifest = manifestFor(instance.widget_id);
   const card = node("section", `w-card home-widget home-size-${instance.size}`);
+  if (isProjectHome()) card.classList.add("project-widget");
   card.dataset.instanceId = instance.instance_id;
   card.dataset.widgetId = instance.widget_id;
   const heading = node("div", "home-widget-head");
@@ -638,12 +883,75 @@ function gallery() {
   return panel;
 }
 
+function syncProjectGridLayout() {
+  if (!homeState.grid || !homeState.editing) return;
+  const byId = new Map(homeState.draft.map((item) => [item.instance_id, item]));
+  for (const gridNode of homeState.grid.engine.nodes || []) {
+    const instanceId = gridNode.el?.dataset.instanceId;
+    const instance = byId.get(instanceId);
+    if (!instance || ![gridNode.x, gridNode.y, gridNode.w, gridNode.h].every(Number.isInteger)) continue;
+    instance.layout = { x: gridNode.x, y: gridNode.y, w: gridNode.w, h: gridNode.h };
+    instance.size = gridNode.w >= 9 ? "wide" : gridNode.w >= 5 ? "medium" : "small";
+  }
+}
+
+function renderProjectGrid(host, instances, generation) {
+  const GridStack = window.FrankDashboardVendor?.GridStack;
+  host.classList.add("project-signal-grid", "grid-stack");
+  instances.forEach((instance, index) => {
+    const layout = projectLayout(instance);
+    const frame = node("div", "grid-stack-item");
+    frame.dataset.instanceId = instance.instance_id;
+    frame.setAttribute("gs-x", String(layout.x));
+    frame.setAttribute("gs-y", String(layout.y));
+    frame.setAttribute("gs-w", String(layout.w));
+    frame.setAttribute("gs-h", String(layout.h));
+    const card = widgetCard(instance, index, generation);
+    card.classList.add("grid-stack-item-content");
+    frame.append(card);
+    host.append(frame);
+  });
+  if (homeState.editing && homeState.gallery) {
+    const frame = node("div", "grid-stack-item project-gallery-frame");
+    frame.dataset.instanceId = "widget-gallery";
+    frame.setAttribute("gs-x", "0");
+    frame.setAttribute("gs-y", "99");
+    frame.setAttribute("gs-w", "12");
+    frame.setAttribute("gs-h", "6");
+    const panel = gallery();
+    panel.classList.add("grid-stack-item-content");
+    frame.append(panel);
+    host.append(frame);
+  }
+  if (!GridStack) {
+    host.classList.add("project-grid-fallback");
+    return;
+  }
+  homeState.grid = GridStack.init({
+    column: PROJECT_GRID_COLUMNS,
+    cellHeight: 82,
+    margin: 10,
+    staticGrid: !homeState.editing,
+    animate: true,
+    float: false,
+    columnOpts: { breakpoints: [{ w: 700, c: 1 }, { w: 1100, c: 6 }, { w: 1400, c: 12 }] },
+  }, host);
+  if (homeState.editing) {
+    homeState.grid.on("change dragstop resizestop", syncProjectGridLayout);
+    syncProjectGridLayout();
+  }
+}
+
 function renderHome() {
   if (!homeState.host || !homeState.home) return;
+  destroyHomeGrid();
   homeControls();
   const host = homeState.host;
   host.replaceChildren();
   host.classList.add("home-grid");
+  host.classList.toggle("project-signal-grid", isProjectHome());
+  host.classList.toggle("grid-stack", isProjectHome());
+  host.classList.remove("project-grid-fallback");
   host.dataset.homeKind = homeState.home.entity.kind;
   host.dataset.homeId = homeState.home.entity.id;
   const instances = homeState.editing ? homeState.draft : homeState.home.instances;
@@ -652,10 +960,12 @@ function renderHome() {
     const empty = node("section", "home-empty");
     empty.append(node("h2", "", "This home is empty"), node("p", "", "Add a widget to start this home."), button("Add widget", () => beginEditing(true), "home-action home-action-primary"));
     host.append(empty);
+  } else if (isProjectHome()) {
+    renderProjectGrid(host, instances, generation);
   } else {
     instances.forEach((instance, index) => host.append(widgetCard(instance, index, generation)));
   }
-  if (homeState.editing && homeState.gallery) host.append(gallery());
+  if (!isProjectHome() && homeState.editing && homeState.gallery) host.append(gallery());
   scheduleHomeRefresh();
 }
 
@@ -663,6 +973,7 @@ async function openHome(kind, id, host) {
   homeState.controller?.abort();
   window.clearInterval(homeState.refreshTimer);
   homeState.refreshTimer = null;
+  destroyHomeGrid();
   const controller = new AbortController();
   const generation = ++homeState.generation;
   homeState.controller = controller;
@@ -691,6 +1002,20 @@ async function openHome(kind, id, host) {
 }
 
 export function openProjectHome(project) {
+  $("#project-dashboard-name").textContent = project.name || project.id;
+  $("#project-dashboard-blurb").textContent = project.blurb || "Project workspace.";
+  const status = $("#project-dashboard-status");
+  const setup = $("#project-dashboard-setup");
+  const dot = $("#project-dashboard-dot");
+  status.textContent = "Loading status";
+  status.dataset.status = "setup_needed";
+  setup.textContent = "Checking setup";
+  dot.dataset.status = "setup_needed";
+  const open = $("#project-dashboard-open");
+  const liveUrl = safeExternalUrl(project.live);
+  open.hidden = !liveUrl;
+  if (liveUrl) open.href = liveUrl;
+  else open.removeAttribute("href");
   return openHome("project", project.id, $("#slot-project"));
 }
 

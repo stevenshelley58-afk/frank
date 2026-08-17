@@ -7,6 +7,7 @@ Hermes state.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 import json
 import re
 import threading
@@ -232,6 +233,48 @@ def _attention_connections(ctx: ProviderContext) -> list[dict]:
     return [item for item in _scoped_connections(ctx) if item.get("status") in {"connected", "setup_needed", "error"}]
 
 
+def _analytics_connection(ctx: ProviderContext) -> dict | None:
+    return ctx.bound_connection or next((
+        item for item in ctx.connections
+        if "analytics.read" in item.get("capabilities", []) or "umami" in str(item.get("name", "")).lower()
+    ), None)
+
+
+def _project_attention_items(ctx: ProviderContext) -> list[dict]:
+    rows = []
+    target, _root_name = _project_path(ctx)
+    if not target or not target.is_dir():
+        rows.append({
+            "subject": "Mount the project checkout",
+            "detail": "Unlock repository activity and project files.",
+            "status": "setup_needed",
+            "link": internal_link("Review", view="files"),
+        })
+    connection_rows = _attention_connections(ctx)
+    if connection_rows:
+        rows.append({
+            "subject": "Review provider connections",
+            "detail": f"{len(connection_rows)} connection item{'s' if len(connection_rows) != 1 else ''} need setup or verification.",
+            "status": "attention",
+            "link": internal_link("Review", view="connections"),
+        })
+    elif not ctx.connections:
+        rows.append({
+            "subject": "Add a connection",
+            "detail": "No project-scoped providers are recorded yet.",
+            "status": "setup_needed",
+            "link": internal_link("Connect", view="connections"),
+        })
+    if not _analytics_connection(ctx):
+        rows.append({
+            "subject": "Connect analytics",
+            "detail": "Add a provider only when selected metrics matter.",
+            "status": "setup_needed",
+            "link": internal_link("Set up", view="connections"),
+        })
+    return rows
+
+
 @register("entity-overview")
 def entity_overview(ctx: ProviderContext) -> dict:
     profile = _profile(ctx)
@@ -278,6 +321,29 @@ def application_status(ctx: ProviderContext) -> dict:
     return snapshot("error", "Application health check failed.", {"live": live, "health": probe or {"reason": detail}}, links, now=ctx.now)
 
 
+@register("project-signal")
+def project_signal(ctx: ProviderContext) -> dict:
+    application = application_status(ctx)
+    target, _root_name = _project_path(ctx)
+    branch = _git_branch(target) if target and target.is_dir() else "not mounted"
+    attention = _project_attention_items(ctx)
+    if application["status"] == "error":
+        status = "error"
+        headline = "Application needs attention"
+    elif application["status"] == "ready":
+        status = "ready"
+        headline = "Serving normally"
+    else:
+        status = "attention"
+        headline = "Setup in progress"
+    return snapshot(status, headline, {
+        "health_summary": application["summary"],
+        "branch": branch,
+        "live_services": int(application["status"] == "ready"),
+        "setup_items": len(attention),
+    }, application.get("links", [])[:1], now=ctx.now)
+
+
 @register("repository-status")
 def repository_status(ctx: ProviderContext) -> dict:
     target, root_name = _project_path(ctx)
@@ -299,6 +365,95 @@ def repository_activity(ctx: ProviderContext) -> dict:
     if not rows:
         return snapshot("empty", "No recent repository activity was found in the read-only Git log.", {"root": root_name, "rows": []}, now=ctx.now)
     return snapshot("ready", f"{len(rows)} recent repository change{'s' if len(rows) != 1 else ''}.", {"root": root_name, "branch": _git_branch(target), "rows": rows}, now=ctx.now)
+
+
+@register("repository-pulse")
+def repository_pulse(ctx: ProviderContext) -> dict:
+    target, root_name = _project_path(ctx)
+    if not target or not target.is_dir():
+        return snapshot("setup_needed", "Repository activity is available when the project checkout is mounted.", {"root": root_name, "points": []}, now=ctx.now)
+    rows = _repo_rows(target, limit=50)
+    grouped: dict[str, dict] = {}
+    for row in rows:
+        timestamp = int(row.get("timestamp") or 0)
+        if timestamp <= 0:
+            continue
+        day = datetime.fromtimestamp(timestamp, tz=timezone.utc).date()
+        key = day.isoformat()
+        grouped.setdefault(key, {"date": key, "label": day.strftime("%d %b").lstrip("0"), "value": 0})
+        grouped[key]["value"] += 1
+    points = [grouped[key] for key in sorted(grouped)[-8:]]
+    if not points:
+        return snapshot("empty", "No recent repository activity was found in the read-only Git log.", {"root": root_name, "points": []}, now=ctx.now)
+    return snapshot("ready", f"{len(rows)} recent repository events across {len(points)} active day{'s' if len(points) != 1 else ''}.", {
+        "root": root_name,
+        "branch": _git_branch(target),
+        "points": points,
+    }, now=ctx.now)
+
+
+@register("project-attention")
+def project_attention(ctx: ProviderContext) -> dict:
+    rows = _project_attention_items(ctx)
+    return snapshot(
+        "attention" if rows else "ready",
+        f"{len(rows)} item{'s' if len(rows) != 1 else ''} need attention." if rows else "Nothing needs attention.",
+        {"rows": rows},
+        now=ctx.now,
+    )
+
+
+@register("project-activity")
+def project_activity(ctx: ProviderContext) -> dict:
+    application = application_status(ctx)
+    timeline = [{
+        "title": application["summary"],
+        "detail": str((_profile(ctx).get("live") or "Application status")),
+        "timestamp": application["generated_at"],
+        "status": application["status"],
+    }]
+    target, root_name = _project_path(ctx)
+    if target and target.is_dir():
+        for row in _repo_rows(target, limit=4):
+            timeline.append({
+                "title": row.get("subject") or "Repository change",
+                "detail": row.get("author") or "Git activity",
+                "timestamp": row.get("timestamp") or 0,
+                "status": "ready",
+            })
+    else:
+        timeline.append({
+            "title": "Checkout awaiting mount",
+            "detail": f"Repository widgets are paused for {root_name}.",
+            "timestamp": 0,
+            "status": "setup_needed",
+        })
+    return snapshot("ready" if application["status"] == "ready" else application["status"], "Latest project and repository events.", {"timeline": timeline}, now=ctx.now)
+
+
+@register("project-quick-paths")
+def project_quick_paths(ctx: ProviderContext) -> dict:
+    profile = _profile(ctx)
+    links = []
+    live = external_link("Open application", profile.get("live")) if profile.get("live") else None
+    if live:
+        links.append(live)
+    links.extend(filter(None, [
+        internal_link("Browse files", view="files"),
+        internal_link("View releases", view="releases"),
+        internal_link("Open trace", view="trace"),
+    ]))
+    target, _root_name = _project_path(ctx)
+    ready = sum((
+        int(live is not None),
+        int(bool(target and target.is_dir())),
+        int(bool(ctx.connections)),
+        int(_analytics_connection(ctx) is not None),
+    ))
+    return snapshot("ready", "Fast routes into this project.", {
+        "ready": ready,
+        "total": 4,
+    }, links, now=ctx.now)
 
 
 @register("project-files")
@@ -469,7 +624,7 @@ def widget_catalog(ctx: ProviderContext) -> dict:
 
 @register("analytics-summary")
 def analytics_summary(ctx: ProviderContext) -> dict:
-    analytics = ctx.bound_connection or next((item for item in ctx.connections if "analytics.read" in item.get("capabilities", []) or "umami" in str(item.get("name", "")).lower()), None)
+    analytics = _analytics_connection(ctx)
     if not analytics:
         return snapshot("setup_needed", "Connect an analytics provider to show selected metrics.", {"metrics": [], "adapter": "not_configured"}, [internal_link("Set up analytics", view="connections")], now=ctx.now)
     if analytics.get("status") != "verified":

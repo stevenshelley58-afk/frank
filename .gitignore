@@ -14,3 +14,5 @@ outputs/
 *.sqlite*
 *.log
 .DS_Store
+apps/window/web/dashboard/
+apps/window/web/graph/
