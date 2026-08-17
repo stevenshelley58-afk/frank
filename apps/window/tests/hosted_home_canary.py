@@ -82,10 +82,14 @@ def main() -> None:
     assert verified["connection"]["status"] == "verified"
 
     status, home = request("/api/homes/project/blockwise")
-    assert status == 200 and home["entity"] == {
-        "id": "blockwise", "kind": "project", "name": "Blockwise",
-        "project": home["entity"]["project"],
-    }
+    assert status == 200
+    entity = home["entity"]
+    assert entity["id"] == "blockwise"
+    assert entity["kind"] == "project"
+    assert entity["name"] == "Blockwise"
+    assert entity["project"]["id"] == "blockwise"
+    if "profile" in entity:
+        assert entity["profile"] == entity["project"]
     instances = [
         {**instance, "config": {"connection_id": connection["id"]}}
         if instance["widget_id"] == "connections-summary" else instance
