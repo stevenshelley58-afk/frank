@@ -1,6 +1,7 @@
 import { mount, mountAll } from "./registry.js";
 import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
+import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -610,9 +611,59 @@ async function sendTurn(text, atts) {
   })();
   content.classList.add("is-stream");
   content.textContent = "";
+  const thinking = document.createElement("details");
+  thinking.className = "thinking-stream";
+  thinking.hidden = true;
+  thinking.open = true;
+  thinking.innerHTML = '<summary><span>Thinking</span><span class="thinking-state">Working</span></summary><div class="thinking-copy md" aria-live="polite"></div>';
+  content.before(thinking);
+  const thinkingCopy = thinking.querySelector(".thinking-copy");
+  const thinkingState = thinking.querySelector(".thinking-state");
   setBusy(true);
   turnAbort = new AbortController();
   let acc = "";
+  let reasoning = "";
+  let sawThinking = false;
+  const showThinking = (value, replace = false) => {
+    if (value) reasoning = replace ? value : reasoning + value;
+    if (!value && !reasoning) return;
+    sawThinking = true;
+    thinking.hidden = false;
+    thinking.open = true;
+    thinkingCopy.innerHTML = renderMd(reasoning);
+    chatScrollBottom();
+  };
+  const applyEvent = (event, data) => {
+    const item = classifyChatStreamEvent(event, data);
+    if (item.kind === "assistant.delta") {
+      acc += item.text;
+      content.innerHTML = renderMd(acc);
+      chatScrollBottom();
+    } else if (item.kind === "reasoning.delta") {
+      showThinking(item.text);
+    } else if (item.kind === "reasoning.replace") {
+      showThinking(item.text, true);
+    } else if (item.kind === "thinking.status") {
+      if (!item.text) return;
+      sawThinking = true;
+      thinking.hidden = false;
+      thinking.open = true;
+      thinkingState.textContent = item.text;
+      chatScrollBottom();
+    } else if (item.kind === "tool.started") {
+      const line = document.createElement("div");
+      line.className = "tool-line";
+      line.textContent = item.name;
+      content.after(line);
+    } else if (item.kind === "assistant.completed" && !acc && item.text) {
+      acc = item.text;
+      content.innerHTML = renderMd(acc);
+    } else if (item.kind === "error") {
+      acc = acc || item.text;
+      content.innerHTML = renderMd(acc);
+      content.classList.add("is-err");
+    }
+  };
   try {
     const res = await fetch("/api/chat/turn", {
       method: "POST",
@@ -629,47 +680,13 @@ async function sendTurn(text, atts) {
     if (!res.ok || !res.body) throw new Error("Hub did not accept the turn");
     const reader = res.body.getReader();
     const dec = new TextDecoder();
-    let buf = "";
+    const parser = new SseEventParser();
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      buf += dec.decode(value, { stream: true });
-      const parts = buf.split("\n\n");
-      buf = parts.pop() || "";
-      for (const block of parts) {
-        let ev = "", data = "";
-        for (const line of block.split("\n")) {
-          if (line.startsWith("event:")) ev = line.slice(6).trim();
-          else if (line.startsWith("data:")) data += line.slice(5).trim();
-        }
-        if (!data) continue;
-        let obj = null;
-        try { obj = JSON.parse(data); } catch { continue; }
-        if (obj.type === "response.output_text.delta" || ev === "response.output_text.delta" || ev === "assistant.delta") {
-          acc += obj.delta || obj.content || "";
-          content.innerHTML = renderMd(acc);
-          chatScrollBottom();
-        } else if (obj.type === "response.output_item.done" && obj.item?.type === "function_call") {
-          const name = obj.item.name || "tool";
-          const line = document.createElement("div");
-          line.className = "tool-line";
-          line.textContent = name;
-          content.after(line);
-        } else if (ev === "tool.started") {
-          const line = document.createElement("div");
-          line.className = "tool-line";
-          line.textContent = obj.tool_name || "tool";
-          content.after(line);
-        } else if (ev === "assistant.completed" && !acc && obj.content) {
-          acc = obj.content;
-          content.innerHTML = renderMd(acc);
-        } else if (obj.type === "error" || ev === "error") {
-          acc = acc || obj.content || obj.message || "Hermes returned an error.";
-          content.innerHTML = renderMd(acc);
-          content.classList.add("is-err");
-        }
-      }
+      for (const item of parser.push(dec.decode(value, { stream: true }))) applyEvent(item.event, item.data);
     }
+    for (const item of parser.finish(dec.decode())) applyEvent(item.event, item.data);
     if (!acc) content.textContent = "No reply from hub.";
   } catch (err) {
     if (err.name === "AbortError") {
@@ -680,6 +697,10 @@ async function sendTurn(text, atts) {
     }
   } finally {
     content.classList.remove("is-stream");
+    if (sawThinking) {
+      thinkingState.textContent = "Done";
+      thinking.open = false;
+    }
     if (acc) {
       const actions = document.createElement("div");
       actions.className = "msg-actions";
@@ -731,7 +752,7 @@ function setupChatActions() {
     }
     const copyMessage = event.target.closest("[data-copy-message]");
     if (copyMessage) {
-      const text = copyMessage.closest(".bub")?.querySelector(".md")?.innerText || "";
+      const text = copyMessage.closest(".bub")?.querySelector(":scope > .md")?.innerText || "";
       await navigator.clipboard.writeText(text);
       copyMessage.textContent = "Copied";
       setTimeout(() => { copyMessage.textContent = "Copy response"; }, 1500);

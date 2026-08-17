@@ -38,7 +38,8 @@ class UiContractTest(unittest.TestCase):
         compose = (WEB.parent / "docker-compose.yml").read_text(encoding="utf-8")
 
         self.assertIn('/api/chat/sessions/${encodeURIComponent(currentChatId)}/model', script)
-        self.assertIn('ev === "assistant.delta"', script)
+        self.assertIn('classifyChatStreamEvent(event, data)', script)
+        self.assertIn('className = "thinking-stream"', script)
         self.assertIn("refreshChatSessions(true)", script)
         self.assertIn("window.setInterval", script)
         self.assertIn('"--timeout", "0"', dockerfile)
