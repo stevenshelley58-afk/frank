@@ -158,6 +158,20 @@ class UiContractTest(unittest.TestCase):
         self.assertIn("home-size-wide", styles)
         self.assertIn(".tool-workspace", styles)
 
+    def test_memory_knowledge_link_is_a_private_top_level_hermes_navigation(self):
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn(
+            'id="hermes-knowledge-link" href="https://srv1625369.tail3084c0.ts.net/knowledge"',
+            html,
+        )
+        self.assertIn('target="_top"', html)
+        self.assertIn('rel="noopener noreferrer"', html)
+        self.assertIn("If unavailable, connect this device to the Frank Tailscale network", html)
+        self.assertNotIn("<iframe", html.lower())
+        self.assertNotIn("Authorization", html)
+        self.assertNotIn("HERMES_API_KEY", html)
+
     def test_widget_and_connection_editors_are_plain_text_reference_surfaces(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
