@@ -60,6 +60,7 @@ class HindsightMemoryInfraTests(unittest.TestCase):
         self.assertIn('hindsight-client==0.6.1', deploy)
         self.assertIn('hindsight-embed==0.6.1', deploy)
         self.assertIn('"$hindsight_embed" --profile hermes daemon start', deploy)
+        self.assertIn('"$hindsight_embed" --profile hermes daemon status', deploy)
         self.assertLess(deploy.index('"$hindsight_embed" --profile hermes daemon start'), deploy.index('bash "$script_dir/expose.sh"'))
         self.assertNotIn("agent_workspace=", deploy)
         self.assertIn('steven-{workspace}', check)

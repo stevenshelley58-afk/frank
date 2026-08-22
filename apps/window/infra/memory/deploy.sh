@@ -34,11 +34,15 @@ sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
 
 systemctl restart hermes-gateway.service hermes-serve.service
 # Start the vendor-owned embedded daemon explicitly after Hermes has stopped its
-# previous instance. `hermes memory status` can report the plugin as available
-# while that previous listener is still shutting down, so it is not a startup
-# primitive and must not be used as one here.
-sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
-  "$hindsight_embed" --profile hermes daemon start
+# previous instance. Under a queued consolidation load the vendor start command
+# can time out after the daemon is already healthy, so confirm that false-negative
+# with the vendor status command. expose.sh still enforces the real health probe.
+if ! sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
+  "$hindsight_embed" --profile hermes daemon start; then
+  sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
+    "$hindsight_embed" --profile hermes daemon status \
+    || die "the embedded Hindsight daemon failed to start"
+fi
 bash "$script_dir/expose.sh"
 "$script_dir/check.sh"
 echo "Hindsight is active for workspace-derived project banks."
