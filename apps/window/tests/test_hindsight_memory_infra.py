@@ -70,6 +70,8 @@ class HindsightMemoryInfraTests(unittest.TestCase):
         self.assertIn("127.0.0.1:9177", service)
         self.assertIn("systemd-socket-proxyd", service)
         self.assertIn("/health", expose)
+        self.assertIn("systemctl stop hindsight-frank-proxy.service", expose)
+        self.assertIn("systemctl restart hindsight-frank-proxy.socket", expose)
         self.assertNotIn("docker ", expose)
         self.assertNotIn("hindsight-api", service)
 

@@ -17,7 +17,8 @@ curl --fail --silent --show-error --max-time 5 http://127.0.0.1:9177/health >/de
 install -o root -g root -m 0644 -- "$script_dir/hindsight-frank-proxy.socket" "$socket_unit"
 install -o root -g root -m 0644 -- "$script_dir/hindsight-frank-proxy.service" "$service_unit"
 systemctl daemon-reload
-systemctl enable --now hindsight-frank-proxy.socket
+systemctl enable hindsight-frank-proxy.socket >/dev/null
+systemctl stop hindsight-frank-proxy.service
 systemctl restart hindsight-frank-proxy.socket
 curl --fail --silent --show-error --max-time 5 http://172.16.1.1:9178/health >/dev/null \
   || die "the private Frank Hindsight bridge is unavailable"
