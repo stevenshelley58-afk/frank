@@ -1,3 +1,5 @@
+import { mountGraphWorkbench, renderMermaid } from "../graph/graph-workbench.bundle.js";
+
 const SCHEMA = "schema://frank.memory-inspector/v1";
 
 function element(tag, className = "", text = "") {
@@ -47,6 +49,85 @@ function summaryCard(label, value, note, status = "") {
   return card;
 }
 
+function knowledgeContent(content) {
+  const article = element("article", "project-knowledge-copy");
+  const lines = String(content || "").replaceAll("\r", "").split("\n");
+  let list = null;
+  let fence = null;
+  let fenceLanguage = "";
+  const finishList = () => { list = null; };
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (line.startsWith("```")) {
+      if (fence === null) {
+        finishList();
+        fence = [];
+        fenceLanguage = line.slice(3).trim().toLowerCase();
+      } else {
+        const definition = fence.join("\n");
+        if (fenceLanguage === "mermaid") {
+          const diagram = element("div", "project-knowledge-diagram");
+          diagram.setAttribute("aria-label", "Architecture diagram");
+          article.append(diagram);
+          void renderMermaid(diagram, definition).catch(() => {
+            diagram.classList.add("project-knowledge-code");
+            diagram.textContent = definition;
+          });
+        } else {
+          article.append(element("pre", "project-knowledge-code", definition));
+        }
+        fence = null;
+        fenceLanguage = "";
+      }
+      continue;
+    }
+    if (fence !== null) { fence.push(raw); continue; }
+    if (!line) { finishList(); continue; }
+    const heading = /^(#{1,4})\s+(.+)$/.exec(line);
+    if (heading) {
+      finishList();
+      const level = Math.min(4, heading[1].length + 1);
+      article.append(element(`h${level}`, "", heading[2]));
+      continue;
+    }
+    const bullet = /^[-*]\s+(.+)$/.exec(line);
+    if (bullet) {
+      if (!list) { list = element("ul"); article.append(list); }
+      list.append(element("li", "", bullet[1]));
+      continue;
+    }
+    finishList();
+    article.append(element("p", "", line.replaceAll("**", "").replaceAll("`", "")));
+  }
+  if (fence !== null && fence.length) article.append(element("pre", "project-knowledge-code", fence.join("\n")));
+  if (!article.childElementCount) article.append(element("p", "connection-empty", "This page has not been generated yet."));
+  return article;
+}
+
+function knowledgeGraphSnapshot(graph, project) {
+  const nodes = Array.isArray(graph?.nodes) ? graph.nodes : [];
+  const edges = Array.isArray(graph?.edges) ? graph.edges : [];
+  return {
+    graph_revision: `hindsight-${nodes.length}-${edges.length}`,
+    groups: [],
+    nodes: nodes.map((node) => ({
+      id: node.id,
+      label: node.label,
+      kind: "entity",
+      status: "declared",
+      presentation: {},
+      extensions: { "frank.graph.mentions": Number(node.mention_count || 0) },
+    })),
+    edges: edges.map((edge) => ({
+      id: edge.id,
+      from: edge.source,
+      to: edge.target,
+      status: "declared",
+    })),
+    project,
+  };
+}
+
 function inputStyle(input, multiline = false) {
   input.style.width = "100%";
   input.style.border = "1px solid var(--line)";
@@ -89,6 +170,8 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   const projectId = encodeURIComponent(project.id);
   let disposed = false;
   let snapshot = null;
+  let graphHandle = null;
+  let activeTab = "overview";
 
   host.classList.remove("home-grid", "project-signal-grid", "grid-stack", "project-grid-fallback");
   host.classList.add("memory-inspector-host");
@@ -98,15 +181,58 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   const intro = element("div", "tool-workspace-intro");
   const introCopy = element("div");
   introCopy.append(
-    element("span", "home-kicker", "Hermes memory"),
-    element("h2", "", `${project.name || project.id} memory`),
-    element("p", "", "Inspect exactly what Hindsight retains and recalls for this project. Frank displays provider truth and never stores a second copy."),
+    element("span", "home-kicker", "Project knowledge"),
+    element("h2", "", `${project.name || project.id}`),
+    element("p", "", "A human-readable view of what the project is, its operating rules, how it works, and the provider evidence behind it."),
   );
   const introStatus = element("span", "", "Loading Hindsight…");
   intro.append(introCopy, introStatus);
   main.append(intro);
 
+  const tabs = element("nav", "project-knowledge-tabs");
+  tabs.setAttribute("aria-label", "Project knowledge views");
+  const panels = new Map();
+  const tabButtons = new Map();
+  const panel = (id) => {
+    const value = element("section", "project-knowledge-panel");
+    value.dataset.knowledgePanel = id;
+    value.hidden = id !== activeTab;
+    panels.set(id, value);
+    return value;
+  };
+  const overviewPanel = panel("overview");
+  const rulesPanel = panel("rules");
+  const architecturePanel = panel("architecture");
+  const graphPanel = panel("map");
+  const memoryPanel = panel("memory");
+
+  function selectTab(id) {
+    activeTab = id;
+    for (const [key, value] of panels) value.hidden = key !== id;
+    for (const [key, value] of tabButtons) value.setAttribute("aria-selected", key === id ? "true" : "false");
+    if (id === "map" && snapshot) renderKnowledgeGraph(snapshot);
+  }
+  for (const [id, label] of [["overview", "Overview"], ["rules", "Rules & facts"], ["architecture", "How it works"], ["map", "Knowledge map"], ["memory", "Memory activity"]]) {
+    const button = control(label, () => selectTab(id), "project-knowledge-tab");
+    button.setAttribute("role", "tab");
+    button.setAttribute("aria-selected", id === activeTab ? "true" : "false");
+    tabs.append(button);
+    tabButtons.set(id, button);
+  }
+  main.append(tabs);
+
   const overview = element("div", "connection-overview");
+  const pageNav = element("div", "project-knowledge-page-nav");
+  const pageBody = element("div", "project-knowledge-page");
+  const codePageNav = element("div", "project-knowledge-page-nav");
+  const codePageBody = element("div", "project-knowledge-page");
+  overviewPanel.append(
+    overview,
+    sectionHeading("Project guide", "Living pages synthesized by Hindsight"), pageNav, pageBody,
+    sectionHeading("Application wiki", "Source-grounded pages generated by CodeWiki"), codePageNav, codePageBody,
+  );
+
+  const directivesList = element("div", "project-rule-list");
   const recallSection = element("section", "connections-section");
   const recallForm = element("form");
   recallForm.style.display = "flex";
@@ -124,14 +250,18 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   const recallResults = element("div", "connection-activity");
   recallSection.append(sectionHeading("Recall test", "Uses this project bank only"), recallForm, recallResults);
 
-  const columns = element("div", "connection-columns");
   const memoriesSection = element("section", "connections-section connection-panel");
   const memoriesList = element("div", "connection-activity");
   memoriesSection.append(sectionHeading("Retained memories", "Newest provider facts"), memoriesList);
-  const sourcesSection = element("section", "connections-section connection-panel");
+  const sourcesSection = element("section", "connections-section");
   const sourcesList = element("div", "connection-activity");
   sourcesSection.append(sectionHeading("Retained sources", "Correct or forget at source"), sourcesList);
-  columns.append(memoriesSection, sourcesSection);
+  rulesPanel.append(sectionHeading("Operating rules", "Hard directives applied by Hindsight"), directivesList, memoriesSection);
+
+  const architectureBody = element("div", "project-knowledge-page");
+  architecturePanel.append(sectionHeading("How the application works", "Human-readable architecture and flows"), architectureBody);
+  const graphHost = element("div", "project-knowledge-graph");
+  graphPanel.append(sectionHeading("Project knowledge map", "Entities and relationships retained by Hindsight"), graphHost);
 
   const editorSection = element("section", "connections-section");
   editorSection.hidden = true;
@@ -152,9 +282,40 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   const activitySection = element("section", "connections-section");
   const activityList = element("div", "connection-activity");
   activitySection.append(sectionHeading("Memory activity", "Recall, retention and provider failures"), activityList);
-  main.append(overview, recallSection, columns, editorSection, activitySection);
+  memoryPanel.append(recallSection, sourcesSection, editorSection, activitySection);
+  main.append(overviewPanel, rulesPanel, architecturePanel, graphPanel, memoryPanel);
   shell.append(main);
   host.append(shell);
+
+  function renderKnowledgeGraph(value) {
+    graphHandle?.destroy?.();
+    graphHandle = null;
+    const graph = value.entity_graph || {};
+    if (!graph.nodes?.length) {
+      graphHost.replaceChildren(element("p", "connection-empty", "No entity relationships have been extracted for this project yet."));
+      return;
+    }
+    graphHandle = mountGraphWorkbench(graphHost, {
+      kind: "project",
+      entityId: project.id,
+      lens: "project.knowledge",
+      title: `${project.name || project.id} knowledge map`,
+      load: async () => knowledgeGraphSnapshot(graph, project),
+      validate: (loaded) => loaded,
+    });
+  }
+
+  function renderPage(page, target) {
+    target.replaceChildren();
+    if (!page) {
+      target.append(element("p", "connection-empty", "This project guide has not been generated yet."));
+      return;
+    }
+    target.append(
+      element("p", "project-knowledge-provenance", `${page.source || "Hindsight living page"} · updated ${timestamp(page.updated_at || page.last_refreshed_at || page.created_at)}`),
+      knowledgeContent(page.content),
+    );
+  }
 
   function renderSnapshot(value) {
     snapshot = value;
@@ -163,12 +324,39 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     const counts = value.counts || {};
     introStatus.textContent = `${provider.status || "attention"} · ${provider.bank_id || "unknown bank"}`;
     overview.replaceChildren(
-      summaryCard("Provider", provider.name || "Hindsight", `API ${provider.version || "unknown"}`, provider.status === "ready" ? "ready" : "error"),
-      summaryCard("Bank", provider.bank_id || "—", "Workspace-isolated"),
-      summaryCard("Memories", Number(counts.memories || 0), "Extracted durable facts"),
-      summaryCard("Sources", Number(counts.documents || 0), "Retained conversations and corrections"),
-      summaryCard("Failures", Number(counts.failed || 0), `${Number(counts.pending || 0)} pending`, Number(counts.failed || 0) ? "error" : "ready"),
+      summaryCard("Guide pages", Number(counts.pages || 0), "Human-readable living summaries"),
+      summaryCard("App wiki", Number(counts.code_pages || 0), "Pages generated from source code"),
+      summaryCard("Rules", Number(counts.rules || 0), "Active provider directives"),
+      summaryCard("Facts", Number(counts.memories || 0), "Durable project knowledge"),
+      summaryCard("Sources", Number(counts.documents || 0), "Traceable retained evidence"),
+      summaryCard("Memory health", Number(counts.failed || 0) ? "Attention" : "Healthy", `${provider.name || "Hindsight"} ${provider.version || ""} · ${Number(counts.pending || 0)} pending`, Number(counts.failed || 0) ? "error" : "ready"),
     );
+    const pages = Array.isArray(value.knowledge_pages) ? value.knowledge_pages : [];
+    const codePages = Array.isArray(value.code_pages) ? value.code_pages : [];
+    const overviewPage = pages.find((page) => /project brief|overview|product/i.test(page.name)) || pages[0];
+    const codeOverview = codePages.find((page) => /overview|architecture/i.test(page.name)) || codePages[0];
+    const architecturePage = codePages.find((page) => /architecture|system|overview|data flow|sequence/i.test(page.name))
+      || pages.find((page) => /architecture|how .*works|system design|technical/i.test(page.name));
+    pageNav.replaceChildren();
+    pages.forEach((page) => pageNav.append(control(page.name, () => renderPage(page, pageBody), "project-knowledge-page-button")));
+    if (!pages.length) pageNav.append(element("span", "quiet", "No living pages yet"));
+    renderPage(overviewPage, pageBody);
+    codePageNav.replaceChildren();
+    codePages.forEach((page) => codePageNav.append(control(page.name, () => renderPage(page, codePageBody), "project-knowledge-page-button")));
+    if (!codePages.length) codePageNav.append(element("span", "quiet", "The source-code wiki has not been generated yet."));
+    renderPage(codeOverview, codePageBody);
+    renderPage(architecturePage, architectureBody);
+    directivesList.replaceChildren();
+    (value.directives || []).forEach((directive) => {
+      const card = element("article", "project-rule-card");
+      card.append(
+        element("span", "home-provider", `Priority ${directive.priority || 0}`),
+        element("h3", "", directive.name),
+        element("p", "", directive.content),
+      );
+      directivesList.append(card);
+    });
+    if (!directivesList.childElementCount) directivesList.append(element("p", "connection-empty", "No hard project directives have been registered yet."));
     const sources = new Map((value.documents || []).map((item) => [item.id, item]));
     memoriesList.replaceChildren();
     (value.memories || []).forEach((memory) => memoriesList.append(memoryRow(memory, sources, openSource)));
@@ -189,6 +377,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     activity.forEach((item) => activityList.append(activityRow(item)));
     if (!activityList.childElementCount) activityList.append(element("p", "connection-empty", "No provider activity has been recorded yet."));
     setStatus(`Hindsight bank ${provider.bank_id} · ${Number(counts.memories || 0)} memories · ${Number(counts.failed || 0)} failures`, Number(counts.failed || 0) ? "error" : "success");
+    if (activeTab === "map") renderKnowledgeGraph(value);
   }
 
   async function refresh() {
@@ -279,6 +468,8 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     dispose() {
       disposed = true;
       controller.abort();
+      graphHandle?.destroy?.();
+      graphHandle = null;
       host.classList.remove("memory-inspector-host");
     },
   };

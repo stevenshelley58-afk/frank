@@ -1,4 +1,6 @@
 import unittest
+from pathlib import Path
+import tempfile
 
 from flask import Flask
 
@@ -46,6 +48,29 @@ class FakeHindsight:
             ("GET", "/v1/default/banks/steven-blockwise/audit-logs?limit=50&offset=0"): {
                 "items": [{"id": "audit-1", "action": "recall", "status": "ok"}],
             },
+            ("GET", "/v1/default/banks/steven-blockwise/mental-models?detail=full&limit=20&offset=0"): {
+                "items": [{
+                    "id": "project-brief", "name": "Project Brief",
+                    "content": "# Blockwise\n\nCampaign operations product.",
+                    "source_query": "Describe the product.",
+                    "last_refreshed_at": "2026-08-22T02:02:00Z",
+                }],
+            },
+            ("GET", "/v1/default/banks/steven-blockwise/directives?active_only=true&limit=100&offset=0"): {
+                "items": [{
+                    "id": "approved-workflow", "name": "Approved workflow",
+                    "content": "Use the approved campaign workflow.",
+                    "priority": 100, "is_active": True,
+                }],
+            },
+            ("GET", "/v1/default/banks/steven-blockwise/entities/graph?limit=250&min_count=1"): {
+                "total_entities": 2, "total_edges": 1,
+                "nodes": [
+                    {"data": {"id": "a", "label": "Blockwise", "mentionCount": 4}},
+                    {"data": {"id": "b", "label": "Hermes", "mentionCount": 2}},
+                ],
+                "edges": [{"data": {"id": "a-b", "source": "a", "target": "b", "weight": 2, "linkType": "cooccurrence"}}],
+            },
             ("GET", "/v1/default/banks/steven-blockwise/documents/doc-1"): {
                 "id": "doc-1", "original_text": "Original durable project decision.",
                 "memory_unit_count": 2, "tags": ["project:blockwise"],
@@ -86,7 +111,10 @@ class MemoryInspectorTests(unittest.TestCase):
         self.assertEqual(data["schema"], SCHEMA)
         self.assertEqual(data["provider"]["bank_id"], "steven-blockwise")
         self.assertTrue(data["provider"]["bank_exists"])
-        self.assertEqual(data["counts"], {"memories": 1, "documents": 1, "pending": 0, "failed": 1})
+        self.assertEqual(data["counts"], {"memories": 1, "documents": 1, "pending": 0, "failed": 1, "pages": 1, "rules": 1, "code_pages": 0})
+        self.assertEqual(data["knowledge_pages"][0]["name"], "Project Brief")
+        self.assertEqual(data["directives"][0]["name"], "Approved workflow")
+        self.assertEqual(data["entity_graph"]["total_entities"], 2)
         self.assertEqual(data["memories"][0]["source_document_id"], "doc-1")
         self.assertEqual(data["documents"][0]["metadata"]["session_id"], "session-1")
         self.assertNotIn("api_key", str(data))
@@ -98,8 +126,26 @@ class MemoryInspectorTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         data = response.get_json()
         self.assertFalse(data["provider"]["bank_exists"])
-        self.assertEqual(data["counts"], {"memories": 0, "documents": 0, "pending": 0, "failed": 0})
+        self.assertEqual(data["counts"], {"memories": 0, "documents": 0, "pending": 0, "failed": 0, "pages": 0, "rules": 0, "code_pages": 0})
         self.assertEqual(data["memories"], [])
+
+    def test_source_grounded_codewiki_pages_are_read_from_the_rebuildable_artifact_root(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            page_root = root / "blockwise"
+            page_root.mkdir()
+            (page_root / "overview.md").write_text(
+                "# Blockwise architecture\n\n```mermaid\ngraph LR\nA --> B\n```\n",
+                encoding="utf-8",
+            )
+            projects = {"blockwise": {"id": "blockwise", "name": "Blockwise", "root": "blockwise"}}
+            inspector = MemoryInspector(projects.get, self.hindsight, root)
+            app = Flask(__name__)
+            app.register_blueprint(create_blueprint(inspector))
+            data = app.test_client().get("/api/projects/blockwise/memory").get_json()
+            self.assertEqual(data["counts"]["code_pages"], 1)
+            self.assertEqual(data["code_pages"][0]["name"], "Blockwise architecture")
+            self.assertIn("graph LR", data["code_pages"][0]["content"])
 
     def test_source_text_is_loaded_only_by_the_explicit_document_route(self):
         summary = self.client.get("/api/projects/blockwise/memory").get_json()

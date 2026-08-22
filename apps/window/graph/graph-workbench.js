@@ -3,6 +3,7 @@ import "./graph-workbench.css";
 import { Graph as MaxGraph, InternalEvent, RubberBandHandler } from "@maxgraph/core";
 import Sigma from "sigma";
 import Graphology from "graphology";
+import mermaid from "mermaid";
 import { fetchGraphSnapshot, validateGraphSnapshot } from "./graph-client.js";
 import {
   chooseGraphRenderer,
@@ -23,6 +24,13 @@ const STATUS_COLORS = {
 };
 const GROUP_COLORS = { code: "#6b8fb3", vault: "#a9824b", memory: "#8069a8" };
 let workbenchSequence = 0;
+mermaid.initialize({ startOnLoad: false, securityLevel: "strict", theme: "neutral" });
+
+export async function renderMermaid(host, definition) {
+  const id = `frank-mermaid-${++workbenchSequence}`;
+  const { svg } = await mermaid.render(id, String(definition || "").slice(0, 100_000));
+  host.innerHTML = svg;
+}
 
 const $ = (tag, className, text = "") => {
   const element = document.createElement(tag);
@@ -214,10 +222,10 @@ function renderNodeList(state, snapshot) {
 export function mountGraphWorkbench(root, options = {}) {
   root.replaceChildren();
   root.classList.add("graph-workbench");
-  const kind = "tool";
+  const kind = options.kind || "tool";
   const state = {
     kind, entityId: options.entityId || "",
-    lens: "tool.pipeline", graph: null, sigma: null,
+    lens: options.lens || "tool.pipeline", graph: null, sigma: null,
     nodes: new Map(), meta: $("p", "graph-meta", "Loading graph projection…"),
     details: $("p", "graph-details"), load: null, loadGeneration: 0,
     destroyed: false, filter: "", legend: $("div", "graph-group-legend"),
@@ -294,7 +302,7 @@ export function mountGraphWorkbench(root, options = {}) {
       const params = { kind: state.kind, entityId: state.entityId, lens: state.lens };
       const loaded = await (options.load || fetchGraphSnapshot)(params);
       if (state.destroyed || generation !== state.loadGeneration) return;
-      const snapshot = validateGraphSnapshot(loaded, params);
+      const snapshot = (options.validate || validateGraphSnapshot)(loaded, params);
       renderNodeList(state, snapshot);
       renderGroupLegend(state, snapshot);
       const renderer = chooseGraphRenderer(snapshot, params);

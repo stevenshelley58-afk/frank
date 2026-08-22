@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timezone
 import json
+from pathlib import Path
 import re
 from typing import Callable
 import urllib.error
@@ -15,6 +17,7 @@ from flask import Blueprint, abort, jsonify, request
 SCHEMA = "schema://frank.memory-inspector/v1"
 _SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$")
 _SAFE_BANK_PART = re.compile(r"[^A-Za-z0-9_-]+")
+_SAFE_WORKSPACE = re.compile(r"^[a-z0-9][a-z0-9-]{0,79}$")
 _METADATA_KEYS = {
     "source", "platform", "session_id", "turn_index", "retained_at",
     "message_count", "agent_identity", "corrected_at", "corrected_by",
@@ -181,10 +184,128 @@ def _audit_item(item: object) -> dict | None:
     }
 
 
+def _mental_model_item(item: object) -> dict | None:
+    if not isinstance(item, dict) or not item.get("id") or not item.get("name"):
+        return None
+    reflect_response = item.get("reflect_response") if isinstance(item.get("reflect_response"), dict) else {}
+    content = _text(item.get("content"), 100_000)
+    reflected = _text(reflect_response.get("text"), 100_000)
+    if reflected and (not content or content == "Generating content..."):
+        content = reflected
+    return {
+        "id": _text(item.get("id"), 200),
+        "name": _text(item.get("name"), 200),
+        "content": content,
+        "source_query": _text(item.get("source_query"), 2_000),
+        "tags": [str(tag)[:120] for tag in item.get("tags", []) if isinstance(tag, str)][:30],
+        "last_refreshed_at": _text(item.get("last_refreshed_at"), 80),
+        "created_at": _text(item.get("created_at"), 80),
+    }
+
+
+def _directive_item(item: object) -> dict | None:
+    if not isinstance(item, dict) or not item.get("id") or not item.get("name"):
+        return None
+    try:
+        priority = int(item.get("priority") or 0)
+    except (TypeError, ValueError):
+        priority = 0
+    return {
+        "id": _text(item.get("id"), 200),
+        "name": _text(item.get("name"), 200),
+        "content": _text(item.get("content"), 20_000),
+        "priority": max(-10_000, min(10_000, priority)),
+        "is_active": bool(item.get("is_active", True)),
+        "tags": [str(tag)[:120] for tag in item.get("tags", []) if isinstance(tag, str)][:30],
+        "updated_at": _text(item.get("updated_at") or item.get("created_at"), 80),
+    }
+
+
+def _entity_graph(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {"nodes": [], "edges": [], "total_entities": 0, "total_edges": 0}
+    nodes = []
+    allowed_ids = set()
+    for item in value.get("nodes", [])[:500] if isinstance(value.get("nodes"), list) else []:
+        data = item.get("data") if isinstance(item, dict) else None
+        if not isinstance(data, dict):
+            continue
+        node_id = _text(data.get("id"), 200)
+        label = _text(data.get("label"), 300)
+        if not node_id or not label:
+            continue
+        allowed_ids.add(node_id)
+        nodes.append({
+            "id": node_id,
+            "label": label,
+            "mention_count": _count(data.get("mentionCount")),
+        })
+    edges = []
+    for item in value.get("edges", [])[:1000] if isinstance(value.get("edges"), list) else []:
+        data = item.get("data") if isinstance(item, dict) else None
+        if not isinstance(data, dict):
+            continue
+        source = _text(data.get("source"), 200)
+        target = _text(data.get("target"), 200)
+        if source not in allowed_ids or target not in allowed_ids:
+            continue
+        edges.append({
+            "id": _text(data.get("id"), 420) or f"{source}:{target}",
+            "source": source,
+            "target": target,
+            "weight": _count(data.get("weight")),
+            "type": _text(data.get("linkType"), 80) or "cooccurrence",
+        })
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "total_entities": max(len(nodes), _count(value.get("total_entities"))),
+        "total_edges": max(len(edges), _count(value.get("total_edges"))),
+    }
+
+
+def _code_pages(root: Path | None, project: dict) -> list[dict]:
+    workspace = _text(project.get("root"), 80)
+    if root is None or not _SAFE_WORKSPACE.fullmatch(workspace):
+        return []
+    try:
+        base = root.resolve(strict=False)
+        project_root = (base / workspace).resolve(strict=False)
+        if project_root.parent != base or not project_root.is_dir() or project_root.is_symlink():
+            return []
+    except OSError:
+        return []
+    pages = []
+    try:
+        candidates = sorted(project_root.rglob("*.md"), key=lambda path: (path.name != "overview.md", str(path)))[:40]
+    except OSError:
+        return []
+    for path in candidates:
+        try:
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 300_000:
+                continue
+            resolved = path.resolve(strict=True)
+            if project_root not in resolved.parents:
+                continue
+            content = resolved.read_text(encoding="utf-8")
+            title = next((line.lstrip("# ").strip() for line in content.splitlines() if line.startswith("# ")), "")
+            pages.append({
+                "id": str(resolved.relative_to(project_root)).replace("\\", "/"),
+                "name": _text(title, 200) or resolved.stem.replace("-", " ").title(),
+                "content": _text(content, 250_000),
+                "source": "CodeWiki",
+                "updated_at": datetime.fromtimestamp(resolved.stat().st_mtime, timezone.utc).isoformat().replace("+00:00", "Z"),
+            })
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+    return pages
+
+
 class MemoryInspector:
-    def __init__(self, project_loader: Callable[[str], dict | None], client: HindsightClient):
+    def __init__(self, project_loader: Callable[[str], dict | None], client: HindsightClient, knowledge_root: Path | None = None):
         self.project_loader = project_loader
         self.client = client
+        self.knowledge_root = knowledge_root
 
     def project(self, project_id: str) -> dict:
         project = self.project_loader(project_id)
@@ -212,6 +333,14 @@ class MemoryInspector:
         audit_data = self.client.request("GET", _path(bank_id, "/audit-logs?limit=50&offset=0")) if bank_exists else {"items": []}
         raw_audit = audit_data.get("items") if isinstance(audit_data.get("items"), list) else []
         audit = [item for value in raw_audit if (item := _audit_item(value))]
+        mental_model_data = self.client.request("GET", _path(bank_id, "/mental-models?detail=full&limit=20&offset=0")) if bank_exists else {"items": []}
+        raw_mental_models = mental_model_data.get("items") if isinstance(mental_model_data.get("items"), list) else []
+        mental_models = [item for value in raw_mental_models if (item := _mental_model_item(value))]
+        directive_data = self.client.request("GET", _path(bank_id, "/directives?active_only=true&limit=100&offset=0")) if bank_exists else {"items": []}
+        raw_directives = directive_data.get("items") if isinstance(directive_data.get("items"), list) else []
+        directives = [item for value in raw_directives if (item := _directive_item(value))]
+        graph_data = self.client.request("GET", _path(bank_id, "/entities/graph?limit=250&min_count=1")) if bank_exists else {}
+        code_pages = _code_pages(self.knowledge_root, project)
         failed = sum(1 for item in operations if item["status"] == "failed")
         pending = sum(1 for item in operations if item["status"] in {"pending", "processing", "running"})
         return {
@@ -234,7 +363,14 @@ class MemoryInspector:
                 "documents": max(len(documents), _count(document_data.get("total"))),
                 "pending": max(pending, _count(stats.get("pending_operations"))),
                 "failed": max(failed, _count(stats.get("failed_operations"))),
+                "pages": len(mental_models),
+                "rules": len(directives),
+                "code_pages": len(code_pages),
             },
+            "knowledge_pages": mental_models,
+            "code_pages": code_pages,
+            "directives": directives,
+            "entity_graph": _entity_graph(graph_data),
             "memories": memories,
             "documents": documents,
             "operations": operations,

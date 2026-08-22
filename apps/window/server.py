@@ -1300,7 +1300,11 @@ home_platform.configure(
 app.register_blueprint(home_platform.api)
 app.register_blueprint(create_graph_blueprint(_graph_provider))
 app.register_blueprint(vault_broker.api)
-app.register_blueprint(create_memory_blueprint(MemoryInspector(_project_store.get_project, HindsightClient(HINDSIGHT_URL))))
+app.register_blueprint(create_memory_blueprint(MemoryInspector(
+    _project_store.get_project,
+    HindsightClient(HINDSIGHT_URL),
+    Path(os.environ.get("PROJECT_KNOWLEDGE_ROOT", "/data/knowledge")),
+)))
 
 
 @app.get("/", defaults={"path": ""})

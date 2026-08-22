@@ -22,7 +22,12 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('/memory/documents/', inspector)
         self.assertIn('method: "DELETE"', inspector)
         self.assertIn('confirmation: `FORGET ${source.id}`', inspector)
-        self.assertIn('Frank displays provider truth and never stores a second copy', inspector)
+        self.assertIn('"Project knowledge"', inspector)
+        self.assertIn('["overview", "Overview"]', inspector)
+        self.assertIn('["rules", "Rules & facts"]', inspector)
+        self.assertIn('["architecture", "How it works"]', inspector)
+        self.assertIn('["map", "Knowledge map"]', inspector)
+        self.assertIn('mountGraphWorkbench(graphHost', inspector)
         self.assertNotIn("localStorage", inspector)
 
     def test_ad_studio_is_a_real_tool_surface_backed_by_hermes(self):
