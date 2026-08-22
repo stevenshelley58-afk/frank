@@ -27,7 +27,7 @@ from .contract import (
     GraphContractError,
 )
 
-_QUERY_KEYS = frozenset({"lens"})
+_QUERY_KEYS = frozenset({"lens", "scope_kind", "scope_id"})
 _OPAQUE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]*$")
 _GRAPH_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
 _NAMESPACED = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)+$")
@@ -66,8 +66,16 @@ def manifest_reader(manifests: Mapping[str, Mapping[str, object]]) -> Callable[.
         if not isinstance(manifest, Mapping):
             return None
         try:
+            scope_kind = str(selectors.get("scope_kind") or "").strip()
+            scope_id = str(selectors.get("scope_id") or "").strip()
+            render_scope = None
+            if scope_kind:
+                render_scope = {"kind": scope_kind}
+                if scope_kind != "global":
+                    render_scope["id"] = scope_id
             return normalize_manifest(
                 manifest,
+                render_scope=render_scope,
                 lens=str(selectors.get("lens") or "tool.pipeline"),
                 as_of=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
             )
@@ -90,7 +98,19 @@ def _query() -> dict[str, str | None]:
     lens = request.args.get("lens", "tool.pipeline")
     if lens not in ADAPTER_LENSES:
         abort(400, "unsupported graph lens")
-    return {"lens": lens}
+    scope_kind = request.args.get("scope_kind")
+    scope_id = request.args.get("scope_id")
+    if scope_kind is not None:
+        if scope_kind not in SCOPES:
+            abort(400, "unsupported graph scope")
+        if scope_kind == "global":
+            if scope_id is not None:
+                abort(400, "global graph scope cannot include an id")
+        elif not scope_id or not _OPAQUE.fullmatch(scope_id):
+            abort(400, "scoped graph request requires a valid id")
+    elif scope_id is not None:
+        abort(400, "graph scope id requires a scope kind")
+    return {"lens": lens, "scope_kind": scope_kind, "scope_id": scope_id}
 
 
 def _timestamp(value: object, label: str) -> str:
@@ -352,6 +372,14 @@ def _safe_graph(value: object, *, kind: str, entity_id: str, selectors: Mapping[
     if subject != {"kind": kind, "id": entity_id}:
         raise ProviderUnavailable("graph subject did not match the request")
     scope = _scope(value.get("scope"))
+    requested_scope_kind = selectors.get("scope_kind")
+    requested_scope_id = selectors.get("scope_id")
+    if requested_scope_kind:
+        requested_scope = {"kind": requested_scope_kind}
+        if requested_scope_kind != "global":
+            requested_scope["id"] = requested_scope_id
+        if scope != requested_scope:
+            raise ProviderUnavailable("graph scope did not match the request")
     subject_id = f"{kind}:{entity_id}"
     if scope["kind"] == "global" or (scope["kind"] == kind and scope.get("id") == entity_id):
         expected_graph_id = subject_id

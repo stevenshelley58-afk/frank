@@ -100,6 +100,11 @@ class GraphProviderTest(unittest.TestCase):
         reader = manifest_reader({"fixture-tool": MANIFEST})
         graph = reader(kind="tool", entity_id="fixture-tool", selectors={"lens": "tool.pipeline"})
         self.assertEqual(graph["lens"], "tool.pipeline")
+        scoped = reader(kind="tool", entity_id="fixture-tool", selectors={
+            "lens": "tool.pipeline", "scope_kind": "project", "scope_id": "blockwise",
+        })
+        self.assertEqual(scoped["scope"], {"kind": "project", "id": "blockwise"})
+        self.assertEqual(scoped["graph_id"], "project:blockwise/tool:fixture-tool")
         self.assertIsNone(reader(kind="project", entity_id="fixture-tool", selectors={"lens": "tool.pipeline"}))
         self.assertIsNone(reader(kind="tool", entity_id="fixture-tool", selectors={"lens": "tool.settings"}))
 
@@ -124,8 +129,18 @@ class GraphProviderTest(unittest.TestCase):
         self.assertEqual(client.get("/api/graphs/tool/fixture-tool?source=/vps/secrets").status_code, 400)
         self.assertEqual(client.get("/api/graphs/tool/fixture-tool?lens=tool.settings").status_code, 400)
         self.assertEqual(client.get("/api/graphs/tool/fixture-tool?settings_revision_id=4").status_code, 400)
+        self.assertEqual(client.get("/api/graphs/tool/fixture-tool?scope_id=blockwise").status_code, 400)
+        self.assertEqual(client.get("/api/graphs/tool/fixture-tool?scope_kind=project").status_code, 400)
+        self.assertEqual(client.get("/api/graphs/tool/fixture-tool?scope_kind=global&scope_id=blockwise").status_code, 400)
         self.assertEqual(client.get("/api/graphs/unknown/fixture-tool").status_code, 404)
         self.assertEqual(client.get(f"/api/graphs/tool/fixture-tool?trace_id={TRACE_ID}").status_code, 400)
+
+    def test_graph_endpoint_projects_and_binds_declared_project_scope(self):
+        reader = manifest_reader({"fixture-tool": MANIFEST})
+        client = self.client(ReadOnlyProvider(graph_reader=reader))
+        response = client.get("/api/graphs/tool/fixture-tool?lens=tool.pipeline&scope_kind=project&scope_id=blockwise")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["scope"], {"kind": "project", "id": "blockwise"})
 
     def test_graph_rejects_cross_entity_scope_lens_trace_and_revision_projections(self):
         cases = []

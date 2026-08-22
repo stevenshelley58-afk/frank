@@ -1,6 +1,6 @@
-# Ad Template Generator tool package
+# Ad Studio tool package
 
-This is the Frank-side contract for the Ad Template Generator. Frank may
+This is the Frank-side contract for Ad Studio. Frank may
 display tool status, trace records, receipts, and immutable releases. Hermes
 remains the sole owner of reasoning, model selection, provider calls, skills,
 memory, execution, and durable state.

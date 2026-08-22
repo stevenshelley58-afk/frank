@@ -249,6 +249,7 @@ export function mountGraphWorkbench(root, options = {}) {
     if (!node) return;
     controls.status.textContent = `Selected ${node.label}`;
     state.details.textContent = `${node.label} · ${node.kind} · ${node.status}`;
+    options.onSelect?.(node);
   };
   state.fit = () => {
     if (state.sigma) state.sigma.getCamera().animatedReset({ duration: 250 });

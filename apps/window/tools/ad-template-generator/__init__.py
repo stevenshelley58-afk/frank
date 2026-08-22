@@ -1,4 +1,4 @@
-"""Frank contract for the provider-owned Ad Template Generator tool.
+"""Frank contract for the provider-owned Ad Studio tool.
 
 This package is deliberately an adapter contract, not an image-generation
 engine. Hermes owns execution, model selection, skills, and state.

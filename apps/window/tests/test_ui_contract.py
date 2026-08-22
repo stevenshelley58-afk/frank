@@ -7,6 +7,25 @@ WEB = Path(__file__).resolve().parents[1] / "web"
 
 
 class UiContractTest(unittest.TestCase):
+    def test_ad_studio_is_a_real_tool_surface_backed_by_hermes(self):
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
+        studio = (WEB / "js" / "ad-studio.js").read_text(encoding="utf-8")
+        widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
+
+        self.assertIn('data-view="ad-studio"', html)
+        self.assertIn('data-ad-tab="run"', html)
+        self.assertIn('data-ad-tab="runs"', html)
+        self.assertIn('data-ad-tab="pipeline"', html)
+        self.assertIn('id="ad-stage-input"', html)
+        self.assertIn('id="ad-stage-output"', html)
+        self.assertIn('emit("frank:ad-studio")', widgets)
+        self.assertIn('window.addEventListener("frank:ad-studio-run"', app)
+        self.assertIn('TOOL_ID_FOR_AD_STUDIO = "ad-template-generator"', app)
+        self.assertIn('mountGraphWorkbench(root', studio)
+        self.assertIn('scope_kind: "project"', studio)
+        self.assertNotIn('run.trace', studio)
+
     def test_explorer_remains_one_pinnable_vps_tree(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         script = (WEB / "js" / "app.js").read_text(encoding="utf-8")

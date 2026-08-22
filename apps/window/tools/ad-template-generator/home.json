@@ -1,6 +1,6 @@
 {
   "id": "ad-template-generator",
-  "name": "Ad Template Generator",
+  "name": "Ad Studio",
   "kind": "tool",
   "blurb": "Reference-clone ad templates with visible QA, human native-pixel approval, and immutable releases.",
   "capabilities": [

@@ -1,4 +1,4 @@
-"""Truthful read-only home projection for Ad Template Generator state."""
+"""Truthful read-only home projection for Ad Studio state."""
 
 from __future__ import annotations
 
@@ -109,7 +109,7 @@ def _connection_snapshot(value: Any = ()) -> dict[str, Any]:
 def _release_projection(release: Mapping[str, Any] | ImmutableRelease) -> tuple[dict[str, Any], list[dict[str, Any]]]:
     errors = validate_release(release)
     if errors:
-        raise ValueError("invalid Ad Template Generator runtime release: " + "; ".join(errors))
+        raise ValueError("invalid Ad Studio runtime release: " + "; ".join(errors))
     value = release.as_dict() if isinstance(release, ImmutableRelease) else dict(release)
     output = {
         "release_id": value["release_id"],
@@ -133,7 +133,7 @@ def _trace_projection(trace: Mapping[str, Any]) -> tuple[dict[str, Any], list[di
     value = dict(trace)
     errors = validate_trace(value)
     if errors:
-        raise ValueError("invalid Ad Template Generator runtime trace: " + "; ".join(errors))
+        raise ValueError("invalid Ad Studio runtime trace: " + "; ".join(errors))
     item = {
         "run_id": _safe_ref(value["run_id"], "trace.run_id"),
         "status": _safe_ref(value["status"], "trace.status"),
@@ -163,7 +163,7 @@ def build_home_snapshot(runtime_state: Mapping[str, Any] | None = None) -> dict[
             "schema": SNAPSHOT_SCHEMA,
             "tool_id": HOME_PROFILE["id"],
             "status": "unavailable",
-            "summary": "Ad Template Generator runtime state is unavailable.",
+            "summary": "Ad Studio runtime state is unavailable.",
             "overview": deepcopy(overview),
             "connections": deepcopy(_connection_snapshot()),
             "current_work": dict(unavailable),

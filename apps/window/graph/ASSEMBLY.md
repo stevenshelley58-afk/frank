@@ -9,6 +9,11 @@ At startup, `server.py` discovers canonical Tool manifests through
 and normalises responses through `schema://frank.graph/v1`. Unsupported
 entities, scopes, selectors, or unsafe payloads fail closed.
 
+Project/workspace-scoped Tool views pass their authorized render context as
+the exact `scope_kind` and `scope_id` graph selectors. The provider validates
+the declared manifest scope and binds the returned graph identity to it; the
+selectors do not grant access to state, settings, traces, or filesystem paths.
+
 The workbench is available only on Tool homes. It has no project-memory
 surface and is independent of Hermes memory.
 

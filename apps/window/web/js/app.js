@@ -2,15 +2,18 @@ import { mount, mountAll } from "./registry.js";
 import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
+import { mountAdStudio } from "./ad-studio.js";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
+const TOOL_ID_FOR_AD_STUDIO = "ad-template-generator";
 
 const TITLES = {
   hub: ["Hub", ""],
   project: ["Project", ""],
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
+  "ad-studio": ["Ad Studio", "Source image → ad template"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
   connections: ["Connections", "Recorded provider setup and capabilities"],
@@ -29,7 +32,7 @@ function show(id) {
   $("#view-sub").textContent = id === "hub"
     ? (chatSessions.find((chat) => chat.id === currentChatId)?.title || "")
     : sub;
-  const railView = ["accounts", "entity-home", "widget-builder", "connections"].includes(id) ? "tools" : id;
+  const railView = ["accounts", "entity-home", "widget-builder", "connections", "ad-studio"].includes(id) ? "tools" : id;
   $$(".rail-item[data-view]").forEach((b) => b.classList.toggle("is-on", b.dataset.view === railView));
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
@@ -118,6 +121,11 @@ window.addEventListener("frank:widget-builder", () => {
   openWidgetBuilder();
 });
 
+window.addEventListener("frank:ad-studio", () => {
+  show("ad-studio");
+  mountAdStudio();
+});
+
 window.addEventListener("frank:connections", (event) => {
   show("connections");
   openConnections(event.detail || {});
@@ -134,6 +142,54 @@ window.addEventListener("frank:open-chat-session", async (event) => {
 window.addEventListener("frank:new-project-chat", (event) => {
   const projectId = String(event.detail?.project_id || "");
   void createChat(projectId).catch((error) => addChatMsg({ role: "sys", text: error.message || "Could not start a project chat.", ts: Date.now() / 1000 | 0 }));
+});
+
+window.addEventListener("frank:ad-studio-run", (event) => {
+  const detail = event.detail || {};
+  void (async () => {
+    const files = Array.isArray(detail.files) ? detail.files.filter((file) => file instanceof File) : [];
+    const projectId = String(detail.projectId || "").trim();
+    if (!files.length) throw new Error("Choose at least one source image.");
+    if (!projectId) throw new Error("Choose a project.");
+    const fallbackName = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, "") : `${files.length} source images`;
+    const jobName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
+    const session = await createChat(projectId, `Ad Studio · ${jobName}`);
+    if (!session?.id) throw new Error("Finish or stop the current Hermes job before starting another.");
+    const uploaded = await uploadFiles(files.map((file) => ({ file, path: file.name })));
+    if (uploaded.length !== files.length) throw new Error("One or more source images were not accepted.");
+    const placements = Array.isArray(detail.placements) && detail.placements.length ? detail.placements.join(", ") : "square";
+    const brief = String(detail.brief || "").trim();
+    const request = [
+      `Run the canonical Frank Tool \`${TOOL_ID_FOR_AD_STUDIO}\` for this ${files.length === 1 ? "source image" : `batch of ${files.length} source images`}.`,
+      `Use pipeline \`reference-clone-release\` and placements: ${placements}.`,
+      brief ? `Brief: ${brief}` : "No additional brief was supplied; preserve the reference structure and make all customer assets and copy replaceable.",
+      "Hermes owns model selection, skills, tools, execution, QA, approval, and release. Do not create a second pipeline or memory store.",
+      "Record the stages, actual inputs and outputs, model/prompt references, QA evidence, and final artifact references in the canonical run/trace system when that integration is available. Never claim unavailable evidence exists.",
+    ].join("\n\n");
+    enqueueTurn(request, uploaded.map(attachmentPayload));
+    detail.resolve?.(session);
+  })().catch((error) => detail.reject?.(error));
+});
+
+window.addEventListener("frank:ad-studio-change-request", (event) => {
+  const detail = event.detail || {};
+  void (async () => {
+    const projectId = String(detail.projectId || "").trim();
+    const stage = String(detail.stage || "").trim();
+    if (!projectId || !stage) throw new Error("Choose a project and pipeline stage.");
+    const session = await createChat(projectId, `Ad Studio · change ${stage}`.slice(0, 80));
+    if (!session?.id) throw new Error("Finish or stop the current Hermes job before opening a change request.");
+    const lines = [
+      `Review and apply a settings change to the canonical Frank Tool \`${TOOL_ID_FOR_AD_STUDIO}\`, pipeline \`reference-clone-release\`, stage \`${stage}\`.`,
+      detail.runId ? `Use Ad Studio session \`${String(detail.runId)}\` as the example run context.` : "No example run was selected.",
+      detail.prompt ? `Prompt change requested:\n${String(detail.prompt)}` : "No prompt change requested.",
+      detail.model ? `Model policy change requested:\n${String(detail.model)}` : "No model policy change requested.",
+      detail.settings ? `Other settings requested:\n${String(detail.settings)}` : "No other settings requested.",
+      "Validate this against the Tool manifest and existing project policy. If accepted, create a new immutable scoped settings revision through the Hermes-owned path; do not mutate an old revision or add settings state to Frank.",
+    ];
+    enqueueTurn(lines.join("\n\n"), []);
+    detail.resolve?.(session);
+  })().catch((error) => detail.reject?.(error));
 });
 
 function escapeHtml(s) {
@@ -267,19 +323,20 @@ async function selectChat(chatId) {
   show("hub");
   await loadChatMessages(chatId);
 }
-async function createChat(projectId = "") {
+async function createChat(projectId = "", title = "New chat") {
   if (turnAbort) return;
   await modelUpdate.catch(() => {});
   const response = await fetch("/api/chat/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: "New chat", model: chatModel, provider: chatProvider, project_id: projectId || undefined }),
+    body: JSON.stringify({ title, model: chatModel, provider: chatProvider, project_id: projectId || undefined }),
   });
   if (!response.ok) throw new Error("Could not start a new chat");
   const data = await response.json();
   await fetchChatSessions();
   await selectChat(data.session.id);
   $("#chat-input").focus();
+  return data.session;
 }
 
 function slugifyProject(value) {

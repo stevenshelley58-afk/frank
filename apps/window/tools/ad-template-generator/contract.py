@@ -1,4 +1,4 @@
-"""Stable Frank/Hermes boundary for the Ad Template Generator.
+"""Stable Frank/Hermes boundary for Ad Studio.
 
 The functions here validate and describe work; they never call a provider or
 generate pixels. Keeping this boundary small prevents Frank from becoming a
@@ -23,7 +23,7 @@ from tool_apps.canonical import canonical_sha256
 MANIFEST = json.loads((Path(__file__).resolve().parent / "manifest.json").read_text(encoding="utf-8"))
 HOME_PROFILE = MappingProxyType({
     "id": "ad-template-generator",
-    "name": "Ad Template Generator",
+    "name": "Ad Studio",
     "kind": "tool",
     "blurb": "Reference-clone ad templates with visible QA, human native-pixel approval, and immutable releases.",
     "capabilities": (

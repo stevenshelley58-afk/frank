@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260817-thinking-stream">
+<link rel="stylesheet" href="/app.css?v=20260822-ad-studio">
 </head>
 <body>
 <div class="app">
@@ -166,6 +166,75 @@
       </section>
 
       <section class="view" data-view="tools"><div class="grid" id="slot-tools"></div></section>
+      <section class="view" data-view="ad-studio" aria-labelledby="ad-studio-heading">
+        <div class="ad-studio" id="ad-studio">
+          <header class="ad-studio-head">
+            <div><span class="home-kicker">Tool</span><h2 id="ad-studio-heading">Ad Studio</h2><p>Turn source images into editable, source-free ad templates.</p></div>
+            <span class="ad-studio-owner">Runs on Hermes</span>
+          </header>
+          <nav class="ad-studio-tabs" aria-label="Ad Studio sections">
+            <button type="button" class="is-on" data-ad-tab="run">Run</button>
+            <button type="button" data-ad-tab="runs">Runs</button>
+            <button type="button" data-ad-tab="pipeline">Pipeline</button>
+          </nav>
+
+          <div class="ad-studio-panel is-on" data-ad-panel="run">
+            <form class="ad-run-form" id="ad-run-form">
+              <div class="ad-section-heading"><div><span>New job</span><h3>Source image → ad template</h3></div><span id="ad-run-mode">Single</span></div>
+              <label class="ad-drop" id="ad-drop">
+                <input type="file" id="ad-source-files" accept="image/*" multiple>
+                <span class="ad-drop-mark" aria-hidden="true">+</span>
+                <strong>Choose source images</strong>
+                <small>Drop one image for a single run or several for a batch.</small>
+              </label>
+              <div class="ad-source-preview" id="ad-source-preview" aria-live="polite"></div>
+              <div class="ad-form-pair">
+                <label>Project<select id="ad-run-project" required><option value="">Loading projects…</option></select></label>
+                <label>Job name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
+              </div>
+              <fieldset class="ad-fieldset"><legend>Placements</legend><label><input type="checkbox" name="ad-placement" value="square" checked> Square</label><label><input type="checkbox" name="ad-placement" value="portrait"> Portrait</label><label><input type="checkbox" name="ad-placement" value="story"> Story</label></fieldset>
+              <label>Brief <span>optional</span><textarea id="ad-run-brief" maxlength="800" rows="4" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea></label>
+              <div class="ad-submit-row"><p id="ad-run-status" role="status">Hermes will execute the canonical pipeline and record the work in a project chat.</p><button type="submit" class="ad-primary" id="ad-run-submit">Run job</button></div>
+            </form>
+            <aside class="ad-run-guide">
+              <span class="home-kicker">Pipeline</span>
+              <ol><li><strong>Understand</strong><span>Inspect the source and extract the layout contract.</span></li><li><strong>Build</strong><span>Clone the reference using replaceable assets and copy.</span></li><li><strong>Check</strong><span>Review quality, approve native pixels, and issue a source-free release.</span></li></ol>
+              <p>Model choice, tools, skills, and execution stay with Hermes.</p>
+            </aside>
+          </div>
+
+          <div class="ad-studio-panel" data-ad-panel="runs">
+            <div class="ad-runs-layout">
+              <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><span>History</span><h3>Jobs</h3></div><button type="button" class="ad-text-button" id="ad-runs-refresh">Refresh</button></div><div class="ad-runs-list" id="ad-runs-list" aria-live="polite"></div></section>
+              <section class="ad-run-detail" id="ad-run-detail" aria-live="polite"><div class="ad-empty"><strong>Select a job</strong><span>Open any Ad Studio job to inspect its real conversation and tool activity.</span></div></section>
+            </div>
+          </div>
+
+          <div class="ad-studio-panel" data-ad-panel="pipeline">
+            <div class="ad-pipeline-toolbar">
+              <div><span class="home-kicker">Design + run evidence</span><h3>Reference clone pipeline</h3></div>
+              <div class="ad-pipeline-controls"><label>Project<select id="ad-pipeline-project"></select></label><label>Example run<select id="ad-pipeline-run"><option value="">No run selected</option></select></label></div>
+            </div>
+            <div class="ad-pipeline-layout">
+              <section class="ad-pipeline-canvas"><div id="ad-pipeline-graph"></div></section>
+              <aside class="ad-stage-inspector">
+                <div class="ad-section-heading"><div><span>Selected stage</span><h3 id="ad-stage-name">Select a stage</h3></div><span id="ad-stage-kind">—</span></div>
+                <div class="ad-evidence-grid">
+                  <section><span>Input</span><div id="ad-stage-input" class="ad-evidence-empty">Select a real run and stage to see its input image, text, or JSON.</div></section>
+                  <section><span>Output</span><div id="ad-stage-output" class="ad-evidence-empty">No correlated output is available yet.</div></section>
+                </div>
+                <form id="ad-stage-form">
+                  <label>Prompt change<textarea id="ad-stage-prompt" maxlength="1600" rows="5" placeholder="Describe the prompt change for this stage…"></textarea></label>
+                  <label>Model policy<input id="ad-stage-model" maxlength="160" placeholder="e.g. quality-first image model"></label>
+                  <label>Other settings<textarea id="ad-stage-settings" maxlength="1000" rows="3" placeholder="Retries, thresholds, placement behaviour…"></textarea></label>
+                  <div class="ad-submit-row"><p id="ad-stage-status" role="status">Changes are reviewed and applied by Hermes as a new settings revision.</p><button type="submit" class="ad-primary">Send change request</button></div>
+                </form>
+                <details class="ad-trace-state"><summary>Full trace</summary><p>A drill-down trace will appear here only when Hermes supplies a correlated run record. Frank does not reconstruct or invent Langfuse spans from chat messages.</p></details>
+              </aside>
+            </div>
+          </div>
+        </div>
+      </section>
       <section class="view" data-view="entity-home">
         <div class="home-surface">
           <div class="entity-home-heading"><div><span class="home-kicker" id="entity-home-kind">Tool</span><h2 id="entity-home-name">Home</h2></div><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
@@ -356,6 +425,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260817-thinking-stream"></script>
+<script type="module" src="/js/app.js?v=20260822-ad-studio"></script>
 </body>
 </html>
