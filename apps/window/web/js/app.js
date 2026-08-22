@@ -2,11 +2,10 @@ import { mount, mountAll } from "./registry.js";
 import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
-import { mountAdStudio } from "./ad-studio.js?v=20260822-background-runs";
+import { mountAdStudio } from "./ad-studio.js?v=20260822-tool-runs-v2";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
-const TOOL_ID_FOR_AD_STUDIO = "ad-template-generator";
 
 const TITLES = {
   hub: ["Hub", ""],
@@ -171,34 +170,13 @@ window.addEventListener("frank:ad-studio-run", (event) => {
         brief: String(detail.brief || "").trim(),
         placements: Array.isArray(detail.placements) && detail.placements.length ? detail.placements : ["square"],
         attachments: uploaded.map(attachmentPayload),
-        model: chatModel,
-        provider: chatProvider,
+        policy_revision: String(detail.policyRevision || ""),
+        ...(detail.policyOverride ? { policy_override: detail.policyOverride } : {}),
       }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.run?.id) throw new Error(data.error || "Hermes did not start the background job.");
-    detail.resolve?.(data.run);
-  })().catch((error) => detail.reject?.(error));
-});
-
-window.addEventListener("frank:ad-studio-change-request", (event) => {
-  const detail = event.detail || {};
-  void (async () => {
-    const projectId = String(detail.projectId || "").trim();
-    const stage = String(detail.stage || "").trim();
-    if (!projectId || !stage) throw new Error("Choose a project and pipeline stage.");
-    const session = await createChat(projectId, `Ad Studio · change ${stage}`.slice(0, 80));
-    if (!session?.id) throw new Error("Finish or stop the current Hermes job before opening a change request.");
-    const lines = [
-      `Review and apply a settings change to the canonical Frank Tool \`${TOOL_ID_FOR_AD_STUDIO}\`, pipeline \`reference-clone-release\`, stage \`${stage}\`.`,
-      detail.runId ? `Use Ad Studio session \`${String(detail.runId)}\` as the example run context.` : "No example run was selected.",
-      detail.prompt ? `Prompt change requested:\n${String(detail.prompt)}` : "No prompt change requested.",
-      detail.model ? `Model policy change requested:\n${String(detail.model)}` : "No model policy change requested.",
-      detail.settings ? `Other settings requested:\n${String(detail.settings)}` : "No other settings requested.",
-      "Validate this against the Tool manifest and existing project policy. If accepted, create a new immutable scoped settings revision through the Hermes-owned path; do not mutate an old revision or add settings state to Frank.",
-    ];
-    enqueueTurn(lines.join("\n\n"), []);
-    detail.resolve?.(session);
+    detail.resolve?.({ run: data.run, runs: data.runs || [data.run], batchId: data.batch_id });
   })().catch((error) => detail.reject?.(error));
 });
 

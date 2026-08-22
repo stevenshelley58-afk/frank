@@ -16,16 +16,21 @@ class AdStudioPickerContractTest(unittest.TestCase):
         self.assertIn('id="ad-source-vps-search"', html)
         self.assertIn('Choose from this device or the VPS', html)
         self.assertIn('fetch(`/api/tree?root=vps&path=', studio)
+        self.assertIn('fetch(`/api/tree/search?root=vps&q=', studio)
         self.assertIn('sources: selectedFiles.slice()', studio)
         self.assertIn('uploadVpsFiles(vpsFiles)', app)
         self.assertIn('fetch("/api/chat/uploads/vps"', app)
         self.assertIn('fetch("/api/ad-studio/runs"', app)
-        self.assertIn('fetch(`/api/ad-studio/runs/${encodeURIComponent(ref.id)}`)', studio)
+        self.assertIn('fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}`)', studio)
+        self.assertIn("new EventSource", studio)
         run_handler = app.split('window.addEventListener("frank:ad-studio-run"', 1)[1].split(
-            'window.addEventListener("frank:ad-studio-change-request"', 1
+            'function escapeHtml', 1
         )[0]
         self.assertNotIn("createChat(", run_handler)
         self.assertNotIn("enqueueTurn(", run_handler)
+        self.assertNotIn("chatModel", run_handler)
+        self.assertNotIn("chatProvider", run_handler)
+        self.assertNotIn('frank:ad-studio-change-request', app)
 
 
 if __name__ == "__main__":

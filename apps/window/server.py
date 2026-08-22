@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import base64
+import hashlib
 import mimetypes
 import os
 import re
@@ -88,8 +89,12 @@ ACCOUNT_MODES = {"selfserve", "managed", "internal"}
 ACCOUNT_ENVIRONMENTS = {"test", "live"}
 AUTH_STATUSES = {"not_connected", "invited", "active", "suspended", "closed"}
 BILLING_STATUSES = {"not_connected", "trial", "active", "past_due", "canceled"}
-AD_STUDIO_RUN_ID = re.compile(r"run_[0-9a-f]{32}")
+AD_STUDIO_RUN_ID = re.compile(r"trun_[0-9a-f]{32}")
 AD_STUDIO_PLACEMENTS = {"square", "portrait", "story"}
+AD_STUDIO_IMAGE_EXTENSIONS = {
+    ".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg",
+    ".png", ".tif", ".tiff", ".webp",
+}
 ACCOUNT_FIELDS = {
     "project_id", "kind", "name", "identity", "provider", "purpose",
     "admin_url", "credential_ref", "notes", "status", "account_mode",
@@ -779,6 +784,67 @@ def tree():
     return jsonify({"ok": True, "missing": False, "root": root, "path": rel, "entries": entries})
 
 
+@app.get("/api/tree/search")
+def tree_search():
+    """Bounded recursive image search inside an explicitly mounted root."""
+    root = request.args.get("root", "vps")
+    query = str(request.args.get("q") or "").strip().lower()
+    if len(query) < 2 or len(query) > 120:
+        abort(400, "search requires between 2 and 120 characters")
+    try:
+        cursor = max(0, int(request.args.get("cursor", "0")))
+        limit = min(100, max(1, int(request.args.get("limit", "50"))))
+    except ValueError:
+        abort(400, "invalid search page")
+    base = jail(root, "")
+    if not base.is_dir():
+        return jsonify({"ok": False, "missing": True, "entries": [], "next_cursor": None})
+    matches = []
+    inspected = 0
+    stack = [base]
+    while stack and inspected < 20_000 and len(matches) < cursor + limit + 1:
+        folder = stack.pop()
+        try:
+            children = sorted(folder.iterdir(), key=lambda path: path.name.lower(), reverse=True)
+        except (OSError, PermissionError):
+            continue
+        for child in children:
+            inspected += 1
+            if inspected > 20_000:
+                break
+            if child.name.startswith(".") or child.name in SKIP or child.is_symlink():
+                continue
+            try:
+                if child.is_dir():
+                    stack.append(child)
+                    continue
+                if child.suffix.lower() not in AD_STUDIO_IMAGE_EXTENSIONS or query not in child.name.lower():
+                    continue
+                resolved = child.resolve()
+                resolved.relative_to(base.resolve())
+                st = resolved.stat()
+            except (OSError, ValueError):
+                continue
+            matches.append({
+                "name": child.name,
+                "dir": False,
+                "path": resolved.relative_to(base.resolve()).as_posix(),
+                "size": st.st_size,
+                "mtime": int(st.st_mtime),
+                "ext": child.suffix[1:].lower(),
+            })
+    page = matches[cursor:cursor + limit]
+    next_cursor = cursor + limit if len(matches) > cursor + limit else None
+    return jsonify({
+        "ok": True,
+        "missing": False,
+        "entries": page,
+        "next_cursor": next_cursor,
+        "inspected": inspected,
+        "truncated": inspected >= 20_000,
+    })
+
+
 @app.get("/api/file")
 def file_get():
     root = request.args.get("root", "vps")
@@ -933,6 +999,7 @@ def _clean_atts(raw) -> list:
             "type": media_type,
             "url": f"/api/chat/uploads/{rel}",
             "hermes_path": str(HERMES_UPLOAD_ROOT / Path(rel)).replace("\\", "/"),
+            "origin": "vps" if a.get("source") == "vps" else "device",
         })
         if len(out) >= 500:
             break
@@ -1132,27 +1199,74 @@ def _hermes_input(text: str, attachments: list) -> str | list:
 
 
 def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
-    """Return only the Hermes run fields needed by the Ad Studio display."""
+    """Project a Tool run without exposing source paths or private command data."""
     now = int(time.time())
+    payload = run.get("payload") if isinstance(run.get("payload"), dict) else {}
+    sources = payload.get("sources") if isinstance(payload.get("sources"), list) else []
+    source = sources[0] if sources and isinstance(sources[0], dict) else {}
+    policy = run.get("model_policy") if isinstance(run.get("model_policy"), dict) else {}
+    output = run.get("output") if isinstance(run.get("output"), dict) else {}
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    safe_output_keys = {
+        "summary", "preview", "previews", "artifacts", "qa", "usage", "cost",
+        "release_id", "template_pack", "template_pack_ref", "checksum", "sha256",
+        "signature", "compatibility", "imports", "trace_ref",
+    }
     item = {
-        "id": str(run.get("run_id") or run.get("id") or ""),
+        "id": str(run.get("id") or run.get("run_id") or ""),
+        "request_id": str(run.get("request_id") or ""),
         "status": str(run.get("status") or "queued"),
+        "stage": str(run.get("stage") or "source"),
+        "progress": int(run.get("progress") or 0),
+        "attention": str(run.get("attention") or ""),
+        "trace_id": str(run.get("trace_id") or ""),
         "created_at": run.get("created_at") or now,
         "updated_at": run.get("updated_at") or run.get("completed_at") or run.get("created_at") or now,
-        "last_event": str(run.get("last_event") or ""),
-        "model": str(run.get("model") or ""),
+        "policy_revision": str(run.get("model_policy_revision") or ""),
+        "policy": policy,
+        "current_model": str(run.get("current_model") or ""),
+        "current_provider": str(run.get("current_provider") or ""),
+        "source": {
+            "ref": str(source.get("ref") or ""),
+            "name": str(source.get("name") or ""),
+            "sha256": str(source.get("sha256") or ""),
+            "size": int(source.get("size") or 0),
+            "media_type": str(source.get("media_type") or ""),
+            "origin": str(source.get("origin") or ""),
+        },
+        "output": {key: value for key, value in output.items() if key in safe_output_keys},
     }
-    if title:
-        item["title"] = title
-    if project_id:
-        item["project_id"] = project_id
-    if run.get("output") is not None:
-        item["output"] = str(run.get("output") or "")
-    if run.get("error") is not None:
-        item["error"] = str(run.get("error") or "")
+    item["title"] = title or str(run.get("title") or payload.get("job_name") or "Ad Studio job")
+    item["project_id"] = project_id or str(run.get("project_id") or scope.get("project_id") or payload.get("project_id") or "")
+    if run.get("error"):
+        item["error"] = str(run.get("error"))[:1200]
     if isinstance(run.get("usage"), dict):
         item["usage"] = run["usage"]
+    if run.get("cost") is not None:
+        item["cost"] = run["cost"]
     return item
+
+
+def _ad_studio_source(attachment: dict) -> dict:
+    target = _upload_target(attachment["id"])
+    if target is None or not target.is_file():
+        abort(400, "source image is no longer available")
+    digest = hashlib.sha256(target.read_bytes()).hexdigest()
+    return {
+        "ref": f"source:{digest}",
+        "path": attachment["hermes_path"],
+        "name": attachment["name"],
+        "sha256": digest,
+        "size": attachment["size"],
+        "media_type": attachment["type"],
+        "origin": attachment.get("origin") or "device",
+    }
+
+
+def _tool_run_path(run_id: str, suffix: str = "") -> str:
+    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+        abort(404)
+    return f"/v1/tool-runs/{urllib.parse.quote(run_id, safe='')}{suffix}"
 
 
 @app.post("/api/ad-studio/runs")
@@ -1184,45 +1298,193 @@ def ad_studio_run_create():
         if len(attachments) == 1 else f"{len(attachments)} source images"
     )
     brief = _clean_project_text(body.get("brief"), 800)
-    source_count = len(attachments)
-    prompt = "\n\n".join([
-        f"Run the canonical Frank Tool `ad-template-generator` for this {'source image' if source_count == 1 else f'batch of {source_count} source images'}.",
-        f"Use pipeline `reference-clone-release` and placements: {', '.join(placements)}.",
-        f"Brief: {brief}" if brief else "No additional brief was supplied; preserve the reference structure and make all customer assets and copy replaceable.",
-        "Hermes owns model selection, skills, tools, execution, QA, approval, and release. Do not create a second pipeline or memory store.",
-        "Record the stages, actual inputs and outputs, model/prompt references, QA evidence, and final artifact references in the canonical run/trace system when that integration is available. Never claim unavailable evidence exists.",
-    ])
-    payload = {
-        "input": _attachment_prompt(prompt, attachments),
-        "instructions": _project_context(project),
-    }
-    model = str(body.get("model") or "").strip()
-    provider = str(body.get("provider") or "").strip()
-    if model:
-        payload["model"] = model
-    if provider:
-        payload["provider"] = provider
+    policy_revision = str(body.get("policy_revision") or "").strip()
+    policy_override = body.get("policy_override") if isinstance(body.get("policy_override"), dict) else None
+    batch_id = f"batch_{secrets.token_hex(16)}"
+    runs = []
     try:
-        data = hermes_request("/v1/runs", payload, method="POST", timeout=10)
+        for index, attachment in enumerate(attachments):
+            child_name = name if len(attachments) == 1 else f"{name} · {index + 1} of {len(attachments)}"
+            command_payload = {
+                "batch_id": batch_id,
+                "job_name": child_name,
+                "brief": brief,
+                "placements": placements,
+                "sources": [_ad_studio_source(attachment)],
+                "project_context": _project_context(project),
+            }
+            request_payload = {
+                "schema": "schema://hermes.tool-run-command/v1",
+                "request_id": f"req_{secrets.token_hex(16)}",
+                "tool_id": "ad-template-generator",
+                "action": "build-template",
+                "scope": {"project_id": project_id},
+                "payload": command_payload,
+                "idempotency_key": f"{batch_id}:{index}",
+            }
+            if policy_revision:
+                try:
+                    request_payload["model_policy_revision"] = int(policy_revision)
+                except ValueError:
+                    abort(400, "invalid model policy revision")
+            if policy_override:
+                request_payload["model_policy_override"] = policy_override
+            data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=15)
+            run_data = data.get("run") if isinstance(data.get("run"), dict) else data
+            run_id = str(run_data.get("id") or run_data.get("run_id") or "")
+            if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+                return jsonify({"error": "Hermes did not return a valid Tool run id"}), 502
+            runs.append(_public_ad_studio_run(run_data, title=f"Ad Studio · {child_name}", project_id=project_id))
+            staging_target = _upload_target(attachment["id"])
+            if staging_target is not None:
+                try:
+                    staging_target.unlink(missing_ok=True)
+                except OSError:
+                    pass
     except Exception as error:
         return _hermes_error(error)
-    run_id = str(data.get("run_id") or "")
-    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
-        return jsonify({"error": "Hermes did not return a valid background run id"}), 502
-    run = _public_ad_studio_run(data, title=f"Ad Studio · {name}", project_id=project_id)
-    return jsonify({"ok": True, "run": run}), 202
+    return jsonify({"ok": True, "batch_id": batch_id, "run": runs[0], "runs": runs}), 202
+
+
+@app.get("/api/ad-studio/runs")
+def ad_studio_run_list():
+    query = urllib.parse.urlencode({
+        "tool_id": "ad-template-generator",
+        "project_id": str(request.args.get("project_id") or ""),
+        "limit": min(200, max(1, request.args.get("limit", type=int) or 100)),
+    })
+    try:
+        data = hermes_request(f"/v1/tool-runs?{query}", timeout=8)
+    except Exception as error:
+        return _hermes_error(error)
+    raw_runs = data.get("runs") if isinstance(data.get("runs"), list) else data.get("data", [])
+    return jsonify({"runs": [_public_ad_studio_run(item) for item in raw_runs if isinstance(item, dict)]})
 
 
 @app.get("/api/ad-studio/runs/<run_id>")
 def ad_studio_run_get(run_id: str):
-    """Read authoritative detached-run status without creating a Hub chat."""
-    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
-        abort(404)
+    """Read authoritative Tool-run status without creating a Hub chat."""
     try:
-        data = hermes_request(f"/v1/runs/{urllib.parse.quote(run_id, safe='')}", timeout=5)
+        data = hermes_request(_tool_run_path(run_id), timeout=8)
     except Exception as error:
         return _hermes_error(error)
-    return jsonify({"run": _public_ad_studio_run(data)})
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    return jsonify({"run": _public_ad_studio_run(run)})
+
+
+@app.get("/api/ad-studio/runs/<run_id>/events")
+def ad_studio_run_events(run_id: str):
+    after = request.args.get("after", type=int)
+    if after is None:
+        try:
+            after = int(request.headers.get("Last-Event-ID") or 0)
+        except ValueError:
+            after = 0
+    url = hermes_base() + _tool_run_path(run_id, "/events") + "?" + urllib.parse.urlencode({"after": max(-1, after)})
+
+    def generate():
+        headers = {"Accept": "text/event-stream"}
+        if HERMES_KEY:
+            headers["Authorization"] = f"Bearer {HERMES_KEY}"
+        try:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=75) as response:
+                while True:
+                    chunk = response.read(4096)
+                    if not chunk:
+                        break
+                    yield chunk
+        except (urllib.error.URLError, TimeoutError):
+            yield b"event: disconnected\ndata: {}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream", headers=_sse_headers())
+
+
+@app.get("/api/ad-studio/runs/<run_id>/download")
+def ad_studio_run_download(run_id: str):
+    url = hermes_base() + _tool_run_path(run_id, "/download")
+    headers = {"Accept": "application/zip, application/json"}
+    if HERMES_KEY:
+        headers["Authorization"] = f"Bearer {HERMES_KEY}"
+    try:
+        upstream = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30)
+    except Exception as error:
+        return _hermes_error(error)
+
+    def generate():
+        try:
+            while True:
+                chunk = upstream.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            upstream.close()
+
+    response_headers = {"Cache-Control": "private, no-store"}
+    disposition = upstream.headers.get("Content-Disposition")
+    if disposition:
+        response_headers["Content-Disposition"] = disposition
+    return Response(stream_with_context(generate()), mimetype=upstream.headers.get_content_type(), headers=response_headers)
+
+
+def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or any(key not in allowed for key in body):
+        abort(400, "invalid action")
+    try:
+        data = hermes_request(_tool_run_path(run_id, suffix), body, method="POST", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    return jsonify({"ok": True, "run": _public_ad_studio_run(run)})
+
+
+@app.post("/api/ad-studio/runs/<run_id>/approval")
+def ad_studio_run_approval(run_id: str):
+    return _proxy_ad_studio_action(run_id, "/approval", {"decision", "confirm_100_percent", "reason"})
+
+
+@app.post("/api/ad-studio/runs/<run_id>/models")
+def ad_studio_run_models(run_id: str):
+    return _proxy_ad_studio_action(run_id, "/models", {"policy", "reason"})
+
+
+@app.post("/api/ad-studio/runs/<run_id>/retry")
+def ad_studio_run_retry(run_id: str):
+    return _proxy_ad_studio_action(run_id, "/retry", {"from_stage"})
+
+
+@app.post("/api/ad-studio/runs/<run_id>/cancel")
+def ad_studio_run_cancel(run_id: str):
+    return _proxy_ad_studio_action(run_id, "/cancel", {"reason"})
+
+
+@app.get("/api/ad-studio/models")
+def ad_studio_models():
+    try:
+        return jsonify(hermes_request("/v1/tool-runs/models?tool_id=ad-template-generator", timeout=8))
+    except Exception as error:
+        return _hermes_error(error)
+
+
+@app.route("/api/ad-studio/model-policies", methods=["GET", "POST"])
+def ad_studio_model_policies():
+    path = "/v1/tool-runs/policies/ad-template-generator"
+    if request.method == "GET":
+        query = urllib.parse.urlencode({"project_id": str(request.args.get("project_id") or "")})
+        try:
+            return jsonify(hermes_request(f"{path}?{query}", timeout=8))
+        except Exception as error:
+            return _hermes_error(error)
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or not isinstance(body.get("policy"), dict):
+        abort(400, "model policy required")
+    payload = {"project_id": str(body.get("project_id") or ""), "policy": body["policy"]}
+    try:
+        return jsonify(hermes_request(path, payload, method="POST", timeout=15))
+    except Exception as error:
+        return _hermes_error(error)
 
 
 @app.post("/api/chat/turn")

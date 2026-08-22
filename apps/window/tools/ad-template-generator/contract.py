@@ -25,14 +25,14 @@ HOME_PROFILE = MappingProxyType({
     "id": "ad-template-generator",
     "name": "Ad Studio",
     "kind": "tool",
-    "blurb": "Reference-clone ad templates with visible QA, human native-pixel approval, and immutable releases.",
+    "blurb": "Portable editable TemplatePacks with live VPS evidence, Studio QA and signed releases.",
     "capabilities": (
         "inspect-source-provenance",
         "extract-customer-input-contract",
-        "clone-reference-to-safe-sample",
+        "build-layered-source-safe-template",
         "review-quality-evidence",
-        "approve-native-pixels",
-        "issue-source-free-release",
+        "approve-at-100-percent-zoom",
+        "issue-signed-template-pack",
     ),
     "default_widget_ids": (),
     "connection_capabilities": ("image.generate",),
@@ -45,7 +45,21 @@ def home_profile() -> dict[str, Any]:
         key: list(value) if isinstance(value, tuple) else value
         for key, value in HOME_PROFILE.items()
     }
-PIPELINE_ENTRY = MANIFEST["pipelines"][0]
+# Keep the v1 release validator available for already-issued packs while the
+# operator UI and new releases use the provider-neutral TemplatePack v2 path.
+PIPELINE_ENTRY = {
+    "id": "reference-clone-release",
+    "version": "1.0.0",
+    "nodes": [
+        {"id": "source"}, {"id": "extract"}, {"id": "clone"}, {"id": "qa"},
+        {"id": "native-pixel-human-approval"}, {"id": "immutable-source-free-release"},
+    ],
+    "edges": [
+        {"from": "source", "to": "extract"}, {"from": "extract", "to": "clone"},
+        {"from": "clone", "to": "qa"}, {"from": "qa", "to": "native-pixel-human-approval"},
+        {"from": "native-pixel-human-approval", "to": "immutable-source-free-release"},
+    ],
+}
 PIPELINE_GRAPH_NODES = tuple(node["id"] for node in PIPELINE_ENTRY["nodes"])
 PIPELINE_GRAPH_EDGES = tuple((edge["from"], edge["to"]) for edge in PIPELINE_ENTRY["edges"])
 PIPELINE_GRAPH = {"nodes": PIPELINE_GRAPH_NODES, "edges": PIPELINE_GRAPH_EDGES}

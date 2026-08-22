@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260822-ad-studio">
+<link rel="stylesheet" href="/app.css?v=20260822-ad-studio-v2">
 <link rel="stylesheet" href="/ad-studio-picker.css?v=20260822-vps-picker">
 </head>
 <body>
@@ -177,6 +177,7 @@
             <button type="button" class="is-on" data-ad-tab="run">Run</button>
             <button type="button" data-ad-tab="runs">Runs</button>
             <button type="button" data-ad-tab="pipeline">Pipeline</button>
+            <button type="button" data-ad-tab="models">Models</button>
           </nav>
 
           <div class="ad-studio-panel is-on" data-ad-panel="run">
@@ -193,27 +194,29 @@
                 <label>Project<select id="ad-run-project" required><option value="">Loading projects…</option></select></label>
                 <label>Job name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
               </div>
+              <div class="ad-policy-summary" id="ad-run-policy-summary"><div><span>Model policy</span><strong>Loading active policy…</strong></div><button type="button" class="ad-text-button" id="ad-run-models">Review or override</button></div>
+              <input type="hidden" id="ad-run-policy-revision">
               <fieldset class="ad-fieldset"><legend>Placements</legend><label><input type="checkbox" name="ad-placement" value="square" checked> Square</label><label><input type="checkbox" name="ad-placement" value="portrait"> Portrait</label><label><input type="checkbox" name="ad-placement" value="story"> Story</label></fieldset>
               <label>Brief <span>optional</span><textarea id="ad-run-brief" maxlength="800" rows="4" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea></label>
               <div class="ad-submit-row"><p id="ad-run-status" role="status">Hermes will run this as a background job. It will not open or interrupt a Hub chat.</p><button type="submit" class="ad-primary" id="ad-run-submit">Run job</button></div>
             </form>
             <aside class="ad-run-guide">
               <span class="home-kicker">Pipeline</span>
-              <ol><li><strong>Understand</strong><span>Inspect the source and extract the layout contract.</span></li><li><strong>Build</strong><span>Clone the reference using replaceable assets and copy.</span></li><li><strong>Check</strong><span>Review quality, approve native pixels, and issue a source-free release.</span></li></ol>
-              <p>Model choice, tools, skills, and execution stay with Hermes.</p>
+              <ol><li><strong>Analyse</strong><span>Extract structure without copying private source pixels into the pack.</span></li><li><strong>Build</strong><span>Create editable layers, placements, fields, copy and forms.</span></li><li><strong>Prove</strong><span>Run visual and subject-invariance checks, then pause for approval.</span></li><li><strong>Release</strong><span>Sign a portable TemplatePack after every gate passes.</span></li></ol>
+              <p>Frank is the cockpit. Hermes runs the durable VPS job and approved gateways.</p>
             </aside>
           </div>
 
           <div class="ad-studio-panel" data-ad-panel="runs">
             <div class="ad-runs-layout">
-              <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><span>History</span><h3>Jobs</h3></div><button type="button" class="ad-text-button" id="ad-runs-refresh">Refresh</button></div><div class="ad-runs-list" id="ad-runs-list" aria-live="polite"></div></section>
+              <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><span>Hermes history</span><h3>Jobs</h3></div><span class="ad-live-state" id="ad-live-state">Live</span></div><div class="ad-runs-list" id="ad-runs-list" aria-live="polite"></div></section>
               <section class="ad-run-detail" id="ad-run-detail" aria-live="polite"><div class="ad-empty"><strong>Select a job</strong><span>Open any Ad Studio job to inspect its live Hermes status and result.</span></div></section>
             </div>
           </div>
 
           <div class="ad-studio-panel" data-ad-panel="pipeline">
             <div class="ad-pipeline-toolbar">
-              <div><span class="home-kicker">Design + run evidence</span><h3>Reference clone pipeline</h3></div>
+              <div><span class="home-kicker">Fixed pipeline laws</span><h3>TemplatePack pipeline</h3></div>
               <div class="ad-pipeline-controls"><label>Project<select id="ad-pipeline-project"></select></label><label>Example run<select id="ad-pipeline-run"><option value="">No run selected</option></select></label></div>
             </div>
             <div class="ad-pipeline-layout">
@@ -224,15 +227,19 @@
                   <section><span>Input</span><div id="ad-stage-input" class="ad-evidence-empty">Select a real run and stage to see its input image, text, or JSON.</div></section>
                   <section><span>Output</span><div id="ad-stage-output" class="ad-evidence-empty">No correlated output is available yet.</div></section>
                 </div>
-                <form id="ad-stage-form">
-                  <label>Prompt change<textarea id="ad-stage-prompt" maxlength="1600" rows="5" placeholder="Describe the prompt change for this stage…"></textarea></label>
-                  <label>Model policy<input id="ad-stage-model" maxlength="160" placeholder="e.g. quality-first image model"></label>
-                  <label>Other settings<textarea id="ad-stage-settings" maxlength="1000" rows="3" placeholder="Retries, thresholds, placement behaviour…"></textarea></label>
-                  <div class="ad-submit-row"><p id="ad-stage-status" role="status">Changes are reviewed and applied by Hermes as a new settings revision.</p><button type="submit" class="ad-primary">Send change request</button></div>
-                </form>
-                <details class="ad-trace-state"><summary>Full trace</summary><p>A drill-down trace will appear here only when Hermes supplies a correlated run record. Frank does not reconstruct or invent Langfuse spans from chat messages.</p></details>
+                <div class="ad-stage-events" id="ad-stage-events"><p>Select a run and stage to inspect model attempts, tools, artifacts, QA and errors.</p></div>
+                <details class="ad-trace-state"><summary>Full trace</summary><div id="ad-full-trace">Select a run to replay its correlated, redacted events.</div></details>
               </aside>
             </div>
+          </div>
+
+          <div class="ad-studio-panel" data-ad-panel="models">
+            <div class="ad-models-head"><div><span class="home-kicker">Project defaults</span><h3>Model routing</h3><p>Models and prices can change. Safety rules and release gates cannot.</p></div><label>Project<select id="ad-model-project"></select></label></div>
+            <div class="ad-model-preset" role="group" aria-label="Routing preset"><button type="button" data-ad-preset="quality-first">Quality first</button><button type="button" class="is-on" data-ad-preset="balanced">Balanced</button><button type="button" data-ad-preset="cheapest-compatible">Cheapest compatible</button></div>
+            <form id="ad-model-form">
+              <div class="ad-model-stage-list" id="ad-model-stage-list" aria-live="polite"></div>
+              <div class="ad-submit-row"><p id="ad-model-status" role="status">Saving creates a new immutable Hermes policy revision for future runs.</p><button type="submit" class="ad-primary">Save new revision</button></div>
+            </form>
           </div>
         </div>
       </section>
@@ -248,7 +255,7 @@
             <button type="button" class="ad-source-device" id="ad-source-device">Browse this device</button>
           </section>
           <section class="ad-source-vps" aria-labelledby="ad-source-vps-title">
-            <div class="ad-source-vps-head"><div><strong id="ad-source-vps-title">VPS</strong><span>Read-only files available to Frank.</span></div><input id="ad-source-vps-search" type="search" placeholder="Filter this folder" aria-label="Filter this VPS folder"></div>
+            <div class="ad-source-vps-head"><div><strong id="ad-source-vps-title">VPS</strong><span>Search all approved read-only image folders, or browse below.</span></div><input id="ad-source-vps-search" type="search" placeholder="Search VPS images" aria-label="Search VPS images"></div>
             <nav class="ad-source-crumbs" id="ad-source-crumbs" aria-label="VPS folder"></nav>
             <div class="ad-source-vps-list" id="ad-source-vps-list" aria-live="polite"></div>
           </section>

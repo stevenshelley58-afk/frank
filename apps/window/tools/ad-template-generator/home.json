@@ -2,14 +2,14 @@
   "id": "ad-template-generator",
   "name": "Ad Studio",
   "kind": "tool",
-  "blurb": "Reference-clone ad templates with visible QA, human native-pixel approval, and immutable releases.",
+  "blurb": "Portable editable TemplatePacks with live VPS evidence, Studio QA and signed releases.",
   "capabilities": [
     "inspect-source-provenance",
     "extract-customer-input-contract",
-    "clone-reference-to-safe-sample",
+    "build-layered-source-safe-template",
     "review-quality-evidence",
-    "approve-native-pixels",
-    "issue-source-free-release"
+    "approve-at-100-percent-zoom",
+    "issue-signed-template-pack"
   ],
   "default_widget_ids": [],
   "connection_capabilities": ["image.generate"]
