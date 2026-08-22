@@ -98,9 +98,15 @@ a { color: inherit; text-decoration: none; }
 .chat-nav-copy strong, .chat-nav-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .chat-nav-copy strong { font-size: 12px; font-weight: 550; }
 .chat-nav-copy small { color: var(--faint); font-size: 10px; }
+.chat-nav-copy small em { color: var(--mark); font-style: normal; font-weight: 550; }
 .chat-nav-item time { padding-top: 1px; color: var(--faint); font-size: 9px; white-space: nowrap; }
-.project-rule { display: flex; align-items: center; gap: 7px; padding: 12px 8px 5px; color: var(--faint); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
-.project-rule::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.project-nav-head { display: flex; align-items: center; justify-content: space-between; padding: 12px 5px 5px 8px; color: var(--faint); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.project-nav-head button { width: 24px; height: 24px; display: grid; place-items: center; border-radius: 6px; color: var(--mute); }
+.project-nav-head button:hover { color: var(--ink); background: var(--hover); }
+.project-nav-head svg { width: 14px; height: 14px; }
+.project-nav { max-height: 190px; overflow-y: auto; }
+.project-nav .dot[data-status="ready"] { background: var(--ink); }
+.project-nav .dot[data-status="attention"] { background: var(--mark); }
 .rail-foot { margin-top: auto; padding: 8px; font-size: 11px; color: var(--faint); }
 
 /* ---- main ---- */
@@ -1339,12 +1345,45 @@ a { color: inherit; text-decoration: none; }
 }
 .btn:disabled { opacity: 0.4; cursor: not-allowed; }
 
+.project-dialog {
+  width: min(560px, calc(100vw - 28px));
+  max-height: min(760px, calc(100dvh - 28px));
+  margin: auto;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 18%);
+}
+.project-dialog::backdrop { background: rgb(0 0 0 / 32%); backdrop-filter: blur(2px); }
+.project-dialog form { display: grid; gap: 14px; padding: 24px; overflow-y: auto; }
+.project-dialog-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.project-dialog-head span { color: var(--mark); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.project-dialog-head h2 { margin-top: 3px; font-size: 25px; }
+.project-dialog-head button { width: 36px; height: 36px; border-radius: 8px; color: var(--mute); font-size: 23px; }
+.project-dialog-head button:hover { color: var(--ink); background: var(--hover); }
+.project-dialog-intro { color: var(--mute); font-size: 13px; }
+.project-dialog label { display: grid; gap: 6px; color: var(--mute); font-size: 11px; }
+.project-dialog label > span { color: var(--faint); font-size: 10px; }
+.project-dialog input,
+.project-dialog textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--ink); font-size: 13px; }
+.project-dialog input { height: 42px; padding: 9px 11px; }
+.project-dialog textarea { min-height: 92px; padding: 10px 11px; resize: vertical; }
+.project-dialog small { color: var(--faint); font-size: 10px; }
+.project-dialog-error { min-height: 20px; color: var(--bad); font-size: 12px; }
+.project-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+.project-dialog-actions button { min-height: 40px; padding: 8px 16px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
+.project-dialog-actions button:hover { border-color: var(--ink); }
+.project-dialog-actions .primary { border-color: var(--ink); background: var(--ink); color: #fff; }
+.project-dialog-actions button:disabled { opacity: .45; cursor: wait; }
+
 @media (max-width: 720px) {
   .rail { width: 60px; padding: 16px 6px 12px; }
   .logo .fn, .rail-item span, .rail-group .lbl, .rail-foot { display: none; }
   .rail-item .glyph, .rail-item .dot { display: block; }
-  .chat-nav, .project-rule, .chat-nav-head span { display: none; }
-  .chat-nav-head { justify-content: center; padding: 8px 0; }
+  .chat-nav, .project-nav, .chat-nav-head span, .project-nav-head span { display: none; }
+  .chat-nav-head, .project-nav-head { justify-content: center; padding: 8px 0; }
   .rail-item { justify-content: center; }
   .grid { grid-template-columns: 1fr; }
   .exp-cols, .exp-row { grid-template-columns: minmax(140px, 1fr) 120px 70px 34px; }
@@ -1377,6 +1416,7 @@ a { color: inherit; text-decoration: none; }
   .account-row .account-status { grid-column: 2; grid-row: 1; }
   .account-editor { position: absolute; inset: 0; z-index: 5; width: auto; border: 0; background: var(--bg); padding: 16px; }
   .account-form-pair { grid-template-columns: 1fr; }
+  .project-dialog form { padding: 18px; }
 }
 @media (prefers-reduced-motion: reduce) {
   * { transition: none !important; animation: none !important; }

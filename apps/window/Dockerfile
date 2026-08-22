@@ -13,6 +13,7 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY server.py .
+COPY project_store.py .
 COPY home_platform.py .
 COPY home_defaults.py .
 COPY home_providers.py .

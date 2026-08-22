@@ -31,11 +31,13 @@
         </button>
       </div>
       <div class="chat-nav" id="chat-nav" aria-label="Hub chats"></div>
-      <div class="project-rule"><span>Projects</span></div>
-      <button class="rail-item" data-project="blockwise" aria-label="Blockwise"><span class="dot"></span><span>Blockwise</span></button>
-      <button class="rail-item" data-project="merrypaws" aria-label="Merrypaws"><span class="dot"></span><span>Merrypaws</span></button>
-      <button class="rail-item" data-project="elfwonder" aria-label="Elf &amp; Wonder"><span class="dot"></span><span>Elf &amp; Wonder</span></button>
-      <button class="rail-item" data-project="pavone" aria-label="Pavone"><span class="dot"></span><span>Pavone</span></button>
+      <div class="project-nav-head">
+        <span>Projects</span>
+        <button type="button" id="new-project" aria-label="Create a new project" title="New project">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg>
+        </button>
+      </div>
+      <div class="project-nav" id="project-nav" aria-label="Projects"></div>
     </div>
 
     <div class="rail-group">
@@ -322,6 +324,22 @@
     </div>
   </main>
 </div>
+<dialog class="project-dialog" id="new-project-dialog" aria-labelledby="new-project-title">
+  <form id="new-project-form" autocomplete="off">
+    <div class="project-dialog-head">
+      <div><span>Project</span><h2 id="new-project-title">Start something new</h2></div>
+      <button type="button" id="new-project-close" aria-label="Close new project dialog">×</button>
+    </div>
+    <p class="project-dialog-intro">Frank creates the workspace and dashboard. Hermes gets one project-scoped chat and memory workspace in the existing default profile.</p>
+    <label>Name<input id="project-name" maxlength="80" required placeholder="Mini Frank"></label>
+    <label>Project ID<input id="project-id" maxlength="48" pattern="[a-z0-9](?:[a-z0-9-]{0,46}[a-z0-9])?" placeholder="mini-frank"><small>Lowercase letters, numbers and hyphens. This becomes /projects/&lt;id&gt;.</small></label>
+    <label>Brief<textarea id="project-blurb" maxlength="240" rows="4" placeholder="What are we building, for whom, and what should the first milestone prove?"></textarea></label>
+    <label>Existing repository <span>optional</span><input id="project-repository" type="url" maxlength="500" placeholder="https://github.com/you/project.git"><small>Leave blank for a new Git repository. Credentials must not be included in the URL.</small></label>
+    <label>Live app <span>optional</span><input id="project-live" type="url" maxlength="500" placeholder="https://example.com"></label>
+    <div class="project-dialog-error" id="new-project-error" role="alert"></div>
+    <div class="project-dialog-actions"><button type="button" id="new-project-cancel">Cancel</button><button type="submit" class="primary" id="new-project-submit">Create project</button></div>
+  </form>
+</dialog>
 <div class="ctx" id="ctx" hidden>
   <button type="button" data-act="open">Open</button>
   <button type="button" data-act="preview">Preview</button>

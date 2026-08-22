@@ -95,8 +95,12 @@ class UiContractTest(unittest.TestCase):
 
         rail_views = re.findall(r'<button class="rail-item[^>]*data-view="([^"]+)"', html)
         self.assertEqual(rail_views, ["hub", "files", "tools", "trace", "releases"])
-        rail_projects = re.findall(r'<button class="rail-item[^>]*data-project="([^"]+)"', html)
-        self.assertEqual(rail_projects, ["blockwise", "merrypaws", "elfwonder", "pavone"])
+        self.assertIn('id="project-nav"', html)
+        self.assertIn('id="new-project"', html)
+        self.assertIn('id="new-project-dialog"', html)
+        self.assertIn("renderProjectNav", app)
+        self.assertIn('fetchProjects()', app)
+        self.assertNotIn('data-project="blockwise"', html)
 
         self.assertIn('data-view="entity-home"', html)
         self.assertIn('id="project-dashboard-status"', html)

@@ -13,6 +13,7 @@ services:
     environment:
       FRANK_WEB: /web
       CHAT_STORE_DIR: /data
+      PROJECTS_STORE_FILE: /data/projects.json
       HERMES_SHARED_UPLOAD_ROOT: /srv/frank/data/window/uploads
       HERMES_API_URL: http://172.16.1.1:8642
       HERMES_PROFILE: default

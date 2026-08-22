@@ -54,3 +54,22 @@ virtual `/vps` tree. Hindsight and Hermes state are never mounted into Frank.
 The authoritative memory design is [MEMORY.md](MEMORY.md): one Hindsight
 provider in Hermes' `default` profile, with one bank derived from each bound
 project workspace slug.
+
+## Creating projects
+
+Frank's New Project flow records safe project metadata in Window data, creates
+one authoritative Hermes session in the existing `default` profile, and binds
+that session to `/projects/<project-id>`. Hermes provisions that directory
+before the first turn; the visible bootstrap turn initializes it or clones the
+requested repository into it. Frank's `/projects` mount remains read-only.
+
+The session workspace is the shared scoping key for chat grouping, repository
+instructions, tools, and long-term memory. Memory providers must derive their
+workspace/bank from the bound session workspace so project memory cannot cross
+into another project. Frank stores the session-to-project association for
+navigation only; it never stores transcripts, recalled memories, model state,
+or an agent loop.
+
+Project creation fails if Hermes cannot create the bound session. If Frank
+cannot persist the project registry after Hermes creates the empty session, it
+best-effort deletes that session rather than presenting a disconnected project.

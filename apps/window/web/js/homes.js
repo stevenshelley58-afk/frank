@@ -235,12 +235,16 @@ function homeEndpoint(home = homeState.home) {
 function homeControls() {
   const controls = [];
   const isConnectionsHome = homeState.home?.entity.kind === "tool" && homeState.home?.entity.id === "connections";
+  const isProject = homeState.home?.entity.kind === "project";
+  if (isProject) {
+    controls.push(button("New project chat", () => window.dispatchEvent(new CustomEvent("frank:new-project-chat", { detail: { project_id: homeState.home.entity.id } })), "home-action home-action-primary"));
+  }
   if (isConnectionsHome) {
     controls.push(button("Manage connections", () => window.dispatchEvent(new CustomEvent("frank:connections")), "home-action home-action-primary"));
   }
   if (!homeState.editing) {
     controls.push(button("Add widget", () => beginEditing(true)));
-    controls.push(button("Edit layout", () => beginEditing(false), isConnectionsHome ? "home-action" : "home-action home-action-primary"));
+    controls.push(button("Edit layout", () => beginEditing(false), (isConnectionsHome || isProject) ? "home-action" : "home-action home-action-primary"));
   } else {
     controls.push(button("Add widget", () => { homeState.gallery = true; renderHome(); }));
     controls.push(button("Reset", resetHome));

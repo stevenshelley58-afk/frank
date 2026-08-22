@@ -39,6 +39,27 @@ function show(id) {
 
 let currentProject = { id: "blockwise", name: "Blockwise" };
 
+function renderProjectNav() {
+  const nav = $("#project-nav");
+  if (!nav) return;
+  nav.replaceChildren();
+  for (const project of projects.projects || []) {
+    const control = document.createElement("button");
+    control.type = "button";
+    control.className = "rail-item";
+    control.dataset.project = project.id;
+    control.setAttribute("aria-label", project.name || project.id);
+    const dot = document.createElement("span");
+    dot.className = "dot";
+    dot.dataset.status = project.setup_state || "starting";
+    const label = document.createElement("span");
+    label.textContent = project.name || project.id;
+    control.append(dot, label);
+    control.addEventListener("click", () => showProject(project.id));
+    nav.append(control);
+  }
+}
+
 function showProject(id) {
   currentProject = projects.projects.find((x) => x.id === id) || { id, name: id };
   show("project");
@@ -56,10 +77,6 @@ $$(".rail-item[data-view]").forEach((b) =>
     }
     else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); }
   })
-);
-
-$$(".rail-item[data-project]").forEach((b) =>
-  b.addEventListener("click", () => showProject(b.dataset.project))
 );
 
 $$(".chip").forEach((c) => {
@@ -112,6 +129,11 @@ window.addEventListener("frank:open-chat-session", async (event) => {
   show("hub");
   await selectChat(sessionId);
   $("#chat-input")?.focus();
+});
+
+window.addEventListener("frank:new-project-chat", (event) => {
+  const projectId = String(event.detail?.project_id || "");
+  void createChat(projectId).catch((error) => addChatMsg({ role: "sys", text: error.message || "Could not start a project chat.", ts: Date.now() / 1000 | 0 }));
 });
 
 function escapeHtml(s) {
@@ -198,11 +220,14 @@ function chatDate(sec) {
 }
 function renderChatNav() {
   const nav = $("#chat-nav");
-  nav.innerHTML = chatSessions.map((chat) => `
+  nav.innerHTML = chatSessions.map((chat) => {
+    const project = projects.projects.find((item) => item.id === chat.project_id);
+    return `
     <button type="button" class="chat-nav-item ${chat.id === currentChatId ? "is-on" : ""}" data-chat-id="${escapeHtml(chat.id)}" title="${escapeHtml(chat.title || "New chat")}">
-      <span class="chat-nav-copy"><strong>${escapeHtml(chat.title || "New chat")}</strong><small>${escapeHtml(chat.preview || "No messages yet")}</small></span>
+      <span class="chat-nav-copy"><strong>${escapeHtml(chat.title || "New chat")}</strong><small>${project ? `<em>${escapeHtml(project.name)}</em> · ` : ""}${escapeHtml(chat.preview || "No messages yet")}</small></span>
       <time>${chatDate(chat.updated_at)}</time>
-    </button>`).join("");
+    </button>`;
+  }).join("");
   $$(".chat-nav-item", nav).forEach((button) => button.addEventListener("click", () => {
     if (turnAbort) return;
     void selectChat(button.dataset.chatId);
@@ -242,13 +267,13 @@ async function selectChat(chatId) {
   show("hub");
   await loadChatMessages(chatId);
 }
-async function createChat() {
+async function createChat(projectId = "") {
   if (turnAbort) return;
   await modelUpdate.catch(() => {});
   const response = await fetch("/api/chat/sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title: "New chat", model: chatModel, provider: chatProvider }),
+    body: JSON.stringify({ title: "New chat", model: chatModel, provider: chatProvider, project_id: projectId || undefined }),
   });
   if (!response.ok) throw new Error("Could not start a new chat");
   const data = await response.json();
@@ -256,6 +281,76 @@ async function createChat() {
   await selectChat(data.session.id);
   $("#chat-input").focus();
 }
+
+function slugifyProject(value) {
+  return String(value || "").toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+}
+
+function setupProjects() {
+  const dialog = $("#new-project-dialog");
+  const form = $("#new-project-form");
+  const name = $("#project-name");
+  const id = $("#project-id");
+  let idEdited = false;
+  const close = () => { if (dialog.open) dialog.close(); };
+  $("#new-project")?.addEventListener("click", () => {
+    form.reset();
+    idEdited = false;
+    $("#new-project-error").textContent = "";
+    dialog.showModal();
+    name.focus();
+  });
+  $("#new-project-close")?.addEventListener("click", close);
+  $("#new-project-cancel")?.addEventListener("click", close);
+  dialog?.addEventListener("click", (event) => { if (event.target === dialog) close(); });
+  id?.addEventListener("input", () => { idEdited = Boolean(id.value); });
+  name?.addEventListener("input", () => { if (!idEdited) id.value = slugifyProject(name.value); });
+  form?.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const submit = $("#new-project-submit");
+    const error = $("#new-project-error");
+    submit.disabled = true;
+    submit.textContent = "Connecting Hermes…";
+    error.textContent = "";
+    try {
+      const response = await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: name.value,
+          id: id.value,
+          blurb: $("#project-blurb").value,
+          repository_url: $("#project-repository").value,
+          live: $("#project-live").value,
+          model: chatModel,
+          provider: chatProvider,
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || data.message || "Could not create this project");
+      close();
+      await fetchProjects();
+      await fetchChatSessions();
+      await selectChat(data.session.id);
+      if (data.bootstrap_prompt) await sendTurn(data.bootstrap_prompt, []);
+    } catch (reason) {
+      error.textContent = reason.message || "Could not create this project.";
+    } finally {
+      submit.disabled = false;
+      submit.textContent = "Create project";
+    }
+  });
+}
+
+async function fetchProjects() {
+  const response = await fetch("/api/projects");
+  if (!response.ok) throw new Error("Could not load projects");
+  projects = await response.json();
+  renderProjectNav();
+  renderChatNav();
+  return projects.projects;
+}
+
 async function refreshChatSessions(reloadCurrent = false) {
   try {
     await fetchChatSessions();
@@ -1651,8 +1746,8 @@ setupChat();
 setupExplorer();
 setupAccounts();
 setupHomePlatform();
+setupProjects();
 
-fetch("/api/projects")
-  .then((r) => r.json())
-  .then((d) => { projects = d; show("hub"); })
+fetchProjects()
+  .then(() => show("hub"))
   .catch(() => show("hub"));

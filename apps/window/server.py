@@ -20,6 +20,7 @@ from flask import Flask, Response, abort, jsonify, request, send_file, send_from
 
 import home_platform
 import home_defaults
+from project_store import ProjectStore, ProjectStoreError
 import vault_broker
 from graph.provider import (
     ReadOnlyProvider,
@@ -33,6 +34,7 @@ WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 UPLOAD_DIR = CHAT_DIR / "uploads"
 ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accounts.json")))
+PROJECTS_FILE = Path(os.environ.get("PROJECTS_STORE_FILE", str(CHAT_DIR / "projects.json")))
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
@@ -140,6 +142,13 @@ DEFAULT_PROJECTS = [
         "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },
 ]
+PROJECT_ID = re.compile(r"^(?=.{1,48}$)[a-z0-9]+(?:-[a-z0-9]+)*$")
+PROJECT_STATES = {"starting", "ready", "attention"}
+PROJECT_DEFAULT_CAPABILITIES = [
+    "repository.activity", "repository.summary", "project.files",
+    "accounts.directory", "connections.read", "analytics.setup",
+]
+_project_store = ProjectStore(PROJECTS_FILE, DEFAULT_PROJECTS)
 
 
 def _contains_payment_data(text: str) -> bool:
@@ -322,12 +331,12 @@ def _session_path(session_id: str, suffix: str = "") -> str:
     return f"/api/sessions/{safe_id}{suffix}"
 
 
-def _public_hermes_session(session: dict) -> dict:
+def _public_hermes_session(session: dict, *, project_id: str = "") -> dict:
     preview = re.sub(r"\s+", " ", str(session.get("preview") or "")).strip()
     title = re.sub(r"\s+", " ", str(session.get("title") or "")).strip()
     if not title:
         title = (preview[:52] + ("…" if len(preview) > 52 else "")) or "New chat"
-    return {
+    result = {
         "id": str(session.get("id") or ""),
         "title": title,
         "created_at": session.get("started_at") or 0,
@@ -337,14 +346,17 @@ def _public_hermes_session(session: dict) -> dict:
         "model": str(session.get("model") or ""),
         "source": str(session.get("source") or ""),
     }
+    if project_id:
+        result["project_id"] = project_id
+    return result
 
 
-def _public_hermes_session_list(payload: dict) -> list[dict] | None:
+def _public_hermes_session_list(payload: dict, bindings: dict[str, str] | None = None) -> list[dict] | None:
     """Parse the production Hermes session-list shape used by chat and homes."""
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
         return None
     return [
-        _public_hermes_session(item)
+        _public_hermes_session(item, project_id=(bindings or {}).get(str(item.get("id") or ""), ""))
         for item in payload["data"]
         if isinstance(item, dict) and item.get("id")
     ]
@@ -446,22 +458,187 @@ def health():
     return jsonify({"ok": True, "service": "frank-window", "hermes": brain})
 
 
+@app.errorhandler(ProjectStoreError)
+def project_store_error(error: ProjectStoreError):
+    return jsonify({"error": str(error)}), 503
+
+
 @app.get("/api/projects")
 def projects():
-    return jsonify({"projects": _project_items()})
+    try:
+        return jsonify({"schema": "schema://frank.projects/v1", "projects": _project_items()})
+    except ProjectStoreError as error:
+        abort(503, str(error))
+
+
+def _project_workspace(project: dict) -> str:
+    return f"/projects/{project['root']}"
+
+
+def _project_setup_state(project: dict) -> str:
+    root = ROOTS.get("vps")
+    if not root:
+        return "attention"
+    try:
+        return "ready" if (root / "projects" / str(project["root"])).is_dir() else "starting"
+    except OSError:
+        return "attention"
+
+
+def _project_public(project: dict) -> dict:
+    item = deepcopy(project)
+    item["capabilities"] = list(item.get("capabilities", []))
+    item["default_widgets"] = list(item.get("default_widgets", []))
+    item["workspace"] = _project_workspace(item)
+    item["hermes_profile"] = HERMES_PROFILE.strip() or "default"
+    item["memory_scope"] = f"workspace/{item['root']}"
+    item["setup_state"] = _project_setup_state(item)
+    return item
 
 
 def _project_items() -> list[dict]:
-    # Keep the canonical profile source in this tracked module. Return copies
-    # so API consumers and home providers cannot mutate the process registry.
-    return [
-        {
-            **item,
-            "capabilities": list(item.get("capabilities", [])),
-            "default_widgets": list(item.get("default_widgets", [])),
-        }
-        for item in DEFAULT_PROJECTS
-    ]
+    return [_project_public(item) for item in _project_store.list_projects()]
+
+
+def _clean_project_id(raw: object, name: str = "") -> str:
+    value = str(raw or "").strip().lower()
+    if not value:
+        value = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:48]
+    if not PROJECT_ID.fullmatch(value):
+        abort(400, "project id must use lowercase letters, numbers, and single hyphens")
+    return value
+
+
+def _clean_project_text(raw: object, limit: int, *, required: bool = False) -> str:
+    value = re.sub(r"\s+", " ", str(raw or "")).strip()[:limit]
+    if required and not value:
+        abort(400, "project name is required")
+    if any(ord(char) < 32 for char in value):
+        abort(400, "project text contains unsupported characters")
+    return value
+
+
+def _clean_project_url(raw: object, label: str) -> str:
+    value = str(raw or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urllib.parse.urlsplit(value)
+    except ValueError:
+        abort(400, f"{label} is invalid")
+    if parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password:
+        abort(400, f"{label} must be an https URL without embedded credentials")
+    if parsed.query or parsed.fragment:
+        abort(400, f"{label} must not contain a query or fragment")
+    return urllib.parse.urlunsplit(parsed)[:500]
+
+
+def _project_context(project: dict) -> str:
+    return (
+        "You are Hermes, the sole brain for a project displayed through Frank.\n"
+        f"Frank project id: {project['id']}\n"
+        f"Project name: {project['name']}\n"
+        f"Canonical workspace: {_project_workspace(project)}\n"
+        f"Memory workspace: {project['root']}\n\n"
+        "Keep all project file operations inside the canonical workspace. Read and follow "
+        "the workspace AGENTS.md and other repository instructions before changing files. "
+        "Use the existing Hermes default profile; never create another Hermes profile, Frank "
+        "runtime, memory store, or agent loop. Durable memory must remain scoped to this exact "
+        "workspace. Project files and explicit user corrections override recalled memory."
+    )
+
+
+def _project_bootstrap_prompt(project: dict) -> str:
+    repository = str(project.get("repository_url") or "")
+    setup = (
+        f"If {_project_workspace(project)} is not already a Git repository, clone {repository} "
+        "into that existing workspace (clone into `.` when it is empty), then inspect its "
+        "instructions. Do not place credentials in the clone URL."
+        if repository else
+        f"Create {_project_workspace(project)} if it does not exist, initialize a Git repository "
+        "on main, and add a concise README.md and AGENTS.md that preserve the Frank/Hermes boundary."
+    )
+    return (
+        f"Start the {project['name']} project. {setup}\n\n"
+        f"Project brief: {project.get('blurb') or 'No brief supplied yet.'}\n\n"
+        "First report what already exists, then create the smallest useful project foundation and "
+        "a milestone plan. Keep working in this project workspace and record durable project "
+        "decisions only in its scoped memory."
+    )
+
+
+def _create_project_session(project: dict, *, title: str = "New chat", model: str = "", provider: str = "") -> dict:
+    payload = {
+        "source": "api_server",
+        "cwd": _project_workspace(project),
+        "workspace": _project_workspace(project),
+        "system_prompt": _project_context(project),
+    }
+    if title and title != "New chat":
+        payload["title"] = title
+    if model:
+        payload.update({"model": model, "require_model_lock": True})
+    if provider:
+        payload["provider"] = provider
+    data = hermes_request("/api/sessions", payload, method="POST")
+    session = data.get("session") or {}
+    if not session.get("id"):
+        raise RuntimeError("Hermes did not return a session id")
+    return session
+
+
+@app.post("/api/projects")
+def projects_create():
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        abort(400, "request body must be an object")
+    allowed = {"name", "id", "blurb", "repository_url", "live", "model", "provider"}
+    if set(body) - allowed:
+        abort(400, "unsupported project fields")
+    name = _clean_project_text(body.get("name"), 80, required=True)
+    project_id = _clean_project_id(body.get("id"), name)
+    project = {
+        "id": project_id,
+        "name": name,
+        "root": project_id,
+        "blurb": _clean_project_text(body.get("blurb"), 240) or f"{name} project workspace.",
+        "repository_url": _clean_project_url(body.get("repository_url"), "repository URL"),
+        "live": _clean_project_url(body.get("live"), "live URL"),
+        "capabilities": list(PROJECT_DEFAULT_CAPABILITIES),
+        "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
+        "created_at": int(time.time()),
+    }
+    if _project_store.get_project(project_id):
+        abort(409, "project already exists")
+    try:
+        session = _create_project_session(
+            project,
+            title=f"{name} · start",
+            model=str(body.get("model") or "").strip(),
+            provider=str(body.get("provider") or "").strip(),
+        )
+    except Exception as error:
+        return _hermes_error(error)
+    try:
+        _project_store.create_project(project, str(session["id"]))
+    except ValueError as error:
+        try:
+            hermes_request(_session_path(str(session["id"])), method="DELETE")
+        except Exception:
+            pass
+        abort(409, str(error))
+    except ProjectStoreError as error:
+        try:
+            hermes_request(_session_path(str(session["id"])), method="DELETE")
+        except Exception:
+            pass
+        abort(503, str(error))
+    return jsonify({
+        "ok": True,
+        "project": _project_public({**project, "chat_count": 1, "default_chat_id": str(session["id"])}),
+        "session": _public_hermes_session(session, project_id=project_id),
+        "bootstrap_prompt": _project_bootstrap_prompt(project),
+    }), 201
 
 
 @app.get("/api/accounts")
@@ -638,7 +815,7 @@ def chat_sessions_list():
         data = hermes_request("/api/sessions?limit=100&include_children=true")
     except Exception as err:
         return _hermes_error(err)
-    sessions = _public_hermes_session_list(data) or []
+    sessions = _public_hermes_session_list(data, _project_store.session_bindings()) or []
     return jsonify({"sessions": sessions, "profile": HERMES_PROFILE})
 
 
@@ -648,19 +825,35 @@ def chat_sessions_create():
     title = re.sub(r"\s+", " ", str(body.get("title", "New chat"))).strip()[:80] or "New chat"
     model = str(body.get("model", "")).strip()
     provider = str(body.get("provider", "")).strip()
-    payload = {"source": "api_server"}
-    if title != "New chat":
-        payload["title"] = title
-    if model:
-        payload.update({"model": model, "require_model_lock": True})
-    if provider:
-        payload["provider"] = provider
+    project_id = _clean_project_id(body.get("project_id")) if body.get("project_id") else ""
+    project = _project_store.get_project(project_id) if project_id else None
+    if project_id and not project:
+        abort(404, "project not found")
     try:
-        data = hermes_request("/api/sessions", payload, method="POST")
+        if project:
+            session = _create_project_session(project, title=title, model=model, provider=provider)
+        else:
+            payload = {"source": "api_server"}
+            if title != "New chat":
+                payload["title"] = title
+            if model:
+                payload.update({"model": model, "require_model_lock": True})
+            if provider:
+                payload["provider"] = provider
+            data = hermes_request("/api/sessions", payload, method="POST")
+            session = data.get("session") or {}
     except Exception as err:
         return _hermes_error(err)
-    session = data.get("session") or {}
-    return jsonify({"ok": True, "session": _public_hermes_session(session)}), 201
+    if project_id:
+        try:
+            _project_store.bind_session(project_id, str(session.get("id") or ""))
+        except (KeyError, ValueError) as error:
+            try:
+                hermes_request(_session_path(str(session.get("id") or "")), method="DELETE")
+            except Exception:
+                pass
+            abort(409, str(error))
+    return jsonify({"ok": True, "session": _public_hermes_session(session, project_id=project_id)}), 201
 
 
 @app.patch("/api/chat/sessions/<chat_id>")
@@ -673,7 +866,12 @@ def chat_sessions_rename(chat_id: str):
         data = hermes_request(_session_path(chat_id), {"title": title}, method="PATCH")
     except Exception as err:
         return _hermes_error(err)
-    return jsonify({"ok": True, "session": _public_hermes_session(data.get("session") or {})})
+    return jsonify({
+        "ok": True,
+        "session": _public_hermes_session(
+            data.get("session") or {}, project_id=_project_store.project_id_for_session(chat_id)
+        ),
+    })
 
 
 @app.post("/api/chat/sessions/<chat_id>/model")
@@ -702,7 +900,11 @@ def chat_list():
         data = hermes_request(_session_path(chat_id, "/messages") + "?limit=500&order=oldest")
     except Exception as err:
         return _hermes_error(err)
-    return jsonify({"messages": _public_hermes_messages(data.get("data") or []), "session_id": chat_id})
+    return jsonify({
+        "messages": _public_hermes_messages(data.get("data") or []),
+        "session_id": chat_id,
+        "project_id": _project_store.project_id_for_session(chat_id),
+    })
 
 
 def _clean_atts(raw) -> list:
