@@ -32,6 +32,6 @@ assert importlib.metadata.version("hindsight-embed") == "0.6.1"
 PY
 
 status="$(cd "$hermes_home" && sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" "$hermes_cli" memory status)"
-grep -q 'Provider: hindsight' <<<"$status" || die "Hermes has not activated Hindsight"
+grep -q -E 'Provider:[[:space:]]+hindsight' <<<"$status" || die "Hermes has not activated Hindsight"
 grep -q 'Status:    available' <<<"$status" || die "the local provider runtime is unavailable"
 echo "healthy: native provider active; bank template steven-{workspace}"
