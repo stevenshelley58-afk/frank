@@ -167,7 +167,11 @@ def load_project(root: Path, verify_local_sources: bool = False, repo_root: Path
                 raise KnowledgeError(f"{path}: source escapes repository")
             if not local.is_file():
                 raise KnowledgeError(f"{path}: local source is missing")
-            digest = hashlib.sha256(local.read_bytes()).hexdigest()
+            # Git may materialise committed text as LF or CRLF. Define local
+            # evidence hashes over UTF-8 text normalised to LF so the same
+            # source validates on Windows and Linux.
+            text = local.read_text(encoding="utf-8").replace("\r\n", "\n").replace("\r", "\n")
+            digest = hashlib.sha256(text.encode("utf-8")).hexdigest()
             if digest != source["sha256"]:
                 raise KnowledgeError(f"{path}: local source checksum changed")
 
