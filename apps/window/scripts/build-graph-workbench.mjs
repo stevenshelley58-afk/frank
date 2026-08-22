@@ -24,6 +24,8 @@ await build({
 });
 
 const dependencies = [
+  ["@antv/g6", "antv-g6-MIT.txt", "MIT"],
+  ["graphology-communities-louvain", "graphology-communities-louvain-MIT.txt", "MIT"],
   ["@maxgraph/core", "maxgraph-APACHE-2.0.txt", "Apache-2.0"],
   ["sigma", "sigma-MIT.txt", "MIT"],
   ["graphology", "graphology-MIT.txt", "MIT"],

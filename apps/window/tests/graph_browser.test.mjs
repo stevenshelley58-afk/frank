@@ -93,17 +93,21 @@ function pngPixels(buffer) {
   return { width, height, channels, pixels };
 }
 
-test("production graph build emits only runtime assets and the Apache-2.0 license", async () => {
+test("production graph build emits runtime assets and renderer licenses", async () => {
   const output = resolve(root, "web/graph");
-  const [javascript, css, license] = await Promise.all([
+  const [javascript, css, license, g6License, louvainLicense] = await Promise.all([
     readFile(resolve(output, "graph-workbench.bundle.js"), "utf8"),
     readFile(resolve(output, "graph-workbench.bundle.css"), "utf8"),
     readFile(resolve(output, "maxgraph-APACHE-2.0.txt"), "utf8"),
+    readFile(resolve(output, "antv-g6-MIT.txt"), "utf8"),
+    readFile(resolve(output, "graphology-communities-louvain-MIT.txt"), "utf8"),
   ]);
   assert.ok(javascript.length > 100_000);
   assert.match(css, /\.graph-workbench/);
   assert.match(css, /height:\s*min\(62vh, 640px\)/);
   assert.match(license, /Apache License\s+Version 2\.0/);
+  assert.match(g6License, /MIT License/);
+  assert.match(louvainLicense, /MIT License/);
   assert.equal(existsSync(resolve(output, "isolated-harness.html")), false);
   assert.doesNotMatch(javascript, /fixture-tool/);
   assert.doesNotMatch(css, /fixture-tool/);
@@ -181,6 +185,41 @@ test("isolated maxGraph harness has a nonzero, nonblank canvas and clears stale 
     if (http) await new Promise((resolveClose) => http.close(resolveClose));
     await rm(directory, { recursive: true, force: true });
     assert.equal(existsSync(productionHarness), false);
+  }
+});
+
+test("isolated G6 project atlas renders collapsed knowledge areas and inspector", { skip: !chrome }, async () => {
+  const productionRoot = resolve(root, "web/graph");
+  const directory = await mkdtemp(resolve(tmpdir(), "frank-atlas-browser-"));
+  const testRoot = resolve(directory, "graph");
+  let http = null;
+  try {
+    await mkdir(testRoot, { recursive: true });
+    await Promise.all([
+      copyFile(resolve(root, "graph/isolated-harness.html"), resolve(testRoot, "isolated-harness.html")),
+      copyFile(resolve(productionRoot, "graph-workbench.bundle.js"), resolve(testRoot, "graph-workbench.bundle.js")),
+      copyFile(resolve(productionRoot, "graph-workbench.bundle.css"), resolve(testRoot, "graph-workbench.bundle.css")),
+      cp(resolve(productionRoot, "assets"), resolve(testRoot, "assets"), { recursive: true }),
+    ]);
+    http = await server(testRoot);
+    const url = `http://127.0.0.1:${http.address().port}/isolated-harness.html?kind=project&large=1`;
+    const dom = await chromeDom(url);
+    assert.match(dom, /data-graph-state="ready"/);
+    assert.match(dom, /data-graph-renderer="g6"/);
+    assert.match(dom, /class="graph-workbench graph-project-atlas"/);
+    assert.match(dom, /class="graph-renderer-host graph-atlas-host" data-active="true"/);
+    assert.match(dom, /Fixture project atlas/);
+    assert.match(dom, /Project atlas/);
+    assert.match(dom, /knowledge areas/);
+    assert.match(dom, /Double-click a knowledge area/);
+    assert.match(dom, /<canvas[^>]*>/);
+    const expanded = await chromeDom(`${url}&expand=1`);
+    assert.match(expanded, /data-atlas-expanded="true"/);
+    assert.match(expanded, /data-atlas-selected="[^"]+"/);
+    assert.match(expanded, /Direct relationships|Hindsight has retained|project knowledge graph/);
+  } finally {
+    if (http) await new Promise((resolveClose) => http.close(resolveClose));
+    await rm(directory, { recursive: true, force: true });
   }
 });
 test("renderer lifecycle can switch Sigma, maxGraph, and Sigma without stale hosts", { skip: !chrome }, async () => {

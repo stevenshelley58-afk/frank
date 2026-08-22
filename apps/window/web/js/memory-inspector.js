@@ -123,6 +123,10 @@ function knowledgeGraphSnapshot(graph, project) {
       from: edge.source,
       to: edge.target,
       status: "declared",
+      extensions: {
+        "frank.graph.weight": Number(edge.weight || 1),
+        "frank.graph.relationship": edge.type || "cooccurrence",
+      },
     })),
     project,
   };
@@ -212,7 +216,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     for (const [key, value] of tabButtons) value.setAttribute("aria-selected", key === id ? "true" : "false");
     if (id === "map" && snapshot) renderKnowledgeGraph(snapshot);
   }
-  for (const [id, label] of [["overview", "Overview"], ["rules", "Rules & facts"], ["architecture", "How it works"], ["map", "Knowledge map"], ["memory", "Memory activity"]]) {
+  for (const [id, label] of [["overview", "Overview"], ["rules", "Rules & facts"], ["architecture", "How it works"], ["map", "Project atlas"], ["memory", "Memory activity"]]) {
     const button = control(label, () => selectTab(id), "project-knowledge-tab");
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", id === activeTab ? "true" : "false");
@@ -267,7 +271,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   const architectureBody = element("div", "project-knowledge-page");
   architecturePanel.append(sectionHeading("How the application works", "Human-readable architecture and flows"), architectureBody);
   const graphHost = element("div", "project-knowledge-graph");
-  graphPanel.append(sectionHeading("Project knowledge map", "Entities and relationships retained by Hindsight"), graphHost);
+  graphPanel.append(sectionHeading("Project atlas", "Explore Hindsight knowledge as readable, expandable areas"), graphHost);
 
   const editorSection = element("section", "connections-section");
   editorSection.hidden = true;
@@ -305,7 +309,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
       kind: "project",
       entityId: project.id,
       lens: "project.knowledge",
-      title: `${project.name || project.id} knowledge map`,
+      title: `${project.name || project.id} project atlas`,
       load: async () => knowledgeGraphSnapshot(graph, project),
       validate: (loaded) => loaded,
     });
