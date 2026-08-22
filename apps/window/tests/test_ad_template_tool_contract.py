@@ -81,9 +81,9 @@ class AdTemplateToolContractTest(unittest.TestCase):
         self.assertEqual(pack["lead_form"]["provider"], "meta")
         self.assertNotIn("Blockwise", self.contract.__doc__)
 
-    def test_release_stage_is_after_human_native_pixel_approval(self):
+    def test_template_pack_pipeline_is_canonical_and_legacy_release_remains_readable(self):
         self.assertEqual(self.manifest["schema"], "schema://frank.tool-app-manifest/v1")
-        self.assertEqual(self.manifest["release_schema"], "schema://frank.ad-template-generator-release/v1")
+        self.assertEqual(self.manifest["release_schema"], "schema://frank.template-pack/v1")
         self.assertEqual(self.manifest["scopes"], ["project", "workspace"])
         self.assertEqual(self.manifest["settings"]["schema"], "schema://frank.tool-app-settings/v1")
         for field in ("name", "description", "version", "scopes", "settings", "pipelines", "capabilities", "connectors", "schedules", "thresholds", "approval_gates", "hermes", "trace"):
@@ -91,21 +91,23 @@ class AdTemplateToolContractTest(unittest.TestCase):
         self.assertIsInstance(self.manifest["thresholds"], list)
         pipeline = self.manifest["pipelines"][0]
         self.assertEqual(pipeline["schema"], "schema://frank.tool-app-pipeline/v1")
-        self.assertEqual(pipeline["version"], "1.0.0")
+        self.assertEqual(pipeline["id"], "template-pack-v2")
+        self.assertEqual(pipeline["version"], "2.0.0")
         self.assertTrue(all(set(node) == {"id", "kind"} for node in pipeline["nodes"]))
         self.assertTrue(all(set(edge) == {"from", "to"} for edge in pipeline["edges"]))
         self.assertTrue(all("_" not in node["id"] for node in pipeline["nodes"]))
         self.assertTrue(all("_" not in gate for gate in self.manifest["approval_gates"]))
-        stages = self.contract.PIPELINE_GRAPH["nodes"]
-        self.assertEqual(tuple(node["id"] for node in pipeline["nodes"]), stages)
-        self.assertLess(stages.index("native-pixel-human-approval"), stages.index("immutable-source-free-release"))
-        self.assertIn("approve-native-pixels", self.manifest["hermes"]["actions"])
-        self.assertIn("release-issued", self.manifest["hermes"]["event_kinds"])
+        stages = tuple(node["id"] for node in pipeline["nodes"])
+        self.assertEqual(stages, ("source", "analyse", "decompose", "restyle", "story-draft", "check", "subject-invariance", "studio-qa", "ready", "release"))
+        self.assertLess(stages.index("studio-qa"), stages.index("release"))
+        self.assertIn("build-template", self.manifest["hermes"]["actions"])
+        self.assertIn("release-published", self.manifest["hermes"]["event_kinds"])
         self.assertTrue(all("." not in value for value in self.manifest["hermes"]["actions"] + self.manifest["hermes"]["event_kinds"]))
         self.assertEqual(self.manifest["trace"]["schema"], "schema://frank.tool-app-trace/v1")
         self.assertEqual(self.manifest["trace"]["style"], "otel-genai")
         self.assertEqual(self.manifest["trace"]["event_kinds"], self.manifest["hermes"]["event_kinds"])
-        self.assertEqual(set(self.manifest["metadata"]), {"lineage", "health"})
+        self.assertEqual(self.manifest["metadata"]["pack_contract"], "schema://frank.template-pack/v1")
+        self.assertEqual(self.contract.PIPELINE_ENTRY["id"], "reference-clone-release")
 
     def test_home_manifest_is_exactly_declarative_and_closed(self):
         self.assertEqual(

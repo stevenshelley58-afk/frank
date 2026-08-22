@@ -1,7 +1,6 @@
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
 
 const TOOL_ID = "ad-template-generator";
-const RUN_STORAGE_KEY = "frank.ad-studio.run-refs";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
@@ -17,27 +16,18 @@ let vpsEntries = [];
 const selectedVpsFiles = new Map();
 const localRunInputs = new Map();
 const previewUrls = new Set();
+let runEvents = [];
+let eventStream = null;
+let activePolicy = null;
+let modelCatalog = [];
+let searchTimer = null;
+let modelEditMode = "default";
+let remainingRunId = "";
+let pendingPolicyOverride = null;
 const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"]);
 
 const clean = (value) => String(value || "").trim();
-
-function storedRunRefs() {
-  try {
-    const value = JSON.parse(localStorage.getItem(RUN_STORAGE_KEY) || "[]");
-    return Array.isArray(value) ? value.filter((item) => /^run_[0-9a-f]{32}$/.test(item?.id || "")).slice(0, 50) : [];
-  } catch { return []; }
-}
-
-function storeRunRefs(items) {
-  localStorage.setItem(RUN_STORAGE_KEY, JSON.stringify(items.slice(0, 50).map((item) => ({
-    id: item.id, title: item.title, project_id: item.project_id,
-    created_at: item.created_at, updated_at: item.updated_at,
-  }))));
-}
-
-function rememberRun(run) {
-  storeRunRefs([run, ...storedRunRefs().filter((item) => item.id !== run.id)]);
-}
+const escapeHtml = (value) => clean(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
 
 function runStatusLabel(status) {
   return ({ queued: "Queued", started: "Starting", running: "Running", waiting_for_approval: "Needs approval", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Starting";
@@ -55,10 +45,11 @@ function activate(tab) {
   $$("[data-ad-panel]").forEach((panel) => panel.classList.toggle("is-on", panel.dataset.adPanel === tab));
   if (tab === "runs") void refreshRunsSafe();
   if (tab === "pipeline") { void refreshRunsSafe(); mountPipeline(); }
+  if (tab === "models") void loadModelSettings();
 }
 
 function fillProjects() {
-  for (const select of [$("#ad-run-project"), $("#ad-pipeline-project")]) {
+  for (const select of [$("#ad-run-project"), $("#ad-pipeline-project"), $("#ad-model-project")]) {
     if (!select) continue;
     const previous = select.value;
     select.replaceChildren();
@@ -161,12 +152,12 @@ function updateVpsSelectionStatus() {
 function renderVpsEntries() {
   const host = $("#ad-source-vps-list");
   const query = clean($("#ad-source-vps-search").value).toLowerCase();
-  const entries = vpsEntries.filter((entry) => !query || entry.name.toLowerCase().includes(query));
+  const entries = vpsEntries;
   host.replaceChildren();
   if (!entries.length) {
     const empty = document.createElement("div");
     empty.className = "ad-source-vps-empty";
-    empty.textContent = query ? "No matching folders or images in this folder." : "No folders or images in this folder.";
+    empty.textContent = query ? "No matching images in the approved VPS folders." : "No folders or images in this folder.";
     host.append(empty);
     return;
   }
@@ -214,6 +205,23 @@ async function loadVpsFolder(path) {
   } catch {
     vpsEntries = [];
     $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">Frank could not read this VPS folder.</div>';
+  }
+}
+
+async function searchVpsImages(query) {
+  if (query.length < 2) {
+    await loadVpsFolder(vpsPath);
+    return;
+  }
+  $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">Searching the VPS…</div>';
+  try {
+    const response = await fetch(`/api/tree/search?root=vps&q=${encodeURIComponent(query)}&limit=100`);
+    if (!response.ok) throw new Error("search unavailable");
+    const data = await response.json();
+    vpsEntries = Array.isArray(data.entries) ? data.entries : [];
+    renderVpsEntries();
+  } catch {
+    $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">VPS image search is unavailable.</div>';
   }
 }
 
@@ -282,18 +290,12 @@ function renderRuns() {
 }
 
 async function refreshRuns() {
-  const refs = storedRunRefs();
-  const checked = await Promise.all(refs.map(async (ref) => {
-    try {
-      const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(ref.id)}`);
-      if (response.status === 404) return null;
-      if (!response.ok) throw new Error("status unavailable");
-      const data = await response.json();
-      return { ...ref, ...(data.run || {}), title: ref.title, project_id: ref.project_id };
-    } catch { return { ...ref, status: "unavailable" }; }
-  }));
-  runs = checked.filter(Boolean).sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
-  storeRunRefs(runs);
+  const projectId = clean($("#ad-run-project")?.value || $("#ad-pipeline-project")?.value);
+  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
+  const response = await fetch(`/api/ad-studio/runs${query}`);
+  if (!response.ok) throw new Error("Hermes job history is unavailable");
+  const data = await response.json();
+  runs = (Array.isArray(data.runs) ? data.runs : []).sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
   renderRuns();
 }
 
@@ -315,11 +317,21 @@ async function selectRun(runId) {
     const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}`);
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.run) {
-      run = { ...run, ...data.run, title: run.title, project_id: run.project_id };
+      run = { ...run, ...data.run };
       runs = runs.map((item) => item.id === run.id ? run : item);
       renderRuns();
     }
   } catch { /* keep the last visible status */ }
+  renderRunDetail(run);
+  connectRunEvents(run);
+}
+
+function formatCost(run) {
+  const cost = run.cost ?? run.usage?.cost_usd ?? run.output?.cost?.actual_usd ?? run.output?.cost?.reported_usd;
+  return Number.isFinite(Number(cost)) ? `$${Number(cost).toFixed(3)}` : "Cost pending";
+}
+
+function renderRunDetail(run) {
   const detail = $("#ad-run-detail");
   detail.replaceChildren();
   const summary = document.createElement("div");
@@ -328,31 +340,120 @@ async function selectRun(runId) {
   const heading = document.createElement("h3");
   heading.textContent = run.title || "Ad Studio job";
   const meta = document.createElement("p");
-  meta.textContent = `${runStatusLabel(run.status)} · ${dateLabel(run.updated_at || run.created_at)}${run.model ? ` · ${run.model}` : ""}`;
+  meta.textContent = `${runStatusLabel(run.status)} · ${run.stage || "source"} · ${Math.round(Number(run.progress || 0) * (Number(run.progress || 0) <= 1 ? 100 : 1))}% · ${formatCost(run)}`;
   copy.append(heading, meta);
-  const refresh = document.createElement("button");
-  refresh.type = "button";
-  refresh.className = "ad-primary";
-  refresh.textContent = "Refresh status";
-  refresh.addEventListener("click", () => void selectRun(run.id));
-  summary.append(copy, refresh);
+  const live = document.createElement("span");
+  live.className = "ad-live-state";
+  live.textContent = ["completed", "failed", "cancelled"].includes(run.status) ? "Recorded" : "Live";
+  summary.append(copy, live);
   detail.append(summary);
-  const result = document.createElement("article");
-  result.className = "ad-message";
-  const label = document.createElement("span");
-  label.textContent = run.status === "completed" ? "Hermes result" : run.status === "failed" ? "Hermes error" : "Background job";
-  const body = document.createElement("p");
-  body.textContent = run.output || run.error || (run.status === "waiting_for_approval"
-    ? "Hermes paused this job at an approval gate."
-    : "Hermes is running this independently. You can use Frank normally while it works.");
-  result.append(label, body);
-  detail.append(result);
-  const trace = document.createElement("div");
-  trace.className = "ad-trace-notice";
-  trace.innerHTML = "<strong>Full trace not correlated yet</strong><p>Frank will show the complete drill-down trace when Hermes supplies a versioned run record. Background status is not presented as synthetic Langfuse spans.</p>";
-  detail.append(trace);
+  const overview = document.createElement("div");
+  overview.className = "ad-overview-grid";
+  for (const [label, value] of [["Stage", run.stage || "Source"], ["Policy", run.policy_revision ? `Revision ${run.policy_revision}` : "Pinned"], ["Model", run.current_model || "Deterministic / pending"], ["Trace", run.trace_id ? run.trace_id.slice(0, 12) : "Pending"]]) {
+    const card = document.createElement("div");
+    const small = document.createElement("span"); small.textContent = label;
+    const strong = document.createElement("strong"); strong.textContent = value;
+    card.append(small, strong); overview.append(card);
+  }
+  detail.append(overview);
+  if (run.status === "completed" && run.output?.template_pack_ref) {
+    const release = document.createElement("section"); release.className = "ad-approval";
+    const title = document.createElement("strong"); title.textContent = "Portable TemplatePack released";
+    const evidence = document.createElement("p"); evidence.textContent = `Checksum ${run.output.sha256 || run.output.checksum || "unavailable"} · signature ${typeof run.output.signature === "object" ? run.output.signature.key_id || run.output.signature.algorithm || "recorded" : "recorded"} · ${Array.isArray(run.output.compatibility) ? run.output.compatibility.join(", ") : "compatibility recorded"}`;
+    const download = document.createElement("a"); download.className = "ad-primary"; download.href = `/api/ad-studio/runs/${encodeURIComponent(run.id)}/download`; download.textContent = "Download TemplatePack";
+    release.append(title, evidence, download); detail.append(release);
+  }
+  if (run.attention || run.error) {
+    const attention = document.createElement("div"); attention.className = "ad-attention";
+    attention.textContent = run.error || "This job needs attention."; detail.append(attention);
+  }
+  const preview = run.output?.preview || run.output?.previews?.[0];
+  if (preview?.url || typeof preview === "string") {
+    const image = document.createElement("img"); image.className = "ad-latest-preview";
+    image.src = preview.url || preview; image.alt = "Latest generated preview"; detail.append(image);
+  }
+  const activity = document.createElement("section");
+  activity.className = "ad-live-activity";
+  activity.innerHTML = '<div class="ad-section-heading"><div><span>Live activity</span><h3>What Hermes is doing</h3></div></div><div id="ad-run-events"></div>';
+  detail.append(activity);
+  if (run.status === "waiting_for_approval") {
+    const gate = document.createElement("form"); gate.className = "ad-approval";
+    gate.innerHTML = '<strong>Studio QA approval</strong><label><input type="checkbox" required> I inspected the previews at 100% zoom</label><textarea maxlength="600" placeholder="Approval note (optional)"></textarea><button class="ad-primary" type="submit">Approve and release</button>';
+    gate.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/approval`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision: "approve", confirm_100_percent: true, reason: clean(gate.querySelector("textarea").value) }) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Approval failed");
+      await selectRun(run.id);
+    });
+    detail.append(gate);
+  }
+  if (!["completed", "cancelled"].includes(run.status)) {
+    const actions = document.createElement("div"); actions.className = "ad-run-actions";
+    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel job";
+    cancel.addEventListener("click", async () => { await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); await selectRun(run.id); });
+    const models = document.createElement("button"); models.type = "button"; models.className = "ad-text-button"; models.textContent = "Change remaining models";
+    models.addEventListener("click", () => { modelEditMode = "remaining"; remainingRunId = run.id; activePolicy = { revision: run.policy_revision, policy: structuredClone(run.policy) }; activate("models"); });
+    if (run.status === "failed") {
+      const retry = document.createElement("button"); retry.type = "button"; retry.className = "ad-primary"; retry.textContent = "Retry from checkpoint";
+      retry.addEventListener("click", async () => { await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from_stage: run.stage }) }); await selectRun(run.id); });
+      actions.append(retry);
+    }
+    actions.append(models, cancel); detail.append(actions);
+  }
   $("#ad-pipeline-run").value = runId;
   updateEvidence();
+  renderEventViews();
+}
+
+const EVENT_KINDS = ["command.accepted", "command.queued", "command.cancel-requested", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "approval.requested", "approval.approved", "approval.rejected", "model-policy.changed", "release.published"];
+
+function renderEventViews() {
+  const host = $("#ad-run-events");
+  if (host) {
+    host.replaceChildren();
+    const visible = runEvents.slice(-80);
+    if (!visible.length) host.innerHTML = '<p class="ad-evidence-empty">Waiting for the first durable event…</p>';
+    for (const event of visible) {
+      const row = document.createElement("div"); row.className = `ad-event ad-event-${event.status || "ok"}`;
+      const time = document.createElement("time"); time.textContent = new Date(Number(event.timestamp || 0) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+      const copy = document.createElement("div");
+      const strong = document.createElement("strong"); strong.textContent = String(event.kind || "activity").replaceAll(".", " · ");
+      const p = document.createElement("p"); p.textContent = event.data?.summary || event.data?.tool || event.data?.error || event.node_id || "Recorded";
+      copy.append(strong, p); row.append(time, copy); host.append(row);
+    }
+  }
+  const trace = $("#ad-full-trace");
+  if (trace) trace.textContent = runEvents.length ? JSON.stringify(runEvents, null, 2) : "No events have been recorded for this run yet.";
+  updateEvidence();
+}
+
+function connectRunEvents(run) {
+  eventStream?.close();
+  runEvents = [];
+  renderEventViews();
+  const stream = new EventSource(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/events?after=-1`);
+  eventStream = stream;
+  const receive = (event) => {
+    try {
+      const item = JSON.parse(event.data);
+      if (!runEvents.some((existing) => existing.sequence === item.sequence)) runEvents.push(item);
+      if (item.kind === "stage.started" && item.node_id) {
+        run.stage = item.node_id;
+        const order = ["source", "analyse", "decompose", "restyle", "story-draft", "check", "subject-invariance", "studio-qa", "ready", "release"];
+        run.progress = Math.max(Number(run.progress || 0), Math.max(0, order.indexOf(item.node_id)) / order.length);
+      }
+      if (item.kind === "provider.attempt") { run.current_model = item.data?.model || run.current_model; run.current_provider = item.data?.provider || run.current_provider; }
+      renderRunDetail(run);
+      if (["run.failed", "run.cancelled", "approval.requested", "release.published"].includes(item.kind)) void refreshRunsSafe().then(() => {
+        const updated = runs.find((candidate) => candidate.id === run.id);
+        if (updated) renderRunDetail(updated);
+      });
+    } catch { /* a keepalive contains no event data */ }
+  };
+  for (const kind of EVENT_KINDS) stream.addEventListener(kind, receive);
+  stream.onopen = () => { const state = $("#ad-live-state"); if (state) state.textContent = "Live"; };
+  stream.onerror = () => { const state = $("#ad-live-state"); if (state) state.textContent = "Reconnecting…"; };
 }
 
 async function loadScopedGraph({ entityId, lens }) {
@@ -389,15 +490,18 @@ function updateEvidence() {
   input.replaceChildren();
   output.replaceChildren();
   const local = localRunInputs.get(selectedRunId);
+  const stageEvents = runEvents.filter((event) => !selectedStage || event.node_id === selectedStage.source_id);
   if (selectedStage?.source_id === "source" && local?.url) {
     const image = document.createElement("img");
     image.src = local.url;
     image.alt = local.name || "Source image";
     input.append(image);
   } else {
-    input.textContent = selectedStage && selectedRunId ? "This stage has no correlated input record yet." : "Select a real run and stage to see its input image, text, or JSON.";
+    input.textContent = selectedStage && selectedRunId ? "Private inputs stay in Hermes; only safe evidence is shown here." : "Select a real run and stage to see its safe evidence.";
   }
-  output.textContent = selectedStage && selectedRunId ? "This stage has no correlated output record yet." : "No correlated output is available yet.";
+  output.textContent = stageEvents.length ? JSON.stringify(stageEvents.map((event) => ({ kind: event.kind, status: event.status, data: event.data })), null, 2) : "No correlated output is available yet.";
+  const inspector = $("#ad-stage-events");
+  if (inspector) inspector.textContent = stageEvents.length ? `${stageEvents.length} correlated event${stageEvents.length === 1 ? "" : "s"} recorded for this stage.` : "No events recorded for this stage yet.";
 }
 
 function requestEvent(name, detail) {
@@ -417,7 +521,12 @@ function setupRunForm() {
   $("#ad-source-close").addEventListener("click", () => $("#ad-source-dialog").close());
   $("#ad-source-cancel").addEventListener("click", () => $("#ad-source-dialog").close());
   $("#ad-source-add-vps").addEventListener("click", addSelectedVpsFiles);
-  $("#ad-source-vps-search").addEventListener("input", renderVpsEntries);
+  $("#ad-source-vps-search").addEventListener("input", (event) => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => void searchVpsImages(clean(event.target.value).toLowerCase()), 250);
+  });
+  $("#ad-run-project").addEventListener("change", () => { void loadActivePolicy(); void refreshRunsSafe(); });
+  $("#ad-run-models").addEventListener("click", () => { modelEditMode = "one-run"; remainingRunId = ""; activate("models"); });
   for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.add("is-drag"); });
   for (const type of ["dragleave", "drop"]) drop.addEventListener(type, (event) => {
     event.preventDefault();
@@ -439,16 +548,20 @@ function setupRunForm() {
     status.textContent = "Uploading sources and starting Hermes…";
     try {
       const placements = $$('input[name="ad-placement"]:checked').map((item) => item.value);
-      const run = await requestEvent("frank:ad-studio-run", {
+      const result = await requestEvent("frank:ad-studio-run", {
         sources: selectedFiles.slice(), projectId: $("#ad-run-project").value,
         name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value), placements,
+        policyRevision: clean($("#ad-run-policy-revision").value), policyOverride: pendingPolicyOverride,
       });
+      const run = result.run;
       const first = selectedFiles[0];
       localRunInputs.set(run.id, { url: first.previewUrl, name: first.name });
       selectedRunId = run.id;
-      rememberRun(run);
-      status.textContent = "Background job started. You can keep using Frank while Hermes works.";
-      void refreshRunsSafe();
+      pendingPolicyOverride = null;
+      status.textContent = `${result.runs.length} background job${result.runs.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
+      await refreshRunsSafe();
+      activate("runs");
+      await selectRun(run.id);
     } catch (error) {
       status.textContent = error.message || "The job could not be started.";
       status.classList.add("is-error");
@@ -461,47 +574,171 @@ function setupRunForm() {
 
 function setupPipelineForm() {
   $("#ad-pipeline-project").addEventListener("change", mountPipeline);
-  $("#ad-pipeline-run").addEventListener("change", (event) => { selectedRunId = event.target.value; updateEvidence(); });
-  $("#ad-stage-form").addEventListener("submit", async (event) => {
+  $("#ad-pipeline-run").addEventListener("change", (event) => { selectedRunId = event.target.value; if (selectedRunId) void selectRun(selectedRunId); else updateEvidence(); });
+}
+
+function normalizeModels(payload) {
+  const inventory = payload?.data || payload?.models || payload?.options || [];
+  const capabilities = Array.isArray(payload?.ad_studio_capabilities) ? payload.ad_studio_capabilities : [];
+  const source = [...(Array.isArray(inventory) ? inventory : []), ...capabilities];
+  const normalized = source.map((item) => ({
+    model: clean(item.model || item.id || item.value || item.name),
+    provider: clean(item.provider || item.provider_id || item.gateway || "custom"),
+    available: item.available ?? item.configured ?? null,
+    capabilities: item.capabilities || item.input_modalities || [],
+    price: item.estimated_price || item.price || item.pricing || null,
+    checkedAt: item.price_checked_at || item.pricing_checked_at || "",
+  })).filter((item) => item.model);
+  const merged = new Map();
+  for (const item of normalized) {
+    const key = `${item.provider}/${item.model}`;
+    const previous = merged.get(key) || {};
+    merged.set(key, { ...previous, ...item, available: item.available ?? previous.available ?? null, capabilities: item.capabilities?.length ? item.capabilities : (previous.capabilities || []) });
+  }
+  return [...merged.values()];
+}
+
+function modelReadiness(candidate) {
+  const match = modelCatalog.find((item) => item.model === candidate.model && (!candidate.provider || item.provider === candidate.provider));
+  if (!match) return "Custom model · compatibility checked when saved";
+  const price = match.price ? ` · price ${typeof match.price === "string" ? match.price : "available"}` : " · price unknown";
+  const readiness = match.available === true ? "Credential ready" : match.available === false ? "Credential not ready" : "Credential readiness unknown";
+  return `${readiness}${price}${match.checkedAt ? ` · checked ${match.checkedAt}` : ""}`;
+}
+
+function renderActivePolicySummary() {
+  const host = $("#ad-run-policy-summary");
+  if (!host) return;
+  const strong = host.querySelector("strong");
+  if (!activePolicy) { strong.textContent = "Policy unavailable"; return; }
+  const policy = activePolicy.policy || {};
+  const ceiling = Object.values(policy.stages || {}).reduce((sum, stage) => sum + Number(stage.max_cost_usd || 0), 0);
+  strong.textContent = `${policy.name || policy.preset || "Ad Studio policy"} · revision ${activePolicy.revision} · cost ceiling $${ceiling.toFixed(2)}`;
+  $("#ad-run-policy-revision").value = activePolicy.revision || "";
+}
+
+async function loadActivePolicy() {
+  const projectId = clean($("#ad-run-project")?.value || $("#ad-model-project")?.value);
+  if (!projectId) return;
+  const response = await fetch(`/api/ad-studio/model-policies?project_id=${encodeURIComponent(projectId)}`);
+  if (!response.ok) throw new Error("Model policy is unavailable");
+  const data = await response.json();
+  const records = Array.isArray(data.data) ? data.data : Array.isArray(data.policies) ? data.policies : [];
+  activePolicy = records.find((item) => item.is_default) || records[0] || null;
+  renderActivePolicySummary();
+}
+
+function renderModelSettings() {
+  const host = $("#ad-model-stage-list");
+  host.replaceChildren();
+  const stages = activePolicy?.policy?.stages || {};
+  const labels = { analyse: "Analyse and vision extraction", "masked-text-cleanup": "Masked text cleanup", "story-extend": "Optional story-margin extension", "visual-qa": "Visual QA and critic" };
+  for (const [stageId, stage] of Object.entries(stages)) {
+    const card = document.createElement("section");
+    card.className = "ad-model-stage"; card.dataset.stage = stageId; card.dataset.capability = stage.capability;
+    const fallbacks = (stage.fallbacks || []).map((item) => `${item.provider}/${item.model}`).join("\n");
+    card.innerHTML = `
+      <header><div><span>${stage.optional ? "Optional AI stage" : "AI stage"}</span><h4>${escapeHtml(labels[stageId] || stageId)}</h4></div><code>${escapeHtml(stage.capability)}</code></header>
+      <div class="ad-model-grid">
+        <label>Provider<input data-field="provider" value="${escapeHtml(stage.primary?.provider || "")}" maxlength="80"></label>
+        <label>Primary model<input data-field="model" value="${escapeHtml(stage.primary?.model || "")}" maxlength="200" list="ad-model-options"></label>
+        <label>Maximum attempts<input data-field="attempts" type="number" min="1" max="10" value="${stage.max_attempts || 1}"></label>
+        <label>Timeout (seconds)<input data-field="timeout" type="number" min="1" value="${stage.timeout_seconds || 120}"></label>
+        <label>Cost limit (USD)<input data-field="cost" type="number" min="0" step="0.01" value="${stage.max_cost_usd ?? 0}"></label>
+      </div>
+      <label>Fallbacks <span>one provider/model per line, in order</span><textarea data-field="fallbacks" rows="3">${escapeHtml(fallbacks)}</textarea></label>
+      <p class="ad-model-readiness">${escapeHtml(modelReadiness(stage.primary || {}))}</p>`;
+    host.append(card);
+  }
+  let datalist = $("#ad-model-options");
+  if (!datalist) { datalist = document.createElement("datalist"); datalist.id = "ad-model-options"; document.body.append(datalist); }
+  datalist.replaceChildren(...modelCatalog.map((item) => { const option = document.createElement("option"); option.value = item.model; option.label = `${item.provider} · ${item.available === true ? "ready" : item.available === false ? "not ready" : "readiness unknown"}`; return option; }));
+}
+
+function policyFromForm() {
+  const policy = structuredClone(activePolicy.policy);
+  const candidate = (provider, model) => {
+    const result = { provider, model };
+    const catalog = modelCatalog.find((item) => item.model === model && (!provider || item.provider === provider));
+    if (catalog && Array.isArray(catalog.capabilities) && catalog.capabilities.length) {
+      result.capabilities = catalog.capabilities;
+      result.capability_verified = true;
+    }
+    return result;
+  };
+  policy.preset = $("[data-ad-preset].is-on")?.dataset.adPreset || "balanced";
+  policy.name = `${policy.preset.replaceAll("-", " ")} routing`;
+  for (const card of $$(".ad-model-stage")) {
+    const get = (field) => clean(card.querySelector(`[data-field="${field}"]`).value);
+    policy.stages[card.dataset.stage] = {
+      ...policy.stages[card.dataset.stage], capability: card.dataset.capability,
+      primary: candidate(get("provider"), get("model")),
+      fallbacks: get("fallbacks").split(/\n+/).map(clean).filter(Boolean).map((line) => { const slash = line.indexOf("/"); return slash > 0 ? candidate(line.slice(0, slash).trim(), line.slice(slash + 1).trim()) : candidate("custom", line); }),
+      max_attempts: Number(get("attempts")), timeout_seconds: Number(get("timeout")), max_cost_usd: Number(get("cost")),
+    };
+  }
+  return policy;
+}
+
+async function loadModelSettings() {
+  const status = $("#ad-model-status");
+  try {
+    const tasks = [fetch("/api/ad-studio/models")];
+    if (modelEditMode !== "remaining") tasks.push(loadActivePolicy());
+    const [modelsResponse] = await Promise.all(tasks);
+    if (modelsResponse.ok) modelCatalog = normalizeModels(await modelsResponse.json());
+    renderModelSettings();
+    status.textContent = activePolicy ? (modelEditMode === "one-run" ? "Edit this routing, then use it once without changing the project default." : modelEditMode === "remaining" ? `Only stages not yet started in ${remainingRunId.slice(0, 14)}… will change.` : `Revision ${activePolicy.revision} is active. Pricing checked ${activePolicy.policy?.pricing_checked_at || "at an unknown time"}.`) : "No active model policy.";
+  } catch (error) { status.textContent = error.message || "Model settings are unavailable"; status.classList.add("is-error"); }
+}
+
+function setupModelForm() {
+  $("#ad-model-project").addEventListener("change", () => void loadModelSettings());
+  for (const button of $$("[data-ad-preset]")) button.addEventListener("click", () => {
+    $$("[data-ad-preset]").forEach((item) => item.classList.toggle("is-on", item === button));
+  });
+  $("#ad-model-form").addEventListener("submit", async (event) => {
     event.preventDefault();
-    const status = $("#ad-stage-status");
-    status.classList.remove("is-error");
-    if (!selectedStage) {
-      status.textContent = "Select a pipeline stage first.";
-      status.classList.add("is-error");
-      return;
-    }
-    const prompt = clean($("#ad-stage-prompt").value);
-    const model = clean($("#ad-stage-model").value);
-    const settings = clean($("#ad-stage-settings").value);
-    if (!prompt && !model && !settings) {
-      status.textContent = "Describe at least one change.";
-      status.classList.add("is-error");
-      return;
-    }
-    const submit = event.submitter;
-    submit.disabled = true;
+    const status = $("#ad-model-status"); status.classList.remove("is-error");
+    const submit = event.submitter; submit.disabled = true;
     try {
-      await requestEvent("frank:ad-studio-change-request", {
-        projectId: $("#ad-pipeline-project").value, stage: selectedStage.source_id,
-        prompt, model, settings, runId: selectedRunId,
-      });
-      status.textContent = "Change request opened with Hermes.";
-    } catch (error) {
-      status.textContent = error.message || "The change request could not be opened.";
-      status.classList.add("is-error");
-    } finally { submit.disabled = false; }
+      const policy = policyFromForm();
+      if (modelEditMode === "one-run") {
+        pendingPolicyOverride = policy;
+        const summary = $("#ad-run-policy-summary strong");
+        if (summary) summary.textContent = `${policy.name || "Custom routing"} · one-run override · project default unchanged`;
+        status.textContent = "One-run override ready. It will be pinned when you start the next job.";
+        modelEditMode = "default";
+        activate("run");
+        return;
+      }
+      const changingRemaining = modelEditMode === "remaining";
+      const url = changingRemaining ? `/api/ad-studio/runs/${encodeURIComponent(remainingRunId)}/models` : "/api/ad-studio/model-policies";
+      const body = changingRemaining ? { policy, reason: "Operator changed remaining stages in Frank" } : { project_id: $("#ad-model-project").value, policy };
+      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || data.message || "Policy could not be saved");
+      if (changingRemaining) {
+        const runId = remainingRunId; remainingRunId = ""; modelEditMode = "default";
+        activate("runs"); await selectRun(runId);
+      } else {
+        activePolicy = data; renderActivePolicySummary(); renderModelSettings();
+        status.textContent = `Revision ${data.revision} saved. Future jobs will pin it.`;
+      }
+    } catch (error) { status.textContent = error.message || "Policy could not be saved"; status.classList.add("is-error"); }
+    finally { submit.disabled = false; }
   });
 }
 
 export function mountAdStudio() {
   if (mounted) { void refreshRunsSafe(); return; }
   mounted = true;
-  $$("[data-ad-tab]").forEach((button) => button.addEventListener("click", () => activate(button.dataset.adTab)));
-  $("#ad-runs-refresh").addEventListener("click", () => void refreshRunsSafe());
+  $$("[data-ad-tab]").forEach((button) => button.addEventListener("click", () => { if (button.dataset.adTab === "models") { modelEditMode = "default"; remainingRunId = ""; } activate(button.dataset.adTab); }));
   setupRunForm();
   setupPipelineForm();
+  setupModelForm();
   void loadProjects().then(async () => {
+    await loadActivePolicy();
     await refreshRunsSafe();
     if ($("[data-ad-panel=\"pipeline\"]").classList.contains("is-on")) mountPipeline();
   }).catch((error) => {
@@ -509,8 +746,5 @@ export function mountAdStudio() {
     $("#ad-run-status").classList.add("is-error");
   });
   window.addEventListener("beforeunload", () => previewUrls.forEach((url) => URL.revokeObjectURL(url)), { once: true });
-  window.setInterval(() => {
-    const studio = $('[data-view="ad-studio"]');
-    if (studio?.classList.contains("is-on") && runs.some((run) => ["queued", "started", "running"].includes(run.status))) void refreshRunsSafe();
-  }, 5000);
+  window.addEventListener("online", () => void refreshRunsSafe());
 }

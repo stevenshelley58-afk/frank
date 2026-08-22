@@ -17,12 +17,12 @@ EXPECTED_TOOLS = {
 }
 PUBLISHING_TOOLS = {
     "ad-intelligence": "schema://frank.ad-intelligence-release/v1",
-    "ad-template-generator": "schema://frank.ad-template-generator-release/v1",
+    "ad-template-generator": "schema://frank.template-pack/v1",
     "content-factory": "schema://frank.content-factory-release/v1",
 }
 ADJUSTABLE_SETTINGS = {
     "ad-intelligence": ("prompt_ref", "style_preset", "model_policy", "thresholds", "cadence"),
-    "ad-template-generator": ("prompt_ref", "style_pack_ref", "model_policy", "qa_thresholds", "retry_budget"),
+    "ad-template-generator": ("model_policy_revision", "placements", "qa_thresholds", "approval_policy"),
     "content-factory": ("prompt_refs", "tone_style", "model_policy", "thresholds", "schedule_ref"),
     "mail": ("reply_classification.prompt_ref", "reply_classification.model_policy", "sync.poll_interval"),
     "outreach": ("personalized_draft.prompt_ref", "personalized_draft.style_preset", "personalized_draft.model_policy", "sequence.timing"),
