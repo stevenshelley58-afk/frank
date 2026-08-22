@@ -14,39 +14,78 @@ const TOPIC_COLORS = [
 ];
 
 const DOMAIN_HINTS = [
-  ["Agents & memory", /\b(agent|hermes|hindsight|memory|recall|codex|prompt|model)\b/i],
-  ["Interface & experience", /\b(ui|ux|interface|screen|page|view|dashboard|frank|frontend|browser)\b/i],
-  ["Runtime & operations", /\b(vps|docker|deploy|runtime|server|worker|job|trace|release|environment)\b/i],
-  ["Code & architecture", /\b(code|repository|repo|module|function|class|architecture|database|api|service)\b/i],
-  ["Rules & decisions", /\b(rule|policy|decision|requirement|approval|must|constraint|contract)\b/i],
-  ["Providers & integrations", /\b(provider|integration|openrouter|github|fal|vercel|cloudflare|supabase)\b/i],
-  ["Product & purpose", /\b(product|project|customer|user|campaign|property|real estate|blockwise|workflow)\b/i],
+  { name: "Agents & memory", patterns: [/\b(agent|hermes|hindsight|memory|recall|codex|research|skill|tool|prompt)\b/i] },
+  { name: "Interface & design system", patterns: [
+    /\b(ui|ux|interface|screen|page|view|dashboard|frank|frontend|browser|component|layout)\b/i,
+    /\b(button|colour|color|ink|font|spacing|token|css|design system|shadcn|tailwind|manrope|jetbrains|motion|reduced motion)\b/i,
+  ] },
+  { name: "Models & providers", patterns: [
+    /\b(model|provider|inference|llm|open\s*router|open\s*ai|google|claude|gpt|gemini|escalation)\b/i,
+    /\b(fal|vercel|cloudflare|supabase)\b/i,
+  ] },
+  { name: "Runtime & operations", patterns: [
+    /\b(vps|docker|deploy|runtime|server|worker|job|trace|release|environment|operations)\b/i,
+    /\b(container|production|staging|config|env|queue|storage)\b/i,
+  ] },
+  { name: "Code & architecture", patterns: [
+    /\b(code|repository|repo|module|function|class|architecture|database|api|service)\b/i,
+    /\b(source|schema|endpoint|route|python|javascript|typescript|next\s*js|sql|data)\b/i,
+  ] },
+  { name: "Rules & decisions", patterns: [
+    /\b(rule|policy|decision|requirement|approval|must|constraint|contract)\b/i,
+    /\b(owner|canonical|authoritative|prohibited|allowed)\b/i,
+  ] },
+  { name: "Quality & testing", patterns: [
+    /\b(test|testing|quality|qa|audit|coverage|defect|verification|regression)\b/i,
+    /\b(failure|check|fixture|assertion|acceptance)\b/i,
+  ] },
+  { name: "Creative production", patterns: [
+    /\b(ad studio|ad library|creative|campaign|advert\w*|image|video|media|render|generation|meta)\b/i,
+    /\b(asset|template|shot|scene|composition)\b/i,
+  ] },
+  { name: "Product & purpose", patterns: [
+    /\b(product|project|customer|user|property|real estate|blockwise|workflow)\b/i,
+    /\b(goal|purpose|feature|experience|audience|business)\b/i,
+  ] },
 ];
 
 const cleanLabel = (value) => String(value || "Untitled").replace(/\s+/g, " ").trim();
+const searchableLabel = (value) => cleanLabel(value)
+  .replace(/([a-z])([A-Z])/g, "$1 $2")
+  .replace(/[._/\\-]+/g, " ");
 const shortLabel = (value, max = 34) => {
   const label = cleanLabel(value);
   return label.length > max ? `${label.slice(0, max - 1).trim()}…` : label;
 };
 
-function domainName(nodes) {
-  const scores = DOMAIN_HINTS.map(([name, pattern]) => ({
-    name,
-    score: nodes.reduce((total, node) => total + (pattern.test(node.label) ? 1 : 0), 0),
-  })).sort((left, right) => right.score - left.score);
-  if (scores[0]?.score >= Math.max(2, Math.ceil(nodes.length * 0.34))) return scores[0].name;
-  const leaders = [...nodes]
-    .sort((left, right) => right.mentions - left.mentions || left.label.localeCompare(right.label))
-    .slice(0, 2)
-    .map((node) => shortLabel(node.label, 23));
-  if (leaders.length === 1) return leaders[0];
-  return leaders.join(" & ");
+function domainScores(nodes) {
+  return DOMAIN_HINTS.map((domain) => ({
+    name: domain.name,
+    score: nodes.reduce((total, node) => (
+      total + domain.patterns.reduce((matches, pattern) => matches + (pattern.test(searchableLabel(node.label)) ? 1 : 0), 0)
+    ), 0),
+  })).sort((left, right) => right.score - left.score || left.name.localeCompare(right.name));
+}
+
+function topicNames(clusters) {
+  const baseNames = clusters.map((members) => (
+    domainScores(members).find((candidate) => candidate.score > 0)?.name || "Project context"
+  ));
+  const seen = new Map();
+  return baseNames.map((base) => {
+    const occurrence = (seen.get(base) || 0) + 1;
+    seen.set(base, occurrence);
+    if (occurrence === 1) return base;
+    const related = `Related ${base.toLowerCase()}`;
+    const name = occurrence === 2 ? related : `${related} ${occurrence - 1}`;
+    return name;
+  });
 }
 
 function fallbackClusters(nodes) {
   const buckets = new Map();
   for (const node of nodes) {
-    const hinted = DOMAIN_HINTS.find(([, pattern]) => pattern.test(node.label))?.[0] || "Project context";
+    const hinted = domainScores([node]).find((domain) => domain.score > 0)?.name || "Project context";
     if (!buckets.has(hinted)) buckets.set(hinted, []);
     buckets.get(hinted).push(node);
   }
@@ -106,13 +145,14 @@ export function buildProjectAtlas(snapshot) {
       weight: Number(edge.extensions?.["frank.graph.weight"] || 1),
     }));
   const clusters = limitClusters(detectedClusters(rawNodes, rawEdges));
+  const names = topicNames(clusters);
   const topicByNode = new Map();
   const topics = clusters.map((members, index) => {
     const id = `atlas-topic-${index + 1}`;
     const palette = TOPIC_COLORS[index % TOPIC_COLORS.length];
     const topic = {
       id,
-      label: domainName(members),
+      label: names[index],
       members,
       color: palette,
       relationshipCount: 0,

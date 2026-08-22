@@ -119,6 +119,35 @@ test("project atlas clusters Hindsight entities into bounded readable topics", (
   assert.deepEqual(atlas.nodes[0].data.neighborIds, [nodes[1].id]);
 });
 
+test("project atlas translates code-like entities into unique plain-English areas", () => {
+  const labels = [
+    "button-secondary", "colors.ink", "--ui-data", "Interface panel",
+    "HERMES_ESCALATION_MODEL", "OpenRouter", "provider config",
+    "blockwise-coverage-audit", "blockwise-defect-investigation", "QA verification",
+  ];
+  const nodes = labels.map((label, index) => ({
+    id: `readable-${index}`,
+    label,
+    extensions: { "frank.graph.mentions": labels.length - index },
+  }));
+  const edges = [
+    [0, 1], [1, 2], [2, 3],
+    [4, 5], [5, 6],
+    [7, 8], [8, 9],
+  ].map(([from, to], index) => ({
+    id: `readable-edge-${index}`,
+    from: nodes[from].id,
+    to: nodes[to].id,
+    extensions: { "frank.graph.weight": 3 },
+  }));
+  const labelsByTopic = buildProjectAtlas({ nodes, edges }).topics.map((topic) => topic.label);
+  assert.ok(labelsByTopic.includes("Interface & design system"));
+  assert.ok(labelsByTopic.includes("Models & providers"));
+  assert.ok(labelsByTopic.includes("Quality & testing"));
+  assert.equal(new Set(labelsByTopic).size, labelsByTopic.length);
+  assert.ok(labelsByTopic.every((label) => !/[._]|--|HERMES|blockwise-/i.test(label)));
+});
+
 test("graph renderer hosts have a bounded, visible layout contract", () => {
   const css = readFileSync(new URL("../graph/graph-workbench.css", import.meta.url), "utf8");
   assert.match(css, /\.graph-renderer-host\s*\{[^}]*position:\s*absolute/);
