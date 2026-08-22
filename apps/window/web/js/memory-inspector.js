@@ -233,6 +233,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   );
 
   const directivesList = element("div", "project-rule-list");
+  const rulePageBody = element("div", "project-knowledge-page");
   const recallSection = element("section", "connections-section");
   const recallForm = element("form");
   recallForm.style.display = "flex";
@@ -256,7 +257,12 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   const sourcesSection = element("section", "connections-section");
   const sourcesList = element("div", "connection-activity");
   sourcesSection.append(sectionHeading("Retained sources", "Correct or forget at source"), sourcesList);
-  rulesPanel.append(sectionHeading("Operating rules", "Hard directives applied by Hindsight"), directivesList, memoriesSection);
+  rulesPanel.append(
+    sectionHeading("Operating rules", "Living rulebook and explicit Hindsight directives"),
+    rulePageBody,
+    directivesList,
+    memoriesSection,
+  );
 
   const architectureBody = element("div", "project-knowledge-page");
   architecturePanel.append(sectionHeading("How the application works", "Human-readable architecture and flows"), architectureBody);
@@ -326,7 +332,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     overview.replaceChildren(
       summaryCard("Guide pages", Number(counts.pages || 0), "Human-readable living summaries"),
       summaryCard("App wiki", Number(counts.code_pages || 0), "Pages generated from source code"),
-      summaryCard("Rules", Number(counts.rules || 0), "Active provider directives"),
+      summaryCard("Rules", Number(counts.rules || 0), "Living rules and active directives"),
       summaryCard("Facts", Number(counts.memories || 0), "Durable project knowledge"),
       summaryCard("Sources", Number(counts.documents || 0), "Traceable retained evidence"),
       summaryCard("Memory health", Number(counts.failed || 0) ? "Attention" : "Healthy", `${provider.name || "Hindsight"} ${provider.version || ""} · ${Number(counts.pending || 0)} pending`, Number(counts.failed || 0) ? "error" : "ready"),
@@ -335,6 +341,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     const codePages = Array.isArray(value.code_pages) ? value.code_pages : [];
     const overviewPage = pages.find((page) => /project brief|overview|product/i.test(page.name)) || pages[0];
     const codeOverview = codePages.find((page) => /overview|architecture/i.test(page.name)) || codePages[0];
+    const rulesPage = pages.find((page) => /rule|policy|decision/i.test(page.name));
     const architecturePage = codePages.find((page) => /architecture|system|overview|data flow|sequence/i.test(page.name))
       || pages.find((page) => /architecture|how .*works|system design|technical/i.test(page.name));
     pageNav.replaceChildren();
@@ -346,6 +353,8 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     if (!codePages.length) codePageNav.append(element("span", "quiet", "The source-code wiki has not been generated yet."));
     renderPage(codeOverview, codePageBody);
     renderPage(architecturePage, architectureBody);
+    rulePageBody.hidden = !rulesPage;
+    if (rulesPage) renderPage(rulesPage, rulePageBody);
     directivesList.replaceChildren();
     (value.directives || []).forEach((directive) => {
       const card = element("article", "project-rule-card");
@@ -356,7 +365,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
       );
       directivesList.append(card);
     });
-    if (!directivesList.childElementCount) directivesList.append(element("p", "connection-empty", "No hard project directives have been registered yet."));
+    if (!directivesList.childElementCount) directivesList.append(element("p", "connection-empty", "No additional hard enforcement directives are registered for this project."));
     const sources = new Map((value.documents || []).map((item) => [item.id, item]));
     memoriesList.replaceChildren();
     (value.memories || []).forEach((memory) => memoriesList.append(memoryRow(memory, sources, openSource)));

@@ -28,6 +28,8 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('["architecture", "How it works"]', inspector)
         self.assertIn('["map", "Knowledge map"]', inspector)
         self.assertIn('mountGraphWorkbench(graphHost', inspector)
+        self.assertIn('Living rulebook and explicit Hindsight directives', inspector)
+        self.assertIn('renderPage(rulesPage, rulePageBody)', inspector)
         self.assertNotIn("localStorage", inspector)
 
     def test_ad_studio_is_a_real_tool_surface_backed_by_hermes(self):

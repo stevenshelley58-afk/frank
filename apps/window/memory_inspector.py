@@ -341,6 +341,10 @@ class MemoryInspector:
         directives = [item for value in raw_directives if (item := _directive_item(value))]
         graph_data = self.client.request("GET", _path(bank_id, "/entities/graph?limit=250&min_count=1")) if bank_exists else {}
         code_pages = _code_pages(self.knowledge_root, project)
+        living_rule_pages = sum(
+            1 for item in mental_models
+            if re.search(r"\b(rule|policy|decision)", item["name"], re.IGNORECASE)
+        )
         failed = sum(1 for item in operations if item["status"] == "failed")
         pending = sum(1 for item in operations if item["status"] in {"pending", "processing", "running"})
         return {
@@ -364,7 +368,7 @@ class MemoryInspector:
                 "pending": max(pending, _count(stats.get("pending_operations"))),
                 "failed": max(failed, _count(stats.get("failed_operations"))),
                 "pages": len(mental_models),
-                "rules": len(directives),
+                "rules": len(directives) + living_rule_pages,
                 "code_pages": len(code_pages),
             },
             "knowledge_pages": mental_models,
