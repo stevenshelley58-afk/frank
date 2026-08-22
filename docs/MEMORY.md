@@ -129,6 +129,11 @@ Hermes 0.20.1 enforces that client version at runtime. Upgrade the suite and
 Hermes together when that contract changes; do not patch Hermes source or add
 a parallel service to chase a newer package.
 
+The provider profile relies on Hindsight's default zero idle timeout instead
+of serializing an explicit value. Version 0.6.1 saves only public
+`HINDSIGHT_API_*` profile settings; including its internal idle-timeout setting
+would create a false configuration change and a repeated daemon restart loop.
+
 Nothing in this contract starts Docker on a developer machine. Hermes and
 Hindsight run natively on the VPS. Frank's normal production container build
 also runs on the VPS.

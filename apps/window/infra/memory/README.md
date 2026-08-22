@@ -27,3 +27,8 @@ Project isolation is supplied by Hermes runtime context. A session bound to
 bank template resolves that to `steven-blockwise`. An unassigned session uses
 the explicit `steven-unassigned` fallback. No caller may set one static
 workspace value for every session.
+
+The tracked profile intentionally omits `idle_timeout`. Hindsight 0.6.1 already
+defaults it to zero, while its profile registry persists only `HINDSIGHT_API_*`
+settings. Saving the redundant embedded-daemon setting makes Hermes see a
+permanent configuration difference and restart an otherwise healthy provider.

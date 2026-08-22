@@ -24,7 +24,6 @@
   "recall_indicator": true,
   "retain_indicator": true,
   "timeout": 120,
-  "idle_timeout": 0,
   "llm_provider": "openai_compatible",
   "llm_base_url": "https://api.deepseek.com/v1",
   "llm_model": "deepseek-v4-flash"

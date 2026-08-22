@@ -30,6 +30,11 @@ class HindsightMemoryInfraTests(unittest.TestCase):
         self.assertEqual(config["bank_id_template"], "steven-{workspace}")
         self.assertTrue(config["auto_recall"])
         self.assertTrue(config["auto_retain"])
+        # Hindsight 0.6.1 persists only HINDSIGHT_API_* profile settings. An
+        # explicit idle_timeout becomes HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT,
+        # is dropped on save, and makes Hermes restart the healthy daemon on
+        # every provider initialization. The vendor default is already zero.
+        self.assertNotIn("idle_timeout", config)
         self.assertNotIn("agent_workspace", json.dumps(config))
         self.assertNotIn("DEEPSEEK_API_KEY", json.dumps(config))
         self.assertNotIn("HINDSIGHT_LLM_API_KEY", json.dumps(config))
