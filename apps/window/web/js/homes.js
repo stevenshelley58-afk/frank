@@ -1019,6 +1019,7 @@ function renderHome() {
   const host = homeState.host;
   destroyGraphMounts(host);
   host.replaceChildren();
+  host.classList.remove("memory-inspector-host");
   host.classList.add("home-grid");
   host.classList.toggle("project-signal-grid", isProjectHome());
   host.classList.toggle("grid-stack", isProjectHome());

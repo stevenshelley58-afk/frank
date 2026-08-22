@@ -10,9 +10,14 @@ class UiContractTest(unittest.TestCase):
     def test_project_memory_inspector_uses_hindsight_provider_truth(self):
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
         inspector = (WEB / "js" / "memory-inspector.js").read_text(encoding="utf-8")
+        styles = (WEB / "app.css").read_text(encoding="utf-8")
 
         self.assertIn('button("Memory", openMemoryInspector)', homes)
         self.assertIn('mountMemoryInspector', homes)
+        self.assertIn('host.classList.add("memory-inspector-host")', inspector)
+        self.assertIn('host.classList.remove("memory-inspector-host")', homes)
+        self.assertIn('.memory-inspector-host {', styles)
+        self.assertIn('display: flex;', styles.split('.memory-inspector-host {', 1)[1].split('}', 1)[0])
         self.assertIn('/memory/recall', inspector)
         self.assertIn('/memory/documents/', inspector)
         self.assertIn('method: "DELETE"', inspector)

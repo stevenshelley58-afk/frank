@@ -91,6 +91,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   let snapshot = null;
 
   host.classList.remove("home-grid", "project-signal-grid", "grid-stack", "project-grid-fallback");
+  host.classList.add("memory-inspector-host");
   host.replaceChildren();
   const shell = element("div", "tool-workspace");
   const main = element("div", "tool-workspace-main");
@@ -278,6 +279,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     dispose() {
       disposed = true;
       controller.abort();
+      host.classList.remove("memory-inspector-host");
     },
   };
 }
