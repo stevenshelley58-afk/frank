@@ -75,6 +75,10 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("header_up -Cookie", release)
         self.assertIn("header_up -X-Frank-Operator-Attestation", release)
         self.assertIn("header_down -Set-Cookie", release)
+        self.assertIn('-Cache-Control', release)
+        self.assertIn('Cache-Control "public, max-age=300"', release)
+        self.assertIn('-Cross-Origin-Resource-Policy', release)
+        self.assertIn('Cross-Origin-Resource-Policy "cross-origin"', release)
         self.assertLess(caddyfile.index("@ad_template_release"), caddyfile.index("basic_auth"))
 
     def test_template_release_root_uses_existing_data_volume_and_hermes_ownership(self):

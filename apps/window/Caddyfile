@@ -63,7 +63,10 @@ frank.fail {
         }
         handle @ad_template_release {
             header {
+                -Cache-Control
                 Cache-Control "public, max-age=300"
+                -Cross-Origin-Resource-Policy
+                Cross-Origin-Resource-Policy "cross-origin"
                 X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
             }
             reverse_proxy frank-window:8080 {
