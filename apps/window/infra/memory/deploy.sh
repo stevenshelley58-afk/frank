@@ -7,6 +7,7 @@ hermes_home="${HERMES_HOME:-/home/hermes/.hermes}"
 hermes_user="${HERMES_USER:-hermes}"
 hermes_python="$hermes_home/hermes-agent/venv/bin/python"
 hermes_cli="$hermes_home/hermes-agent/venv/bin/hermes"
+hindsight_embed="$hermes_home/hermes-agent/venv/bin/hindsight-embed"
 uv_bin="$hermes_home/bin/uv"
 
 die() { echo "Hindsight deploy: $*" >&2; exit 1; }
@@ -14,7 +15,7 @@ die() { echo "Hindsight deploy: $*" >&2; exit 1; }
 [[ "$(realpath -e -- "$repo_root")" == "/projects/frank" ]] || die "run from the canonical Frank checkout"
 git -C "$repo_root" diff --quiet HEAD -- || die "refusing an uncommitted Frank revision"
 id "$hermes_user" >/dev/null 2>&1 || die "Hermes user does not exist"
-[[ -x "$hermes_python" && -x "$hermes_cli" && -x "$uv_bin" ]] || die "Hermes runtime is incomplete"
+[[ -x "$hermes_python" && -x "$hermes_cli" && -x "$hindsight_embed" && -x "$uv_bin" ]] || die "Hermes runtime is incomplete"
 [[ -f "$hermes_home/config.yaml" && ! -L "$hermes_home/config.yaml" ]] || die "Hermes config is unavailable"
 [[ -f "$hermes_home/.env" && ! -L "$hermes_home/.env" ]] || die "Hermes secret environment is unavailable"
 
@@ -32,12 +33,12 @@ sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
   "$hermes_cli" config set memory.provider hindsight >/dev/null
 
 systemctl restart hermes-gateway.service hermes-serve.service
-# The embedded provider is intentionally lazy. Activate it after Hermes restarts
-# before expose.sh probes the loopback listener; otherwise a clean restart can
-# fail even though the configured provider is healthy and available.
-status="$(cd "$hermes_home" && sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" "$hermes_cli" memory status)"
-grep -q -E 'Provider:[[:space:]]+hindsight' <<<"$status" || die "Hermes did not activate Hindsight"
-grep -q 'Status:    available' <<<"$status" || die "the local provider runtime is unavailable"
+# Start the vendor-owned embedded daemon explicitly after Hermes has stopped its
+# previous instance. `hermes memory status` can report the plugin as available
+# while that previous listener is still shutting down, so it is not a startup
+# primitive and must not be used as one here.
+sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
+  "$hindsight_embed" --profile hermes daemon start
 bash "$script_dir/expose.sh"
 "$script_dir/check.sh"
 echo "Hindsight is active for workspace-derived project banks."
