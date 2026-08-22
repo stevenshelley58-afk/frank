@@ -7,6 +7,7 @@ secret_dir="/srv/frank/secrets"
 secret_file="$secret_dir/window.env"
 caddy_secret_file="$secret_dir/caddy.env"
 data_dir="/srv/frank/data/window"
+template_release_dir="$data_dir/releases/ad-template-generator"
 preview_dir="/srv/frank/previews"
 mini_preview_dir="$preview_dir/mini"
 
@@ -24,6 +25,7 @@ install -d -m 0700 -- "$secret_dir"
 # on the host. Keep the directory private to root + the existing Hermes group;
 # setgid preserves that boundary for newly-created staging directories.
 install -d -o root -g hermes -m 2750 -- "$data_dir"
+install -d -o hermes -g hermes -m 0755 -- "$template_release_dir"
 install -d -m 0755 -- "$preview_dir"
 # Hermes provisions new project workspaces before their first turn. Keep the
 # canonical parent root-owned while granting the sole agent runtime a setgid

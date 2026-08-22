@@ -65,6 +65,26 @@ class InfraContractTest(unittest.TestCase):
         fallback = caddyfile[caddyfile.index("        handle {\n            import frank_private_response_headers"):]
         self.assertLess(fallback.index("import frank_private_response_headers"), fallback.index("basic_auth"))
 
+    def test_template_release_bypass_is_exact_and_strips_private_headers(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        release = caddyfile.split("@ad_template_release", 1)[1].split("@pavone_root", 1)[0]
+        self.assertIn("method GET HEAD", release)
+        self.assertIn("path_regexp ad_template_release ^/releases/ad-template-generator/", release)
+        self.assertNotIn("basic_auth", release)
+        self.assertIn("header_up -Authorization", release)
+        self.assertIn("header_up -Cookie", release)
+        self.assertIn("header_up -X-Frank-Operator-Attestation", release)
+        self.assertIn("header_down -Set-Cookie", release)
+        self.assertLess(caddyfile.index("@ad_template_release"), caddyfile.index("basic_auth"))
+
+    def test_template_release_root_uses_existing_data_volume_and_hermes_ownership(self):
+        deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
+        self.assertIn('template_release_dir="$data_dir/releases/ad-template-generator"', deploy)
+        self.assertIn('install -d -o hermes -g hermes -m 0755 -- "$template_release_dir"', deploy)
+        self.assertIn("/srv/frank/data/window:/data", compose)
+        self.assertNotIn("template-release", compose)
+
     def test_deploy_provisions_mini_runtime_contract(self):
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
         self.assertIn('mini_preview_dir="$preview_dir/mini"', deploy)
