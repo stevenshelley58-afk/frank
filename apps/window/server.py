@@ -1676,7 +1676,7 @@ def _save_mini_jobs(new_job):
             temp.unlink(missing_ok=True)
 
 
-@app.get("/mini", defaults={"mini_path": "index.html"})
+@app.get("/mini", defaults={"mini_path": "index.html"}, strict_slashes=False)
 @app.get("/mini/<path:mini_path>")
 def mini_spa(mini_path: str):
     return send_from_directory(WEB / "mini", mini_path)
