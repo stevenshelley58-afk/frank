@@ -40,6 +40,8 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('emit("frank:ad-studio")', widgets)
         self.assertIn('window.addEventListener("frank:ad-studio-run"', app)
         self.assertIn('TOOL_ID_FOR_AD_STUDIO = "ad-template-generator"', app)
+        self.assertIn('"/api/ad-studio/runs"', app)
+        self.assertIn('Hermes will run this as a background job', html)
         self.assertIn('mountGraphWorkbench(root', studio)
         self.assertIn('scope_kind: "project"', studio)
         self.assertNotIn('run.trace', studio)

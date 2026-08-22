@@ -19,6 +19,13 @@ class AdStudioPickerContractTest(unittest.TestCase):
         self.assertIn('sources: selectedFiles.slice()', studio)
         self.assertIn('uploadVpsFiles(vpsFiles)', app)
         self.assertIn('fetch("/api/chat/uploads/vps"', app)
+        self.assertIn('fetch("/api/ad-studio/runs"', app)
+        self.assertIn('fetch(`/api/ad-studio/runs/${encodeURIComponent(ref.id)}`)', studio)
+        run_handler = app.split('window.addEventListener("frank:ad-studio-run"', 1)[1].split(
+            'window.addEventListener("frank:ad-studio-change-request"', 1
+        )[0]
+        self.assertNotIn("createChat(", run_handler)
+        self.assertNotIn("enqueueTurn(", run_handler)
 
 
 if __name__ == "__main__":

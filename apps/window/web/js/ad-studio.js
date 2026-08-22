@@ -1,7 +1,7 @@
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
 
 const TOOL_ID = "ad-template-generator";
-const RUN_PREFIX = "Ad Studio";
+const RUN_STORAGE_KEY = "frank.ad-studio.run-refs";
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
@@ -20,6 +20,28 @@ const previewUrls = new Set();
 const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"]);
 
 const clean = (value) => String(value || "").trim();
+
+function storedRunRefs() {
+  try {
+    const value = JSON.parse(localStorage.getItem(RUN_STORAGE_KEY) || "[]");
+    return Array.isArray(value) ? value.filter((item) => /^run_[0-9a-f]{32}$/.test(item?.id || "")).slice(0, 50) : [];
+  } catch { return []; }
+}
+
+function storeRunRefs(items) {
+  localStorage.setItem(RUN_STORAGE_KEY, JSON.stringify(items.slice(0, 50).map((item) => ({
+    id: item.id, title: item.title, project_id: item.project_id,
+    created_at: item.created_at, updated_at: item.updated_at,
+  }))));
+}
+
+function rememberRun(run) {
+  storeRunRefs([run, ...storedRunRefs().filter((item) => item.id !== run.id)]);
+}
+
+function runStatusLabel(status) {
+  return ({ queued: "Queued", started: "Starting", running: "Running", waiting_for_approval: "Needs approval", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Starting";
+}
 
 function dateLabel(seconds) {
   if (!seconds) return "";
@@ -248,7 +270,7 @@ function renderRuns() {
     title.textContent = String(run.title || "Ad Studio job").replace(/^Ad Studio\s*[·|-]?\s*/, "") || "Job";
     const meta = document.createElement("span");
     const project = projects.find((item) => item.id === run.project_id);
-    meta.textContent = project?.name || run.project_id || "Workspace";
+    meta.textContent = `${project?.name || run.project_id || "Workspace"} · ${runStatusLabel(run.status)}`;
     copy.append(title, meta);
     const time = document.createElement("time");
     time.textContent = dateLabel(run.updated_at);
@@ -260,10 +282,18 @@ function renderRuns() {
 }
 
 async function refreshRuns() {
-  const response = await fetch("/api/chat/sessions");
-  if (!response.ok) throw new Error("Jobs are unavailable");
-  const data = await response.json();
-  runs = (Array.isArray(data.sessions) ? data.sessions : []).filter((session) => clean(session.title).startsWith(RUN_PREFIX));
+  const refs = storedRunRefs();
+  const checked = await Promise.all(refs.map(async (ref) => {
+    try {
+      const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(ref.id)}`);
+      if (response.status === 404) return null;
+      if (!response.ok) throw new Error("status unavailable");
+      const data = await response.json();
+      return { ...ref, ...(data.run || {}), title: ref.title, project_id: ref.project_id };
+    } catch { return { ...ref, status: "unavailable" }; }
+  }));
+  runs = checked.filter(Boolean).sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+  storeRunRefs(runs);
   renderRuns();
 }
 
@@ -276,20 +306,20 @@ async function refreshRunsSafe() {
   }
 }
 
-function openChatButton(run) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.className = "ad-primary";
-  button.textContent = "Open full job";
-  button.addEventListener("click", () => window.dispatchEvent(new CustomEvent("frank:open-chat-session", { detail: { id: run.id } })));
-  return button;
-}
-
 async function selectRun(runId) {
   selectedRunId = runId;
   renderRuns();
-  const run = runs.find((item) => item.id === runId);
+  let run = runs.find((item) => item.id === runId);
   if (!run) return;
+  try {
+    const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}`);
+    const data = await response.json().catch(() => ({}));
+    if (response.ok && data.run) {
+      run = { ...run, ...data.run, title: run.title, project_id: run.project_id };
+      runs = runs.map((item) => item.id === run.id ? run : item);
+      renderRuns();
+    }
+  } catch { /* keep the last visible status */ }
   const detail = $("#ad-run-detail");
   detail.replaceChildren();
   const summary = document.createElement("div");
@@ -298,47 +328,28 @@ async function selectRun(runId) {
   const heading = document.createElement("h3");
   heading.textContent = run.title || "Ad Studio job";
   const meta = document.createElement("p");
-  meta.textContent = `${dateLabel(run.updated_at)} · ${run.message_count || 0} messages${run.model ? ` · ${run.model}` : ""}`;
+  meta.textContent = `${runStatusLabel(run.status)} · ${dateLabel(run.updated_at || run.created_at)}${run.model ? ` · ${run.model}` : ""}`;
   copy.append(heading, meta);
-  summary.append(copy, openChatButton(run));
+  const refresh = document.createElement("button");
+  refresh.type = "button";
+  refresh.className = "ad-primary";
+  refresh.textContent = "Refresh status";
+  refresh.addEventListener("click", () => void selectRun(run.id));
+  summary.append(copy, refresh);
   detail.append(summary);
-  try {
-    const response = await fetch(`/api/chat?session_id=${encodeURIComponent(run.id)}`);
-    if (!response.ok) throw new Error("Job conversation is unavailable");
-    const data = await response.json();
-    const list = document.createElement("div");
-    list.className = "ad-message-list";
-    for (const message of data.messages || []) {
-      const card = document.createElement("article");
-      card.className = "ad-message";
-      const role = document.createElement("span");
-      role.textContent = message.role === "user" ? "Request" : message.role === "sys" ? "System" : "Hermes";
-      const body = document.createElement("p");
-      body.textContent = message.text || "";
-      card.append(role, body);
-      if (Array.isArray(message.tools) && message.tools.length) {
-        const tools = document.createElement("div");
-        tools.className = "ad-message-tools";
-        tools.textContent = `Tools · ${message.tools.join(" · ")}`;
-        card.append(tools);
-      }
-      list.append(card);
-    }
-    if (!(data.messages || []).length) list.innerHTML = '<div class="ad-empty"><strong>Job started</strong><span>Hermes has not recorded a message yet.</span></div>';
-    detail.append(list);
-  } catch (error) {
-    const empty = document.createElement("div");
-    empty.className = "ad-empty";
-    const strong = document.createElement("strong");
-    strong.textContent = "Could not load this job";
-    const message = document.createElement("span");
-    message.textContent = clean(error.message);
-    empty.append(strong, message);
-    detail.append(empty);
-  }
+  const result = document.createElement("article");
+  result.className = "ad-message";
+  const label = document.createElement("span");
+  label.textContent = run.status === "completed" ? "Hermes result" : run.status === "failed" ? "Hermes error" : "Background job";
+  const body = document.createElement("p");
+  body.textContent = run.output || run.error || (run.status === "waiting_for_approval"
+    ? "Hermes paused this job at an approval gate."
+    : "Hermes is running this independently. You can use Frank normally while it works.");
+  result.append(label, body);
+  detail.append(result);
   const trace = document.createElement("div");
   trace.className = "ad-trace-notice";
-  trace.innerHTML = "<strong>Full trace not correlated yet</strong><p>Frank will show the complete drill-down trace when Hermes supplies a versioned run record. Chat activity is not presented as synthetic Langfuse spans.</p>";
+  trace.innerHTML = "<strong>Full trace not correlated yet</strong><p>Frank will show the complete drill-down trace when Hermes supplies a versioned run record. Background status is not presented as synthetic Langfuse spans.</p>";
   detail.append(trace);
   $("#ad-pipeline-run").value = runId;
   updateEvidence();
@@ -428,14 +439,15 @@ function setupRunForm() {
     status.textContent = "Uploading sources and starting Hermes…";
     try {
       const placements = $$('input[name="ad-placement"]:checked').map((item) => item.value);
-      const session = await requestEvent("frank:ad-studio-run", {
+      const run = await requestEvent("frank:ad-studio-run", {
         sources: selectedFiles.slice(), projectId: $("#ad-run-project").value,
         name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value), placements,
       });
       const first = selectedFiles[0];
-      localRunInputs.set(session.id, { url: first.previewUrl, name: first.name });
-      selectedRunId = session.id;
-      status.textContent = "Job started in Hermes.";
+      localRunInputs.set(run.id, { url: first.previewUrl, name: first.name });
+      selectedRunId = run.id;
+      rememberRun(run);
+      status.textContent = "Background job started. You can keep using Frank while Hermes works.";
       void refreshRunsSafe();
     } catch (error) {
       status.textContent = error.message || "The job could not be started.";
@@ -497,4 +509,8 @@ export function mountAdStudio() {
     $("#ad-run-status").classList.add("is-error");
   });
   window.addEventListener("beforeunload", () => previewUrls.forEach((url) => URL.revokeObjectURL(url)), { once: true });
+  window.setInterval(() => {
+    const studio = $('[data-view="ad-studio"]');
+    if (studio?.classList.contains("is-on") && runs.some((run) => ["queued", "started", "running"].includes(run.status))) void refreshRunsSafe();
+  }, 5000);
 }

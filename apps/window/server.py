@@ -88,6 +88,8 @@ ACCOUNT_MODES = {"selfserve", "managed", "internal"}
 ACCOUNT_ENVIRONMENTS = {"test", "live"}
 AUTH_STATUSES = {"not_connected", "invited", "active", "suspended", "closed"}
 BILLING_STATUSES = {"not_connected", "trial", "active", "past_due", "canceled"}
+AD_STUDIO_RUN_ID = re.compile(r"run_[0-9a-f]{32}")
+AD_STUDIO_PLACEMENTS = {"square", "portrait", "story"}
 ACCOUNT_FIELDS = {
     "project_id", "kind", "name", "identity", "provider", "purpose",
     "admin_url", "credential_ref", "notes", "status", "account_mode",
@@ -930,7 +932,7 @@ def _clean_atts(raw) -> list:
             "size": target.stat().st_size,
             "type": media_type,
             "url": f"/api/chat/uploads/{rel}",
-            "hermes_path": str(HERMES_UPLOAD_ROOT / Path(rel)),
+            "hermes_path": str(HERMES_UPLOAD_ROOT / Path(rel)).replace("\\", "/"),
         })
         if len(out) >= 500:
             break
@@ -1096,7 +1098,7 @@ def chat_upload_get(upload_id: str):
     )
 
 
-def _hermes_input(text: str, attachments: list) -> str | list:
+def _attachment_prompt(text: str, attachments: list) -> str:
     if not attachments:
         return text
     listing = "\n".join(
@@ -1105,6 +1107,13 @@ def _hermes_input(text: str, attachments: list) -> str | list:
     )
     prompt = (text or "Please inspect and respond to the attached material.").strip()
     prompt += "\n\nAttached files have already been uploaded and are readable at these exact local paths:\n" + listing
+    return prompt
+
+
+def _hermes_input(text: str, attachments: list) -> str | list:
+    if not attachments:
+        return text
+    prompt = _attachment_prompt(text, attachments)
     content = [{"type": "input_text", "text": prompt}]
     inline_total = 0
     for attachment in attachments:
@@ -1120,6 +1129,100 @@ def _hermes_input(text: str, attachments: list) -> str | list:
         content.append({"type": "input_image", "image_url": f"data:{attachment['type']};base64,{encoded}"})
         inline_total += size
     return content
+
+
+def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
+    """Return only the Hermes run fields needed by the Ad Studio display."""
+    now = int(time.time())
+    item = {
+        "id": str(run.get("run_id") or run.get("id") or ""),
+        "status": str(run.get("status") or "queued"),
+        "created_at": run.get("created_at") or now,
+        "updated_at": run.get("updated_at") or run.get("completed_at") or run.get("created_at") or now,
+        "last_event": str(run.get("last_event") or ""),
+        "model": str(run.get("model") or ""),
+    }
+    if title:
+        item["title"] = title
+    if project_id:
+        item["project_id"] = project_id
+    if run.get("output") is not None:
+        item["output"] = str(run.get("output") or "")
+    if run.get("error") is not None:
+        item["error"] = str(run.get("error") or "")
+    if isinstance(run.get("usage"), dict):
+        item["usage"] = run["usage"]
+    return item
+
+
+@app.post("/api/ad-studio/runs")
+def ad_studio_run_create():
+    """Start the canonical Ad Studio work as a detached Hermes run."""
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        abort(400, "request body must be an object")
+    project_id = _clean_project_id(body.get("project_id")) if body.get("project_id") else ""
+    project = _project_store.get_project(project_id) if project_id else None
+    if not project:
+        abort(404, "project not found")
+    raw_attachments = body.get("attachments")
+    if not isinstance(raw_attachments, list) or not raw_attachments or len(raw_attachments) > 100:
+        abort(400, "choose between 1 and 100 source images")
+    attachments = _clean_atts(raw_attachments)
+    if len(attachments) != len(raw_attachments):
+        abort(400, "one or more source images were not accepted")
+    if any(not item["type"].startswith("image/") for item in attachments):
+        abort(400, "Ad Studio accepts image sources only")
+
+    raw_placements = body.get("placements")
+    placements = [str(item).strip().lower() for item in raw_placements] if isinstance(raw_placements, list) else []
+    if not placements or any(item not in AD_STUDIO_PLACEMENTS for item in placements):
+        abort(400, "choose one or more supported placements")
+    placements = list(dict.fromkeys(placements))
+    name = _clean_project_text(body.get("name"), 60) or (
+        re.sub(r"\.[^.]+$", "", attachments[0]["name"])
+        if len(attachments) == 1 else f"{len(attachments)} source images"
+    )
+    brief = _clean_project_text(body.get("brief"), 800)
+    source_count = len(attachments)
+    prompt = "\n\n".join([
+        f"Run the canonical Frank Tool `ad-template-generator` for this {'source image' if source_count == 1 else f'batch of {source_count} source images'}.",
+        f"Use pipeline `reference-clone-release` and placements: {', '.join(placements)}.",
+        f"Brief: {brief}" if brief else "No additional brief was supplied; preserve the reference structure and make all customer assets and copy replaceable.",
+        "Hermes owns model selection, skills, tools, execution, QA, approval, and release. Do not create a second pipeline or memory store.",
+        "Record the stages, actual inputs and outputs, model/prompt references, QA evidence, and final artifact references in the canonical run/trace system when that integration is available. Never claim unavailable evidence exists.",
+    ])
+    payload = {
+        "input": _attachment_prompt(prompt, attachments),
+        "instructions": _project_context(project),
+    }
+    model = str(body.get("model") or "").strip()
+    provider = str(body.get("provider") or "").strip()
+    if model:
+        payload["model"] = model
+    if provider:
+        payload["provider"] = provider
+    try:
+        data = hermes_request("/v1/runs", payload, method="POST", timeout=10)
+    except Exception as error:
+        return _hermes_error(error)
+    run_id = str(data.get("run_id") or "")
+    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+        return jsonify({"error": "Hermes did not return a valid background run id"}), 502
+    run = _public_ad_studio_run(data, title=f"Ad Studio · {name}", project_id=project_id)
+    return jsonify({"ok": True, "run": run}), 202
+
+
+@app.get("/api/ad-studio/runs/<run_id>")
+def ad_studio_run_get(run_id: str):
+    """Read authoritative detached-run status without creating a Hub chat."""
+    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+        abort(404)
+    try:
+        data = hermes_request(f"/v1/runs/{urllib.parse.quote(run_id, safe='')}", timeout=5)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify({"run": _public_ad_studio_run(data)})
 
 
 @app.post("/api/chat/turn")

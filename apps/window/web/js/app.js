@@ -2,7 +2,7 @@ import { mount, mountAll } from "./registry.js";
 import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
-import { mountAdStudio } from "./ad-studio.js?v=20260822-vps-picker";
+import { mountAdStudio } from "./ad-studio.js?v=20260822-background-runs";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -156,25 +156,28 @@ window.addEventListener("frank:ad-studio-run", (event) => {
     const sourceCount = files.length + vpsFiles.length;
     const fallbackName = sourceCount === 1 ? String(sources[0]?.name || "source image").replace(/\.[^.]+$/, "") : `${sourceCount} source images`;
     const jobName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
-    const session = await createChat(projectId, `Ad Studio · ${jobName}`);
-    if (!session?.id) throw new Error("Finish or stop the current Hermes job before starting another.");
     const [localUploads, vpsUploads] = await Promise.all([
       uploadFiles(files.map((file) => ({ file, path: file.name }))),
       uploadVpsFiles(vpsFiles),
     ]);
     const uploaded = [...localUploads, ...vpsUploads];
     if (uploaded.length !== sourceCount) throw new Error("One or more source images were not accepted.");
-    const placements = Array.isArray(detail.placements) && detail.placements.length ? detail.placements.join(", ") : "square";
-    const brief = String(detail.brief || "").trim();
-    const request = [
-      `Run the canonical Frank Tool \`${TOOL_ID_FOR_AD_STUDIO}\` for this ${sourceCount === 1 ? "source image" : `batch of ${sourceCount} source images`}.`,
-      `Use pipeline \`reference-clone-release\` and placements: ${placements}.`,
-      brief ? `Brief: ${brief}` : "No additional brief was supplied; preserve the reference structure and make all customer assets and copy replaceable.",
-      "Hermes owns model selection, skills, tools, execution, QA, approval, and release. Do not create a second pipeline or memory store.",
-      "Record the stages, actual inputs and outputs, model/prompt references, QA evidence, and final artifact references in the canonical run/trace system when that integration is available. Never claim unavailable evidence exists.",
-    ].join("\n\n");
-    enqueueTurn(request, uploaded.map(attachmentPayload));
-    detail.resolve?.(session);
+    const response = await fetch("/api/ad-studio/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        name: jobName,
+        brief: String(detail.brief || "").trim(),
+        placements: Array.isArray(detail.placements) && detail.placements.length ? detail.placements : ["square"],
+        attachments: uploaded.map(attachmentPayload),
+        model: chatModel,
+        provider: chatProvider,
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.run?.id) throw new Error(data.error || "Hermes did not start the background job.");
+    detail.resolve?.(data.run);
   })().catch((error) => detail.reject?.(error));
 });
 

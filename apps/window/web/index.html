@@ -195,7 +195,7 @@
               </div>
               <fieldset class="ad-fieldset"><legend>Placements</legend><label><input type="checkbox" name="ad-placement" value="square" checked> Square</label><label><input type="checkbox" name="ad-placement" value="portrait"> Portrait</label><label><input type="checkbox" name="ad-placement" value="story"> Story</label></fieldset>
               <label>Brief <span>optional</span><textarea id="ad-run-brief" maxlength="800" rows="4" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea></label>
-              <div class="ad-submit-row"><p id="ad-run-status" role="status">Hermes will execute the canonical pipeline and record the work in a project chat.</p><button type="submit" class="ad-primary" id="ad-run-submit">Run job</button></div>
+              <div class="ad-submit-row"><p id="ad-run-status" role="status">Hermes will run this as a background job. It will not open or interrupt a Hub chat.</p><button type="submit" class="ad-primary" id="ad-run-submit">Run job</button></div>
             </form>
             <aside class="ad-run-guide">
               <span class="home-kicker">Pipeline</span>
@@ -207,7 +207,7 @@
           <div class="ad-studio-panel" data-ad-panel="runs">
             <div class="ad-runs-layout">
               <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><span>History</span><h3>Jobs</h3></div><button type="button" class="ad-text-button" id="ad-runs-refresh">Refresh</button></div><div class="ad-runs-list" id="ad-runs-list" aria-live="polite"></div></section>
-              <section class="ad-run-detail" id="ad-run-detail" aria-live="polite"><div class="ad-empty"><strong>Select a job</strong><span>Open any Ad Studio job to inspect its real conversation and tool activity.</span></div></section>
+              <section class="ad-run-detail" id="ad-run-detail" aria-live="polite"><div class="ad-empty"><strong>Select a job</strong><span>Open any Ad Studio job to inspect its live Hermes status and result.</span></div></section>
             </div>
           </div>
 
@@ -445,6 +445,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260822-vps-picker"></script>
+<script type="module" src="/js/app.js?v=20260822-background-runs"></script>
 </body>
 </html>
