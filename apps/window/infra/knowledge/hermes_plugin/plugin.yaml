@@ -1,8 +1,0 @@
-name: frank-graphiti-memory
-version: "1.0.0"
-description: Private Graphiti memory provider for Hermes default profile
-provider_type: memory
-requires_env:
-  - name: HERMES_GRAPHITI_PROVIDER_TOKEN
-    description: "Bearer token for the private Hermes Graphiti gateway"
-    password: true

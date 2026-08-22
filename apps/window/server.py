@@ -22,9 +22,6 @@ import home_platform
 import home_defaults
 import vault_broker
 from graph.provider import (
-    KNOWLEDGE_LENS,
-    KnowledgeProjectionClient,
-    KnowledgeProjectionProvider,
     ReadOnlyProvider,
     ProviderUnavailable,
     create_blueprint as create_graph_blueprint,
@@ -67,15 +64,9 @@ _authorized_tool_manifests = MappingProxyType({
     for item in discover_tool_apps(Path(__file__).resolve().parent / "tools")
 })
 _graph_provider = ReadOnlyProvider(graph_reader=manifest_reader(_authorized_tool_manifests))
-_knowledge_projection = KnowledgeProjectionProvider(KnowledgeProjectionClient.from_environment())
 
 
 def _graph_projection(**kwargs):
-    if kwargs.get("kind") == "project":
-        try:
-            return _knowledge_projection.graph(**kwargs)
-        except ProviderUnavailable:
-            return None
     try:
         return _graph_provider.graph(**kwargs)
     except ProviderUnavailable:
@@ -83,8 +74,6 @@ def _graph_projection(**kwargs):
 
 
 def _graph_available(kind: str, entity_id: str) -> bool:
-    if kind == "project":
-        return bool(_knowledge_projection.client and _knowledge_projection.client.configured_for(entity_id))
     manifest = _authorized_tool_manifests.get(entity_id) if kind == "tool" else None
     return isinstance(manifest, dict) and "global" in manifest.get("scopes", [])
 
@@ -945,7 +934,7 @@ home_platform.configure(
     graph_available=_graph_available,
 )
 app.register_blueprint(home_platform.api)
-app.register_blueprint(create_graph_blueprint(_graph_provider, _knowledge_projection))
+app.register_blueprint(create_graph_blueprint(_graph_provider))
 app.register_blueprint(vault_broker.api)
 
 

@@ -3,7 +3,7 @@ import "./graph-workbench.css";
 import { Graph as MaxGraph, InternalEvent, RubberBandHandler } from "@maxgraph/core";
 import Sigma from "sigma";
 import Graphology from "graphology";
-import { COMBINED_GRAPH_LENS, fetchGraphSnapshot, validateCombinedGraphSnapshot, validateGraphSnapshot } from "./graph-client.js";
+import { fetchGraphSnapshot, validateGraphSnapshot } from "./graph-client.js";
 import {
   chooseGraphRenderer,
   MAXGRAPH_NODE_THRESHOLD,
@@ -36,7 +36,7 @@ function groupCategory(snapshot, node, groups = null) {
   const text = [group?.label, group?.id, node.source?.source_type].filter(Boolean).join(" ").toLowerCase();
   if (/\b(code|repo|repository|source|file|github|gitlab)\b/.test(text)) return "code";
   if (/\b(vault|secret|secrets|credential)\b/.test(text)) return "vault";
-  if (/\b(memory|graphiti|hermes)\b/.test(text)) return "memory";
+  if (/\b(memory|hermes)\b/.test(text)) return "memory";
   return "";
 }
 
@@ -214,10 +214,10 @@ function renderNodeList(state, snapshot) {
 export function mountGraphWorkbench(root, options = {}) {
   root.replaceChildren();
   root.classList.add("graph-workbench");
-  const kind = options.kind === "project" ? "project" : "tool";
+  const kind = "tool";
   const state = {
     kind, entityId: options.entityId || "",
-    lens: kind === "project" ? COMBINED_GRAPH_LENS : "tool.pipeline", graph: null, sigma: null,
+    lens: "tool.pipeline", graph: null, sigma: null,
     nodes: new Map(), meta: $("p", "graph-meta", "Loading graph projection…"),
     details: $("p", "graph-details"), load: null, loadGeneration: 0,
     destroyed: false, filter: "", legend: $("div", "graph-group-legend"),
@@ -293,9 +293,7 @@ export function mountGraphWorkbench(root, options = {}) {
       const params = { kind: state.kind, entityId: state.entityId, lens: state.lens };
       const loaded = await (options.load || fetchGraphSnapshot)(params);
       if (state.destroyed || generation !== state.loadGeneration) return;
-      const snapshot = loaded?.schema === "schema://frank.graph/v2"
-        ? validateCombinedGraphSnapshot(loaded, params)
-        : validateGraphSnapshot(loaded, params);
+      const snapshot = validateGraphSnapshot(loaded, params);
       renderNodeList(state, snapshot);
       renderGroupLegend(state, snapshot);
       const renderer = chooseGraphRenderer(snapshot, params);

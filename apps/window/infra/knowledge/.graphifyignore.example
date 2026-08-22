@@ -1,6 +1,0 @@
-# Copy to the project root as .graphifyignore and review before indexing.
-.env*
-*.db
-*.sqlite*
-node_modules/
-graphify-out/

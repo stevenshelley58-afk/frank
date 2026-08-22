@@ -403,17 +403,13 @@ validated fields declared by the canonical event and trace allowlists.
 9. Validate/demo/run/commit actions send typed commands to Hermes. Progress is
    rendered from events/spans; maxGraph never invokes a Tool directly.
 
-## Knowledge-library separation
+## Memory separation
 
-The multimodal knowledge-library design does **not** change any field or schema
-in `ToolManifestAdapter`, Tool manifests, settings revisions, Hermes envelopes,
-or Tool traces.
-
-A future knowledge provider may register a separate adapter ID such as
-`knowledge-library` and project its authorized topology into the existing
-`schema://frank.graph/v1` envelope. It reuses `graph-workbench`; it does not add
-knowledge fields to domain Tool contracts and does not give Frank direct access
-to a memory/vector database.
+Project memory is Hindsight inside Hermes and is governed by
+[`../MEMORY.md`](../MEMORY.md). It does not add fields or adapters to
+`ToolManifestAdapter`, Tool manifests, settings revisions, Hermes envelopes,
+Tool traces, or the graph workbench. Frank never projects the provider's raw
+state into a graph response.
 
 ## Explicit do-not-rebuild boundaries
 
@@ -434,9 +430,8 @@ to a memory/vector database.
 ## Consequences
 
 One renderer and one adapter seam cover every registered Tool without bespoke
-UI. Domain packages stay declarative, Hermes remains authoritative, trace data
-remains portable OpenTelemetry, and future topology/memory/knowledge providers
-can reuse the same graph envelope without contaminating Tool contracts.
+UI. Domain packages stay declarative, Hermes remains authoritative, and trace
+data remains portable OpenTelemetry without contaminating Tool contracts.
 
 The implementation will require a small frontend build step to bundle
 `@maxgraph/core`, plus Frank provider endpoints and redaction. Those are

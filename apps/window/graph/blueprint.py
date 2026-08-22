@@ -4,16 +4,15 @@ from __future__ import annotations
 
 from copy import deepcopy
 
-# The capability is backed by the shared read-only workbench and two explicit
-# Hermes-owned projections: Tool pipelines (v1) and project knowledge (v2).
-CAPABILITIES: list[str] = ["frank.graph.v1", "frank.graph.v2"]
+# The capability is backed by the shared read-only Tool-pipeline workbench.
+CAPABILITIES: list[str] = ["frank.graph.v1"]
 
 WIDGET_MANIFEST = {
     "id": "entity-graph",
     "version": "1.0.0",
     "title": "Graph",
-    "description": "Read-only Tool pipeline and project knowledge graph.",
-    "surfaces": ["project", "tool"],
+    "description": "Read-only Tool pipeline graph.",
+    "surfaces": ["tool"],
     "default_size": "wide",
     "allowed_sizes": ["medium", "wide"],
     "provider": "frank.graph",
@@ -34,17 +33,6 @@ TOOL_MANIFEST_ADAPTER = {
     "renderer": "graph-workbench",
 }
 
-KNOWLEDGE_PROJECTION_ADAPTER = {
-    "schema": "schema://frank.knowledge-projection-adapter/v1",
-    "id": "hermes-knowledge-projection",
-    "version": "1.0.0",
-    "accepts": ["schema://frank.graph/v2"],
-    "produces": ["schema://frank.graph/v2"],
-    "surfaces": ["project"],
-    "lens": "knowledge.combined",
-    "renderer": "graph-workbench",
-}
-
 RESERVED_ALIASES = {}
 
 
@@ -54,7 +42,7 @@ def production_registration_blueprint() -> dict:
         "capabilities": CAPABILITIES,
         "views": [],
         "widgets": [WIDGET_MANIFEST],
-        "adapters": [TOOL_MANIFEST_ADAPTER, KNOWLEDGE_PROJECTION_ADAPTER],
+        "adapters": [TOOL_MANIFEST_ADAPTER],
         "aliases": RESERVED_ALIASES,
     })
 

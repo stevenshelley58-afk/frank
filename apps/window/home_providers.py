@@ -557,9 +557,8 @@ def entity_graph(ctx: ProviderContext) -> dict:
     """Render the graph endpoint's truthful envelope as a home snapshot."""
     if _graph_reader is None:
         return snapshot("unavailable", "Graph projection is not connected.", now=ctx.now)
-    lens = "knowledge.combined" if ctx.kind == "project" else "tool.pipeline"
     try:
-        graph = _graph_reader(kind=ctx.kind, entity_id=ctx.entity_id, selectors={"lens": lens})
+        graph = _graph_reader(kind=ctx.kind, entity_id=ctx.entity_id, selectors={"lens": "tool.pipeline"})
     except Exception:
         graph = None
     if not isinstance(graph, dict):

@@ -411,10 +411,9 @@ that independent workflow, keep it as Hermes capabilities/nodes reused by the
 existing tools. Customer lifecycle/transaction mail, leads/workers,
 property/suburb, and AdStudio editing stay Blockwise-owned.
 
-The accepted Knowledge Library remains a separate future graph provider, not a
-Tool. It may project authorized topology through `schema://frank.graph/v1`, but
-it changes no Tool manifest, settings, command, event, trace, or adapter field
-and gives Frank no direct vector/memory database access.
+Project memory remains a Hermes concern under the shared Hindsight contract in
+`docs/MEMORY.md`. It is not a Tool or graph provider, changes no Tool contract,
+and gives Frank no direct memory-database access.
 
 After the importer audit, the existing lead-ad, instant-form, and page-builder
 capabilities may become one future Campaign Builder Tool only if they form an

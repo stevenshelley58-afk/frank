@@ -183,7 +183,6 @@ test("isolated maxGraph harness has a nonzero, nonblank canvas and clears stale 
     assert.equal(existsSync(productionHarness), false);
   }
 });
-
 test("renderer lifecycle can switch Sigma, maxGraph, and Sigma without stale hosts", { skip: !chrome }, async () => {
   const productionRoot = resolve(root, "web/graph");
   const directory = await mkdtemp(resolve(tmpdir(), "frank-graph-cycle-"));
@@ -209,33 +208,5 @@ test("renderer lifecycle can switch Sigma, maxGraph, and Sigma without stale hos
     await rm(directory, { recursive: true, force: true });
   }
 });
-
-test("project knowledge harness validates v2, uses Sigma, and renders the group legend", { skip: !chrome }, async () => {
-  const productionRoot = resolve(root, "web/graph");
-  const directory = await mkdtemp(resolve(tmpdir(), "frank-graph-project-"));
-  const testRoot = resolve(directory, "graph");
-  let http = null;
-  try {
-    await mkdir(testRoot, { recursive: true });
-    await Promise.all([
-      copyFile(resolve(root, "graph/isolated-harness.html"), resolve(testRoot, "isolated-harness.html")),
-      copyFile(resolve(productionRoot, "graph-workbench.bundle.js"), resolve(testRoot, "graph-workbench.bundle.js")),
-      copyFile(resolve(productionRoot, "graph-workbench.bundle.css"), resolve(testRoot, "graph-workbench.bundle.css")),
-    ]);
-    http = await server(testRoot);
-    const base = `http://127.0.0.1:${http.address().port}/isolated-harness.html`;
-    const dom = await chromeDom(`${base}?project=1`);
-    assert.match(dom, /data-graph-state="ready"/);
-    assert.match(dom, /data-graph-renderer="sigma"/);
-    assert.match(dom, />Code</);
-    assert.match(dom, />Vault</);
-    assert.match(dom, />Memory</);
-    for (const mode of ["v2-unknown-root", "v2-bad-source", "v2-bad-reference", "v2-too-many-nodes", "v2-trace"]) {
-      const invalid = await chromeDom(`${base}?project=1&invalid=${mode}`);
-      assert.match(invalid, /data-graph-state="unavailable"/, mode);
-    }
-  } finally {
-    if (http) await new Promise((resolveClose) => http.close(resolveClose));
-    await rm(directory, { recursive: true, force: true });
-  }
-});
+// End of isolated browser harness coverage.
+// Browser tests intentionally stop at the shared Tool graph boundary.

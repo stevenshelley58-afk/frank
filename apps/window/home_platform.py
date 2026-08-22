@@ -522,11 +522,6 @@ def _widget_allowed_on_home(manifest: dict | None, kind: str, entity_id: str) ->
 def _default_instances(kind: str, entity_id: str, entity: dict | None = None, store: dict | None = None) -> list[dict]:
     entity = entity or _entity(kind, entity_id)
     requested = home_defaults.default_widget_ids(kind, entity_id, entity.get("profile"))
-    # The graph manifest explicitly declares both surfaces. Add its project
-    # instance only when the Hermes-owned knowledge projection is configured;
-    # a missing provider never creates a misleading empty widget.
-    if kind == "project" and "entity-graph" not in requested and home_providers.graph_available(kind, entity_id):
-        requested.append("entity-graph")
     by_id = {item["id"]: item for item in BUILTIN_WIDGETS}
     result = []
     for widget_id in requested:
