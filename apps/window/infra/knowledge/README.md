@@ -25,3 +25,12 @@ frank-project-wiki blockwise
 
 The command runs natively on the VPS and uses the existing Codex CLI
 subscription. It never requires a local Docker runtime.
+
+## Mini Frank staged project seed
+
+`project-seeds/mini-frank` is the reviewed bootstrap for the ordinary
+`/projects/mini-frank` Hermes project. It contains versioned Markdown knowledge,
+source manifests, schemas, an external-repository candidate, and retrieval
+fixtures. `mini_frank_knowledge.py` validates and compiles it into the existing
+project knowledge artifact root. It adds no runtime, database, memory provider,
+model client, scheduler, or public endpoint.

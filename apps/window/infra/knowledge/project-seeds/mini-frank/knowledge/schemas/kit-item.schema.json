@@ -1,0 +1,11 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://mini-frank.kit-item/v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "id", "title", "kind", "status", "summary", "tags", "source_refs", "verified_at", "stale_after", "privacy", "origin_ref", "license_spdx", "test_refs"],
+  "properties": {
+    "schema": {"const": "schema://mini-frank.kit-item/v1"},
+    "test_refs": {"type": "array", "items": {"type": "string"}}
+  }
+}

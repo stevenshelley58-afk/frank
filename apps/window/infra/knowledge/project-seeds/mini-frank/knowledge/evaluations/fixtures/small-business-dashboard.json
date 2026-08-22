@@ -1,0 +1,12 @@
+{
+  "schema": "schema://mini-frank.evaluation/v1",
+  "id": "small-business-dashboard-retrieval-v1",
+  "query": "Build a mobile responsive small business dashboard with forms, saved records, honest error states and reusable open-source components",
+  "expected_contains": [
+    "architecture-responsive-small-business-dashboard",
+    "ui-mobile-first-dashboard",
+    "ui-isolated-failure-states",
+    "craft-reuse-before-build"
+  ],
+  "max_results": 8
+}

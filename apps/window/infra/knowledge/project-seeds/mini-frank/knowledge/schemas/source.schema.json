@@ -1,0 +1,21 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://mini-frank.source/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "title", "kind", "locator", "revision", "sha256", "tier", "verified_at", "retention_rights"],
+  "properties": {
+    "schema": {"const": "schema://mini-frank.source/v1"},
+    "id": {"type": "string"}, "title": {"type": "string"},
+    "kind": {"enum": ["local-file", "external-repository-license"]},
+    "locator": {"type": "string"}, "revision": {"type": "string"},
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "For local-file text, SHA-256 of UTF-8 content normalised to LF; otherwise SHA-256 of retained source bytes."
+    },
+    "tier": {"enum": ["A", "B", "C"]},
+    "verified_at": {"type": "string", "format": "date"},
+    "retention_rights": {"type": "string"}
+  }
+}

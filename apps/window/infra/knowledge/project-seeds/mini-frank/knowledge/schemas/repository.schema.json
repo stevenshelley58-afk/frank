@@ -1,0 +1,14 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://mini-frank.repository/v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "id", "title", "kind", "status", "summary", "tags", "source_refs", "verified_at", "stale_after", "privacy", "repository_url", "exact_revision", "license_spdx", "license_evidence_ref", "missing_evidence"],
+  "properties": {
+    "schema": {"const": "schema://mini-frank.repository/v1"},
+    "status": {"enum": ["candidate", "approved", "restricted", "deprecated", "rejected"]},
+    "exact_revision": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "license_spdx": {"type": "string"},
+    "missing_evidence": {"type": "array", "items": {"type": "string"}}
+  }
+}

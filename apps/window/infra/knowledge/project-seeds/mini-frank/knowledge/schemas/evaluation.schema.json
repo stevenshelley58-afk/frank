@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://mini-frank.evaluation/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "id", "query", "expected_contains", "max_results"],
+  "properties": {
+    "schema": {"const": "schema://mini-frank.evaluation/v1"},
+    "id": {"type": "string"}, "query": {"type": "string"},
+    "expected_contains": {"type": "array", "items": {"type": "string"}},
+    "max_results": {"type": "integer", "minimum": 1}
+  }
+}
