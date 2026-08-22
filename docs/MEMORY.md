@@ -58,12 +58,26 @@ one bank per repository. Its derived bank must equal the Hermes name
 `steven-<slug>`; do not include the client name in the bank identity. This lets
 Codex and Hermes share project memory without sharing sessions or profiles.
 
-## Frank inspector
+## Frank project knowledge view
 
-Open a project and choose **Memory**. The inspector shows the resolved bank,
-provider health and version, retained facts, source documents, timestamps,
-tags, asynchronous operations, and failures. A recall test runs against only
-the selected project bank.
+Open a project and choose **Memory**. The Window presents one human-readable
+project knowledge surface with five views:
+
+- **Overview** combines Hindsight living project-guide pages with the
+  source-grounded application wiki.
+- **Rules & facts** separates the living rulebook, explicit Hindsight
+  directives, durable facts, and their retained sources.
+- **How it works** renders source-grounded Mermaid architecture, data-flow,
+  and sequence diagrams.
+- **Knowledge map** renders Hindsight's entity relationships in Frank's
+  existing read-only graph workbench.
+- **Memory activity** keeps recall testing, source correction/forgetting,
+  asynchronous operations, and provider failures available as the advanced
+  evidence view.
+
+Hindsight remains authoritative for semantic facts, directives, entities, and
+living project summaries. The application wiki is a rebuildable projection of
+committed source code, not memory and not a second source of truth.
 
 Corrections replace the selected native Hindsight source document and ask
 Hindsight to re-extract its facts. Forget deletes that source and all facts
@@ -75,6 +89,28 @@ Frank reaches the loopback-only Hindsight API through a systemd socket proxy
 bound to the existing private Frank Docker network (`172.16.1.1:9178`). The
 proxy has no database, worker, model, or memory logic. Hindsight remains the
 single source of truth and is not exposed on a public interface.
+
+### Source-grounded application wiki
+
+Frank uses the pinned MIT-licensed FSoft CodeWiki CLI as a native VPS batch
+generator. It is not deployed as another web app, database, agent runtime, or
+container. A refresh clones the current committed `/projects/<slug>` revision
+into a temporary read-only working directory, so it never changes or includes
+uncommitted work in the canonical checkout. Completed Markdown and Mermaid
+artifacts are atomically published beneath
+`/srv/frank/data/window/knowledge/<slug>`.
+
+Install or update the pinned generator, then rebuild one project:
+
+```bash
+cd /projects/frank
+bash apps/window/infra/knowledge/deploy.sh
+frank-project-wiki blockwise
+```
+
+Generation is outside Frank's request path. Hermes, Frank, and project work
+continue normally while a bulk wiki refresh runs; Frank reads only the last
+completed artifact set.
 
 ## Operations
 
