@@ -185,7 +185,16 @@ function renderVpsEntries() {
         else selectedVpsFiles.delete(entry.path);
         updateVpsSelectionStatus();
       });
-      row.append(icon, name, checkbox);
+      row.append(icon, name);
+      if (query) {
+        const location = document.createElement("small");
+        const suffix = `/${entry.name}`;
+        location.textContent = String(entry.path || "").endsWith(suffix)
+          ? String(entry.path).slice(0, -suffix.length)
+          : String(entry.path || "VPS");
+        row.append(location);
+      }
+      row.append(checkbox);
     }
     host.append(row);
   }
