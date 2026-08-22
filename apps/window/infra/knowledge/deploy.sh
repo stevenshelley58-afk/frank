@@ -17,14 +17,24 @@ command -v codex >/dev/null || die "Codex CLI is unavailable"
 
 uv_bin="$(command -v uv || true)"
 [[ -n "$uv_bin" ]] || uv_bin="/home/hermes/.local/bin/uv"
-[[ -x "$uv_bin" ]] || die "uv is unavailable"
+python_bin="$(command -v python3.12 || true)"
+[[ -n "$python_bin" ]] || die "Python 3.12 is unavailable"
 
 install -d -o root -g root -m 0755 -- "$install_root"
 if [[ ! -x "$venv/bin/python" ]]; then
-  "$uv_bin" venv --python 3.12 "$venv"
+  if [[ -x "$uv_bin" ]]; then
+    "$uv_bin" venv --python 3.12 "$venv"
+  else
+    "$python_bin" -m venv "$venv"
+  fi
 fi
-"$uv_bin" pip install --python "$venv/bin/python" \
-  "git+https://github.com/FSoft-AI4Code/CodeWiki.git@$codewiki_revision"
+if [[ -x "$uv_bin" ]]; then
+  "$uv_bin" pip install --python "$venv/bin/python" \
+    "git+https://github.com/FSoft-AI4Code/CodeWiki.git@$codewiki_revision"
+else
+  "$venv/bin/python" -m pip install --disable-pip-version-check \
+    "git+https://github.com/FSoft-AI4Code/CodeWiki.git@$codewiki_revision"
+fi
 
 install -o root -g root -m 0755 -- "$script_dir/generate.sh" /usr/local/sbin/frank-project-wiki
 CODEWIKI_NO_KEYRING=1 "$venv/bin/codewiki" config set \

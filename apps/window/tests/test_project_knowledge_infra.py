@@ -14,6 +14,8 @@ class ProjectKnowledgeInfraTests(unittest.TestCase):
         self.assertIn("00138da6ab25f0b0aad58d42c74a97d78b6547a7", deploy)
         self.assertIn("FSoft-AI4Code/CodeWiki.git@$codewiki_revision", deploy)
         self.assertIn("--provider codex", deploy)
+        self.assertIn('python3.12', deploy)
+        self.assertIn('-m pip install', deploy)
         self.assertNotIn("docker", deploy.lower())
         self.assertIn('repo="/projects/$slug"', generate)
         self.assertIn("git clone --quiet --no-hardlinks", generate)
