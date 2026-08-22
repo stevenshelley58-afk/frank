@@ -41,6 +41,9 @@ ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accou
 PROJECTS_FILE = Path(os.environ.get("PROJECTS_STORE_FILE", str(CHAT_DIR / "projects.json")))
 DATA_DIR = CHAT_DIR
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
+TEMPLATE_RELEASE_ROOT = Path(os.environ.get(
+    "AD_TEMPLATE_GENERATOR_RELEASE_ROOT", "/data/releases/ad-template-generator"
+)).resolve()
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
 HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
@@ -96,6 +99,22 @@ AD_STUDIO_PLACEMENTS = {"square", "portrait", "story"}
 AD_STUDIO_IMAGE_EXTENSIONS = {
     ".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg",
     ".png", ".tif", ".tiff", ".webp",
+}
+TEMPLATE_RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+TEMPLATE_RELEASE_EXTENSIONS = {
+    ".json", ".png", ".webp", ".jpg", ".jpeg", ".woff", ".woff2", ".ttf", ".otf",
+}
+TEMPLATE_RELEASE_MAX_BYTES = int(os.environ.get("AD_TEMPLATE_GENERATOR_RELEASE_MAX_BYTES", str(100 * 1024 * 1024)))
+TEMPLATE_RELEASE_MIME_TYPES = {
+    ".json": "application/json",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
 }
 ACCOUNT_FIELDS = {
     "project_id", "kind", "name", "identity", "provider", "purpose",
@@ -1445,6 +1464,71 @@ def ad_studio_run_artifact(run_id: str, name: str):
         return Response(data, mimetype=upstream.headers.get_content_type(), headers={"Cache-Control": "private, no-store"})
     except Exception as error:
         return _hermes_error(error)
+
+
+def _template_release_target(release_id: str, artifact: str) -> Path | None:
+    if not TEMPLATE_RELEASE_ID.fullmatch(release_id or ""):
+        return None
+    if not artifact or "\\" in artifact or artifact.startswith("/"):
+        return None
+    parts = artifact.split("/")
+    if any(not part or part in {".", ".."} or part.startswith(".") for part in parts):
+        return None
+    target = (TEMPLATE_RELEASE_ROOT / release_id / Path(*parts)).resolve()
+    try:
+        target.relative_to(TEMPLATE_RELEASE_ROOT)
+    except ValueError:
+        return None
+    if target.suffix.lower() not in TEMPLATE_RELEASE_EXTENSIONS:
+        return None
+    current = TEMPLATE_RELEASE_ROOT
+    try:
+        for part in (release_id, *parts):
+            current = current / part
+            if current.is_symlink():
+                return None
+    except OSError:
+        return None
+    if not target.exists() or not target.is_file() or target.is_symlink():
+        return None
+    try:
+        if target.stat().st_size > TEMPLATE_RELEASE_MAX_BYTES:
+            return None
+    except OSError:
+        return None
+    return target
+
+
+@app.route("/releases/ad-template-generator/<release_id>/<path:artifact>", methods=["GET", "HEAD"])
+def ad_template_generator_release_artifact(release_id: str, artifact: str):
+    target = _template_release_target(release_id, artifact)
+    if target is None:
+        abort(404)
+    try:
+        stat = target.stat()
+        etag = hashlib.sha256(f"{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()
+        if request.if_none_match and request.if_none_match.contains(etag):
+            return Response(status=304, headers={"ETag": f'"{etag}"', "Cache-Control": "public, max-age=300"})
+        content_type = TEMPLATE_RELEASE_MIME_TYPES.get(target.suffix.lower(), mimetypes.guess_type(target.name)[0]) or "application/octet-stream"
+        headers = {
+            "ETag": f'"{etag}"',
+            "Cache-Control": "public, max-age=300",
+            "Content-Length": str(stat.st_size),
+        }
+        if request.method == "HEAD":
+            return Response(status=200, headers=headers, mimetype=content_type)
+
+        def stream():
+            with target.open("rb") as handle:
+                while True:
+                    chunk = handle.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+
+        return Response(stream_with_context(stream()), headers=headers, mimetype=content_type, direct_passthrough=True)
+    except OSError:
+        abort(404)
 
 
 def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):
