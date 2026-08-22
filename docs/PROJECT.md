@@ -42,12 +42,15 @@ contract; tool and agent homes open inside the existing content pane.
 | Responsibility | Path |
 | --- | --- |
 | Frank source | `/projects/frank` |
+| Project source | `/projects/<slug>` |
 | Window data | `/srv/frank/data/window` |
 | Window secrets | `/srv/frank/secrets/window.env` |
-| Shared knowledge | `/srv/vault` |
 | Shared skills | `/srv/skills` |
-| Project source | `/projects/<project>` |
 | Hermes state | `/home/hermes/.hermes` |
 
-The Window container sees only `/projects`, `/srv/vault`, and `/srv/skills`
-through a read-only virtual `/vps` tree.
+The Window container sees only its explicit read-only mounts through the
+virtual `/vps` tree. Hindsight and Hermes state are never mounted into Frank.
+
+The authoritative memory design is [MEMORY.md](MEMORY.md): one Hindsight
+provider in Hermes' `default` profile, with one bank derived from each bound
+project workspace slug.

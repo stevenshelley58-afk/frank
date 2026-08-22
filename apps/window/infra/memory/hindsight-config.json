@@ -1,0 +1,31 @@
+{
+  "mode": "local_embedded",
+  "profile": "hermes",
+  "bank_id": "steven-unassigned",
+  "bank_id_template": "steven-{workspace}",
+  "bank_mission": "Remember durable project decisions, requirements, preferences, architecture, outcomes, and unresolved work for Steven and Hermes. Keep each project isolated. Never retain credentials, authentication material, or transient execution noise.",
+  "bank_retain_mission": "Extract durable project facts, decisions, corrections, preferences, constraints, outcomes, and open work. Preserve decision rationale and timestamps when facts may change. Ignore secrets, tokens, credentials, raw tool output, and temporary failures.",
+  "recall_budget": "mid",
+  "memory_mode": "hybrid",
+  "recall_prefetch_method": "recall",
+  "auto_retain": true,
+  "retain_every_n_turns": 1,
+  "retain_async": true,
+  "retain_context": "Hermes project conversation",
+  "retain_source": "hermes",
+  "auto_recall": true,
+  "recall_sync": true,
+  "recall_max_tokens": 2048,
+  "recall_types": [
+    "observation",
+    "world",
+    "experience"
+  ],
+  "recall_indicator": true,
+  "retain_indicator": true,
+  "timeout": 120,
+  "idle_timeout": 0,
+  "llm_provider": "openai_compatible",
+  "llm_base_url": "https://api.deepseek.com/v1",
+  "llm_model": "deepseek-v4-flash"
+}

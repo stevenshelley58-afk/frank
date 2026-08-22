@@ -25,3 +25,6 @@ bash apps/window/deploy.sh
 
 The deployment preserves data, builds the Window image, performs a short
 atomic cutover, and checks container health.
+
+Hermes memory is deployed separately because it belongs to the brain, not the
+Window. See [`docs/MEMORY.md`](docs/MEMORY.md).
