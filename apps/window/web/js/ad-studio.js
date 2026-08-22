@@ -401,7 +401,7 @@ function renderRunDetail(run) {
     }
     actions.append(models, cancel); detail.append(actions);
   }
-  $("#ad-pipeline-run").value = runId;
+  $("#ad-pipeline-run").value = run.id;
   updateEvidence();
   renderEventViews();
 }
