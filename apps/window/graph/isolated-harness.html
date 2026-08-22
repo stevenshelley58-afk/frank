@@ -11,6 +11,7 @@
   <script type="module">
     import { mountGraphWorkbench } from "./graph-workbench.bundle.js";
     const query = new URLSearchParams(location.search);
+    const projectMode = query.get("kind") === "project";
     let fail = false;
     let calls = 0;
     const rendererSequence = [];
@@ -69,6 +70,32 @@
       trace_ref: null,
       extensions: {},
     });
+    const projectSnapshot = () => {
+      const topicLabels = [
+        ["Hermes", "Hindsight", "Project memory", "Recall", "Retained facts", "Session context", "Codex", "Model prompts"],
+        ["Frank", "Project atlas", "Dashboard", "Project view", "Browser interface", "Inspector", "Knowledge tabs", "Files panel"],
+        ["Blockwise", "Property campaign", "Real-estate workflow", "Ad Studio", "Creative run", "Image stages", "Campaign brief", "Bulk production"],
+        ["VPS", "Docker deploy", "Health check", "Release", "Runtime", "Worker", "Trace", "Environment"],
+        ["Application API", "Server", "Project workspace", "Source repository", "CodeWiki", "Architecture", "Data flow", "Provider adapter"],
+        ["Project rules", "Owner decisions", "Memory contract", "Workspace isolation", "Release gate", "Source evidence", "Model selection", "Operating policy"],
+      ];
+      const value = snapshot("project", "d");
+      value.nodes = topicLabels.flatMap((labels, topicIndex) => labels.map((label, labelIndex) => ({
+        ...node(`entity-${topicIndex}-${labelIndex}`, label),
+        extensions: { "frank.graph.mentions": 12 - labelIndex },
+      })));
+      value.edges = [];
+      let sourceId = 0;
+      topicLabels.forEach((labels, topicIndex) => {
+        for (let labelIndex = 1; labelIndex < labels.length; labelIndex += 1) {
+          value.edges.push(edge(sourceId++, `entity-${topicIndex}-0`, `entity-${topicIndex}-${labelIndex}`));
+        }
+      });
+      for (let topicIndex = 1; topicIndex < topicLabels.length; topicIndex += 1) {
+        value.edges.push(edge(sourceId++, `entity-0-0`, `entity-${topicIndex}-0`));
+      }
+      return value;
+    };
     const invalidSnapshot = (mode) => {
       const value = snapshot();
       if (mode === "revision") value.graph_revision = "invalid";
@@ -90,10 +117,10 @@
       return value;
     };
     const mounted = mountGraphWorkbench(document.querySelector("#workbench"), {
-      kind: "tool",
+      kind: projectMode ? "project" : "tool",
       entityId: "fixture-tool",
-      lens: "tool.pipeline",
-      title: "Fixture tool",
+      lens: projectMode ? "project.knowledge" : "tool.pipeline",
+      title: projectMode ? "Fixture project atlas" : "Fixture tool",
       load: async () => {
         calls += 1;
         const call = calls;
@@ -110,8 +137,9 @@
           throw new Error("Graph is unavailable.");
         }
         if (query.get("invalid")) return invalidSnapshot(query.get("invalid"));
-        return snapshot();
+        return projectMode ? projectSnapshot() : snapshot("prepare", "a", query.get("large") === "1");
       },
+      ...(projectMode ? { validate: (loaded) => loaded } : {}),
       onRenderer: (renderer) => {
         rendererSequence.push(renderer);
         document.body.dataset.rendererSequence = rendererSequence.join(",");
@@ -136,6 +164,22 @@
         }
       };
       requestAnimationFrame(waitForReady);
+    }
+    if (projectMode && query.get("expand") === "1") {
+      const waitForAtlas = async () => {
+        if (document.querySelector("#workbench").dataset.graphState !== "ready") {
+          requestAnimationFrame(waitForAtlas);
+          return;
+        }
+        const topic = mounted.state.atlas?.topics?.[0];
+        const node = topic?.members?.[0];
+        if (!topic || !node) return;
+        await mounted.state.g6.expandElement(topic.id, { animation: false });
+        await mounted.state.select(node.id, false);
+        document.body.dataset.atlasExpanded = "true";
+        document.body.dataset.atlasSelected = node.label;
+      };
+      requestAnimationFrame(waitForAtlas);
     }
   </script>
 </body>

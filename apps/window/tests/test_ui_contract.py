@@ -26,7 +26,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('["overview", "Overview"]', inspector)
         self.assertIn('["rules", "Rules & facts"]', inspector)
         self.assertIn('["architecture", "How it works"]', inspector)
-        self.assertIn('["map", "Knowledge map"]', inspector)
+        self.assertIn('["map", "Project atlas"]', inspector)
         self.assertIn('mountGraphWorkbench(graphHost', inspector)
         self.assertIn('Living rulebook and explicit Hindsight directives', inspector)
         self.assertIn('renderPage(rulesPage, rulePageBody)', inspector)

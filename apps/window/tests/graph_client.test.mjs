@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { graphEndpoint, validateGraphSnapshot } from "../graph/graph-client.js";
 import { chooseGraphRenderer, MAXGRAPH_NODE_THRESHOLD, MAXGRAPH_EDGE_THRESHOLD } from "../graph/renderer-policy.js";
+import { buildProjectAtlas, MAX_TOPICS } from "../graph/project-atlas.js";
 
 const adversarialCorpus = JSON.parse(readFileSync(new URL("./fixtures/graph/adversarial-validation-corpus.json", import.meta.url), "utf8"));
 
@@ -88,17 +89,70 @@ test("graph client validates the complete provider envelope and GET selectors", 
   assert.throws(() => validateGraphSnapshot({ ...graph, trace_ref: { trace_id: "0123456789abcdef0123456789abcdef" } }, expected));
 });
 
-test("graph workbench selects Sigma for large current-v1 projections", () => {
+test("graph workbench selects G6 for project atlases and preserves tool renderers", () => {
   assert.equal(chooseGraphRenderer(graph), "maxgraph");
+  assert.equal(chooseGraphRenderer(graph, { kind: "project" }), "g6");
   assert.equal(chooseGraphRenderer({ ...graph, nodes: Array.from({ length: MAXGRAPH_NODE_THRESHOLD + 1 }, (_, index) => ({ id: String(index) })) }), "sigma");
   assert.equal(chooseGraphRenderer({ ...graph, edges: Array.from({ length: MAXGRAPH_EDGE_THRESHOLD + 1 }, (_, index) => ({ id: String(index) })) }), "sigma");
+});
+
+test("project atlas clusters Hindsight entities into bounded readable topics", () => {
+  const nodes = Array.from({ length: 18 }, (_, index) => ({
+    id: `entity-${index}`,
+    label: index < 6 ? `Hermes memory ${index}` : index < 12 ? `Frank interface ${index}` : `VPS runtime ${index}`,
+    extensions: { "frank.graph.mentions": 18 - index },
+  }));
+  const edges = nodes.slice(1).map((item, index) => ({
+    id: `edge-${index}`,
+    from: nodes[index].id,
+    to: item.id,
+    extensions: { "frank.graph.weight": 2 },
+  }));
+  const atlas = buildProjectAtlas({ nodes, edges });
+  assert.equal(atlas.nodes.length, nodes.length);
+  assert.equal(atlas.edges.length, edges.length);
+  assert.ok(atlas.topics.length > 1);
+  assert.ok(atlas.topics.length <= MAX_TOPICS);
+  assert.equal(atlas.combos.length, atlas.topics.length);
+  assert.ok(atlas.combos.every((combo) => combo.style.collapsed === true));
+  assert.ok(atlas.nodes.every((item) => item.combo && item.data.topicLabel));
+  assert.deepEqual(atlas.nodes[0].data.neighborIds, [nodes[1].id]);
+});
+
+test("project atlas translates code-like entities into unique plain-English areas", () => {
+  const labels = [
+    "button-secondary", "colors.ink", "--ui-data", "Interface panel",
+    "HERMES_ESCALATION_MODEL", "OpenRouter", "provider config",
+    "blockwise-coverage-audit", "blockwise-defect-investigation", "QA verification",
+  ];
+  const nodes = labels.map((label, index) => ({
+    id: `readable-${index}`,
+    label,
+    extensions: { "frank.graph.mentions": labels.length - index },
+  }));
+  const edges = [
+    [0, 1], [1, 2], [2, 3],
+    [4, 5], [5, 6],
+    [7, 8], [8, 9],
+  ].map(([from, to], index) => ({
+    id: `readable-edge-${index}`,
+    from: nodes[from].id,
+    to: nodes[to].id,
+    extensions: { "frank.graph.weight": 3 },
+  }));
+  const labelsByTopic = buildProjectAtlas({ nodes, edges }).topics.map((topic) => topic.label);
+  assert.ok(labelsByTopic.includes("Interface & design system"));
+  assert.ok(labelsByTopic.includes("Models & providers"));
+  assert.ok(labelsByTopic.includes("Quality & testing"));
+  assert.equal(new Set(labelsByTopic).size, labelsByTopic.length);
+  assert.ok(labelsByTopic.every((label) => !/[._]|--|HERMES|blockwise-/i.test(label)));
 });
 
 test("graph renderer hosts have a bounded, visible layout contract", () => {
   const css = readFileSync(new URL("../graph/graph-workbench.css", import.meta.url), "utf8");
   assert.match(css, /\.graph-renderer-host\s*\{[^}]*position:\s*absolute/);
   assert.match(css, /\.graph-renderer-host\s*\{[^}]*height:\s*100%/);
-  assert.match(css, /\.graph-max-host, \.graph-sigma-host\s*\{[^}]*visibility:\s*hidden/);
+  assert.match(css, /\.graph-max-host, \.graph-sigma-host, \.graph-atlas-host\s*\{[^}]*visibility:\s*hidden/);
   assert.match(css, /data-active/);
   assert.match(readFileSync(new URL("../graph/graph-workbench.js", import.meta.url), "utf8"), /state\.maxHost\.dataset\.active/);
   assert.match(readFileSync(new URL("../graph/graph-workbench.js", import.meta.url), "utf8"), /state\.sigmaHost\.dataset\.active/);
