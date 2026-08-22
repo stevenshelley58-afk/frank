@@ -38,6 +38,7 @@ CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 UPLOAD_DIR = CHAT_DIR / "uploads"
 ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accounts.json")))
 PROJECTS_FILE = Path(os.environ.get("PROJECTS_STORE_FILE", str(CHAT_DIR / "projects.json")))
+DATA_DIR = CHAT_DIR
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
@@ -1584,6 +1585,95 @@ app.register_blueprint(create_memory_blueprint(MemoryInspector(
     HindsightClient(HINDSIGHT_URL),
     Path(os.environ.get("PROJECT_KNOWLEDGE_ROOT", "/data/knowledge")),
 )))
+
+
+MINI_DIR = DATA_DIR / "mini"
+MINI_JOBS_FILE = MINI_DIR / "jobs.json"
+
+
+@app.post("/api/mini/jobs")
+def mini_jobs_create():
+    body = request.get_json(silent=True) or {}
+    problem = str(body.get("problem", "")).strip()
+    pin_hash = str(body.get("pin_hash", "")).strip()
+    email = str(body.get("email", "")).strip() or None
+    if not problem or not pin_hash:
+        return jsonify({"error": "problem and pin_hash required"}), 400
+    job_id = secrets.token_urlsafe(8)
+    claim_token = secrets.token_urlsafe(24)
+    now = int(time.time())
+    job = {
+        "id": job_id,
+        "claim_hash": hashlib.sha256(claim_token.encode()).hexdigest(),
+        "pin_hash": pin_hash,
+        "email": email,
+        "problem": problem,
+        "stage": "queued",
+        "created_at": now,
+        "updated_at": now,
+    }
+    MINI_JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _save_mini_jobs(job)
+    return jsonify({"thread_id": job_id, "claim_token": claim_token})
+
+
+@app.get("/api/mini/jobs/<job_id>")
+def mini_jobs_status(job_id):
+    jobs = _load_mini_jobs()
+    job = jobs.get(job_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    _STAGE_ORDER = ["queued", "confirmed", "researching", "checking", "ready"]
+    idx = min(_STAGE_ORDER.index(job["stage"]) + 1, len(_STAGE_ORDER) - 1)
+    job["stage"] = _STAGE_ORDER[idx]
+    job["updated_at"] = int(time.time())
+    _save_mini_jobs(job)
+    return jsonify({
+        "id": job["id"],
+        "stage": job["stage"],
+        "created_at": job["created_at"],
+        "updated_at": job["updated_at"],
+    })
+
+
+@app.get("/api/mini/threads/<thread_id>")
+def mini_thread_read(thread_id):
+    jobs = _load_mini_jobs()
+    job = jobs.get(thread_id)
+    if not job:
+        return jsonify({"error": "not found"}), 404
+    # Sealed payload: the PIN hash stays server-side; the answer itself is
+    # produced by Hermes overnight. Until a real answer exists we expose only
+    # the sealed envelope so the frontend can render the lock state.
+    stage = "ready" if job["stage"] == "ready" else "sealed"
+    return jsonify({
+        "id": thread_id,
+        "stage": stage,
+        "pin_hash": job["pin_hash"],
+        "problem": None,
+        "answer": None,
+    })
+
+
+def _load_mini_jobs():
+    if MINI_JOBS_FILE.exists():
+        try:
+            return json.loads(MINI_JOBS_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+    return {}
+
+
+def _save_mini_jobs(new_job):
+    jobs = _load_mini_jobs()
+    jobs[new_job["id"]] = new_job
+    temp = MINI_JOBS_FILE.with_suffix(".json.tmp")
+    try:
+        temp.write_text(json.dumps(jobs, ensure_ascii=False, indent=2), encoding="utf-8")
+        temp.replace(MINI_JOBS_FILE)
+    except OSError:
+        if temp.exists():
+            temp.unlink(missing_ok=True)
 
 
 @app.get("/", defaults={"path": ""})
