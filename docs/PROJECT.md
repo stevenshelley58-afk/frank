@@ -62,6 +62,9 @@ one authoritative Hermes session in the existing `default` profile, and binds
 that session to `/projects/<project-id>`. Hermes provisions that directory
 before the first turn; the visible bootstrap turn initializes it or clones the
 requested repository into it. Frank's `/projects` mount remains read-only.
+The canonical `/projects` parent stays root-owned and setgid to the `hermes`
+group so Hermes can create new child workspaces without broadening Frank's
+filesystem access.
 
 The session workspace is the shared scoping key for chat grouping, repository
 instructions, tools, and long-term memory. Memory providers must derive their

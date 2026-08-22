@@ -53,3 +53,8 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("Connections Agent ingress is not configured", deploy)
         self.assertIn("vault/provider status remains setup_needed", deploy)
         self.assertIn("never invent a key or broker URL", deploy)
+
+    def test_deploy_grants_only_hermes_group_project_provisioning(self):
+        deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn("install -d -o root -g hermes -m 2775 -- /projects", deploy)
+        self.assertIn("Hermes user is required for project workspace provisioning", deploy)

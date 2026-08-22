@@ -21,6 +21,14 @@ git -C "$repo" diff --quiet HEAD -- || {
 install -d -m 0700 -- "$secret_dir"
 install -d -m 0750 -- "$data_dir"
 install -d -m 0755 -- "$preview_dir"
+# Hermes provisions new project workspaces before their first turn. Keep the
+# canonical parent root-owned while granting the sole agent runtime a setgid
+# directory in which it can create isolated /projects/<slug> children.
+id hermes >/dev/null 2>&1 || {
+  echo "Hermes user is required for project workspace provisioning" >&2
+  exit 1
+}
+install -d -o root -g hermes -m 2775 -- /projects
 
 if [[ -e "$secret_file" || -L "$secret_file" ]]; then
   [[ -f "$secret_file" && ! -L "$secret_file" ]] || {
