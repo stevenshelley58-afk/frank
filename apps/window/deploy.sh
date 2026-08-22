@@ -8,6 +8,7 @@ secret_file="$secret_dir/window.env"
 caddy_secret_file="$secret_dir/caddy.env"
 data_dir="/srv/frank/data/window"
 preview_dir="/srv/frank/previews"
+mini_preview_dir="$preview_dir/mini"
 
 [[ "$(realpath -e -- "$repo")" == "/projects/frank" ]] || {
   echo "refusing non-canonical Frank repository: $repo" >&2
@@ -31,6 +32,7 @@ id hermes >/dev/null 2>&1 || {
   echo "Hermes user is required for project workspace provisioning" >&2
   exit 1
 }
+install -d -o hermes -g hermes -m 0755 -- "$mini_preview_dir"
 install -d -o root -g hermes -m 2775 -- /projects
 
 # Expose the native loopback Hindsight API only to Frank's existing private
@@ -77,10 +79,34 @@ if [[ ! -f "$secret_file" ]]; then
       fi
     done
   done
+  mini_rate_limit_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+  printf 'MINI_RATE_LIMIT_KEY=%s\n' "$mini_rate_limit_key" >> "$tmp"
+  unset mini_rate_limit_key
   chmod 0600 "$tmp"
   mv -f -- "$tmp" "$secret_file"
   trap - EXIT
 fi
+
+# Older installations predate the public Mini Frank boundary. Add its private
+# rate-limit key once, atomically, while preserving every existing secret.
+if ! grep -q -E '^MINI_RATE_LIMIT_KEY=[^[:space:]]' "$secret_file"; then
+  tmp="$(mktemp "$secret_dir/.window.env.XXXXXX")"
+  trap 'rm -f -- "$tmp"' EXIT
+  cp -- "$secret_file" "$tmp"
+  mini_rate_limit_key="$(python3 -c 'import secrets; print(secrets.token_urlsafe(48))')"
+  printf 'MINI_RATE_LIMIT_KEY=%s\n' "$mini_rate_limit_key" >> "$tmp"
+  unset mini_rate_limit_key
+  chmod 0600 "$tmp"
+  mv -f -- "$tmp" "$secret_file"
+  trap - EXIT
+fi
+
+mini_rate_limit_key="$(grep -E '^MINI_RATE_LIMIT_KEY=' "$secret_file" | tail -n 1 | cut -d= -f2- || true)"
+[[ "$mini_rate_limit_key" =~ ^[A-Za-z0-9_-]{43,}$ ]] || {
+  echo "MINI_RATE_LIMIT_KEY in $secret_file must be a URL-safe secret of at least 43 characters" >&2
+  exit 1
+}
+unset mini_rate_limit_key
 
 # Validate the core Window boundary before any build or container replacement.
 # Private Hermes extensions remain fail-closed when their exact deployment
@@ -161,7 +187,7 @@ done
 }
 
 docker exec frank-window python -c \
-  "import connections_agent, home_platform, server, tool_apps; import memory_inspector; assert connections_agent and home_platform and server and tool_apps and memory_inspector"
+  "import connections_agent, home_platform, server, tool_apps; import memory_inspector, mini_frank; assert connections_agent and home_platform and server and tool_apps and memory_inspector and mini_frank"
 docker exec frank-window python -c \
   "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/health',timeout=5)); assert data['ok'] is True"
 release_dir=/var/lib/frank/release

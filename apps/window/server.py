@@ -22,6 +22,7 @@ from flask import Flask, Response, abort, jsonify, request, send_file, send_from
 
 import home_platform
 import home_defaults
+import mini_frank
 from memory_inspector import HindsightClient, MemoryInspector, create_blueprint as create_memory_blueprint
 from project_store import ProjectStore, ProjectStoreError
 import vault_broker
@@ -1587,93 +1588,20 @@ app.register_blueprint(create_memory_blueprint(MemoryInspector(
 )))
 
 
-MINI_DIR = DATA_DIR / "mini"
-MINI_JOBS_FILE = MINI_DIR / "jobs.json"
-
-
-@app.post("/api/mini/jobs")
-def mini_jobs_create():
-    body = request.get_json(silent=True) or {}
-    problem = str(body.get("problem", "")).strip()
-    pin_hash = str(body.get("pin_hash", "")).strip()
-    email = str(body.get("email", "")).strip() or None
-    if not problem or not pin_hash:
-        return jsonify({"error": "problem and pin_hash required"}), 400
-    job_id = secrets.token_urlsafe(8)
-    claim_token = secrets.token_urlsafe(24)
-    now = int(time.time())
-    job = {
-        "id": job_id,
-        "claim_hash": hashlib.sha256(claim_token.encode()).hexdigest(),
-        "pin_hash": pin_hash,
-        "email": email,
-        "problem": problem,
-        "stage": "queued",
-        "created_at": now,
-        "updated_at": now,
-    }
-    MINI_JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    _save_mini_jobs(job)
-    return jsonify({"thread_id": job_id, "claim_token": claim_token})
-
-
-@app.get("/api/mini/jobs/<job_id>")
-def mini_jobs_status(job_id):
-    jobs = _load_mini_jobs()
-    job = jobs.get(job_id)
-    if not job:
-        return jsonify({"error": "not found"}), 404
-    _STAGE_ORDER = ["queued", "confirmed", "researching", "checking", "ready"]
-    idx = min(_STAGE_ORDER.index(job["stage"]) + 1, len(_STAGE_ORDER) - 1)
-    job["stage"] = _STAGE_ORDER[idx]
-    job["updated_at"] = int(time.time())
-    _save_mini_jobs(job)
-    return jsonify({
-        "id": job["id"],
-        "stage": job["stage"],
-        "created_at": job["created_at"],
-        "updated_at": job["updated_at"],
-    })
-
-
-@app.get("/api/mini/threads/<thread_id>")
-def mini_thread_read(thread_id):
-    jobs = _load_mini_jobs()
-    job = jobs.get(thread_id)
-    if not job:
-        return jsonify({"error": "not found"}), 404
-    # Sealed payload: the PIN hash stays server-side; the answer itself is
-    # produced by Hermes overnight. Until a real answer exists we expose only
-    # the sealed envelope so the frontend can render the lock state.
-    stage = "ready" if job["stage"] == "ready" else "sealed"
-    return jsonify({
-        "id": thread_id,
-        "stage": stage,
-        "pin_hash": job["pin_hash"],
-        "problem": None,
-        "answer": None,
-    })
-
-
-def _load_mini_jobs():
-    if MINI_JOBS_FILE.exists():
-        try:
-            return json.loads(MINI_JOBS_FILE.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            pass
-    return {}
-
-
-def _save_mini_jobs(new_job):
-    jobs = _load_mini_jobs()
-    jobs[new_job["id"]] = new_job
-    temp = MINI_JOBS_FILE.with_suffix(".json.tmp")
-    try:
-        temp.write_text(json.dumps(jobs, ensure_ascii=False, indent=2), encoding="utf-8")
-        temp.replace(MINI_JOBS_FILE)
-    except OSError:
-        if temp.exists():
-            temp.unlink(missing_ok=True)
+app.register_blueprint(mini_frank.create_blueprint(
+    data_root=DATA_DIR,
+    project_view_root=Path(os.environ.get(
+        "MINI_PROJECT_VIEW_ROOT", str(ROOTS["vps"] / "projects" / "mini-frank")
+    )),
+    project_getter=_project_store.get_project,
+    session_creator=_create_project_session,
+    hermes_request=hermes_request,
+    # Keep claim links stable across restarts when a dedicated Mini key has not
+    # yet been provisioned. HERMES_KEY is already a persistent server secret.
+    rate_limit_key=os.environ.get("MINI_RATE_LIMIT_KEY", "").strip() or HERMES_KEY,
+    priority_payment_url=os.environ.get("MINI_PRIORITY_PAYMENT_URL", "").strip(),
+    daily_limit=int(os.environ.get("MINI_DAILY_LIMIT", "3")),
+))
 
 
 @app.get("/mini", defaults={"mini_path": "index.html"}, strict_slashes=False)

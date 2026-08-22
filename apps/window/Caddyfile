@@ -27,6 +27,7 @@ frank.fail {
                 request>headers>Authorization delete
                 request>headers>Proxy-Authorization delete
                 request>headers>X-Frank-Operator-Attestation delete
+                request>headers>X-Mini-Claim delete
                 request>headers>Cookie delete
                 request>uri delete
                 response>headers>Set-Cookie delete
@@ -47,6 +48,48 @@ frank.fail {
                 header_up -Authorization
                 header_up -Proxy-Authorization
                 header_up -Cookie
+                header_down -Set-Cookie
+            }
+        }
+
+        # Mini Frank is the public customer surface. Keep both handlers ahead
+        # of the operator-only fallback so Frank itself remains protected.
+        @mini_api path /api/mini /api/mini/*
+        handle @mini_api {
+            header {
+                Cache-Control "no-store"
+                X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+            }
+            request_body {
+                max_size 1MB
+            }
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -Cookie
+                header_up -X-Frank-Operator-Attestation
+                header_down -Set-Cookie
+            }
+        }
+
+        @mini_ui path /mini /mini/*
+        handle @mini_ui {
+            header {
+                Cache-Control "no-cache"
+                X-Robots-Tag "index, follow"
+                Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-src https://preview.frank.fail; manifest-src 'self'"
+            }
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -Cookie
+                header_up -X-Frank-Operator-Attestation
                 header_down -Set-Cookie
             }
         }
@@ -73,6 +116,16 @@ frank.fail {
 
 preview.frank.fail {
     root * /srv/frank/previews
+    header {
+        -Server
+        X-Content-Type-Options "nosniff"
+        Referrer-Policy "no-referrer"
+        Cross-Origin-Resource-Policy "cross-origin"
+        Content-Security-Policy "frame-ancestors https://frank.fail"
+        Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+        Cache-Control "no-store"
+        X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+    }
     file_server
     try_files {path} {path}/index.html =404
 }

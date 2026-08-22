@@ -10,9 +10,12 @@ class InfraContractTest(unittest.TestCase):
     def test_window_image_copies_all_imported_runtime_modules(self):
         dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("COPY connections_agent.py .", dockerfile)
+        self.assertIn("COPY mini_frank.py .", dockerfile)
         self.assertIn("COPY tool_apps ./tool_apps", dockerfile)
         self.assertIn("COPY tools ./tools", dockerfile)
-        self.assertIn('"import connections_agent, home_platform, server, tool_apps;', (APP / "deploy.sh").read_text(encoding="utf-8"))
+        deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn('"import connections_agent, home_platform, server, tool_apps;', deploy)
+        self.assertIn("import memory_inspector, mini_frank", deploy)
 
     def test_caddy_receives_only_derived_basic_auth_env(self):
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
@@ -26,6 +29,41 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("header_up -X-Frank-Operator-Attestation", caddyfile)
         self.assertIn("header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}", caddyfile)
         self.assertIn("request>headers>X-Frank-Operator-Attestation delete", caddyfile)
+        self.assertIn("request>headers>X-Mini-Claim delete", caddyfile)
+
+    def test_mini_routes_are_public_without_exposing_operator_attestation(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        mini_api = caddyfile.index("@mini_api path /api/mini /api/mini/*")
+        mini_ui = caddyfile.index("@mini_ui path /mini /mini/*")
+        basic_auth = caddyfile.index("basic_auth")
+        self.assertLess(mini_api, basic_auth)
+        self.assertLess(mini_ui, basic_auth)
+        public_routes = caddyfile[mini_api:basic_auth]
+        self.assertNotIn("{$FRANK_BASIC_AUTH_HASH}", public_routes)
+        self.assertIn("header_up -X-Frank-Operator-Attestation", public_routes)
+        self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"', public_routes)
+        self.assertIn('X-Robots-Tag "index, follow"', public_routes)
+        self.assertIn("script-src 'self'; style-src 'self';", public_routes)
+        self.assertIn("frame-src https://preview.frank.fail", public_routes)
+
+    def test_deploy_provisions_mini_runtime_contract(self):
+        deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn('mini_preview_dir="$preview_dir/mini"', deploy)
+        self.assertIn('install -d -o hermes -g hermes -m 0755 -- "$mini_preview_dir"', deploy)
+        self.assertIn("secrets.token_urlsafe(48)", deploy)
+        self.assertIn("if ! grep -q -E '^MINI_RATE_LIMIT_KEY=[^[:space:]]'", deploy)
+        self.assertIn("^[A-Za-z0-9_-]{43,}$", deploy)
+        self.assertIn("must be a URL-safe secret of at least 43 characters", deploy)
+        self.assertIn('chmod 0600 "$tmp"', deploy)
+
+    def test_customer_previews_are_not_indexed_or_content_sniffed(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        preview = caddyfile.split("preview.frank.fail {", 1)[1].split("tasks.frank.fail {", 1)[0]
+        self.assertIn('X-Content-Type-Options "nosniff"', preview)
+        self.assertIn('Referrer-Policy "no-referrer"', preview)
+        self.assertIn('Cross-Origin-Resource-Policy "cross-origin"', preview)
+        self.assertIn('Content-Security-Policy "frame-ancestors https://frank.fail"', preview)
+        self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"', preview)
 
     def test_release_runbook_orders_private_dependencies_before_frank(self):
         runbook = (ROOT / "docs" / "FRANK_RELEASE_RUNBOOK.md").read_text(encoding="utf-8")
