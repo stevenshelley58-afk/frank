@@ -579,8 +579,18 @@ function setupPipelineForm() {
 
 function normalizeModels(payload) {
   const inventory = payload?.data || payload?.models || payload?.options || [];
+  const providers = Array.isArray(payload?.providers) ? payload.providers : [];
   const capabilities = Array.isArray(payload?.ad_studio_capabilities) ? payload.ad_studio_capabilities : [];
-  const source = [...(Array.isArray(inventory) ? inventory : []), ...capabilities];
+  const providerModels = providers.flatMap((provider) => {
+    const models = Array.isArray(provider?.models) ? provider.models : [];
+    return models.map((model) => ({
+      model: typeof model === "string" ? model : (model?.model || model?.id || model?.name),
+      provider: provider.slug || provider.id || provider.name,
+      available: provider.authenticated ?? provider.configured ?? false,
+      capabilities: typeof model === "object" ? (model.capabilities || []) : [],
+    }));
+  });
+  const source = [...providerModels, ...(Array.isArray(inventory) ? inventory : []), ...capabilities];
   const normalized = source.map((item) => ({
     model: clean(item.model || item.id || item.value || item.name),
     provider: clean(item.provider || item.provider_id || item.gateway || "custom"),
@@ -588,6 +598,7 @@ function normalizeModels(payload) {
     capabilities: item.capabilities || item.input_modalities || [],
     price: item.estimated_price || item.price || item.pricing || null,
     checkedAt: item.price_checked_at || item.pricing_checked_at || "",
+    pricingStale: item.pricing_stale === true,
   })).filter((item) => item.model);
   const merged = new Map();
   for (const item of normalized) {
@@ -603,7 +614,8 @@ function modelReadiness(candidate) {
   if (!match) return "Custom model · compatibility checked when saved";
   const price = match.price ? ` · price ${typeof match.price === "string" ? match.price : "available"}` : " · price unknown";
   const readiness = match.available === true ? "Credential ready" : match.available === false ? "Credential not ready" : "Credential readiness unknown";
-  return `${readiness}${price}${match.checkedAt ? ` · checked ${match.checkedAt}` : ""}`;
+  const timestamp = match.checkedAt ? ` · ${match.pricingStale ? "price last checked" : "checked"} ${match.checkedAt}` : "";
+  return `${readiness}${price}${timestamp}`;
 }
 
 function renderActivePolicySummary() {
@@ -640,7 +652,7 @@ function renderModelSettings() {
     card.innerHTML = `
       <header><div><span>${stage.optional ? "Optional AI stage" : "AI stage"}</span><h4>${escapeHtml(labels[stageId] || stageId)}</h4></div><code>${escapeHtml(stage.capability)}</code></header>
       <div class="ad-model-grid">
-        <label>Provider<input data-field="provider" value="${escapeHtml(stage.primary?.provider || "")}" maxlength="80"></label>
+        <label>Provider<input data-field="provider" value="${escapeHtml(stage.primary?.provider || "")}" maxlength="80" list="ad-provider-options"></label>
         <label>Primary model<input data-field="model" value="${escapeHtml(stage.primary?.model || "")}" maxlength="200" list="ad-model-options"></label>
         <label>Maximum attempts<input data-field="attempts" type="number" min="1" max="10" value="${stage.max_attempts || 1}"></label>
         <label>Timeout (seconds)<input data-field="timeout" type="number" min="1" value="${stage.timeout_seconds || 120}"></label>
@@ -653,6 +665,9 @@ function renderModelSettings() {
   let datalist = $("#ad-model-options");
   if (!datalist) { datalist = document.createElement("datalist"); datalist.id = "ad-model-options"; document.body.append(datalist); }
   datalist.replaceChildren(...modelCatalog.map((item) => { const option = document.createElement("option"); option.value = item.model; option.label = `${item.provider} · ${item.available === true ? "ready" : item.available === false ? "not ready" : "readiness unknown"}`; return option; }));
+  let providerList = $("#ad-provider-options");
+  if (!providerList) { providerList = document.createElement("datalist"); providerList.id = "ad-provider-options"; document.body.append(providerList); }
+  providerList.replaceChildren(...[...new Set(modelCatalog.map((item) => item.provider).filter(Boolean))].sort().map((provider) => { const option = document.createElement("option"); option.value = provider; return option; }));
 }
 
 function policyFromForm() {

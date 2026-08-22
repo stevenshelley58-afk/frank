@@ -1217,7 +1217,7 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "request_id": str(run.get("request_id") or ""),
         "status": str(run.get("status") or "queued"),
         "stage": str(run.get("stage") or "source"),
-        "progress": int(run.get("progress") or 0),
+        "progress": float(run.get("progress") or 0),
         "attention": str(run.get("attention") or ""),
         "trace_id": str(run.get("trace_id") or ""),
         "created_at": run.get("created_at") or now,
@@ -1389,11 +1389,10 @@ def ad_studio_run_events(run_id: str):
         try:
             req = urllib.request.Request(url, headers=headers, method="GET")
             with urllib.request.urlopen(req, timeout=75) as response:
-                while True:
-                    chunk = response.read(4096)
-                    if not chunk:
-                        break
-                    yield chunk
+                # SSE records are small and long-lived. A fixed-size read can
+                # wait for its whole buffer, hiding live activity for minutes.
+                for line in response:
+                    yield line
         except (urllib.error.URLError, TimeoutError):
             yield b"event: disconnected\ndata: {}\n\n"
 

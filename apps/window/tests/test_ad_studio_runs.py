@@ -40,11 +40,12 @@ class AdStudioToolRunApiTest(unittest.TestCase):
 
     @patch("server.hermes_request")
     def test_reads_sanitized_authoritative_status(self, hermes_request):
-        hermes_request.return_value = {"run_id":RUN_ID,"status":"completed","stage":"release","output":{"summary":"Ready","private_path":"/srv/private"},"payload":{"sources":[{"name":"source.png","path":"/srv/private/source.png"}]},"trace_id":"a"*32}
+        hermes_request.return_value = {"run_id":RUN_ID,"status":"completed","stage":"release","progress":0.92,"output":{"summary":"Ready","private_path":"/srv/private"},"payload":{"sources":[{"name":"source.png","path":"/srv/private/source.png"}]},"trace_id":"a"*32}
         response = self.client.get(f"/api/ad-studio/runs/{RUN_ID}")
         self.assertEqual(response.status_code, 200)
         run = response.get_json()["run"]
         self.assertEqual(run["output"], {"summary": "Ready"})
+        self.assertEqual(run["progress"], 0.92)
         self.assertNotIn("path", run["source"])
         hermes_request.assert_called_once_with(f"/v1/tool-runs/{RUN_ID}", timeout=8)
 
