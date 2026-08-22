@@ -36,7 +36,7 @@ class HindsightClient:
         if not self.base_url.startswith("http://"):
             raise ValueError("Hindsight must use the private HTTP bridge")
 
-    def request(self, method: str, path: str, payload: dict | None = None) -> dict:
+    def request(self, method: str, path: str, payload: dict | None = None, *, timeout: float | None = None) -> dict:
         body = None if payload is None else json.dumps(payload).encode("utf-8")
         headers = {"Accept": "application/json"}
         if body is not None:
@@ -45,7 +45,7 @@ class HindsightClient:
             f"{self.base_url}{path}", data=body, headers=headers, method=method,
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+            with urllib.request.urlopen(req, timeout=timeout or self.timeout) as response:
                 raw = response.read(2 * 1024 * 1024 + 1)
         except urllib.error.HTTPError as error:
             raw = error.read(16_384)
@@ -273,7 +273,7 @@ class MemoryInspector:
             }],
             "async": False,
         }
-        result = self.client.request("POST", _path(bank_id, "/memories"), payload)
+        result = self.client.request("POST", _path(bank_id, "/memories"), payload, timeout=120)
         return {"ok": True, "schema": SCHEMA, "bank_id": bank_id, "document_id": document_id, "result": result}
 
     def forget_document(self, project: dict, document_id: str, confirmation: str) -> dict:
@@ -291,7 +291,7 @@ class MemoryInspector:
             abort(400, "recall query is required")
         value = self.client.request("POST", _path(bank_id, "/memories/recall"), {
             "query": query, "budget": "mid", "max_tokens": 2048, "trace": True,
-        })
+        }, timeout=120)
         raw_results = value.get("results") if isinstance(value.get("results"), list) else []
         results = []
         for item in raw_results[:30]:

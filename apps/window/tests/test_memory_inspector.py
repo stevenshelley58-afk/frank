@@ -60,8 +60,8 @@ class FakeHindsight:
             ("DELETE", "/v1/default/banks/steven-blockwise/documents/doc-1"): {"success": True},
         }
 
-    def request(self, method, path, payload=None):
-        self.calls.append((method, path, payload))
+    def request(self, method, path, payload=None, *, timeout=None):
+        self.calls.append((method, path, payload, timeout))
         value = self.responses.get((method, path))
         if value is None:
             raise AssertionError(f"unexpected request: {method} {path}")
@@ -90,7 +90,7 @@ class MemoryInspectorTests(unittest.TestCase):
         self.assertEqual(data["memories"][0]["source_document_id"], "doc-1")
         self.assertEqual(data["documents"][0]["metadata"]["session_id"], "session-1")
         self.assertNotIn("api_key", str(data))
-        self.assertTrue(all("steven-blockwise" in path or path in {"/health", "/version", "/v1/default/banks"} for _, path, _ in self.hindsight.calls))
+        self.assertTrue(all("steven-blockwise" in path or path in {"/health", "/version", "/v1/default/banks"} for _, path, _, _ in self.hindsight.calls))
 
     def test_new_project_without_a_bank_is_a_healthy_empty_state(self):
         self.hindsight.responses[("GET", "/v1/default/banks")] = {"banks": []}
@@ -122,6 +122,7 @@ class MemoryInspectorTests(unittest.TestCase):
         self.assertEqual(item["update_mode"], "replace")
         self.assertEqual(item["metadata"]["source"], "frank-memory-inspector")
         self.assertNotIn("api_key", item["metadata"])
+        self.assertEqual(call[3], 120)
 
     def test_forget_requires_an_exact_confirmation_and_deletes_the_source(self):
         rejected = self.client.delete(
@@ -141,6 +142,7 @@ class MemoryInspectorTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["bank_id"], "steven-blockwise")
         self.assertEqual(self.hindsight.calls[-1][1], "/v1/default/banks/steven-blockwise/memories/recall")
+        self.assertEqual(self.hindsight.calls[-1][3], 120)
         rejected = self.client.post("/api/projects/blockwise/memory/recall", json={"query": "x", "bank_id": "steven-frank"})
         self.assertEqual(rejected.status_code, 400)
 
@@ -148,7 +150,7 @@ class MemoryInspectorTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/projects/nope/memory").status_code, 404)
         self.hindsight.responses[("GET", "/health")] = None
 
-        def unavailable(method, path, payload=None):
+        def unavailable(method, path, payload=None, *, timeout=None):
             raise HindsightUnavailable("Hindsight memory is unavailable.")
 
         self.hindsight.request = unavailable
