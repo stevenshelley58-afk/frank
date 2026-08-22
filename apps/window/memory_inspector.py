@@ -196,17 +196,20 @@ class MemoryInspector:
         bank_id = _bank_id(project)
         health = self.client.request("GET", "/health")
         version = self.client.request("GET", "/version")
-        stats = self.client.request("GET", _path(bank_id, "/stats"))
-        document_data = self.client.request("GET", _path(bank_id, "/documents?limit=100&offset=0"))
+        bank_data = self.client.request("GET", "/v1/default/banks")
+        banks = bank_data.get("banks") if isinstance(bank_data.get("banks"), list) else []
+        bank_exists = any(isinstance(item, dict) and item.get("bank_id") == bank_id for item in banks)
+        stats = self.client.request("GET", _path(bank_id, "/stats")) if bank_exists else {}
+        document_data = self.client.request("GET", _path(bank_id, "/documents?limit=100&offset=0")) if bank_exists else {"items": [], "total": 0}
         raw_documents = document_data.get("items") if isinstance(document_data.get("items"), list) else []
         documents = [item for value in raw_documents if (item := _document_item(value))]
-        memory_data = self.client.request("GET", _path(bank_id, "/memories/list?limit=100&offset=0"))
+        memory_data = self.client.request("GET", _path(bank_id, "/memories/list?limit=100&offset=0")) if bank_exists else {"items": [], "total": 0}
         raw_memories = memory_data.get("items") if isinstance(memory_data.get("items"), list) else []
         memories = [item for value in raw_memories if (item := _memory_item(value, documents, bank_id))]
-        operations_data = self.client.request("GET", _path(bank_id, "/operations?limit=50&offset=0"))
+        operations_data = self.client.request("GET", _path(bank_id, "/operations?limit=50&offset=0")) if bank_exists else {"operations": []}
         raw_operations = operations_data.get("operations") if isinstance(operations_data.get("operations"), list) else []
         operations = [item for value in raw_operations if (item := _operation_item(value))]
-        audit_data = self.client.request("GET", _path(bank_id, "/audit-logs?limit=50&offset=0"))
+        audit_data = self.client.request("GET", _path(bank_id, "/audit-logs?limit=50&offset=0")) if bank_exists else {"items": []}
         raw_audit = audit_data.get("items") if isinstance(audit_data.get("items"), list) else []
         audit = [item for value in raw_audit if (item := _audit_item(value))]
         failed = sum(1 for item in operations if item["status"] == "failed")
@@ -223,6 +226,7 @@ class MemoryInspector:
                 "status": "ready" if health.get("status") in {None, "healthy", "ok"} or health.get("ok") else "attention",
                 "version": _text(version.get("version") or version.get("api_version"), 80),
                 "bank_id": bank_id,
+                "bank_exists": bank_exists,
                 "isolation": "workspace",
             },
             "counts": {

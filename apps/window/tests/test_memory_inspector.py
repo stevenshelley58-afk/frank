@@ -11,6 +11,7 @@ class FakeHindsight:
         self.responses = {
             ("GET", "/health"): {"status": "healthy"},
             ("GET", "/version"): {"version": "0.6.1"},
+            ("GET", "/v1/default/banks"): {"banks": [{"bank_id": "steven-blockwise"}]},
             ("GET", "/v1/default/banks/steven-blockwise/stats"): {
                 "pending_operations": 0, "failed_operations": 1,
             },
@@ -84,11 +85,21 @@ class MemoryInspectorTests(unittest.TestCase):
         data = response.get_json()
         self.assertEqual(data["schema"], SCHEMA)
         self.assertEqual(data["provider"]["bank_id"], "steven-blockwise")
+        self.assertTrue(data["provider"]["bank_exists"])
         self.assertEqual(data["counts"], {"memories": 1, "documents": 1, "pending": 0, "failed": 1})
         self.assertEqual(data["memories"][0]["source_document_id"], "doc-1")
         self.assertEqual(data["documents"][0]["metadata"]["session_id"], "session-1")
         self.assertNotIn("api_key", str(data))
-        self.assertTrue(all("steven-blockwise" in path or path in {"/health", "/version"} for _, path, _ in self.hindsight.calls))
+        self.assertTrue(all("steven-blockwise" in path or path in {"/health", "/version", "/v1/default/banks"} for _, path, _ in self.hindsight.calls))
+
+    def test_new_project_without_a_bank_is_a_healthy_empty_state(self):
+        self.hindsight.responses[("GET", "/v1/default/banks")] = {"banks": []}
+        response = self.client.get("/api/projects/blockwise/memory")
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertFalse(data["provider"]["bank_exists"])
+        self.assertEqual(data["counts"], {"memories": 0, "documents": 0, "pending": 0, "failed": 0})
+        self.assertEqual(data["memories"], [])
 
     def test_source_text_is_loaded_only_by_the_explicit_document_route(self):
         summary = self.client.get("/api/projects/blockwise/memory").get_json()
