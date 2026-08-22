@@ -1,0 +1,16 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://mini-frank.knowledge-page/v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "id", "title", "kind", "status", "summary", "tags", "source_refs", "verified_at", "stale_after", "privacy"],
+  "properties": {
+    "schema": {"const": "schema://mini-frank.knowledge-page/v1"},
+    "id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]+$"},
+    "kind": {"enum": ["governance", "craft", "platform", "pattern", "vertical", "intersection", "ui-pattern"]},
+    "status": {"enum": ["candidate", "approved", "restricted", "deprecated", "rejected"]},
+    "tags": {"type": "array", "items": {"type": "string"}},
+    "source_refs": {"type": "array", "items": {"type": "string"}},
+    "privacy": {"enum": ["public", "internal", "private-client"]}
+  }
+}

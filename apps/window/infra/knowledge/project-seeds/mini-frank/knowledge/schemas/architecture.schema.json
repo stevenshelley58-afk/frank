@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://mini-frank.architecture/v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "id", "title", "kind", "status", "summary", "tags", "source_refs", "verified_at", "stale_after", "privacy", "applies_when", "not_for"],
+  "properties": {
+    "schema": {"const": "schema://mini-frank.architecture/v1"},
+    "applies_when": {"type": "array", "items": {"type": "string"}},
+    "not_for": {"type": "array", "items": {"type": "string"}}
+  }
+}

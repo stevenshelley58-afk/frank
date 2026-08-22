@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "schema://mini-frank.feedback-lesson/v1",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema", "id", "title", "kind", "status", "summary", "tags", "source_refs", "verified_at", "stale_after", "privacy", "sample_size", "recognisability_check"],
+  "properties": {
+    "schema": {"const": "schema://mini-frank.feedback-lesson/v1"},
+    "sample_size": {"type": "integer", "minimum": 1},
+    "recognisability_check": {"const": "passed"}
+  }
+}
