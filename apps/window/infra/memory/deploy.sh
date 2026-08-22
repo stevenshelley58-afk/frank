@@ -32,6 +32,12 @@ sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
   "$hermes_cli" config set memory.provider hindsight >/dev/null
 
 systemctl restart hermes-gateway.service hermes-serve.service
+# The embedded provider is intentionally lazy. Activate it after Hermes restarts
+# before expose.sh probes the loopback listener; otherwise a clean restart can
+# fail even though the configured provider is healthy and available.
+status="$(cd "$hermes_home" && sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" "$hermes_cli" memory status)"
+grep -q -E 'Provider:[[:space:]]+hindsight' <<<"$status" || die "Hermes did not activate Hindsight"
+grep -q 'Status:    available' <<<"$status" || die "the local provider runtime is unavailable"
 bash "$script_dir/expose.sh"
 "$script_dir/check.sh"
 echo "Hindsight is active for workspace-derived project banks."
