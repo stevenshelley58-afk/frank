@@ -26,10 +26,12 @@ assert config["bank_id"] == "steven-unassigned"
 assert config["bank_id_template"] == "steven-{workspace}"
 assert config["auto_recall"] is True and config["auto_retain"] is True
 assert importlib.metadata.version("hindsight-all") == "0.6.1"
+assert importlib.metadata.version("hindsight-api-slim") == "0.6.1"
 assert importlib.metadata.version("hindsight-client") == "0.6.1"
+assert importlib.metadata.version("hindsight-embed") == "0.6.1"
 PY
 
-status="$(sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" "$hermes_cli" memory status)"
+status="$(cd "$hermes_home" && sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" "$hermes_cli" memory status)"
 grep -q 'Provider: hindsight' <<<"$status" || die "Hermes has not activated Hindsight"
-grep -q 'available' <<<"$status" || die "the local provider runtime is unavailable"
+grep -q 'Status:    available' <<<"$status" || die "the local provider runtime is unavailable"
 echo "healthy: native provider active; bank template steven-{workspace}"

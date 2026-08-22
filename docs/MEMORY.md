@@ -68,9 +68,10 @@ bash apps/window/infra/memory/deploy.sh
 ```
 
 The local embedded runtime is vendor-owned and uses Hermes' existing DeepSeek
-credential. Version `0.6.1` is deliberately pinned because Hermes 0.20.1 pins
-the matching client. Upgrade both together when Hermes changes that contract;
-do not patch Hermes source or add a parallel service to chase a newer package.
+credential. The provider suite is deliberately pinned to `0.6.1` because
+Hermes 0.20.1 enforces that client version at runtime. Upgrade the suite and
+Hermes together when that contract changes; do not patch Hermes source or add
+a parallel service to chase a newer package.
 
 The retired graph-backed memory stack, projection API, helper services, and
 database volumes have no supported compatibility path. Restores must restore

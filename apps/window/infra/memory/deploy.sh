@@ -18,10 +18,12 @@ id "$hermes_user" >/dev/null 2>&1 || die "Hermes user does not exist"
 [[ -f "$hermes_home/config.yaml" && ! -L "$hermes_home/config.yaml" ]] || die "Hermes config is unavailable"
 [[ -f "$hermes_home/.env" && ! -L "$hermes_home/.env" ]] || die "Hermes secret environment is unavailable"
 
-# Hermes 0.20.1 pins this client version. Install the matching all-in-one
-# package instead of maintaining a separate database or memory service.
+# Hermes 0.20.1 pins this client version at runtime. Pin the whole vendor suite
+# to the same release so Hermes cannot create a mixed, incompatible install.
 sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
-  "$uv_bin" pip install --python "$hermes_python" "hindsight-all==0.6.1"
+  "$uv_bin" pip install --python "$hermes_python" \
+  "hindsight-all==0.6.1" "hindsight-api-slim==0.6.1" \
+  "hindsight-client==0.6.1" "hindsight-embed==0.6.1"
 
 sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
   "$hermes_python" "$script_dir/configure.py" \

@@ -57,6 +57,8 @@ class HindsightMemoryInfraTests(unittest.TestCase):
         check = (INFRA / "check.sh").read_text(encoding="utf-8")
         self.assertIn("config set memory.provider hindsight", deploy)
         self.assertIn('hindsight-all==0.6.1', deploy)
+        self.assertIn('hindsight-client==0.6.1', deploy)
+        self.assertIn('hindsight-embed==0.6.1', deploy)
         self.assertNotIn("agent_workspace=", deploy)
         self.assertIn('steven-{workspace}', check)
 
