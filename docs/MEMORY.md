@@ -37,8 +37,9 @@ write to a project bank.
    the turn, and offers explicit retain, recall, and reflect tools.
 4. Hermes retains completed turns asynchronously and keeps its small built-in
    memory files active for high-value operator preferences.
-5. Frank renders only safe Hermes output and memory status. Raw provider state
-   never crosses the Window boundary.
+5. Frank's project Memory inspector reads the native Hindsight API through a
+   private VPS bridge and renders an allowlisted view of the project's bank.
+   Frank never stores a second copy of provider state.
 
 The extraction mission keeps durable decisions, requirements, corrections,
 preferences, outcomes, and open work. It excludes credentials, tokens, raw
@@ -57,10 +58,29 @@ one bank per repository. Its derived bank must equal the Hermes name
 `steven-<slug>`; do not include the client name in the bank identity. This lets
 Codex and Hermes share project memory without sharing sessions or profiles.
 
+## Frank inspector
+
+Open a project and choose **Memory**. The inspector shows the resolved bank,
+provider health and version, retained facts, source documents, timestamps,
+tags, asynchronous operations, and failures. A recall test runs against only
+the selected project bank.
+
+Corrections replace the selected native Hindsight source document and ask
+Hindsight to re-extract its facts. Forget deletes that source and all facts
+derived from it after explicit confirmation. Source text is loaded only when
+the operator opens that source; project summaries never include raw retained
+conversation text.
+
+Frank reaches the loopback-only Hindsight API through a systemd socket proxy
+bound to the existing private Frank Docker network (`172.16.1.1:9178`). The
+proxy has no database, worker, model, or memory logic. Hindsight remains the
+single source of truth and is not exposed on a public interface.
+
 ## Operations
 
-The committed deployment contract lives in `apps/window/infra/memory` and is
-run independently of a Frank Window release:
+The committed deployment contract lives in `apps/window/infra/memory`. The
+provider can be deployed independently, and every Frank release verifies the
+private inspector bridge before replacing the Window container:
 
 ```bash
 cd /projects/frank
@@ -72,6 +92,10 @@ credential. The provider suite is deliberately pinned to `0.6.1` because
 Hermes 0.20.1 enforces that client version at runtime. Upgrade the suite and
 Hermes together when that contract changes; do not patch Hermes source or add
 a parallel service to chase a newer package.
+
+Nothing in this contract starts Docker on a developer machine. Hermes and
+Hindsight run natively on the VPS. Frank's normal production container build
+also runs on the VPS.
 
 The retired graph-backed memory stack, projection API, helper services, and
 database volumes have no supported compatibility path. Restores must restore

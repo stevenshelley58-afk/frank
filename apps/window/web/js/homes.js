@@ -1,5 +1,6 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js";
+import { mountMemoryInspector } from "./memory-inspector.js";
 
 const graphMounts = new WeakMap();
 
@@ -27,6 +28,8 @@ const homeState = {
   savePending: false,
   refreshTimer: null,
   grid: null,
+  memoryInspector: null,
+  memoryOpen: false,
 };
 
 const PROJECT_GRID_COLUMNS = 12;
@@ -202,6 +205,9 @@ function setTopActions(controls = []) {
 
 export function clearHomeActions() {
   homeState.controller?.abort();
+  homeState.memoryInspector?.dispose?.();
+  homeState.memoryInspector = null;
+  homeState.memoryOpen = false;
   window.clearInterval(homeState.refreshTimer);
   homeState.refreshTimer = null;
   destroyHomeGrid();
@@ -236,8 +242,15 @@ function homeControls() {
   const controls = [];
   const isConnectionsHome = homeState.home?.entity.kind === "tool" && homeState.home?.entity.id === "connections";
   const isProject = homeState.home?.entity.kind === "project";
+  if (isProject && homeState.memoryOpen) {
+    controls.push(button("Back to dashboard", closeMemoryInspector, "home-action home-action-primary"));
+    controls.push(button("Refresh memory", () => homeState.memoryInspector?.refresh?.()));
+    setTopActions(controls);
+    return;
+  }
   if (isProject) {
     controls.push(button("New project chat", () => window.dispatchEvent(new CustomEvent("frank:new-project-chat", { detail: { project_id: homeState.home.entity.id } })), "home-action home-action-primary"));
+    controls.push(button("Memory", openMemoryInspector));
   }
   if (isConnectionsHome) {
     controls.push(button("Manage connections", () => window.dispatchEvent(new CustomEvent("frank:connections")), "home-action home-action-primary"));
@@ -254,6 +267,30 @@ function homeControls() {
     controls.push(save);
   }
   setTopActions(controls);
+}
+
+function openMemoryInspector() {
+  if (!isProjectHome() || homeState.memoryOpen) return;
+  homeState.memoryOpen = true;
+  homeState.editing = false;
+  homeState.gallery = false;
+  window.clearInterval(homeState.refreshTimer);
+  homeState.refreshTimer = null;
+  destroyHomeGrid();
+  homeState.memoryInspector?.dispose?.();
+  homeState.memoryInspector = mountMemoryInspector({
+    host: homeState.host,
+    project: homeState.home.entity,
+    setStatus: setHomeMessage,
+  });
+  homeControls();
+}
+
+function closeMemoryInspector() {
+  homeState.memoryInspector?.dispose?.();
+  homeState.memoryInspector = null;
+  homeState.memoryOpen = false;
+  renderHome();
 }
 
 function beginEditing(openGallery) {
@@ -1005,6 +1042,7 @@ function renderHome() {
 
 async function openHome(kind, id, host) {
   homeState.controller?.abort();
+  homeState.memoryInspector?.dispose?.();
   window.clearInterval(homeState.refreshTimer);
   homeState.refreshTimer = null;
   destroyHomeGrid();
@@ -1016,6 +1054,8 @@ async function openHome(kind, id, host) {
   homeState.editing = false;
   homeState.gallery = false;
   homeState.savePending = false;
+  homeState.memoryInspector = null;
+  homeState.memoryOpen = false;
   host.classList.add("home-grid");
   destroyGraphMounts(host);
   host.replaceChildren(node("p", "home-loading", "Loading home…"));

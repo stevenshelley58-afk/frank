@@ -32,5 +32,6 @@ sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
   "$hermes_cli" config set memory.provider hindsight >/dev/null
 
 systemctl restart hermes-gateway.service hermes-serve.service
+bash "$script_dir/expose.sh"
 "$script_dir/check.sh"
 echo "Hindsight is active for workspace-derived project banks."

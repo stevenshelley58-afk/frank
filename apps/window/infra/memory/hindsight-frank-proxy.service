@@ -1,0 +1,10 @@
+[Unit]
+Description=Private Frank proxy to the loopback-only Hindsight API
+After=network.target
+
+[Service]
+ExecStart=/lib/systemd/systemd-socket-proxyd 127.0.0.1:9177
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+NoNewPrivileges=true

@@ -13,6 +13,9 @@ die() { echo "Hindsight check: $*" >&2; exit 1; }
 [[ "$(stat -c '%a' -- "$hermes_home/.env")" == 600 ]] || die "Hermes environment must be 0600"
 systemctl is-active --quiet hermes-gateway.service || die "Hermes gateway is not active"
 systemctl is-active --quiet hermes-serve.service || die "Hermes serve is not active"
+systemctl is-active --quiet hindsight-frank-proxy.socket || die "the private Frank inspector bridge is not active"
+curl --fail --silent --show-error --max-time 5 http://172.16.1.1:9178/health >/dev/null \
+  || die "the private Frank inspector bridge is unavailable"
 
 sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
   "$hermes_python" - "$config" <<'PY'

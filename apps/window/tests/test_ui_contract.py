@@ -7,6 +7,19 @@ WEB = Path(__file__).resolve().parents[1] / "web"
 
 
 class UiContractTest(unittest.TestCase):
+    def test_project_memory_inspector_uses_hindsight_provider_truth(self):
+        homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
+        inspector = (WEB / "js" / "memory-inspector.js").read_text(encoding="utf-8")
+
+        self.assertIn('button("Memory", openMemoryInspector)', homes)
+        self.assertIn('mountMemoryInspector', homes)
+        self.assertIn('/memory/recall', inspector)
+        self.assertIn('/memory/documents/', inspector)
+        self.assertIn('method: "DELETE"', inspector)
+        self.assertIn('confirmation: `FORGET ${source.id}`', inspector)
+        self.assertIn('Frank displays provider truth and never stores a second copy', inspector)
+        self.assertNotIn("localStorage", inspector)
+
     def test_ad_studio_is_a_real_tool_surface_backed_by_hermes(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")

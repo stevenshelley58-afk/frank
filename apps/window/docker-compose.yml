@@ -17,6 +17,7 @@ services:
       HERMES_SHARED_UPLOAD_ROOT: /srv/frank/data/window/uploads
       HERMES_API_URL: http://172.16.1.1:8642
       HERMES_PROFILE: default
+      HINDSIGHT_API_URL: http://172.16.1.1:9178
       CONNECTIONS_STORE_FILE: /data/connections.json
       CONNECTION_ACTIONS_FILE: /data/connection-actions.jsonl
       CONNECTION_PLANS_FILE: /data/connection-plans.json

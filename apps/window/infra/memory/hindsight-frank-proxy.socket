@@ -1,0 +1,12 @@
+[Unit]
+Description=Private Frank socket for the Hermes Hindsight API
+After=docker.service
+Requires=docker.service
+
+[Socket]
+ListenStream=172.16.1.1:9178
+Accept=no
+NoDelay=true
+
+[Install]
+WantedBy=sockets.target

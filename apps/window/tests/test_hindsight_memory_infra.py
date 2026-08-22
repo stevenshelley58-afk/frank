@@ -62,6 +62,17 @@ class HindsightMemoryInfraTests(unittest.TestCase):
         self.assertNotIn("agent_workspace=", deploy)
         self.assertIn('steven-{workspace}', check)
 
+    def test_frank_inspector_bridge_is_private_and_has_no_memory_runtime(self):
+        expose = (INFRA / "expose.sh").read_text(encoding="utf-8")
+        socket = (INFRA / "hindsight-frank-proxy.socket").read_text(encoding="utf-8")
+        service = (INFRA / "hindsight-frank-proxy.service").read_text(encoding="utf-8")
+        self.assertIn("172.16.1.1:9178", socket)
+        self.assertIn("127.0.0.1:9177", service)
+        self.assertIn("systemd-socket-proxyd", service)
+        self.assertIn("/health", expose)
+        self.assertNotIn("docker ", expose)
+        self.assertNotIn("hindsight-api", service)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,6 +30,10 @@ id hermes >/dev/null 2>&1 || {
 }
 install -d -o root -g hermes -m 2775 -- /projects
 
+# Expose the native loopback Hindsight API only to Frank's existing private
+# Docker network. This is a socket proxy, not another memory service or store.
+bash "$app/infra/memory/expose.sh"
+
 if [[ -e "$secret_file" || -L "$secret_file" ]]; then
   [[ -f "$secret_file" && ! -L "$secret_file" ]] || {
     echo "refusing non-regular Frank secret file: $secret_file" >&2
@@ -154,7 +158,7 @@ done
 }
 
 docker exec frank-window python -c \
-  "import connections_agent, home_platform, server, tool_apps; assert connections_agent and home_platform and server and tool_apps"
+  "import connections_agent, home_platform, server, tool_apps; import memory_inspector; assert connections_agent and home_platform and server and tool_apps and memory_inspector"
 docker exec frank-window python -c \
   "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/health',timeout=5)); assert data['ok'] is True"
 release_dir=/var/lib/frank/release

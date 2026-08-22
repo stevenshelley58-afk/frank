@@ -20,6 +20,7 @@ from flask import Flask, Response, abort, jsonify, request, send_file, send_from
 
 import home_platform
 import home_defaults
+from memory_inspector import HindsightClient, MemoryInspector, create_blueprint as create_memory_blueprint
 from project_store import ProjectStore, ProjectStoreError
 import vault_broker
 from graph.provider import (
@@ -41,6 +42,7 @@ MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 10
 HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
 HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
+HINDSIGHT_URL = os.environ.get("HINDSIGHT_API_URL", "http://172.16.1.1:9178").rstrip("/")
 ROOTS = {
     # The container receives only the explicitly approved read-only VPS mounts
     # beneath /vps. This presents one familiar tree without exposing the
@@ -1138,6 +1140,7 @@ home_platform.configure(
 app.register_blueprint(home_platform.api)
 app.register_blueprint(create_graph_blueprint(_graph_provider))
 app.register_blueprint(vault_broker.api)
+app.register_blueprint(create_memory_blueprint(MemoryInspector(_project_store.get_project, HindsightClient(HINDSIGHT_URL))))
 
 
 @app.get("/", defaults={"path": ""})
