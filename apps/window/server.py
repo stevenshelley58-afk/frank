@@ -1208,7 +1208,7 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     safe_output_keys = {
-        "summary", "preview", "previews", "artifacts", "qa", "usage", "cost",
+        "preview", "previews", "artifacts", "qa", "usage", "cost",
         "release_id", "template_pack", "template_pack_ref", "checksum", "sha256",
         "signature", "compatibility", "imports", "trace_ref",
     }
@@ -1425,6 +1425,24 @@ def ad_studio_run_download(run_id: str):
     if disposition:
         response_headers["Content-Disposition"] = disposition
     return Response(stream_with_context(generate()), mimetype=upstream.headers.get_content_type(), headers=response_headers)
+
+
+@app.get("/api/ad-studio/runs/<run_id>/artifacts/<name>")
+def ad_studio_run_artifact(run_id: str, name: str):
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", name):
+        abort(404)
+    url = hermes_base() + _tool_run_path(run_id, f"/artifacts/{urllib.parse.quote(name, safe='')}")
+    headers = {"Accept": "image/png,image/jpeg,image/webp"}
+    if HERMES_KEY:
+        headers["Authorization"] = f"Bearer {HERMES_KEY}"
+    try:
+        upstream = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15)
+        data = upstream.read(20 * 1024 * 1024 + 1)
+        if len(data) > 20 * 1024 * 1024:
+            abort(413)
+        return Response(data, mimetype=upstream.headers.get_content_type(), headers={"Cache-Control": "private, no-store"})
+    except Exception as error:
+        return _hermes_error(error)
 
 
 def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):

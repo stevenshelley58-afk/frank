@@ -44,7 +44,7 @@ class AdStudioToolRunApiTest(unittest.TestCase):
         response = self.client.get(f"/api/ad-studio/runs/{RUN_ID}")
         self.assertEqual(response.status_code, 200)
         run = response.get_json()["run"]
-        self.assertEqual(run["output"], {"summary": "Ready"})
+        self.assertEqual(run["output"], {})
         self.assertEqual(run["progress"], 0.92)
         self.assertNotIn("path", run["source"])
         hermes_request.assert_called_once_with(f"/v1/tool-runs/{RUN_ID}", timeout=8)
