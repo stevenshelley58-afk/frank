@@ -35,16 +35,35 @@ class InfraContractTest(unittest.TestCase):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         mini_api = caddyfile.index("@mini_api path /api/mini /api/mini/*")
         mini_ui = caddyfile.index("@mini_ui path /mini /mini/*")
+        fallback = caddyfile.index("        handle {\n            import frank_private_response_headers", mini_ui)
         basic_auth = caddyfile.index("basic_auth")
         self.assertLess(mini_api, basic_auth)
         self.assertLess(mini_ui, basic_auth)
         public_routes = caddyfile[mini_api:basic_auth]
+        mini_api_route = caddyfile[mini_api:mini_ui]
+        mini_ui_route = caddyfile[mini_ui:fallback]
+        api_policy = caddyfile.split("(frank_mini_api_response_headers) {", 1)[1].split("}", 2)[0]
+        ui_policy = caddyfile.split("(frank_mini_ui_response_headers) {", 1)[1].split("}", 2)[0]
         self.assertNotIn("{$FRANK_BASIC_AUTH_HASH}", public_routes)
         self.assertIn("header_up -X-Frank-Operator-Attestation", public_routes)
-        self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"', public_routes)
-        self.assertIn('X-Robots-Tag "index, follow"', public_routes)
-        self.assertIn("script-src 'self'; style-src 'self';", public_routes)
-        self.assertIn("frame-src https://preview.frank.fail", public_routes)
+        self.assertIn("import frank_mini_api_response_headers", mini_api_route)
+        self.assertIn("import frank_mini_ui_response_headers", mini_ui_route)
+        self.assertNotIn("frank_private_response_headers", mini_api_route)
+        self.assertNotIn("frank_private_response_headers", mini_ui_route)
+        self.assertIn('Cache-Control "no-store"', api_policy)
+        self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"', api_policy)
+        self.assertIn('Cache-Control "public, max-age=300"', ui_policy)
+        self.assertIn('X-Robots-Tag "index, follow"', ui_policy)
+        self.assertIn("script-src 'self'; style-src 'self';", ui_policy)
+        self.assertIn("frame-src https://preview.frank.fail", ui_policy)
+        self.assertNotIn("defer", ui_policy)
+
+    def test_private_response_policy_is_scoped_to_pavone_and_authenticated_frank(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        self.assertIn("import frank_common_security_headers", caddyfile)
+        self.assertEqual(caddyfile.count("import frank_private_response_headers"), 3)
+        fallback = caddyfile[caddyfile.index("        handle {\n            import frank_private_response_headers"):]
+        self.assertLess(fallback.index("import frank_private_response_headers"), fallback.index("basic_auth"))
 
     def test_deploy_provisions_mini_runtime_contract(self):
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
