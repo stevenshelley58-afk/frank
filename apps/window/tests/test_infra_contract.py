@@ -89,6 +89,10 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("/srv/frank/data/window:/data", compose)
         self.assertNotIn("template-release", compose)
 
+    def test_deploy_recreates_caddy_so_bound_config_uses_current_revision(self):
+        deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn("docker rm -f frank-window frank-caddy frank-frank-caddy-1", deploy)
+
     def test_deploy_provisions_mini_runtime_contract(self):
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
         self.assertIn('mini_preview_dir="$preview_dir/mini"', deploy)
