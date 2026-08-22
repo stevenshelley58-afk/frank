@@ -46,7 +46,17 @@ class TemplateReleaseRouteTest(unittest.TestCase):
         response = self.client.head("/releases/ad-template-generator/release-1/pack.json")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.data, b"")
-        self.assertEqual(self.client.get("/releases/ad-template-generator/release-1/").status_code, 404)
+        for path in (
+            "/releases/ad-template-generator",
+            "/releases/ad-template-generator/",
+            "/releases/ad-template-generator/release-1",
+            "/releases/ad-template-generator/release-1/",
+        ):
+            directory_response = self.client.get(path)
+            try:
+                self.assertEqual(directory_response.status_code, 404, path)
+            finally:
+                directory_response.close()
 
     def test_traversal_private_extensions_and_non_files_fail(self):
         cases = (

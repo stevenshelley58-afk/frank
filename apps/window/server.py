@@ -1697,6 +1697,8 @@ def mini_spa(mini_path: str):
 @app.get("/", defaults={"path": ""})
 @app.get("/<path:path>")
 def spa(path: str):
+    if path == "releases/ad-template-generator" or path.startswith("releases/ad-template-generator/"):
+        abort(404)
     candidate = (WEB / path).resolve()
     try:
         candidate.relative_to(WEB)
