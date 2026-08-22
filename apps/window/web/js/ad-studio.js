@@ -408,23 +408,67 @@ function renderRunDetail(run) {
 
 const EVENT_KINDS = ["command.accepted", "command.queued", "command.cancel-requested", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "approval.requested", "approval.approved", "approval.rejected", "model-policy.changed", "release.published"];
 
+const SAFE_TOOL_LABELS = {
+  terminal: "VPS command",
+  exec_command: "VPS command",
+  execute_code: "VPS calculation",
+  read_file: "Inspect private artifact",
+  write_file: "Create private artifact",
+  search_files: "Find builder assets",
+  skill_view: "Load builder instructions",
+  browser: "Browser check",
+};
+
+function redactOperatorText(value) {
+  return clean(value)
+    .replace(/[A-Za-z]:\\[^\s"']+/g, "[private path]")
+    .replace(/\/(?:home|srv|opt|projects|root|tmp|var|etc)\/[^\s"']+/g, "[private path]")
+    .replace(/\b(?:sk|pk|api|key|token|secret)[-_][A-Za-z0-9_-]{8,}\b/gi, "[redacted]")
+    .slice(0, 240);
+}
+
+function safeEventData(event) {
+  const data = event?.data || {};
+  if (event.kind === "provider.attempt") return { attempt: data.attempt, provider: data.provider, model: data.model, timeout_seconds: data.timeout_seconds };
+  if (event.kind === "provider.fallback") return { attempt: data.attempt, from_model: data.from_model, to_model: data.to_model, reason: redactOperatorText(data.reason) };
+  if (event.kind === "stage.started") return { summary: `Started ${String(event.node_id || "pipeline stage").replaceAll("-", " ")}` };
+  if (event.kind === "tool.started" || event.kind === "tool.completed") return { tool: SAFE_TOOL_LABELS[data.tool] || "VPS builder tool", duration_seconds: data.duration_seconds, error: Boolean(data.error) };
+  if (event.kind === "run.failed") return { error: redactOperatorText(data.error) || "Run failed; protected diagnostics remain in Hermes." };
+  if (event.kind === "release.published") return { release_id: data.release_id, template_pack_ref: data.template_pack_ref, sha256: data.sha256, compatibility: data.compatibility };
+  return Object.fromEntries(Object.entries(data).filter(([key]) => ["attempt", "provider", "model", "cost_usd", "input_tokens", "output_tokens", "gate", "choices", "policy_revision", "will_resume", "release_id", "sha256", "compatibility"].includes(key)));
+}
+
+function safeEventSummary(event) {
+  const data = safeEventData(event);
+  if (event.kind === "tool.started" || event.kind === "tool.completed") return data.tool;
+  if (event.kind === "stage.started") return data.summary;
+  if (event.kind === "provider.attempt") return `${data.provider || "provider"} · ${data.model || "model"} · attempt ${data.attempt || 1}`;
+  if (event.kind === "provider.fallback") return `${data.from_model || "model"} → ${data.to_model || "fallback"}`;
+  if (event.kind === "run.failed") return data.error;
+  return event.node_id || data.gate || data.release_id || "Recorded";
+}
+
+function safeEventForTrace(event) {
+  return { sequence: event.sequence, timestamp: event.timestamp, kind: event.kind, status: event.status, node_id: event.node_id, trace_id: event.trace_id, data: safeEventData(event) };
+}
+
 function renderEventViews() {
   const host = $("#ad-run-events");
   if (host) {
     host.replaceChildren();
-    const visible = runEvents.slice(-80);
+    const visible = runEvents.slice(-24);
     if (!visible.length) host.innerHTML = '<p class="ad-evidence-empty">Waiting for the first durable event…</p>';
     for (const event of visible) {
       const row = document.createElement("div"); row.className = `ad-event ad-event-${event.status || "ok"}`;
       const time = document.createElement("time"); time.textContent = new Date(Number(event.timestamp || 0) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       const copy = document.createElement("div");
       const strong = document.createElement("strong"); strong.textContent = String(event.kind || "activity").replaceAll(".", " · ");
-      const p = document.createElement("p"); p.textContent = event.data?.summary || event.data?.tool || event.data?.error || event.node_id || "Recorded";
+      const p = document.createElement("p"); p.textContent = safeEventSummary(event);
       copy.append(strong, p); row.append(time, copy); host.append(row);
     }
   }
   const trace = $("#ad-full-trace");
-  if (trace) trace.textContent = runEvents.length ? JSON.stringify(runEvents, null, 2) : "No events have been recorded for this run yet.";
+  if (trace) trace.textContent = runEvents.length ? JSON.stringify(runEvents.map(safeEventForTrace), null, 2) : "No events have been recorded for this run yet.";
   updateEvidence();
 }
 
