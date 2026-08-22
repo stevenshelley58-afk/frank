@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
 <link rel="stylesheet" href="/app.css?v=20260822-ad-studio">
+<link rel="stylesheet" href="/ad-studio-picker.css?v=20260822-vps-picker">
 </head>
 <body>
 <div class="app">
@@ -181,12 +182,12 @@
           <div class="ad-studio-panel is-on" data-ad-panel="run">
             <form class="ad-run-form" id="ad-run-form">
               <div class="ad-section-heading"><div><span>New job</span><h3>Source image → ad template</h3></div><span id="ad-run-mode">Single</span></div>
-              <label class="ad-drop" id="ad-drop">
-                <input type="file" id="ad-source-files" accept="image/*" multiple>
+              <input type="file" id="ad-source-files" accept="image/*" multiple hidden>
+              <button type="button" class="ad-drop" id="ad-drop">
                 <span class="ad-drop-mark" aria-hidden="true">+</span>
                 <strong>Choose source images</strong>
-                <small>Drop one image for a single run or several for a batch.</small>
-              </label>
+                <small>Choose from this device or the VPS, or drop images here.</small>
+              </button>
               <div class="ad-source-preview" id="ad-source-preview" aria-live="polite"></div>
               <div class="ad-form-pair">
                 <label>Project<select id="ad-run-project" required><option value="">Loading projects…</option></select></label>
@@ -235,6 +236,25 @@
           </div>
         </div>
       </section>
+
+      <dialog class="ad-source-dialog" id="ad-source-dialog" aria-labelledby="ad-source-dialog-title">
+        <div class="ad-source-dialog-shell">
+          <header>
+            <div><span class="home-kicker">Source images</span><h2 id="ad-source-dialog-title">Choose from device or VPS</h2></div>
+            <button type="button" class="ad-source-close" id="ad-source-close" aria-label="Close">&times;</button>
+          </header>
+          <section class="ad-source-local">
+            <div><strong>This device</strong><span>Use your computer or phone's normal file search.</span></div>
+            <button type="button" class="ad-source-device" id="ad-source-device">Browse this device</button>
+          </section>
+          <section class="ad-source-vps" aria-labelledby="ad-source-vps-title">
+            <div class="ad-source-vps-head"><div><strong id="ad-source-vps-title">VPS</strong><span>Read-only files available to Frank.</span></div><input id="ad-source-vps-search" type="search" placeholder="Filter this folder" aria-label="Filter this VPS folder"></div>
+            <nav class="ad-source-crumbs" id="ad-source-crumbs" aria-label="VPS folder"></nav>
+            <div class="ad-source-vps-list" id="ad-source-vps-list" aria-live="polite"></div>
+          </section>
+          <footer><span id="ad-source-vps-status">No VPS images selected</span><div><button type="button" class="ad-source-cancel" id="ad-source-cancel">Cancel</button><button type="button" class="ad-primary" id="ad-source-add-vps" disabled>Add selected</button></div></footer>
+        </div>
+      </dialog>
       <section class="view" data-view="entity-home">
         <div class="home-surface">
           <div class="entity-home-heading"><div><span class="home-kicker" id="entity-home-kind">Tool</span><h2 id="entity-home-name">Home</h2></div><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
@@ -425,6 +445,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260822-ad-studio"></script>
+<script type="module" src="/js/app.js?v=20260822-vps-picker"></script>
 </body>
 </html>

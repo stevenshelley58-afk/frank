@@ -2,7 +2,7 @@ import { mount, mountAll } from "./registry.js";
 import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
-import { mountAdStudio } from "./ad-studio.js";
+import { mountAdStudio } from "./ad-studio.js?v=20260822-vps-picker";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -147,20 +147,27 @@ window.addEventListener("frank:new-project-chat", (event) => {
 window.addEventListener("frank:ad-studio-run", (event) => {
   const detail = event.detail || {};
   void (async () => {
-    const files = Array.isArray(detail.files) ? detail.files.filter((file) => file instanceof File) : [];
+    const sources = Array.isArray(detail.sources) ? detail.sources : [];
+    const files = sources.filter((source) => source?.kind === "local" && source.file instanceof File).map((source) => source.file);
+    const vpsFiles = sources.filter((source) => source?.kind === "vps").map((source) => ({ root: source.root || "vps", path: source.path }));
     const projectId = String(detail.projectId || "").trim();
-    if (!files.length) throw new Error("Choose at least one source image.");
+    if (!files.length && !vpsFiles.length) throw new Error("Choose at least one source image.");
     if (!projectId) throw new Error("Choose a project.");
-    const fallbackName = files.length === 1 ? files[0].name.replace(/\.[^.]+$/, "") : `${files.length} source images`;
+    const sourceCount = files.length + vpsFiles.length;
+    const fallbackName = sourceCount === 1 ? String(sources[0]?.name || "source image").replace(/\.[^.]+$/, "") : `${sourceCount} source images`;
     const jobName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
     const session = await createChat(projectId, `Ad Studio · ${jobName}`);
     if (!session?.id) throw new Error("Finish or stop the current Hermes job before starting another.");
-    const uploaded = await uploadFiles(files.map((file) => ({ file, path: file.name })));
-    if (uploaded.length !== files.length) throw new Error("One or more source images were not accepted.");
+    const [localUploads, vpsUploads] = await Promise.all([
+      uploadFiles(files.map((file) => ({ file, path: file.name }))),
+      uploadVpsFiles(vpsFiles),
+    ]);
+    const uploaded = [...localUploads, ...vpsUploads];
+    if (uploaded.length !== sourceCount) throw new Error("One or more source images were not accepted.");
     const placements = Array.isArray(detail.placements) && detail.placements.length ? detail.placements.join(", ") : "square";
     const brief = String(detail.brief || "").trim();
     const request = [
-      `Run the canonical Frank Tool \`${TOOL_ID_FOR_AD_STUDIO}\` for this ${files.length === 1 ? "source image" : `batch of ${files.length} source images`}.`,
+      `Run the canonical Frank Tool \`${TOOL_ID_FOR_AD_STUDIO}\` for this ${sourceCount === 1 ? "source image" : `batch of ${sourceCount} source images`}.`,
       `Use pipeline \`reference-clone-release\` and placements: ${placements}.`,
       brief ? `Brief: ${brief}` : "No additional brief was supplied; preserve the reference structure and make all customer assets and copy replaceable.",
       "Hermes owns model selection, skills, tools, execution, QA, approval, and release. Do not create a second pipeline or memory store.",
@@ -649,6 +656,17 @@ async function uploadFiles(items) {
   }
   const response = await fetch("/api/chat/uploads", { method: "POST", body: form });
   if (!response.ok) throw new Error(`Upload failed (HTTP ${response.status})`);
+  const data = await response.json();
+  return Array.isArray(data.attachments) ? data.attachments : [];
+}
+async function uploadVpsFiles(files) {
+  if (!files.length) return [];
+  const response = await fetch("/api/chat/uploads/vps", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ files }),
+  });
+  if (!response.ok) throw new Error(`VPS image copy failed (HTTP ${response.status})`);
   const data = await response.json();
   return Array.isArray(data.attachments) ? data.attachments : [];
 }

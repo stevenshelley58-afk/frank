@@ -1,0 +1,60 @@
+.ad-source-dialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--bg);
+  color: var(--ink);
+  box-shadow: 0 24px 80px rgb(0 0 0 / 18%);
+}
+.ad-source-dialog::backdrop { background: rgb(0 0 0 / 32%); backdrop-filter: blur(2px); }
+.ad-source-dialog-shell { display: flex; min-height: 520px; max-height: calc(100vh - 34px); flex-direction: column; }
+.ad-source-dialog header,
+.ad-source-dialog footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 18px 20px; }
+.ad-source-dialog header { border-bottom: 1px solid var(--line); }
+.ad-source-dialog header h2 { margin-top: 3px; font-size: 21px; }
+.ad-source-close { width: 36px; height: 36px; border-radius: 8px; color: var(--mute); font-size: 24px; }
+.ad-source-close:hover { background: var(--hover); color: var(--ink); }
+.ad-source-local { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+.ad-source-local div,
+.ad-source-vps-head div { display: grid; gap: 3px; }
+.ad-source-local strong,
+.ad-source-vps-head strong { font-size: 13px; }
+.ad-source-local span,
+.ad-source-vps-head span { color: var(--faint); font-size: 11px; }
+.ad-source-device,
+.ad-source-cancel { min-height: 38px; padding: 8px 14px; border: 1px solid var(--line); border-radius: 999px; font-size: 12px; }
+.ad-source-device:hover,
+.ad-source-cancel:hover { border-color: var(--ink); }
+.ad-source-vps { display: flex; min-height: 0; flex: 1; flex-direction: column; padding: 16px 20px 0; }
+.ad-source-vps-head { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.ad-source-vps-head input { width: min(240px, 48%); height: 38px; padding: 8px 11px; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-size: 12px; }
+.ad-source-crumbs { display: flex; align-items: center; gap: 2px; min-height: 42px; overflow-x: auto; color: var(--mute); font-size: 11px; white-space: nowrap; }
+.ad-source-crumbs button { padding: 5px 6px; border-radius: 5px; }
+.ad-source-crumbs button:hover { background: var(--hover); color: var(--ink); }
+.ad-source-crumbs span { color: var(--faint); }
+.ad-source-vps-list { min-height: 210px; flex: 1; overflow: auto; border: 1px solid var(--line); border-radius: 9px; background: var(--card); }
+.ad-source-vps-row { width: 100%; min-height: 44px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 11px; border-bottom: 1px solid var(--line); text-align: left; }
+.ad-source-vps-row:last-child { border-bottom: 0; }
+.ad-source-vps-row:hover { background: var(--hover); }
+.ad-source-vps-row .ad-source-icon { color: var(--faint); font-size: 16px; text-align: center; }
+.ad-source-vps-row strong { overflow: hidden; font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+.ad-source-vps-row small { color: var(--faint); font-size: 10px; }
+.ad-source-vps-row input { accent-color: var(--ink); }
+.ad-source-vps-empty { min-height: 210px; display: grid; place-items: center; padding: 18px; color: var(--faint); font-size: 11px; text-align: center; }
+.ad-source-dialog footer { border-top: 1px solid var(--line); }
+.ad-source-dialog footer > span { color: var(--faint); font-size: 11px; }
+.ad-source-dialog footer > div { display: flex; gap: 8px; }
+.ad-source-item { position: relative; }
+.ad-source-item button { position: absolute; top: 5px; right: 5px; width: 24px; height: 24px; display: grid; place-items: center; border-radius: 50%; background: rgb(20 20 20 / 82%); color: #fff; font-size: 16px; }
+
+@media (max-width: 560px) {
+  .ad-source-dialog { width: calc(100vw - 16px); max-height: calc(100vh - 16px); }
+  .ad-source-dialog-shell { min-height: calc(100vh - 18px); max-height: calc(100vh - 18px); }
+  .ad-source-local,
+  .ad-source-vps-head { align-items: stretch; flex-direction: column; }
+  .ad-source-vps-head input { width: 100%; }
+  .ad-source-dialog footer { align-items: flex-start; flex-direction: column; }
+  .ad-source-dialog footer > div { width: 100%; justify-content: flex-end; }
+}

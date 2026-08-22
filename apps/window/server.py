@@ -7,6 +7,7 @@ import mimetypes
 import os
 import re
 import secrets
+import shutil
 import threading
 import time
 from types import MappingProxyType
@@ -983,6 +984,62 @@ def chat_upload():
             "size": target.stat().st_size,
             "type": media_type,
             "url": f"/api/chat/uploads/{upload_id}",
+        })
+    return jsonify({"ok": True, "attachments": saved})
+
+
+@app.post("/api/chat/uploads/vps")
+def chat_upload_vps():
+    """Copy selected images from the read-only VPS tree for Hermes."""
+    body = request.get_json(silent=True) or {}
+    files = body.get("files")
+    if not isinstance(files, list) or not files:
+        abort(400, "no files")
+    if len(files) > 100:
+        abort(413, "too many files")
+
+    sources = []
+    total_size = 0
+    for item in files:
+        if not isinstance(item, dict):
+            abort(400, "invalid file")
+        root = str(item.get("root", "vps")).strip() or "vps"
+        rel = str(item.get("path", "")).replace("\\", "/").lstrip("/")
+        parts = Path(rel).parts
+        if not rel or any(part.startswith(".") or part in SKIP for part in parts):
+            abort(400, "invalid file path")
+        source = jail(root, rel)
+        if not source.is_file():
+            abort(404, "file not found")
+        media_type = mimetypes.guess_type(source.name)[0] or "application/octet-stream"
+        if not media_type.startswith("image/"):
+            abort(415, "source must be an image")
+        size = source.stat().st_size
+        total_size += size
+        if total_size > MAX_UPLOAD_BYTES:
+            abort(413, "files are too large")
+        sources.append((source, rel, media_type, size))
+
+    batch = f"{int(time.time())}-{secrets.token_hex(6)}"
+    saved = []
+    for source, rel, media_type, size in sources:
+        stored_rel = _safe_relative_path(f"vps/{rel}", source.name)
+        target = (UPLOAD_DIR / batch / stored_rel).resolve()
+        try:
+            target.relative_to((UPLOAD_DIR / batch).resolve())
+        except ValueError:
+            abort(400, "invalid upload path")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, target)
+        upload_id = target.relative_to(UPLOAD_DIR).as_posix()
+        saved.append({
+            "id": upload_id,
+            "name": source.name,
+            "relative_path": rel,
+            "size": size,
+            "type": media_type,
+            "url": f"/api/chat/uploads/{upload_id}",
+            "source": "vps",
         })
     return jsonify({"ok": True, "attachments": saved})
 
