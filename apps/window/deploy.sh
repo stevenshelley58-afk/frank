@@ -19,7 +19,10 @@ git -C "$repo" diff --quiet HEAD -- || {
 }
 
 install -d -m 0700 -- "$secret_dir"
-install -d -m 0750 -- "$data_dir"
+# Frank writes short-lived upload staging here and Hermes ingests it directly
+# on the host. Keep the directory private to root + the existing Hermes group;
+# setgid preserves that boundary for newly-created staging directories.
+install -d -o root -g hermes -m 2750 -- "$data_dir"
 install -d -m 0755 -- "$preview_dir"
 # Hermes provisions new project workspaces before their first turn. Keep the
 # canonical parent root-owned while granting the sole agent runtime a setgid
