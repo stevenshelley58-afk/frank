@@ -165,7 +165,7 @@ docker compose build frank-window
 # The previous Window and Caddy were created by two retired compose projects.
 # Build first, then make the shortest possible atomic cutover to this one stack.
 docker rm -f frank-window-sessions-candidate >/dev/null 2>&1 || true
-docker rm -f frank-window frank-frank-caddy-1 >/dev/null 2>&1 || true
+docker rm -f frank-window frank-caddy frank-frank-caddy-1 >/dev/null 2>&1 || true
 
 if ! docker compose up -d --remove-orphans; then
   echo "new Frank stack failed to start; restoring the previous runtime" >&2
