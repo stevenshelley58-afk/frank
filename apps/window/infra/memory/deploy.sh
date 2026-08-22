@@ -20,7 +20,8 @@ id "$hermes_user" >/dev/null 2>&1 || die "Hermes user does not exist"
 
 # Hermes 0.20.1 pins this client version. Install the matching all-in-one
 # package instead of maintaining a separate database or memory service.
-"$uv_bin" pip install --python "$hermes_python" "hindsight-all==0.6.1"
+sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
+  "$uv_bin" pip install --python "$hermes_python" "hindsight-all==0.6.1"
 
 sudo -u "$hermes_user" -H env HERMES_HOME="$hermes_home" \
   "$hermes_python" "$script_dir/configure.py" \
