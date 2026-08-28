@@ -193,8 +193,8 @@ DEFAULT_PROJECTS = [
         "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },
     {
-        "id": "mini-frank", "name": "Mini Frank", "root": "mini-frank",
-        "blurb": "Mini Frank project workspace.",
+        "id": "mini-frank", "name": "Frank", "root": "mini-frank",
+        "blurb": "Frank project workspace.",
         "capabilities": ["repository.activity", "repository.summary", "project.files", "accounts.directory", "connections.read", "analytics.setup"],
         "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },

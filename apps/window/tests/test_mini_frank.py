@@ -38,6 +38,7 @@ class MiniFrankTest(unittest.TestCase):
         self.sessions = []
         self.guide_turns = []
         self.guide_mode = "complete"
+        self.guide_reply = "I understand the booking problem. What would a good result change for you?"
         self.fail_next_run = False
         self.fail_session_delete = False
         self.poll_status = "started"
@@ -84,7 +85,9 @@ class MiniFrankTest(unittest.TestCase):
 
         def hermes_chat_stream(session_id, payload, **kwargs):
             self.guide_turns.append({"session_id": session_id, "payload": payload, "kwargs": kwargs})
-            reply = "I understand the booking problem. What would a good result change for you?"
+            reply = self.guide_reply
+            if self.guide_mode == "timeout":
+                raise TimeoutError("guide stream timed out")
             yield b"event: run.started\n"
             yield b'data: {"type":"run.started","run_id":"private-run-secret"}\n'
             yield b"\n"
@@ -329,6 +332,93 @@ class MiniFrankTest(unittest.TestCase):
         intake = self.client.get(f"/api/mini/intakes/{intake_id}", headers=headers).get_json()["intake"]
         self.assertEqual([item["role"] for item in intake["conversation"]], ["user", "assistant"])
 
+    def test_actionable_submit_is_accepted_before_hermes_work_and_reconciles_once(self):
+        created = self.create_intake(conversation=[{
+            "role": "user",
+            "text": "Create meta ads for my small business.",
+        }])
+        response = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/submit",
+            json={},
+            headers=self.claim_headers(created),
+        )
+        self.assertEqual(response.status_code, 202)
+        body = response.get_json()
+        self.assertEqual(body["job"]["stage"], "queued")
+        self.assertEqual(self.runs, [])
+        self.reconcile_job(body["job"]["id"])
+        self.assertEqual(len(self.runs), 1)
+        self.assertIn("Create meta ads", self.runs[0]["payload"]["input"])
+        self.assertNotIn("Before I build", self.runs[0]["payload"]["input"])
+
+    def test_guide_prompt_allows_only_one_essential_question(self):
+        self.guide_reply = "What destination URL should the ads use?"
+        created = self.create_intake()
+        response = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/chat",
+            json={"text": "Create a campaign for my business."},
+            headers={**self.claim_headers(created), "Idempotency-Key": "guide-essential-1"},
+        )
+        self.assertEqual(response.status_code, 200)
+        response.data
+        prompt = self.sessions[0]["kwargs"]["system_prompt_suffix"]
+        self.assertIn("at most one short question only", prompt)
+        self.assertIn("genuinely impossible", prompt)
+        self.assertNotIn("quality-improvement questions", response.data.decode().lower())
+
+    def test_slow_guide_is_saved_and_can_continue_without_retrying_hermes(self):
+        self.guide_mode = "timeout"
+        created = self.create_intake()
+        headers = {**self.claim_headers(created), "Idempotency-Key": "guide-timeout-1"}
+        response = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/chat",
+            json={"text": "Create meta ads for my business."},
+            headers=headers,
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(b"resumable", response.data)
+        intake = self.client.get(
+            f"/api/mini/intakes/{created['intake']['id']}", headers=self.claim_headers(created)
+        ).get_json()["intake"]
+        self.assertEqual(intake["guide_status"], "unavailable")
+        self.assertTrue(intake["guide_resumable"])
+        self.assertEqual(len(self.guide_turns), 1)
+
+        submitted = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/submit",
+            json={},
+            headers=self.claim_headers(created),
+        )
+        self.assertEqual(submitted.status_code, 202)
+        self.assertEqual(submitted.get_json()["job"]["stage"], "queued")
+
+    def test_guide_idempotency_replays_without_a_second_hermes_turn(self):
+        created = self.create_intake()
+        headers = {**self.claim_headers(created), "Idempotency-Key": "guide-replay-1"}
+        first = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/chat",
+            json={"text": "Create a simple booking helper."}, headers=headers,
+        )
+        second = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/chat",
+            json={"text": "Create a simple booking helper."}, headers=headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(len(self.guide_turns), 1)
+
+    def test_customer_generated_responses_do_not_expose_product_owned_name(self):
+        created = self.create_intake(conversation=[{
+            "role": "user", "text": "Create meta ads for my business.",
+        }])
+        response = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/submit",
+            json={}, headers=self.claim_headers(created),
+        )
+        self.assertNotIn("mini frank", json.dumps(response.get_json()).lower())
+        self.reconcile_job(response.get_json()["job"]["id"])
+        self.assertNotIn("mini frank", self.runs[0]["payload"]["input"].lower())
+
     def test_incomplete_guide_reply_is_not_persisted_as_an_assistant_answer(self):
         self.guide_mode = "partial"
         created = self.create_intake()
@@ -426,6 +516,7 @@ class MiniFrankTest(unittest.TestCase):
         submitted = self.client.post(f"/api/mini/intakes/{intake_id}/submit", json={}, headers=headers)
         self.assertEqual(submitted.status_code, 202)
         job_id = submitted.get_json()["job"]["id"]
+        self.reconcile_job(job_id)
         staged = self.workspace(job_id) / "private" / "attachments" / f"{attachment['id']}.pdf"
         self.assertEqual(staged.read_bytes(), self.pdf_bytes())
         self.assertFalse(any(path.name == "booking-brief.pdf" for path in self.workspace(job_id).rglob("*")))
@@ -450,7 +541,7 @@ class MiniFrankTest(unittest.TestCase):
         job = submitted.get_json()["job"]
         self.assertEqual(job["attachment_count"], 1)
         self.assertTrue(job["problem"])
-        self.assertEqual(job["stage"], "working")
+        self.assertEqual(job["stage"], "queued")
 
     def test_valid_v2_result_is_published_as_a_copied_customer_snapshot(self):
         created = self.create_job().get_json()
@@ -768,6 +859,7 @@ class MiniFrankTest(unittest.TestCase):
         created = submitted.get_json()
         job_id = created["job"]["id"]
         job_headers = self.claim_headers(created)
+        self.reconcile_job(job_id)
         self.write_v2_result(job_id)
         self.reconcile_job(job_id)
         ready = self.client.get(f"/api/mini/jobs/{job_id}", headers=job_headers)
@@ -852,6 +944,7 @@ class MiniFrankTest(unittest.TestCase):
         )
         self.assertEqual(submitted.status_code, 202)
         job_id = submitted.get_json()["job"]["id"]
+        self.blueprint.mini_reconcile_once()
         self.write_v2_result(job_id)
         self.blueprint.mini_reconcile_once()
         self.assertTrue((self.project_root / job_id).is_dir())
@@ -1402,7 +1495,7 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(created_response.status_code, 202)
         created = created_response.get_json()
         self.assertEqual(created["job"]["stage"], "queued")
-        self.assertTrue(created["job"]["retry_available"])
+        self.assertFalse(created["job"]["retry_available"])
         retried = self.client.post(
             f"/api/mini/jobs/{created['job']['id']}/dispatch", headers=self.claim_headers(created)
         )
@@ -1459,6 +1552,7 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(submitted.status_code, 202)
         created = submitted.get_json()
         job_id = created["job"]["id"]
+        self.reconcile_job(job_id)
         self.assertTrue(self.stored_job(job_id)["storage_reserved"])
 
         workspace = self.workspace(job_id)
@@ -1713,6 +1807,7 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(first.status_code, 202)
         self.assertEqual(second.status_code, 202)
         self.assertEqual(first.get_json()["job"]["id"], second.get_json()["job"]["id"])
+        self.reconcile_job(first.get_json()["job"]["id"])
         self.assertEqual(len(self.runs), 1)
 
     def test_claimed_feedback_is_categorical_and_repeatable(self):
