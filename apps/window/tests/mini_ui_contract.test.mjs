@@ -10,6 +10,10 @@ async function source(name) {
   return readFile(path.join(miniDir, name), "utf8");
 }
 
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 test("the customer conversation is branded as Frank without legacy Mini copy", async () => {
   const html = await source("index.html");
   const script = await source("mini.js");
@@ -22,6 +26,28 @@ test("the customer conversation is branded as Frank without legacy Mini copy", a
   assert.doesNotMatch(customerHtml, /\bmini frank\b|\bmini\b/i);
   assert.doesNotMatch(`${script}\n${api}`, /\bmini frank\b/i);
   assert.doesNotMatch(script, /outcome-contract|<h3[^>]*>Before I build|<dt>I know|<dt>I have|<dt>I.?m assuming/i);
+});
+
+test("customer-visible source has no legacy ready or privacy copy", async () => {
+  const html = await source("index.html");
+  const script = await source("mini.js");
+  const api = await source("mini_api.mjs");
+  const css = await source("mini.css");
+  const customerSource = `${html}\n${script}\n${api}\n${css}`;
+  for (const phrase of [
+    "Before I build",
+    "Build this version",
+    "That reply took too long",
+    "Please try again",
+    "Private link access",
+    "How private access works",
+    "I’ll use only what you share",
+  ]) {
+    assert.doesNotMatch(customerSource, new RegExp(escapeRegExp(phrase), "i"), phrase);
+  }
+  assert.doesNotMatch(script, /data-action="start-build"|data-action="start-free"|attachDecision|function startBuild/i);
+  assert.match(script, /data-action="resume"/);
+  assert.match(script, />Retry<|>Resume</);
 });
 
 test("the composer stays focused and offers a stop control for active work", async () => {
@@ -38,9 +64,12 @@ test("the composer stays focused and offers a stop control for active work", asy
 
 test("the first non-empty message submits directly without the guide round trip", async () => {
   const script = await source("mini.js");
+  const css = await source("mini.css");
 
   assert.match(script, /await startFreeWork\("new"\)/);
   assert.doesNotMatch(script, /await guideAfter\(spokenText, files\)/);
   assert.match(script, /Working on it/);
   assert.doesNotMatch(script, /Before I build|outcome-contract|Build this for free/i);
+  assert.doesNotMatch(css, /#302e2a|#88837a/i);
+  assert.match(css, /--sans:\s*-apple-system/);
 });

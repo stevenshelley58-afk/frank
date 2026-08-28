@@ -69,7 +69,7 @@ export function createMiniApi({ fetchImpl = globalThis.fetch, deadlineMs = DEFAU
       if (controller.signal.aborted) {
         const callerCancelled = Boolean(externalSignal && externalSignal.aborted);
         throw new MiniApiError(
-          callerCancelled ? "I stopped waiting. Your messages and files are still here." : "That request took too long. Your messages and files are still here.",
+          callerCancelled ? "I stopped waiting. Your messages and files are still here." : "Couldn’t finish that request. Your messages and files are still here.",
           { name: callerCancelled ? "AbortError" : "DeadlineError", code: callerCancelled ? "cancelled" : "deadline_exceeded" },
         );
       }

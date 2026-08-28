@@ -74,7 +74,7 @@ a { color: inherit; text-underline-offset: 3px; }
 
 .primary-button, .secondary-button, .quiet-button, .artifact-link { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; border-radius: 8px; font-size: 13px; font-weight: 650; text-decoration: none; cursor: pointer; transition: transform 140ms ease, border-color 140ms ease, background-color 140ms ease, color 140ms ease; }
 .primary-button { padding: 0 18px; border: 1px solid var(--ink); background: var(--ink); color: var(--paper); }
-.primary-button:hover { background: #302e2a; }
+.primary-button:hover { background: var(--ink-soft); }
 .secondary-button, .artifact-link { padding: 0 17px; border: 1px solid var(--line-strong); background: var(--paper); color: var(--ink); }
 .secondary-button:hover, .artifact-link:hover { border-color: var(--ink); }
 .quiet-button { min-height: 38px; padding: 0 9px; border: 0; background: transparent; color: var(--muted); font-weight: 600; }
@@ -121,11 +121,11 @@ button:disabled, .is-disabled { cursor: not-allowed !important; opacity: 0.52; t
 .attach-button:hover { background: var(--paper-deep); color: var(--ink); }
 .send-button { border: 0; background: var(--ink); color: var(--paper); }
 .send-button.is-stop { background: var(--blue); }
-.send-button:not(:disabled):hover { background: #302e2a; }
+.send-button:not(:disabled):hover { background: var(--ink-soft); }
 .send-button:not(:disabled):active { transform: translateY(1px); }
 .attach-button svg, .send-button svg, .icon-button svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 .composer textarea { display: block; width: 100%; min-width: 0; max-height: 156px; min-height: 42px; padding: 10px 4px 8px; resize: none; overflow-y: auto; border: 0; outline: 0; background: transparent; color: var(--ink); font-size: 16px; line-height: 1.45; }
-.composer textarea::placeholder { color: #88837a; opacity: 1; }
+.composer textarea::placeholder { color: var(--muted); opacity: 1; }
 .composer.is-locked { box-shadow: none; opacity: 0.82; }
 .composer.is-locked .attach-button { pointer-events: none; }
 .composer > .danger-button { margin: 6px 0 0 48px; }

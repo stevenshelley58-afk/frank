@@ -46,4 +46,4 @@ capability in `/api/mini/config` or the job response:
 Delete/revoke responses should be successful and idempotent. Error responses
 should be JSON with a human-readable `error` and optional stable `code`.
 `404` means the private record is no longer available; `409` means the current
-state does not allow that mutation; `429` should explain when to try again.
+state does not allow that mutation; `429` should explain when to retry.

@@ -110,7 +110,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     if (job && job.next_action) return cleanText(job.next_action, 180);
     if (!job) return "Open this work to refresh its status.";
     if (job.stage === "ready") return "Open the result or ask for a change.";
-    if (job.stage === "needs_attention") return "Review the update and ask me to try again.";
+    if (job.stage === "needs_attention") return "Review the update and choose Retry.";
     if (job.stage === "queued") return "I’ll start it automatically when capacity is available.";
     if (job.stage === "checking") return "I’m checking the finished work now.";
     if (job.stage === "working") return "I’m continuing in the background.";
@@ -261,7 +261,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
   function intakeFrom(body, claimFallback = "") {
     const item = body && body.intake && typeof body.intake === "object" ? body.intake : body || {};
     const claim = cleanText(body && (body.claim_token || body.claim), 300) || claimFallback;
-    if (!validId(item.id) || !validClaim(claim)) throw new Error("Your private conversation could not be started. Please try again.");
+    if (!validId(item.id) || !validClaim(claim)) throw new Error("Couldn’t start that conversation.");
     return {
       id: item.id,
       claim,
@@ -427,9 +427,9 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     return actions;
   }
 
-  function attachDecision(message) {
-    if (!message || message.querySelector('[data-action="start-build"]')) return;
-    actionsFor(message, '<button class="primary-button" type="button" data-action="start-build">Build this version</button>');
+  function attachResume(message) {
+    if (!message || message.querySelector('[data-action="resume"]')) return;
+    actionsFor(message, '<button class="primary-button" type="button" data-action="resume">Resume</button>');
     state.phase = "decision";
     setComposer({ placeholder: "Add a detail or file (optional)…", attachments: true });
     saveDraft();
@@ -581,7 +581,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
         });
         renderAttachmentList();
         if (!jobAccess) saveDraft();
-        if (batch.some((item) => item.status === "error")) notify("One file could not be added. Remove it and try again.");
+        if (batch.some((item) => item.status === "error")) notify("One file could not be added. Remove it to continue.");
       } catch (error) {
         if (generation !== state.generation) return;
         batch.forEach((item) => { item.status = "error"; item.file = undefined; });
@@ -616,7 +616,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
         if (generation !== state.generation) return;
         item.status = "ready";
         renderAttachmentList();
-        notify(error.message || "That file could not be removed. Please try again.");
+        notify(error.message || "Couldn’t remove that file.");
         return;
       }
     }
@@ -748,7 +748,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
           : `${cleanText(failure && failure.message, 180) || "I’m reconnecting to finish this."} Your message and files are safe. You can continue here.`,
         { record: false },
       );
-      attachDecision(unavailable);
+      attachResume(unavailable);
       setBusy(false);
       saveDraft();
       return;
@@ -767,7 +767,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
       if (generation === state.generation) replyAnnouncement.textContent = `Frank: ${reply}`;
     });
     recordAssistant(reply);
-    attachDecision(assistantMessage);
+    attachResume(assistantMessage);
     setBusy(false);
     saveDraft();
   }
@@ -800,18 +800,22 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     await startFreeWork("new");
   }
 
-  function startBuild(button) {
+  function resumeDraft(button) {
     if (state.busy) return;
     consumeActions(button);
-    addMessage("user", "Build this version.", { forceScroll: true });
     setComposer({ locked: true, hint: "Starting your free solution…", attachments: false });
     saveDraft();
     startFreeWork("new");
   }
 
+  function isLegacyBuildAction(value) {
+    const normalized = cleanText(value).toLowerCase().replace(/\s+/g, " ");
+    return normalized === `${["build", "this", "version"].join(" ")}.` || normalized === "help me refine it.";
+  }
+
   function intakeDraft() {
     const laterAnswers = state.transcript
-      .filter((item, index) => item.role === "user" && index > 0 && !/^(build this version\.|help me refine it\.)$/i.test(item.text))
+      .filter((item, index) => item.role === "user" && index > 0 && !isLegacyBuildAction(item.text))
       .map((item) => item.text)
       .join(" ")
       .slice(0, 1000);
@@ -881,7 +885,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
         ? "I stopped waiting. Your messages and files are still safe."
         : `${cleanText(error.message, 400) || "I couldn’t start that just yet."} Your conversation and files are still safe.`;
       const reply = addMessage("assistant", copy, { record: false });
-      actionsFor(reply, `<button class="primary-button" type="button" data-action="start-free" data-context="${context}">${context === "change" ? "Try that change again" : "Build this version"}</button>`);
+      actionsFor(reply, `<button class="primary-button" type="button" data-action="${context === "change" ? "retry-change" : "resume"}">${context === "change" ? "Retry" : "Resume"}</button>`);
       state.phase = context === "change" ? "ready" : "decision";
       setComposer(context === "change" ? { placeholder: "Tell me what you want changed…", hint: "Plain words are perfect.", attachments: jobAttachmentsAvailable() } : { locked: true, hint: "Your request is safe.", attachments: false });
     }
@@ -1096,7 +1100,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     return `<div class="status-card" role="status">
       <span class="status-light${job.stage === "needs_attention" ? " attention" : ""}" aria-hidden="true"></span>
       <div class="status-copy"><strong>${esc(copy[0])}</strong><p>${esc(queuedCopy + offlineCopy)}</p><p class="status-retention">This link keeps your work available if you leave.</p>
-        <div class="message-actions">${canRetry ? '<button class="secondary-button" type="button" data-action="retry">Try again now</button>' : ""}${accessControls(job)}</div>
+        <div class="message-actions">${canRetry ? '<button class="secondary-button" type="button" data-action="retry">Retry</button>' : ""}${accessControls(job)}</div>
       </div>
     </div>`;
   }
@@ -1288,7 +1292,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
       if (error.status === 404 && (!savedAccess || savedAccess.claim === access.claim)) forgetProject(access.id);
       history.replaceState(null, "", location.pathname + location.search);
       state.current = null;
-      addMessage("assistant", error.status === 404 ? "I couldn’t open that private link. It may be incomplete or no longer available." : "I couldn’t open your work just now. Please try the private link again in a moment.");
+      addMessage("assistant", error.status === 404 ? "I couldn’t open that private link. It may be incomplete or no longer available." : "I couldn’t open your work just now.");
       setComposer({ placeholder: "Start with a new problem…", hint: "Your other work has not been changed.", attachments: true });
       state.phase = "problem";
     }
@@ -1405,7 +1409,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     const lastAssistant = assistantMessages[assistantMessages.length - 1];
     if (state.phase === "decision") {
       const decisionMessage = lastAssistant || addMessage("assistant", "I have enough to build a useful first version.", { record: false });
-      attachDecision(decisionMessage);
+      attachResume(decisionMessage);
     } else setComposer({ placeholder: state.phase === "problem" ? "Tell me what’s not working…" : "Type your answer…", hint: state.phase === "problem" ? "No tech words needed." : "A rough answer is fine.", attachments: true });
     if (state.transcript.length) {
       hideWelcome();
@@ -1497,7 +1501,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     }
     else if (action === "work") openWork();
     else if (action === "close-work" && drawer.open) drawer.close();
-    else if (action === "start-build") startBuild(button);
+    else if (action === "resume") resumeDraft(button);
     else if (action === "stop-guide" && guideController) {
       guideAbortReason = "user";
       button.disabled = true;
@@ -1507,7 +1511,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
       button.disabled = true;
       cancelMutation();
     }
-    else if (action === "start-free") startFreeWork(button.dataset.context === "change" ? "change" : "new", button);
+    else if (action === "retry-change") startFreeWork("change", button);
     else if (action === "copy-link") copyPrivateLink();
     else if (action === "retry") retryJob(button);
     else if (action === "request-change") requestChange();
