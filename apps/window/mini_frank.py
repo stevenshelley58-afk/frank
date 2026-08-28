@@ -2865,7 +2865,7 @@ def create_blueprint(
                 "input": _build_prompt(
                     job,
                     change,
-                    f"https://frank.fail/mini/#project={job['id']}&key={_claim_token(job['id'], rate_key)}",
+                    f"https://frank.fail/frank/#project={job['id']}&key={_claim_token(job['id'], rate_key)}",
                     hermes_data_root,
                 ),
                 "session_id": session_id,

@@ -34,22 +34,23 @@ class InfraContractTest(unittest.TestCase):
     def test_mini_routes_are_public_without_exposing_operator_attestation(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         mini_api = caddyfile.index("@mini_api path /api/mini /api/mini/*")
-        mini_ui = caddyfile.index("@mini_ui path /mini /mini/*")
-        fallback = caddyfile.index("        handle {\n            import frank_private_response_headers", mini_ui)
+        frank_ui = caddyfile.index("@frank_ui path /frank /frank/*")
+        legacy_mini = caddyfile.index("@mini_legacy path /mini /mini/*")
+        fallback = caddyfile.index("        handle {\n            import frank_private_response_headers", legacy_mini)
         basic_auth = caddyfile.index("basic_auth")
         self.assertLess(mini_api, basic_auth)
-        self.assertLess(mini_ui, basic_auth)
+        self.assertLess(frank_ui, basic_auth)
         public_routes = caddyfile[mini_api:basic_auth]
-        mini_api_route = caddyfile[mini_api:mini_ui]
-        mini_ui_route = caddyfile[mini_ui:fallback]
+        mini_api_route = caddyfile[mini_api:frank_ui]
+        frank_ui_route = caddyfile[frank_ui:legacy_mini]
         api_policy = caddyfile.split("(frank_mini_api_response_headers) {", 1)[1].split("}", 2)[0]
         ui_policy = caddyfile.split("(frank_mini_ui_response_headers) {", 1)[1].split("}", 2)[0]
         self.assertNotIn("{$FRANK_BASIC_AUTH_HASH}", public_routes)
         self.assertIn("header_up -X-Frank-Operator-Attestation", public_routes)
         self.assertIn("import frank_mini_api_response_headers", mini_api_route)
-        self.assertIn("import frank_mini_ui_response_headers", mini_ui_route)
+        self.assertIn("import frank_mini_ui_response_headers", frank_ui_route)
         self.assertNotIn("frank_private_response_headers", mini_api_route)
-        self.assertNotIn("frank_private_response_headers", mini_ui_route)
+        self.assertNotIn("frank_private_response_headers", frank_ui_route)
         self.assertIn('Cache-Control "no-store"', api_policy)
         self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"', api_policy)
         self.assertIn('Cache-Control "public, no-cache"', ui_policy)
@@ -127,7 +128,7 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("infra/mini_builder/Dockerfile", deploy)
         self.assertIn("docker compose config --quiet", deploy)
         self.assertIn("caddy validate --config /etc/caddy/Caddyfile", deploy)
-        self.assertIn("https://frank.fail/mini/", deploy)
+        self.assertIn("https://frank.fail/frank/", deploy)
 
         builder = (APP / "infra" / "mini_builder" / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("@sha256:", builder)

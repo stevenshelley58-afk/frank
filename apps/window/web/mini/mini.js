@@ -1,5 +1,5 @@
-import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.mjs";
-import { MiniApiError, createMiniApi } from "./mini_api.mjs";
+import { isAssistantCompleted, parseSseBlock, streamPiece } from "./stream.mjs";
+import { MiniApiError, createMiniApi } from "./api.mjs";
 
 (function () {
   "use strict";
@@ -908,7 +908,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
   }
 
   function privateLink(access) {
-    const url = new URL("/mini/", location.origin);
+    const url = new URL("/frank/", location.origin);
     url.hash = new URLSearchParams({ project: access.id, key: access.claim }).toString();
     return url.href;
   }

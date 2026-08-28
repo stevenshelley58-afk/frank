@@ -23,8 +23,14 @@ test("the customer conversation is branded as Frank without legacy Mini copy", a
     .replace(/<script[\s\S]*?<\/script>/gi, "")
     .replace(/<[^>]+>/g, " ");
   assert.match(html, /<title>Frank — Tell me what you need<\/title>/);
+  assert.match(html, /href="\/frank\/style\.css"/);
+  assert.match(html, /src="\/frank\/app\.js"/);
+  assert.doesNotMatch(html, /(?:href|src)="[^\"]*\/mini(?:\/|\")/i);
   assert.doesNotMatch(customerHtml, /\bmini frank\b|\bmini\b/i);
   assert.doesNotMatch(`${script}\n${api}`, /\bmini frank\b/i);
+  assert.match(script, /from "\.\/stream\.mjs"/);
+  assert.match(script, /from "\.\/api\.mjs"/);
+  assert.match(script, /new URL\("\/frank\/", location\.origin\)/);
   assert.doesNotMatch(script, /outcome-contract|<h3[^>]*>Before I build|<dt>I know|<dt>I have|<dt>I.?m assuming/i);
 });
 

@@ -228,5 +228,5 @@ printf '%s\n' "$(git -C "$repo" rev-parse HEAD)" >"$release_tmp"
 chown root:root "$release_tmp"; chmod 0644 "$release_tmp"; mv -f -- "$release_tmp" "$release_dir/approved-sha"
 curl --fail --silent --show-error --output /dev/null \
   --retry 10 --retry-delay 2 --retry-all-errors \
-  https://frank.fail/mini/
+  https://frank.fail/frank/
 echo "deployed $(git -C "$repo" rev-parse HEAD)"

@@ -19,7 +19,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from flask import Flask, Response, abort, jsonify, request, send_file, send_from_directory, stream_with_context
+from flask import Flask, Response, abort, jsonify, redirect, request, send_file, send_from_directory, stream_with_context
 
 import home_platform
 import home_defaults
@@ -36,6 +36,18 @@ from graph.provider import (
 from tool_apps import discover_tool_apps
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
+FRANK_PUBLIC_ASSETS = {
+    "style.css": "mini.css",
+    "app.js": "mini.js",
+    "stream.mjs": "mini_stream.mjs",
+    "api.mjs": "mini_api.mjs",
+}
+LEGACY_MINI_ASSETS = {
+    "mini.css": "style.css",
+    "mini.js": "app.js",
+    "mini_stream.mjs": "stream.mjs",
+    "mini_api.mjs": "api.mjs",
+}
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 UPLOAD_DIR = CHAT_DIR / "uploads"
 ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accounts.json")))
@@ -1776,10 +1788,41 @@ app.register_blueprint(mini_frank.create_blueprint(
 ))
 
 
-@app.get("/mini", defaults={"mini_path": "index.html"}, strict_slashes=False)
+@app.get("/frank")
+def frank_root_redirect():
+    target = "/frank/"
+    if request.query_string:
+        target = f"{target}?{request.query_string.decode('latin-1')}"
+    return redirect(target, code=308)
+
+
+@app.get("/frank/", defaults={"frank_path": ""})
+@app.get("/frank/<path:frank_path>")
+def frank_spa(frank_path: str):
+    public_path = str(frank_path or "").strip("/")
+    if public_path == "":
+        return send_from_directory(WEB / "mini", "index.html")
+    if public_path == "index.html":
+        return redirect("/frank/", code=308)
+    source_name = FRANK_PUBLIC_ASSETS.get(public_path)
+    if not source_name:
+        abort(404)
+    return send_from_directory(WEB / "mini", source_name)
+
+
+@app.get("/mini", defaults={"mini_path": ""}, strict_slashes=False)
 @app.get("/mini/<path:mini_path>")
-def mini_spa(mini_path: str):
-    return send_from_directory(WEB / "mini", mini_path)
+def mini_legacy_redirect(mini_path: str):
+    legacy_path = str(mini_path or "").strip("/")
+    if legacy_path in {"", "index.html"}:
+        target = "/frank/"
+    elif legacy_path in LEGACY_MINI_ASSETS:
+        target = f"/frank/{LEGACY_MINI_ASSETS[legacy_path]}"
+    else:
+        abort(404)
+    if request.query_string:
+        target = f"{target}?{request.query_string.decode('latin-1')}"
+    return redirect(target, code=308)
 
 
 @app.get("/", defaults={"path": ""})

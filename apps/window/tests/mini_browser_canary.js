@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const BASE_URL = (process.env.FRANK_BROWSER_URL || "http://127.0.0.1:8765/mini/").replace(/\/$/, "");
+const BASE_URL = (process.env.FRANK_BROWSER_URL || "http://127.0.0.1:8765/frank/").replace(/\/$/, "");
 const PORT = Number(process.env.FRANK_BROWSER_PORT || 9333);
 const CHROME = process.env.CHROME_BIN || "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const PROFILE = path.join(os.tmpdir(), `frank-mini-browser-${process.pid}`);
@@ -71,6 +71,10 @@ async function main() {
         return item ? { left: item.left, right: item.right, width: item.width, top: item.top, bottom: item.bottom } : null;
       };
       const input = document.querySelector("#message");
+      const publicResources = [...document.querySelectorAll("link[href], script[src]")]
+        .map((item) => item.href || item.src)
+        .filter(Boolean);
+      const loadedResources = performance.getEntriesByType("resource").map((item) => item.name);
       input.value = "A quick test";
       input.dispatchEvent(new Event("input", { bubbles: true }));
       const sendEnabled = !document.querySelector(".send-button")?.disabled;
@@ -79,6 +83,12 @@ async function main() {
       input.dispatchEvent(new Event("input", { bubbles: true }));
       return {
         viewport: { width: innerWidth, height: innerHeight },
+        canonicalPath: location.pathname,
+        publicResources,
+        hasLegacyPublicPath: [...publicResources, ...loadedResources].some((value) => {
+          try { return new URL(value, location.origin).pathname.startsWith("/mini"); }
+          catch { return false; }
+        }),
         bodyWidth: document.body.getBoundingClientRect().width,
         scrollWidth: document.documentElement.scrollWidth,
         welcome: rect(".welcome"),
@@ -113,7 +123,7 @@ async function main() {
       fs.writeFileSync(SCREENSHOT, Buffer.from(capture.data, "base64"));
     }
     console.log(JSON.stringify(result));
-    if (result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || result.sendAction !== "send-message" || (EXERCISE_SUBMIT && (!result.directSubmit.statusCard || result.directSubmit.hasGuideQuestion || !result.directSubmit.hasWorkingCopy))) process.exitCode = 1;
+    if (result.canonicalPath !== "/frank/" || result.hasLegacyPublicPath || result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || result.sendAction !== "send-message" || (EXERCISE_SUBMIT && (!result.directSubmit.statusCard || result.directSubmit.hasGuideQuestion || !result.directSubmit.hasWorkingCopy))) process.exitCode = 1;
   } finally {
     try { browser?.close(); } catch {}
     chrome.kill();

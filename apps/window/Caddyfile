@@ -103,8 +103,8 @@ frank.fail {
             }
         }
 
-        # Mini Frank is the public customer surface. Keep both handlers ahead
-        # of the operator-only fallback so Frank itself remains protected.
+        # Frank is the public customer surface. Keep its handler ahead of the
+        # operator-only fallback so the rest of Frank remains protected.
         @mini_api path /api/mini /api/mini/*
         handle @mini_api {
             import frank_mini_api_response_headers
@@ -126,8 +126,8 @@ frank.fail {
             }
         }
 
-        @mini_ui path /mini /mini/*
-        handle @mini_ui {
+        @frank_ui path /frank /frank/*
+        handle @frank_ui {
             import frank_mini_ui_response_headers
             reverse_proxy frank-window:8080 {
                 header_up Host {host}
@@ -140,6 +140,21 @@ frank.fail {
                 header_down -Set-Cookie
             }
         }
+
+        # Preserve old customer links and asset references without leaving the
+        # browser on the retired public path. Caddy keeps the original query.
+        @mini_style path /mini/mini.css
+        redir @mini_style /frank/style.css 308
+        @mini_app path /mini/mini.js
+        redir @mini_app /frank/app.js 308
+        @mini_stream path /mini/mini_stream.mjs
+        redir @mini_stream /frank/stream.mjs 308
+        @mini_api_module path /mini/mini_api.mjs
+        redir @mini_api_module /frank/api.mjs 308
+        @mini_index path /mini/index.html
+        redir @mini_index /frank/ 308
+        @mini_legacy path /mini /mini/*
+        redir @mini_legacy /frank/ 308
 
         handle {
             import frank_private_response_headers
