@@ -144,17 +144,17 @@ frank.fail {
         # Preserve old customer links and asset references without leaving the
         # browser on the retired public path. Caddy keeps the original query.
         @mini_style path /mini/mini.css
-        redir @mini_style /frank/style.css 308
+        redir @mini_style /frank/style.css?{http.request.uri.query} 308
         @mini_app path /mini/mini.js
-        redir @mini_app /frank/app.js 308
+        redir @mini_app /frank/app.js?{http.request.uri.query} 308
         @mini_stream path /mini/mini_stream.mjs
-        redir @mini_stream /frank/stream.mjs 308
+        redir @mini_stream /frank/stream.mjs?{http.request.uri.query} 308
         @mini_api_module path /mini/mini_api.mjs
-        redir @mini_api_module /frank/api.mjs 308
+        redir @mini_api_module /frank/api.mjs?{http.request.uri.query} 308
         @mini_index path /mini/index.html
-        redir @mini_index /frank/ 308
+        redir @mini_index /frank/?{http.request.uri.query} 308
         @mini_legacy path /mini /mini/*
-        redir @mini_legacy /frank/ 308
+        redir @mini_legacy /frank/?{http.request.uri.query} 308
 
         handle {
             import frank_private_response_headers
