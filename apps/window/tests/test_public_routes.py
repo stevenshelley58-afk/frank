@@ -63,7 +63,7 @@ class PublicFrankRouteTest(unittest.TestCase):
         self.assertLess(public, caddyfile.index("basic_auth"))
         self.assertIn("basic_auth", caddyfile[fallback:])
         self.assertIn("@mini_legacy path /mini /mini/*", caddyfile)
-        self.assertIn("redir @mini_legacy /frank/ 308", caddyfile)
+        self.assertIn("redir @mini_legacy /frank/?{http.request.uri.query} 308", caddyfile)
 
 
 if __name__ == "__main__":
