@@ -1,10 +1,16 @@
-# Mini Frank frontend API contract
+# Frank frontend API contract
 
-`mini_api.mjs` is the only transport boundary used by the Mini Frank UI. The
+`mini_api.mjs` is the only transport boundary used by the Frank UI. The
 frontend sends `Accept: application/json` on every request, `credentials: omit`,
 `X-Mini-Claim`, and `Authorization: Bearer <claim>` on claimed requests. Every
 mutation also sends a unique `Idempotency-Key`. The server should treat retries
 with the same key as the same effect.
+
+The normal first-request path creates an intake, uploads any files, then submits
+the intake directly. Submit returns `202` with `{ job, claim_token }`; the job
+is durably `queued` and the UI polls its status. That request does not create a
+Hermes session or run. The intake chat route remains a bounded, resumable
+compatibility fallback for older drafts and clients.
 
 ## Existing routes
 

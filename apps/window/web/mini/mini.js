@@ -398,7 +398,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     const item = document.createElement("article");
     item.className = "message message-assistant";
     item.setAttribute("aria-label", "Frank is thinking");
-    item.innerHTML = `<span class="speaker-mark"></span><div class="message-body"><div class="thinking"><span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="thinking-copy">One moment…</span></div></div>`;
+    item.innerHTML = `<span class="speaker-mark"></span><div class="message-body"><div class="thinking"><span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="thinking-copy">Working on it…</span></div></div>`;
     messages.append(item);
     scrollToEnd(true);
     return item;
@@ -777,7 +777,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     const text = cleanText(messageInput.value);
     const files = state.attachments.filter((item) => item.status === "ready");
     if (!text && !files.length) return;
-    if (text && text.length < 3) {
+    if (text && text.length < 10) {
       notify("Tell me just a little more.");
       return;
     }
@@ -796,7 +796,8 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     state.attachments = state.attachments.filter((item) => item.status !== "ready");
     renderAttachmentList();
     resetComposerValue();
-    await guideAfter(spokenText, files);
+    setBusy(false);
+    await startFreeWork("new");
   }
 
   function startBuild(button) {
@@ -1078,10 +1079,10 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
   }
 
   const stageCopy = {
-    queued: ["I have everything I need.", "Your place is saved. I’ll start as soon as there is room."],
-    working: ["I’m working on it now.", "Copy your private link if you want to leave. It brings you back here."],
-    checking: ["The solution is made.", "I’m checking the important parts now."],
-    needs_attention: ["I hit a snag.", "Your problem and files are safe. I can try again from here."],
+    queued: ["Working on it…", "Your request is saved. I’ll start automatically."],
+    working: ["Working on it…", "I’ll keep working in the background."],
+    checking: ["Almost ready…", "I’m checking the finished work now."],
+    needs_attention: ["Needs another pass", "Your request is safe. I can start another run from here."],
     ready: ["I finished the work.", "The result is not available from this link yet."],
   };
 
@@ -1102,14 +1103,11 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
 
   function jobMessageText(job) {
     if (job.stage === "ready") return "It’s ready. I’ve put the finished work here for you.";
-    if (job.stage === "checking") return "A quick update: the work is finished and I’m checking it now.";
-    if (job.stage === "needs_attention") return "I still have everything you shared. I just need another run at it.";
-    if (job.stage === "working") return "I’m on it. I’ll keep working in the background.";
-    return "Your problem is safely with me. I’ll start as soon as I can.";
+    return stageCopy[job.stage]?.[0] || stageCopy.queued[0];
   }
 
   function jobBody(job) {
-    return `<p class="message-text">${esc(jobMessageText(job))}</p>${job.stage === "ready" && job.result ? artifactCard(job) : statusCard(job)}`;
+    return job.stage === "ready" && job.result ? artifactCard(job) : statusCard(job);
   }
 
   function renderJobUpdate(job, forceNew = false) {

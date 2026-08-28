@@ -9,6 +9,7 @@ const CHROME = process.env.CHROME_BIN || "C:\\Program Files\\Google\\Chrome\\App
 const PROFILE = path.join(os.tmpdir(), `frank-mini-browser-${process.pid}`);
 const WINDOW_SIZE = process.argv[2] || "1440,900";
 const SCREENSHOT = process.argv[3] || "";
+const EXERCISE_SUBMIT = process.env.FRANK_BROWSER_EXERCISE_SUBMIT === "1";
 const [WIDTH, HEIGHT] = WINDOW_SIZE.split(",").map(Number);
 
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -88,12 +89,31 @@ async function main() {
         hasLegacyCopy: /mini frank|private link access|how private access works|before i build/i.test(document.body.innerText),
       };
     })()`);
+    if (EXERCISE_SUBMIT) {
+      await browser.evaluate(`(() => {
+        const input = document.querySelector("#message");
+        input.value = "Create a simple booking page for my customers.";
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        document.querySelector("#composer").requestSubmit();
+      })()`);
+      await wait(900);
+      const accepted = await browser.evaluate(`(() => ({
+        statusCard: Boolean(document.querySelector(".status-card")),
+        bodyText: document.body.innerText,
+        hasGuideQuestion: /before i build|what would a good result|what destination/i.test(document.body.innerText),
+      }))()`);
+      result.directSubmit = {
+        statusCard: accepted.statusCard,
+        hasGuideQuestion: accepted.hasGuideQuestion,
+        hasWorkingCopy: /working on it/i.test(accepted.bodyText),
+      };
+    }
     if (SCREENSHOT) {
       const capture = await browser.send("Page.captureScreenshot", { format: "png", fromSurface: true });
       fs.writeFileSync(SCREENSHOT, Buffer.from(capture.data, "base64"));
     }
     console.log(JSON.stringify(result));
-    if (result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || result.sendAction !== "send-message") process.exitCode = 1;
+    if (result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || result.sendAction !== "send-message" || (EXERCISE_SUBMIT && (!result.directSubmit.statusCard || result.directSubmit.hasGuideQuestion || !result.directSubmit.hasWorkingCopy))) process.exitCode = 1;
   } finally {
     try { browser?.close(); } catch {}
     chrome.kill();

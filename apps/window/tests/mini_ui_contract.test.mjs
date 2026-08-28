@@ -35,3 +35,12 @@ test("the composer stays focused and offers a stop control for active work", asy
   assert.match(script, /Stop response/);
   assert.doesNotMatch(css, /var\(--serif\)|gradient|font-family:\s*[^;]*serif/i);
 });
+
+test("the first non-empty message submits directly without the guide round trip", async () => {
+  const script = await source("mini.js");
+
+  assert.match(script, /await startFreeWork\("new"\)/);
+  assert.doesNotMatch(script, /await guideAfter\(spokenText, files\)/);
+  assert.match(script, /Working on it/);
+  assert.doesNotMatch(script, /Before I build|outcome-contract|Build this for free/i);
+});

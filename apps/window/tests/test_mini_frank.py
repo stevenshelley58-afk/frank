@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.parse
@@ -46,6 +47,7 @@ class MiniFrankTest(unittest.TestCase):
         self.deleted_sessions = []
         self.hermes_calls = []
         self.run_controls = []
+        self.block_hermes = False
 
         def project_getter(project_id):
             if project_id != "mini-frank":
@@ -53,6 +55,9 @@ class MiniFrankTest(unittest.TestCase):
             return {"id": project_id, "root": project_id, "name": "Mini Frank"}
 
         def session_creator(project, **kwargs):
+            if self.block_hermes:
+                time.sleep(1)
+                raise TimeoutError("Hermes unavailable")
             session = {
                 "id": kwargs.get("session_id_override") or f"session-{len(self.sessions) + 1}"
             }
@@ -60,6 +65,9 @@ class MiniFrankTest(unittest.TestCase):
             return session
 
         def hermes_request(path, payload=None, **kwargs):
+            if self.block_hermes:
+                time.sleep(1)
+                raise TimeoutError("Hermes unavailable")
             self.hermes_calls.append({"path": path, "method": kwargs.get("method")})
             if path == "/v1/runs":
                 if self.fail_next_run:
@@ -350,6 +358,26 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(len(self.runs), 1)
         self.assertIn("Create meta ads", self.runs[0]["payload"]["input"])
         self.assertNotIn("Before I build", self.runs[0]["payload"]["input"])
+
+    def test_first_submit_stays_fast_when_hermes_is_blocked(self):
+        self.block_hermes = True
+        created = self.create_intake(conversation=[{
+            "role": "user",
+            "text": "Make a simple booking page for my customers.",
+        }])
+        started = time.perf_counter()
+        response = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/submit",
+            json={},
+            headers=self.claim_headers(created),
+        )
+        elapsed = time.perf_counter() - started
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.get_json()["job"]["stage"], "queued")
+        self.assertEqual(self.sessions, [])
+        self.assertEqual(self.runs, [])
+        self.assertLess(elapsed, 0.5, f"first submit took {elapsed:.3f}s")
 
     def test_guide_prompt_allows_only_one_essential_question(self):
         self.guide_reply = "What destination URL should the ads use?"
