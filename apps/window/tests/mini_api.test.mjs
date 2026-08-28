@@ -33,3 +33,23 @@ test("a mutation deadline becomes a recoverable deadline error", async () => {
     (error) => error.code === "deadline_exceeded" && error.name === "DeadlineError",
   );
 });
+
+test("feedback and revoke use the published lifecycle routes and shapes", async () => {
+  const calls = [];
+  const api = createMiniApi({
+    fetchImpl: async (path, options) => {
+      calls.push({ path, options });
+      return new Response(JSON.stringify({ job: { id: "job-1" } }), { status: 200 });
+    },
+  });
+
+  await api.feedbackJob({ id: "job-1", claim: "claim-token" }, { rating: "not_yet", reason: "missing_piece" });
+  await api.revokeJob({ id: "job-1", claim: "claim-token" });
+
+  assert.equal(calls[0].path, "/api/mini/jobs/job-1/feedback");
+  assert.equal(calls[0].options.method, "POST");
+  assert.deepEqual(JSON.parse(calls[0].options.body), { rating: "not_yet", reason: "missing_piece" });
+  assert.equal(calls[1].path, "/api/mini/jobs/job-1/revoke");
+  assert.equal(calls[1].options.method, "POST");
+  assert.match(calls[1].options.headers["Idempotency-Key"], /^mini-/);
+});

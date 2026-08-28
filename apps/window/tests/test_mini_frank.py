@@ -43,6 +43,7 @@ class MiniFrankTest(unittest.TestCase):
         self.poll_status = "started"
         self.poll_http_status = None
         self.deleted_sessions = []
+        self.hermes_calls = []
         self.run_controls = []
 
         def project_getter(project_id):
@@ -58,6 +59,7 @@ class MiniFrankTest(unittest.TestCase):
             return session
 
         def hermes_request(path, payload=None, **kwargs):
+            self.hermes_calls.append({"path": path, "method": kwargs.get("method")})
             if path == "/v1/runs":
                 if self.fail_next_run:
                     self.fail_next_run = False
@@ -454,6 +456,9 @@ class MiniFrankTest(unittest.TestCase):
         created = self.create_job().get_json()
         job_id = created["job"]["id"]
         workspace, public, manifest = self.write_v2_result(job_id, result_type="combined")
+        manifest["checks"] = ["The primary action was checked on a narrow screen."]
+        manifest["limitations"] = {"offline": "Live provider data is not included."}
+        (workspace / "result.json").write_text(json.dumps(manifest), encoding="utf-8")
         self.reconcile_job(job_id)
         response = self.client.get(f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created))
         self.assertEqual(response.status_code, 200)
@@ -461,6 +466,8 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(job["stage"], "ready")
         self.assertEqual(job["result"]["revision"], 1)
         self.assertEqual(job["result"]["artifacts"], manifest["artifacts"])
+        self.assertEqual(job["result"]["checks"], manifest["checks"])
+        self.assertEqual(job["result"]["limitations"], manifest["limitations"])
 
         projection = self.project_root / job_id
         self.assertEqual((projection / "index.html").read_text(encoding="utf-8"), (public / "index.html").read_text(encoding="utf-8"))
@@ -969,6 +976,7 @@ class MiniFrankTest(unittest.TestCase):
         jobs[job_id]["expires_at"] = deadline
         jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
         self.fail_session_delete = True
+        calls_before_read = len(self.hermes_calls)
 
         calls = 0
 
@@ -984,9 +992,28 @@ class MiniFrankTest(unittest.TestCase):
 
         self.assertEqual(response.status_code, 404)
         stored = self.stored_job(job_id)
-        self.assertEqual(stored["stage"], "expired_cleanup_pending")
+        self.assertEqual(stored["stage"], "working")
         self.assertEqual(stored["expires_at"], deadline)
         self.assertFalse((self.project_root / job_id).exists())
+        self.assertEqual(self.deleted_sessions, [])
+        self.assertEqual(len(self.hermes_calls), calls_before_read)
+
+    def test_due_reconciler_owns_the_expiry_transition(self):
+        created = self.create_job().get_json()
+        job_id = created["job"]["id"]
+        jobs_path = self.data_root / "mini" / "jobs.json"
+        jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+        jobs[job_id]["expires_at"] = 1
+        jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+        self.fail_session_delete = True
+
+        with patch("mini_frank.time.time", return_value=2):
+            self.blueprint.mini_reconcile_once()
+
+        stored = self.stored_job(job_id)
+        self.assertEqual(stored["stage"], "expired_cleanup_pending")
+        self.assertEqual(stored["expires_at"], 1)
+        self.assertEqual(self.deleted_sessions, [])
 
     def test_abandon_always_deletes_the_derived_session_after_a_lost_create_response(self):
         created = self.create_intake()
@@ -1693,7 +1720,7 @@ class MiniFrankTest(unittest.TestCase):
         job_id = created["job"]["id"]
         response = self.client.post(
             f"/api/mini/jobs/{job_id}/feedback",
-            json={"status": "not_yet", "reason": "missing_detail"},
+            json={"rating": "not_yet", "reason": "missing_piece"},
             headers=self.claim_headers(created),
         )
         self.assertEqual(response.status_code, 200)
@@ -1722,6 +1749,19 @@ class MiniFrankTest(unittest.TestCase):
             ).status_code,
             404,
         )
+
+    def test_revoke_route_and_replayed_delete_are_idempotent(self):
+        created = self.create_job().get_json()
+        job_id = created["job"]["id"]
+        revoked = self.client.post(
+            f"/api/mini/jobs/{job_id}/revoke", headers=self.claim_headers(created)
+        )
+        self.assertEqual(revoked.status_code, 200)
+        replay = self.client.delete(
+            f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created)
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.get_json()["deleted"], job_id)
 
     def test_readiness_reports_local_signals_without_upstream_status_polling(self):
         response = self.client.get("/api/mini/readiness")

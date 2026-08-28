@@ -44,6 +44,7 @@ RESULT_FIELDS = {
 RESULT_V2_FIELDS = {
     "schema", "job_id", "revision", "result_type", "title", "summary", "artifacts", "details_url",
 }
+RESULT_V2_OPTIONAL_FIELDS = {"checks", "limitations"}
 MAX_RESULT_ARTIFACTS = 12
 MAX_PUBLISHED_FILES = 500
 MAX_PUBLISHED_FILE_BYTES = 50 * 1024 * 1024
@@ -237,8 +238,7 @@ RECONCILE_FAILURE_DELAY_SECONDS = 15
 IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
 FEEDBACK_STATUSES = {"useful", "not_yet"}
 FEEDBACK_REASONS = {
-    "missing_detail", "not_as_expected", "hard_to_use", "not_ready",
-    "technical_problem", "missing_feature", "other",
+    "missing_piece", "wrong_format", "needs_more_context", "hard_to_use", "other",
 }
 COMPLETED_RESULT_GRACE_SECONDS = 60
 GUIDE_STREAM_LIMIT = 2
@@ -1359,6 +1359,40 @@ def _manifest_text(value, limit: int, *, minimum: int = 1) -> str | None:
     return text
 
 
+def _manifest_details(value) -> list[str] | dict[str, str] | None:
+    """Keep optional customer-facing checks bounded and text-only."""
+    if isinstance(value, list):
+        if len(value) > 20:
+            return None
+        cleaned: list[str] = []
+        for item in value:
+            if isinstance(item, str):
+                text = _manifest_text(item, 240)
+            elif isinstance(item, dict):
+                text = _manifest_text(
+                    item.get("label") or item.get("name") or item.get("summary"),
+                    240,
+                )
+            else:
+                return None
+            if not text:
+                return None
+            cleaned.append(text)
+        return cleaned
+    if isinstance(value, dict):
+        if len(value) > 20:
+            return None
+        cleaned_map: dict[str, str] = {}
+        for raw_key, raw_value in value.items():
+            key = _manifest_text(raw_key, 80)
+            item = _manifest_text(raw_value, 240)
+            if not key or not item:
+                return None
+            cleaned_map[key] = item
+        return cleaned_map
+    return None
+
+
 def _claim_hash(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
@@ -1436,7 +1470,7 @@ The customer owns the result. Keep technical detail optional. Do not expose priv
 
 Publish a browser-ready result, when useful, to {public_dir}/index.html. Hosted previews are deliberately static and offline: use no JavaScript, forms, frames, SVG, external URLs, meta redirects, popups, or navigable links other than page anchors and files under downloads/. Use plain HTML/CSS and passive local or data assets. If the solution needs program logic, put its rebuildable source in a ZIP download and make the hosted page a useful no-script guide or preview. Put customer downloads under {public_dir}/downloads/ using a plain safe filename. Put concise, customer-readable build notes at {public_dir}/build-notes.txt. Never copy the private attachment directory into public.
 
-As the final operation, atomically write {source_dir}/result.json using schema {RESULT_SCHEMA_V2}. Include exactly schema, job_id, revision, result_type, title, summary, artifacts, and details_url. job_id must be {job['id']} and revision must be {int(job.get('revision') or 1)}. result_type must be interactive, download, or combined and must agree with the artifact kinds. artifacts must contain 1 to {MAX_RESULT_ARTIFACTS} entries, each with exactly kind, label, and url, plus optional media_type. kind is interactive or download. Use {PREVIEW_PREFIX}{job['id']}/ for the main interactive artifact, and put downloads at {PREVIEW_PREFIX}{job['id']}/downloads/<safe filename>. Multiple downloads are allowed when they are genuinely useful. details_url must be exactly {PREVIEW_PREFIX}{job['id']}/build-notes.txt. Do not include null fields, extra fields, private paths, or internal notes. Keep title under 100 characters, artifact labels under 80 characters, and summary to two concise customer-facing sentences.
+As the final operation, atomically write {source_dir}/result.json using schema {RESULT_SCHEMA_V2}. Include schema, job_id, revision, result_type, title, summary, artifacts, and details_url; checks and limitations are optional bounded customer-facing lists or label/value maps. job_id must be {job['id']} and revision must be {int(job.get('revision') or 1)}. result_type must be interactive, download, or combined and must agree with the artifact kinds. artifacts must contain 1 to {MAX_RESULT_ARTIFACTS} entries, each with exactly kind, label, and url, plus optional media_type. kind is interactive or download. Use {PREVIEW_PREFIX}{job['id']}/ for the main interactive artifact, and put downloads at {PREVIEW_PREFIX}{job['id']}/downloads/<safe filename>. Multiple downloads are allowed when they are genuinely useful. details_url must be exactly {PREVIEW_PREFIX}{job['id']}/build-notes.txt. Do not include null fields, extra fields, private paths, or internal notes. Keep title under 100 characters, artifact labels under 80 characters, summary to two concise customer-facing sentences, and each check or limitation under 240 characters with no more than 20 entries.
 
 Do not write result.json until every listed artifact exists and has passed the checks you record in build-notes.txt. Do not send messages or email; Frank owns delivery."""
 
@@ -2428,7 +2462,11 @@ def create_blueprint(
         if not title or not summary:
             return None
         if value.get("schema") == RESULT_SCHEMA_V2:
-            if set(value) != RESULT_V2_FIELDS:
+            fields = set(value)
+            if (
+                not RESULT_V2_FIELDS <= fields
+                or not fields <= RESULT_V2_FIELDS | RESULT_V2_OPTIONAL_FIELDS
+            ):
                 return None
             if value.get("revision") != int(job.get("revision") or 1):
                 return None
@@ -2484,7 +2522,7 @@ def create_blueprint(
             expected_type = "combined" if len(kinds) == 2 else next(iter(kinds))
             if result_type != expected_type:
                 return None
-            return {
+            cleaned_result = {
                 "schema": RESULT_SCHEMA_V2,
                 "revision": int(job.get("revision") or 1),
                 "result_type": result_type,
@@ -2493,6 +2531,13 @@ def create_blueprint(
                 "artifacts": artifacts,
                 "details_url": details_url,
             }
+            for field in RESULT_V2_OPTIONAL_FIELDS:
+                if field in value:
+                    details = _manifest_details(value[field])
+                    if details is None:
+                        return None
+                    cleaned_result[field] = details
+            return cleaned_result
         if value.get("schema") != RESULT_SCHEMA or set(value) != RESULT_FIELDS:
             return None
         if int(job.get("revision") or 1) != 1:
@@ -2915,7 +2960,11 @@ def create_blueprint(
     @blueprint.get("/api/mini/config")
     def config():
         return jsonify({
+            "feedback_available": True,
             "job_attachment_uploads": True,
+            "delete_available": True,
+            "revoke_available": True,
+            "make_another": True,
             "readiness_url": "/api/mini/readiness",
             "status_owner": "background_reconciler",
             "reconciliation": "due_based",
@@ -3462,15 +3511,10 @@ def create_blueprint(
         # upstream status fan-out.
         job = claimed_job(job_id, allow_expired=True)
         if job_is_expired(job):
-            with job_dispatch_lock(job_id):
-                current = store.get(job_id)
-                if current and job_is_expired(current):
-                    try:
-                        expire_job_record(current)
-                    except Exception:
-                        logging.getLogger(__name__).exception(
-                            "Mini Frank customer expiry cleanup failed"
-                        )
+            # Expiry cleanup, including Hermes session deletion, belongs to the
+            # reconciler. A customer status read must remain a persisted local
+            # projection and must never fan out to Hermes, even at the deadline.
+            remove_public_projection(job_id)
             abort(404)
         return jsonify({"job": public_job(job)})
 
@@ -3478,7 +3522,7 @@ def create_blueprint(
     def job_feedback(job_id: str):
         body = json_object()
         outcome = str(
-            body.get("status") or body.get("feedback") or body.get("outcome") or ""
+            body.get("rating") or body.get("status") or body.get("feedback") or body.get("outcome") or ""
         ).strip().lower()
         if outcome not in FEEDBACK_STATUSES:
             abort(400, "Feedback status must be useful or not_yet.")
@@ -3495,10 +3539,25 @@ def create_blueprint(
         return jsonify({"job": public_job(job)}), 200
 
     @blueprint.delete("/api/mini/jobs/<job_id>")
+    @blueprint.post("/api/mini/jobs/<job_id>/revoke")
     def revoke_job(job_id: str):
-        """Revoke the claim immediately, then reuse fail-closed cleanup."""
+        """Withdraw bearer access immediately and complete fail-closed cleanup."""
+        if not JOB_ID_RE.fullmatch(job_id):
+            abort(404)
+        action = "revoke" if request.path.endswith("/revoke") else "delete"
         with job_dispatch_lock(job_id):
-            job = claimed_job(job_id)
+            job = store.get(job_id)
+            token = str(request.headers.get("X-Mini-Claim") or "").strip()
+            if not job:
+                # Claims are deterministic but never stored in clear text. This
+                # permits a lost-response replay to be acknowledged after the
+                # private record has already been fully removed.
+                if token and hmac.compare_digest(token, _claim_token(job_id, rate_key)):
+                    return jsonify({"deleted": job_id}), 200
+                abort(404)
+            claim_hash = str(job.get("claim_hash") or "")
+            if not token or not claim_hash or not hmac.compare_digest(claim_hash, _claim_hash(token)):
+                abort(404)
             job = store.update(
                 job_id,
                 stage="expired_cleanup_pending",
@@ -3511,9 +3570,9 @@ def create_blueprint(
             try:
                 expire_job_record(job)
             except Exception:
-                telemetry.record("job.revoke", outcome="cleanup_pending")
+                telemetry.record(f"job.{action}", outcome="cleanup_pending")
                 return jsonify({"deleted": job_id, "cleanup_pending": True}), 202
-        telemetry.record("job.revoke", outcome="deleted")
+        telemetry.record(f"job.{action}", outcome="deleted")
         return jsonify({"deleted": job_id}), 200
 
     @blueprint.post("/api/mini/jobs/<job_id>/attachments")

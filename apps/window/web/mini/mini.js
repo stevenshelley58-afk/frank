@@ -135,7 +135,10 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
   function safeUrl(value) {
     try {
       const url = new URL(String(value || ""), location.origin);
-      if (url.origin !== location.origin && url.protocol !== "https:") return "";
+      const sameOrigin = url.origin === location.origin;
+      const trustedPreview = url.protocol === "https:" && url.host === "preview.frank.fail";
+      if (!sameOrigin && !trustedPreview) return "";
+      if (url.username || url.password) return "";
       return url.href;
     } catch (_error) {
       return "";
@@ -995,7 +998,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
       <div class="artifact-content">
         <h3>${esc(result.title || job.title || "Your solution")}</h3>
         <p>${esc(result.summary || "Your working result is ready.")}</p>
-        ${preview ? `<div class="artifact-preview-wrap"><iframe class="artifact-preview" src="${esc(preview)}" title="Safe preview of ${esc(result.title || job.title || "your result")}" sandbox="allow-scripts allow-forms" loading="lazy"></iframe><p class="preview-note">This preview is sandboxed. Use the open or download action below for the full result.</p></div>` : ""}
+        ${preview ? `<div class="artifact-preview-wrap"><iframe class="artifact-preview" src="${esc(preview)}" title="Safe preview of ${esc(result.title || job.title || "your result")}" sandbox loading="lazy"></iframe><p class="preview-note">This preview is static and sandboxed. Use the open or download action below for the full result.</p></div>` : ""}
         <div class="artifact-actions">${actions || ""}${detailsUrl ? `<a class="artifact-link" href="${esc(detailsUrl)}" target="_blank" rel="noopener noreferrer">Open build notes</a>` : ""}<button class="secondary-button" type="button" data-action="request-change">Ask for a change</button></div>
         ${resultChecks(result)}
         <div class="artifact-meta"><span>${availableUntil ? `Available here until ${esc(availableUntil)}` : "Availability date not provided"}</span><span>Private link is bearer access · I keep this work for 30 days</span></div>
