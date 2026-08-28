@@ -202,6 +202,14 @@ class MiniFrankTest(unittest.TestCase):
     def stored_job(self, job_id):
         return json.loads((self.data_root / "mini" / "jobs.json").read_text(encoding="utf-8"))[job_id]
 
+    def reconcile_job(self, job_id):
+        jobs_path = self.data_root / "mini" / "jobs.json"
+        jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+        if job_id in jobs:
+            jobs[job_id]["next_reconcile_at"] = 0
+            jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+        self.blueprint.mini_reconcile_once()
+
     def seed_legacy_job(
         self, job_id, *, hosted_until, created_at=1_700_000_000, session_id=""
     ):
@@ -446,6 +454,7 @@ class MiniFrankTest(unittest.TestCase):
         created = self.create_job().get_json()
         job_id = created["job"]["id"]
         workspace, public, manifest = self.write_v2_result(job_id, result_type="combined")
+        self.reconcile_job(job_id)
         response = self.client.get(f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created))
         self.assertEqual(response.status_code, 200)
         job = response.get_json()["job"]
@@ -482,6 +491,7 @@ class MiniFrankTest(unittest.TestCase):
                 (public / "index.html").write_text(
                     f"<!doctype html><title>Unsafe probe</title>{markup}", encoding="utf-8"
                 )
+                self.reconcile_job(job_id)
 
                 response = self.client.get(
                     f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created)
@@ -497,6 +507,7 @@ class MiniFrankTest(unittest.TestCase):
         created = self.create_job().get_json()
         job_id = created["job"]["id"]
         self.write_v2_result(job_id, run_complete=False)
+        self.reconcile_job(job_id)
 
         working = self.client.get(
             f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created)
@@ -505,6 +516,7 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(working["stage"], "working")
         self.assertFalse((self.project_root / job_id).exists())
         self.poll_status = "completed"
+        self.reconcile_job(job_id)
         ready = self.client.get(
             f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created)
         ).get_json()["job"]
@@ -514,6 +526,7 @@ class MiniFrankTest(unittest.TestCase):
         created = self.create_job().get_json()
         job_id = created["job"]["id"]
         self.write_v2_result(job_id, result_type="download")
+        self.reconcile_job(job_id)
         response = self.client.get(f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created))
         self.assertEqual(response.status_code, 200)
         job = response.get_json()["job"]
@@ -554,6 +567,7 @@ class MiniFrankTest(unittest.TestCase):
         created = self.create_job().get_json()
         job_id = created["job"]["id"]
         workspace, _, _ = self.write_v2_result(job_id)
+        self.reconcile_job(job_id)
         ready = self.client.get(f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created)).get_json()["job"]
         self.assertEqual(ready["stage"], "ready")
         self.assertTrue((self.project_root / job_id / "index.html").is_file())
@@ -576,7 +590,7 @@ class MiniFrankTest(unittest.TestCase):
         created = self.create_job().get_json()
         job_id = created["job"]["id"]
         self.write_v2_result(job_id)
-        self.client.get(f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created))
+        self.reconcile_job(job_id)
         change = "Add evening appointment choices and a notes field."
         self.fail_next_run = True
         queued = self.client.post(
@@ -748,6 +762,7 @@ class MiniFrankTest(unittest.TestCase):
         job_id = created["job"]["id"]
         job_headers = self.claim_headers(created)
         self.write_v2_result(job_id)
+        self.reconcile_job(job_id)
         ready = self.client.get(f"/api/mini/jobs/{job_id}", headers=job_headers)
         self.assertEqual(ready.get_json()["job"]["stage"], "ready")
         job_upload = self.client.post(
@@ -989,6 +1004,7 @@ class MiniFrankTest(unittest.TestCase):
         job_id = created["job"]["id"]
         first_key = self.runs[-1]["payload"]["idempotency_key"]
         self.poll_http_status = 404
+        self.reconcile_job(job_id)
 
         response = self.client.get(f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created))
 
@@ -1008,6 +1024,7 @@ class MiniFrankTest(unittest.TestCase):
         created = self.create_job().get_json()
         job_id = created["job"]["id"]
         self.poll_status = "waiting_for_approval"
+        self.reconcile_job(job_id)
 
         response = self.client.get(f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created))
 
@@ -1021,6 +1038,7 @@ class MiniFrankTest(unittest.TestCase):
         self.assertTrue(self.run_controls[1]["path"].endswith("/stop"))
 
         self.poll_status = "cancelled"
+        self.reconcile_job(job_id)
         stopped = self.client.get(
             f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created)
         ).get_json()["job"]
@@ -1378,6 +1396,7 @@ class MiniFrankTest(unittest.TestCase):
         self.assertTrue(self.stored_job(job_id)["storage_reserved"])
 
         self.poll_status = "cancelled"
+        self.reconcile_job(job_id)
         terminal = self.client.get(
             f"/api/mini/jobs/{job_id}",
             headers=self.claim_headers(created),
@@ -1452,7 +1471,7 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(created["job"]["stage"], "queued")
         self.assertEqual(len(self.runs), 0)
         with patch("mini_frank.AUTO_DISPATCH_RETRY_DELAYS", (0, 0, 0, 0, 0)):
-            self.blueprint.mini_reconcile_once()
+            self.reconcile_job(job_id)
         stored = self.stored_job(job_id)
         self.assertEqual(stored["stage"], "working")
         self.assertEqual(stored["run_id"], "run-1")
@@ -1550,6 +1569,210 @@ class MiniFrankTest(unittest.TestCase):
         limited = self.create_job(ip=ip)
         self.assertEqual(limited.status_code, 429)
         self.assertEqual(len(self.runs), 1)
+
+    def test_customer_get_reads_persisted_status_until_due_reconciler_runs(self):
+        created = self.create_job().get_json()
+        job_id = created["job"]["id"]
+        self.write_v2_result(job_id)
+
+        before = self.client.get(
+            f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created)
+        )
+        self.assertEqual(before.status_code, 200)
+        self.assertEqual(before.get_json()["job"]["stage"], "working")
+        self.assertFalse((self.project_root / job_id).exists())
+
+        self.blueprint.mini_reconcile_once()
+        self.assertEqual(self.stored_job(job_id)["stage"], "ready")
+        self.assertTrue((self.project_root / job_id).is_dir())
+
+    def test_reconciler_skips_a_job_until_its_persisted_due_time(self):
+        created = self.create_job().get_json()
+        job_id = created["job"]["id"]
+        self.write_v2_result(job_id)
+        jobs_path = self.data_root / "mini" / "jobs.json"
+        jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+        jobs[job_id]["next_reconcile_at"] = 9_999_999_999
+        jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+
+        self.blueprint.mini_reconcile_once()
+        self.assertEqual(self.stored_job(job_id)["stage"], "working")
+
+        jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+        jobs[job_id]["next_reconcile_at"] = 0
+        jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+        self.blueprint.mini_reconcile_once()
+        self.assertEqual(self.stored_job(job_id)["stage"], "ready")
+
+    def test_upload_reserves_once_for_the_whole_stream_not_once_per_chunk(self):
+        created = self.create_intake()
+        payload = self.pdf_bytes(b"C" * 240_000)
+        with patch.object(
+            MiniFrankStorageFence,
+            "_usage_locked",
+            autospec=True,
+            wraps=MiniFrankStorageFence._usage_locked,
+        ) as usage:
+            response = self.client.post(
+                f"/api/mini/intakes/{created['intake']['id']}/attachments",
+                data={"files": (io.BytesIO(payload), "large.pdf", "application/pdf")},
+                headers=self.claim_headers(created),
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 201)
+        self.assertLess(usage.call_count, 10)
+
+    def test_invalid_claim_is_rejected_before_multipart_form_parsing(self):
+        created = self.create_intake()
+        with patch(
+            "werkzeug.wrappers.request.Request._load_form_data",
+            side_effect=AssertionError("multipart parsed before claim validation"),
+        ):
+            response = self.client.post(
+                f"/api/mini/intakes/{created['intake']['id']}/attachments",
+                data={"files": (io.BytesIO(b"private"), "notes.txt", "text/plain")},
+                content_type="multipart/form-data",
+            )
+        self.assertEqual(response.status_code, 404)
+
+    def test_dispatch_failure_is_categorized_without_claiming_capacity(self):
+        self.fail_next_run = True
+        created = self.create_job().get_json()
+        stored = self.stored_job(created["job"]["id"])
+        self.assertEqual(stored["dispatch_error"], "dispatch_unavailable")
+        self.assertNotEqual(stored["dispatch_error"], "waiting_for_capacity")
+        self.assertEqual(stored["next_reconcile_at"] > 0, True)
+
+    def test_change_idempotency_replays_without_a_second_revision_or_run(self):
+        created = self.create_job().get_json()
+        job_id = created["job"]["id"]
+        self.write_v2_result(job_id)
+        self.blueprint.mini_reconcile_once()
+        headers = {**self.claim_headers(created), "Idempotency-Key": "change-001"}
+        first = self.client.post(
+            f"/api/mini/jobs/{job_id}/changes",
+            json={"change": "Add evening appointment choices."},
+            headers=headers,
+        )
+        second = self.client.post(
+            f"/api/mini/jobs/{job_id}/changes",
+            json={"change": "Add evening appointment choices."},
+            headers=headers,
+        )
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(first.get_json()["job"]["revision"], 2)
+        self.assertEqual(second.get_json()["job"]["revision"], 2)
+        self.assertEqual(len(self.runs), 2)
+
+        conflict = self.client.post(
+            f"/api/mini/jobs/{job_id}/changes",
+            json={"change": "Replace the entire booking flow."},
+            headers=headers,
+        )
+        self.assertEqual(conflict.status_code, 409)
+
+    def test_submit_idempotency_replays_the_linked_job(self):
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        headers = {**self.claim_headers(created), "Idempotency-Key": "submit-001"}
+        body = {"conversation": [{"role": "user", "text": "I need a simple booking helper for customers."}]}
+        first = self.client.post(
+            f"/api/mini/intakes/{intake_id}/submit", json=body, headers=headers
+        )
+        second = self.client.post(
+            f"/api/mini/intakes/{intake_id}/submit", json=body, headers=headers
+        )
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertEqual(first.get_json()["job"]["id"], second.get_json()["job"]["id"])
+        self.assertEqual(len(self.runs), 1)
+
+    def test_claimed_feedback_is_categorical_and_repeatable(self):
+        created = self.create_job().get_json()
+        job_id = created["job"]["id"]
+        response = self.client.post(
+            f"/api/mini/jobs/{job_id}/feedback",
+            json={"status": "not_yet", "reason": "missing_detail"},
+            headers=self.claim_headers(created),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["job"]["feedback"]["status"], "not_yet")
+        invalid = self.client.post(
+            f"/api/mini/jobs/{job_id}/feedback",
+            json={"status": "useful", "reason": "free-form customer transcript"},
+            headers=self.claim_headers(created),
+        )
+        self.assertEqual(invalid.status_code, 400)
+
+    def test_claimed_job_revoke_withdraws_access_and_reuses_fail_closed_cleanup(self):
+        created = self.create_job().get_json()
+        job_id = created["job"]["id"]
+        response = self.client.delete(
+            f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created)
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(
+            json.loads((self.data_root / "mini" / "jobs.json").read_text(encoding="utf-8")),
+            {},
+        )
+        self.assertEqual(
+            self.client.get(
+                f"/api/mini/jobs/{job_id}", headers=self.claim_headers(created)
+            ).status_code,
+            404,
+        )
+
+    def test_readiness_reports_local_signals_without_upstream_status_polling(self):
+        response = self.client.get("/api/mini/readiness")
+        self.assertEqual(response.status_code, 200)
+        payload = response.get_json()
+        self.assertTrue(payload["ready"])
+        self.assertTrue(payload["reconciler"]["due_based"])
+        self.assertEqual(payload["reconciler"]["status_owner"], "background_reconciler")
+
+    def test_telemetry_is_bounded_and_contains_only_categories(self):
+        created = self.create_job().get_json()
+        self.client.post(
+            f"/api/mini/jobs/{created['job']['id']}/feedback",
+            json={"status": "useful", "reason": "other"},
+            headers=self.claim_headers(created),
+        )
+        snapshot = self.blueprint.mini_telemetry.snapshot()
+        encoded = json.dumps(snapshot)
+        self.assertIn("job.feedback", encoded)
+        self.assertNotIn(created["claim_token"], encoded)
+        self.assertNotIn("I need customers to book appointments", encoded)
+        self.assertTrue(all(set(event) <= {"event", "outcome", "created_at"} for event in snapshot["events"]))
+
+    def test_guide_reuses_sanitized_attachment_context_without_reparsing_or_resending(self):
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+        uploaded = self.client.post(
+            f"/api/mini/intakes/{intake_id}/attachments",
+            data={"files": (io.BytesIO(b"booking notes and customer context"), "notes.txt", "text/plain")},
+            headers=headers,
+            content_type="multipart/form-data",
+        )
+        self.assertEqual(uploaded.status_code, 201)
+        original = __import__("mini_frank")._attachment_excerpt
+        with patch("mini_frank._attachment_excerpt", wraps=original) as excerpt:
+            first = self.client.post(
+                f"/api/mini/intakes/{intake_id}/chat",
+                json={"text": "Help me understand these notes."}, headers=headers,
+            )
+            first.data
+            second = self.client.post(
+                f"/api/mini/intakes/{intake_id}/chat",
+                json={"text": "What should I do next?"}, headers=headers,
+            )
+            second.data
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(excerpt.call_count, 1)
+        self.assertIn(b"UNTRUSTED ATTACHMENT CONTEXT", self.guide_turns[0]["payload"]["message"][0]["text"].encode())
+        self.assertNotIn(b"UNTRUSTED ATTACHMENT CONTEXT", self.guide_turns[1]["payload"]["message"].encode())
 
 
 if __name__ == "__main__":

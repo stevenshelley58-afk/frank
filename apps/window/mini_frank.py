@@ -22,6 +22,7 @@ import urllib.error
 import urllib.parse
 import zipfile
 import xml.etree.ElementTree as ET
+from collections import deque
 from contextlib import contextmanager, nullcontext
 from html.parser import HTMLParser
 from pathlib import Path
@@ -232,6 +233,13 @@ MAX_RATE_EVENTS = 20_000
 MINI_BUILD_STORAGE_RESERVATION_BYTES = 256 * 1024 * 1024
 MINI_WORKSPACE_CONTROL_RESERVATION_BYTES = 64 * 1024
 AUTO_DISPATCH_RETRY_DELAYS = (0, 5, 15, 60, 300)
+RECONCILE_FAILURE_DELAY_SECONDS = 15
+IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+FEEDBACK_STATUSES = {"useful", "not_yet"}
+FEEDBACK_REASONS = {
+    "missing_detail", "not_as_expected", "hard_to_use", "not_ready",
+    "technical_problem", "missing_feature", "other",
+}
 COMPLETED_RESULT_GRACE_SECONDS = 60
 GUIDE_STREAM_LIMIT = 2
 GUIDE_READ_TIMEOUT_SECONDS = 45
@@ -744,6 +752,45 @@ class MiniFrankRateLedger:
             return True
 
 
+class MiniFrankTelemetry:
+    """Bounded, privacy-safe operational counters for the Mini transport.
+
+    This deliberately stays in memory. It is useful for health diagnostics
+    without creating another customer-data retention surface. Callers may only
+    record a fixed event name and a small categorical outcome; no request,
+    claim, prompt, transcript, filename, URL, IP, or file data is accepted.
+    """
+
+    def __init__(self, *, max_events: int = 512):
+        self.max_events = max(1, int(max_events))
+        self.lock = threading.Lock()
+        self.counters: dict[str, int] = {}
+        self.events = deque(maxlen=self.max_events)
+
+    def record(self, event: str, *, outcome: str = "") -> None:
+        event = str(event or "").strip().lower()
+        outcome = str(outcome or "").strip().lower()
+        if not re.fullmatch(r"[a-z][a-z0-9_.-]{0,63}", event):
+            raise ValueError("invalid telemetry event")
+        if outcome and not re.fullmatch(r"[a-z][a-z0-9_.-]{0,31}", outcome):
+            raise ValueError("invalid telemetry outcome")
+        with self.lock:
+            key = f"{event}.{outcome}" if outcome else event
+            self.counters[key] = self.counters.get(key, 0) + 1
+            self.events.append({
+                "event": event,
+                **({"outcome": outcome} if outcome else {}),
+                "created_at": int(time.time()),
+            })
+
+    def snapshot(self) -> dict:
+        with self.lock:
+            return {
+                "counters": dict(self.counters),
+                "events": list(self.events),
+            }
+
+
 class MiniFrankStorageFull(RuntimeError):
     """The anonymous Mini storage or host free-space floor is exhausted."""
 
@@ -752,10 +799,10 @@ class MiniFrankStorageFence:
     """Atomically reserve one aggregate budget across every Mini file tree.
 
     The Window runs as one threaded worker, so this process-wide lock is the
-    final write admission seam. Actual files are rescanned on every admission;
-    short-lived reservations cover concurrent writes that have not appeared in
-    that scan yet, while ``reserved_provider`` contributes durable in-flight
-    build reservations stored with the jobs themselves.
+    final write admission seam. Admission scans the roots once per reservation;
+    the reservation then covers the complete bounded write, including bytes
+    that have not appeared in a directory scan yet. Durable build reservations
+    stored with jobs cover accepted work across request/restart boundaries.
     """
 
     def __init__(
@@ -1466,6 +1513,7 @@ def create_blueprint(
         max_events=max_rate_events,
         max_serialized_bytes=max_rate_store_bytes,
     )
+    telemetry = MiniFrankTelemetry()
     shared_root = data_root / "mini-shared"
     attachment_root = shared_root / "attachments"
     workspace_root = shared_root / "workspaces"
@@ -1518,6 +1566,7 @@ def create_blueprint(
     guide_slots = threading.BoundedSemaphore(GUIDE_STREAM_LIMIT)
     active_guides: set[str] = set()
     active_guides_lock = threading.Lock()
+    reconcile_delay = max(0.25, min(60.0, float(reconcile_interval_seconds)))
 
     def job_dispatch_lock(job_id: str) -> threading.RLock:
         with dispatch_locks_guard:
@@ -1565,6 +1614,58 @@ def create_blueprint(
         address = str(request.headers.get("X-Real-IP") or request.remote_addr or "unknown")
         return hmac.new(rate_key, address.encode("utf-8"), hashlib.sha256).hexdigest()
 
+    def classify_failure(error: Exception, *, operation: str) -> str:
+        """Map transport failures to stable customer-safe categories."""
+        if isinstance(error, MiniFrankStorageFull):
+            return "capacity_unavailable"
+        if isinstance(error, urllib.error.HTTPError):
+            if error.code in {401, 403}:
+                return f"{operation}_unauthorized"
+            if error.code in {408, 425, 429, 500, 502, 503, 504}:
+                return f"{operation}_unavailable"
+            if error.code == 404:
+                return f"{operation}_missing"
+            if 400 <= error.code < 500:
+                return f"{operation}_rejected"
+        if isinstance(error, (TimeoutError, urllib.error.URLError, OSError)):
+            return f"{operation}_unavailable"
+        return f"{operation}_failed"
+
+    def idempotency_key() -> str:
+        raw = str(request.headers.get("Idempotency-Key") or "").strip()
+        if not raw:
+            return ""
+        if not IDEMPOTENCY_KEY_RE.fullmatch(raw):
+            abort(400, "Idempotency-Key must be a short token.")
+        return raw
+
+    def change_fingerprint(change: str, attachment_ids: list[str]) -> str:
+        value = json.dumps(
+            {"change": change, "attachment_ids": attachment_ids},
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+    def dispatch_retry_delay(attempts: int) -> int:
+        index = min(max(1, int(attempts)), len(AUTO_DISPATCH_RETRY_DELAYS) - 1)
+        return int(AUTO_DISPATCH_RETRY_DELAYS[index])
+
+    def upload_reservation_bytes(file_count: int, existing_total: int) -> int:
+        bounded = min(
+            MAX_ATTACHMENT_BYTES * max(0, int(file_count)),
+            max(0, MAX_ATTACHMENTS_TOTAL_BYTES - max(0, int(existing_total))),
+        )
+        if bounded <= 0:
+            return 0
+        # The multipart body length is a safe upper bound for file bytes and
+        # lets ordinary small uploads reserve their real request size instead
+        # of pessimistically reserving 20 MB per file. Chunked requests use the
+        # explicit product bound and remain fail-closed.
+        declared = int(request.content_length or 0)
+        return min(bounded, declared) if declared > 0 else bounded
+
     def record_rate_event(owner_hash: str, kind: str, *, limit: int, message: str) -> None:
         if not rate_ledger.try_record(owner_hash, kind, limit=limit):
             abort(429, message)
@@ -1578,7 +1679,7 @@ def create_blueprint(
             or int(job.get("expires_at") or 0) <= timestamp
         )
 
-    def claimed_job(job_id: str) -> dict:
+    def claimed_job(job_id: str, *, allow_expired: bool = False) -> dict:
         if not JOB_ID_RE.fullmatch(job_id):
             abort(404)
         job = store.get(job_id)
@@ -1586,7 +1687,7 @@ def create_blueprint(
         claim_hash = str((job or {}).get("claim_hash") or "")
         if not job or not token or not claim_hash or not hmac.compare_digest(claim_hash, _claim_hash(token)):
             abort(404)
-        if job_is_expired(job):
+        if job_is_expired(job) and not allow_expired:
             abort(404)
         return job
 
@@ -1638,6 +1739,78 @@ def create_blueprint(
         except ValueError as error:
             raise RuntimeError("Mini Frank attachment storage is invalid") from error
         return target
+
+    def cached_attachment_context(
+        intake: dict, attachments: list[dict]
+    ) -> tuple[list[dict], list[dict], list[str]]:
+        """Build bounded guide context once and return only unseen context."""
+        raw_cached = intake.get("guide_attachment_context")
+        cached = {
+            str(item.get("id") or ""): item
+            for item in (raw_cached if isinstance(raw_cached, list) else [])
+            if isinstance(item, dict) and JOB_ID_RE.fullmatch(str(item.get("id") or ""))
+        }
+        raw_sent = intake.get("guide_context_sent")
+        sent = {
+            str(value)
+            for value in (raw_sent if isinstance(raw_sent, list) else [])
+            if JOB_ID_RE.fullmatch(str(value or ""))
+        }
+        context: list[dict] = []
+        total = 0
+        for item in attachments:
+            attachment_id = str(item.get("id") or "")
+            if not JOB_ID_RE.fullmatch(attachment_id):
+                continue
+            name = str(item.get("name") or "attachment")[:120]
+            media_type = str(item.get("type") or "application/octet-stream")[:100]
+            size = max(0, int(item.get("size") or 0))
+            previous = cached.get(attachment_id)
+            if (
+                isinstance(previous, dict)
+                and previous.get("id") == attachment_id
+                and previous.get("type") == media_type
+                and int(previous.get("size") or -1) == size
+            ):
+                item_context = dict(previous)
+            else:
+                item_context = {"id": attachment_id, "name": name, "type": media_type, "size": size}
+                try:
+                    excerpt = _attachment_excerpt(
+                        attachment_target(item), media_type
+                    )
+                except RuntimeError:
+                    excerpt = ""
+                if excerpt and total < MAX_GUIDE_EXCERPTS_TOTAL_CHARS:
+                    excerpt = excerpt[:MAX_GUIDE_EXCERPTS_TOTAL_CHARS - total]
+                    item_context["untrusted_excerpt"] = excerpt
+                    total += len(excerpt)
+                else:
+                    item_context["content_available_during_build"] = True
+            if "untrusted_excerpt" in item_context:
+                excerpt = str(item_context["untrusted_excerpt"] or "")
+                if len(excerpt) > MAX_GUIDE_EXCERPT_CHARS:
+                    item_context["untrusted_excerpt"] = excerpt[:MAX_GUIDE_EXCERPT_CHARS]
+            else:
+                item_context["content_available_during_build"] = True
+            context.append(item_context)
+
+        # The cache itself is bounded even if a legacy record contains junk.
+        bounded: list[dict] = []
+        bounded_total = 0
+        for item in context:
+            excerpt = str(item.get("untrusted_excerpt") or "")
+            if excerpt:
+                remaining = MAX_GUIDE_EXCERPTS_TOTAL_CHARS - bounded_total
+                if remaining <= 0:
+                    item.pop("untrusted_excerpt", None)
+                    item["content_available_during_build"] = True
+                else:
+                    item["untrusted_excerpt"] = excerpt[:remaining]
+                    bounded_total += len(item["untrusted_excerpt"])
+            bounded.append(item)
+        unseen = [item for item in bounded if str(item.get("id") or "") not in sent]
+        return bounded, unseen, sorted(sent | {str(item.get("id") or "") for item in unseen})
 
     def workspace_for_job(job_id: str) -> Path:
         if not JOB_ID_RE.fullmatch(job_id):
@@ -2207,7 +2380,15 @@ def create_blueprint(
                 job.get("stage") == "needs_attention"
                 or (job.get("stage") == "queued" and not job.get("run_id"))
             ),
+            "retry_reason": str(job.get("dispatch_error") or "") or None,
+            "next_reconcile_at": int(job.get("next_reconcile_at") or 0),
         }
+        feedback = job.get("feedback")
+        if isinstance(feedback, dict):
+            response["feedback"] = {
+                "status": str(feedback.get("status") or ""),
+                "reason": str(feedback.get("reason") or ""),
+            }
         if job.get("stage") == "queued" and not job.get("run_id") and attempts < len(AUTO_DISPATCH_RETRY_DELAYS):
             response["automatic_retry_at"] = (
                 int(job.get("last_dispatch_at") or 0) + AUTO_DISPATCH_RETRY_DELAYS[attempts]
@@ -2347,7 +2528,8 @@ def create_blueprint(
             logging.getLogger(__name__).exception("Mini Frank trusted publish failed for %s", job["id"])
             return store.update(
                 job["id"], stage="needs_attention", result=None,
-                dispatch_error="publish_failed", checking_since=0,
+                dispatch_error="publish_failed", status_error="",
+                checking_since=0, next_reconcile_at=0,
                 storage_reserved=False,
             )
         if (
@@ -2360,6 +2542,7 @@ def create_blueprint(
             )
             return store.update(
                 job["id"], stage="ready", result=result, dispatch_error="",
+                status_error="", next_reconcile_at=0,
                 pending_change="", checking_since=0, storage_reserved=False,
                 published_revision=int(job.get("revision") or 1),
                 expires_at=(
@@ -2389,11 +2572,17 @@ def create_blueprint(
                 if int(time.time()) >= retry_at:
                     try:
                         return dispatch(job)
-                    except Exception:
-                        return store.update(job["id"], stage="queued", dispatch_error="waiting_for_capacity")
+                    except Exception as error:
+                        failure = classify_failure(error, operation="dispatch")
+                        telemetry.record("dispatch.failure", outcome=failure)
+                        return store.update(
+                            job["id"], stage="queued", dispatch_error=failure,
+                            next_reconcile_at=int(time.time()) + dispatch_retry_delay(attempts + 1),
+                        )
             if job.get("stage") == "queued" and attempts >= len(AUTO_DISPATCH_RETRY_DELAYS):
                 return store.update(
                     job["id"], stage="needs_attention", dispatch_error="dispatch_failed",
+                    status_error="", next_reconcile_at=0,
                 )
             return job
         try:
@@ -2406,14 +2595,25 @@ def create_blueprint(
             if error.code == 404:
                 return store.update(
                     job["id"], stage="needs_attention", dispatch_error="run_missing",
-                    checking_since=0,
+                    status_error="", checking_since=0, next_reconcile_at=0,
                 )
-            return job
-        except Exception:
-            return job
+            failure = classify_failure(error, operation="status")
+            telemetry.record("status.failure", outcome=failure)
+            return store.update(
+                job["id"], status_error=failure,
+                next_reconcile_at=int(time.time()) + RECONCILE_FAILURE_DELAY_SECONDS,
+            )
+        except Exception as error:
+            failure = classify_failure(error, operation="status")
+            telemetry.record("status.failure", outcome=failure)
+            return store.update(
+                job["id"], status_error=failure,
+                next_reconcile_at=int(time.time()) + RECONCILE_FAILURE_DELAY_SECONDS,
+            )
         if not isinstance(run, dict):
             return job
         status = str(run.get("status") or "").lower()
+        status_error = ""
         if status in RUNNING_STATUSES:
             stage = "working"
         elif status == "waiting_for_approval":
@@ -2441,15 +2641,26 @@ def create_blueprint(
                 if error.code == 404:
                     return store.update(
                         job["id"], stage="needs_attention",
-                        dispatch_error="run_missing", checking_since=0,
+                        dispatch_error="run_missing", status_error="",
+                        checking_since=0, next_reconcile_at=0,
                     )
-                if error.code != 404:
-                    return job
-            except Exception:
-                return job
+                failure = classify_failure(error, operation="status")
+                telemetry.record("status.failure", outcome=failure)
+                return store.update(
+                    job["id"], status_error=failure,
+                    next_reconcile_at=int(time.time()) + RECONCILE_FAILURE_DELAY_SECONDS,
+                )
+            except Exception as error:
+                failure = classify_failure(error, operation="status")
+                telemetry.record("status.failure", outcome=failure)
+                return store.update(
+                    job["id"], status_error=failure,
+                    next_reconcile_at=int(time.time()) + RECONCILE_FAILURE_DELAY_SECONDS,
+                )
             return store.update(
                 job["id"], stage="working", dispatch_error="stopping_blocked_run",
-                checking_since=0,
+                status_error="", checking_since=0,
+                next_reconcile_at=int(time.time()) + reconcile_delay,
             )
         elif status == "completed":
             if bool(job.get("storage_reserved")):
@@ -2460,11 +2671,14 @@ def create_blueprint(
             checking_since = int(job.get("checking_since") or 0)
             now = int(time.time())
             if not checking_since:
-                return store.update(job["id"], stage="checking", checking_since=now)
+                return store.update(
+                    job["id"], stage="checking", checking_since=now,
+                    status_error="", next_reconcile_at=now + 1,
+                )
             if now - checking_since >= COMPLETED_RESULT_GRACE_SECONDS:
                 return store.update(
                     job["id"], stage="needs_attention", dispatch_error="result_missing_or_invalid",
-                    storage_reserved=False,
+                    status_error="", storage_reserved=False, next_reconcile_at=0,
                 )
             stage = "checking"
         elif status in {"failed", "cancelled"}:
@@ -2473,11 +2687,25 @@ def create_blueprint(
                 terminal_error = "run_interrupted"
             return store.update(
                 job["id"], stage="needs_attention", dispatch_error=terminal_error,
-                checking_since=0, storage_reserved=False,
+                status_error="", checking_since=0, next_reconcile_at=0,
+                storage_reserved=False,
             )
         else:
             stage = job.get("stage") or "queued"
-        return store.update(job["id"], stage=stage) if stage != job.get("stage") else job
+            status_error = "unknown_status"
+        if stage == "checking":
+            next_reconcile_at = int(time.time()) + 1
+        else:
+            next_reconcile_at = int(time.time()) + reconcile_delay
+        if stage != job.get("stage") or status_error != str(job.get("status_error") or ""):
+            return store.update(
+                job["id"], stage=stage, status_error=status_error,
+                next_reconcile_at=next_reconcile_at,
+            )
+        return store.update(
+            job["id"], status_error=status_error,
+            next_reconcile_at=next_reconcile_at,
+        )
 
     def sync_job(job: dict) -> dict:
         # Polling requests, the background reconciler, retries, and revision
@@ -2599,7 +2827,8 @@ def create_blueprint(
             run_id = accepted_run_id(run)
             return store.update(
                 job["id"], session_id=session_id, run_id=run_id,
-                stage="working", dispatch_error="", checking_since=0,
+                stage="working", dispatch_error="", status_error="",
+                checking_since=0, next_reconcile_at=int(time.time()),
             )
 
     def new_job(
@@ -2651,6 +2880,10 @@ def create_blueprint(
             "checking_since": 0,
             "pending_change": "",
             "changes": [],
+            "next_reconcile_at": 0,
+            "status_error": "",
+            "feedback": None,
+            "change_idempotency": [],
         }
         record_rate_event(
             owner_hash,
@@ -2662,8 +2895,15 @@ def create_blueprint(
         if dispatch_now:
             try:
                 job = dispatch(job)
-            except Exception:
-                job = store.update(job_id, stage="queued", dispatch_error="waiting_for_capacity")
+            except HTTPException:
+                raise
+            except Exception as error:
+                failure = classify_failure(error, operation="dispatch")
+                telemetry.record("dispatch.failure", outcome=failure)
+                job = store.update(
+                    job_id, stage="queued", dispatch_error=failure,
+                    next_reconcile_at=int(time.time()) + dispatch_retry_delay(1),
+                )
         return job, token
 
     def job_response(job: dict, token: str = "") -> dict:
@@ -2676,6 +2916,9 @@ def create_blueprint(
     def config():
         return jsonify({
             "job_attachment_uploads": True,
+            "readiness_url": "/api/mini/readiness",
+            "status_owner": "background_reconciler",
+            "reconciliation": "due_based",
             "attachments": {
                 "extensions": list(ATTACHMENT_EXTENSIONS),
                 "max_count": MAX_ATTACHMENTS,
@@ -2688,6 +2931,34 @@ def create_blueprint(
                 "max_guide_turns": MAX_GUIDE_USER_TURNS,
             },
         })
+
+    @blueprint.get("/api/mini/readiness")
+    def readiness():
+        """Expose local readiness without making an upstream Hermes call."""
+        roots_ready = all(root.is_dir() and not root.is_symlink() for root in (
+            metadata_root, attachment_root, workspace_root, publish_root,
+        ))
+        try:
+            free_bytes = int(shutil.disk_usage(data_root).free)
+        except OSError:
+            free_bytes = 0
+        storage_ready = free_bytes >= storage_min_free_bytes
+        ready = roots_ready and storage_ready
+        payload = {
+            "ready": ready,
+            "storage": {
+                "ready": storage_ready,
+                "free_bytes": free_bytes,
+                "minimum_free_bytes": storage_min_free_bytes,
+            },
+            "reconciler": {
+                "enabled": bool(start_reconciler),
+                "due_based": True,
+                "status_owner": "background_reconciler",
+            },
+            "telemetry": {"bounded": True, "privacy_safe": True},
+        }
+        return jsonify(payload), (200 if ready else 503)
 
     @blueprint.post("/api/mini/intakes")
     def create_intake():
@@ -2711,6 +2982,9 @@ def create_blueprint(
             "job_id": "",
             "created_at": now,
             "updated_at": now,
+            "guide_attachment_context": [],
+            "guide_context_sent": [],
+            "submit_idempotency_key": "",
         }
         record_rate_event(
             owner_hash,
@@ -2807,27 +3081,19 @@ def create_blueprint(
                 intake = intake_store.update(intake_id, conversation=conversation)
                 intake = ensure_intake_session(intake)
 
-            attachment_context = []
-            excerpts_total = 0
-            for item in attachments:
-                context_item = {
-                    "name": str(item.get("name") or "attachment"),
-                    "type": str(item.get("type") or "application/octet-stream"),
-                    "size": int(item.get("size") or 0),
-                }
-                try:
-                    excerpt = _attachment_excerpt(
-                        attachment_target(item), str(item.get("type") or "application/octet-stream")
-                    )
-                except RuntimeError:
-                    excerpt = ""
-                if excerpt and excerpts_total < MAX_GUIDE_EXCERPTS_TOTAL_CHARS:
-                    excerpt = excerpt[:MAX_GUIDE_EXCERPTS_TOTAL_CHARS - excerpts_total]
-                    context_item["untrusted_excerpt"] = excerpt
-                    excerpts_total += len(excerpt)
-                else:
-                    context_item["content_available_during_build"] = True
-                attachment_context.append(context_item)
+            with intake_store.lock:
+                latest = claimed_intake(intake_id)
+                attachments = [
+                    item for item in latest.get("attachments") or [] if isinstance(item, dict)
+                ]
+                cached_context, attachment_context, sent_ids = cached_attachment_context(
+                    latest, attachments
+                )
+                intake_store.update(
+                    intake_id,
+                    guide_attachment_context=cached_context,
+                    guide_context_sent=sent_ids,
+                )
             guide_message = text
             if attachment_context:
                 guide_message += (
@@ -2836,6 +3102,12 @@ def create_blueprint(
                     "Use only excerpts that are present and do not claim to have read unavailable content:\n"
                     + json.dumps(attachment_context, ensure_ascii=False, separators=(",", ":"))
                     + "\nEND UNTRUSTED ATTACHMENT CONTEXT"
+                )
+            elif attachments:
+                guide_message += (
+                    "\n\nThe attached files were already supplied as context earlier in this "
+                    "conversation. Use that prior context and do not claim to have inspected "
+                    "anything new."
                 )
             guide_content: str | list[dict[str, str]] = guide_message
             if attachment_context:
@@ -2862,6 +3134,9 @@ def create_blueprint(
             upstream = hermes_chat_stream(
                 str(intake["session_id"]), {"message": guide_content},
                 read_timeout=GUIDE_READ_TIMEOUT_SECONDS,
+            )
+            telemetry.record(
+                "guide.request", outcome="with_context" if attachment_context else "cached_context"
             )
         except Exception:
             release_slot()
@@ -2973,21 +3248,31 @@ def create_blueprint(
 
     @blueprint.post("/api/mini/intakes/<intake_id>/attachments")
     def upload_intake_attachments(intake_id: str):
-        files = request.files.getlist("files")
-        if not files:
-            abort(400, "Choose at least one file to attach.")
         with intake_store.lock:
             intake = claimed_intake(intake_id)
             if intake.get("status") != "draft":
                 abort(409, "This request has already been submitted.")
+            # Claim validation intentionally precedes access to request.files;
+            # Werkzeug otherwise parses attacker-controlled multipart bodies
+            # before the bearer claim has been checked.
+            files = request.files.getlist("files")
+            if not files:
+                abort(400, "Choose at least one file to attach.")
             existing = [item for item in intake.get("attachments") or [] if isinstance(item, dict)]
             if len(existing) + len(files) > MAX_ATTACHMENTS:
                 abort(413, f"You can attach up to {MAX_ATTACHMENTS} files.")
             total_size = sum(max(0, int(item.get("size") or 0)) for item in existing)
+            reservation_bytes = upload_reservation_bytes(len(files), total_size)
+            if reservation_bytes <= 0:
+                abort(413, f"Attachments can total up to {MAX_ATTACHMENTS_TOTAL_BYTES // (1024 * 1024)} MB.")
             stage_dir = attachment_root / f".stage-{intake_id}-{secrets.token_hex(6)}"
-            storage_token = storage_fence.acquire(0, target=attachment_root)
+            # Reserve the complete bounded request once. The stream loop only
+            # enforces the already-reserved per-file/aggregate limits; it does
+            # not rescan the entire Mini tree for every 64 KiB chunk.
+            storage_token = storage_fence.acquire(reservation_bytes, target=attachment_root)
             staged: list[tuple[Path, dict]] = []
             moved: list[Path] = []
+            reserved_written = 0
             try:
                 _shared_private_dir(stage_dir)
                 for item in files:
@@ -3007,15 +3292,12 @@ def create_blueprint(
                                 abort(413, f"Each attachment must be {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB or smaller.")
                             if total_size + size > MAX_ATTACHMENTS_TOTAL_BYTES:
                                 abort(413, f"Attachments can total up to {MAX_ATTACHMENTS_TOTAL_BYTES // (1024 * 1024)} MB.")
-                            storage_fence.grow(
-                                storage_token,
-                                len(chunk),
-                                materializing_path=stage_path,
-                            )
+                            reserved_written += len(chunk)
+                            if reserved_written > reservation_bytes:
+                                raise MiniFrankStorageFull("Mini Frank upload exceeded its admitted size")
                             destination.write(chunk)
                         destination.flush()
                         os.fsync(destination.fileno())
-                    storage_fence.materialize(storage_token, size)
                     _shared_private_file(stage_path)
                     media_type = _validate_attachment_content(stage_path, extension)
                     total_size += size
@@ -3036,6 +3318,11 @@ def create_blueprint(
                     stage_path.replace(destination)
                     _shared_private_file(destination)
                     moved.append(destination)
+                # Convert the bytes already materialized into the one request
+                # reservation before the metadata write takes its own short
+                # reservation. Any unused declared multipart headroom remains
+                # reserved until the request exits.
+                storage_fence.materialize(storage_token, reserved_written)
                 intake = intake_store.update(intake_id, attachments=existing + [metadata for _, metadata in staged])
             except Exception:
                 for destination in moved:
@@ -3074,6 +3361,14 @@ def create_blueprint(
             intake = intake_store.update(
                 intake_id,
                 attachments=[item for item in attachments if item.get("id") != attachment_id],
+                guide_attachment_context=[
+                    item for item in (intake.get("guide_attachment_context") or [])
+                    if isinstance(item, dict) and item.get("id") != attachment_id
+                ],
+                guide_context_sent=[
+                    value for value in (intake.get("guide_context_sent") or [])
+                    if value != attachment_id
+                ],
             )
             try:
                 target.unlink(missing_ok=True)
@@ -3085,6 +3380,7 @@ def create_blueprint(
     @blueprint.post("/api/mini/intakes/<intake_id>/submit")
     def submit_intake(intake_id: str):
         body = json_object()
+        submit_key = idempotency_key()
         existing_job_id = ""
         with intake_store.lock:
             intake = claimed_intake(intake_id)
@@ -3122,6 +3418,7 @@ def create_blueprint(
                         status="submitted",
                         job_id=job["id"],
                         conversation=conversation,
+                        submit_idempotency_key=submit_key,
                     )
                 except Exception:
                     store.delete(job["id"])
@@ -3138,13 +3435,18 @@ def create_blueprint(
                 job = store.get(existing_job_id)
                 if job_is_expired(job):
                     abort(404)
-                return jsonify(job_response(job, _claim_token(existing_job_id, rate_key)))
+                return jsonify(job_response(job, _claim_token(existing_job_id, rate_key))), 202
         try:
             job = dispatch(job)
         except HTTPException:
             raise
-        except Exception:
-            job = store.update(job["id"], stage="queued", dispatch_error="waiting_for_capacity")
+        except Exception as error:
+            failure = classify_failure(error, operation="dispatch")
+            telemetry.record("dispatch.failure", outcome=failure)
+            job = store.update(
+                job["id"], stage="queued", dispatch_error=failure,
+                next_reconcile_at=int(time.time()) + dispatch_retry_delay(1),
+            )
         return jsonify(job_response(job, token)), 202
 
     @blueprint.post("/api/mini/jobs")
@@ -3155,29 +3457,89 @@ def create_blueprint(
 
     @blueprint.get("/api/mini/jobs/<job_id>")
     def read_job(job_id: str):
-        job = sync_job(claimed_job(job_id))
-        if job.get("stage") == "expired_cleanup_pending":
+        # Hermes status is owned by the background reconciler. Customer reads
+        # are a cheap persisted projection and must never turn polling into an
+        # upstream status fan-out.
+        job = claimed_job(job_id, allow_expired=True)
+        if job_is_expired(job):
+            with job_dispatch_lock(job_id):
+                current = store.get(job_id)
+                if current and job_is_expired(current):
+                    try:
+                        expire_job_record(current)
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "Mini Frank customer expiry cleanup failed"
+                        )
             abort(404)
         return jsonify({"job": public_job(job)})
 
+    @blueprint.post("/api/mini/jobs/<job_id>/feedback")
+    def job_feedback(job_id: str):
+        body = json_object()
+        outcome = str(
+            body.get("status") or body.get("feedback") or body.get("outcome") or ""
+        ).strip().lower()
+        if outcome not in FEEDBACK_STATUSES:
+            abort(400, "Feedback status must be useful or not_yet.")
+        reason = str(body.get("reason") or "other").strip().lower()
+        if reason not in FEEDBACK_REASONS:
+            abort(400, "Feedback reason must be one of the available categories.")
+        with job_dispatch_lock(job_id):
+            job = claimed_job(job_id)
+            job = store.update(
+                job_id,
+                feedback={"status": outcome, "reason": reason, "created_at": int(time.time())},
+            )
+        telemetry.record("job.feedback", outcome=outcome)
+        return jsonify({"job": public_job(job)}), 200
+
+    @blueprint.delete("/api/mini/jobs/<job_id>")
+    def revoke_job(job_id: str):
+        """Revoke the claim immediately, then reuse fail-closed cleanup."""
+        with job_dispatch_lock(job_id):
+            job = claimed_job(job_id)
+            job = store.update(
+                job_id,
+                stage="expired_cleanup_pending",
+                expires_at=int(time.time()),
+                published_revision=0,
+                dispatch_error="revoked",
+                status_error="",
+                next_reconcile_at=0,
+            )
+            try:
+                expire_job_record(job)
+            except Exception:
+                telemetry.record("job.revoke", outcome="cleanup_pending")
+                return jsonify({"deleted": job_id, "cleanup_pending": True}), 202
+        telemetry.record("job.revoke", outcome="deleted")
+        return jsonify({"deleted": job_id}), 200
+
     @blueprint.post("/api/mini/jobs/<job_id>/attachments")
     def upload_job_attachments(job_id: str):
-        files = request.files.getlist("files")
-        if not files:
-            abort(400, "Choose at least one file to attach.")
         with job_dispatch_lock(job_id):
             job = claimed_job(job_id)
             if job.get("stage") != "ready":
                 abort(409, "Wait for the current solution to finish before adding change files.")
+            # Authenticate before forcing Flask/Werkzeug to parse multipart
+            # input. This keeps anonymous oversized bodies off the upload path.
+            files = request.files.getlist("files")
+            if not files:
+                abort(400, "Choose at least one file to attach.")
             existing = [item for item in job.get("attachments") or [] if isinstance(item, dict)]
             if len(existing) + len(files) > MAX_ATTACHMENTS:
                 abort(413, f"You can attach up to {MAX_ATTACHMENTS} files.")
             total_size = sum(max(0, int(item.get("size") or 0)) for item in existing)
+            reservation_bytes = upload_reservation_bytes(len(files), total_size)
+            if reservation_bytes <= 0:
+                abort(413, f"Attachments can total up to {MAX_ATTACHMENTS_TOTAL_BYTES // (1024 * 1024)} MB.")
             owner_dir_name = f"job-{job_id}"
             stage_dir = attachment_root / f".stage-{owner_dir_name}-{secrets.token_hex(6)}"
-            storage_token = storage_fence.acquire(0, target=attachment_root)
+            storage_token = storage_fence.acquire(reservation_bytes, target=attachment_root)
             staged: list[tuple[Path, dict]] = []
             moved: list[Path] = []
+            reserved_written = 0
             try:
                 _shared_private_dir(stage_dir)
                 for item in files:
@@ -3197,15 +3559,12 @@ def create_blueprint(
                                 abort(413, f"Each attachment must be {MAX_ATTACHMENT_BYTES // (1024 * 1024)} MB or smaller.")
                             if total_size + size > MAX_ATTACHMENTS_TOTAL_BYTES:
                                 abort(413, f"Attachments can total up to {MAX_ATTACHMENTS_TOTAL_BYTES // (1024 * 1024)} MB.")
-                            storage_fence.grow(
-                                storage_token,
-                                len(chunk),
-                                materializing_path=stage_path,
-                            )
+                            reserved_written += len(chunk)
+                            if reserved_written > reservation_bytes:
+                                raise MiniFrankStorageFull("Mini Frank upload exceeded its admitted size")
                             destination.write(chunk)
                         destination.flush()
                         os.fsync(destination.fileno())
-                    storage_fence.materialize(storage_token, size)
                     _shared_private_file(stage_path)
                     media_type = _validate_attachment_content(stage_path, extension)
                     total_size += size
@@ -3222,6 +3581,7 @@ def create_blueprint(
                     stage_path.replace(destination)
                     _shared_private_file(destination)
                     moved.append(destination)
+                storage_fence.materialize(storage_token, reserved_written)
                 job = store.update(job_id, attachments=existing + [metadata for _, metadata in staged])
             except Exception:
                 for destination in moved:
@@ -3284,15 +3644,25 @@ def create_blueprint(
                 job_id, stage="queued", run_id="", checking_since=0,
                 dispatch_generation=next_generation,
                 dispatch_attempts=0, last_dispatch_at=0, dispatch_error="",
+                status_error="", next_reconcile_at=0,
             )
         try:
             job = dispatch(job)
         except HTTPException:
             raise
-        except Exception:
-            job = store.update(job_id, stage="queued", run_id="", dispatch_error="waiting_for_capacity")
+        except Exception as error:
+            failure = classify_failure(error, operation="dispatch")
+            telemetry.record("dispatch.failure", outcome=failure)
+            job = store.update(
+                job_id, stage="queued", run_id="", dispatch_error=failure,
+                next_reconcile_at=int(time.time()) + dispatch_retry_delay(1),
+            )
             return jsonify({
-                "error": "We have your request, but capacity is busy. We will keep it queued.",
+                "error": (
+                    "We have your request, but capacity is busy. We will keep it queued."
+                    if failure == "capacity_unavailable"
+                    else "We have your request, but Hermes is temporarily unavailable. We will retry it."
+                ),
                 "job": public_job(job),
             }), 503
         return jsonify({"job": public_job(job)}), 202
@@ -3300,6 +3670,7 @@ def create_blueprint(
     @blueprint.post("/api/mini/jobs/<job_id>/changes")
     def request_change(job_id: str):
         body = json_object()
+        request_key = idempotency_key()
         change = _clean_text(body.get("change"), 2000)
         raw_attachment_ids = body.get("attachment_ids") or []
         if not isinstance(raw_attachment_ids, list) or len(raw_attachment_ids) > MAX_ATTACHMENTS:
@@ -3315,6 +3686,20 @@ def create_blueprint(
             abort(400, "Mini Frank changes are free.")
         with job_dispatch_lock(job_id):
             job = claimed_job(job_id)
+            fingerprint = change_fingerprint(change, attachment_ids)
+            if request_key:
+                previous_requests = [
+                    item for item in job.get("change_idempotency") or []
+                    if isinstance(item, dict)
+                ]
+                previous = next(
+                    (item for item in previous_requests if item.get("key") == request_key),
+                    None,
+                )
+                if previous is not None:
+                    if previous.get("fingerprint") != fingerprint:
+                        abort(409, "That Idempotency-Key was already used for a different change.")
+                    return jsonify({"job": public_job(job)}), 202
             if job.get("stage") != "ready" or job.get("run_id") and job.get("stage") in ACTIVE_STAGES:
                 abort(409, "I’m already working on this solution. Wait for it to finish before changing it again.")
             known_ids = {str(item.get("id") or "") for item in job.get("attachments") or [] if isinstance(item, dict)}
@@ -3335,6 +3720,16 @@ def create_blueprint(
                 "text": change, "attachment_ids": attachment_ids,
                 "created_at": int(time.time()),
             })
+            change_requests = [
+                item for item in job.get("change_idempotency") or []
+                if isinstance(item, dict)
+            ]
+            if request_key:
+                change_requests.append({
+                    "key": request_key,
+                    "fingerprint": fingerprint,
+                    "created_at": int(time.time()),
+                })
             job = store.update(
                 job_id, changes=changes[-20:], delivery="free", stage="queued",
                 revision=int(job.get("revision") or 1) + 1, run_id="", result=None,
@@ -3342,14 +3737,21 @@ def create_blueprint(
                 dispatch_generation=1,
                 pending_change=change, dispatch_attempts=0, last_dispatch_at=0,
                 checking_since=0, dispatch_error="", storage_reserved=False,
+                status_error="", next_reconcile_at=0,
+                change_idempotency=change_requests[-20:],
                 expires_at=int(time.time()) + JOB_TTL_SECONDS,
             )
             try:
                 job = dispatch(job, change=change)
             except HTTPException:
                 raise
-            except Exception:
-                job = store.update(job_id, stage="queued", dispatch_error="waiting_for_capacity")
+            except Exception as error:
+                failure = classify_failure(error, operation="dispatch")
+                telemetry.record("dispatch.failure", outcome=failure)
+                job = store.update(
+                    job_id, stage="queued", dispatch_error=failure,
+                    next_reconcile_at=int(time.time()) + dispatch_retry_delay(1),
+                )
         return jsonify({"job": public_job(job)}), 202
 
     def reconcile_once() -> None:
@@ -3359,8 +3761,15 @@ def create_blueprint(
             logging.getLogger(__name__).exception("Mini Frank rate ledger cleanup failed")
         sweep_abandoned_intakes()
         sweep_expired_jobs()
+        now = int(time.time())
         for snapshot in store.list_items():
             if snapshot.get("stage") not in ACTIVE_STAGES:
+                continue
+            try:
+                due_at = int(snapshot.get("next_reconcile_at") or 0)
+            except (TypeError, ValueError):
+                due_at = 0
+            if due_at > now:
                 continue
             try:
                 sync_job(snapshot)
@@ -3412,6 +3821,7 @@ def create_blueprint(
     blueprint.mini_reconcile_once = reconcile_once  # type: ignore[attr-defined]
     blueprint.mini_sweep_once = sweep_expired_jobs  # type: ignore[attr-defined]
     blueprint.mini_storage_fence = storage_fence  # type: ignore[attr-defined]
+    blueprint.mini_telemetry = telemetry  # type: ignore[attr-defined]
     # Complete the fail-closed half of the durable migration before the app can
     # become healthy, then sweep any legacy record whose deadline has passed.
     finish_legacy_migrations()
