@@ -1,4 +1,5 @@
 import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.mjs";
+import { MiniApiError, createMiniApi } from "./mini_api.mjs";
 
 (function () {
   "use strict";
@@ -8,6 +9,9 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
   const MAX_SAVED_MESSAGES = 80;
   const MESSAGE_MAX_LENGTH = 4000;
   const GUIDE_IDLE_TIMEOUT_MS = 60000;
+  const STATUS_POLL_BASE_MS = 8000;
+  const STATUS_POLL_HIDDEN_MS = 30000;
+  const STATUS_POLL_OFFLINE_MS = 60000;
   const DEFAULT_LIMITS = {
     max_count: 10,
     max_file_bytes: 20 * 1024 * 1024,
@@ -31,11 +35,14 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
   const workList = document.getElementById("work-list");
   const toast = document.getElementById("toast");
   const replyAnnouncement = document.getElementById("reply-announcement");
+  const draftDeleteButton = document.querySelector('[data-action="delete-draft"]');
 
   let intakePromise = null;
   let uploadChain = Promise.resolve();
   let guideController = null;
   let guideAbortReason = "";
+  let mutationController = null;
+  let mutationAbortReason = "";
 
   const state = {
     config: {
@@ -55,7 +62,12 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     current: null,
     jobMessage: null,
     lastStage: "",
+    pollFailures: 0,
+    workRefreshing: false,
+    feedbackOpen: false,
   };
+
+  const api = createMiniApi();
 
   const fileIcon = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM14 3v5h5"/></svg>';
   const closeIcon = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>';
@@ -73,6 +85,45 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     return String(value == null ? "" : value).replace(/\u0000/g, "").trim().slice(0, limit);
   }
 
+  function formatDate(value) {
+    const timestamp = Number(value);
+    if (!timestamp) return "Not provided";
+    try {
+      return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" }).format(new Date(timestamp * 1000));
+    } catch (_error) {
+      return "Not provided";
+    }
+  }
+
+  function formatDateTime(value) {
+    const timestamp = Number(value);
+    if (!timestamp) return "Not provided";
+    try {
+      return new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", hour: "numeric", minute: "2-digit" }).format(new Date(timestamp * 1000));
+    } catch (_error) {
+      return "Not provided";
+    }
+  }
+
+  function jobNextAction(job) {
+    if (job && job.next_action) return cleanText(job.next_action, 180);
+    if (!job) return "Open this work to refresh its status.";
+    if (job.stage === "ready") return "Open the result or ask for a change.";
+    if (job.stage === "needs_attention") return "Review the update and ask me to try again.";
+    if (job.stage === "queued") return "I’ll start it automatically when capacity is available.";
+    if (job.stage === "checking") return "I’m checking the finished work now.";
+    if (job.stage === "working") return "I’m continuing in the background.";
+    return "Open this work to see what happens next.";
+  }
+
+  function jobCanDelete(job) {
+    return Boolean(state.config.delete_available || (job && (job.delete_available || job.can_delete)));
+  }
+
+  function jobCanRevoke(job) {
+    return Boolean(state.config.revoke_available || (job && (job.revoke_available || job.can_revoke)));
+  }
+
   function validId(value) {
     return /^[A-Za-z0-9_-]{6,120}$/.test(String(value || ""));
   }
@@ -84,7 +135,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
   function safeUrl(value) {
     try {
       const url = new URL(String(value || ""), location.origin);
-      if (url.protocol !== "https:" && !(url.protocol === "http:" && url.hostname === "localhost")) return "";
+      if (url.origin !== location.origin && url.protocol !== "https:") return "";
       return url.href;
     } catch (_error) {
       return "";
@@ -140,6 +191,10 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
       stage: job.stage || "saved",
       created_at: job.created_at,
       updated_at: job.updated_at,
+      available_until: job.available_until,
+      next_action: jobNextAction(job),
+      refresh_status: "live",
+      refresh_error: "",
       transcript: Array.isArray(transcriptOverride)
         ? cleanTranscript(transcriptOverride)
         : state.transcript.length ? cleanTranscript(state.transcript) : cleanTranscript(prior && prior.transcript),
@@ -199,110 +254,6 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     }
   }
 
-  async function request(path, options = {}) {
-    const requestOptions = {
-      cache: "no-store",
-      credentials: "omit",
-      method: options.method || "GET",
-      headers: { Accept: "application/json", ...(options.headers || {}) },
-    };
-    if (options.json !== undefined) {
-      requestOptions.body = JSON.stringify(options.json);
-      requestOptions.headers["Content-Type"] = "application/json";
-    } else if (options.body) {
-      requestOptions.body = options.body;
-    }
-    const response = await fetch(path, requestOptions);
-    let body = {};
-    try { body = await response.json(); }
-    catch (_error) { body = {}; }
-    if (!response.ok) {
-      const error = new Error(cleanText(body.error, 500) || "Something went wrong. Please try again.");
-      error.status = response.status;
-      throw error;
-    }
-    return body;
-  }
-
-  function claimHeaders(claim) {
-    return { "X-Mini-Claim": claim };
-  }
-
-  const api = {
-    createIntake(conversationValue) {
-      return request("/api/mini/intakes", {
-        method: "POST",
-        json: conversationValue.length ? { conversation: conversationValue } : {},
-      });
-    },
-    readIntake(intake) {
-      return request(`/api/mini/intakes/${encodeURIComponent(intake.id)}`, {
-        headers: claimHeaders(intake.claim),
-      });
-    },
-    abandonIntake(intake) {
-      return request(`/api/mini/intakes/${encodeURIComponent(intake.id)}`, {
-        method: "DELETE",
-        headers: claimHeaders(intake.claim),
-      });
-    },
-    upload(intake, files) {
-      const form = new FormData();
-      files.forEach((file) => form.append("files", file, file.name));
-      return request(`/api/mini/intakes/${encodeURIComponent(intake.id)}/attachments`, {
-        method: "POST",
-        headers: claimHeaders(intake.claim),
-        body: form,
-      });
-    },
-    removeAttachment(intake, attachmentId) {
-      return request(`/api/mini/intakes/${encodeURIComponent(intake.id)}/attachments/${encodeURIComponent(attachmentId)}`, {
-        method: "DELETE",
-        headers: claimHeaders(intake.claim),
-      });
-    },
-    submitIntake(intake, payload) {
-      return request(`/api/mini/intakes/${encodeURIComponent(intake.id)}/submit`, {
-        method: "POST",
-        headers: claimHeaders(intake.claim),
-        json: payload,
-      });
-    },
-    readJob(access) {
-      return request(`/api/mini/jobs/${encodeURIComponent(access.id)}`, {
-        headers: { "X-Mini-Claim": access.claim },
-      });
-    },
-    retryJob(access) {
-      return request(`/api/mini/jobs/${encodeURIComponent(access.id)}/dispatch`, {
-        method: "POST",
-        headers: { "X-Mini-Claim": access.claim },
-      });
-    },
-    uploadJob(access, files) {
-      const form = new FormData();
-      files.forEach((file) => form.append("files", file, file.name));
-      return request(`/api/mini/jobs/${encodeURIComponent(access.id)}/attachments`, {
-        method: "POST",
-        headers: claimHeaders(access.claim),
-        body: form,
-      });
-    },
-    removeJobAttachment(access, attachmentId) {
-      return request(`/api/mini/jobs/${encodeURIComponent(access.id)}/attachments/${encodeURIComponent(attachmentId)}`, {
-        method: "DELETE",
-        headers: claimHeaders(access.claim),
-      });
-    },
-    changeJob(access, change, attachmentIds = []) {
-      return request(`/api/mini/jobs/${encodeURIComponent(access.id)}/changes`, {
-        method: "POST",
-        headers: { "X-Mini-Claim": access.claim },
-        json: { change, attachment_ids: attachmentIds },
-      });
-    },
-  };
-
   function intakeFrom(body, claimFallback = "") {
     const item = body && body.intake && typeof body.intake === "object" ? body.intake : body || {};
     const claim = cleanText(body && (body.claim_token || body.claim), 300) || claimFallback;
@@ -334,6 +285,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
         throw error;
       }
       state.intake = intake;
+      setDraftDeleteVisibility();
       saveDraft();
       return intake;
     })();
@@ -357,6 +309,16 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     conversation.setAttribute("aria-busy", String(state.busy));
     brandMark.classList.toggle("is-working", state.busy);
     updateSendButton();
+  }
+
+  function setDraftDeleteVisibility() {
+    if (draftDeleteButton) draftDeleteButton.hidden = !(state.intake && !state.current);
+  }
+
+  function cancelMutation() {
+    if (!mutationController) return;
+    mutationAbortReason = "user";
+    mutationController.abort();
   }
 
   function nearBottom() {
@@ -450,11 +412,25 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     return actions;
   }
 
+  function outcomeContract() {
+    const knownProblem = cleanText(state.problem || state.transcript.find((item) => item.role === "user")?.text, 900) || "No problem statement yet.";
+    const files = state.attachments.filter((item) => item.status === "ready").map((item) => item.name);
+    const fileLine = files.length ? files.map((name) => esc(name)).join(", ") : "No files attached yet.";
+    return `<section class="outcome-contract" aria-labelledby="outcome-contract-title">
+      <h3 id="outcome-contract-title">Before I build</h3>
+      <dl>
+        <div><dt>I know</dt><dd>${esc(knownProblem)}</dd></div>
+        <div><dt>I have</dt><dd>${fileLine}</dd></div>
+        <div><dt>I’m assuming</dt><dd>You want a useful first version based only on this conversation and these files. I’ll call out anything I cannot verify.</dd></div>
+      </dl>
+    </section>`;
+  }
+
   function attachDecision(message) {
     if (!message || message.querySelector('[data-action="start-build"]')) return;
-    actionsFor(message, `<button class="primary-button" type="button" data-action="start-build">Start building</button>`);
+    actionsFor(message, `${outcomeContract()}<button class="primary-button" type="button" data-action="start-build">Build this for free</button>`);
     state.phase = "decision";
-    setComposer({ placeholder: "Answer here, or add anything else…", hint: "Start whenever this feels clear enough.", attachments: true });
+    setComposer({ placeholder: "Add a detail or file, if it matters…", hint: "I’ll use only what you share.", attachments: true });
     saveDraft();
   }
 
@@ -491,7 +467,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     const locked = Boolean(options.locked);
     const attachments = options.attachments !== false && !locked;
     messageInput.disabled = locked;
-    messageInput.placeholder = options.placeholder || (locked ? "" : "Tell us what’s not working…");
+    messageInput.placeholder = options.placeholder || (locked ? "" : "Tell me what’s not working…");
     messageInput.setAttribute("inputmode", options.inputmode || "text");
     messageInput.setAttribute("autocomplete", options.autocomplete || "off");
     messageInput.maxLength = options.maxlength || MESSAGE_MAX_LENGTH;
@@ -579,7 +555,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
           priorAttachments = cleanFiles(target.attachments);
         }
         const beforeIds = new Set(priorAttachments.map((item) => item.id));
-        const body = jobAccess ? await api.uploadJob(target, files) : await api.upload(target, files);
+      const body = jobAccess ? await api.uploadJob(target, files) : await api.uploadIntake(target, files);
         if (generation !== state.generation) return;
         let savedAttachments;
         if (jobAccess) {
@@ -625,7 +601,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
           if (generation !== state.generation || !state.current || state.current.id !== jobAccess.id || state.current.claim !== jobAccess.claim) return;
           if (body.job) state.current.job = body.job;
         } else {
-          const body = await api.removeAttachment(intakeAccess, item.id);
+          const body = await api.removeIntakeAttachment(intakeAccess, item.id);
           if (generation !== state.generation || !state.intake || state.intake.id !== intakeAccess.id || state.intake.claim !== intakeAccess.claim) return;
           updateIntake(body);
         }
@@ -662,7 +638,9 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
       headers: {
         Accept: "text/event-stream, application/json",
         "Content-Type": "application/json",
-        ...claimHeaders(intake.claim),
+        "X-Mini-Claim": intake.claim,
+        Authorization: `Bearer ${intake.claim}`,
+        "Idempotency-Key": `mini-guide-${intake.id}-${Date.now()}`,
       },
       body: JSON.stringify({ text }),
       signal,
@@ -795,7 +773,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     const files = state.attachments.filter((item) => item.status === "ready");
     if (!text && !files.length) return;
     if (text && text.length < 3) {
-      notify("Tell us just a little more.");
+      notify("Tell me just a little more.");
       return;
     }
     setBusy(true);
@@ -819,7 +797,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
   function startBuild(button) {
     if (state.busy) return;
     consumeActions(button);
-    addMessage("user", "Start building.", { forceScroll: true });
+    addMessage("user", "Build this version.", { forceScroll: true });
     setComposer({ locked: true, hint: "Starting your free solution…", attachments: false });
     saveDraft();
     startFreeWork("new");
@@ -827,7 +805,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
 
   function intakeDraft() {
     const laterAnswers = state.transcript
-      .filter((item, index) => item.role === "user" && index > 0 && !/^(start building\.|help me refine it\.)$/i.test(item.text))
+      .filter((item, index) => item.role === "user" && index > 0 && !/^(build this version\.|help me refine it\.)$/i.test(item.text))
       .map((item) => item.text)
       .join(" ")
       .slice(0, 1000);
@@ -839,12 +817,12 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     };
   }
 
-  async function submitIntake() {
+  async function submitIntake(options = {}) {
     const payload = {
       ...intakeDraft(),
       conversation: conversationPayload(),
     };
-    return api.submitIntake(state.intake, payload);
+    return api.submitIntake(state.intake, payload, options);
   }
 
   async function startFreeWork(context = "new", button = null) {
@@ -860,10 +838,15 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     const changeAttachmentIds = state.attachments.filter((item) => item.status === "ready").map((item) => item.id);
     setComposer({ locked: true, hint: context === "change" ? "Saving your change…" : "Starting your solution…", attachments: false });
     const thinking = addThinking();
+    const controller = new AbortController();
+    mutationController = controller;
+    mutationAbortReason = "";
+    actionsFor(thinking, '<button class="quiet-button" type="button" data-action="cancel-mutation">Stop waiting</button>');
     try {
       const body = context === "change"
-        ? await api.changeJob(changeAccess, state.pendingChange, changeAttachmentIds)
-        : await submitIntake();
+        ? await api.changeJob(changeAccess, state.pendingChange, changeAttachmentIds, { signal: controller.signal })
+        : await submitIntake({ signal: controller.signal });
+      if (mutationController === controller) mutationController = null;
       thinking.remove();
       const job = body.job;
       const claim = context === "change" ? changeAccess.claim : cleanText(body.claim_token, 300);
@@ -874,6 +857,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
       }
       state.current = { id: job.id, claim, job };
       state.intake = null;
+      setDraftDeleteVisibility();
       state.attachments = [];
       state.pendingChange = "";
       clearDraft();
@@ -883,10 +867,15 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
       renderJobUpdate(job, true);
     } catch (error) {
       if (generation !== state.generation) return;
+      if (mutationController === controller) mutationController = null;
       thinking.remove();
       setBusy(false);
-      const reply = addMessage("assistant", `${cleanText(error.message, 400) || "I couldn’t start that just yet."} Your conversation is still safe.`, { record: false });
-      actionsFor(reply, `<button class="primary-button" type="button" data-action="start-free" data-context="${context}">Try again</button>`);
+      const cancelled = mutationAbortReason === "user" || error.code === "cancelled";
+      const copy = cancelled
+        ? "I stopped waiting. Your messages and files are still safe."
+        : `${cleanText(error.message, 400) || "I couldn’t start that just yet."} Your conversation and files are still safe.`;
+      const reply = addMessage("assistant", copy, { record: false });
+      actionsFor(reply, `<button class="primary-button" type="button" data-action="start-free" data-context="${context}">${context === "change" ? "Try that change again" : "Build this for free"}</button>`);
       state.phase = context === "change" ? "ready" : "decision";
       setComposer(context === "change" ? { placeholder: "Tell me what you want changed…", hint: "Plain words are perfect.", attachments: jobAttachmentsAvailable() } : { locked: true, hint: "Your request is safe.", attachments: false });
     }
@@ -950,6 +939,39 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     return legacy;
   }
 
+  function resultChecks(result) {
+    const values = (value) => Array.isArray(value)
+      ? value.map((item) => typeof item === "string" ? item : item && (item.label || item.name || item.summary)).filter(Boolean)
+      : value && typeof value === "object" ? Object.entries(value).map(([name, status]) => `${name}: ${status}`) : [];
+    const checkItems = values(result && result.checks);
+    const limitationItems = values(result && result.limitations);
+    return `<details class="result-details"><summary>Checks and limitations</summary><div class="result-detail-grid">
+      <div><h4>Checks</h4>${checkItems.length ? `<ul>${checkItems.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : "<p>Not supplied with this result.</p>"}</div>
+      <div><h4>Limitations</h4>${limitationItems.length ? `<ul>${limitationItems.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : "<p>Not supplied with this result.</p>"}</div>
+    </div></details>`;
+  }
+
+  function feedbackMarkup() {
+    return `<div class="result-feedback" aria-labelledby="feedback-title">
+      <p id="feedback-title">Does this help?</p>
+      <div class="feedback-actions"><button class="quiet-button" type="button" data-feedback="useful">Useful</button><button class="quiet-button" type="button" data-feedback="not-yet" aria-expanded="false" aria-controls="feedback-form">Not yet</button></div>
+      <form class="feedback-form" id="feedback-form" data-feedback-form hidden>
+        <fieldset><legend>What needs attention?</legend>
+          <label><input type="radio" name="feedback-reason" value="missing_piece"> It is missing something I need</label>
+          <label><input type="radio" name="feedback-reason" value="wrong_format"> It is in the wrong format</label>
+          <label><input type="radio" name="feedback-reason" value="needs_more_context"> It needs more context</label>
+          <label><input type="radio" name="feedback-reason" value="hard_to_use"> It is hard to use</label>
+          <label><input type="radio" name="feedback-reason" value="other"> Something else</label>
+        </fieldset>
+        <button class="secondary-button" type="button" data-action="submit-feedback">Send feedback</button>
+      </form>
+    </div>`;
+  }
+
+  function accessControls(job) {
+    return `<button class="quiet-button" type="button" data-action="copy-link">Copy private link</button>${jobCanRevoke(job) ? '<button class="quiet-button danger-button" type="button" data-action="revoke-access">Revoke link access</button>' : ""}${jobCanDelete(job) ? '<button class="quiet-button danger-button" type="button" data-action="delete-work">Delete private work</button>' : ""}`;
+  }
+
   function artifactAction(item, index, total) {
     const isDownload = item.kind === "download";
     let label = item.label;
@@ -962,6 +984,8 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     const result = job.result || {};
     const artifacts = resultArtifacts(result);
     const actions = artifacts.map((item, index) => artifactAction(item, index, artifacts.length)).join("");
+    const preview = safeUrl(result.preview_url) || artifacts.find((item) => item.kind === "interactive")?.url || "";
+    const detailsUrl = safeUrl(result.details_url);
     const availableUntil = Number(job.available_until) > 0
       ? new Intl.DateTimeFormat(undefined, { day: "numeric", month: "short", year: "numeric" })
         .format(new Date(Number(job.available_until) * 1000))
@@ -970,11 +994,82 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
       <div class="artifact-top"><span class="ready-label">Ready for you</span></div>
       <div class="artifact-content">
         <h3>${esc(result.title || job.title || "Your solution")}</h3>
-        <p>${esc(result.summary || "Your working solution is ready.")}</p>
-        <div class="artifact-actions">${actions || ""}<button class="secondary-button" type="button" data-action="request-change">Ask for a change</button></div>
-        <div class="artifact-meta"><span>${availableUntil ? `Available here until ${esc(availableUntil)}` : "Private link"}</span><button class="quiet-button" type="button" data-action="copy-link">Copy private link</button></div>
+        <p>${esc(result.summary || "Your working result is ready.")}</p>
+        ${preview ? `<div class="artifact-preview-wrap"><iframe class="artifact-preview" src="${esc(preview)}" title="Safe preview of ${esc(result.title || job.title || "your result")}" sandbox="allow-scripts allow-forms" loading="lazy"></iframe><p class="preview-note">This preview is sandboxed. Use the open or download action below for the full result.</p></div>` : ""}
+        <div class="artifact-actions">${actions || ""}${detailsUrl ? `<a class="artifact-link" href="${esc(detailsUrl)}" target="_blank" rel="noopener noreferrer">Open build notes</a>` : ""}<button class="secondary-button" type="button" data-action="request-change">Ask for a change</button></div>
+        ${resultChecks(result)}
+        <div class="artifact-meta"><span>${availableUntil ? `Available here until ${esc(availableUntil)}` : "Availability date not provided"}</span><span>Private link is bearer access · I keep this work for 30 days</span></div>
+        <div class="artifact-actions artifact-secondary-actions"><button class="secondary-button" type="button" data-action="make-another">Make another like this</button>${accessControls(job)}</div>
+        ${feedbackMarkup()}
       </div>
     </div>`;
+  }
+
+  async function sendFeedback(rating, reason = "") {
+    if (!state.current || !state.current.job) return;
+    const access = { id: state.current.id, claim: state.current.claim };
+    try {
+      await api.feedbackJob(access, { rating, reason: reason || undefined });
+      const panel = state.jobMessage && state.jobMessage.querySelector(".result-feedback");
+      if (panel) panel.innerHTML = `<p class="feedback-confirmation">Thanks. I’ll use that to improve the next version.</p>`;
+      notify(rating === "useful" ? "Thanks — I’m glad this is useful." : "Thanks. I’ll use that feedback for the next version.");
+    } catch (error) {
+      notify(error.message || "I could not save that feedback. Your result is still here.");
+    }
+  }
+
+  function makeAnother() {
+    const prompt = state.problem ? `${state.problem}\n\nMake another like this.` : "Make another like this.";
+    newConversation(true);
+    messageInput.value = prompt;
+    resizeComposer();
+    messageInput.focus();
+    notify("I kept the original work. Add any new files before sending.");
+  }
+
+  async function deletePrivateWork(button) {
+    if (!state.current || !jobCanDelete(state.current.job)) return;
+    if (!window.confirm("Delete this private work? Its conversation, files, and result will be removed if the server supports deletion.")) return;
+    button.disabled = true;
+    const access = { id: state.current.id, claim: state.current.claim };
+    try {
+      await api.deleteJob(access);
+      forgetProject(access.id);
+      newConversation(false);
+      notify("Your private work was deleted.");
+    } catch (error) {
+      button.disabled = false;
+      notify(error.message || "I could not delete this work. Nothing was changed.");
+    }
+  }
+
+  async function deleteDraft() {
+    if (!state.intake || state.current) return;
+    if (!window.confirm("Delete this draft and its uploaded files now?")) return;
+    const access = { id: state.intake.id, claim: state.intake.claim };
+    try {
+      await api.abandonIntake(access);
+      newConversation(false);
+      notify("Your draft and uploaded files were deleted.");
+    } catch (error) {
+      notify(error.message || "I could not delete this draft. Nothing was changed.");
+    }
+  }
+
+  async function revokeAccess(button) {
+    if (!state.current || !jobCanRevoke(state.current.job)) return;
+    if (!window.confirm("Revoke this private link? Anyone using the link will lose access.")) return;
+    button.disabled = true;
+    const access = { id: state.current.id, claim: state.current.claim };
+    try {
+      await api.revokeJob(access);
+      forgetProject(access.id);
+      newConversation(false);
+      notify("Link access was revoked.");
+    } catch (error) {
+      button.disabled = false;
+      notify(error.message || "I could not revoke this link. Nothing was changed.");
+    }
   }
 
   const stageCopy = {
@@ -982,15 +1077,20 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     working: ["I’m working on it now.", "Copy your private link if you want to leave. It brings you back here."],
     checking: ["The solution is made.", "I’m checking the important parts now."],
     needs_attention: ["I hit a snag.", "Your problem and files are safe. I can try again from here."],
+    ready: ["I finished the work.", "The result is not available from this link yet."],
   };
 
   function statusCard(job) {
     const copy = stageCopy[job.stage] || stageCopy.queued;
-    const canRetry = job.stage === "needs_attention" || job.stage === "queued" || Boolean(job.retry_available);
+    const canRetry = job.stage === "needs_attention" && Boolean(job.retry_available);
+    const queuedCopy = job.stage === "queued" && job.automatic_retry_at
+      ? `I’ll retry automatically around ${formatDateTime(job.automatic_retry_at)}.`
+      : copy[1];
+    const offlineCopy = navigator.onLine ? "" : " You’re offline, so I’ll check again when you’re back online.";
     return `<div class="status-card" role="status">
       <span class="status-light${job.stage === "needs_attention" ? " attention" : ""}" aria-hidden="true"></span>
-      <div class="status-copy"><strong>${esc(copy[0])}</strong><p>${esc(copy[1])}</p>
-        <div class="message-actions">${canRetry ? '<button class="secondary-button" type="button" data-action="retry">Try again now</button>' : ""}<button class="quiet-button" type="button" data-action="copy-link">Copy private link</button></div>
+      <div class="status-copy"><strong>${esc(copy[0])}</strong><p>${esc(queuedCopy + offlineCopy)}</p><p class="status-retention">Private link is bearer access. I keep this work for 30 days.</p>
+        <div class="message-actions">${canRetry ? '<button class="secondary-button" type="button" data-action="retry">Try again now</button>' : ""}${accessControls(job)}</div>
       </div>
     </div>`;
   }
@@ -1041,13 +1141,28 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
   }
 
   function pollLater() {
+    pollLaterWithDelay(null);
+  }
+
+  function pollLaterWithDelay(delay) {
     stopPolling();
     const generation = state.generation;
+    const job = state.current && state.current.job;
+    const stageDelay = job && job.stage === "checking" ? 5000 : job && job.stage === "working" ? STATUS_POLL_BASE_MS : STATUS_POLL_BASE_MS * 1.5;
+    const backoff = Math.min(60000, stageDelay * (2 ** Math.min(state.pollFailures, 3)));
+    const wait = delay == null
+      ? (!navigator.onLine ? STATUS_POLL_OFFLINE_MS : (document.hidden ? STATUS_POLL_HIDDEN_MS : backoff))
+      : delay;
     state.timer = setTimeout(async () => {
       if (generation !== state.generation || !state.current) return;
+      if (!navigator.onLine) {
+        pollLaterWithDelay(STATUS_POLL_OFFLINE_MS);
+        return;
+      }
       try {
         const body = await api.readJob(state.current);
         if (generation !== state.generation || !state.current) return;
+        state.pollFailures = 0;
         renderJobUpdate(body.job);
       } catch (error) {
         if (error.status === 404) {
@@ -1056,10 +1171,18 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
           newConversation(false);
           addMessage("assistant", "I couldn’t open that private link. It may be incomplete or no longer available.");
         } else {
-          pollLater();
+          state.pollFailures += 1;
+          pollLaterWithDelay(null);
         }
       }
-    }, 10000);
+    }, wait);
+  }
+
+  function refreshNetworkState() {
+    if (state.current && state.current.job && state.current.job.stage !== "ready") {
+      if (state.jobMessage && state.jobMessage.isConnected) state.jobMessage.querySelector(".message-body").innerHTML = jobBody(state.current.job);
+      pollLaterWithDelay(navigator.onLine ? 0 : STATUS_POLL_OFFLINE_MS);
+    }
   }
 
   function resetState() {
@@ -1081,6 +1204,11 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     state.current = null;
     state.jobMessage = null;
     state.lastStage = "";
+    state.pollFailures = 0;
+    mutationAbortReason = "";
+    if (mutationController) mutationController.abort();
+    mutationController = null;
+    setDraftDeleteVisibility();
     replyAnnouncement.textContent = "";
   }
 
@@ -1096,7 +1224,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     welcome.hidden = false;
     renderAttachmentList();
     resetComposerValue();
-    setComposer({ placeholder: "Tell us what’s not working…", hint: "No tech words needed.", attachments: true });
+    setComposer({ placeholder: "Tell me what’s not working…", hint: "No tech words needed.", attachments: true });
     setBusy(false);
     if (drawer.open) drawer.close();
     thread.scrollTop = 0;
@@ -1205,25 +1333,65 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     await startFreeWork("change");
   }
 
-  function renderWorkList() {
+  async function refreshProjects() {
     const list = projects();
+    if (!list.length) return list;
+    const refreshed = await Promise.all(list.map(async (item) => {
+      try {
+        const body = await api.readJob({ id: item.id, claim: item.claim });
+        const job = body && body.job;
+        if (!job) throw new MiniApiError("The server returned no work status.");
+        saveProject(job, item.claim, item.transcript);
+        return { ...item, ...job, refresh_status: "live", refresh_error: "", next_action: jobNextAction(job) };
+      } catch (error) {
+        if (error.status === 404) {
+          forgetProject(item.id);
+          return null;
+        }
+        return { ...item, refresh_status: "unavailable", refresh_error: cleanText(error.message, 180) };
+      }
+    }));
+    return refreshed.filter(Boolean);
+  }
+
+  function renderWorkList(list = projects()) {
     const labels = {
       queued: "Waiting",
       working: "In progress",
       checking: "Almost ready",
       ready: "Ready",
-      needs_attention: "Needs a retry",
+      needs_attention: "Needs attention",
       saved: "Saved",
+      unavailable: "Could not refresh",
     };
-    workList.innerHTML = list.length ? list.map((item) => `<button class="work-row" type="button" data-project-id="${esc(item.id)}">
-      <strong>${esc(item.title || "Your solution")}</strong><span>${esc(item.problem || "Private project")}</span><small class="work-status">${esc(labels[item.stage] || "Saved")}</small>
+    workList.innerHTML = list.length ? list.map((item) => `<button class="work-row" type="button" data-project-id="${esc(item.id)}" aria-label="Open ${esc(item.title || "your private work")}">
+      <strong>${esc(item.title || "Your solution")}</strong><small class="work-status">${esc(item.refresh_status === "unavailable" ? labels.unavailable : (labels[item.stage] || "Saved"))}</small>
+      <span>${esc(item.problem || "Private work")}</span>
+      <small class="work-meta">Updated ${esc(formatDateTime(item.updated_at || item.created_at))} · ${item.available_until ? `Available until ${esc(formatDate(item.available_until))}` : "Availability date not provided"}</small>
+      <small class="work-next">Next: ${esc(item.refresh_status === "unavailable" ? "Try opening this work again when you are online." : jobNextAction(item))}</small>
     </button>`).join("") : `<div class="empty-work"><strong>Nothing here yet.</strong><p>Your first solution will be saved here in this browser.</p></div>`;
   }
 
-  function openWork() {
-    renderWorkList();
-    if (typeof drawer.showModal === "function") drawer.showModal();
-    else drawer.setAttribute("open", "");
+  async function openWork() {
+    if (state.workRefreshing) return;
+    state.workRefreshing = true;
+    const workButton = document.querySelector('[data-action="work"]');
+    if (workButton) {
+      workButton.disabled = true;
+      workButton.setAttribute("aria-busy", "true");
+    }
+    workList.innerHTML = '<div class="empty-work" role="status"><strong>Refreshing your work…</strong><p>I’m checking each private link for its current status.</p></div>';
+    try {
+      renderWorkList(await refreshProjects());
+      if (typeof drawer.showModal === "function") drawer.showModal();
+      else drawer.setAttribute("open", "");
+    } finally {
+      state.workRefreshing = false;
+      if (workButton) {
+        workButton.disabled = false;
+        workButton.setAttribute("aria-busy", "false");
+      }
+    }
   }
 
   function finishDraftRestore() {
@@ -1233,9 +1401,9 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     const assistantMessages = messages.querySelectorAll(".message-assistant");
     const lastAssistant = assistantMessages[assistantMessages.length - 1];
     if (state.phase === "decision") {
-      const decisionMessage = lastAssistant || addMessage("assistant", "I have enough to start your free solution.", { record: false });
+      const decisionMessage = lastAssistant || addMessage("assistant", "I have enough to build a useful first version.", { record: false });
       attachDecision(decisionMessage);
-    } else setComposer({ placeholder: state.phase === "problem" ? "Tell us what’s not working…" : "Type your answer…", hint: state.phase === "problem" ? "No tech words needed." : "A rough answer is fine.", attachments: true });
+    } else setComposer({ placeholder: state.phase === "problem" ? "Tell me what’s not working…" : "Type your answer…", hint: state.phase === "problem" ? "No tech words needed." : "A rough answer is fine.", attachments: true });
     if (state.transcript.length) {
       hideWelcome();
       scrollToEnd(true);
@@ -1245,6 +1413,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
 
   async function restoreConversation(draft) {
     state.intake = draft.intake;
+    setDraftDeleteVisibility();
     state.phase = draft.phase;
     state.problem = draft.problem;
     state.userTurns = draft.userTurns;
@@ -1299,6 +1468,21 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
       removeFile(remove.dataset.removeFile);
       return;
     }
+    const feedback = event.target.closest("[data-feedback]");
+    if (feedback) {
+      const panel = feedback.closest(".result-feedback");
+      if (feedback.dataset.feedback === "useful") {
+        sendFeedback("useful");
+        return;
+      }
+      if (panel) {
+        const form = panel.querySelector("[data-feedback-form]");
+        form.hidden = false;
+        feedback.setAttribute("aria-expanded", "true");
+        form.querySelector("input")?.focus();
+      }
+      return;
+    }
     const button = event.target.closest("[data-action]");
     if (!button) return;
     const action = button.dataset.action;
@@ -1315,10 +1499,24 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
       button.disabled = true;
       guideController.abort();
     }
+    else if (action === "cancel-mutation") {
+      button.disabled = true;
+      cancelMutation();
+    }
     else if (action === "start-free") startFreeWork(button.dataset.context === "change" ? "change" : "new", button);
     else if (action === "copy-link") copyPrivateLink();
     else if (action === "retry") retryJob(button);
     else if (action === "request-change") requestChange();
+    else if (action === "make-another") makeAnother();
+    else if (action === "submit-feedback") {
+      const form = button.closest("[data-feedback-form]");
+      const reason = form && form.querySelector("input[name='feedback-reason']:checked")?.value;
+      if (!reason) notify("Choose what needs attention first.");
+      else sendFeedback("not_yet", reason);
+    }
+    else if (action === "delete-work") deletePrivateWork(button);
+    else if (action === "revoke-access") revokeAccess(button);
+    else if (action === "delete-draft") deleteDraft();
   });
 
   composer.addEventListener("submit", (event) => {
@@ -1363,6 +1561,12 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
     if (access && (access.id !== state.current?.id || access.claim !== state.current?.claim)) openProject(access);
   });
 
+  window.addEventListener("online", refreshNetworkState);
+  window.addEventListener("offline", refreshNetworkState);
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden) refreshNetworkState();
+  });
+
   function syncVisualHeight() {
     const viewport = window.visualViewport;
     const height = viewport ? viewport.height : window.innerHeight;
@@ -1379,7 +1583,7 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
   }
 
   resizeComposer();
-  request("/api/mini/config").then((config) => {
+  api.config().then((config) => {
     state.config = {
       ...state.config,
       ...config,
