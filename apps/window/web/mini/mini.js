@@ -27,7 +27,6 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
   const messageInput = document.getElementById("message");
   const fileInput = document.getElementById("file-input");
   const attachmentList = document.getElementById("attachment-list");
-  const composerHint = document.getElementById("composer-hint");
   const attachButton = composer.querySelector('[data-action="attach"]');
   const sendButton = composer.querySelector(".send-button");
   const brandMark = document.querySelector(".brand-mark");
@@ -71,6 +70,8 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
 
   const fileIcon = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7zM14 3v5h5"/></svg>';
   const closeIcon = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>';
+  const sendIcon = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 12 6-6 6 6M12 6v12"/></svg>';
+  const stopIcon = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 8h8v8H8z"/></svg>';
 
   function esc(value) {
     return String(value == null ? "" : value)
@@ -324,6 +325,17 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     mutationController.abort();
   }
 
+  function stopResponse() {
+    if (guideController) {
+      guideAbortReason = "user";
+      guideController.abort();
+    }
+    if (mutationController) {
+      mutationAbortReason = "user";
+      mutationController.abort();
+    }
+  }
+
   function nearBottom() {
     return thread.scrollHeight - thread.scrollTop - thread.clientHeight < 170;
   }
@@ -365,7 +377,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     const follow = nearBottom();
     const item = document.createElement("article");
     item.className = `message message-${role === "assistant" ? "assistant" : "user"}`;
-    item.setAttribute("aria-label", role === "assistant" ? "Mini Frank" : "You");
+    item.setAttribute("aria-label", role === "assistant" ? "Frank" : "You");
     const body = document.createElement("div");
     body.className = "message-body";
     body.innerHTML = `<p class="message-text">${esc(text)}</p>${fileSummary(options.files || [])}`;
@@ -385,8 +397,8 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     hideWelcome();
     const item = document.createElement("article");
     item.className = "message message-assistant";
-    item.setAttribute("aria-label", "Mini Frank is thinking");
-    item.innerHTML = `<span class="speaker-mark"></span><div class="message-body"><div class="thinking"><span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span><span>One moment…</span></div></div>`;
+    item.setAttribute("aria-label", "Frank is thinking");
+    item.innerHTML = `<span class="speaker-mark"></span><div class="message-body"><div class="thinking"><span class="thinking-dots" aria-hidden="true"><i></i><i></i><i></i></span><span class="thinking-copy">One moment…</span></div></div>`;
     messages.append(item);
     scrollToEnd(true);
     return item;
@@ -415,25 +427,11 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     return actions;
   }
 
-  function outcomeContract() {
-    const knownProblem = cleanText(state.problem || state.transcript.find((item) => item.role === "user")?.text, 900) || "No problem statement yet.";
-    const files = state.attachments.filter((item) => item.status === "ready").map((item) => item.name);
-    const fileLine = files.length ? files.map((name) => esc(name)).join(", ") : "No files attached yet.";
-    return `<section class="outcome-contract" aria-labelledby="outcome-contract-title">
-      <h3 id="outcome-contract-title">Before I build</h3>
-      <dl>
-        <div><dt>I know</dt><dd>${esc(knownProblem)}</dd></div>
-        <div><dt>I have</dt><dd>${fileLine}</dd></div>
-        <div><dt>I’m assuming</dt><dd>You want a useful first version based only on this conversation and these files. I’ll call out anything I cannot verify.</dd></div>
-      </dl>
-    </section>`;
-  }
-
   function attachDecision(message) {
     if (!message || message.querySelector('[data-action="start-build"]')) return;
-    actionsFor(message, `${outcomeContract()}<button class="primary-button" type="button" data-action="start-build">Build this for free</button>`);
+    actionsFor(message, '<button class="primary-button" type="button" data-action="start-build">Build this version</button>');
     state.phase = "decision";
-    setComposer({ placeholder: "Add a detail or file, if it matters…", hint: "I’ll use only what you share.", attachments: true });
+    setComposer({ placeholder: "Add a detail or file (optional)…", attachments: true });
     saveDraft();
   }
 
@@ -457,7 +455,14 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     const waitingFiles = state.attachments.some((item) => item.status === "uploading");
     const hasText = Boolean(messageInput.value.trim());
     const acceptsFiles = ["problem", "guiding", "decision"].includes(state.phase) || (state.phase === "ready" && jobAttachmentsAvailable());
-    sendButton.disabled = state.busy || messageInput.disabled || waitingFiles || (!hasText && !(acceptsFiles && usableFiles));
+    const canStop = Boolean(state.busy && (guideController || mutationController));
+    sendButton.type = canStop ? "button" : "submit";
+    sendButton.classList.toggle("is-stop", canStop);
+    sendButton.setAttribute("aria-label", canStop ? "Stop response" : "Send message");
+    sendButton.title = canStop ? "Stop response" : "Send message";
+    sendButton.innerHTML = canStop ? stopIcon : sendIcon;
+    sendButton.dataset.action = canStop ? "stop-response" : "send-message";
+    sendButton.disabled = canStop ? false : state.busy || messageInput.disabled || waitingFiles || (!hasText && !(acceptsFiles && usableFiles));
   }
 
   function resizeComposer() {
@@ -474,7 +479,6 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     messageInput.setAttribute("inputmode", options.inputmode || "text");
     messageInput.setAttribute("autocomplete", options.autocomplete || "off");
     messageInput.maxLength = options.maxlength || MESSAGE_MAX_LENGTH;
-    composerHint.textContent = options.hint || (locked ? "" : "No tech words needed.");
     attachButton.hidden = !attachments;
     fileInput.disabled = !attachments;
     composer.classList.toggle("is-locked", locked);
@@ -708,12 +712,13 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
       clearTimeout(idleTimer);
       idleTimer = setTimeout(() => {
         if (guideController === controller) {
-          guideAbortReason = "timeout";
-          controller.abort();
+          thinking.classList.add("is-slow");
+          const thinkingCopy = thinking.querySelector(".thinking-copy");
+          if (thinkingCopy) thinkingCopy.textContent = "Still working…";
         }
       }, GUIDE_IDLE_TIMEOUT_MS);
     };
-    actionsFor(thinking, '<button class="quiet-button" type="button" data-action="stop-guide">Stop</button>');
+    updateSendButton();
     touch();
     try {
       reply = await sendGuideTurn(text, (partial) => {
@@ -721,7 +726,6 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
         thinking.remove();
         if (!streamMessage) {
           streamMessage = startStreamMessage();
-          actionsFor(streamMessage, '<button class="quiet-button" type="button" data-action="stop-guide">Stop</button>');
         }
         streamMessage.querySelector(".message-text").textContent = partial;
         scrollToEnd();
@@ -741,9 +745,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
         "assistant",
         guideAbortReason === "user"
           ? "Stopped. Your message and files are safe. You can continue whenever you’re ready."
-          : guideAbortReason === "timeout"
-            ? "That reply took too long, so I stopped waiting. Your message and files are safe. Please try again."
-            : `${cleanText(failure && failure.message, 180) || "I couldn’t reply just now."} Your message and files are safe. Please try again.`,
+          : `${cleanText(failure && failure.message, 180) || "I’m reconnecting to finish this."} Your message and files are safe. You can continue here.`,
         { record: false },
       );
       attachDecision(unavailable);
@@ -762,7 +764,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     finalText.removeAttribute("aria-live");
     replyAnnouncement.textContent = "";
     requestAnimationFrame(() => {
-      if (generation === state.generation) replyAnnouncement.textContent = `Mini Frank: ${reply}`;
+      if (generation === state.generation) replyAnnouncement.textContent = `Frank: ${reply}`;
     });
     recordAssistant(reply);
     attachDecision(assistantMessage);
@@ -844,7 +846,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     const controller = new AbortController();
     mutationController = controller;
     mutationAbortReason = "";
-    actionsFor(thinking, '<button class="quiet-button" type="button" data-action="cancel-mutation">Stop waiting</button>');
+    updateSendButton();
     try {
       const body = context === "change"
         ? await api.changeJob(changeAccess, state.pendingChange, changeAttachmentIds, { signal: controller.signal })
@@ -878,7 +880,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
         ? "I stopped waiting. Your messages and files are still safe."
         : `${cleanText(error.message, 400) || "I couldn’t start that just yet."} Your conversation and files are still safe.`;
       const reply = addMessage("assistant", copy, { record: false });
-      actionsFor(reply, `<button class="primary-button" type="button" data-action="start-free" data-context="${context}">${context === "change" ? "Try that change again" : "Build this for free"}</button>`);
+      actionsFor(reply, `<button class="primary-button" type="button" data-action="start-free" data-context="${context}">${context === "change" ? "Try that change again" : "Build this version"}</button>`);
       state.phase = context === "change" ? "ready" : "decision";
       setComposer(context === "change" ? { placeholder: "Tell me what you want changed…", hint: "Plain words are perfect.", attachments: jobAttachmentsAvailable() } : { locked: true, hint: "Your request is safe.", attachments: false });
     }
@@ -1001,7 +1003,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
         ${preview ? `<div class="artifact-preview-wrap"><iframe class="artifact-preview" src="${esc(preview)}" title="Safe preview of ${esc(result.title || job.title || "your result")}" sandbox loading="lazy"></iframe><p class="preview-note">This preview is static and sandboxed. Use the open or download action below for the full result.</p></div>` : ""}
         <div class="artifact-actions">${actions || ""}${detailsUrl ? `<a class="artifact-link" href="${esc(detailsUrl)}" target="_blank" rel="noopener noreferrer">Open build notes</a>` : ""}<button class="secondary-button" type="button" data-action="request-change">Ask for a change</button></div>
         ${resultChecks(result)}
-        <div class="artifact-meta"><span>${availableUntil ? `Available here until ${esc(availableUntil)}` : "Availability date not provided"}</span><span>Private link is bearer access · I keep this work for 30 days</span></div>
+        <div class="artifact-meta"><span>${availableUntil ? `Available here until ${esc(availableUntil)}` : "Availability date not provided"}</span><span>This link keeps your work available if you leave.</span></div>
         <div class="artifact-actions artifact-secondary-actions"><button class="secondary-button" type="button" data-action="make-another">Make another like this</button>${accessControls(job)}</div>
         ${feedbackMarkup()}
       </div>
@@ -1092,7 +1094,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     const offlineCopy = navigator.onLine ? "" : " You’re offline, so I’ll check again when you’re back online.";
     return `<div class="status-card" role="status">
       <span class="status-light${job.stage === "needs_attention" ? " attention" : ""}" aria-hidden="true"></span>
-      <div class="status-copy"><strong>${esc(copy[0])}</strong><p>${esc(queuedCopy + offlineCopy)}</p><p class="status-retention">Private link is bearer access. I keep this work for 30 days.</p>
+      <div class="status-copy"><strong>${esc(copy[0])}</strong><p>${esc(queuedCopy + offlineCopy)}</p><p class="status-retention">This link keeps your work available if you leave.</p>
         <div class="message-actions">${canRetry ? '<button class="secondary-button" type="button" data-action="retry">Try again now</button>' : ""}${accessControls(job)}</div>
       </div>
     </div>`;
@@ -1490,6 +1492,7 @@ import { MiniApiError, createMiniApi } from "./mini_api.mjs";
     if (!button) return;
     const action = button.dataset.action;
     if (action === "attach") fileInput.click();
+    else if (action === "stop-response") stopResponse();
     else if (action === "new") {
       if (state.busy && !guideController) notify("I’m saving this first. It’ll only take a moment.");
       else if (confirmDiscardDraft()) newConversation(true);

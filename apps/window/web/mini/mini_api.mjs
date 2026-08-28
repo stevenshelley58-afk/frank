@@ -21,7 +21,7 @@ export class MiniApiError extends Error {
 }
 
 export function createMiniApi({ fetchImpl = globalThis.fetch, deadlineMs = DEFAULT_DEADLINE_MS } = {}) {
-  if (typeof fetchImpl !== "function") throw new Error("Mini Frank needs a browser fetch implementation.");
+  if (typeof fetchImpl !== "function") throw new Error("Frank needs a browser fetch implementation.");
 
   async function request(path, options = {}) {
     const method = String(options.method || "GET").toUpperCase();
@@ -73,7 +73,7 @@ export function createMiniApi({ fetchImpl = globalThis.fetch, deadlineMs = DEFAU
           { name: callerCancelled ? "AbortError" : "DeadlineError", code: callerCancelled ? "cancelled" : "deadline_exceeded" },
         );
       }
-      throw new MiniApiError("I could not reach Mini Frank. Your messages and files are still here.", {
+      throw new MiniApiError("I could not reach Frank. Your messages and files are still here.", {
         name: "NetworkError",
         code: "network_error",
       });
