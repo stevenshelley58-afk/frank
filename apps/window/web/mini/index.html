@@ -3,36 +3,81 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Give Mini Frank a business problem and get a real, working solution.">
-  <meta name="theme-color" content="#fefefd">
+  <meta name="description" content="Tell Mini Frank what is getting in the way. We will turn it into a real, working solution.">
+  <meta name="theme-color" content="#f4f1ea">
   <title>Mini Frank — Give us your problem</title>
   <link rel="stylesheet" href="/mini/mini.css">
-  <script src="/mini/mini.js" defer></script>
+  <script src="/mini/mini.js" type="module"></script>
 </head>
 <body>
-  <!--
-    THESIS: One calm conversation turns a plain business problem into a real result; no dashboard or technical machinery interrupts it.
-    OWN-WORLD: Warm white paper, near-black type, fine neutral lines, generous pill controls, and one small amber Frank signal.
-    STORY: Ask, optionally clarify, choose timing, follow the real job state, use the result, then request a change or handoff.
-    FIRST VIEWPORT: A quiet header, one centred promise, and a labelled problem composer whose sole primary action is Start.
-    FORM: Approved Mini Frank customer journey, translated directly from the signed-off mockup.
-    FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
-  -->
-  <a class="skip-link" href="#app">Skip to Mini Frank</a>
-  <div class="site-shell">
-    <header class="site-header">
-      <button class="brand" type="button" data-action="home" aria-label="Mini Frank home">
-        <span class="brand-dot" aria-hidden="true"></span>
-        <span>frank.my</span>
+  <a class="skip-link" href="#conversation">Skip to the conversation</a>
+
+  <div class="app-shell">
+    <header class="topbar">
+      <button class="brand" type="button" data-action="new" aria-label="Start a new conversation">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span>mini frank</span>
       </button>
-      <nav class="header-actions" aria-label="Mini Frank">
-        <button class="text-button" type="button" data-action="how">How it works</button>
-        <button class="outline-button" type="button" data-action="projects">My projects</button>
-      </nav>
+      <button class="work-button" type="button" data-action="work" aria-haspopup="dialog">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-3.1-6.8"/></svg>
+        <span>Your work</span>
+      </button>
     </header>
-    <main id="app" tabindex="-1" aria-live="polite" aria-busy="true"></main>
+
+    <main id="conversation" class="conversation" tabindex="-1">
+      <div class="thread" id="thread">
+        <section class="welcome" id="welcome" aria-labelledby="welcome-title">
+          <p class="welcome-kicker">Something getting in the way?</p>
+          <h1 id="welcome-title">Give us your problem.<br><em>We’ll give you a solution.</em></h1>
+          <p class="welcome-copy">Explain it like you would to a person. Add a photo or document if that is easier. We’ll work out the rest.</p>
+          <p class="welcome-free"><span aria-hidden="true">✓</span> Your solution is free</p>
+        </section>
+
+        <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversation"></div>
+        <div class="end-marker" id="end-marker" aria-hidden="true"></div>
+      </div>
+
+      <div class="composer-dock" id="composer-dock">
+        <form class="composer" id="composer" novalidate>
+          <div class="attachment-list" id="attachment-list" aria-live="polite"></div>
+          <div class="composer-main">
+            <button class="attach-button" type="button" data-action="attach" aria-label="Add photos or documents" title="Add photos or documents">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+            </button>
+            <label class="visually-hidden" for="message">Your message</label>
+            <textarea id="message" name="message" rows="1" maxlength="4000" placeholder="Tell us what’s not working…" enterkeyhint="send"></textarea>
+            <button class="send-button" type="submit" aria-label="Send message" disabled>
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 12 6-6 6 6M12 6v12"/></svg>
+            </button>
+          </div>
+          <div class="composer-meta">
+            <span id="composer-hint">No tech words needed.</span>
+            <span class="privacy-note"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M7 10V8a5 5 0 0 1 10 0v2M6 10h12v10H6z"/></svg> Private to your project</span>
+          </div>
+          <input id="file-input" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif">
+        </form>
+      </div>
+    </main>
   </div>
+
+  <dialog class="work-drawer" id="work-drawer" aria-labelledby="work-title">
+    <div class="drawer-head">
+      <div>
+        <p class="drawer-kicker">Saved on this device</p>
+        <h2 id="work-title">Your work</h2>
+      </div>
+      <button class="icon-button" type="button" data-action="close-work" aria-label="Close your work">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>
+      </button>
+    </div>
+    <div class="work-list" id="work-list"></div>
+    <div class="drawer-foot">
+      <button class="primary-button full-button" type="button" data-action="new">Start something new</button>
+    </div>
+  </dialog>
+
   <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
-  <noscript><p class="noscript">Mini Frank needs JavaScript to start, save, and reopen your private projects.</p></noscript>
+  <div class="visually-hidden" id="reply-announcement" role="status" aria-live="polite" aria-atomic="true"></div>
+  <noscript><p class="noscript">Mini Frank needs JavaScript so it can save your conversation and send your problem.</p></noscript>
 </body>
 </html>

@@ -30,8 +30,10 @@
 
 (frank_mini_ui_response_headers) {
     header {
-        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; frame-src https://preview.frank.fail; manifest-src 'self'"
-        Cache-Control "public, max-age=300"
+        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src https://preview.frank.fail; manifest-src 'self'"
+        # Revalidate the tiny Mini shell so a rebuilt conversation experience
+        # cannot leave returning customers on an older cached script.
+        Cache-Control "public, no-cache"
         X-Robots-Tag "index, follow"
     }
 }
@@ -107,7 +109,10 @@ frank.fail {
         handle @mini_api {
             import frank_mini_api_response_headers
             request_body {
-                max_size 1MB
+                # Mini Frank accepts a small set of customer images and
+                # documents. The application still enforces stricter
+                # per-file, count, and media-type limits.
+                max_size 56MB
             }
             reverse_proxy frank-window:8080 {
                 header_up Host {host}
@@ -158,19 +163,37 @@ frank.fail {
 }
 
 preview.frank.fail {
-    root * /srv/frank/previews
     header {
         -Server
         X-Content-Type-Options "nosniff"
         Referrer-Policy "no-referrer"
         Cross-Origin-Resource-Policy "cross-origin"
-        Content-Security-Policy "frame-ancestors https://frank.fail"
+        # Published pages are passive, validated snapshots. No generated code
+        # executes in the browser; navigation-capable markup is rejected before
+        # publication and the response policy remains a second fail-closed wall.
+        Content-Security-Policy "sandbox allow-same-origin allow-downloads; default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; media-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors https://frank.fail"
         Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
         Cache-Control "no-store"
         X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
     }
-    file_server
-    try_files {path} {path}/index.html =404
+    route {
+        # Frank publishes validated, regular, non-symlink snapshots here.
+        # Hidden staging/backup paths are never customer-addressable.
+        @mini_hidden path_regexp mini_hidden ^/mini/(?:[^/]+/)*\.
+        respond @mini_hidden 404
+        @mini_download path_regexp mini_download ^/mini/[^/]+/downloads/[A-Za-z0-9][A-Za-z0-9._-]{0,119}$
+        handle @mini_download {
+            header Content-Disposition "attachment"
+            root * /srv/frank/previews
+            try_files {path} =404
+            file_server
+        }
+        handle {
+            root * /srv/frank/previews
+            try_files {path} {path}/index.html =404
+            file_server
+        }
+    }
 }
 
 tasks.frank.fail {

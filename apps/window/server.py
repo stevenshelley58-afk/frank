@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import shutil
+import tempfile
 import threading
 import time
 from types import MappingProxyType
@@ -40,6 +41,31 @@ UPLOAD_DIR = CHAT_DIR / "uploads"
 ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accounts.json")))
 PROJECTS_FILE = Path(os.environ.get("PROJECTS_STORE_FILE", str(CHAT_DIR / "projects.json")))
 DATA_DIR = CHAT_DIR
+
+
+def _mini_data_root() -> Path:
+    """Keep import-time Mini storage writable in local Windows test runs."""
+    if os.name != "nt" or "CHAT_STORE_DIR" in os.environ:
+        return DATA_DIR
+    return Path(tempfile.gettempdir()) / f"frank-window-{os.getpid()}"
+
+
+def _mini_preview_root() -> Path:
+    configured = os.environ.get("MINI_PREVIEW_ROOT")
+    if configured:
+        return Path(configured)
+    if os.name == "nt" and "CHAT_STORE_DIR" not in os.environ:
+        return _mini_data_root() / "previews"
+    return Path("/previews/mini")
+
+
+def _mini_legacy_root() -> Path | None:
+    configured = os.environ.get("MINI_LEGACY_PROJECT_ROOT")
+    if configured:
+        return Path(configured)
+    if os.name == "nt" and "CHAT_STORE_DIR" not in os.environ:
+        return None
+    return Path("/legacy-mini-projects")
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
 TEMPLATE_RELEASE_ROOT = Path(os.environ.get(
     "AD_TEMPLATE_GENERATOR_RELEASE_ROOT", "/data/releases/ad-template-generator"
@@ -564,13 +590,17 @@ def _clean_project_url(raw: object, label: str) -> str:
     return urllib.parse.urlunsplit(parsed)[:500]
 
 
-def _project_context(project: dict) -> str:
+def _project_context(
+    project: dict, *, canonical_workspace: str = "", memory_scope: str = ""
+) -> str:
+    workspace = canonical_workspace or _project_workspace(project)
+    memory_workspace = memory_scope or str(project["root"])
     return (
         "You are Hermes, the sole brain for a project displayed through Frank.\n"
         f"Frank project id: {project['id']}\n"
         f"Project name: {project['name']}\n"
-        f"Canonical workspace: {_project_workspace(project)}\n"
-        f"Memory workspace: {project['root']}\n\n"
+        f"Canonical workspace: {workspace}\n"
+        f"Memory workspace: {memory_workspace}\n\n"
         "Keep all project file operations inside the canonical workspace. Read and follow "
         "the workspace AGENTS.md and other repository instructions before changing files. "
         "Use the existing Hermes default profile; never create another Hermes profile, Frank "
@@ -598,19 +628,62 @@ def _project_bootstrap_prompt(project: dict) -> str:
     )
 
 
-def _create_project_session(project: dict, *, title: str = "New chat", model: str = "", provider: str = "") -> dict:
+def _create_project_session(
+    project: dict,
+    *,
+    session_id_override: str = "",
+    title: str = "New chat",
+    model: str = "",
+    provider: str = "",
+    system_prompt_suffix: str = "",
+    tool_policy: str = "",
+    workspace_override: str = "",
+    display_workspace_override: str = "",
+    memory_scope_override: str = "",
+) -> dict:
+    workspace = _project_workspace(project)
+    if workspace_override:
+        normalized = workspace_override.replace("\\", "/").rstrip("/")
+        allowed_root = str(HERMES_UPLOAD_ROOT.parent / "mini-shared" / "workspaces").replace("\\", "/").rstrip("/")
+        if (
+            not normalized.startswith(allowed_root + "/")
+            or any(part in {"", ".", ".."} for part in normalized.removeprefix(allowed_root + "/").split("/"))
+        ):
+            raise ValueError("unsupported Hermes session workspace override")
+        workspace = normalized
+    if display_workspace_override and display_workspace_override != "/workspace":
+        raise ValueError("unsupported Hermes display workspace override")
+    if memory_scope_override and not re.fullmatch(r"mini-(?:intake|job)/[A-Za-z0-9_-]{8,80}", memory_scope_override):
+        raise ValueError("unsupported Hermes memory scope override")
+    system_prompt = _project_context(
+        project,
+        canonical_workspace=display_workspace_override or workspace,
+        memory_scope=memory_scope_override,
+    )
+    if system_prompt_suffix:
+        system_prompt = f"{system_prompt}\n\n{system_prompt_suffix.strip()}"
     payload = {
         "source": "api_server",
-        "cwd": _project_workspace(project),
-        "workspace": _project_workspace(project),
-        "system_prompt": _project_context(project),
+        "cwd": workspace,
+        "workspace": workspace,
+        "system_prompt": system_prompt,
     }
+    if session_id_override:
+        if not re.fullmatch(
+            r"mini-(?:intake|job)-[A-Za-z0-9_-]{8,80}", session_id_override
+        ):
+            raise ValueError("unsupported deterministic Hermes session id")
+        payload["id"] = session_id_override
     if title and title != "New chat":
         payload["title"] = title
     if model:
         payload.update({"model": model, "require_model_lock": True})
     if provider:
         payload["provider"] = provider
+    if tool_policy:
+        if tool_policy not in {"none", "isolated_terminal"}:
+            raise ValueError("unsupported Hermes session tool policy")
+        payload["tool_policy"] = tool_policy
     data = hermes_request("/api/sessions", payload, method="POST")
     session = data.get("session") or {}
     if not session.get("id"):
@@ -1590,6 +1663,48 @@ def ad_studio_model_policies():
         return _hermes_error(error)
 
 
+def _hermes_chat_stream(chat_id: str, payload: dict, *, read_timeout: float | None = None):
+    """Yield one authoritative Hermes session turn as raw SSE lines."""
+    url = hermes_base() + _session_path(chat_id, "/chat/stream")
+    base_headers = {
+        "Authorization": f"Bearer {HERMES_KEY}",
+        "Content-Type": "application/json",
+        "Accept": "text/event-stream",
+    }
+
+    try:
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(payload).encode("utf-8"),
+            headers=base_headers,
+            method="POST",
+        )
+        # Operator chat has no client-side turn deadline. Public Mini callers
+        # supply a finite read timeout so an abandoned upstream cannot occupy
+        # one of the deliberately small number of guide slots forever.
+        response = (
+            urllib.request.urlopen(req)
+            if read_timeout is None
+            else urllib.request.urlopen(req, timeout=read_timeout)
+        )
+        with response as resp:
+            for raw_line in resp:
+                yield raw_line
+    except urllib.error.HTTPError as err:
+        detail = err.read().decode("utf-8", errors="replace")[:1200]
+        msg = f"Hermes returned HTTP {err.code}."
+        try:
+            parsed = json.loads(detail)
+            msg = parsed.get("error", {}).get("message") or parsed.get("message") or msg
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        yield f"event: error\ndata: {json.dumps({'type': 'error', 'content': msg})}\n\n".encode()
+    except Exception as err:
+        msg = f"Could not reach Hermes: {str(err).split(chr(10))[0][:180]}"
+        yield f"event: error\ndata: {json.dumps({'type': 'error', 'content': msg})}\n\n".encode()
+        yield b"event: done\ndata: {\"type\":\"done\"}\n\n"
+
+
 @app.post("/api/chat/turn")
 def chat_turn():
     """Stream one turn through the authoritative Hermes session."""
@@ -1608,41 +1723,11 @@ def chat_turn():
         payload.update({"model": model, "require_model_lock": True})
     if provider:
         payload["provider"] = provider
-    url = hermes_base() + _session_path(chat_id, "/chat/stream")
-    base_headers = {
-        "Authorization": f"Bearer {HERMES_KEY}",
-        "Content-Type": "application/json",
-        "Accept": "text/event-stream",
-    }
-
-    def generate():
-        try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode("utf-8"),
-                headers=base_headers,
-                method="POST",
-            )
-            # No client-side turn deadline. Hermes owns the run lifecycle and
-            # emits SSE keepalives; the browser's Stop button closes this stream.
-            with urllib.request.urlopen(req) as resp:
-                for raw_line in resp:
-                    yield raw_line
-        except urllib.error.HTTPError as err:
-            detail = err.read().decode("utf-8", errors="replace")[:1200]
-            msg = f"Hermes returned HTTP {err.code}."
-            try:
-                parsed = json.loads(detail)
-                msg = parsed.get("error", {}).get("message") or parsed.get("message") or msg
-            except (json.JSONDecodeError, AttributeError):
-                pass
-            yield f"event: error\ndata: {json.dumps({'type': 'error', 'content': msg})}\n\n".encode()
-        except Exception as err:
-            msg = f"Could not reach Hermes: {str(err).split(chr(10))[0][:180]}"
-            yield f"event: error\ndata: {json.dumps({'type': 'error', 'content': msg})}\n\n".encode()
-            yield b"event: done\ndata: {\"type\":\"done\"}\n\n"
-
-    return Response(stream_with_context(generate()), mimetype="text/event-stream", headers=_sse_headers())
+    return Response(
+        stream_with_context(_hermes_chat_stream(chat_id, payload)),
+        mimetype="text/event-stream",
+        headers=_sse_headers(),
+    )
 
 
 def _sse_headers():
@@ -1673,18 +1758,21 @@ app.register_blueprint(create_memory_blueprint(MemoryInspector(
 
 
 app.register_blueprint(mini_frank.create_blueprint(
-    data_root=DATA_DIR,
-    project_view_root=Path(os.environ.get(
-        "MINI_PROJECT_VIEW_ROOT", str(ROOTS["vps"] / "projects" / "mini-frank")
-    )),
+    data_root=_mini_data_root(),
+    project_view_root=_mini_preview_root(),
+    legacy_project_root=_mini_legacy_root(),
     project_getter=_project_store.get_project,
     session_creator=_create_project_session,
     hermes_request=hermes_request,
+    hermes_chat_stream=_hermes_chat_stream,
+    # Hermes runs on the VPS host, while Frank writes through the /data
+    # container mount. The shared upload root already names that host path.
+    hermes_data_root=HERMES_UPLOAD_ROOT.parent,
     # Keep claim links stable across restarts when a dedicated Mini key has not
     # yet been provisioned. HERMES_KEY is already a persistent server secret.
     rate_limit_key=os.environ.get("MINI_RATE_LIMIT_KEY", "").strip() or HERMES_KEY,
-    priority_payment_url=os.environ.get("MINI_PRIORITY_PAYMENT_URL", "").strip(),
     daily_limit=int(os.environ.get("MINI_DAILY_LIMIT", "3")),
+    start_reconciler=True,
 ))
 
 

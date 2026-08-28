@@ -10,6 +10,8 @@ data_dir="/srv/frank/data/window"
 template_release_dir="$data_dir/releases/ad-template-generator"
 preview_dir="/srv/frank/previews"
 mini_preview_dir="$preview_dir/mini"
+mini_workspace_dir="$data_dir/mini-shared/workspaces"
+legacy_mini_project_dir="/projects/mini-frank/customer-projects"
 
 [[ "$(realpath -e -- "$repo")" == "/projects/frank" ]] || {
   echo "refusing non-canonical Frank repository: $repo" >&2
@@ -34,8 +36,15 @@ id hermes >/dev/null 2>&1 || {
   echo "Hermes user is required for project workspace provisioning" >&2
   exit 1
 }
-install -d -o hermes -g hermes -m 0755 -- "$mini_preview_dir"
+# Only trusted Frank publishing code writes customer-facing snapshots. Hermes
+# can write its private build workspace but has no access to this projection.
+install -d -o root -g root -m 0755 -- "$mini_preview_dir"
+install -d -o root -g hermes -m 2750 -- "$data_dir/mini-shared" "$mini_workspace_dir"
 install -d -o root -g hermes -m 2775 -- /projects
+# This is the retired Mini's exact per-customer root. Window receives only this
+# narrow path writable so migrated retention deadlines can erase old private
+# source/result data; the rest of /projects remains read-only in Window.
+install -d -o hermes -g hermes -m 0750 -- "$legacy_mini_project_dir"
 
 # Expose the native loopback Hindsight API only to Frank's existing private
 # Docker network. This is a socket proxy, not another memory service or store.
@@ -160,7 +169,18 @@ migrate_volume frank_frank_caddy_data frank_caddy_data
 migrate_volume frank_frank_caddy_config frank_caddy_config
 
 cd "$app"
+# Public Mini builds are deliberately networkless at runtime. Bake their
+# document, spreadsheet, PDF, image, and headless-browser tools ahead of time.
+docker build \
+  --tag frank-mini-builder:mini-v1 \
+  --file "$app/infra/mini_builder/Dockerfile" \
+  "$app/infra/mini_builder"
 docker compose build frank-window
+docker compose config --quiet
+docker run --rm \
+  --env-file "$caddy_secret_file" \
+  --volume "$app/Caddyfile:/etc/caddy/Caddyfile:ro" \
+  caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile
 
 # The previous Window and Caddy were created by two retired compose projects.
 # Build first, then make the shortest possible atomic cutover to this one stack.
@@ -187,6 +207,15 @@ done
   docker compose logs --tail 100 frank-window >&2
   exit 1
 }
+for _ in $(seq 1 30); do
+  caddy_running="$(docker inspect frank-caddy --format '{{.State.Running}}' 2>/dev/null || true)"
+  [[ "$caddy_running" == "true" ]] && break
+  sleep 1
+done
+[[ "$(docker inspect frank-caddy --format '{{.State.Running}}')" == "true" ]] || {
+  docker compose logs --tail 100 frank-caddy >&2
+  exit 1
+}
 
 docker exec frank-window python -c \
   "import connections_agent, home_platform, server, tool_apps; import memory_inspector, mini_frank; assert connections_agent and home_platform and server and tool_apps and memory_inspector and mini_frank"
@@ -199,5 +228,5 @@ printf '%s\n' "$(git -C "$repo" rev-parse HEAD)" >"$release_tmp"
 chown root:root "$release_tmp"; chmod 0644 "$release_tmp"; mv -f -- "$release_tmp" "$release_dir/approved-sha"
 curl --fail --silent --show-error --output /dev/null \
   --retry 10 --retry-delay 2 --retry-all-errors \
-  https://preview.frank.fail/frank-vps-file-explorer-v1/
+  https://frank.fail/mini/
 echo "deployed $(git -C "$repo" rev-parse HEAD)"

@@ -18,6 +18,8 @@ services:
       HERMES_SHARED_UPLOAD_ROOT: /srv/frank/data/window/uploads
       HERMES_API_URL: http://172.16.1.1:8642
       HERMES_PROFILE: default
+      MINI_PREVIEW_ROOT: /previews/mini
+      MINI_LEGACY_PROJECT_ROOT: /legacy-mini-projects
       HINDSIGHT_API_URL: http://172.16.1.1:9178
       CONNECTIONS_STORE_FILE: /data/connections.json
       CONNECTION_ACTIONS_FILE: /data/connection-actions.jsonl
@@ -29,6 +31,8 @@ services:
       - "127.0.0.1:18080:8080"
     volumes:
       - /srv/frank/data/window:/data
+      - /srv/frank/previews/mini:/previews/mini
+      - /projects/mini-frank/customer-projects:/legacy-mini-projects
       - /projects:/vps/projects:ro
       - /srv/skills:/vps/srv/skills:ro
     networks:

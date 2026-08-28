@@ -52,7 +52,8 @@ class InfraContractTest(unittest.TestCase):
         self.assertNotIn("frank_private_response_headers", mini_ui_route)
         self.assertIn('Cache-Control "no-store"', api_policy)
         self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"', api_policy)
-        self.assertIn('Cache-Control "public, max-age=300"', ui_policy)
+        self.assertIn('Cache-Control "public, no-cache"', ui_policy)
+        self.assertIn("max_size 56MB", mini_api_route)
         self.assertIn('X-Robots-Tag "index, follow"', ui_policy)
         self.assertIn("script-src 'self'; style-src 'self';", ui_policy)
         self.assertIn("frame-src https://preview.frank.fail", ui_policy)
@@ -95,13 +96,54 @@ class InfraContractTest(unittest.TestCase):
 
     def test_deploy_provisions_mini_runtime_contract(self):
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
         self.assertIn('mini_preview_dir="$preview_dir/mini"', deploy)
-        self.assertIn('install -d -o hermes -g hermes -m 0755 -- "$mini_preview_dir"', deploy)
+        self.assertIn('mini_workspace_dir="$data_dir/mini-shared/workspaces"', deploy)
+        self.assertIn('legacy_mini_project_dir="/projects/mini-frank/customer-projects"', deploy)
+        self.assertIn('install -d -o root -g root -m 0755 -- "$mini_preview_dir"', deploy)
+        self.assertIn(
+            'install -d -o root -g hermes -m 2750 -- "$data_dir/mini-shared" "$mini_workspace_dir"',
+            deploy,
+        )
+        self.assertIn(
+            'install -d -o hermes -g hermes -m 0750 -- "$legacy_mini_project_dir"',
+            deploy,
+        )
+        window = compose.split("  frank-window:", 1)[1].split("\n  frank-caddy:", 1)[0]
+        caddy = compose.split("  frank-caddy:", 1)[1].split("\n  volumes:", 1)[0]
+        self.assertIn("/srv/frank/previews/mini:/previews/mini", window)
+        self.assertIn("/projects/mini-frank/customer-projects:/legacy-mini-projects", window)
+        self.assertIn("/srv/frank/data/window:/data", window)
+        self.assertIn("/projects:/vps/projects:ro", window)
+        self.assertNotIn("/projects:/vps/projects:rw", window)
+        self.assertIn("/srv/frank/previews:/srv/frank/previews:ro", caddy)
+        self.assertNotIn("mini-shared/workspaces", caddy)
         self.assertIn("secrets.token_urlsafe(48)", deploy)
         self.assertIn("if ! grep -q -E '^MINI_RATE_LIMIT_KEY=[^[:space:]]'", deploy)
         self.assertIn("^[A-Za-z0-9_-]{43,}$", deploy)
         self.assertIn("must be a URL-safe secret of at least 43 characters", deploy)
         self.assertIn('chmod 0600 "$tmp"', deploy)
+        self.assertIn("frank-mini-builder:mini-v1", deploy)
+        self.assertIn("infra/mini_builder/Dockerfile", deploy)
+        self.assertIn("docker compose config --quiet", deploy)
+        self.assertIn("caddy validate --config /etc/caddy/Caddyfile", deploy)
+        self.assertIn("https://frank.fail/mini/", deploy)
+
+        builder = (APP / "infra" / "mini_builder" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("@sha256:", builder)
+        self.assertIn("chromium", builder)
+        for capability in ("libreoffice-calc", "libreoffice-writer", "openpyxl", "python-docx", "reportlab"):
+            self.assertIn(capability, builder)
+
+    def test_customer_preview_host_serves_only_franks_trusted_projection(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        preview = caddyfile.split("preview.frank.fail {", 1)[1].split("tasks.frank.fail {", 1)[0]
+        self.assertIn("Frank publishes validated, regular, non-symlink snapshots here", preview)
+        self.assertIn("root * /srv/frank/previews", preview)
+        self.assertIn("try_files {path} {path}/index.html =404", preview)
+        self.assertIn("@mini_hidden path_regexp", preview)
+        self.assertNotIn("mini-shared", preview)
+        self.assertNotIn("rewrite", preview)
 
     def test_customer_previews_are_not_indexed_or_content_sniffed(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
@@ -109,8 +151,23 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn('X-Content-Type-Options "nosniff"', preview)
         self.assertIn('Referrer-Policy "no-referrer"', preview)
         self.assertIn('Cross-Origin-Resource-Policy "cross-origin"', preview)
-        self.assertIn('Content-Security-Policy "frame-ancestors https://frank.fail"', preview)
+        self.assertIn("connect-src 'none'", preview)
+        self.assertIn("form-action 'none'", preview)
+        self.assertIn("object-src 'none'", preview)
+        self.assertIn("sandbox allow-same-origin allow-downloads", preview)
+        self.assertIn("script-src 'none'", preview)
+        self.assertNotIn("allow-scripts", preview)
+        self.assertNotIn("allow-top-navigation", preview)
+        self.assertNotIn("allow-popups", preview)
+        self.assertIn("frame-ancestors https://frank.fail", preview)
         self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"', preview)
+
+    def test_customer_downloads_are_forced_to_download(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        preview = caddyfile.split("preview.frank.fail {", 1)[1].split("tasks.frank.fail {", 1)[0]
+        self.assertIn("handle @mini_download {", preview)
+        self.assertIn('header Content-Disposition "attachment"', preview)
+        self.assertIn("try_files {path} =404", preview)
 
     def test_release_runbook_orders_private_dependencies_before_frank(self):
         runbook = (ROOT / "docs" / "FRANK_RELEASE_RUNBOOK.md").read_text(encoding="utf-8")
