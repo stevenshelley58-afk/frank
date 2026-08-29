@@ -1605,11 +1605,6 @@ def _number_from(*values):
     return None
 
 
-@app.post("/api/ad-studio/runs/<run_id>/models")
-def ad_studio_run_models(run_id: str):
-    return _proxy_ad_studio_action(run_id, "/models", {"policy", "reason"})
-
-
 @app.post("/api/ad-studio/runs/<run_id>/retry")
 def ad_studio_run_retry(run_id: str):
     return _proxy_ad_studio_action(run_id, "/retry", {"from_stage"})
@@ -1618,33 +1613,6 @@ def ad_studio_run_retry(run_id: str):
 @app.post("/api/ad-studio/runs/<run_id>/cancel")
 def ad_studio_run_cancel(run_id: str):
     return _proxy_ad_studio_action(run_id, "/cancel", {"reason"})
-
-
-@app.get("/api/ad-studio/models")
-def ad_studio_models():
-    try:
-        return jsonify(hermes_request("/v1/tool-runs/models?tool_id=ad-template-generator", timeout=8))
-    except Exception as error:
-        return _hermes_error(error)
-
-
-@app.route("/api/ad-studio/model-policies", methods=["GET", "POST"])
-def ad_studio_model_policies():
-    path = "/v1/tool-runs/policies/ad-template-generator"
-    if request.method == "GET":
-        query = urllib.parse.urlencode({"project_id": str(request.args.get("project_id") or "")})
-        try:
-            return jsonify(hermes_request(f"{path}?{query}", timeout=8))
-        except Exception as error:
-            return _hermes_error(error)
-    body = request.get_json(silent=True) or {}
-    if not isinstance(body, dict) or not isinstance(body.get("policy"), dict):
-        abort(400, "model policy required")
-    payload = {"project_id": str(body.get("project_id") or ""), "policy": body["policy"]}
-    try:
-        return jsonify(hermes_request(path, payload, method="POST", timeout=15))
-    except Exception as error:
-        return _hermes_error(error)
 
 
 def _hermes_chat_stream(chat_id: str, payload: dict, *, read_timeout: float | None = None):
@@ -1800,8 +1768,6 @@ def mini_legacy_redirect(mini_path: str):
 @app.get("/", defaults={"path": ""})
 @app.get("/<path:path>")
 def spa(path: str):
-    if path == "releases/ad-template-generator" or path.startswith("releases/ad-template-generator/"):
-        abort(404)
     candidate = (WEB / path).resolve()
     try:
         candidate.relative_to(WEB)

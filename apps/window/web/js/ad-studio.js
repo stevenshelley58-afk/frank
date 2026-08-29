@@ -88,7 +88,7 @@ function renderSourcePreview() {
     image.src = source.previewUrl;
     image.alt = source.name;
     const label = document.createElement("span");
-    label.textContent = source.kind === "vps" ? `VPS · ${source.name}` : source.name;
+    label.textContent = source.name;
     const remove = document.createElement("button");
     remove.type = "button";
     remove.setAttribute("aria-label", `Remove ${source.name}`);
@@ -113,24 +113,11 @@ function addLocalFiles(files) {
     previewUrls.add(previewUrl);
     return { kind: "local", key: `local:${file.name}:${file.size}:${file.lastModified}`, name: file.name, size: file.size, type: file.type, file, previewUrl };
   });
-  const existing = new Set(selectedFiles.map((source) => source.key));
-  for (const source of additions) {
-    if (existing.has(source.key)) {
-      URL.revokeObjectURL(source.previewUrl);
-      previewUrls.delete(source.previewUrl);
-      continue;
-    }
-    selectedFiles.push(source);
-    existing.add(source.key);
-  }
-  const keep = additions.find((source) => !existing.has(source.key)) || additions[0];
-  for (const source of additions) {
-    if (source !== keep) { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); }
-  }
-  if (keep) {
-    selectedFiles.filter((source) => source.kind === "local").forEach((source) => { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); });
-    selectedFiles = [keep];
-  }
+  const keep = additions[0];
+  if (!keep) return;
+  for (const source of additions.slice(1)) { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); }
+  selectedFiles.filter((source) => source.kind === "local").forEach((source) => { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); });
+  selectedFiles = [keep];
   renderSourcePreview();
 }
 
@@ -351,11 +338,11 @@ function renderRunDetail(run) {
   detail.append(overview);
   renderPhaseTimeline(run, detail);
   if (run.status === "completed" && ["imported", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase())) {
-    const release = document.createElement("section"); release.className = "ad-template-ready";
+    const readySection = document.createElement("section"); readySection.className = "ad-template-ready";
     const title = document.createElement("strong"); title.textContent = "Template ready";
     const evidence = document.createElement("p"); evidence.textContent = "Deterministic Feed and Story documents are ready to import.";
     const download = document.createElement("a"); download.className = "ad-primary"; download.href = "/api/ad-studio/runs/" + encodeURIComponent(run.id) + "/download"; download.textContent = "Download template";
-    release.append(title, evidence, download); detail.append(release);
+    readySection.append(title, evidence, download); detail.append(readySection);
   }
 
   if (run.attention || run.error) {
@@ -385,7 +372,7 @@ function renderRunDetail(run) {
   renderEventViews();
 }
 
-const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "final-review.started", "final-review.completed", "template.imported", "model-policy.changed"];
+const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "final-review.started", "final-review.completed", "template.imported"];
 
 const SAFE_TOOL_LABELS = {
   terminal: "VPS command",
@@ -408,8 +395,8 @@ function redactOperatorText(value) {
 
 function safeEventData(event) {
   const data = event?.data || {};
-  if (event.kind === "provider.attempt") return { attempt: data.attempt, provider: data.provider, model: data.model, timeout_seconds: data.timeout_seconds };
-  if (event.kind === "provider.fallback") return { attempt: data.attempt, from_model: data.from_model, to_model: data.to_model, reason: redactOperatorText(data.reason) };
+  if (event.kind === "provider.attempt") return { attempt: data.attempt, timeout_seconds: data.timeout_seconds };
+  if (event.kind === "provider.fallback") return { attempt: data.attempt, reason: redactOperatorText(data.reason) };
   if (event.kind === "stage.started") return { summary: `Started ${String(event.node_id || "pipeline stage").replaceAll("-", " ")}` };
   if (event.kind === "tool.started" || event.kind === "tool.completed") return { tool: SAFE_TOOL_LABELS[data.tool] || "VPS builder tool", duration_seconds: data.duration_seconds, error: Boolean(data.error) };
   if (event.kind === "iteration.compared" || event.kind === "iteration.revised") return {
@@ -419,7 +406,7 @@ function safeEventData(event) {
   if (event.kind === "final-review.completed") return { decision: clean(data.decision), reviewer_count: data.reviewer_count };
   if (event.kind === "run.failed") return { error: redactOperatorText(data.error) || "Run failed; diagnostics remain in Hermes." };
   if (event.kind === "template.imported") return { status: "ready", deterministic: true };
-  return Object.fromEntries(Object.entries(data).filter(([key]) => ["attempt", "provider", "model", "cost_usd", "input_tokens", "output_tokens", "policy_revision", "will_resume"].includes(key)));
+  return Object.fromEntries(Object.entries(data).filter(([key]) => ["attempt", "cost_usd", "input_tokens", "output_tokens", "will_resume"].includes(key)));
 }
 
 function safeEventSummary(event) {
@@ -493,7 +480,6 @@ function connectRunEvents(run) {
         run.stage = item.node_id;
         run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(item.node_id)) / PIPELINE_STAGES.length);
       }
-      if (item.kind === "provider.attempt") { run.current_model = item.data?.model || run.current_model; run.current_provider = item.data?.provider || run.current_provider; }
       renderRunDetail(run);
       if (["run.failed", "run.cancelled", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {
         const updated = runs.find((candidate) => candidate.id === run.id);
