@@ -6,11 +6,13 @@ frontend sends `Accept: application/json` on every request, `credentials: omit`,
 mutation also sends a unique `Idempotency-Key`. The server should treat retries
 with the same key as the same effect.
 
-The normal first-request path creates an intake, uploads any files, then submits
-the intake directly. Submit returns `202` with `{ job, claim_token }`; the job
-is durably `queued` and the UI polls its status. That request does not create a
-Hermes session or run. The intake chat route remains a bounded, resumable
-compatibility fallback for older drafts and clients.
+The normal first-request path creates an intake, uploads any files, then streams
+one concise Hermes conversation turn. This is the customer-facing fast path:
+the UI renders the answer as it arrives and keeps the intake resumable if the
+browser disconnects. When the customer chooses **Resume**, the UI submits the
+intake. Submit returns `202` with `{ job, claim_token }`; the job is durably
+`queued` and the UI polls its status. Submit itself does not create a Hermes
+session or run; the background reconciler owns full build dispatch.
 
 ## Existing routes
 

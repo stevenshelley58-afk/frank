@@ -797,7 +797,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
     renderAttachmentList();
     resetComposerValue();
     setBusy(false);
-    await startFreeWork("new");
+    await guideAfter(spokenText, files);
   }
 
   function resumeDraft(button) {

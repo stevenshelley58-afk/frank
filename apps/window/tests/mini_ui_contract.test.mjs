@@ -68,12 +68,13 @@ test("the composer stays focused and offers a stop control for active work", asy
   assert.doesNotMatch(css, /var\(--serif\)|gradient|font-family:\s*[^;]*serif/i);
 });
 
-test("the first non-empty message submits directly without the guide round trip", async () => {
+test("the first non-empty message uses the fast streamed conversation before a full build", async () => {
   const script = await source("mini.js");
   const css = await source("mini.css");
 
-  assert.match(script, /await startFreeWork\("new"\)/);
-  assert.doesNotMatch(script, /await guideAfter\(spokenText, files\)/);
+  assert.match(script, /await guideAfter\(spokenText, files\)/);
+  assert.doesNotMatch(script, /setBusy\(false\);\s*await startFreeWork\("new"\)/);
+  assert.match(script, /attachResume\(assistantMessage\)/);
   assert.match(script, /Working on it/);
   assert.doesNotMatch(script, /Before I build|outcome-contract|Build this for free/i);
   assert.doesNotMatch(css, /#302e2a|#88837a/i);
