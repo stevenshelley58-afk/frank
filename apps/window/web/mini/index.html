@@ -27,9 +27,8 @@
     <main id="conversation" class="conversation" tabindex="-1">
       <div class="thread" id="thread">
         <section class="welcome" id="welcome" aria-labelledby="welcome-title">
-          <h1 id="welcome-title">What can I help you make?</h1>
-          <p class="welcome-copy">Tell me what you need in your own words. Add a file when it helps.</p>
-          <p class="welcome-free"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></svg> Start with a rough idea</p>
+          <h1 id="welcome-title">What could we make easier today?</h1>
+          <p class="welcome-copy">Describe it normally, or pick a useful starting point below.</p>
         </section>
 
         <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversation"></div>
@@ -52,6 +51,32 @@
           <button class="quiet-button danger-button" type="button" data-action="delete-draft" hidden>Delete this draft</button>
           <input id="file-input" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif">
         </form>
+        <div class="solution-starters" id="solution-starters" aria-label="Business solution starters">
+          <button class="solution-pill is-featured" type="button" data-solution="leads">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 18v-2.3c0-1.5 1.4-2.7 3.1-2.7h3.8c1.7 0 3.1 1.2 3.1 2.7V18M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6m6-1 2 2 4-5"/></svg>
+            <span>Turn enquiries into customers</span><small>Try it</small>
+          </button>
+          <button class="solution-pill" type="button" data-solution="admin">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5M8 17h3"/></svg>
+            <span>Automate repetitive admin</span>
+          </button>
+          <button class="solution-pill" type="button" data-solution="cash">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16v11H4zM7 7V5h10v2M8 12h8M8 15h5"/></svg>
+            <span>Get paid faster</span>
+          </button>
+          <button class="solution-pill" type="button" data-solution="numbers">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>
+            <span>See what needs attention</span>
+          </button>
+          <button class="solution-pill" type="button" data-solution="service">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 16H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h1m14 7h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-1M5 10a7 7 0 0 1 14 0v6a3 3 0 0 1-3 3h-3"/></svg>
+            <span>Improve customer service</span>
+          </button>
+          <button class="solution-pill" type="button" data-solution="knowledge">
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5zm16 0A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5z"/></svg>
+            <span>Make staff know-how reusable</span>
+          </button>
+        </div>
       </div>
     </main>
   </div>
@@ -66,6 +91,21 @@
     <div class="work-list" id="work-list"></div>
     <div class="drawer-foot">
       <button class="primary-button full-button" type="button" data-action="new">Start something new</button>
+    </div>
+  </dialog>
+
+  <dialog class="solution-guide" id="solution-guide" aria-labelledby="guide-title">
+    <div class="solution-guide-shell">
+      <header class="guide-head">
+        <div><span class="brand-mark" aria-hidden="true"></span><strong>Turn enquiries into customers</strong></div>
+        <span class="guide-count" id="guide-count">Step 1 of 5</span>
+        <button class="icon-button" type="button" data-guide-action="close" aria-label="Close worked example">
+          <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>
+        </button>
+      </header>
+      <div class="guide-progress" aria-hidden="true"><i id="guide-progress-bar"></i></div>
+      <div class="guide-stage" id="guide-stage"></div>
+      <footer class="guide-foot" id="guide-foot"></footer>
     </div>
   </dialog>
 
