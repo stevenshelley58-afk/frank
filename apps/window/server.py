@@ -84,9 +84,6 @@ def _mini_legacy_root() -> Path | None:
         return None
     return Path("/legacy-mini-projects")
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
-TEMPLATE_RELEASE_ROOT = Path(os.environ.get(
-    "AD_TEMPLATE_GENERATOR_RELEASE_ROOT", "/data/releases/ad-template-generator"
-)).resolve()
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
 HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
@@ -142,22 +139,6 @@ AD_STUDIO_PLACEMENTS = {"square", "portrait", "story"}
 AD_STUDIO_IMAGE_EXTENSIONS = {
     ".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg",
     ".png", ".tif", ".tiff", ".webp",
-}
-TEMPLATE_RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-TEMPLATE_RELEASE_EXTENSIONS = {
-    ".json", ".png", ".webp", ".jpg", ".jpeg", ".woff", ".woff2", ".ttf", ".otf",
-}
-TEMPLATE_RELEASE_MAX_BYTES = int(os.environ.get("AD_TEMPLATE_GENERATOR_RELEASE_MAX_BYTES", str(100 * 1024 * 1024)))
-TEMPLATE_RELEASE_MIME_TYPES = {
-    ".json": "application/json",
-    ".png": "image/png",
-    ".webp": "image/webp",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".woff": "font/woff",
-    ".woff2": "font/woff2",
-    ".ttf": "font/ttf",
-    ".otf": "font/otf",
 }
 ACCOUNT_FIELDS = {
     "project_id", "kind", "name", "identity", "provider", "purpose",
@@ -1327,94 +1308,57 @@ def _public_ad_studio_generations(value: object) -> list[dict]:
     for index, raw in enumerate(value[:30], 1):
         if not isinstance(raw, dict):
             continue
-        scores = raw.get("scores") if isinstance(raw.get("scores"), dict) else raw
-        artifacts = raw.get("artifacts") if isinstance(raw.get("artifacts"), dict) else {}
-        reviewers = raw.get("reviewers") if isinstance(raw.get("reviewers"), dict) else {}
-        record = {
-            "iteration": int(_number_from(raw.get("iteration"), raw.get("generation"), index) or index),
-            "status": re.sub(r"[^a-z-]", "", str(raw.get("status") or raw.get("decision") or "recorded").lower())[:40],
-            "scores": {
-                "primary_ad_system_likeness": _number_from(scores.get("primary_ad_system_likeness"), scores.get("primaryAdSystemLikeness"), scores.get("primary_score")),
-                "strict_ad_system_likeness": _number_from(scores.get("strict_ad_system_likeness"), scores.get("strictAdSystemLikeness"), scores.get("strict_score")),
+        comparison = raw.get("comparison") if isinstance(raw.get("comparison"), dict) else {}
+        public.append({
+            "iteration": int(_number_from(raw.get("iteration"), index) or index),
+            "decision": str(raw.get("decision") or "revise")[:20],
+            "comparison": {
+                "score": _number_from(comparison.get("score")),
+                "reason": _public_generation_text(comparison.get("reason")),
             },
-            "likeness_threshold": _number_from(raw.get("likeness_threshold"), raw.get("likenessThreshold"), raw.get("threshold"), 9.5),
-            "revision_reason": _public_generation_text(raw.get("revision_reason") or raw.get("revisionReason") or raw.get("change_summary")),
-            "reviewers": {
-                "primary": str(reviewers.get("primary") or "")[:160] if EXTERNAL_REFERENCE.fullmatch(str(reviewers.get("primary") or "")) else "",
-                "strict": str(reviewers.get("strict") or "")[:160] if EXTERNAL_REFERENCE.fullmatch(str(reviewers.get("strict") or "")) else "",
-            },
-            "artifacts": {
-                key: str(artifacts.get(key) or "").lower()
-                for key in ("feedSha256", "storySha256", "renderSetSha256")
-                if re.fullmatch(r"[0-9a-f]{64}", str(artifacts.get(key) or "").lower())
-            },
-        }
-        public.append(record)
+        })
     return public
 
 
 def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
-    """Project a Tool run without exposing source paths or private command data."""
+    """Project Hermes state for Frank's internal operator monitor."""
     now = int(time.time())
     payload = run.get("payload") if isinstance(run.get("payload"), dict) else {}
     sources = payload.get("sources") if isinstance(payload.get("sources"), list) else []
     source = sources[0] if sources and isinstance(sources[0], dict) else {}
-    policy = run.get("model_policy") if isinstance(run.get("model_policy"), dict) else {}
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
-    safe_output_keys = {
-        "preview", "previews", "artifacts", "qa", "usage", "cost",
-        "release_id", "template_pack", "template_pack_ref", "checksum", "sha256",
-        "signature", "compatibility", "imports", "trace_ref",
-    }
-    safe_output = {key: value for key, value in output.items() if key in safe_output_keys}
-    if "generations" in output:
-        safe_output["generations"] = _public_ad_studio_generations(output.get("generations"))
-    item = {
+    safe_output = {key: output.get(key) for key in (
+        "template", "previews", "deterministic_documents", "iterations",
+        "final_review", "import", "template_path", "render_path", "process",
+    ) if key in output}
+    if "iterations" in output:
+        safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"))
+    return {
         "id": str(run.get("id") or run.get("run_id") or ""),
         "request_id": str(run.get("request_id") or ""),
         "status": str(run.get("status") or "queued"),
         "stage": str(run.get("stage") or "source"),
         "progress": float(run.get("progress") or 0),
-        "attention": str(run.get("attention") or ""),
-        "trace_id": str(run.get("trace_id") or ""),
+        "attention": bool(run.get("attention")),
         "created_at": run.get("created_at") or now,
-        "updated_at": run.get("updated_at") or run.get("completed_at") or run.get("created_at") or now,
+        "updated_at": run.get("updated_at") or run.get("created_at") or now,
         "policy_revision": str(run.get("model_policy_revision") or ""),
-        "policy": policy,
-        "current_model": str(run.get("current_model") or ""),
-        "current_provider": str(run.get("current_provider") or ""),
-        "source": {
-            "ref": str(source.get("ref") or ""),
-            "name": str(source.get("name") or ""),
-            "sha256": str(source.get("sha256") or ""),
-            "size": int(source.get("size") or 0),
-            "media_type": str(source.get("media_type") or ""),
-            "origin": str(source.get("origin") or ""),
-        },
+        "source": {"name": str(source.get("name") or ""), "size": int(source.get("size") or 0), "media_type": str(source.get("media_type") or ""), "origin": str(source.get("origin") or "")},
         "output": safe_output,
+        "title": title or str(run.get("title") or payload.get("job_name") or "Ad template"),
+        "project_id": project_id or str(scope.get("project_id") or payload.get("project_id") or ""),
+        **({"error": str(run.get("error"))[:1200]} if run.get("error") else {}),
     }
-    item["title"] = title or str(run.get("title") or payload.get("job_name") or "Ad Studio job")
-    item["project_id"] = project_id or str(run.get("project_id") or scope.get("project_id") or payload.get("project_id") or "")
-    if run.get("error"):
-        item["error"] = str(run.get("error"))[:1200]
-    if isinstance(run.get("usage"), dict):
-        item["usage"] = run["usage"]
-    if run.get("cost") is not None:
-        item["cost"] = run["cost"]
-    return item
 
 
 def _ad_studio_source(attachment: dict) -> dict:
     target = _upload_target(attachment["id"])
     if target is None or not target.is_file():
         abort(400, "source image is no longer available")
-    digest = hashlib.sha256(target.read_bytes()).hexdigest()
     return {
-        "ref": f"source:{digest}",
         "path": attachment["hermes_path"],
         "name": attachment["name"],
-        "sha256": digest,
         "size": attachment["size"],
         "media_type": attachment["type"],
         "origin": attachment.get("origin") or "device",
@@ -1603,71 +1547,6 @@ def ad_studio_run_artifact(run_id: str, name: str):
         return _hermes_error(error)
 
 
-def _template_release_target(release_id: str, artifact: str) -> Path | None:
-    if not TEMPLATE_RELEASE_ID.fullmatch(release_id or ""):
-        return None
-    if not artifact or "\\" in artifact or artifact.startswith("/"):
-        return None
-    parts = artifact.split("/")
-    if any(not part or part in {".", ".."} or part.startswith(".") for part in parts):
-        return None
-    target = (TEMPLATE_RELEASE_ROOT / release_id / Path(*parts)).resolve()
-    try:
-        target.relative_to(TEMPLATE_RELEASE_ROOT)
-    except ValueError:
-        return None
-    if target.suffix.lower() not in TEMPLATE_RELEASE_EXTENSIONS:
-        return None
-    current = TEMPLATE_RELEASE_ROOT
-    try:
-        for part in (release_id, *parts):
-            current = current / part
-            if current.is_symlink():
-                return None
-    except OSError:
-        return None
-    if not target.exists() or not target.is_file() or target.is_symlink():
-        return None
-    try:
-        if target.stat().st_size > TEMPLATE_RELEASE_MAX_BYTES:
-            return None
-    except OSError:
-        return None
-    return target
-
-
-@app.route("/releases/ad-template-generator/<release_id>/<path:artifact>", methods=["GET", "HEAD"])
-def ad_template_generator_release_artifact(release_id: str, artifact: str):
-    target = _template_release_target(release_id, artifact)
-    if target is None:
-        abort(404)
-    try:
-        stat = target.stat()
-        etag = hashlib.sha256(f"{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()
-        if request.if_none_match and request.if_none_match.contains(etag):
-            return Response(status=304, headers={"ETag": f'"{etag}"', "Cache-Control": "public, max-age=300"})
-        content_type = TEMPLATE_RELEASE_MIME_TYPES.get(target.suffix.lower(), mimetypes.guess_type(target.name)[0]) or "application/octet-stream"
-        headers = {
-            "ETag": f'"{etag}"',
-            "Cache-Control": "public, max-age=300",
-            "Content-Length": str(stat.st_size),
-        }
-        if request.method == "HEAD":
-            return Response(status=200, headers=headers, mimetype=content_type)
-
-        def stream():
-            with target.open("rb") as handle:
-                while True:
-                    chunk = handle.read(64 * 1024)
-                    if not chunk:
-                        break
-                    yield chunk
-
-        return Response(stream_with_context(stream()), headers=headers, mimetype=content_type, direct_passthrough=True)
-    except OSError:
-        abort(404)
-
-
 def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict) or any(key not in allowed for key in body):
@@ -1693,45 +1572,9 @@ def _number_from(*values):
     return None
 
 
-def _ad_studio_visual_gate(run: dict) -> dict:
-    """Project the fail-closed two-review gate from a durable run result."""
-    output = run.get("output") if isinstance(run.get("output"), dict) else {}
-    qa = output.get("qa") if isinstance(output.get("qa"), dict) else {}
-    review = qa.get("visual_review") or qa.get("visualReview") or output.get("quality_gate") or output.get("iteration_summary") or {}
-    review = review if isinstance(review, dict) else {}
-    scores = review.get("scores") if isinstance(review.get("scores"), dict) else qa.get("scores")
-    scores = scores if isinstance(scores, dict) else {}
-    primary = _number_from(
-        scores.get("primaryAdSystemLikeness"), scores.get("primary_ad_system_likeness"),
-        review.get("primaryAdSystemLikeness"), review.get("primary_score"), qa.get("primary_score"),
-    )
-    strict = _number_from(
-        scores.get("strictAdSystemLikeness"), scores.get("strict_ad_system_likeness"),
-        review.get("strictAdSystemLikeness"), review.get("strict_score"), qa.get("strict_score"),
-    )
-    threshold = _number_from(review.get("likenessThreshold"), review.get("likeness_threshold"), qa.get("likeness_threshold"), 9.5)
-    passed = primary is not None and strict is not None and threshold is not None and primary >= threshold and strict >= threshold
-    return {"passed": passed, "primary_score": primary, "strict_score": strict, "threshold": threshold or 9.5}
-
-
 @app.post("/api/ad-studio/runs/<run_id>/approval")
 def ad_studio_run_approval(run_id: str):
-    body = request.get_json(silent=True) or {}
-    if isinstance(body, dict) and body.get("decision") == "approve":
-        if body.get("confirm_100_percent") is not True:
-            return jsonify({"error": "Approval requires an explicit 100% zoom confirmation."}), 400
-        try:
-            data = hermes_request(_tool_run_path(run_id), timeout=8)
-        except Exception as error:
-            return _hermes_error(error)
-        run = data.get("run") if isinstance(data.get("run"), dict) else data
-        gate = _ad_studio_visual_gate(run if isinstance(run, dict) else {})
-        if not gate["passed"]:
-            return jsonify({
-                "error": "Approval is locked until both independent visual scores are recorded at 9.5 or higher.",
-                "quality_gate": gate,
-            }), 409
-    return _proxy_ad_studio_action(run_id, "/approval", {"decision", "confirm_100_percent", "reason"})
+    return jsonify({"error": "This process completes automatically; human approval is not used."}), 410
 
 
 @app.post("/api/ad-studio/runs/<run_id>/models")

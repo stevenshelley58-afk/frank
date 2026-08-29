@@ -202,7 +202,7 @@
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
               <h3>One source. A traceable template.</h3>
-              <ol><li><strong>Read the design</strong><span>Hermes records the structure and source hash.</span></li><li><strong>Build editable layers</strong><span>The builder creates separate Feed and Story documents.</span></li><li><strong>Render, score, improve</strong><span>Every generation is kept. Scores below 9.5 trigger another revision.</span></li><li><strong>Approve and release</strong><span>A source-free signed TemplatePack is released only after every gate passes.</span></li></ol>
+              <ol><li><strong>Read the design</strong><span>Hermes analyses the source design.</span></li><li><strong>Build editable layers</strong><span>The builder creates separate Feed and Story documents.</span></li><li><strong>Render, score, improve</strong><span>One comparator runs per iteration. A score below 9.5 triggers another revision.</span></li><li><strong>Finish automatically</strong><span>After the comparator passes, two final reviewers run automatically.</span></li></ol>
               <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
             </aside>
           </div>
@@ -210,7 +210,7 @@
           <div class="ad-studio-panel" id="ad-panel-runs" role="tabpanel" aria-labelledby="ad-tab-runs" data-ad-panel="runs" hidden>
             <div class="ad-runs-layout">
               <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><h3>Run history</h3><p>Durable jobs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div><div class="ad-runs-list" id="ad-runs-list"></div></section>
-              <section class="ad-run-detail" id="ad-run-detail"><div class="ad-empty"><strong>Select a run</strong><span>Open a run to inspect every generation, score and release decision.</span></div></section>
+              <section class="ad-run-detail" id="ad-run-detail"><div class="ad-empty"><strong>Select a run</strong><span>Open a run to inspect every iteration, comparator score and final review.</span></div></section>
             </div>
           </div>
 
@@ -247,7 +247,7 @@
           </div>
 
           <div class="ad-studio-panel" id="ad-panel-models" role="tabpanel" aria-labelledby="ad-tab-models" data-ad-panel="models" hidden>
-            <div class="ad-models-head"><div><h3>Model routing</h3><p>Models and prices can change. Safety rules and release gates cannot.</p></div><label>Project<select id="ad-model-project"></select></label></div>
+            <div class="ad-models-head"><div><h3>Model routing</h3><p>Models can change; the sole process and quality threshold remain fixed.</p></div><label>Project<select id="ad-model-project"></select></label></div>
             <div class="ad-model-preset" role="group" aria-label="Routing preset"><button type="button" data-ad-preset="quality-first">Quality first</button><button type="button" class="is-on" data-ad-preset="balanced">Balanced</button><button type="button" data-ad-preset="cheapest-compatible">Cheapest compatible</button></div>
             <form id="ad-model-form">
               <div class="ad-model-stage-list" id="ad-model-stage-list" aria-live="polite"></div>

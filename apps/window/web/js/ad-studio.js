@@ -29,19 +29,16 @@ const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", 
 
 const clean = (value) => String(value || "").trim();
 const escapeHtml = (value) => clean(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
-const PIPELINE_STAGES = ["source", "analyse", "decompose", "restyle", "story-draft", "render", "visual-review", "check", "subject-invariance", "studio-qa", "ready", "release"];
+const PIPELINE_STAGES = ["source", "analyse", "decompose", "restyle", "story-draft", "render", "compare", "qa", "final-review", "import"];
 const PIPELINE_LABELS = {
   source: "Source", analyse: "Analyse", decompose: "Layer", restyle: "Restyle",
-  "story-draft": "Story", render: "Render", "visual-review": "Score + revise", check: "Validate",
-  "subject-invariance": "Replaceability", "studio-qa": "Approval", ready: "Ready", release: "Release",
+  "story-draft": "Story", render: "Render", compare: "Compare", qa: "Check",
+  "final-review": "Final review", import: "Import",
 };
-const GENERATION_EVENT_KINDS = new Set([
-  "generation.started", "generation.rendered", "generation.scored",
-  "generation.revision-requested", "generation.accepted", "generation.failed",
-]);
+
 
 function runStatusLabel(status) {
-  return ({ queued: "Queued", started: "Starting", running: "Running", waiting_for_approval: "Needs approval", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Starting";
+  return ({ queued: "Queued", started: "Starting", running: "Running", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Starting";
 }
 
 function dateLabel(seconds) {
@@ -393,64 +390,6 @@ function firstNumber(...values) {
   return null;
 }
 
-function qualityEvidence(run) {
-  const output = run.output || {};
-  const qa = output.qa && typeof output.qa === "object" ? output.qa : {};
-  const review = qa.visual_review || qa.visualReview || output.quality_gate || output.iteration_summary || {};
-  const scores = review.scores && typeof review.scores === "object" ? review.scores : (qa.scores || {});
-  const primary = firstNumber(
-    scores.primaryAdSystemLikeness, scores.primary_ad_system_likeness,
-    review.primaryAdSystemLikeness, review.primary_score, qa.primary_score,
-  );
-  const strict = firstNumber(
-    scores.strictAdSystemLikeness, scores.strict_ad_system_likeness,
-    review.strictAdSystemLikeness, review.strict_score, qa.strict_score,
-  );
-  const threshold = firstNumber(review.likenessThreshold, review.likeness_threshold, qa.likeness_threshold, 9.5);
-  const passed = primary !== null && strict !== null && primary >= threshold && strict >= threshold;
-  return { primary, strict, threshold, passed, recorded: primary !== null || strict !== null };
-}
-
-function generationRecords(run) {
-  const output = run.output || {};
-  const qa = output.qa && typeof output.qa === "object" ? output.qa : {};
-  const candidates = [output.generations, output.iteration_summary?.generations, qa.generations, qa.visual_review?.generations]
-    .find((value) => Array.isArray(value)) || [];
-  const records = new Map();
-  const ensure = (value) => {
-    const iteration = Math.max(1, Math.trunc(firstNumber(value, records.size + 1) || 1));
-    if (!records.has(iteration)) records.set(iteration, { iteration, status: "recorded", changes: "", model: "", provider: "", primary: null, strict: null, threshold: 9.5, timestamp: 0 });
-    return records.get(iteration);
-  };
-  candidates.forEach((item, index) => {
-    if (!item || typeof item !== "object") return;
-    const record = ensure(item.iteration ?? item.generation ?? index + 1);
-    const scores = item.scores && typeof item.scores === "object" ? item.scores : item;
-    record.status = clean(item.status || (item.accepted === true ? "accepted" : record.status));
-    record.primary = firstNumber(scores.primaryAdSystemLikeness, scores.primary_ad_system_likeness, scores.primary_score, record.primary);
-    record.strict = firstNumber(scores.strictAdSystemLikeness, scores.strict_ad_system_likeness, scores.strict_score, record.strict);
-    record.threshold = firstNumber(item.likenessThreshold, item.likeness_threshold, record.threshold, 9.5);
-    record.changes = clean(item.change_summary || item.changes || item.revision_reason || record.changes);
-    record.model = clean(item.model || record.model);
-    record.provider = clean(item.provider || record.provider);
-    record.timestamp = firstNumber(item.timestamp, item.created_at, record.timestamp, 0);
-  });
-  for (const event of runEvents) {
-    if (!GENERATION_EVENT_KINDS.has(event.kind)) continue;
-    const data = event.data && typeof event.data === "object" ? event.data : {};
-    const record = ensure(data.iteration ?? data.generation);
-    record.status = event.kind.replace("generation.", "") || record.status;
-    record.primary = firstNumber(data.primary_score, data.primaryAdSystemLikeness, record.primary);
-    record.strict = firstNumber(data.strict_score, data.strictAdSystemLikeness, record.strict);
-    record.threshold = firstNumber(data.threshold, data.likeness_threshold, record.threshold, 9.5);
-    record.changes = clean(data.change_summary || data.revision_reason || data.reason || record.changes);
-    record.model = clean(data.model || record.model);
-    record.provider = clean(data.provider || record.provider);
-    record.timestamp = firstNumber(event.timestamp, record.timestamp, 0);
-  }
-  return Array.from(records.values()).sort((a, b) => a.iteration - b.iteration);
-}
-
 function formatScore(value) {
   return value === null ? "Not recorded" : Number(value).toFixed(1);
 }
@@ -475,7 +414,7 @@ function renderPhaseTimeline(run, parent) {
     button.innerHTML = `<i aria-hidden="true"></i><span>${escapeHtml(PIPELINE_LABELS[id] || id)}</span>`;
     button.setAttribute("aria-label", `${PIPELINE_LABELS[id] || id}${active ? ", current stage" : completed ? ", completed" : ""}`);
     button.addEventListener("click", () => {
-      selectedStage = { source_id: id, label: PIPELINE_LABELS[id] || id, kind: id === "studio-qa" ? "approval" : "stage" };
+      selectedStage = { source_id: id, label: PIPELINE_LABELS[id] || id, kind: "stage" };
       activate("pipeline");
       updateEvidence();
     });
@@ -509,41 +448,30 @@ function renderPreviewGallery(run, parent) {
 }
 
 function renderGenerationHistory(run, parent) {
-  const evidence = qualityEvidence(run);
-  const records = generationRecords(run);
-  const section = document.createElement("section");
-  section.className = "ad-generation-section";
-  const heading = document.createElement("div");
-  heading.className = "ad-inline-heading";
-  heading.innerHTML = `<strong>Generation history</strong><span>${records.length ? `${records.length} recorded generation${records.length === 1 ? "" : "s"}` : "Every render, score and revision will appear here."}</span>`;
-  const quality = document.createElement("div");
-  quality.className = `ad-quality-gate${evidence.passed ? " is-passed" : ""}`;
-  quality.innerHTML = `<div><span>Primary review</span><strong>${formatScore(evidence.primary)}</strong></div><div><span>Strict review</span><strong>${formatScore(evidence.strict)}</strong></div><div><span>Release rule</span><strong>Both ≥ ${evidence.threshold.toFixed(1)}</strong></div><p>${evidence.passed ? "Visual gate passed. Human 100% review is still required." : evidence.recorded ? "Another revision is required before approval." : "This run has not emitted numeric visual evidence. It cannot be approved."}</p>`;
-  section.append(heading, quality);
-  const list = document.createElement("div");
-  list.className = "ad-generation-list";
-  if (!records.length) {
-    const empty = document.createElement("p");
-    empty.className = "ad-evidence-empty";
-    empty.textContent = "Legacy runs record tools and stages but not individual generations. New runs use the scored generation contract.";
-    list.append(empty);
-  }
+  const records = Array.isArray(run.output?.iterations) ? run.output.iterations : [];
+  const finalReview = run.output?.final_review;
+  const section = document.createElement("section"); section.className = "ad-generation-section";
+  const heading = document.createElement("div"); heading.className = "ad-inline-heading";
+  heading.innerHTML = "<strong>Iteration history</strong><span>" + (records.length ? records.length + " comparator" + (records.length === 1 ? "" : "s") + " recorded" : "Hermes will record each iteration.") + "</span>";
+  section.append(heading);
+  const list = document.createElement("div"); list.className = "ad-generation-list";
   records.forEach((record) => {
-    const row = document.createElement("article");
-    row.className = "ad-generation-row";
-    const title = document.createElement("div");
-    title.innerHTML = `<strong>Generation ${record.iteration}</strong><span>${escapeHtml(record.status.replaceAll("-", " ") || "recorded")}</span>`;
-    const scores = document.createElement("div");
-    scores.className = "ad-generation-scores";
-    scores.innerHTML = `<span>Primary <b>${formatScore(record.primary)}</b></span><span>Strict <b>${formatScore(record.strict)}</b></span>`;
-    const note = document.createElement("p");
-    note.textContent = record.changes || (record.status === "accepted" ? "Accepted by the numeric visual gate." : "No revision note was recorded.");
-    row.append(title, scores, note);
-    list.append(row);
+    const row = document.createElement("article"); row.className = "ad-generation-row";
+    const comparison = record.comparison || {};
+    const title = document.createElement("div"); title.innerHTML = "<strong>Iteration " + record.iteration + "</strong><span>" + escapeHtml(String(record.decision || "revise")) + "</span>";
+    const scores = document.createElement("div"); scores.className = "ad-generation-scores";
+    scores.innerHTML = "<span>Comparator <b>" + formatScore(comparison.score) + "</b></span>";
+    const note = document.createElement("p"); note.textContent = comparison.reason || "No comparator note was recorded.";
+    row.append(title, scores, note); list.append(row);
   });
-  section.append(list);
-  parent.append(section);
+  if (finalReview && Array.isArray(finalReview.reviewers) && finalReview.reviewers.length) {
+    const review = document.createElement("p"); review.className = "ad-review-summary";
+    review.textContent = "Final review: " + finalReview.reviewers.map((item) => item.id + " " + formatScore(item.score)).join(" - ") + " - " + (finalReview.decision || "recorded");
+    section.append(review);
+  }
+  section.append(list); parent.append(section);
 }
+
 
 function renderRunDetail(run) {
   const detail = $("#ad-run-detail");
@@ -572,40 +500,21 @@ function renderRunDetail(run) {
   }
   detail.append(overview);
   renderPhaseTimeline(run, detail);
-  if (run.status === "completed" && run.output?.template_pack_ref) {
+  if (run.status === "completed" && run.output?.template_path) {
     const release = document.createElement("section"); release.className = "ad-approval";
-    const title = document.createElement("strong"); title.textContent = "Portable TemplatePack released";
-    const evidence = document.createElement("p"); evidence.textContent = `Checksum ${run.output.sha256 || run.output.checksum || "unavailable"} · signature ${typeof run.output.signature === "object" ? run.output.signature.key_id || run.output.signature.algorithm || "recorded" : "recorded"} · ${Array.isArray(run.output.compatibility) ? run.output.compatibility.join(", ") : "compatibility recorded"}`;
-    const download = document.createElement("a"); download.className = "ad-primary"; download.href = `/api/ad-studio/runs/${encodeURIComponent(run.id)}/download`; download.textContent = "Download TemplatePack";
+    const title = document.createElement("strong"); title.textContent = "Template ready";
+    const evidence = document.createElement("p"); evidence.textContent = "Deterministic Feed and Story documents are ready to import.";
+    const download = document.createElement("a"); download.className = "ad-primary"; download.href = "/api/ad-studio/runs/" + encodeURIComponent(run.id) + "/download"; download.textContent = "Download template";
     release.append(title, evidence, download); detail.append(release);
   }
+
   if (run.attention || run.error) {
     const attention = document.createElement("div"); attention.className = "ad-attention";
     attention.textContent = run.error || "This job needs attention."; detail.append(attention);
   }
   renderPreviewGallery(run, detail);
   renderGenerationHistory(run, detail);
-  if (run.status === "waiting_for_approval") {
-    const quality = qualityEvidence(run);
-    const gate = document.createElement("form"); gate.className = "ad-approval";
-    gate.innerHTML = `<strong>Human release review</strong><p>${quality.passed ? "The numeric visual gate passed. Confirm the final editable Feed and Story at native size." : "Approval is locked until both independent visual scores are recorded at 9.5 or higher."}</p><label><input type="checkbox" required${quality.passed ? "" : " disabled"}> I inspected Feed and Story at 100% zoom</label><textarea maxlength="600" placeholder="What you checked or changed"${quality.passed ? "" : " disabled"}></textarea><button class="ad-primary" type="submit"${quality.passed ? "" : " disabled"}>Approve and release</button><p class="ad-action-status" role="status"></p>`;
-    gate.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const status = gate.querySelector(".ad-action-status");
-      const button = gate.querySelector("button[type=submit]");
-      button.disabled = true; status.textContent = "Recording approval…";
-      try {
-        const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/approval`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision: "approve", confirm_100_percent: true, reason: clean(gate.querySelector("textarea").value) }) });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || "Approval failed");
-        await selectRun(run.id);
-      } catch (error) {
-        status.textContent = `${error.message || "Approval failed"} Try again without leaving this run.`;
-        button.disabled = false;
-      }
-    });
-    detail.append(gate);
-  }
+
   const activity = document.createElement("details");
   activity.className = "ad-live-activity";
   activity.innerHTML = '<summary>All recorded activity</summary><div id="ad-run-events"></div>';
@@ -628,7 +537,7 @@ function renderRunDetail(run) {
   renderEventViews();
 }
 
-const EVENT_KINDS = ["command.accepted", "command.queued", "command.cancel-requested", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "generation.started", "generation.rendered", "generation.scored", "generation.revision-requested", "generation.accepted", "generation.failed", "artifact.recorded", "qa.gate", "approval.requested", "approval.approved", "approval.rejected", "model-policy.changed", "release.published"];
+const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "final-review.started", "final-review.completed", "template.imported", "model-policy.changed"];
 
 const SAFE_TOOL_LABELS = {
   terminal: "VPS command",
@@ -655,37 +564,29 @@ function safeEventData(event) {
   if (event.kind === "provider.fallback") return { attempt: data.attempt, from_model: data.from_model, to_model: data.to_model, reason: redactOperatorText(data.reason) };
   if (event.kind === "stage.started") return { summary: `Started ${String(event.node_id || "pipeline stage").replaceAll("-", " ")}` };
   if (event.kind === "tool.started" || event.kind === "tool.completed") return { tool: SAFE_TOOL_LABELS[data.tool] || "VPS builder tool", duration_seconds: data.duration_seconds, error: Boolean(data.error) };
-  if (GENERATION_EVENT_KINDS.has(event.kind)) return {
-    iteration: firstNumber(data.iteration, data.generation),
-    placement: clean(data.placement),
-    primary_score: firstNumber(data.primary_score, data.primaryAdSystemLikeness),
-    strict_score: firstNumber(data.strict_score, data.strictAdSystemLikeness),
-    threshold: firstNumber(data.threshold, data.likeness_threshold, 9.5),
-    revision_reason: redactOperatorText(data.revision_reason || data.change_summary || data.reason),
-    artifact_sha256: clean(data.artifact_sha256 || data.sha256),
+  if (event.kind === "iteration.compared" || event.kind === "iteration.revised") return {
+    iteration: firstNumber(data.iteration), score: firstNumber(data.score),
+    reason: redactOperatorText(data.reason), decision: clean(data.decision),
   };
-  if (event.kind === "artifact.recorded") return { artifact_id: clean(data.artifact_id), placement: clean(data.placement), sha256: clean(data.sha256), media_type: clean(data.media_type) };
-  if (event.kind === "qa.gate") return { gate: clean(data.gate), decision: clean(data.decision), primary_score: firstNumber(data.primary_score), strict_score: firstNumber(data.strict_score), threshold: firstNumber(data.threshold, 9.5) };
-  if (event.kind === "run.failed") return { error: redactOperatorText(data.error) || "Run failed; protected diagnostics remain in Hermes." };
-  if (event.kind === "release.published") return { release_id: data.release_id, template_pack_ref: data.template_pack_ref, sha256: data.sha256, compatibility: data.compatibility };
-  return Object.fromEntries(Object.entries(data).filter(([key]) => ["attempt", "provider", "model", "cost_usd", "input_tokens", "output_tokens", "gate", "choices", "policy_revision", "will_resume", "release_id", "sha256", "compatibility"].includes(key)));
+  if (event.kind === "final-review.completed") return { decision: clean(data.decision), reviewer_count: data.reviewer_count };
+  if (event.kind === "run.failed") return { error: redactOperatorText(data.error) || "Run failed; diagnostics remain in Hermes." };
+  if (event.kind === "template.imported") return { status: "ready", deterministic: true };
+  return Object.fromEntries(Object.entries(data).filter(([key]) => ["attempt", "provider", "model", "cost_usd", "input_tokens", "output_tokens", "policy_revision", "will_resume"].includes(key)));
 }
 
 function safeEventSummary(event) {
   const data = safeEventData(event);
   if (event.kind === "tool.started" || event.kind === "tool.completed") return data.tool;
   if (event.kind === "stage.started") return data.summary;
-  if (event.kind === "provider.attempt") return `${data.provider || "provider"} · ${data.model || "model"} · attempt ${data.attempt || 1}`;
-  if (event.kind === "provider.fallback") return `${data.from_model || "model"} → ${data.to_model || "fallback"}`;
-  if (GENERATION_EVENT_KINDS.has(event.kind)) {
-    const scores = data.primary_score !== null || data.strict_score !== null ? ` · ${formatScore(data.primary_score)} / ${formatScore(data.strict_score)}` : "";
-    return `Generation ${data.iteration || "?"}${scores}${data.revision_reason ? ` · ${data.revision_reason}` : ""}`;
-  }
-  if (event.kind === "artifact.recorded") return `${data.placement || "Template"} artifact recorded${data.sha256 ? ` · ${data.sha256.slice(0, 12)}…` : ""}`;
-  if (event.kind === "qa.gate") return `${data.gate || "Quality gate"} · ${data.decision || "recorded"}`;
+  if (event.kind === "provider.attempt") return (data.provider || "provider") + " - " + (data.model || "model") + " - attempt " + (data.attempt || 1);
+  if (event.kind === "provider.fallback") return (data.from_model || "model") + " -> " + (data.to_model || "fallback");
+  if (event.kind === "iteration.compared" || event.kind === "iteration.revised") return "Iteration " + (data.iteration || "?") + " - " + formatScore(data.score) + " - " + (data.decision || "revise") + (data.reason ? " - " + data.reason : "");
+  if (event.kind === "final-review.completed") return "Two final reviewers - " + (data.decision || "recorded");
   if (event.kind === "run.failed") return data.error;
-  return event.node_id || data.gate || data.release_id || "Recorded";
+  if (event.kind === "template.imported") return "Template imported";
+  return event.node_id || "Recorded";
 }
+
 
 function safeEventForTrace(event) {
   return { sequence: event.sequence, timestamp: event.timestamp, kind: event.kind, status: event.status, node_id: event.node_id, trace_id: event.trace_id, data: safeEventData(event) };
@@ -727,7 +628,7 @@ function connectRunEvents(run) {
       }
       if (item.kind === "provider.attempt") { run.current_model = item.data?.model || run.current_model; run.current_provider = item.data?.provider || run.current_provider; }
       renderRunDetail(run);
-      if (["run.failed", "run.cancelled", "approval.requested", "release.published"].includes(item.kind)) void refreshRunsSafe().then(() => {
+      if (["run.failed", "run.cancelled", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {
         const updated = runs.find((candidate) => candidate.id === run.id);
         if (updated) renderRunDetail(updated);
       });
