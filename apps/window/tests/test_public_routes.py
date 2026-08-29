@@ -46,6 +46,24 @@ class PublicFrankRouteTest(unittest.TestCase):
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.mimetype, "image/png")
 
+    def test_public_landing_page_and_handoff_script_are_served(self):
+        with self.client.get("/landing") as root:
+            self.assertEqual(root.status_code, 308)
+            self.assertEqual(root.headers["Location"], "/landing/")
+
+        with self.client.get("/landing/") as page:
+            self.assertEqual(page.status_code, 200)
+            document = page.get_data(as_text=True)
+        self.assertIn('id="hero-composer"', document)
+        self.assertIn('src="/landing/app.js"', document)
+        self.assertNotIn("fonts.googleapis.com", document)
+
+        with self.client.get("/landing/app.js") as script:
+            self.assertEqual(script.status_code, 200)
+            source = script.get_data(as_text=True)
+        self.assertIn('window.location.assign("/frank/?from=landing")', source)
+        self.assertIn("frank_landing_prompt_v1", source)
+
     def test_old_entry_and_asset_links_redirect_to_canonical_paths(self):
         for path in ("/mini", "/mini/"):
             with self.client.get(path, query_string={"next": "saved"}) as response:
@@ -63,12 +81,15 @@ class PublicFrankRouteTest(unittest.TestCase):
                 self.assertEqual(response.status_code, 308, old_path)
                 self.assertEqual(response.headers["Location"], f"{new_path}?v=1", old_path)
 
-    def test_root_remains_protected_by_caddy_fallback(self):
+    def test_root_is_public_but_operator_routes_remain_protected_by_caddy_fallback(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        landing = caddyfile.index("@landing_root path /")
         public = caddyfile.index("@frank_ui path /frank /frank/*")
         fallback = caddyfile.index("        handle {\n            import frank_private_response_headers", public)
+        self.assertLess(landing, caddyfile.index("basic_auth"))
         self.assertLess(public, caddyfile.index("basic_auth"))
         self.assertIn("basic_auth", caddyfile[fallback:])
+        self.assertIn("rewrite * /landing/", caddyfile[landing:public])
         self.assertIn("@mini_legacy path /mini /mini/*", caddyfile)
         self.assertIn("redir @mini_legacy /frank/?{http.request.uri.query} 308", caddyfile)
 

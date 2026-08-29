@@ -47,6 +47,9 @@ FRANK_PUBLIC_ASSETS = {
     "site-preview.js": "site-preview.js",
     "assets/demo-business-hero.png": "assets/demo-business-hero.png",
 }
+LANDING_PUBLIC_ASSETS = {
+    "app.js": "app.js",
+}
 LEGACY_MINI_ASSETS = {
     "mini.css": "style.css",
     "mini.js": "app.js",
@@ -1887,6 +1890,28 @@ app.register_blueprint(mini_frank.create_blueprint(
     free_project_limit=int(os.environ.get("MINI_FREE_PROJECT_LIMIT", "1")),
     start_reconciler=True,
 ))
+
+
+@app.get("/landing")
+def landing_root_redirect():
+    target = "/landing/"
+    if request.query_string:
+        target = f"{target}?{request.query_string.decode('latin-1')}"
+    return redirect(target, code=308)
+
+
+@app.get("/landing/", defaults={"landing_path": ""})
+@app.get("/landing/<path:landing_path>")
+def landing_page(landing_path: str):
+    public_path = str(landing_path or "").strip("/")
+    if public_path == "":
+        return send_from_directory(WEB / "landing", "index.html")
+    if public_path == "index.html":
+        return redirect("/", code=308)
+    source_name = LANDING_PUBLIC_ASSETS.get(public_path)
+    if not source_name:
+        abort(404)
+    return send_from_directory(WEB / "landing", source_name)
 
 
 @app.get("/frank")

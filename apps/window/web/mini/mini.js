@@ -6,6 +6,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
 
   const PROJECT_STORE = "mini_frank_projects_v1";
   const DRAFT_STORE = "mini_frank_conversation_v2";
+  const LANDING_PROMPT_STORE = "frank_landing_prompt_v1";
   const MAX_SAVED_MESSAGES = 200;
   const MESSAGE_MAX_LENGTH = 4000;
   const GUIDE_IDLE_TIMEOUT_MS = 60000;
@@ -1612,6 +1613,16 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
     else if (["problem", "guiding", "decision"].includes(state.phase)) submitProblemOrAnswer();
   }
 
+  function consumeLandingPrompt() {
+    try {
+      const prompt = cleanText(window.localStorage.getItem(LANDING_PROMPT_STORE), MESSAGE_MAX_LENGTH);
+      window.localStorage.removeItem(LANDING_PROMPT_STORE);
+      return prompt;
+    } catch (_) {
+      return "";
+    }
+  }
+
   document.addEventListener("click", (event) => {
     const solution = event.target.closest("[data-solution]");
     if (solution) {
@@ -1822,6 +1833,14 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
   else {
     const draft = restoredDraft();
     if (draft) restoreConversation(draft);
-    else newConversation(false);
+    else {
+      newConversation(false);
+      const landingPrompt = consumeLandingPrompt();
+      if (landingPrompt) {
+        messageInput.value = landingPrompt;
+        resizeComposer();
+        window.requestAnimationFrame(() => composer.requestSubmit());
+      }
+    }
   }
 }());

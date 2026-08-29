@@ -84,6 +84,14 @@ test("the first non-empty message uses the fast streamed conversation before a f
   assert.match(css, /--sans:\s*-apple-system/);
 });
 
+test("a landing-page problem is consumed once and starts the real conversation", async () => {
+  const script = await source("mini.js");
+
+  assert.match(script, /LANDING_PROMPT_STORE = "frank_landing_prompt_v1"/);
+  assert.match(script, /localStorage\.removeItem\(LANDING_PROMPT_STORE\)/);
+  assert.match(script, /window\.requestAnimationFrame\(\(\) => composer\.requestSubmit\(\)\)/);
+});
+
 test("only the build boundary applies the project entitlement and planning stays open", async () => {
   const script = await source("mini.js");
 

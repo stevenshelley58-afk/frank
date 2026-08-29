@@ -38,6 +38,14 @@
     }
 }
 
+(frank_landing_response_headers) {
+    header {
+        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'self'; manifest-src 'self'"
+        Cache-Control "public, no-cache"
+        X-Robots-Tag "index, follow"
+    }
+}
+
 frank.fail {
     encode zstd gzip
     import frank_common_security_headers
@@ -71,6 +79,39 @@ frank.fail {
                 Cross-Origin-Resource-Policy "cross-origin"
                 X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
             }
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -Cookie
+                header_up -X-Frank-Operator-Attestation
+                header_down -Set-Cookie
+            }
+        }
+
+        # The public homepage is a lightweight landing page. Its primary form
+        # hands the problem to the existing Frank conversation at /frank/.
+        @landing_root path /
+        handle @landing_root {
+            import frank_landing_response_headers
+            rewrite * /landing/
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -Cookie
+                header_up -X-Frank-Operator-Attestation
+                header_down -Set-Cookie
+            }
+        }
+
+        @landing_ui path /landing /landing/*
+        handle @landing_ui {
+            import frank_landing_response_headers
             reverse_proxy frank-window:8080 {
                 header_up Host {host}
                 header_up X-Real-IP {remote_host}
