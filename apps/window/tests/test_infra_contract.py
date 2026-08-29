@@ -58,6 +58,7 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn('X-Robots-Tag "index, follow"', ui_policy)
         self.assertIn("script-src 'self'; style-src 'self';", ui_policy)
         self.assertIn("frame-src 'self' https://preview.frank.fail", ui_policy)
+        self.assertIn("frame-ancestors 'self'", ui_policy)
         self.assertNotIn("defer", ui_policy)
 
     def test_private_response_policy_is_scoped_to_pavone_and_authenticated_frank(self):
