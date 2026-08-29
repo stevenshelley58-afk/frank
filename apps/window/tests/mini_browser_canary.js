@@ -10,6 +10,7 @@ const PROFILE = path.join(os.tmpdir(), `frank-mini-browser-${process.pid}`);
 const WINDOW_SIZE = process.argv[2] || "1440,900";
 const SCREENSHOT = process.argv[3] || "";
 const EXERCISE_SUBMIT = process.env.FRANK_BROWSER_EXERCISE_SUBMIT === "1";
+const RESPONSE_BUDGET_MS = Number(process.env.FRANK_BROWSER_RESPONSE_BUDGET_MS || 10000);
 const [WIDTH, HEIGHT] = WINDOW_SIZE.split(",").map(Number);
 
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -100,22 +101,30 @@ async function main() {
       };
     })()`);
     if (EXERCISE_SUBMIT) {
+      const responseStarted = Date.now();
       await browser.evaluate(`(() => {
         const input = document.querySelector("#message");
         input.value = "Create a simple booking page for my customers.";
         input.dispatchEvent(new Event("input", { bubbles: true }));
         document.querySelector("#composer").requestSubmit();
       })()`);
-      await wait(900);
-      const accepted = await browser.evaluate(`(() => ({
+      let answered = false;
+      while (Date.now() - responseStarted < RESPONSE_BUDGET_MS) {
+        answered = await browser.evaluate(`Boolean(document.querySelector('.message-assistant [data-action="resume"]'))`);
+        if (answered) break;
+        await wait(200);
+      }
+      const conversation = await browser.evaluate(`(() => ({
         statusCard: Boolean(document.querySelector(".status-card")),
-        bodyText: document.body.innerText,
-        hasGuideQuestion: /before i build|what would a good result|what destination/i.test(document.body.innerText),
+        resumeAction: Boolean(document.querySelector('.message-assistant [data-action="resume"]')),
+        response: [...document.querySelectorAll(".message-assistant .message-text")].at(-1)?.textContent?.trim() || "",
       }))()`);
-      result.directSubmit = {
-        statusCard: accepted.statusCard,
-        hasGuideQuestion: accepted.hasGuideQuestion,
-        hasWorkingCopy: /working on it/i.test(accepted.bodyText),
+      result.fastConversation = {
+        responseMs: Date.now() - responseStarted,
+        withinBudget: answered,
+        hasResponse: Boolean(conversation.response),
+        resumeAction: conversation.resumeAction,
+        bypassedFullBuild: !conversation.statusCard,
       };
     }
     if (SCREENSHOT) {
@@ -123,7 +132,7 @@ async function main() {
       fs.writeFileSync(SCREENSHOT, Buffer.from(capture.data, "base64"));
     }
     console.log(JSON.stringify(result));
-    if (result.canonicalPath !== "/frank/" || result.hasLegacyPublicPath || result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || result.sendAction !== "send-message" || (EXERCISE_SUBMIT && (!result.directSubmit.statusCard || result.directSubmit.hasGuideQuestion || !result.directSubmit.hasWorkingCopy))) process.exitCode = 1;
+    if (result.canonicalPath !== "/frank/" || result.hasLegacyPublicPath || result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || result.sendAction !== "send-message" || (EXERCISE_SUBMIT && (!result.fastConversation.withinBudget || !result.fastConversation.hasResponse || !result.fastConversation.resumeAction || !result.fastConversation.bypassedFullBuild))) process.exitCode = 1;
   } finally {
     try { browser?.close(); } catch {}
     chrome.kill();
