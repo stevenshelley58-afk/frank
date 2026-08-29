@@ -4,6 +4,7 @@
 __pycache__/
 *.py[cod]
 .pytest_cache/
+.hermes/
 .worktrees/
 .turbo/
 node_modules/
