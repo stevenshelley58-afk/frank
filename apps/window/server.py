@@ -1783,7 +1783,7 @@ app.register_blueprint(mini_frank.create_blueprint(
     # Keep claim links stable across restarts when a dedicated Mini key has not
     # yet been provisioned. HERMES_KEY is already a persistent server secret.
     rate_limit_key=os.environ.get("MINI_RATE_LIMIT_KEY", "").strip() or HERMES_KEY,
-    daily_limit=int(os.environ.get("MINI_DAILY_LIMIT", "3")),
+    free_project_limit=int(os.environ.get("MINI_FREE_PROJECT_LIMIT", "1")),
     start_reconciler=True,
 ))
 

