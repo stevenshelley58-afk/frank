@@ -35,6 +35,12 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
   const toast = document.getElementById("toast");
   const replyAnnouncement = document.getElementById("reply-announcement");
   const draftDeleteButton = document.querySelector('[data-action="delete-draft"]');
+  const solutionStarters = document.getElementById("solution-starters");
+  const guideDialog = document.getElementById("solution-guide");
+  const guideStage = document.getElementById("guide-stage");
+  const guideFoot = document.getElementById("guide-foot");
+  const guideCount = document.getElementById("guide-count");
+  const guideProgressBar = document.getElementById("guide-progress-bar");
 
   let intakePromise = null;
   let uploadChain = Promise.resolve();
@@ -72,6 +78,105 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
   const closeIcon = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg>';
   const sendIcon = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 12 6-6 6 6M12 6v12"/></svg>';
   const stopIcon = '<svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 8h8v8H8z"/></svg>';
+  const solutionPrompts = {
+    admin: "I want to automate a repetitive admin task that takes time every week.",
+    cash: "I want to make it easier for customers to pay on time.",
+    numbers: "I want one simple view of what needs attention in my business.",
+    service: "I want to improve how we answer and help customers.",
+    knowledge: "I want to turn staff know-how into simple guides everyone can reuse.",
+  };
+  const guideAnswers = {
+    source: "Everywhere",
+    business: "North & Co.",
+    promise: "Tell us what you need and we will get back to you today.",
+    reply: "Thanks for getting in touch. I have your details and will reply shortly.",
+    look: "Warm and welcoming",
+  };
+  let workedGuideStep = 0;
+
+  function leadPreview() {
+    return `<div class="mini-shot" aria-label="Example enquiry follow-up screen">
+      <div class="mini-shot-head"><span class="brand-mark" aria-hidden="true"></span>North &amp; Co. enquiries <span>3 need a reply</span></div>
+      <div class="lead-preview">
+        <div class="preview-list">
+          <span class="preview-label">New enquiries</span>
+          <div class="preview-lead is-active"><i>AM</i><span><strong>Alex Morgan</strong><small>Asked for a price</small></span><small>8 min</small></div>
+          <div class="preview-lead"><i>JS</i><span><strong>Jamie Singh</strong><small>Website enquiry</small></span><small>1 hr</small></div>
+          <div class="preview-lead"><i>RL</i><span><strong>Riley Lee</strong><small>Needs a call back</small></span><small>Yesterday</small></div>
+        </div>
+        <div class="preview-detail">
+          <small>Next simple action</small><h4>Reply to Alex</h4><p>Alex wants a price and prefers email.</p>
+          <div class="preview-reply">Hi Alex, thanks for getting in touch. I can help with that. Here is what happens next...</div>
+          <span class="preview-button">Send reply</span>
+        </div>
+      </div>
+    </div>`;
+  }
+
+  function guideWork(step) {
+    if (step === 0) return `<div class="guide-card"><h3>This is the kind of result you will get</h3><p>One tidy place for new enquiries, reminders and ready-to-send replies.</p>${leadPreview()}</div>`;
+    if (step === 1) {
+      const choices = [
+        ["Website form", "People fill in a form"],
+        ["Email inbox", "People send an email"],
+        ["Calls or messages", "You write down their details"],
+        ["Everywhere", "They arrive in several places"],
+      ];
+      return `<div class="guide-card"><h3>Pick the closest answer</h3><p>It does not need to be exact. You can change this later.</p><div class="guide-options">${choices.map(([label, detail]) => `<button class="guide-option" type="button" aria-pressed="${guideAnswers.source === label}" data-guide-action="choose" data-guide-key="source" data-guide-value="${esc(label)}"><strong>${esc(label)}</strong><span>${esc(detail)}</span></button>`).join("")}</div></div>`;
+    }
+    if (step === 2) return `<div class="guide-card"><h3>Use words your customers will understand</h3><p>We filled in an example. Change only what matters.</p><div class="guide-fields">
+      <div class="guide-field"><label for="guide-business">What should we call the business?</label><input id="guide-business" data-guide-field="business" value="${esc(guideAnswers.business)}"></div>
+      <div class="guide-field"><label for="guide-promise">What should customers expect?</label><input id="guide-promise" data-guide-field="promise" value="${esc(guideAnswers.promise)}"></div>
+      <div class="guide-field"><label for="guide-reply">What should the instant reply say?</label><textarea id="guide-reply" data-guide-field="reply">${esc(guideAnswers.reply)}</textarea></div>
+    </div><div class="guide-example"><strong>Example:</strong> "Thanks - we have your request. Sam will call before 4 pm today."</div></div>`;
+    if (step === 3) {
+      const looks = ["Warm and welcoming", "Calm and professional", "Bold and direct"];
+      return `<div class="guide-card"><h3>Choose by feel</h3><p>There is no design language to learn.</p><div class="look-options">${looks.map((look) => `<button class="look-option" type="button" aria-pressed="${guideAnswers.look === look}" data-guide-action="choose" data-guide-key="look" data-guide-value="${esc(look)}"><span class="look-swatch"></span><strong>${esc(look)}</strong></button>`).join("")}</div></div>`;
+    }
+    return `<div class="guide-card"><h3>Your working example</h3><p>Try the form, then mark the new enquiry as followed up.</p><div class="mini-shot finished-example" data-guide-demo>
+      <section class="example-capture"><div class="example-brand"><span class="brand-mark" aria-hidden="true"></span>${esc(guideAnswers.business)}</div><h4>How can we help?</h4><p>${esc(guideAnswers.promise)}</p>
+        <form class="example-form" data-guide-example-form><input name="name" aria-label="Example customer name" placeholder="Your name" required><input name="contact" aria-label="Example email or phone" placeholder="Email or phone" required><button type="submit">Send my enquiry</button></form>
+      </section>
+      <section class="example-inbox"><div class="example-inbox-head"><strong>Enquiries to follow up</strong><span data-guide-waiting>2 waiting</span></div><div data-guide-leads>
+        <div class="example-lead"><strong>Alex Morgan</strong><span>Asked for a price - 8 minutes ago</span><button type="button" data-guide-action="follow">Mark as followed up</button></div>
+        <div class="example-lead"><strong>Jamie Singh</strong><span>Website enquiry - 1 hour ago</span><button type="button" data-guide-action="follow">Mark as followed up</button></div>
+      </div></section>
+    </div><p class="example-result" data-guide-result aria-live="polite">This is a real, clickable example - not a picture.</p></div>`;
+  }
+
+  function renderWorkedGuide() {
+    const copy = [
+      ["First, see the finish line.", "We will make a simple place to catch every enquiry and show who needs a reply.", "No setup words. No blank page."],
+      ["Where do enquiries arrive now?", "Choose the answer closest to your day-to-day business.", "Frank can join the pieces later."],
+      ["What should customers hear?", "A few plain words make the tool feel like it belongs to your business.", "The examples are yours to edit."],
+      ["Pick a look by feel.", "You do not need to know fonts, layouts or colour codes.", "It will stay readable on phones and computers."],
+      ["Done. Try what you made.", "This example catches an enquiry and keeps the follow-up list clear.", "Your real version will use your details and connect to the places you already work."],
+    ][workedGuideStep];
+    guideCount.textContent = `Step ${workedGuideStep + 1} of 5`;
+    guideProgressBar.style.width = `${(workedGuideStep + 1) * 20}%`;
+    guideStage.innerHTML = `<section class="guide-copy"><span class="guide-eyebrow">Worked example</span><h2 id="guide-title">${esc(copy[0])}</h2><p>${esc(copy[1])}</p><small>${esc(copy[2])}</small></section><section class="guide-work">${guideWork(workedGuideStep)}</section>`;
+    const atEnd = workedGuideStep === 4;
+    guideFoot.innerHTML = `${workedGuideStep === 0 ? '<button class="quiet-button" type="button" data-guide-action="close">Exit example</button>' : '<button class="quiet-button" type="button" data-guide-action="back">Back</button>'}<span class="guide-spacer">Nothing here is permanent.</span>${atEnd ? '<button class="secondary-button" type="button" data-guide-action="restart">Start again</button><button class="primary-button" type="button" data-guide-action="use">Use this design</button>' : '<button class="primary-button" type="button" data-guide-action="next">Continue</button>'}`;
+  }
+
+  function openWorkedGuide() {
+    workedGuideStep = 0;
+    renderWorkedGuide();
+    guideDialog.showModal();
+  }
+
+  function closeWorkedGuide() {
+    if (guideDialog.open) guideDialog.close();
+  }
+
+  function useWorkedGuide() {
+    const prompt = `Help me build a simple enquiry and follow-up tool for ${guideAnswers.business}. Enquiries arrive through ${guideAnswers.source.toLowerCase()}. Customers should see: "${guideAnswers.promise}" The instant reply should say: "${guideAnswers.reply}" Make it feel ${guideAnswers.look.toLowerCase()}. Keep everything plain, mobile-friendly and easy for staff to use.`;
+    closeWorkedGuide();
+    messageInput.value = prompt.slice(0, MESSAGE_MAX_LENGTH);
+    resizeComposer();
+    messageInput.focus();
+    notify("Your answers are ready. Send when you are happy.");
+  }
 
   function esc(value) {
     return String(value == null ? "" : value)
@@ -350,6 +455,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
 
   function hideWelcome() {
     welcome.hidden = true;
+    solutionStarters.hidden = true;
   }
 
   function formatBytes(value) {
@@ -1241,6 +1347,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
     history.replaceState(null, "", location.pathname + location.search);
     messages.replaceChildren();
     welcome.hidden = false;
+    solutionStarters.hidden = false;
     renderAttachmentList();
     resetComposerValue();
     setComposer({ placeholder: "Tell me what’s not working…", hint: "No tech words needed.", attachments: true });
@@ -1268,6 +1375,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
     setHash(access, true);
     messages.replaceChildren();
     welcome.hidden = true;
+    solutionStarters.hidden = true;
     const saved = projects().find((item) => item.id === access.id);
     if (saved && saved.transcript.length) {
       state.transcript = cleanTranscript(saved.transcript);
@@ -1473,6 +1581,40 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
   }
 
   document.addEventListener("click", (event) => {
+    const solution = event.target.closest("[data-solution]");
+    if (solution) {
+      if (solution.dataset.solution === "leads") openWorkedGuide();
+      else {
+        messageInput.value = solutionPrompts[solution.dataset.solution] || "";
+        resizeComposer();
+        messageInput.focus();
+        notify("This complete guide is next. You can still start with this request now.");
+      }
+      return;
+    }
+    const guideAction = event.target.closest("[data-guide-action]");
+    if (guideAction) {
+      const action = guideAction.dataset.guideAction;
+      if (action === "close") closeWorkedGuide();
+      else if (action === "next") { workedGuideStep = Math.min(4, workedGuideStep + 1); renderWorkedGuide(); }
+      else if (action === "back") { workedGuideStep = Math.max(0, workedGuideStep - 1); renderWorkedGuide(); }
+      else if (action === "restart") { workedGuideStep = 0; renderWorkedGuide(); }
+      else if (action === "use") useWorkedGuide();
+      else if (action === "choose") {
+        guideAnswers[guideAction.dataset.guideKey] = cleanText(guideAction.dataset.guideValue, 200);
+        const group = guideAction.closest(".guide-options, .look-options");
+        group.querySelectorAll('[data-guide-action="choose"]').forEach((item) => item.setAttribute("aria-pressed", String(item === guideAction)));
+      }
+      else if (action === "follow") {
+        const lead = guideAction.closest(".example-lead");
+        lead.classList.toggle("is-done");
+        guideAction.textContent = lead.classList.contains("is-done") ? "Followed up" : "Mark as followed up";
+        const demo = guideAction.closest("[data-guide-demo]");
+        const waiting = demo.querySelectorAll(".example-lead:not(.is-done)").length;
+        demo.querySelector("[data-guide-waiting]").textContent = `${waiting} waiting`;
+      }
+      return;
+    }
     const projectRow = event.target.closest("[data-project-id]");
     if (projectRow) {
       const item = projects().find((project) => project.id === projectRow.dataset.projectId);
@@ -1542,6 +1684,33 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
   composer.addEventListener("submit", (event) => {
     event.preventDefault();
     handleSubmit();
+  });
+
+  guideDialog.addEventListener("input", (event) => {
+    const field = event.target.closest("[data-guide-field]");
+    if (field) guideAnswers[field.dataset.guideField] = cleanText(field.value, 1000);
+  });
+
+  guideDialog.addEventListener("submit", (event) => {
+    const form = event.target.closest("[data-guide-example-form]");
+    if (!form) return;
+    event.preventDefault();
+    const name = cleanText(new FormData(form).get("name"), 80);
+    if (!name) return;
+    const demo = form.closest("[data-guide-demo]");
+    const lead = document.createElement("div");
+    lead.className = "example-lead";
+    lead.innerHTML = `<strong>${esc(name)}</strong><span>New enquiry - just now</span><button type="button" data-guide-action="follow">Mark as followed up</button>`;
+    demo.querySelector("[data-guide-leads]").prepend(lead);
+    form.reset();
+    const waiting = demo.querySelectorAll(".example-lead:not(.is-done)").length;
+    demo.querySelector("[data-guide-waiting]").textContent = `${waiting} waiting`;
+    guideStage.querySelector("[data-guide-result]").textContent = `${name}'s enquiry is now in the follow-up list.`;
+  });
+
+  guideDialog.addEventListener("cancel", (event) => {
+    event.preventDefault();
+    closeWorkedGuide();
   });
 
   messageInput.addEventListener("input", resizeComposer);
