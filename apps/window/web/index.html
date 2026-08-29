@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<meta name="description" content="Frank is the private window and hub for projects, tools and Hermes.">
+<meta name="description" content="Frank is the operator window for projects, tools and Hermes.">
 <title>Frank</title>
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
@@ -170,38 +170,36 @@
       <section class="view" data-view="ad-studio" aria-labelledby="ad-studio-heading">
         <div class="ad-studio" id="ad-studio">
           <header class="ad-studio-head">
-            <div><h2 id="ad-studio-heading">Ad Studio</h2><p>Turn source images into editable, source-free ad templates.</p></div>
+            <div><h2 id="ad-studio-heading">Ad Studio</h2><p>Turn a source image into a Feed and native Story template.</p></div>
             <span class="ad-studio-owner">Runs on Hermes</span>
           </header>
           <nav class="ad-studio-tabs" role="tablist" aria-label="Ad Studio sections">
             <button type="button" class="is-on" id="ad-tab-run" role="tab" aria-selected="true" aria-controls="ad-panel-run" data-ad-tab="run">Create</button>
             <button type="button" id="ad-tab-runs" role="tab" aria-selected="false" aria-controls="ad-panel-runs" data-ad-tab="runs">Runs</button>
             <button type="button" id="ad-tab-pipeline" role="tab" aria-selected="false" aria-controls="ad-panel-pipeline" data-ad-tab="pipeline">How it works</button>
-            <button type="button" id="ad-tab-models" role="tab" aria-selected="false" aria-controls="ad-panel-models" data-ad-tab="models">Models</button>
           </nav>
 
           <div class="ad-studio-panel is-on" id="ad-panel-run" role="tabpanel" aria-labelledby="ad-tab-run" data-ad-panel="run">
             <form class="ad-run-form" id="ad-run-form">
-              <div class="ad-section-heading"><div><h3>Source image → ad template</h3><p>Choose one source per traceable run.</p></div><span id="ad-run-mode">Single</span></div>
-              <input type="file" id="ad-source-files" accept="image/*" multiple hidden>
+              <div class="ad-section-heading"><div><h3>Source image → ad template</h3><p>Choose a source image for a live Hermes run.</p></div><span id="ad-run-mode">Single</span></div>
+              <input type="file" id="ad-source-files" accept="image/*" hidden>
               <button type="button" class="ad-drop" id="ad-drop">
                 <span class="ad-drop-mark" aria-hidden="true">+</span>
-                <strong>Choose source images</strong>
-                <small>Choose from this device or the VPS, or drop images here.</small>
+                <strong>Choose a source image</strong>
+                <small>Choose from this device or the VPS, or drop an image here.</small>
               </button>
               <div class="ad-source-preview" id="ad-source-preview" aria-live="polite"></div>
               <div class="ad-form-pair">
                 <label>Project<select id="ad-run-project" required><option value="">Loading projects…</option></select></label>
                 <label>Job name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
               </div>
-              <div class="ad-policy-summary" id="ad-run-policy-summary"><div><span>Model policy</span><strong>Loading active policy…</strong></div><button type="button" class="ad-text-button" id="ad-run-models">Review or override</button></div>
               <input type="hidden" id="ad-run-policy-revision">
               <fieldset class="ad-fieldset"><legend>Placements</legend><label><input type="checkbox" name="ad-placement" value="square" checked> Square</label><label><input type="checkbox" name="ad-placement" value="portrait"> Portrait</label><label><input type="checkbox" name="ad-placement" value="story"> Story</label></fieldset>
               <label>Brief <span>optional</span><textarea id="ad-run-brief" maxlength="800" rows="4" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea></label>
               <div class="ad-submit-row"><p id="ad-run-status" role="status">Hermes will run this as a background job. It will not open or interrupt a Hub chat.</p><button type="submit" class="ad-primary" id="ad-run-submit">Run job</button></div>
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
-              <h3>One source. A traceable template.</h3>
+              <h3>One source. A live template run.</h3>
               <ol><li><strong>Read the design</strong><span>Hermes analyses the source design.</span></li><li><strong>Build editable layers</strong><span>The builder creates separate Feed and Story documents.</span></li><li><strong>Render, score, improve</strong><span>One comparator runs per iteration. A score below 9.5 triggers another revision.</span></li><li><strong>Finish automatically</strong><span>After the comparator passes, two final reviewers run automatically.</span></li></ol>
               <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
             </aside>
@@ -219,14 +217,18 @@
               <div><h3>How Frank builds an ad template</h3><p>The declared lifecycle stays fixed. The selected run shows what actually happened.</p></div>
               <div class="ad-pipeline-controls"><label>Project<select id="ad-pipeline-project"></select></label><label>Inspect run<select id="ad-pipeline-run"><option value="">No run selected</option></select></label></div>
             </div>
+            <section class="ad-process-monitors" aria-label="Implementation monitors">
+              <div><strong>Architecture</strong><span id="ad-archify-status">Checking Archify artifact&</span><a id="ad-archify-link" href="/api/ad-studio/architecture/artifact" target="_blank" rel="noreferrer" hidden>Open diagram</a></div>
+              <div><strong>Implementation activity</strong><span id="ad-agenttrail-status">Checking AgentTrail board&</span><pre id="ad-agenttrail-board" hidden></pre></div>
+            </section>
             <section class="ad-system-map" aria-label="Frank generation architecture">
               <div><strong>Frank</strong><span>Collects the brief and shows the trace.</span></div><i aria-hidden="true"></i>
               <div><strong>Hermes</strong><span>Owns the durable run, policy and events.</span></div><i aria-hidden="true"></i>
-              <div><strong>Template Builder</strong><span>Creates source-free editable layers.</span></div><i aria-hidden="true"></i>
-              <div><strong>Blockwise</strong><span>Imports the signed pack for editing and publishing.</span></div>
+              <div><strong>Template Builder</strong><span>Creates editable Feed and native Story layers.</span></div><i aria-hidden="true"></i>
+              <div><strong>Blockwise</strong><span>Imports the finished template into Blockwise.</span></div>
             </section>
             <section class="ad-iteration-law" aria-label="Quality iteration rule">
-              <div><strong>Render</strong><span>Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Score</strong><span>Two independent visual reviews</span></div><b aria-hidden="true">→</b><div><strong>Revise</strong><span>Record what changed</span></div><b aria-hidden="true">↻</b><div><strong>Accept</strong><span>Both scores must reach 9.5</span></div>
+              <div><strong>Render</strong><span>Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Final review</strong><span>Two independent reviews at completion</span></div><b aria-hidden="true">→</b><div><strong>Revise</strong><span>Record what changed</span></div><b aria-hidden="true">↻</b><div><strong>Accept</strong><span>Both scores must reach 9.5</span></div>
             </section>
             <details class="ad-oss-note">
               <summary>Why the trace is organised this way</summary>
@@ -237,16 +239,16 @@
               <aside class="ad-stage-inspector">
                 <div class="ad-section-heading"><div><h3 id="ad-stage-name">Observed run</h3><p id="ad-stage-summary">Select a run or stage to inspect its recorded evidence.</p></div><span id="ad-stage-kind">—</span></div>
                 <div class="ad-evidence-grid">
-                  <section><span>Private input</span><div id="ad-stage-input" class="ad-evidence-empty">Inputs stay private in Hermes. Their hashes remain traceable.</div></section>
+                  <section><span>Source image</span><div id="ad-stage-input" class="ad-evidence-empty">The source image is available to this run.</div></section>
                   <section><span>Recorded result</span><div id="ad-stage-output" class="ad-evidence-empty">No safe result has been recorded yet.</div></section>
                 </div>
-                <div class="ad-stage-events" id="ad-stage-events"><p>Select a run and stage to inspect model attempts, tools, artifacts, QA and errors.</p></div>
+                <div class="ad-stage-events" id="ad-stage-events"><p>Select a run and stage to inspect recorded Hermes events.</p></div>
                 <details class="ad-trace-state"><summary>Raw trace data</summary><div class="ad-trace-actions"><button type="button" class="ad-text-button" id="ad-copy-trace">Copy safe trace</button></div><pre id="ad-full-trace">Select a run to replay its correlated, redacted events.</pre></details>
               </aside>
             </div>
           </div>
 
-          <div class="ad-studio-panel" id="ad-panel-models" role="tabpanel" aria-labelledby="ad-tab-models" data-ad-panel="models" hidden>
+          <div class="ad-studio-panel" id="ad-panel-models" role="tabpanel" aria-labelledby="ad-tab-models" data-ad-panel="models" hidden aria-hidden="true">
             <div class="ad-models-head"><div><h3>Model routing</h3><p>Models can change; the sole process and quality threshold remain fixed.</p></div><label>Project<select id="ad-model-project"></select></label></div>
             <div class="ad-model-preset" role="group" aria-label="Routing preset"><button type="button" data-ad-preset="quality-first">Quality first</button><button type="button" class="is-on" data-ad-preset="balanced">Balanced</button><button type="button" data-ad-preset="cheapest-compatible">Cheapest compatible</button></div>
             <form id="ad-model-form">
@@ -325,7 +327,7 @@
             <section class="connections-section"><div class="section-heading"><h2>Connection bindings</h2><span>Configured is not verified</span></div><div class="connection-list" id="connection-list"></div></section>
             <div class="connection-columns">
               <section class="connections-section connection-panel"><div class="section-heading"><h2>Activity &amp; receipts</h2><span>Newest first</span></div><div class="connection-activity" id="connection-activity"></div></section>
-              <section class="connections-section connection-panel"><div class="section-heading"><h2>Connections Agent</h2><span>Private Hermes session</span></div><div class="connection-agent-card"><p>Ask Hermes to inspect, verify, sync, or repair this same workspace. Agent work is recorded in the activity ledger.</p><button type="button" class="home-action home-action-primary" id="connection-agent-open">Open Connections Agent in Chat</button><p class="home-truth">Frank never runs an agent loop or holds Hermes credentials in the browser.</p></div></section>
+              <section class="connections-section connection-panel"><div class="section-heading"><h2>Connections Agent</h2><span>Hermes session</span></div><div class="connection-agent-card"><p>Ask Hermes to inspect, verify, sync, or repair this same workspace. Agent work is recorded in the activity ledger.</p><button type="button" class="home-action home-action-primary" id="connection-agent-open">Open Connections Agent in Chat</button><p class="home-truth">Frank never runs an agent loop or holds Hermes credentials in the browser.</p></div></section>
             </div>
           </div>
           <aside class="tool-editor" id="connection-editor" hidden role="dialog" aria-modal="true" aria-labelledby="connection-form-title" tabindex="-1">

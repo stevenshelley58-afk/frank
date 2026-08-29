@@ -90,6 +90,11 @@ HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("
 HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
 HINDSIGHT_URL = os.environ.get("HINDSIGHT_API_URL", "http://172.16.1.1:9178").rstrip("/")
+# Read-only implementation monitors; Hermes remains template-run truth.
+ARCHIFY_ARTIFACT = Path(os.environ.get("ARCHIFY_ARTIFACT", "/data/archify/ad-template-process.html")).resolve()
+AGENTTRAIL_BOARD = Path(os.environ.get("AGENTTRAIL_BOARD", "/vps/agenttrail/board.json")).resolve()
+ARCHIFY_REVISION = "b36d79fdbc3aec3728744341485a7e79f03c0071"
+AGENTTRAIL_REVISION = "5b97cf3cef548a0c668731e7f569fa36c14832f2"
 ROOTS = {
     # The container receives only the explicitly approved read-only VPS mounts
     # beneath /vps. This presents one familiar tree without exposing the
@@ -1359,6 +1364,41 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "project_id": project_id or str(scope.get("project_id") or payload.get("project_id") or ""),
         **({"error": str(run.get("error"))[:1200]} if run.get("error") else {}),
     }
+
+
+@app.get("/api/ad-studio/architecture")
+def ad_studio_architecture():
+    available = ARCHIFY_ARTIFACT.is_file()
+    return jsonify({
+        "available": available,
+        "source": "archify",
+        "revision": ARCHIFY_REVISION,
+        "read_only": True,
+        "artifact_url": "/api/ad-studio/architecture/artifact" if available else None,
+        "message": "Archify typed-IR artifact is not installed on this host yet." if not available else "Archify typed-IR artifact is available.",
+    })
+
+
+@app.get("/api/ad-studio/architecture/artifact")
+def ad_studio_architecture_artifact():
+    if not ARCHIFY_ARTIFACT.is_file():
+        abort(404, "Archify artifact is not available")
+    return send_file(ARCHIFY_ARTIFACT, mimetype="text/html", max_age=0)
+
+
+@app.get("/api/ad-studio/implementation-activity")
+def ad_studio_implementation_activity():
+    if not AGENTTRAIL_BOARD.is_file():
+        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail board is not available on this host."})
+    try:
+        if AGENTTRAIL_BOARD.stat().st_size > 2 * 1024 * 1024:
+            abort(413, "AgentTrail board is too large")
+        board = json.loads(AGENTTRAIL_BOARD.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail board is unavailable or invalid."}), 503
+    if not isinstance(board, (dict, list)):
+        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail board has an unsupported shape."}), 503
+    return jsonify({"available": True, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "board": board})
 
 
 def _ad_studio_source(attachment: dict) -> dict:

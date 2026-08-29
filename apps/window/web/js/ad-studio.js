@@ -88,7 +88,7 @@ function renderSourcePreview() {
   const host = $("#ad-source-preview");
   host.replaceChildren();
   host.classList.toggle("has-items", selectedFiles.length > 0);
-  $("#ad-run-mode").textContent = selectedFiles.length > 1 ? `Batch · ${selectedFiles.length}` : "Single";
+  $("#ad-run-mode").textContent = selectedFiles.length ? "Source selected" : "Awaiting source";
   if (selectedFiles.length <= 8) sourcePreviewExpanded = false;
   const visibleSources = sourcePreviewExpanded ? selectedFiles : selectedFiles.slice(0, 8);
   visibleSources.forEach((source) => {
@@ -491,7 +491,7 @@ function renderRunDetail(run) {
   detail.append(summary);
   const overview = document.createElement("dl");
   overview.className = "ad-run-facts";
-  for (const [label, value] of [["Run", run.id], ["Policy", run.policy_revision ? `Revision ${run.policy_revision}` : "Pinned"], ["Model", run.current_model || "Deterministic / pending"], ["Trace", run.trace_id || "Pending"]]) {
+  for (const [label, value] of [["Run", run.id], ["Stage", run.stage || "source"], ["Trace", run.trace_id || "Pending"]]) {
     const item = document.createElement("div");
     const term = document.createElement("dt"); term.textContent = label;
     const description = document.createElement("dd"); description.textContent = value;
@@ -500,7 +500,7 @@ function renderRunDetail(run) {
   }
   detail.append(overview);
   renderPhaseTimeline(run, detail);
-  if (run.status === "completed" && run.output?.import?.status === "ready") {
+  if (run.status === "completed" && ["imported", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase())) {
     const release = document.createElement("section"); release.className = "ad-template-ready";
     const title = document.createElement("strong"); title.textContent = "Template ready";
     const evidence = document.createElement("p"); evidence.textContent = "Deterministic Feed and Story documents are ready to import.";
@@ -523,14 +523,12 @@ function renderRunDetail(run) {
     const actions = document.createElement("div"); actions.className = "ad-run-actions";
     const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel job";
     cancel.addEventListener("click", async () => { cancel.disabled = true; try { const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); if (!response.ok) throw new Error("Cancel failed"); await selectRun(run.id); } catch { cancel.textContent = "Cancel failed — retry"; cancel.disabled = false; } });
-    const models = document.createElement("button"); models.type = "button"; models.className = "ad-text-button"; models.textContent = "Change remaining models";
-    models.addEventListener("click", () => { modelEditMode = "remaining"; remainingRunId = run.id; activePolicy = { revision: run.policy_revision, policy: structuredClone(run.policy) }; activate("models"); });
     if (run.status === "failed") {
       const retry = document.createElement("button"); retry.type = "button"; retry.className = "ad-primary"; retry.textContent = "Retry from checkpoint";
       retry.addEventListener("click", async () => { retry.disabled = true; try { const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from_stage: run.stage }) }); if (!response.ok) throw new Error("Retry failed"); await selectRun(run.id); } catch { retry.textContent = "Retry failed — try again"; retry.disabled = false; } });
       actions.append(retry);
     }
-    actions.append(models, cancel); detail.append(actions);
+    actions.append(cancel); detail.append(actions);
   }
   $("#ad-pipeline-run").value = run.id;
   updateEvidence();
@@ -543,8 +541,8 @@ const SAFE_TOOL_LABELS = {
   terminal: "VPS command",
   exec_command: "VPS command",
   execute_code: "VPS calculation",
-  read_file: "Inspect private artifact",
-  write_file: "Create private artifact",
+  read_file: "Inspect source artifact",
+  write_file: "Create template artifact",
   search_files: "Find builder assets",
   skill_view: "Load builder instructions",
   browser: "Browser check",
@@ -578,8 +576,8 @@ function safeEventSummary(event) {
   const data = safeEventData(event);
   if (event.kind === "tool.started" || event.kind === "tool.completed") return data.tool;
   if (event.kind === "stage.started") return data.summary;
-  if (event.kind === "provider.attempt") return (data.provider || "provider") + " - " + (data.model || "model") + " - attempt " + (data.attempt || 1);
-  if (event.kind === "provider.fallback") return (data.from_model || "model") + " -> " + (data.to_model || "fallback");
+  if (event.kind === "provider.attempt") return "Agent attempt " + (data.attempt || 1);
+  if (event.kind === "provider.fallback") return "Agent fallback after attempt " + (data.attempt || 1);
   if (event.kind === "iteration.compared" || event.kind === "iteration.revised") return "Iteration " + (data.iteration || "?") + " - " + formatScore(data.score) + " - " + (data.decision || "revise") + (data.reason ? " - " + data.reason : "");
   if (event.kind === "final-review.completed") return "Two final reviewers - " + (data.decision || "recorded");
   if (event.kind === "run.failed") return data.error;
@@ -649,10 +647,32 @@ async function loadScopedGraph({ entityId, lens }) {
   return payload;
 }
 
+async function loadProcessMonitors() {
+  const archStatus = $("#ad-archify-status");
+  const archLink = $("#ad-archify-link");
+  const trailStatus = $("#ad-agenttrail-status");
+  const trailBoard = $("#ad-agenttrail-board");
+  try {
+    const response = await fetch("/api/ad-studio/architecture");
+    const data = await response.json();
+    archStatus.textContent = data.available ? `Archify typed-IR artifact ready | ${data.revision || "pinned"}` : (data.message || "Archify artifact unavailable.");
+    if (data.available && data.artifact_url) { archLink.href = data.artifact_url; archLink.hidden = false; }
+  } catch (error) { archStatus.textContent = "Archify status unavailable."; }
+  try {
+    const response = await fetch("/api/ad-studio/implementation-activity");
+    const data = await response.json();
+    if (!data.available) { trailStatus.textContent = data.message || "AgentTrail board unavailable."; return; }
+    trailStatus.textContent = `Read-only AgentTrail board | ${data.revision || "pinned"}`;
+    trailBoard.hidden = false;
+    trailBoard.textContent = JSON.stringify(data.board, null, 2);
+  } catch (error) { trailStatus.textContent = "AgentTrail status unavailable."; }
+}
+
 function mountPipeline() {
   const root = $("#ad-pipeline-graph");
   const panel = $("[data-ad-panel=\"pipeline\"]");
   if (!root || !panel.classList.contains("is-on")) return;
+  void loadProcessMonitors();
   graphHandle?.destroy();
   graphHandle = mountGraphWorkbench(root, {
     entityId: TOOL_ID,
@@ -680,7 +700,7 @@ function updateEvidence() {
     image.alt = local.name || "Source image";
     input.append(image);
   } else {
-    input.textContent = selectedStage && selectedRunId ? "Private inputs stay in Hermes; only safe evidence is shown here." : "Select a real run and stage to see its safe evidence.";
+    input.textContent = selectedStage && selectedRunId ? "Source and run evidence are recorded in Hermes." : "Select a real run and stage to see its evidence.";
   }
   output.classList.toggle("ad-evidence-empty", !stageEvents.length);
   if (!stageEvents.length) output.textContent = "No safe result has been recorded for this stage yet.";
@@ -699,7 +719,7 @@ function updateEvidence() {
     output.append(list);
   }
   const inspector = $("#ad-stage-events");
-  if (inspector) inspector.textContent = stageEvents.length ? `${stageEvents.length} durable event${stageEvents.length === 1 ? "" : "s"} recorded. Private prompts and paths remain in Hermes.` : "No events recorded for this stage yet.";
+  if (inspector) inspector.textContent = stageEvents.length ? `${stageEvents.length} durable event${stageEvents.length === 1 ? "" : "s"} recorded. Internal prompts and paths are excluded.` : "No events recorded for this stage yet.";
   const summary = $("#ad-stage-summary");
   if (summary) summary.textContent = selectedStage ? `${stageEvents.length} observed event${stageEvents.length === 1 ? "" : "s"} for ${selectedStage.label}.` : "Select a run or stage to inspect its recorded evidence.";
 }
@@ -726,7 +746,7 @@ function setupRunForm() {
     searchTimer = setTimeout(() => void searchVpsImages(clean(event.target.value).toLowerCase()), 250);
   });
   $("#ad-run-project").addEventListener("change", () => { void loadActivePolicy(); void refreshRunsSafe(); });
-  $("#ad-run-models").addEventListener("click", () => { modelEditMode = "one-run"; remainingRunId = ""; activate("models"); });
+  $("#ad-run-models")?.addEventListener("click", () => { modelEditMode = "one-run"; remainingRunId = ""; activate("models"); });
   for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.add("is-drag"); });
   for (const type of ["dragleave", "drop"]) drop.addEventListener(type, (event) => {
     event.preventDefault();
