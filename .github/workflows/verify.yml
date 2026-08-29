@@ -23,7 +23,12 @@ jobs:
       - run: pip install -r apps/window/requirements.txt
       - name: Python checks
         working-directory: apps/window
+        env:
+          CHAT_STORE_DIR: ${{ runner.temp }}/frank-window-data
+          MINI_PREVIEW_ROOT: ${{ runner.temp }}/frank-window-previews
+          MINI_LEGACY_PROJECT_ROOT: ${{ runner.temp }}/frank-window-legacy
         run: |
+          mkdir -p "$CHAT_STORE_DIR" "$MINI_PREVIEW_ROOT" "$MINI_LEGACY_PROJECT_ROOT"
           python -m py_compile server.py
           python -m unittest discover -s tests
       - name: JavaScript checks
