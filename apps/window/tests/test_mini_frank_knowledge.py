@@ -28,10 +28,14 @@ class MiniFrankKnowledgeTests(unittest.TestCase):
     def test_seed_is_valid_grounded_and_within_the_reviewed_slice(self):
         project = compiler.load_project(SEED, verify_local_sources=True, repo_root=REPO)
 
-        self.assertEqual(len(project["records"]), 20)
+        self.assertEqual(len(project["records"]), 18)
         self.assertGreaterEqual(len(project["sources"]), 12)
         self.assertTrue(all(record["source_refs"] for record in project["records"].values()))
         self.assertNotIn("private-client", {record["privacy"] for record in project["records"].values()})
+        self.assertNotIn("architecture-portable-artifact", project["records"])
+        self.assertNotIn("craft-immutable-release", project["records"])
+        self.assertNotIn("src-template-pack-contract", project["sources"])
+        self.assertNotIn("src-ad-intelligence-release-schema", project["sources"])
 
         candidate = project["records"]["repository-shadcn-ui"]
         self.assertEqual(candidate["status"], "candidate")
@@ -50,7 +54,7 @@ class MiniFrankKnowledgeTests(unittest.TestCase):
                 self.assertEqual((Path(first) / name).read_bytes(), (Path(second) / name).read_bytes())
 
             catalog = json.loads((Path(first) / "catalog.json").read_text(encoding="utf-8"))
-            self.assertEqual(catalog["record_count"], 20)
+            self.assertEqual(catalog["record_count"], 18)
             evaluation = json.loads((Path(first) / "evaluation-results.json").read_text(encoding="utf-8"))
             self.assertTrue(evaluation["results"][0]["passed"])
             result_ids = evaluation["results"][0]["result_ids"]
