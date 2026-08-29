@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#ffffff">
+  <meta name="description" content="A working business website preview created with Frank.">
+  <title>Your website preview</title>
+  <link rel="stylesheet" href="/frank/site-preview.css">
+  <script src="/frank/site-preview.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#enquire">Skip to the enquiry form</a>
+  <header class="site-header">
+    <a class="site-brand" href="#top" id="site-name">North &amp; Co.</a>
+    <nav aria-label="Main navigation">
+      <a href="#services">What we do</a>
+      <a href="#about">About</a>
+      <a class="nav-action" href="#enquire">Get in touch</a>
+    </nav>
+  </header>
+
+  <main id="top">
+    <section class="site-hero" aria-labelledby="site-heading">
+      <div class="hero-copy">
+        <h1 id="site-heading">Good help starts with a simple conversation.</h1>
+        <p id="site-promise">Tell us what you need and we will get back to you today.</p>
+        <a class="hero-action" href="#enquire">Tell us what you need</a>
+        <span>Clear answers. No runaround.</span>
+      </div>
+      <img src="/frank/assets/demo-business-hero.png" alt="A small business team working together with a customer">
+    </section>
+
+    <section class="trust-strip" aria-label="Why customers choose us">
+      <p><strong>Same-day reply</strong><span>You will know what happens next.</span></p>
+      <p><strong>Real people</strong><span>Your request reaches the right person.</span></p>
+      <p><strong>Simple process</strong><span>One clear place to get started.</span></p>
+    </section>
+
+    <section class="service-section" id="services">
+      <div>
+        <h2>What can we help with?</h2>
+        <p>Start with a rough description. We will ask the right questions and make the next step clear.</p>
+      </div>
+      <ul>
+        <li><strong>A quick question</strong><span>Get a useful answer without chasing.</span></li>
+        <li><strong>A price or proposal</strong><span>Tell us enough to prepare the right response.</span></li>
+        <li><strong>Ongoing help</strong><span>Keep everything together from the first conversation.</span></li>
+      </ul>
+    </section>
+
+    <section class="about-section" id="about">
+      <p>Built around your business</p>
+      <h2>A website that sounds like you and makes it easy for customers to act.</h2>
+    </section>
+
+    <section class="enquiry-section" id="enquire" aria-labelledby="enquiry-title">
+      <div>
+        <h2 id="enquiry-title">How can we help?</h2>
+        <p>You do not need the perfect words. Give us the basics and we will take it from there.</p>
+      </div>
+      <form id="site-enquiry-form">
+        <label>Your name<input name="name" autocomplete="name" required></label>
+        <label>Email or phone<input name="contact" autocomplete="email" required></label>
+        <label>What do you need?<textarea name="message" rows="4" required></textarea></label>
+        <button type="submit">Send my enquiry</button>
+        <p class="form-result" id="form-result" role="status" aria-live="polite"></p>
+      </form>
+    </section>
+  </main>
+
+  <footer><span id="footer-name">North &amp; Co.</span><span>Made to be useful on every screen.</span></footer>
+</body>
+</html>

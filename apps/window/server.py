@@ -41,6 +41,10 @@ FRANK_PUBLIC_ASSETS = {
     "app.js": "mini.js",
     "stream.mjs": "mini_stream.mjs",
     "api.mjs": "mini_api.mjs",
+    "site-preview.html": "site-preview.html",
+    "site-preview.css": "site-preview.css",
+    "site-preview.js": "site-preview.js",
+    "assets/demo-business-hero.png": "assets/demo-business-hero.png",
 }
 LEGACY_MINI_ASSETS = {
     "mini.css": "style.css",

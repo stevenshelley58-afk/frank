@@ -94,3 +94,21 @@ test("only the build boundary applies the project entitlement and planning stays
   assert.match(script, /Keep planning or refine this build/);
   assert.match(script, /data-action="work">Open your project/);
 });
+
+test("the enquiry starter collects a real business reference and launches a working site", async () => {
+  const html = await source("index.html");
+  const script = await source("mini.js");
+  const previewHtml = await source("site-preview.html");
+  const previewScript = await source("site-preview.js");
+
+  assert.match(html, /Step 1 of 6/);
+  assert.match(script, /Facebook page/);
+  assert.match(script, /No site or page/);
+  assert.match(script, /Yes, include a website/);
+  assert.match(script, /data-guide-action="open-site"/);
+  assert.match(script, /window\.open\(sitePreviewUrl\(\)/);
+  assert.match(script, /Include a real browser-ready customer page, not just a mockup/);
+  assert.match(previewHtml, /id="site-enquiry-form"/);
+  assert.match(previewHtml, /demo-business-hero\.png/);
+  assert.match(previewScript, /Enquiry sent/);
+});

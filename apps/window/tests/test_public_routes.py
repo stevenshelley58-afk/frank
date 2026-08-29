@@ -34,10 +34,17 @@ class PublicFrankRouteTest(unittest.TestCase):
             "/frank/app.js": "./stream.mjs",
             "/frank/stream.mjs": "parseSseBlock",
             "/frank/api.mjs": "createMiniApi",
+            "/frank/site-preview.html": 'id="site-name"',
+            "/frank/site-preview.css": ".site-hero",
+            "/frank/site-preview.js": "URLSearchParams",
         }.items():
             with self.client.get(path) as response:
                 self.assertEqual(response.status_code, 200, path)
                 self.assertIn(marker, response.get_data(as_text=True), path)
+
+        with self.client.get("/frank/assets/demo-business-hero.png") as response:
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.mimetype, "image/png")
 
     def test_old_entry_and_asset_links_redirect_to_canonical_paths(self):
         for path in ("/mini", "/mini/"):

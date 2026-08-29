@@ -86,6 +86,9 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
     knowledge: "I want to turn staff know-how into simple guides everyone can reuse.",
   };
   const guideAnswers = {
+    presence: "Website",
+    businessUrl: "",
+    wantsWebsite: "Yes, include a website",
     source: "Everywhere",
     business: "North & Co.",
     promise: "Tell us what you need and we will get back to you today.",
@@ -114,8 +117,17 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
   }
 
   function guideWork(step) {
-    if (step === 0) return `<div class="guide-card"><h3>This is the kind of result you will get</h3><p>One tidy place for new enquiries, reminders and ready-to-send replies.</p>${leadPreview()}</div>`;
+    if (step === 0) return `<div class="guide-card"><h3>See the customer view and the follow-up view</h3><p>The finished result includes a real website customers can open, plus one tidy place for every enquiry.</p>${leadPreview()}</div>`;
     if (step === 1) {
+      const choices = [
+        ["Website", "Use your current site as the starting point"],
+        ["Facebook page", "Use the page customers already know"],
+        ["No site or page", "Start fresh with your business details"],
+      ];
+      const hasReference = guideAnswers.presence !== "No site or page";
+      return `<div class="guide-card"><h3>What can Frank look at?</h3><p>This helps the result look and sound like your real business.</p><div class="guide-options guide-options-three">${choices.map(([label, detail]) => `<button class="guide-option" type="button" aria-pressed="${guideAnswers.presence === label}" data-guide-action="choose" data-guide-key="presence" data-guide-value="${esc(label)}"><strong>${esc(label)}</strong><span>${esc(detail)}</span></button>`).join("")}</div>${hasReference ? `<div class="guide-field reference-field"><label for="guide-business-url">Paste the ${guideAnswers.presence.toLowerCase()} address</label><input id="guide-business-url" type="url" inputmode="url" data-guide-field="businessUrl" value="${esc(guideAnswers.businessUrl)}" placeholder="https://..."><small>Frank will use this as a visual and wording reference for the real build.</small></div>` : `<div class="website-choice"><p>Would you like a simple website included?</p><div class="choice-row"><button class="secondary-button" type="button" aria-pressed="${guideAnswers.wantsWebsite === "Yes, include a website"}" data-guide-action="choose" data-guide-key="wantsWebsite" data-guide-value="Yes, include a website">Yes, include a website</button><button class="secondary-button" type="button" aria-pressed="${guideAnswers.wantsWebsite === "Not right now"}" data-guide-action="choose" data-guide-key="wantsWebsite" data-guide-value="Not right now">Not right now</button></div></div>`}</div>`;
+    }
+    if (step === 2) {
       const choices = [
         ["Website form", "People fill in a form"],
         ["Email inbox", "People send an email"],
@@ -124,38 +136,55 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
       ];
       return `<div class="guide-card"><h3>Pick the closest answer</h3><p>It does not need to be exact. You can change this later.</p><div class="guide-options">${choices.map(([label, detail]) => `<button class="guide-option" type="button" aria-pressed="${guideAnswers.source === label}" data-guide-action="choose" data-guide-key="source" data-guide-value="${esc(label)}"><strong>${esc(label)}</strong><span>${esc(detail)}</span></button>`).join("")}</div></div>`;
     }
-    if (step === 2) return `<div class="guide-card"><h3>Use words your customers will understand</h3><p>We filled in an example. Change only what matters.</p><div class="guide-fields">
+    if (step === 3) return `<div class="guide-card"><h3>Use words your customers will understand</h3><p>We filled in an example. Change only what matters.</p><div class="guide-fields">
       <div class="guide-field"><label for="guide-business">What should we call the business?</label><input id="guide-business" data-guide-field="business" value="${esc(guideAnswers.business)}"></div>
       <div class="guide-field"><label for="guide-promise">What should customers expect?</label><input id="guide-promise" data-guide-field="promise" value="${esc(guideAnswers.promise)}"></div>
       <div class="guide-field"><label for="guide-reply">What should the instant reply say?</label><textarea id="guide-reply" data-guide-field="reply">${esc(guideAnswers.reply)}</textarea></div>
     </div><div class="guide-example"><strong>Example:</strong> "Thanks - we have your request. Sam will call before 4 pm today."</div></div>`;
-    if (step === 3) {
+    if (step === 4) {
       const looks = ["Warm and welcoming", "Calm and professional", "Bold and direct"];
       return `<div class="guide-card"><h3>Choose by feel</h3><p>There is no design language to learn.</p><div class="look-options">${looks.map((look) => `<button class="look-option" type="button" aria-pressed="${guideAnswers.look === look}" data-guide-action="choose" data-guide-key="look" data-guide-value="${esc(look)}"><span class="look-swatch"></span><strong>${esc(look)}</strong></button>`).join("")}</div></div>`;
     }
-    return `<div class="guide-card"><h3>Your working example</h3><p>Try the form, then mark the new enquiry as followed up.</p><div class="mini-shot finished-example" data-guide-demo>
-      <section class="example-capture"><div class="example-brand"><span class="brand-mark" aria-hidden="true"></span>${esc(guideAnswers.business)}</div><h4>How can we help?</h4><p>${esc(guideAnswers.promise)}</p>
-        <form class="example-form" data-guide-example-form><input name="name" aria-label="Example customer name" placeholder="Your name" required><input name="contact" aria-label="Example email or phone" placeholder="Email or phone" required><button type="submit">Send my enquiry</button></form>
-      </section>
-      <section class="example-inbox"><div class="example-inbox-head"><strong>Enquiries to follow up</strong><span data-guide-waiting>2 waiting</span></div><div data-guide-leads>
-        <div class="example-lead"><strong>Alex Morgan</strong><span>Asked for a price - 8 minutes ago</span><button type="button" data-guide-action="follow">Mark as followed up</button></div>
-        <div class="example-lead"><strong>Jamie Singh</strong><span>Website enquiry - 1 hour ago</span><button type="button" data-guide-action="follow">Mark as followed up</button></div>
-      </div></section>
-    </div><p class="example-result" data-guide-result aria-live="polite">This is a real, clickable example - not a picture.</p></div>`;
+    const previewUrl = sitePreviewUrl();
+    return `<div class="guide-card site-result"><div class="site-result-head"><div><h3>Your real website preview</h3><p>Try the form here, or open the same working page in its own browser tab.</p></div><button class="secondary-button open-site-button" type="button" data-guide-action="open-site">Open in browser</button></div><div class="site-preview-browser"><div class="browser-chrome"><span></span><span></span><span></span><strong>${esc(sitePreviewLabel())}</strong></div><iframe src="${esc(previewUrl)}" title="Working website preview for ${esc(guideAnswers.business)}"></iframe></div><p class="site-result-note">This is the actual page that opens in the browser - not a screenshot.</p></div>`;
+  }
+
+  function sitePreviewLabel() {
+    if (guideAnswers.businessUrl) {
+      try { return new URL(guideAnswers.businessUrl).hostname.replace(/^www\./, ""); }
+      catch (_error) { return guideAnswers.businessUrl.replace(/^https?:\/\//, "").split("/")[0] || "your-business.com"; }
+    }
+    return `${guideAnswers.business.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "your-business"}.com`;
+  }
+
+  function sitePreviewUrl() {
+    const params = new URLSearchParams({
+      business: guideAnswers.business,
+      promise: guideAnswers.promise,
+      reply: guideAnswers.reply,
+      look: guideAnswers.look,
+    });
+    return `/frank/site-preview.html?${params.toString()}`;
+  }
+
+  function openSitePreview() {
+    const opened = window.open(sitePreviewUrl(), "_blank", "noopener,noreferrer");
+    if (!opened) notify("Your browser blocked the new tab. Allow pop-ups, then try again.");
   }
 
   function renderWorkedGuide() {
     const copy = [
-      ["First, see the finish line.", "We will make a simple place to catch every enquiry and show who needs a reply.", "No setup words. No blank page."],
+      ["First, see the finish line.", "We will make a customer-facing page and a simple place to catch every enquiry.", "No setup words. No blank page."],
+      ["Show us the real business.", "A website or Facebook page gives Frank real colours, words and context to work from.", "If you do not have one, Frank can include a new website."],
       ["Where do enquiries arrive now?", "Choose the answer closest to your day-to-day business.", "Frank can join the pieces later."],
-      ["What should customers hear?", "A few plain words make the tool feel like it belongs to your business.", "The examples are yours to edit."],
+      ["What should customers hear?", "A few plain words make the result feel like it belongs to your business.", "The examples are yours to edit."],
       ["Pick a look by feel.", "You do not need to know fonts, layouts or colour codes.", "It will stay readable on phones and computers."],
-      ["Done. Try what you made.", "This example catches an enquiry and keeps the follow-up list clear.", "Your real version will use your details and connect to the places you already work."],
+      ["This is a real website.", "Use the form here, then open the finished page in a normal browser tab.", "The real build will use your business reference and connect to your enquiry list."],
     ][workedGuideStep];
-    guideCount.textContent = `Step ${workedGuideStep + 1} of 5`;
-    guideProgressBar.style.width = `${(workedGuideStep + 1) * 20}%`;
-    guideStage.innerHTML = `<section class="guide-copy"><span class="guide-eyebrow">Worked example</span><h2 id="guide-title">${esc(copy[0])}</h2><p>${esc(copy[1])}</p><small>${esc(copy[2])}</small></section><section class="guide-work">${guideWork(workedGuideStep)}</section>`;
-    const atEnd = workedGuideStep === 4;
+    guideCount.textContent = `Step ${workedGuideStep + 1} of 6`;
+    guideProgressBar.style.transform = `scaleX(${(workedGuideStep + 1) / 6})`;
+    guideStage.innerHTML = `<section class="guide-copy"><h2 id="guide-title">${esc(copy[0])}</h2><p>${esc(copy[1])}</p><small>${esc(copy[2])}</small></section><section class="guide-work">${guideWork(workedGuideStep)}</section>`;
+    const atEnd = workedGuideStep === 5;
     guideFoot.innerHTML = `${workedGuideStep === 0 ? '<button class="quiet-button" type="button" data-guide-action="close">Exit example</button>' : '<button class="quiet-button" type="button" data-guide-action="back">Back</button>'}<span class="guide-spacer">Nothing here is permanent.</span>${atEnd ? '<button class="secondary-button" type="button" data-guide-action="restart">Start again</button><button class="primary-button" type="button" data-guide-action="use">Use this design</button>' : '<button class="primary-button" type="button" data-guide-action="next">Continue</button>'}`;
   }
 
@@ -170,7 +199,10 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
   }
 
   function useWorkedGuide() {
-    const prompt = `Help me build a simple enquiry and follow-up tool for ${guideAnswers.business}. Enquiries arrive through ${guideAnswers.source.toLowerCase()}. Customers should see: "${guideAnswers.promise}" The instant reply should say: "${guideAnswers.reply}" Make it feel ${guideAnswers.look.toLowerCase()}. Keep everything plain, mobile-friendly and easy for staff to use.`;
+    const reference = guideAnswers.presence === "No site or page"
+      ? (guideAnswers.wantsWebsite === "Yes, include a website" ? "They do not have a website yet, so include a simple public website." : "They do not have a website and do not want one yet; make the enquiry tool open cleanly in a browser.")
+      : `Use their ${guideAnswers.presence.toLowerCase()} as the visual and wording reference: ${guideAnswers.businessUrl || "address to be supplied"}.`;
+    const prompt = `Help me build a simple enquiry and follow-up tool for ${guideAnswers.business}. ${reference} Enquiries arrive through ${guideAnswers.source.toLowerCase()}. Customers should see: "${guideAnswers.promise}" The instant reply should say: "${guideAnswers.reply}" Make it feel ${guideAnswers.look.toLowerCase()}. Include a real browser-ready customer page, not just a mockup. Keep everything plain, mobile-friendly and easy for staff to use.`;
     closeWorkedGuide();
     messageInput.value = prompt.slice(0, MESSAGE_MAX_LENGTH);
     resizeComposer();
@@ -1596,14 +1628,16 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
     if (guideAction) {
       const action = guideAction.dataset.guideAction;
       if (action === "close") closeWorkedGuide();
-      else if (action === "next") { workedGuideStep = Math.min(4, workedGuideStep + 1); renderWorkedGuide(); }
+      else if (action === "next") { workedGuideStep = Math.min(5, workedGuideStep + 1); renderWorkedGuide(); }
       else if (action === "back") { workedGuideStep = Math.max(0, workedGuideStep - 1); renderWorkedGuide(); }
       else if (action === "restart") { workedGuideStep = 0; renderWorkedGuide(); }
       else if (action === "use") useWorkedGuide();
+      else if (action === "open-site") openSitePreview();
       else if (action === "choose") {
         guideAnswers[guideAction.dataset.guideKey] = cleanText(guideAction.dataset.guideValue, 200);
         const group = guideAction.closest(".guide-options, .look-options");
-        group.querySelectorAll('[data-guide-action="choose"]').forEach((item) => item.setAttribute("aria-pressed", String(item === guideAction)));
+        if (group) group.querySelectorAll('[data-guide-action="choose"]').forEach((item) => item.setAttribute("aria-pressed", String(item === guideAction)));
+        if (["presence", "wantsWebsite"].includes(guideAction.dataset.guideKey)) renderWorkedGuide();
       }
       else if (action === "follow") {
         const lead = guideAction.closest(".example-lead");
