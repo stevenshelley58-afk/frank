@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260822-ad-studio-v2">
+<link rel="stylesheet" href="/app.css?v=20260829-ad-studio-trace-v1">
 <link rel="stylesheet" href="/ad-studio-picker.css?v=20260822-vps-picker">
 </head>
 <body>
@@ -170,19 +170,19 @@
       <section class="view" data-view="ad-studio" aria-labelledby="ad-studio-heading">
         <div class="ad-studio" id="ad-studio">
           <header class="ad-studio-head">
-            <div><span class="home-kicker">Tool</span><h2 id="ad-studio-heading">Ad Studio</h2><p>Turn source images into editable, source-free ad templates.</p></div>
+            <div><h2 id="ad-studio-heading">Ad Studio</h2><p>Turn source images into editable, source-free ad templates.</p></div>
             <span class="ad-studio-owner">Runs on Hermes</span>
           </header>
-          <nav class="ad-studio-tabs" aria-label="Ad Studio sections">
-            <button type="button" class="is-on" data-ad-tab="run">Run</button>
-            <button type="button" data-ad-tab="runs">Runs</button>
-            <button type="button" data-ad-tab="pipeline">Pipeline</button>
-            <button type="button" data-ad-tab="models">Models</button>
+          <nav class="ad-studio-tabs" role="tablist" aria-label="Ad Studio sections">
+            <button type="button" class="is-on" id="ad-tab-run" role="tab" aria-selected="true" aria-controls="ad-panel-run" data-ad-tab="run">Create</button>
+            <button type="button" id="ad-tab-runs" role="tab" aria-selected="false" aria-controls="ad-panel-runs" data-ad-tab="runs">Runs</button>
+            <button type="button" id="ad-tab-pipeline" role="tab" aria-selected="false" aria-controls="ad-panel-pipeline" data-ad-tab="pipeline">How it works</button>
+            <button type="button" id="ad-tab-models" role="tab" aria-selected="false" aria-controls="ad-panel-models" data-ad-tab="models">Models</button>
           </nav>
 
-          <div class="ad-studio-panel is-on" data-ad-panel="run">
+          <div class="ad-studio-panel is-on" id="ad-panel-run" role="tabpanel" aria-labelledby="ad-tab-run" data-ad-panel="run">
             <form class="ad-run-form" id="ad-run-form">
-              <div class="ad-section-heading"><div><span>New job</span><h3>Source image → ad template</h3></div><span id="ad-run-mode">Single</span></div>
+              <div class="ad-section-heading"><div><h3>Source image → ad template</h3><p>Choose one source per traceable run.</p></div><span id="ad-run-mode">Single</span></div>
               <input type="file" id="ad-source-files" accept="image/*" multiple hidden>
               <button type="button" class="ad-drop" id="ad-drop">
                 <span class="ad-drop-mark" aria-hidden="true">+</span>
@@ -200,41 +200,54 @@
               <label>Brief <span>optional</span><textarea id="ad-run-brief" maxlength="800" rows="4" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea></label>
               <div class="ad-submit-row"><p id="ad-run-status" role="status">Hermes will run this as a background job. It will not open or interrupt a Hub chat.</p><button type="submit" class="ad-primary" id="ad-run-submit">Run job</button></div>
             </form>
-            <aside class="ad-run-guide">
-              <span class="home-kicker">Pipeline</span>
-              <ol><li><strong>Analyse</strong><span>Extract structure without copying private source pixels into the pack.</span></li><li><strong>Build</strong><span>Create editable layers, placements, fields, copy and forms.</span></li><li><strong>Prove</strong><span>Run visual and subject-invariance checks, then pause for approval.</span></li><li><strong>Release</strong><span>Sign a portable TemplatePack after every gate passes.</span></li></ol>
-              <p>Frank is the cockpit. Hermes runs the durable VPS job and approved gateways.</p>
+            <aside class="ad-run-guide" aria-label="Generation summary">
+              <h3>One source. A traceable template.</h3>
+              <ol><li><strong>Read the design</strong><span>Hermes records the structure and source hash.</span></li><li><strong>Build editable layers</strong><span>The builder creates separate Feed and Story documents.</span></li><li><strong>Render, score, improve</strong><span>Every generation is kept. Scores below 9.5 trigger another revision.</span></li><li><strong>Approve and release</strong><span>A source-free signed TemplatePack is released only after every gate passes.</span></li></ol>
+              <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
             </aside>
           </div>
 
-          <div class="ad-studio-panel" data-ad-panel="runs">
+          <div class="ad-studio-panel" id="ad-panel-runs" role="tabpanel" aria-labelledby="ad-tab-runs" data-ad-panel="runs" hidden>
             <div class="ad-runs-layout">
-              <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><span>Hermes history</span><h3>Jobs</h3></div><span class="ad-live-state" id="ad-live-state">Live</span></div><div class="ad-runs-list" id="ad-runs-list" aria-live="polite"></div></section>
-              <section class="ad-run-detail" id="ad-run-detail" aria-live="polite"><div class="ad-empty"><strong>Select a job</strong><span>Open any Ad Studio job to inspect its live Hermes status and result.</span></div></section>
+              <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><h3>Run history</h3><p>Durable jobs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div><div class="ad-runs-list" id="ad-runs-list"></div></section>
+              <section class="ad-run-detail" id="ad-run-detail"><div class="ad-empty"><strong>Select a run</strong><span>Open a run to inspect every generation, score and release decision.</span></div></section>
             </div>
           </div>
 
-          <div class="ad-studio-panel" data-ad-panel="pipeline">
+          <div class="ad-studio-panel" id="ad-panel-pipeline" role="tabpanel" aria-labelledby="ad-tab-pipeline" data-ad-panel="pipeline" hidden>
             <div class="ad-pipeline-toolbar">
-              <div><span class="home-kicker">Fixed pipeline laws</span><h3>TemplatePack pipeline</h3></div>
-              <div class="ad-pipeline-controls"><label>Project<select id="ad-pipeline-project"></select></label><label>Example run<select id="ad-pipeline-run"><option value="">No run selected</option></select></label></div>
+              <div><h3>How Frank builds an ad template</h3><p>The declared lifecycle stays fixed. The selected run shows what actually happened.</p></div>
+              <div class="ad-pipeline-controls"><label>Project<select id="ad-pipeline-project"></select></label><label>Inspect run<select id="ad-pipeline-run"><option value="">No run selected</option></select></label></div>
             </div>
+            <section class="ad-system-map" aria-label="Frank generation architecture">
+              <div><strong>Frank</strong><span>Collects the brief and shows the trace.</span></div><i aria-hidden="true"></i>
+              <div><strong>Hermes</strong><span>Owns the durable run, policy and events.</span></div><i aria-hidden="true"></i>
+              <div><strong>Template Builder</strong><span>Creates source-free editable layers.</span></div><i aria-hidden="true"></i>
+              <div><strong>Blockwise</strong><span>Imports the signed pack for editing and publishing.</span></div>
+            </section>
+            <section class="ad-iteration-law" aria-label="Quality iteration rule">
+              <div><strong>Render</strong><span>Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Score</strong><span>Two independent visual reviews</span></div><b aria-hidden="true">→</b><div><strong>Revise</strong><span>Record what changed</span></div><b aria-hidden="true">↻</b><div><strong>Accept</strong><span>Both scores must reach 9.5</span></div>
+            </section>
+            <details class="ad-oss-note">
+              <summary>Why the trace is organised this way</summary>
+              <p><a href="https://github.com/tt-a1i/archify" target="_blank" rel="noreferrer">Archify</a> inspired the fixed, truthful lifecycle. <a href="https://github.com/sodiumsun/agenttrail" target="_blank" rel="noreferrer">AgentTrail</a> inspired the split between the declared plan and observed activity. Frank keeps Hermes as the only runtime and durable event store.</p>
+            </details>
             <div class="ad-pipeline-layout">
-              <section class="ad-pipeline-canvas"><div id="ad-pipeline-graph"></div></section>
+              <section class="ad-pipeline-canvas"><div class="ad-declared-label"><strong>Declared lifecycle</strong><span>The route Frank promises before a run begins.</span></div><div id="ad-pipeline-graph"></div></section>
               <aside class="ad-stage-inspector">
-                <div class="ad-section-heading"><div><span>Selected stage</span><h3 id="ad-stage-name">Select a stage</h3></div><span id="ad-stage-kind">—</span></div>
+                <div class="ad-section-heading"><div><h3 id="ad-stage-name">Observed run</h3><p id="ad-stage-summary">Select a run or stage to inspect its recorded evidence.</p></div><span id="ad-stage-kind">—</span></div>
                 <div class="ad-evidence-grid">
-                  <section><span>Input</span><div id="ad-stage-input" class="ad-evidence-empty">Select a real run and stage to see its input image, text, or JSON.</div></section>
-                  <section><span>Output</span><div id="ad-stage-output" class="ad-evidence-empty">No correlated output is available yet.</div></section>
+                  <section><span>Private input</span><div id="ad-stage-input" class="ad-evidence-empty">Inputs stay private in Hermes. Their hashes remain traceable.</div></section>
+                  <section><span>Recorded result</span><div id="ad-stage-output" class="ad-evidence-empty">No safe result has been recorded yet.</div></section>
                 </div>
                 <div class="ad-stage-events" id="ad-stage-events"><p>Select a run and stage to inspect model attempts, tools, artifacts, QA and errors.</p></div>
-                <details class="ad-trace-state"><summary>Full trace</summary><div id="ad-full-trace">Select a run to replay its correlated, redacted events.</div></details>
+                <details class="ad-trace-state"><summary>Raw trace data</summary><div class="ad-trace-actions"><button type="button" class="ad-text-button" id="ad-copy-trace">Copy safe trace</button></div><pre id="ad-full-trace">Select a run to replay its correlated, redacted events.</pre></details>
               </aside>
             </div>
           </div>
 
-          <div class="ad-studio-panel" data-ad-panel="models">
-            <div class="ad-models-head"><div><span class="home-kicker">Project defaults</span><h3>Model routing</h3><p>Models and prices can change. Safety rules and release gates cannot.</p></div><label>Project<select id="ad-model-project"></select></label></div>
+          <div class="ad-studio-panel" id="ad-panel-models" role="tabpanel" aria-labelledby="ad-tab-models" data-ad-panel="models" hidden>
+            <div class="ad-models-head"><div><h3>Model routing</h3><p>Models and prices can change. Safety rules and release gates cannot.</p></div><label>Project<select id="ad-model-project"></select></label></div>
             <div class="ad-model-preset" role="group" aria-label="Routing preset"><button type="button" data-ad-preset="quality-first">Quality first</button><button type="button" class="is-on" data-ad-preset="balanced">Balanced</button><button type="button" data-ad-preset="cheapest-compatible">Cheapest compatible</button></div>
             <form id="ad-model-form">
               <div class="ad-model-stage-list" id="ad-model-stage-list" aria-live="polite"></div>
@@ -247,7 +260,7 @@
       <dialog class="ad-source-dialog" id="ad-source-dialog" aria-labelledby="ad-source-dialog-title">
         <div class="ad-source-dialog-shell">
           <header>
-            <div><span class="home-kicker">Source images</span><h2 id="ad-source-dialog-title">Choose from device or VPS</h2></div>
+            <div><h2 id="ad-source-dialog-title">Choose from device or VPS</h2></div>
             <button type="button" class="ad-source-close" id="ad-source-close" aria-label="Close">&times;</button>
           </header>
           <section class="ad-source-local">

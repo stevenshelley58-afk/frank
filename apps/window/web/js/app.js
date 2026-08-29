@@ -2,7 +2,7 @@ import { mount, mountAll } from "./registry.js";
 import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
-import { mountAdStudio } from "./ad-studio.js?v=20260822-tool-runs-v2";
+import { mountAdStudio } from "./ad-studio.js?v=20260829-generation-trace-v1";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));

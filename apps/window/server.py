@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import base64
 import hashlib
+import math
 import mimetypes
 import os
 import re
@@ -1308,6 +1309,50 @@ def _hermes_input(text: str, attachments: list) -> str | list:
     return content
 
 
+def _public_generation_text(value: object) -> str:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()[:400]
+    if any(pattern.search(text) for pattern in SECRET_VALUE_PATTERNS):
+        return "Protected revision detail recorded in Hermes."
+    if re.search(r"[A-Za-z]:\\|/(?:home|srv|opt|projects|root|tmp|var|etc)/", text):
+        return "Protected revision detail recorded in Hermes."
+    if re.search(r"\b[^\s@]+@[^\s@]+\.[^\s@]+\b|\+?\d[\d ()-]{7,}\d", text):
+        return "Protected revision detail recorded in Hermes."
+    return text
+
+
+def _public_ad_studio_generations(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    public = []
+    for index, raw in enumerate(value[:30], 1):
+        if not isinstance(raw, dict):
+            continue
+        scores = raw.get("scores") if isinstance(raw.get("scores"), dict) else raw
+        artifacts = raw.get("artifacts") if isinstance(raw.get("artifacts"), dict) else {}
+        reviewers = raw.get("reviewers") if isinstance(raw.get("reviewers"), dict) else {}
+        record = {
+            "iteration": int(_number_from(raw.get("iteration"), raw.get("generation"), index) or index),
+            "status": re.sub(r"[^a-z-]", "", str(raw.get("status") or raw.get("decision") or "recorded").lower())[:40],
+            "scores": {
+                "primary_ad_system_likeness": _number_from(scores.get("primary_ad_system_likeness"), scores.get("primaryAdSystemLikeness"), scores.get("primary_score")),
+                "strict_ad_system_likeness": _number_from(scores.get("strict_ad_system_likeness"), scores.get("strictAdSystemLikeness"), scores.get("strict_score")),
+            },
+            "likeness_threshold": _number_from(raw.get("likeness_threshold"), raw.get("likenessThreshold"), raw.get("threshold"), 9.5),
+            "revision_reason": _public_generation_text(raw.get("revision_reason") or raw.get("revisionReason") or raw.get("change_summary")),
+            "reviewers": {
+                "primary": str(reviewers.get("primary") or "")[:160] if EXTERNAL_REFERENCE.fullmatch(str(reviewers.get("primary") or "")) else "",
+                "strict": str(reviewers.get("strict") or "")[:160] if EXTERNAL_REFERENCE.fullmatch(str(reviewers.get("strict") or "")) else "",
+            },
+            "artifacts": {
+                key: str(artifacts.get(key) or "").lower()
+                for key in ("feedSha256", "storySha256", "renderSetSha256")
+                if re.fullmatch(r"[0-9a-f]{64}", str(artifacts.get(key) or "").lower())
+            },
+        }
+        public.append(record)
+    return public
+
+
 def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
     """Project a Tool run without exposing source paths or private command data."""
     now = int(time.time())
@@ -1322,6 +1367,9 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "release_id", "template_pack", "template_pack_ref", "checksum", "sha256",
         "signature", "compatibility", "imports", "trace_ref",
     }
+    safe_output = {key: value for key, value in output.items() if key in safe_output_keys}
+    if "generations" in output:
+        safe_output["generations"] = _public_ad_studio_generations(output.get("generations"))
     item = {
         "id": str(run.get("id") or run.get("run_id") or ""),
         "request_id": str(run.get("request_id") or ""),
@@ -1344,7 +1392,7 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
             "media_type": str(source.get("media_type") or ""),
             "origin": str(source.get("origin") or ""),
         },
-        "output": {key: value for key, value in output.items() if key in safe_output_keys},
+        "output": safe_output,
     }
     item["title"] = title or str(run.get("title") or payload.get("job_name") or "Ad Studio job")
     item["project_id"] = project_id or str(run.get("project_id") or scope.get("project_id") or payload.get("project_id") or "")
@@ -1632,8 +1680,57 @@ def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):
     return jsonify({"ok": True, "run": _public_ad_studio_run(run)})
 
 
+def _number_from(*values):
+    for value in values:
+        if isinstance(value, bool) or value is None or value == "":
+            continue
+        try:
+            number = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(number):
+            return number
+    return None
+
+
+def _ad_studio_visual_gate(run: dict) -> dict:
+    """Project the fail-closed two-review gate from a durable run result."""
+    output = run.get("output") if isinstance(run.get("output"), dict) else {}
+    qa = output.get("qa") if isinstance(output.get("qa"), dict) else {}
+    review = qa.get("visual_review") or qa.get("visualReview") or output.get("quality_gate") or output.get("iteration_summary") or {}
+    review = review if isinstance(review, dict) else {}
+    scores = review.get("scores") if isinstance(review.get("scores"), dict) else qa.get("scores")
+    scores = scores if isinstance(scores, dict) else {}
+    primary = _number_from(
+        scores.get("primaryAdSystemLikeness"), scores.get("primary_ad_system_likeness"),
+        review.get("primaryAdSystemLikeness"), review.get("primary_score"), qa.get("primary_score"),
+    )
+    strict = _number_from(
+        scores.get("strictAdSystemLikeness"), scores.get("strict_ad_system_likeness"),
+        review.get("strictAdSystemLikeness"), review.get("strict_score"), qa.get("strict_score"),
+    )
+    threshold = _number_from(review.get("likenessThreshold"), review.get("likeness_threshold"), qa.get("likeness_threshold"), 9.5)
+    passed = primary is not None and strict is not None and threshold is not None and primary >= threshold and strict >= threshold
+    return {"passed": passed, "primary_score": primary, "strict_score": strict, "threshold": threshold or 9.5}
+
+
 @app.post("/api/ad-studio/runs/<run_id>/approval")
 def ad_studio_run_approval(run_id: str):
+    body = request.get_json(silent=True) or {}
+    if isinstance(body, dict) and body.get("decision") == "approve":
+        if body.get("confirm_100_percent") is not True:
+            return jsonify({"error": "Approval requires an explicit 100% zoom confirmation."}), 400
+        try:
+            data = hermes_request(_tool_run_path(run_id), timeout=8)
+        except Exception as error:
+            return _hermes_error(error)
+        run = data.get("run") if isinstance(data.get("run"), dict) else data
+        gate = _ad_studio_visual_gate(run if isinstance(run, dict) else {})
+        if not gate["passed"]:
+            return jsonify({
+                "error": "Approval is locked until both independent visual scores are recorded at 9.5 or higher.",
+                "quality_gate": gate,
+            }), 409
     return _proxy_ad_studio_action(run_id, "/approval", {"decision", "confirm_100_percent", "reason"})
 
 

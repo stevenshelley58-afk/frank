@@ -43,6 +43,9 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('data-ad-tab="runs"', html)
         self.assertIn('data-ad-tab="pipeline"', html)
         self.assertIn('data-ad-tab="models"', html)
+        self.assertIn('role="tablist"', html)
+        self.assertIn('How Frank builds an ad template', html)
+        self.assertIn('Both scores must reach 9.5', html)
         self.assertIn('id="ad-stage-input"', html)
         self.assertIn('id="ad-stage-output"', html)
         self.assertIn('emit("frank:ad-studio")', widgets)
@@ -53,6 +56,8 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('mountGraphWorkbench(root', studio)
         self.assertIn('scope_kind: "project"', studio)
         self.assertIn("new EventSource", studio)
+        self.assertIn('"generation.scored"', studio)
+        self.assertIn('Approval is locked until both independent visual scores', studio)
         self.assertNotIn("localStorage", studio)
 
     def test_explorer_remains_one_pinnable_vps_tree(self):

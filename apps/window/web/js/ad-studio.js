@@ -11,6 +11,7 @@ let selectedRunId = "";
 let selectedStage = null;
 let graphHandle = null;
 let selectedFiles = [];
+let sourcePreviewExpanded = false;
 let vpsPath = "";
 let vpsEntries = [];
 const selectedVpsFiles = new Map();
@@ -28,6 +29,16 @@ const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", 
 
 const clean = (value) => String(value || "").trim();
 const escapeHtml = (value) => clean(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
+const PIPELINE_STAGES = ["source", "analyse", "decompose", "restyle", "story-draft", "render", "visual-review", "check", "subject-invariance", "studio-qa", "ready", "release"];
+const PIPELINE_LABELS = {
+  source: "Source", analyse: "Analyse", decompose: "Layer", restyle: "Restyle",
+  "story-draft": "Story", render: "Render", "visual-review": "Score + revise", check: "Validate",
+  "subject-invariance": "Replaceability", "studio-qa": "Approval", ready: "Ready", release: "Release",
+};
+const GENERATION_EVENT_KINDS = new Set([
+  "generation.started", "generation.rendered", "generation.scored",
+  "generation.revision-requested", "generation.accepted", "generation.failed",
+]);
 
 function runStatusLabel(status) {
   return ({ queued: "Queued", started: "Starting", running: "Running", waiting_for_approval: "Needs approval", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Starting";
@@ -41,8 +52,17 @@ function dateLabel(seconds) {
 }
 
 function activate(tab) {
-  $$("[data-ad-tab]").forEach((button) => button.classList.toggle("is-on", button.dataset.adTab === tab));
-  $$("[data-ad-panel]").forEach((panel) => panel.classList.toggle("is-on", panel.dataset.adPanel === tab));
+  $$("[data-ad-tab]").forEach((button) => {
+    const active = button.dataset.adTab === tab;
+    button.classList.toggle("is-on", active);
+    button.setAttribute("aria-selected", String(active));
+    button.tabIndex = active ? 0 : -1;
+  });
+  $$("[data-ad-panel]").forEach((panel) => {
+    const active = panel.dataset.adPanel === tab;
+    panel.classList.toggle("is-on", active);
+    panel.hidden = !active;
+  });
   if (tab === "runs") void refreshRunsSafe();
   if (tab === "pipeline") { void refreshRunsSafe(); mountPipeline(); }
   if (tab === "models") void loadModelSettings();
@@ -72,7 +92,9 @@ function renderSourcePreview() {
   host.replaceChildren();
   host.classList.toggle("has-items", selectedFiles.length > 0);
   $("#ad-run-mode").textContent = selectedFiles.length > 1 ? `Batch · ${selectedFiles.length}` : "Single";
-  selectedFiles.slice(0, 8).forEach((source) => {
+  if (selectedFiles.length <= 8) sourcePreviewExpanded = false;
+  const visibleSources = sourcePreviewExpanded ? selectedFiles : selectedFiles.slice(0, 8);
+  visibleSources.forEach((source) => {
     const item = document.createElement("div");
     item.className = "ad-source-item";
     const image = document.createElement("img");
@@ -95,6 +117,29 @@ function renderSourcePreview() {
     item.append(image, label, remove);
     host.append(item);
   });
+  if (selectedFiles.length > 8) {
+    const controls = document.createElement("div");
+    controls.className = "ad-source-summary";
+    const count = document.createElement("span");
+    count.textContent = sourcePreviewExpanded ? `${selectedFiles.length} sources shown` : `${selectedFiles.length - 8} more sources selected`;
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "ad-text-button";
+    toggle.textContent = sourcePreviewExpanded ? "Show first 8" : "Show all";
+    toggle.addEventListener("click", () => { sourcePreviewExpanded = !sourcePreviewExpanded; renderSourcePreview(); });
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "ad-text-button";
+    clear.textContent = "Remove all";
+    clear.addEventListener("click", () => {
+      selectedFiles.filter((source) => source.kind === "local").forEach((source) => { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); });
+      selectedFiles = [];
+      sourcePreviewExpanded = false;
+      renderSourcePreview();
+    });
+    controls.append(count, toggle, clear);
+    host.append(controls);
+  }
 }
 
 function addLocalFiles(files) {
@@ -340,6 +385,166 @@ function formatCost(run) {
   return Number.isFinite(Number(cost)) ? `$${Number(cost).toFixed(3)}` : "Cost pending";
 }
 
+function firstNumber(...values) {
+  for (const value of values) {
+    const number = Number(value);
+    if (value !== null && value !== undefined && value !== "" && Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+function qualityEvidence(run) {
+  const output = run.output || {};
+  const qa = output.qa && typeof output.qa === "object" ? output.qa : {};
+  const review = qa.visual_review || qa.visualReview || output.quality_gate || output.iteration_summary || {};
+  const scores = review.scores && typeof review.scores === "object" ? review.scores : (qa.scores || {});
+  const primary = firstNumber(
+    scores.primaryAdSystemLikeness, scores.primary_ad_system_likeness,
+    review.primaryAdSystemLikeness, review.primary_score, qa.primary_score,
+  );
+  const strict = firstNumber(
+    scores.strictAdSystemLikeness, scores.strict_ad_system_likeness,
+    review.strictAdSystemLikeness, review.strict_score, qa.strict_score,
+  );
+  const threshold = firstNumber(review.likenessThreshold, review.likeness_threshold, qa.likeness_threshold, 9.5);
+  const passed = primary !== null && strict !== null && primary >= threshold && strict >= threshold;
+  return { primary, strict, threshold, passed, recorded: primary !== null || strict !== null };
+}
+
+function generationRecords(run) {
+  const output = run.output || {};
+  const qa = output.qa && typeof output.qa === "object" ? output.qa : {};
+  const candidates = [output.generations, output.iteration_summary?.generations, qa.generations, qa.visual_review?.generations]
+    .find((value) => Array.isArray(value)) || [];
+  const records = new Map();
+  const ensure = (value) => {
+    const iteration = Math.max(1, Math.trunc(firstNumber(value, records.size + 1) || 1));
+    if (!records.has(iteration)) records.set(iteration, { iteration, status: "recorded", changes: "", model: "", provider: "", primary: null, strict: null, threshold: 9.5, timestamp: 0 });
+    return records.get(iteration);
+  };
+  candidates.forEach((item, index) => {
+    if (!item || typeof item !== "object") return;
+    const record = ensure(item.iteration ?? item.generation ?? index + 1);
+    const scores = item.scores && typeof item.scores === "object" ? item.scores : item;
+    record.status = clean(item.status || (item.accepted === true ? "accepted" : record.status));
+    record.primary = firstNumber(scores.primaryAdSystemLikeness, scores.primary_ad_system_likeness, scores.primary_score, record.primary);
+    record.strict = firstNumber(scores.strictAdSystemLikeness, scores.strict_ad_system_likeness, scores.strict_score, record.strict);
+    record.threshold = firstNumber(item.likenessThreshold, item.likeness_threshold, record.threshold, 9.5);
+    record.changes = clean(item.change_summary || item.changes || item.revision_reason || record.changes);
+    record.model = clean(item.model || record.model);
+    record.provider = clean(item.provider || record.provider);
+    record.timestamp = firstNumber(item.timestamp, item.created_at, record.timestamp, 0);
+  });
+  for (const event of runEvents) {
+    if (!GENERATION_EVENT_KINDS.has(event.kind)) continue;
+    const data = event.data && typeof event.data === "object" ? event.data : {};
+    const record = ensure(data.iteration ?? data.generation);
+    record.status = event.kind.replace("generation.", "") || record.status;
+    record.primary = firstNumber(data.primary_score, data.primaryAdSystemLikeness, record.primary);
+    record.strict = firstNumber(data.strict_score, data.strictAdSystemLikeness, record.strict);
+    record.threshold = firstNumber(data.threshold, data.likeness_threshold, record.threshold, 9.5);
+    record.changes = clean(data.change_summary || data.revision_reason || data.reason || record.changes);
+    record.model = clean(data.model || record.model);
+    record.provider = clean(data.provider || record.provider);
+    record.timestamp = firstNumber(event.timestamp, record.timestamp, 0);
+  }
+  return Array.from(records.values()).sort((a, b) => a.iteration - b.iteration);
+}
+
+function formatScore(value) {
+  return value === null ? "Not recorded" : Number(value).toFixed(1);
+}
+
+function renderPhaseTimeline(run, parent) {
+  const section = document.createElement("section");
+  section.className = "ad-phase-section";
+  const heading = document.createElement("div");
+  heading.className = "ad-inline-heading";
+  heading.innerHTML = "<strong>Run lifecycle</strong><span>Select a stage to inspect its evidence.</span>";
+  const stages = document.createElement("div");
+  stages.className = "ad-phase-rail";
+  const current = run.stage;
+  const currentIndex = PIPELINE_STAGES.indexOf(current);
+  const recorded = new Set(runEvents.filter((event) => event.kind === "stage.started").map((event) => event.node_id));
+  PIPELINE_STAGES.forEach((id, index) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    const completed = run.status === "completed" || (currentIndex >= 0 && index < currentIndex);
+    const active = id === current;
+    button.className = `ad-phase${completed ? " is-done" : ""}${active ? " is-current" : ""}${recorded.has(id) ? " is-recorded" : ""}`;
+    button.innerHTML = `<i aria-hidden="true"></i><span>${escapeHtml(PIPELINE_LABELS[id] || id)}</span>`;
+    button.setAttribute("aria-label", `${PIPELINE_LABELS[id] || id}${active ? ", current stage" : completed ? ", completed" : ""}`);
+    button.addEventListener("click", () => {
+      selectedStage = { source_id: id, label: PIPELINE_LABELS[id] || id, kind: id === "studio-qa" ? "approval" : "stage" };
+      activate("pipeline");
+      updateEvidence();
+    });
+    stages.append(button);
+  });
+  section.append(heading, stages);
+  parent.append(section);
+}
+
+function renderPreviewGallery(run, parent) {
+  const raw = Array.isArray(run.output?.previews) ? run.output.previews : (run.output?.preview ? [run.output.preview] : []);
+  const previews = raw.map((item, index) => typeof item === "string" ? { url: item, label: `Preview ${index + 1}` } : { ...item, label: item.placement || item.label || item.name || `Preview ${index + 1}` }).filter((item) => item.url);
+  if (!previews.length) return;
+  const section = document.createElement("section");
+  section.className = "ad-preview-section";
+  section.innerHTML = '<div class="ad-inline-heading"><strong>Latest render</strong><span>Feed and Story are separate editable layouts.</span></div>';
+  const grid = document.createElement("div");
+  grid.className = "ad-preview-grid";
+  previews.forEach((preview) => {
+    const figure = document.createElement("figure");
+    const image = document.createElement("img");
+    image.src = preview.url;
+    image.alt = `${preview.label} generated template preview`;
+    const caption = document.createElement("figcaption");
+    caption.textContent = preview.label;
+    figure.append(image, caption);
+    grid.append(figure);
+  });
+  section.append(grid);
+  parent.append(section);
+}
+
+function renderGenerationHistory(run, parent) {
+  const evidence = qualityEvidence(run);
+  const records = generationRecords(run);
+  const section = document.createElement("section");
+  section.className = "ad-generation-section";
+  const heading = document.createElement("div");
+  heading.className = "ad-inline-heading";
+  heading.innerHTML = `<strong>Generation history</strong><span>${records.length ? `${records.length} recorded generation${records.length === 1 ? "" : "s"}` : "Every render, score and revision will appear here."}</span>`;
+  const quality = document.createElement("div");
+  quality.className = `ad-quality-gate${evidence.passed ? " is-passed" : ""}`;
+  quality.innerHTML = `<div><span>Primary review</span><strong>${formatScore(evidence.primary)}</strong></div><div><span>Strict review</span><strong>${formatScore(evidence.strict)}</strong></div><div><span>Release rule</span><strong>Both ≥ ${evidence.threshold.toFixed(1)}</strong></div><p>${evidence.passed ? "Visual gate passed. Human 100% review is still required." : evidence.recorded ? "Another revision is required before approval." : "This run has not emitted numeric visual evidence. It cannot be approved."}</p>`;
+  section.append(heading, quality);
+  const list = document.createElement("div");
+  list.className = "ad-generation-list";
+  if (!records.length) {
+    const empty = document.createElement("p");
+    empty.className = "ad-evidence-empty";
+    empty.textContent = "Legacy runs record tools and stages but not individual generations. New runs use the scored generation contract.";
+    list.append(empty);
+  }
+  records.forEach((record) => {
+    const row = document.createElement("article");
+    row.className = "ad-generation-row";
+    const title = document.createElement("div");
+    title.innerHTML = `<strong>Generation ${record.iteration}</strong><span>${escapeHtml(record.status.replaceAll("-", " ") || "recorded")}</span>`;
+    const scores = document.createElement("div");
+    scores.className = "ad-generation-scores";
+    scores.innerHTML = `<span>Primary <b>${formatScore(record.primary)}</b></span><span>Strict <b>${formatScore(record.strict)}</b></span>`;
+    const note = document.createElement("p");
+    note.textContent = record.changes || (record.status === "accepted" ? "Accepted by the numeric visual gate." : "No revision note was recorded.");
+    row.append(title, scores, note);
+    list.append(row);
+  });
+  section.append(list);
+  parent.append(section);
+}
+
 function renderRunDetail(run) {
   const detail = $("#ad-run-detail");
   detail.replaceChildren();
@@ -349,22 +554,24 @@ function renderRunDetail(run) {
   const heading = document.createElement("h3");
   heading.textContent = run.title || "Ad Studio job";
   const meta = document.createElement("p");
-  meta.textContent = `${runStatusLabel(run.status)} · ${run.stage || "source"} · ${Math.round(Number(run.progress || 0) * (Number(run.progress || 0) <= 1 ? 100 : 1))}% · ${formatCost(run)}`;
+  meta.textContent = `${runStatusLabel(run.status)} · ${PIPELINE_LABELS[run.stage] || run.stage || "Source"} · ${formatCost(run)}`;
   copy.append(heading, meta);
   const live = document.createElement("span");
   live.className = "ad-live-state";
   live.textContent = ["completed", "failed", "cancelled"].includes(run.status) ? "Recorded" : "Live";
   summary.append(copy, live);
   detail.append(summary);
-  const overview = document.createElement("div");
-  overview.className = "ad-overview-grid";
-  for (const [label, value] of [["Stage", run.stage || "Source"], ["Policy", run.policy_revision ? `Revision ${run.policy_revision}` : "Pinned"], ["Model", run.current_model || "Deterministic / pending"], ["Trace", run.trace_id ? run.trace_id.slice(0, 12) : "Pending"]]) {
-    const card = document.createElement("div");
-    const small = document.createElement("span"); small.textContent = label;
-    const strong = document.createElement("strong"); strong.textContent = value;
-    card.append(small, strong); overview.append(card);
+  const overview = document.createElement("dl");
+  overview.className = "ad-run-facts";
+  for (const [label, value] of [["Run", run.id], ["Policy", run.policy_revision ? `Revision ${run.policy_revision}` : "Pinned"], ["Model", run.current_model || "Deterministic / pending"], ["Trace", run.trace_id || "Pending"]]) {
+    const item = document.createElement("div");
+    const term = document.createElement("dt"); term.textContent = label;
+    const description = document.createElement("dd"); description.textContent = value;
+    if (label === "Run" || label === "Trace") description.title = value;
+    item.append(term, description); overview.append(item);
   }
   detail.append(overview);
+  renderPhaseTimeline(run, detail);
   if (run.status === "completed" && run.output?.template_pack_ref) {
     const release = document.createElement("section"); release.className = "ad-approval";
     const title = document.createElement("strong"); title.textContent = "Portable TemplatePack released";
@@ -376,36 +583,42 @@ function renderRunDetail(run) {
     const attention = document.createElement("div"); attention.className = "ad-attention";
     attention.textContent = run.error || "This job needs attention."; detail.append(attention);
   }
-  const preview = run.output?.preview || run.output?.previews?.[0];
-  if (preview?.url || typeof preview === "string") {
-    const image = document.createElement("img"); image.className = "ad-latest-preview";
-    image.src = preview.url || preview; image.alt = "Latest generated preview"; detail.append(image);
-  }
-  const activity = document.createElement("section");
-  activity.className = "ad-live-activity";
-  activity.innerHTML = '<div class="ad-section-heading"><div><span>Live activity</span><h3>What Hermes is doing</h3></div></div><div id="ad-run-events"></div>';
-  detail.append(activity);
+  renderPreviewGallery(run, detail);
+  renderGenerationHistory(run, detail);
   if (run.status === "waiting_for_approval") {
+    const quality = qualityEvidence(run);
     const gate = document.createElement("form"); gate.className = "ad-approval";
-    gate.innerHTML = '<strong>Studio QA approval</strong><label><input type="checkbox" required> I inspected the previews at 100% zoom</label><textarea maxlength="600" placeholder="Approval note (optional)"></textarea><button class="ad-primary" type="submit">Approve and release</button>';
+    gate.innerHTML = `<strong>Human release review</strong><p>${quality.passed ? "The numeric visual gate passed. Confirm the final editable Feed and Story at native size." : "Approval is locked until both independent visual scores are recorded at 9.5 or higher."}</p><label><input type="checkbox" required${quality.passed ? "" : " disabled"}> I inspected Feed and Story at 100% zoom</label><textarea maxlength="600" placeholder="What you checked or changed"${quality.passed ? "" : " disabled"}></textarea><button class="ad-primary" type="submit"${quality.passed ? "" : " disabled"}>Approve and release</button><p class="ad-action-status" role="status"></p>`;
     gate.addEventListener("submit", async (event) => {
       event.preventDefault();
-      const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/approval`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision: "approve", confirm_100_percent: true, reason: clean(gate.querySelector("textarea").value) }) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || "Approval failed");
-      await selectRun(run.id);
+      const status = gate.querySelector(".ad-action-status");
+      const button = gate.querySelector("button[type=submit]");
+      button.disabled = true; status.textContent = "Recording approval…";
+      try {
+        const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/approval`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision: "approve", confirm_100_percent: true, reason: clean(gate.querySelector("textarea").value) }) });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.error || "Approval failed");
+        await selectRun(run.id);
+      } catch (error) {
+        status.textContent = `${error.message || "Approval failed"} Try again without leaving this run.`;
+        button.disabled = false;
+      }
     });
     detail.append(gate);
   }
+  const activity = document.createElement("details");
+  activity.className = "ad-live-activity";
+  activity.innerHTML = '<summary>All recorded activity</summary><div id="ad-run-events"></div>';
+  detail.append(activity);
   if (!["completed", "cancelled"].includes(run.status)) {
     const actions = document.createElement("div"); actions.className = "ad-run-actions";
     const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel job";
-    cancel.addEventListener("click", async () => { await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); await selectRun(run.id); });
+    cancel.addEventListener("click", async () => { cancel.disabled = true; try { const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); if (!response.ok) throw new Error("Cancel failed"); await selectRun(run.id); } catch { cancel.textContent = "Cancel failed — retry"; cancel.disabled = false; } });
     const models = document.createElement("button"); models.type = "button"; models.className = "ad-text-button"; models.textContent = "Change remaining models";
     models.addEventListener("click", () => { modelEditMode = "remaining"; remainingRunId = run.id; activePolicy = { revision: run.policy_revision, policy: structuredClone(run.policy) }; activate("models"); });
     if (run.status === "failed") {
       const retry = document.createElement("button"); retry.type = "button"; retry.className = "ad-primary"; retry.textContent = "Retry from checkpoint";
-      retry.addEventListener("click", async () => { await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from_stage: run.stage }) }); await selectRun(run.id); });
+      retry.addEventListener("click", async () => { retry.disabled = true; try { const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from_stage: run.stage }) }); if (!response.ok) throw new Error("Retry failed"); await selectRun(run.id); } catch { retry.textContent = "Retry failed — try again"; retry.disabled = false; } });
       actions.append(retry);
     }
     actions.append(models, cancel); detail.append(actions);
@@ -415,7 +628,7 @@ function renderRunDetail(run) {
   renderEventViews();
 }
 
-const EVENT_KINDS = ["command.accepted", "command.queued", "command.cancel-requested", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "approval.requested", "approval.approved", "approval.rejected", "model-policy.changed", "release.published"];
+const EVENT_KINDS = ["command.accepted", "command.queued", "command.cancel-requested", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "generation.started", "generation.rendered", "generation.scored", "generation.revision-requested", "generation.accepted", "generation.failed", "artifact.recorded", "qa.gate", "approval.requested", "approval.approved", "approval.rejected", "model-policy.changed", "release.published"];
 
 const SAFE_TOOL_LABELS = {
   terminal: "VPS command",
@@ -442,6 +655,17 @@ function safeEventData(event) {
   if (event.kind === "provider.fallback") return { attempt: data.attempt, from_model: data.from_model, to_model: data.to_model, reason: redactOperatorText(data.reason) };
   if (event.kind === "stage.started") return { summary: `Started ${String(event.node_id || "pipeline stage").replaceAll("-", " ")}` };
   if (event.kind === "tool.started" || event.kind === "tool.completed") return { tool: SAFE_TOOL_LABELS[data.tool] || "VPS builder tool", duration_seconds: data.duration_seconds, error: Boolean(data.error) };
+  if (GENERATION_EVENT_KINDS.has(event.kind)) return {
+    iteration: firstNumber(data.iteration, data.generation),
+    placement: clean(data.placement),
+    primary_score: firstNumber(data.primary_score, data.primaryAdSystemLikeness),
+    strict_score: firstNumber(data.strict_score, data.strictAdSystemLikeness),
+    threshold: firstNumber(data.threshold, data.likeness_threshold, 9.5),
+    revision_reason: redactOperatorText(data.revision_reason || data.change_summary || data.reason),
+    artifact_sha256: clean(data.artifact_sha256 || data.sha256),
+  };
+  if (event.kind === "artifact.recorded") return { artifact_id: clean(data.artifact_id), placement: clean(data.placement), sha256: clean(data.sha256), media_type: clean(data.media_type) };
+  if (event.kind === "qa.gate") return { gate: clean(data.gate), decision: clean(data.decision), primary_score: firstNumber(data.primary_score), strict_score: firstNumber(data.strict_score), threshold: firstNumber(data.threshold, 9.5) };
   if (event.kind === "run.failed") return { error: redactOperatorText(data.error) || "Run failed; protected diagnostics remain in Hermes." };
   if (event.kind === "release.published") return { release_id: data.release_id, template_pack_ref: data.template_pack_ref, sha256: data.sha256, compatibility: data.compatibility };
   return Object.fromEntries(Object.entries(data).filter(([key]) => ["attempt", "provider", "model", "cost_usd", "input_tokens", "output_tokens", "gate", "choices", "policy_revision", "will_resume", "release_id", "sha256", "compatibility"].includes(key)));
@@ -453,6 +677,12 @@ function safeEventSummary(event) {
   if (event.kind === "stage.started") return data.summary;
   if (event.kind === "provider.attempt") return `${data.provider || "provider"} · ${data.model || "model"} · attempt ${data.attempt || 1}`;
   if (event.kind === "provider.fallback") return `${data.from_model || "model"} → ${data.to_model || "fallback"}`;
+  if (GENERATION_EVENT_KINDS.has(event.kind)) {
+    const scores = data.primary_score !== null || data.strict_score !== null ? ` · ${formatScore(data.primary_score)} / ${formatScore(data.strict_score)}` : "";
+    return `Generation ${data.iteration || "?"}${scores}${data.revision_reason ? ` · ${data.revision_reason}` : ""}`;
+  }
+  if (event.kind === "artifact.recorded") return `${data.placement || "Template"} artifact recorded${data.sha256 ? ` · ${data.sha256.slice(0, 12)}…` : ""}`;
+  if (event.kind === "qa.gate") return `${data.gate || "Quality gate"} · ${data.decision || "recorded"}`;
   if (event.kind === "run.failed") return data.error;
   return event.node_id || data.gate || data.release_id || "Recorded";
 }
@@ -465,13 +695,13 @@ function renderEventViews() {
   const host = $("#ad-run-events");
   if (host) {
     host.replaceChildren();
-    const visible = runEvents.slice(-24);
+    const visible = runEvents.slice(-40);
     if (!visible.length) host.innerHTML = '<p class="ad-evidence-empty">Waiting for the first durable event…</p>';
     for (const event of visible) {
       const row = document.createElement("div"); row.className = `ad-event ad-event-${event.status || "ok"}`;
       const time = document.createElement("time"); time.textContent = new Date(Number(event.timestamp || 0) * 1000).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
       const copy = document.createElement("div");
-      const strong = document.createElement("strong"); strong.textContent = String(event.kind || "activity").replaceAll(".", " · ");
+      const strong = document.createElement("strong"); strong.textContent = String(event.kind || "activity").replaceAll(".", " ");
       const p = document.createElement("p"); p.textContent = safeEventSummary(event);
       copy.append(strong, p); row.append(time, copy); host.append(row);
     }
@@ -493,8 +723,7 @@ function connectRunEvents(run) {
       if (!runEvents.some((existing) => existing.sequence === item.sequence)) runEvents.push(item);
       if (item.kind === "stage.started" && item.node_id) {
         run.stage = item.node_id;
-        const order = ["source", "analyse", "decompose", "restyle", "story-draft", "check", "subject-invariance", "studio-qa", "ready", "release"];
-        run.progress = Math.max(Number(run.progress || 0), Math.max(0, order.indexOf(item.node_id)) / order.length);
+        run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(item.node_id)) / PIPELINE_STAGES.length);
       }
       if (item.kind === "provider.attempt") { run.current_model = item.data?.model || run.current_model; run.current_provider = item.data?.provider || run.current_provider; }
       renderRunDetail(run);
@@ -552,9 +781,26 @@ function updateEvidence() {
   } else {
     input.textContent = selectedStage && selectedRunId ? "Private inputs stay in Hermes; only safe evidence is shown here." : "Select a real run and stage to see its safe evidence.";
   }
-  output.textContent = stageEvents.length ? JSON.stringify(stageEvents.map((event) => ({ kind: event.kind, status: event.status, data: event.data })), null, 2) : "No correlated output is available yet.";
+  output.classList.toggle("ad-evidence-empty", !stageEvents.length);
+  if (!stageEvents.length) output.textContent = "No safe result has been recorded for this stage yet.";
+  else {
+    const list = document.createElement("div");
+    list.className = "ad-observed-list";
+    stageEvents.forEach((event) => {
+      const row = document.createElement("div");
+      const label = document.createElement("strong");
+      label.textContent = String(event.kind || "activity").replaceAll(".", " ");
+      const summary = document.createElement("span");
+      summary.textContent = safeEventSummary(event);
+      row.append(label, summary);
+      list.append(row);
+    });
+    output.append(list);
+  }
   const inspector = $("#ad-stage-events");
-  if (inspector) inspector.textContent = stageEvents.length ? `${stageEvents.length} correlated event${stageEvents.length === 1 ? "" : "s"} recorded for this stage.` : "No events recorded for this stage yet.";
+  if (inspector) inspector.textContent = stageEvents.length ? `${stageEvents.length} durable event${stageEvents.length === 1 ? "" : "s"} recorded. Private prompts and paths remain in Hermes.` : "No events recorded for this stage yet.";
+  const summary = $("#ad-stage-summary");
+  if (summary) summary.textContent = selectedStage ? `${stageEvents.length} observed event${stageEvents.length === 1 ? "" : "s"} for ${selectedStage.label}.` : "Select a run or stage to inspect its recorded evidence.";
 }
 
 function requestEvent(name, detail) {
@@ -628,6 +874,18 @@ function setupRunForm() {
 function setupPipelineForm() {
   $("#ad-pipeline-project").addEventListener("change", mountPipeline);
   $("#ad-pipeline-run").addEventListener("change", (event) => { selectedRunId = event.target.value; if (selectedRunId) void selectRun(selectedRunId); else updateEvidence(); });
+  $("#ad-copy-trace").addEventListener("click", async (event) => {
+    const button = event.currentTarget;
+    const payload = JSON.stringify(runEvents.map(safeEventForTrace), null, 2);
+    try {
+      await navigator.clipboard.writeText(payload);
+      button.textContent = "Copied";
+    } catch {
+      button.textContent = "Copy unavailable";
+    }
+    setTimeout(() => { button.textContent = "Copy safe trace"; }, 1800);
+  });
+  $$('[data-ad-open-pipeline]').forEach((button) => button.addEventListener("click", () => activate("pipeline")));
 }
 
 function normalizeModels(payload) {
@@ -801,7 +1059,18 @@ function setupModelForm() {
 export function mountAdStudio() {
   if (mounted) { void refreshRunsSafe(); return; }
   mounted = true;
-  $$("[data-ad-tab]").forEach((button) => button.addEventListener("click", () => { if (button.dataset.adTab === "models") { modelEditMode = "default"; remainingRunId = ""; } activate(button.dataset.adTab); }));
+  const tabs = $$("[data-ad-tab]");
+  tabs.forEach((button, index) => {
+    button.addEventListener("click", () => { if (button.dataset.adTab === "models") { modelEditMode = "default"; remainingRunId = ""; } activate(button.dataset.adTab); });
+    button.addEventListener("keydown", (event) => {
+      const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
+      if (!direction) return;
+      event.preventDefault();
+      const next = tabs[(index + direction + tabs.length) % tabs.length];
+      activate(next.dataset.adTab);
+      next.focus();
+    });
+  });
   setupRunForm();
   setupPipelineForm();
   setupModelForm();
