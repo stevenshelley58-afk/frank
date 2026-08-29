@@ -144,23 +144,17 @@ window.addEventListener("frank:new-project-chat", (event) => {
 });
 
 window.addEventListener("frank:ad-studio-run", (event) => {
-  const detail = event.detail || {};
-  void (async () => {
-    const sources = Array.isArray(detail.sources) ? detail.sources : [];
-    const files = sources.filter((source) => source?.kind === "local" && source.file instanceof File).map((source) => source.file);
-    const vpsFiles = sources.filter((source) => source?.kind === "vps").map((source) => ({ root: source.root || "vps", path: source.path }));
-    const projectId = String(detail.projectId || "").trim();
-    if (!files.length && !vpsFiles.length) throw new Error("Choose at least one source image.");
-    if (!projectId) throw new Error("Choose a project.");
-    const sourceCount = files.length + vpsFiles.length;
-    const fallbackName = sourceCount === 1 ? String(sources[0]?.name || "source image").replace(/\.[^.]+$/, "") : `${sourceCount} source images`;
-    const jobName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
-    const [localUploads, vpsUploads] = await Promise.all([
-      uploadFiles(files.map((file) => ({ file, path: file.name }))),
-      uploadVpsFiles(vpsFiles),
-    ]);
-    const uploaded = [...localUploads, ...vpsUploads];
-    if (uploaded.length !== sourceCount) throw new Error("One or more source images were not accepted.");
+    const detail = event.detail || {};
+    void (async () => {
+      const sources = Array.isArray(detail.sources) ? detail.sources : [];
+      const files = sources.filter((source) => source?.kind === "local" && source.file instanceof File).map((source) => source.file);
+      const projectId = String(detail.projectId || "").trim();
+      if (files.length !== 1) throw new Error("Choose exactly one source image from this device.");
+      if (!projectId) throw new Error("Choose a project.");
+      const fallbackName = String(sources[0]?.name || "source image").replace(/\.[^.]+$/, "");
+      const jobName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
+      const uploaded = await uploadFiles(files.map((file) => ({ file, path: file.name })));
+      if (uploaded.length !== 1) throw new Error("The source image was not accepted.");
     const response = await fetch("/api/ad-studio/runs", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -168,10 +162,7 @@ window.addEventListener("frank:ad-studio-run", (event) => {
         project_id: projectId,
         name: jobName,
         brief: String(detail.brief || "").trim(),
-        placements: Array.isArray(detail.placements) && detail.placements.length ? detail.placements : ["square"],
         attachments: uploaded.map(attachmentPayload),
-        policy_revision: String(detail.policyRevision || ""),
-        ...(detail.policyOverride ? { policy_override: detail.policyOverride } : {}),
       }),
     });
     const data = await response.json().catch(() => ({}));
@@ -637,17 +628,6 @@ async function uploadFiles(items) {
   }
   const response = await fetch("/api/chat/uploads", { method: "POST", body: form });
   if (!response.ok) throw new Error(`Upload failed (HTTP ${response.status})`);
-  const data = await response.json();
-  return Array.isArray(data.attachments) ? data.attachments : [];
-}
-async function uploadVpsFiles(files) {
-  if (!files.length) return [];
-  const response = await fetch("/api/chat/uploads/vps", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ files }),
-  });
-  if (!response.ok) throw new Error(`VPS image copy failed (HTTP ${response.status})`);
   const data = await response.json();
   return Array.isArray(data.attachments) ? data.attachments : [];
 }

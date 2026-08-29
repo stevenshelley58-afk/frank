@@ -303,7 +303,7 @@ function renderGenerationHistory(run, parent) {
   });
   if (finalReview && Array.isArray(finalReview.reviewers) && finalReview.reviewers.length) {
     const review = document.createElement("p"); review.className = "ad-review-summary";
-    review.textContent = "Final review: " + finalReview.reviewers.map((item) => item.id + " " + formatScore(item.score)).join(" - ") + " - " + (finalReview.decision || "recorded");
+    review.textContent = "Final review: " + finalReview.reviewers.map((item, index) => `Reviewer ${index + 1} ${formatScore(item.score)}`).join(" · ") + " · " + (finalReview.decision || "recorded");
     section.append(review);
   }
   section.append(list); parent.append(section);
@@ -328,11 +328,13 @@ function renderRunDetail(run) {
   detail.append(summary);
   const overview = document.createElement("dl");
   overview.className = "ad-run-facts";
-  for (const [label, value] of [["Run", run.id], ["Stage", run.stage || "source"], ["Trace", run.trace_id || "Pending"]]) {
+  const facts = [["Run", run.id], ["Stage", run.stage || "source"]];
+  if (run.output?.import?.template_id) facts.push(["Blockwise template", run.output.import.template_id]);
+  for (const [label, value] of facts) {
     const item = document.createElement("div");
     const term = document.createElement("dt"); term.textContent = label;
     const description = document.createElement("dd"); description.textContent = value;
-    if (label === "Run" || label === "Trace") description.title = value;
+    if (label === "Run" || label === "Blockwise template") description.title = value;
     item.append(term, description); overview.append(item);
   }
   detail.append(overview);
@@ -340,9 +342,8 @@ function renderRunDetail(run) {
   if (run.status === "completed" && ["imported", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase())) {
     const readySection = document.createElement("section"); readySection.className = "ad-template-ready";
     const title = document.createElement("strong"); title.textContent = "Template ready";
-    const evidence = document.createElement("p"); evidence.textContent = "Deterministic Feed and Story documents are ready to import.";
-    const download = document.createElement("a"); download.className = "ad-primary"; download.href = "/api/ad-studio/runs/" + encodeURIComponent(run.id) + "/download"; download.textContent = "Download template";
-    readySection.append(title, evidence, download); detail.append(readySection);
+    const evidence = document.createElement("p"); evidence.textContent = "Feed and Story are live in Blockwise.";
+    readySection.append(title, evidence); detail.append(readySection);
   }
 
   if (run.attention || run.error) {
@@ -372,12 +373,12 @@ function renderRunDetail(run) {
   renderEventViews();
 }
 
-const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "final-review.started", "final-review.completed", "template.imported"];
+const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "final-review.started", "final-review.completed", "template.imported"];
 
 const SAFE_TOOL_LABELS = {
-  terminal: "VPS command",
-  exec_command: "VPS command",
-  execute_code: "VPS calculation",
+  terminal: "Builder action",
+  exec_command: "Builder action",
+  execute_code: "Layout calculation",
   read_file: "Inspect source artifact",
   write_file: "Create template artifact",
   search_files: "Find builder assets",
@@ -395,17 +396,15 @@ function redactOperatorText(value) {
 
 function safeEventData(event) {
   const data = event?.data || {};
-  if (event.kind === "provider.attempt") return { attempt: data.attempt, timeout_seconds: data.timeout_seconds };
-  if (event.kind === "provider.fallback") return { attempt: data.attempt, reason: redactOperatorText(data.reason) };
   if (event.kind === "stage.started") return { summary: `Started ${String(event.node_id || "pipeline stage").replaceAll("-", " ")}` };
-  if (event.kind === "tool.started" || event.kind === "tool.completed") return { tool: SAFE_TOOL_LABELS[data.tool] || "VPS builder tool", duration_seconds: data.duration_seconds, error: Boolean(data.error) };
+  if (event.kind === "tool.started" || event.kind === "tool.completed") return { tool: SAFE_TOOL_LABELS[data.tool] || "Builder action", duration_seconds: data.duration_seconds, error: Boolean(data.error) };
   if (event.kind === "iteration.compared" || event.kind === "iteration.revised") return {
     iteration: firstNumber(data.iteration), score: firstNumber(data.score),
     reason: redactOperatorText(data.reason), decision: clean(data.decision),
   };
   if (event.kind === "final-review.completed") return { decision: clean(data.decision), reviewer_count: data.reviewer_count };
   if (event.kind === "run.failed") return { error: redactOperatorText(data.error) || "Run failed; diagnostics remain in Hermes." };
-  if (event.kind === "template.imported") return { status: "ready", deterministic: true };
+  if (event.kind === "template.imported") return { status: "ready" };
   return Object.fromEntries(Object.entries(data).filter(([key]) => ["attempt", "cost_usd", "input_tokens", "output_tokens", "will_resume"].includes(key)));
 }
 
@@ -413,8 +412,6 @@ function safeEventSummary(event) {
   const data = safeEventData(event);
   if (event.kind === "tool.started" || event.kind === "tool.completed") return data.tool;
   if (event.kind === "stage.started") return data.summary;
-  if (event.kind === "provider.attempt") return "Agent attempt " + (data.attempt || 1);
-  if (event.kind === "provider.fallback") return "Agent fallback after attempt " + (data.attempt || 1);
   if (event.kind === "iteration.compared" || event.kind === "iteration.revised") return "Iteration " + (data.iteration || "?") + " - " + formatScore(data.score) + " - " + (data.decision || "revise") + (data.reason ? " - " + data.reason : "");
   if (event.kind === "final-review.completed") return "Two final reviewers - " + (data.decision || "recorded");
   if (event.kind === "run.failed") return data.error;
@@ -439,8 +436,6 @@ function renderEventViews() {
       copy.append(strong, p); row.append(time, copy); host.append(row);
     }
   }
-  const trace = $("#ad-full-trace");
-  if (trace) trace.textContent = runEvents.length ? JSON.stringify(runEvents.map(safeEventForTrace), null, 2) : "No events have been recorded for this run yet.";
   updateEvidence();
 }
 
@@ -624,7 +619,6 @@ function setupRunForm() {
       const first = selectedFiles[0];
       localRunInputs.set(run.id, { url: first.previewUrl, name: first.name });
       selectedRunId = run.id;
-      pendingPolicyOverride = null;
       status.textContent = `${result.runs.length} background job${result.runs.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
       await refreshRunsSafe();
       activate("runs");

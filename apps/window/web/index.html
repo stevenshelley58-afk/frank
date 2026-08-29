@@ -8,8 +8,8 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260829-ad-studio-trace-v1">
-<link rel="stylesheet" href="/ad-studio-picker.css?v=20260822-vps-picker">
+<link rel="stylesheet" href="/app.css?v=20260830-ad-studio">
+<link rel="stylesheet" href="/ad-studio-picker.css?v=20260830-source-dialog">
 </head>
 <body>
 <div class="app">
@@ -212,7 +212,7 @@
 
           <div class="ad-studio-panel" id="ad-panel-pipeline" role="tabpanel" aria-labelledby="ad-tab-pipeline" data-ad-panel="pipeline" hidden>
             <div class="ad-pipeline-toolbar">
-              <div><h3>How Frank builds an ad template</h3><p>The declared lifecycle stays fixed. The selected run shows what actually happened.</p></div>
+              <div><h3>How template generation works</h3><p>Frank starts the run. This view shows what Hermes actually did.</p></div>
               <div class="ad-pipeline-controls"><label>Project<select id="ad-pipeline-project"></select></label><label>Inspect run<select id="ad-pipeline-run"><option value="">No run selected</option></select></label></div>
             </div>
             <section class="ad-process-monitors" aria-label="Implementation monitors">
@@ -220,13 +220,13 @@
               <div><strong>Implementation activity</strong><span id="ad-agenttrail-status">Checking AgentTrail board&</span><pre id="ad-agenttrail-board" hidden></pre></div>
             </section>
             <section class="ad-system-map" aria-label="Frank generation architecture">
-              <div><strong>Frank</strong><span>Collects the brief and shows the trace.</span></div><i aria-hidden="true"></i>
+              <div><strong>Frank</strong><span>Starts the run and shows its progress.</span></div><i aria-hidden="true"></i>
               <div><strong>Hermes</strong><span>Owns the durable run and events.</span></div><i aria-hidden="true"></i>
               <div><strong>Template Builder</strong><span>Creates editable Feed and native Story layers.</span></div><i aria-hidden="true"></i>
               <div><strong>Blockwise</strong><span>Imports the finished template into Blockwise.</span></div>
             </section>
             <section class="ad-iteration-law" aria-label="Quality iteration rule">
-              <div><strong>Render</strong><span>Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Final review</strong><span>Two independent reviews at completion</span></div><b aria-hidden="true">→</b><div><strong>Revise</strong><span>Record what changed</span></div><b aria-hidden="true">↻</b><div><strong>Accept</strong><span>Both scores must reach 9.5</span></div>
+              <div><strong>Render</strong><span>Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Compare</strong><span>One comparison per iteration</span></div><b aria-hidden="true">→</b><div><strong>Revise</strong><span>Below 9.5 loops automatically</span></div><b aria-hidden="true">↻</b><div><strong>Final review</strong><span>Two fresh reviews at completion</span></div><b aria-hidden="true">→</b><div><strong>Accept</strong><span>Both scores must reach 9.5</span></div>
             </section>
             <div class="ad-pipeline-layout">
               <section class="ad-pipeline-canvas"><div class="ad-declared-label"><strong>Declared lifecycle</strong><span>The route Frank promises before a run begins.</span></div><div id="ad-pipeline-graph"></div></section>

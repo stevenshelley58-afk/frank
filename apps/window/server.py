@@ -96,8 +96,6 @@ ARCHIFY_ARTIFACT = Path(os.environ.get("ARCHIFY_ARTIFACT", str(Path(__file__).re
 ARCHIFY_SPEC = Path(os.environ.get("ARCHIFY_SPEC", str(Path(__file__).resolve().parent / "archify" / "ad-template-process.json"))).resolve()
 ARCHIFY_CLI = Path(os.environ.get("ARCHIFY_CLI", str(Path(__file__).resolve().parent / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"))).resolve()
 AGENTTRAIL_URL = os.environ.get("AGENTTRAIL_URL", "http://127.0.0.1:5340").rstrip("/")
-ARCHIFY_REVISION = "b36d79fdbc3aec3728744341485a7e79f03c0071"
-AGENTTRAIL_REVISION = "5b97cf3cef548a0c668731e7f569fa36c14832f2"
 ROOTS = {
     # The container receives only the explicitly approved read-only VPS mounts
     # beneath /vps. This presents one familiar tree without exposing the
@@ -1343,7 +1341,7 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     safe_output = {key: output.get(key) for key in (
-        "template", "deterministic_documents", "iterations", "final_review", "import", "process",
+        "iterations", "final_review", "import", "process",
     ) if key in output}
     previews = []
     for item in output.get("previews") if isinstance(output.get("previews"), list) else []:
@@ -1366,7 +1364,6 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "attention": bool(run.get("attention")),
         "created_at": run.get("created_at") or now,
         "updated_at": run.get("updated_at") or run.get("created_at") or now,
-        "policy_revision": str(run.get("model_policy_revision") or ""),
         "source": {"name": str(source.get("name") or ""), "size": int(source.get("size") or 0), "media_type": str(source.get("media_type") or ""), "origin": str(source.get("origin") or "")},
         "output": safe_output,
         "cost": (output.get("cost") or {}).get("reported_usd") if isinstance(output.get("cost"), dict) else None,
@@ -1388,8 +1385,8 @@ def ad_studio_architecture():
         except (OSError, subprocess.TimeoutExpired):
             validated = False
     return jsonify({
-        "available": available and validated, "source": "archify", "revision": ARCHIFY_REVISION,
-        "read_only": True, "validated": validated, "cli": str(ARCHIFY_CLI.name),
+        "available": available and validated, "source": "archify",
+        "read_only": True, "validated": validated,
         "artifact_url": "/api/ad-studio/architecture/artifact" if available and validated else None,
         "message": "Archify pinned CLI/spec/artifact validation is unavailable." if not (available and validated) else "Archify typed-IR artifact is validated and available.",
     })
@@ -1410,10 +1407,10 @@ def ad_studio_implementation_activity():
         with urllib.request.urlopen(req, timeout=2) as response:
             board = json.loads(response.read(2 * 1024 * 1024 + 1).decode("utf-8"))
     except Exception:
-        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail loopback observer is unavailable."}), 503
+        return jsonify({"available": False, "source": "agenttrail", "read_only": True, "message": "AgentTrail loopback observer is unavailable."}), 503
     if not isinstance(board, (dict, list)):
-        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail returned an unsupported board shape."}), 503
-    return jsonify({"available": True, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "board": board})
+        return jsonify({"available": False, "source": "agenttrail", "read_only": True, "message": "AgentTrail returned an unsupported board shape."}), 503
+    return jsonify({"available": True, "source": "agenttrail", "read_only": True, "board": board})
 
 
 def _ad_studio_source(attachment: dict) -> dict:
@@ -1532,34 +1529,6 @@ def ad_studio_run_events(run_id: str):
             yield b"event: disconnected\ndata: {}\n\n"
 
     return Response(stream_with_context(generate()), mimetype="text/event-stream", headers=_sse_headers())
-
-
-@app.get("/api/ad-studio/runs/<run_id>/download")
-def ad_studio_run_download(run_id: str):
-    url = hermes_base() + _tool_run_path(run_id, "/download")
-    headers = {"Accept": "application/zip, application/json"}
-    if HERMES_KEY:
-        headers["Authorization"] = f"Bearer {HERMES_KEY}"
-    try:
-        upstream = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30)
-    except Exception as error:
-        return _hermes_error(error)
-
-    def generate():
-        try:
-            while True:
-                chunk = upstream.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            upstream.close()
-
-    response_headers = {"Cache-Control": "private, no-store"}
-    disposition = upstream.headers.get("Content-Disposition")
-    if disposition:
-        response_headers["Content-Disposition"] = disposition
-    return Response(stream_with_context(generate()), mimetype=upstream.headers.get_content_type(), headers=response_headers)
 
 
 @app.get("/api/ad-studio/runs/<run_id>/artifacts/<name>")
