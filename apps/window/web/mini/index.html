@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Describe a practical file, template, report, or private page you need to make.">
+  <meta name="description" content="Tell Frank what is slowing your business down. Start a free project or get practical help automating the work.">
   <meta name="theme-color" content="#ffffff">
   <title>Frank — Tell me what you need</title>
   <link rel="stylesheet" href="/frank/style.css">
@@ -18,6 +18,12 @@
         <span class="brand-mark" aria-hidden="true"></span>
         <span>Frank</span>
       </button>
+      <nav class="landing-nav" aria-label="Page sections">
+        <a href="#free-projects">Free projects</a>
+        <a href="#business-automation">Automation</a>
+        <a href="#previous-solutions">Our work</a>
+        <a href="#questions">FAQ</a>
+      </nav>
       <button class="work-button" type="button" data-action="work" aria-haspopup="dialog" aria-busy="false">
         <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-3.1-6.8"/></svg>
         <span>Your work</span>
@@ -27,8 +33,9 @@
     <main id="conversation" class="conversation" tabindex="-1">
       <div class="thread" id="thread">
         <section class="welcome" id="welcome" aria-labelledby="welcome-title">
-          <h1 id="welcome-title">What could we make easier today?</h1>
-          <p class="welcome-copy">Describe it normally, or pick a useful starting point below.</p>
+          <p class="welcome-kicker"><span aria-hidden="true"></span>Free to use</p>
+          <h1 id="welcome-title">What could we solve for your business?</h1>
+          <p class="welcome-copy">Describe the problem normally. Frank will help turn it into something that works.</p>
         </section>
 
         <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversation"></div>
@@ -79,6 +86,100 @@
         </div>
       </div>
     </main>
+  </div>
+
+  <div class="marketing" id="marketing">
+    <section class="marketing-section free-projects" id="free-projects">
+      <div class="marketing-shell">
+        <p class="marketing-kicker">Free projects</p>
+        <div class="section-heading split-heading">
+          <h2>Start with one real problem. It’s free.</h2>
+          <p>Use Frank to solve a useful project without choosing software or learning technical language.</p>
+        </div>
+        <div class="plain-steps">
+          <article><span>01</span><h3>Tell us the problem</h3><p>Use plain English. Photos and documents are welcome.</p></article>
+          <article><span>02</span><h3>Frank builds and checks it</h3><p>Refine the result with the person doing the work.</p></article>
+          <article><span>03</span><h3>Use the result</h3><p>Open it, change it, download it and keep it.</p></article>
+        </div>
+        <a class="marketing-button" href="#conversation">Start a free project <span>→</span></a>
+      </div>
+    </section>
+
+    <section class="marketing-section automation-section" id="business-automation">
+      <div class="marketing-shell automation-grid">
+        <div class="automation-copy">
+          <p class="marketing-kicker">Need a human?</p>
+          <h2>We automate the work that slows your business down.</h2>
+          <p>We map the repetitive work, find the useful opportunities and build the automation with you.</p>
+          <dl class="service-list">
+            <div><dt>Video call</dt><dd>Work with us from anywhere in Australia.</dd></div>
+            <div><dt>Face to face in Perth</dt><dd>We can visit and see how the work really happens.</dd></div>
+          </dl>
+          <a class="marketing-button" href="#conversation">Tell Frank what is slowing you down <span>→</span></a>
+        </div>
+        <div class="workflow-board" aria-label="A detailed enquiry-to-job automation workflow">
+          <div class="workflow-head"><strong>Enquiry-to-job workflow</strong><span><i></i>Running with human checks</span></div>
+          <div class="workflow-metrics"><div><small>Handled this week</small><b>47 enquiries</b></div><div><small>Admin removed</small><b>6.4 hours</b></div><div><small>Needs attention</small><b>2 items</b></div></div>
+          <div class="workflow-columns">
+            <div class="workflow-column"><small>Work coming in</small><div><b>Website form</b><span>Commercial switchboard quote</span></div><div><b>Phone note</b><span>Voicemail transcribed at 8:42 am</span></div><div><b>Email</b><span>Plans and site photos attached</span></div></div>
+            <div class="workflow-column workflow-logic"><small>Frank workflow · v1.8</small><div><b>Capture the job</b><span>Customer, site and urgency</span></div><div class="active"><b>Apply business rules</b><span>Area, licence, margin and availability</span></div><div><b>Prepare the action</b><span>Quote, booking and customer update</span></div></div>
+            <div class="workflow-column"><small>Useful work out</small><div><b>Job #PER-2841</b><span>Site notes attached</span></div><div><b>Quote ready</b><span>A$3,740 incl. GST</span></div><div><b>Customer updated</b><span>Two visit windows sent</span></div></div>
+          </div>
+          <div class="workflow-audit"><span><b>Owner approval:</b> quotes above A$2,500</span><span><b>Checked:</b> today, 9:14 am AWST</span></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="technical-band">
+      <div class="marketing-shell">
+        <p class="marketing-kicker">The technical part is ours</p>
+        <h2>You run the business. We handle the AI.</h2>
+        <p>We take care of the boring technical work so you can focus on your business and earn more money.</p>
+        <div class="technical-list" aria-label="Technical work handled by Frank"><span>AI tools</span><span>Integrations</span><span>Hosting</span><span>Data flows</span><span>Testing</span><span>Security</span><span>Maintenance</span></div>
+      </div>
+    </section>
+
+    <section class="marketing-section solutions-section" id="previous-solutions">
+      <div class="marketing-shell">
+        <p class="marketing-kicker">Previous solutions</p>
+        <div class="section-heading split-heading"><h2>Built around real Australian work.</h2><p>Hospitality, wholesale and field-service tools shaped around the details Australian teams use every day.</p></div>
+        <div class="solution-cases">
+          <article class="solution-case">
+            <div class="solution-preview">
+              <div class="preview-top"><i></i>Hospitality operations · Fremantle, WA</div>
+              <div class="app-preview"><aside><b><i>V</i> Venue desk</b><span class="selected">Today</span><span>Reservations</span><span>Waitlist</span><span>Functions</span><span>Guest notes</span></aside><div class="app-content"><header><b>Saturday service</b><button>+ Booking</button></header><div class="preview-stats"><span><small>Booked covers</small><b>126</b></span><span><small>Deposits held</small><b>A$1,860</b></span><span><small>Needs a call</small><b>3 guests</b></span></div><div class="mini-panel"><b>Service timeline</b><p><time>8:00</time> Turner · 4 guests · Table 12 <em>Paid</em></p><p><time>9:30</time> Nguyen · 6 guests · Courtyard <em>Birthday</em></p><p><time>11:00</time> Rodriguez · Window <em>Access confirmed</em></p></div></div></div>
+            </div>
+            <div class="solution-copy"><span>01 / 03 · HOSPITALITY</span><h3>Bookings, deposits and service notes in one view</h3><dl><div><dt>Problem</dt><dd>Requests arrived through the website, Instagram and voicemail. Staff retyped them and carried dietary notes on paper.</dd></div><div><dt>Solution</dt><dd>One live Saturday board collects bookings, deposits, access needs and guest messages before the doors open.</dd></div></dl></div>
+          </article>
+
+          <article class="solution-case reverse">
+            <div class="solution-preview">
+              <div class="preview-top"><i></i>Foodservice ordering · Malaga, WA</div>
+              <div class="app-preview"><aside><b><i>S</i> Supply desk</b><span class="selected">Orders</span><span>Catalogue</span><span>Customers</span><span>Deliveries</span><span>Price lists</span></aside><div class="app-content"><header><b>Draft order · PO-1048</b><button>Send for approval</button></header><div class="preview-stats"><span><small>Cut-off</small><b>3:00 pm</b></span><span><small>Order lines</small><b>18</b></span><span><small>Subtotal</small><b>A$2,841.60</b></span></div><div class="mini-table"><b>Replenishment order</b><p><span>Oat milk · 1L × 12</span><em>28 units</em><strong>3 ctn</strong></p><p><span>Espresso blend · 1kg</span><em>12 bags</em><strong>12</strong></p><p><span>Compostable cup · 12oz</span><em>6 cartons</em><strong>6</strong></p></div></div></div>
+            </div>
+            <div class="solution-copy"><span>02 / 03 · FOODSERVICE</span><h3>Wholesale replenishment before the cut-off</h3><dl><div><dt>Problem</dt><dd>A multi-site café group counted stock on paper and rebuilt Monday’s supplier order in a spreadsheet.</dd></div><div><dt>Solution</dt><dd>Par levels, contract prices, GST and delivery cut-offs become one approval-ready purchase order.</dd></div></dl></div>
+          </article>
+
+          <article class="solution-case">
+            <div class="solution-preview">
+              <div class="preview-top"><i></i>Field-service operations · Perth metro</div>
+              <div class="app-preview"><aside><b><i>J</i> Job desk</b><span class="selected">Dispatch</span><span>Jobs</span><span>Quotes</span><span>Invoices</span><span>Customers</span></aside><div class="app-content"><header><b>Tuesday dispatch</b><button>+ New job</button></header><div class="preview-stats"><span><small>Jobs today</small><b>8</b></span><span><small>Quotes waiting</small><b>3</b></span><span><small>Scheduled value</small><b>A$12,480</b></span></div><div class="mini-panel"><b>Today’s run</b><p><time>8:00</time> RCD fault · Mount Lawley <em>On site</em></p><p><time>10:30</time> Switchboard · Osborne Park <em>Travelling</em></p><p><time>1:00</time> Lighting repair · Subiaco <em>Scheduled</em></p></div></div></div>
+            </div>
+            <div class="solution-copy"><span>03 / 03 · TRADES</span><h3>From an electrical enquiry to a scheduled job</h3><dl><div><dt>Problem</dt><dd>Calls, photos and handwritten measurements were re-entered into quoting, scheduling and invoicing tools.</dd></div><div><dt>Solution</dt><dd>The request is captured once, a GST-ready quote is drafted and the approved job is scheduled with every site note attached.</dd></div></dl></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="marketing-section faq-section" id="questions">
+      <div class="marketing-shell faq-grid">
+        <div><p class="marketing-kicker">FAQ</p><h2>Questions, answered plainly.</h2></div>
+        <div class="faq-list"><details><summary>Is Frank really free to use?<span>+</span></summary><p>Yes. Start with a real business project for free. If hands-on help changes the cost, we tell you before anything begins.</p></details><details><summary>What can Frank build?<span>+</span></summary><p>Websites, admin tools, follow-up systems, dashboards, automations, reusable guides and other practical business solutions.</p></details><details><summary>Do I need to understand AI or software?<span>+</span></summary><p>No. Explain the business problem normally. We handle the technical choices.</p></details><details><summary>Can you automate my existing processes?<span>+</span></summary><p>Yes. We can work through them over video, or visit your business in Perth.</p></details><details><summary>Do I own what gets built?<span>+</span></summary><p>Yes. Your working solution and source are yours to use, change and keep.</p></details></div>
+      </div>
+    </section>
+
+    <section class="marketing-final"><div class="marketing-shell"><p class="marketing-kicker">Ready when you are</p><h2>What should we solve first?</h2><a class="marketing-button" href="#conversation">Tell Frank <span>→</span></a></div></section>
+    <footer class="marketing-footer"><div class="marketing-shell"><span><i></i>Frank</span><p>Built for useful work in Perth and beyond.</p><a href="#conversation">Start free</a></div></footer>
   </div>
 
   <dialog class="work-drawer" id="work-drawer" aria-labelledby="work-title">

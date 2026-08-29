@@ -488,6 +488,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
   function hideWelcome() {
     welcome.hidden = true;
     solutionStarters.hidden = true;
+    document.body.classList.add("is-conversation-active");
   }
 
   function formatBytes(value) {
@@ -1380,6 +1381,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
     messages.replaceChildren();
     welcome.hidden = false;
     solutionStarters.hidden = false;
+    document.body.classList.remove("is-conversation-active");
     renderAttachmentList();
     resetComposerValue();
     setComposer({ placeholder: "Tell me what’s not working…", hint: "No tech words needed.", attachments: true });
@@ -1408,6 +1410,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
     messages.replaceChildren();
     welcome.hidden = true;
     solutionStarters.hidden = true;
+    document.body.classList.add("is-conversation-active");
     const saved = projects().find((item) => item.id === access.id);
     if (saved && saved.transcript.length) {
       state.transcript = cleanTranscript(saved.transcript);
@@ -1613,6 +1616,10 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
   }
 
   document.addEventListener("click", (event) => {
+    const landingAction = event.target.closest('.marketing a[href="#conversation"]');
+    if (landingAction) {
+      window.requestAnimationFrame(() => messageInput.focus());
+    }
     const solution = event.target.closest("[data-solution]");
     if (solution) {
       if (solution.dataset.solution === "leads") openWorkedGuide();
