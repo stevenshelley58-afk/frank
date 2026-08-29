@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -91,8 +92,10 @@ HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
 HINDSIGHT_URL = os.environ.get("HINDSIGHT_API_URL", "http://172.16.1.1:9178").rstrip("/")
 # Read-only implementation monitors; Hermes remains template-run truth.
-ARCHIFY_ARTIFACT = Path(os.environ.get("ARCHIFY_ARTIFACT", "/data/archify/ad-template-process.html")).resolve()
-AGENTTRAIL_BOARD = Path(os.environ.get("AGENTTRAIL_BOARD", "/vps/agenttrail/board.json")).resolve()
+ARCHIFY_ARTIFACT = Path(os.environ.get("ARCHIFY_ARTIFACT", str(Path(__file__).resolve().parent / "archify" / "ad-template-process.html"))).resolve()
+ARCHIFY_SPEC = Path(os.environ.get("ARCHIFY_SPEC", str(Path(__file__).resolve().parent / "archify" / "ad-template-process.json"))).resolve()
+ARCHIFY_CLI = Path(os.environ.get("ARCHIFY_CLI", str(Path(__file__).resolve().parent / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"))).resolve()
+AGENTTRAIL_URL = os.environ.get("AGENTTRAIL_URL", "http://127.0.0.1:5340").rstrip("/")
 ARCHIFY_REVISION = "b36d79fdbc3aec3728744341485a7e79f03c0071"
 AGENTTRAIL_REVISION = "5b97cf3cef548a0c668731e7f569fa36c14832f2"
 ROOTS = {
@@ -1306,7 +1309,7 @@ def _public_generation_text(value: object) -> str:
     return text
 
 
-def _public_ad_studio_generations(value: object) -> list[dict]:
+def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]:
     if not isinstance(value, list):
         return []
     public = []
@@ -1314,13 +1317,19 @@ def _public_ad_studio_generations(value: object) -> list[dict]:
         if not isinstance(raw, dict):
             continue
         comparison = raw.get("comparison") if isinstance(raw.get("comparison"), dict) else {}
+        iteration = int(_number_from(raw.get("iteration"), index) or index)
+        previews = []
+        candidate = raw.get("candidate") if isinstance(raw.get("candidate"), dict) else {}
+        for item in candidate.get("previews") if isinstance(candidate.get("previews"), list) else []:
+            if not isinstance(item, dict): continue
+            name = str(item.get("name") or "").strip()
+            if not re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", name): continue
+            previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}"})
         public.append({
-            "iteration": int(_number_from(raw.get("iteration"), index) or index),
+            "iteration": iteration,
             "decision": str(raw.get("decision") or "revise")[:20],
-            "comparison": {
-                "score": _number_from(comparison.get("score")),
-                "reason": _public_generation_text(comparison.get("reason")),
-            },
+            "comparison": {"score": _number_from(comparison.get("score")), "reason": _public_generation_text(comparison.get("reason"))},
+            "previews": previews,
         })
     return public
 
@@ -1347,7 +1356,7 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     if previews:
         safe_output["previews"] = previews
     if "iterations" in output:
-        safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"))
+        safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"), str(run.get("run_id") or run.get("id") or ""))
     return {
         "id": str(run.get("id") or run.get("run_id") or ""),
         "request_id": str(run.get("request_id") or ""),
@@ -1360,6 +1369,8 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "policy_revision": str(run.get("model_policy_revision") or ""),
         "source": {"name": str(source.get("name") or ""), "size": int(source.get("size") or 0), "media_type": str(source.get("media_type") or ""), "origin": str(source.get("origin") or "")},
         "output": safe_output,
+        "cost": (output.get("cost") or {}).get("reported_usd") if isinstance(output.get("cost"), dict) else None,
+        "usage": {key: output.get("usage", {}).get(key) for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd") if isinstance(output.get("usage"), dict) and output.get("usage", {}).get(key) is not None},
         "title": title or str(run.get("title") or payload.get("job_name") or "Ad template"),
         "project_id": project_id or str(scope.get("project_id") or payload.get("project_id") or ""),
         **({"error": str(run.get("error"))[:1200]} if run.get("error") else {}),
@@ -1369,13 +1380,18 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
 @app.get("/api/ad-studio/architecture")
 def ad_studio_architecture():
     available = ARCHIFY_ARTIFACT.is_file()
+    validated = False
+    if ARCHIFY_CLI.is_file() and ARCHIFY_SPEC.is_file() and shutil.which("node"):
+        try:
+            result = subprocess.run(["node", str(ARCHIFY_CLI), "validate", "architecture", str(ARCHIFY_SPEC), "--json"], capture_output=True, text=True, timeout=8, check=False)
+            validated = result.returncode == 0 and '"ok": true' in result.stdout.lower()
+        except (OSError, subprocess.TimeoutExpired):
+            validated = False
     return jsonify({
-        "available": available,
-        "source": "archify",
-        "revision": ARCHIFY_REVISION,
-        "read_only": True,
-        "artifact_url": "/api/ad-studio/architecture/artifact" if available else None,
-        "message": "Archify typed-IR artifact is not installed on this host yet." if not available else "Archify typed-IR artifact is available.",
+        "available": available and validated, "source": "archify", "revision": ARCHIFY_REVISION,
+        "read_only": True, "validated": validated, "cli": str(ARCHIFY_CLI.name),
+        "artifact_url": "/api/ad-studio/architecture/artifact" if available and validated else None,
+        "message": "Archify pinned CLI/spec/artifact validation is unavailable." if not (available and validated) else "Archify typed-IR artifact is validated and available.",
     })
 
 
@@ -1388,16 +1404,15 @@ def ad_studio_architecture_artifact():
 
 @app.get("/api/ad-studio/implementation-activity")
 def ad_studio_implementation_activity():
-    if not AGENTTRAIL_BOARD.is_file():
-        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail board is not available on this host."})
+    # AgentTrail is a loopback observer; Frank only proxies its read endpoint.
     try:
-        if AGENTTRAIL_BOARD.stat().st_size > 2 * 1024 * 1024:
-            abort(413, "AgentTrail board is too large")
-        board = json.loads(AGENTTRAIL_BOARD.read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail board is unavailable or invalid."}), 503
+        req = urllib.request.Request(f"{AGENTTRAIL_URL}/summary", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=2) as response:
+            board = json.loads(response.read(2 * 1024 * 1024 + 1).decode("utf-8"))
+    except Exception:
+        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail loopback observer is unavailable."}), 503
     if not isinstance(board, (dict, list)):
-        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail board has an unsupported shape."}), 503
+        return jsonify({"available": False, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "message": "AgentTrail returned an unsupported board shape."}), 503
     return jsonify({"available": True, "source": "agenttrail", "revision": AGENTTRAIL_REVISION, "read_only": True, "board": board})
 
 
@@ -1422,7 +1437,7 @@ def _tool_run_path(run_id: str, suffix: str = "") -> str:
 
 @app.post("/api/ad-studio/runs")
 def ad_studio_run_create():
-    """Start the canonical Ad Studio work as a detached Hermes run."""
+    """Start exactly one canonical Feed + Story run in Hermes."""
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict):
         abort(400, "request body must be an object")
@@ -1431,70 +1446,39 @@ def ad_studio_run_create():
     if not project:
         abort(404, "project not found")
     raw_attachments = body.get("attachments")
-    if not isinstance(raw_attachments, list) or not raw_attachments or len(raw_attachments) > 100:
-        abort(400, "choose between 1 and 100 source images")
+    if not isinstance(raw_attachments, list) or len(raw_attachments) != 1:
+        abort(400, "choose exactly one source image")
     attachments = _clean_atts(raw_attachments)
-    if len(attachments) != len(raw_attachments):
-        abort(400, "one or more source images were not accepted")
-    if any(not item["type"].startswith("image/") for item in attachments):
-        abort(400, "Ad Studio accepts image sources only")
-
-    raw_placements = body.get("placements")
-    placements = [str(item).strip().lower() for item in raw_placements] if isinstance(raw_placements, list) else []
-    if not placements or any(item not in AD_STUDIO_PLACEMENTS for item in placements):
-        abort(400, "choose one or more supported placements")
-    placements = list(dict.fromkeys(placements))
-    name = _clean_project_text(body.get("name"), 60) or (
-        re.sub(r"\.[^.]+$", "", attachments[0]["name"])
-        if len(attachments) == 1 else f"{len(attachments)} source images"
-    )
+    if len(attachments) != 1 or not attachments[0]["type"].startswith("image/"):
+        abort(400, "Ad Studio accepts exactly one image source")
+    attachment = attachments[0]
+    name = _clean_project_text(body.get("name"), 60) or re.sub(r"\.[^.]+$", "", attachment["name"])
     brief = _clean_project_text(body.get("brief"), 800)
-    policy_revision = str(body.get("policy_revision") or "").strip()
-    policy_override = body.get("policy_override") if isinstance(body.get("policy_override"), dict) else None
-    batch_id = f"batch_{secrets.token_hex(16)}"
-    runs = []
+    command_payload = {
+        "job_name": name, "brief": brief, "placements": ["feed", "story"],
+        "sources": [_ad_studio_source(attachment)], "project_context": _project_context(project),
+    }
+    request_payload = {
+        "schema": "schema://hermes.tool-run-command/v1",
+        "request_id": f"req_{secrets.token_hex(16)}",
+        "tool_id": "ad-template-generator", "action": "build-template",
+        "scope": {"project_id": project_id}, "payload": command_payload,
+        "idempotency_key": f"ad-template:{secrets.token_hex(16)}",
+    }
     try:
-        for index, attachment in enumerate(attachments):
-            child_name = name if len(attachments) == 1 else f"{name} · {index + 1} of {len(attachments)}"
-            command_payload = {
-                "batch_id": batch_id,
-                "job_name": child_name,
-                "brief": brief,
-                "placements": placements,
-                "sources": [_ad_studio_source(attachment)],
-                "project_context": _project_context(project),
-            }
-            request_payload = {
-                "schema": "schema://hermes.tool-run-command/v1",
-                "request_id": f"req_{secrets.token_hex(16)}",
-                "tool_id": "ad-template-generator",
-                "action": "build-template",
-                "scope": {"project_id": project_id},
-                "payload": command_payload,
-                "idempotency_key": f"{batch_id}:{index}",
-            }
-            if policy_revision:
-                try:
-                    request_payload["model_policy_revision"] = int(policy_revision)
-                except ValueError:
-                    abort(400, "invalid model policy revision")
-            if policy_override:
-                request_payload["model_policy_override"] = policy_override
-            data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=15)
-            run_data = data.get("run") if isinstance(data.get("run"), dict) else data
-            run_id = str(run_data.get("id") or run_data.get("run_id") or "")
-            if not AD_STUDIO_RUN_ID.fullmatch(run_id):
-                return jsonify({"error": "Hermes did not return a valid Tool run id"}), 502
-            runs.append(_public_ad_studio_run(run_data, title=f"Ad Studio · {child_name}", project_id=project_id))
-            staging_target = _upload_target(attachment["id"])
-            if staging_target is not None:
-                try:
-                    staging_target.unlink(missing_ok=True)
-                except OSError:
-                    pass
+        data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=15)
+        run_data = data.get("run") if isinstance(data.get("run"), dict) else data
+        run_id = str(run_data.get("id") or run_data.get("run_id") or "")
+        if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+            return jsonify({"error": "Hermes did not return a valid Tool run id"}), 502
+        result = _public_ad_studio_run(run_data, title=f"Ad Studio · {name}", project_id=project_id)
+        staging_target = _upload_target(attachment["id"])
+        if staging_target is not None:
+            try: staging_target.unlink(missing_ok=True)
+            except OSError: pass
+        return jsonify({"ok": True, "run": result, "runs": [result]}), 202
     except Exception as error:
         return _hermes_error(error)
-    return jsonify({"ok": True, "batch_id": batch_id, "run": runs[0], "runs": runs}), 202
 
 
 @app.get("/api/ad-studio/runs")

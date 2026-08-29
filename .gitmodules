@@ -1,0 +1,6 @@
+[submodule "apps/window/vendor/archify"]
+	path = apps/window/vendor/archify
+	url = https://github.com/tt-a1i/archify.git
+[submodule "apps/window/vendor/agenttrail"]
+	path = apps/window/vendor/agenttrail
+	url = https://github.com/sodiumsun/agenttrail.git

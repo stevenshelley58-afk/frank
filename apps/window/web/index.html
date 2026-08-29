@@ -193,8 +193,6 @@
                 <label>Project<select id="ad-run-project" required><option value="">Loading projects…</option></select></label>
                 <label>Job name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
               </div>
-              <input type="hidden" id="ad-run-policy-revision">
-              <fieldset class="ad-fieldset"><legend>Placements</legend><label><input type="checkbox" name="ad-placement" value="square" checked> Square</label><label><input type="checkbox" name="ad-placement" value="portrait"> Portrait</label><label><input type="checkbox" name="ad-placement" value="story"> Story</label></fieldset>
               <label>Brief <span>optional</span><textarea id="ad-run-brief" maxlength="800" rows="4" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea></label>
               <div class="ad-submit-row"><p id="ad-run-status" role="status">Hermes will run this as a background job. It will not open or interrupt a Hub chat.</p><button type="submit" class="ad-primary" id="ad-run-submit">Run job</button></div>
             </form>
@@ -223,17 +221,13 @@
             </section>
             <section class="ad-system-map" aria-label="Frank generation architecture">
               <div><strong>Frank</strong><span>Collects the brief and shows the trace.</span></div><i aria-hidden="true"></i>
-              <div><strong>Hermes</strong><span>Owns the durable run, policy and events.</span></div><i aria-hidden="true"></i>
+              <div><strong>Hermes</strong><span>Owns the durable run and events.</span></div><i aria-hidden="true"></i>
               <div><strong>Template Builder</strong><span>Creates editable Feed and native Story layers.</span></div><i aria-hidden="true"></i>
               <div><strong>Blockwise</strong><span>Imports the finished template into Blockwise.</span></div>
             </section>
             <section class="ad-iteration-law" aria-label="Quality iteration rule">
               <div><strong>Render</strong><span>Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Final review</strong><span>Two independent reviews at completion</span></div><b aria-hidden="true">→</b><div><strong>Revise</strong><span>Record what changed</span></div><b aria-hidden="true">↻</b><div><strong>Accept</strong><span>Both scores must reach 9.5</span></div>
             </section>
-            <details class="ad-oss-note">
-              <summary>Why the trace is organised this way</summary>
-              <p><a href="https://github.com/tt-a1i/archify" target="_blank" rel="noreferrer">Archify</a> inspired the fixed, truthful lifecycle. <a href="https://github.com/sodiumsun/agenttrail" target="_blank" rel="noreferrer">AgentTrail</a> inspired the split between the declared plan and observed activity. Frank keeps Hermes as the only runtime and durable event store.</p>
-            </details>
             <div class="ad-pipeline-layout">
               <section class="ad-pipeline-canvas"><div class="ad-declared-label"><strong>Declared lifecycle</strong><span>The route Frank promises before a run begins.</span></div><div id="ad-pipeline-graph"></div></section>
               <aside class="ad-stage-inspector">
@@ -243,38 +237,18 @@
                   <section><span>Recorded result</span><div id="ad-stage-output" class="ad-evidence-empty">No safe result has been recorded yet.</div></section>
                 </div>
                 <div class="ad-stage-events" id="ad-stage-events"><p>Select a run and stage to inspect recorded Hermes events.</p></div>
-                <details class="ad-trace-state"><summary>Raw trace data</summary><div class="ad-trace-actions"><button type="button" class="ad-text-button" id="ad-copy-trace">Copy safe trace</button></div><pre id="ad-full-trace">Select a run to replay its correlated, redacted events.</pre></details>
               </aside>
             </div>
           </div>
 
-          <div class="ad-studio-panel" id="ad-panel-models" role="tabpanel" aria-labelledby="ad-tab-models" data-ad-panel="models" hidden aria-hidden="true">
-            <div class="ad-models-head"><div><h3>Model routing</h3><p>Models can change; the sole process and quality threshold remain fixed.</p></div><label>Project<select id="ad-model-project"></select></label></div>
-            <div class="ad-model-preset" role="group" aria-label="Routing preset"><button type="button" data-ad-preset="quality-first">Quality first</button><button type="button" class="is-on" data-ad-preset="balanced">Balanced</button><button type="button" data-ad-preset="cheapest-compatible">Cheapest compatible</button></div>
-            <form id="ad-model-form">
-              <div class="ad-model-stage-list" id="ad-model-stage-list" aria-live="polite"></div>
-              <div class="ad-submit-row"><p id="ad-model-status" role="status">Saving creates a new immutable Hermes policy revision for future runs.</p><button type="submit" class="ad-primary">Save new revision</button></div>
-            </form>
-          </div>
         </div>
       </section>
 
       <dialog class="ad-source-dialog" id="ad-source-dialog" aria-labelledby="ad-source-dialog-title">
         <div class="ad-source-dialog-shell">
-          <header>
-            <div><h2 id="ad-source-dialog-title">Choose from device or VPS</h2></div>
-            <button type="button" class="ad-source-close" id="ad-source-close" aria-label="Close">&times;</button>
-          </header>
-          <section class="ad-source-local">
-            <div><strong>This device</strong><span>Use your computer or phone's normal file search.</span></div>
-            <button type="button" class="ad-source-device" id="ad-source-device">Browse this device</button>
-          </section>
-          <section class="ad-source-vps" aria-labelledby="ad-source-vps-title">
-            <div class="ad-source-vps-head"><div><strong id="ad-source-vps-title">VPS</strong><span>Search all approved read-only image folders, or browse below.</span></div><input id="ad-source-vps-search" type="search" placeholder="Search VPS images" aria-label="Search VPS images"></div>
-            <nav class="ad-source-crumbs" id="ad-source-crumbs" aria-label="VPS folder"></nav>
-            <div class="ad-source-vps-list" id="ad-source-vps-list" aria-live="polite"></div>
-          </section>
-          <footer><span id="ad-source-vps-status">No VPS images selected</span><div><button type="button" class="ad-source-cancel" id="ad-source-cancel">Cancel</button><button type="button" class="ad-primary" id="ad-source-add-vps" disabled>Add selected</button></div></footer>
+          <header><div><h2 id="ad-source-dialog-title">Choose one source image</h2></div><button type="button" class="ad-source-close" id="ad-source-close" aria-label="Close">&times;</button></header>
+          <section class="ad-source-local"><div><strong>This device</strong><span>Select the source image to turn into Feed + Story.</span></div><button type="button" class="ad-source-device" id="ad-source-device">Choose image</button></section>
+          <footer><button type="button" class="ad-source-cancel" id="ad-source-cancel">Cancel</button></footer>
         </div>
       </dialog>
       <section class="view" data-view="entity-home">

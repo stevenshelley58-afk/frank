@@ -12,19 +12,10 @@ let selectedStage = null;
 let graphHandle = null;
 let selectedFiles = [];
 let sourcePreviewExpanded = false;
-let vpsPath = "";
-let vpsEntries = [];
-const selectedVpsFiles = new Map();
 const localRunInputs = new Map();
 const previewUrls = new Set();
 let runEvents = [];
 let eventStream = null;
-let activePolicy = null;
-let modelCatalog = [];
-let searchTimer = null;
-let modelEditMode = "default";
-let remainingRunId = "";
-let pendingPolicyOverride = null;
 const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"]);
 
 const clean = (value) => String(value || "").trim();
@@ -62,11 +53,10 @@ function activate(tab) {
   });
   if (tab === "runs") void refreshRunsSafe();
   if (tab === "pipeline") { void refreshRunsSafe(); mountPipeline(); }
-  if (tab === "models") void loadModelSettings();
 }
 
 function fillProjects() {
-  for (const select of [$("#ad-run-project"), $("#ad-pipeline-project"), $("#ad-model-project")]) {
+  for (const select of [$("#ad-run-project"), $("#ad-pipeline-project")]) {
     if (!select) continue;
     const previous = select.value;
     select.replaceChildren();
@@ -89,8 +79,8 @@ function renderSourcePreview() {
   host.replaceChildren();
   host.classList.toggle("has-items", selectedFiles.length > 0);
   $("#ad-run-mode").textContent = selectedFiles.length ? "Source selected" : "Awaiting source";
-  if (selectedFiles.length <= 8) sourcePreviewExpanded = false;
-  const visibleSources = sourcePreviewExpanded ? selectedFiles : selectedFiles.slice(0, 8);
+  sourcePreviewExpanded = false;
+  const visibleSources = selectedFiles.slice(0, 1);
   visibleSources.forEach((source) => {
     const item = document.createElement("div");
     item.className = "ad-source-item";
@@ -114,29 +104,7 @@ function renderSourcePreview() {
     item.append(image, label, remove);
     host.append(item);
   });
-  if (selectedFiles.length > 8) {
-    const controls = document.createElement("div");
-    controls.className = "ad-source-summary";
-    const count = document.createElement("span");
-    count.textContent = sourcePreviewExpanded ? `${selectedFiles.length} sources shown` : `${selectedFiles.length - 8} more sources selected`;
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "ad-text-button";
-    toggle.textContent = sourcePreviewExpanded ? "Show first 8" : "Show all";
-    toggle.addEventListener("click", () => { sourcePreviewExpanded = !sourcePreviewExpanded; renderSourcePreview(); });
-    const clear = document.createElement("button");
-    clear.type = "button";
-    clear.className = "ad-text-button";
-    clear.textContent = "Remove all";
-    clear.addEventListener("click", () => {
-      selectedFiles.filter((source) => source.kind === "local").forEach((source) => { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); });
-      selectedFiles = [];
-      sourcePreviewExpanded = false;
-      renderSourcePreview();
-    });
-    controls.append(count, toggle, clear);
-    host.append(controls);
-  }
+
 }
 
 function addLocalFiles(files) {
@@ -155,146 +123,15 @@ function addLocalFiles(files) {
     selectedFiles.push(source);
     existing.add(source.key);
   }
-  selectedFiles = selectedFiles.slice(0, 100);
+  const keep = additions.find((source) => !existing.has(source.key)) || additions[0];
+  for (const source of additions) {
+    if (source !== keep) { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); }
+  }
+  if (keep) {
+    selectedFiles.filter((source) => source.kind === "local").forEach((source) => { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); });
+    selectedFiles = [keep];
+  }
   renderSourcePreview();
-}
-
-function vpsPreviewUrl(entry) {
-  return `/api/file?root=vps&path=${encodeURIComponent(entry.path)}&raw=1`;
-}
-
-function renderVpsCrumbs() {
-  const host = $("#ad-source-crumbs");
-  host.replaceChildren();
-  const root = document.createElement("button");
-  root.type = "button";
-  root.textContent = "VPS";
-  root.addEventListener("click", () => void loadVpsFolder(""));
-  host.append(root);
-  let accumulated = "";
-  for (const segment of vpsPath.split("/").filter(Boolean)) {
-    accumulated = accumulated ? `${accumulated}/${segment}` : segment;
-    const path = accumulated;
-    const separator = document.createElement("span");
-    separator.textContent = "›";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = segment;
-    button.addEventListener("click", () => void loadVpsFolder(path));
-    host.append(separator, button);
-  }
-}
-
-function updateVpsSelectionStatus() {
-  const count = selectedVpsFiles.size;
-  $("#ad-source-vps-status").textContent = count ? `${count} VPS image${count === 1 ? "" : "s"} selected` : "No VPS images selected";
-  $("#ad-source-add-vps").disabled = !count;
-}
-
-function renderVpsEntries() {
-  const host = $("#ad-source-vps-list");
-  const query = clean($("#ad-source-vps-search").value).toLowerCase();
-  const entries = vpsEntries;
-  host.replaceChildren();
-  if (!entries.length) {
-    const empty = document.createElement("div");
-    empty.className = "ad-source-vps-empty";
-    empty.textContent = query ? "No matching images in the approved VPS folders." : "No folders or images in this folder.";
-    host.append(empty);
-    return;
-  }
-  for (const entry of entries) {
-    const row = document.createElement(entry.dir ? "button" : "label");
-    row.className = "ad-source-vps-row";
-    if (entry.dir) row.type = "button";
-    const icon = document.createElement("span");
-    icon.className = "ad-source-icon";
-    icon.textContent = entry.dir ? "▰" : "▧";
-    const name = document.createElement("strong");
-    name.textContent = entry.name;
-    if (entry.dir) {
-      const hint = document.createElement("small");
-      hint.textContent = "Open";
-      row.append(icon, name, hint);
-      row.addEventListener("click", () => void loadVpsFolder(entry.path));
-    } else {
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = selectedVpsFiles.has(entry.path);
-      checkbox.setAttribute("aria-label", `Select ${entry.name}`);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selectedVpsFiles.set(entry.path, entry);
-        else selectedVpsFiles.delete(entry.path);
-        updateVpsSelectionStatus();
-      });
-      row.append(icon, name);
-      if (query) {
-        const location = document.createElement("small");
-        const suffix = `/${entry.name}`;
-        location.textContent = String(entry.path || "").endsWith(suffix)
-          ? String(entry.path).slice(0, -suffix.length)
-          : String(entry.path || "VPS");
-        row.append(location);
-      }
-      row.append(checkbox);
-    }
-    host.append(row);
-  }
-}
-
-async function loadVpsFolder(path) {
-  vpsPath = path;
-  $("#ad-source-vps-search").value = "";
-  $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">Loading VPS…</div>';
-  renderVpsCrumbs();
-  try {
-    const response = await fetch(`/api/tree?root=vps&path=${encodeURIComponent(path)}`);
-    if (!response.ok) throw new Error("VPS folder unavailable");
-    const data = await response.json();
-    vpsEntries = (data.entries || []).filter((entry) => entry.dir || IMAGE_EXTENSIONS.has(String(entry.ext || "").toLowerCase()));
-    renderVpsEntries();
-  } catch {
-    vpsEntries = [];
-    $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">Frank could not read this VPS folder.</div>';
-  }
-}
-
-async function searchVpsImages(query) {
-  if (query.length < 2) {
-    await loadVpsFolder(vpsPath);
-    return;
-  }
-  $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">Searching the VPS…</div>';
-  try {
-    const response = await fetch(`/api/tree/search?root=vps&q=${encodeURIComponent(query)}&limit=100`);
-    if (!response.ok) throw new Error("search unavailable");
-    const data = await response.json();
-    vpsEntries = Array.isArray(data.entries) ? data.entries : [];
-    renderVpsEntries();
-  } catch {
-    $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">VPS image search is unavailable.</div>';
-  }
-}
-
-function addSelectedVpsFiles() {
-  const existing = new Set(selectedFiles.map((source) => source.key));
-  for (const entry of selectedVpsFiles.values()) {
-    const key = `vps:${entry.path}`;
-    if (existing.has(key)) continue;
-    selectedFiles.push({ kind: "vps", key, root: "vps", path: entry.path, name: entry.name, size: entry.size, type: `image/${entry.ext || "unknown"}`, previewUrl: vpsPreviewUrl(entry) });
-    existing.add(key);
-  }
-  selectedFiles = selectedFiles.slice(0, 100);
-  selectedVpsFiles.clear();
-  updateVpsSelectionStatus();
-  renderSourcePreview();
-  $("#ad-source-dialog").close();
-}
-
-function openSourceDialog() {
-  const dialog = $("#ad-source-dialog");
-  if (!dialog.open) dialog.showModal();
-  void loadVpsFolder(vpsPath);
 }
 
 function renderRunOptions() {
@@ -462,7 +299,20 @@ function renderGenerationHistory(run, parent) {
     const scores = document.createElement("div"); scores.className = "ad-generation-scores";
     scores.innerHTML = "<span>Comparator <b>" + formatScore(comparison.score) + "</b></span>";
     const note = document.createElement("p"); note.textContent = comparison.reason || "No comparator note was recorded.";
-    row.append(title, scores, note); list.append(row);
+    row.append(title, scores, note);
+    const previews = Array.isArray(record.previews) ? record.previews : [];
+    if (previews.length) {
+      const gallery = document.createElement("div"); gallery.className = "ad-preview-grid ad-iteration-previews";
+      previews.forEach((preview) => {
+        if (!preview?.url) return;
+        const figure = document.createElement("figure");
+        const image = document.createElement("img"); image.src = preview.url; image.alt = `Iteration ${record.iteration} ${preview.placement || "template"} preview`;
+        const caption = document.createElement("figcaption"); caption.textContent = (preview.placement || "template").replace(/^./, (char) => char.toUpperCase());
+        figure.append(image, caption); gallery.append(figure);
+      });
+      if (gallery.children.length) row.append(gallery);
+    }
+    list.append(row);
   });
   if (finalReview && Array.isArray(finalReview.reviewers) && finalReview.reviewers.length) {
     const review = document.createElement("p"); review.className = "ad-review-summary";
@@ -586,9 +436,6 @@ function safeEventSummary(event) {
 }
 
 
-function safeEventForTrace(event) {
-  return { sequence: event.sequence, timestamp: event.timestamp, kind: event.kind, status: event.status, node_id: event.node_id, trace_id: event.trace_id, data: safeEventData(event) };
-}
 
 function renderEventViews() {
   const host = $("#ad-run-events");
@@ -610,6 +457,27 @@ function renderEventViews() {
   updateEvidence();
 }
 
+function mergeIterationEvent(run, item) {
+  const data = item?.data || {};
+  const iteration = firstNumber(data.iteration);
+  if (!iteration) return;
+  run.output = run.output && typeof run.output === "object" ? run.output : {};
+  const records = Array.isArray(run.output.iterations) ? [...run.output.iterations] : [];
+  let record = records.find((candidate) => Number(candidate?.iteration) === iteration);
+  if (!record) { record = { iteration, decision: "revise", comparison: {}, previews: [] }; records.push(record); }
+  if (item.kind === "iteration.rendered") {
+    record.previews = (Array.isArray(data.previews) ? data.previews : []).map((preview) => ({
+      ...preview,
+      url: `/api/ad-studio/runs/${encodeURIComponent(run.id)}/artifacts/${encodeURIComponent(preview.name || "")}`,
+    }));
+  }
+  if (item.kind === "iteration.compared") {
+    record.comparison = { score: firstNumber(data.score), reason: String(data.reason || "") };
+    record.decision = data.decision || (Number(data.score) >= 9.5 ? "accepted" : "revise");
+  }
+  run.output.iterations = records.sort((a, b) => Number(a.iteration) - Number(b.iteration));
+}
+
 function connectRunEvents(run) {
   eventStream?.close();
   runEvents = [];
@@ -620,6 +488,7 @@ function connectRunEvents(run) {
     try {
       const item = JSON.parse(event.data);
       if (!runEvents.some((existing) => existing.sequence === item.sequence)) runEvents.push(item);
+      if (["iteration.rendered", "iteration.compared"].includes(item.kind)) mergeIterationEvent(run, item);
       if (item.kind === "stage.started" && item.node_id) {
         run.stage = item.node_id;
         run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(item.node_id)) / PIPELINE_STAGES.length);
@@ -740,13 +609,7 @@ function setupRunForm() {
   $("#ad-source-device").addEventListener("click", () => input.click());
   $("#ad-source-close").addEventListener("click", () => $("#ad-source-dialog").close());
   $("#ad-source-cancel").addEventListener("click", () => $("#ad-source-dialog").close());
-  $("#ad-source-add-vps").addEventListener("click", addSelectedVpsFiles);
-  $("#ad-source-vps-search").addEventListener("input", (event) => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => void searchVpsImages(clean(event.target.value).toLowerCase()), 250);
-  });
-  $("#ad-run-project").addEventListener("change", () => { void loadActivePolicy(); void refreshRunsSafe(); });
-  $("#ad-run-models")?.addEventListener("click", () => { modelEditMode = "one-run"; remainingRunId = ""; activate("models"); });
+  $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); });
   for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.add("is-drag"); });
   for (const type of ["dragleave", "drop"]) drop.addEventListener(type, (event) => {
     event.preventDefault();
@@ -759,19 +622,17 @@ function setupRunForm() {
     const submit = $("#ad-run-submit");
     status.classList.remove("is-error");
     if (!selectedFiles.length) {
-      status.textContent = "Choose at least one source image.";
+      status.textContent = "Choose one source image.";
       status.classList.add("is-error");
       return;
     }
     submit.disabled = true;
     submit.textContent = "Starting…";
-    status.textContent = "Uploading sources and starting Hermes…";
+    status.textContent = "Uploading source and starting Hermes…";
     try {
-      const placements = $$('input[name="ad-placement"]:checked').map((item) => item.value);
       const result = await requestEvent("frank:ad-studio-run", {
-        sources: selectedFiles.slice(), projectId: $("#ad-run-project").value,
-        name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value), placements,
-        policyRevision: clean($("#ad-run-policy-revision").value), policyOverride: pendingPolicyOverride,
+        sources: selectedFiles.slice(0, 1), projectId: $("#ad-run-project").value,
+        name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value),
       });
       const run = result.run;
       const first = selectedFiles[0];
@@ -795,186 +656,7 @@ function setupRunForm() {
 function setupPipelineForm() {
   $("#ad-pipeline-project").addEventListener("change", mountPipeline);
   $("#ad-pipeline-run").addEventListener("change", (event) => { selectedRunId = event.target.value; if (selectedRunId) void selectRun(selectedRunId); else updateEvidence(); });
-  $("#ad-copy-trace").addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    const payload = JSON.stringify(runEvents.map(safeEventForTrace), null, 2);
-    try {
-      await navigator.clipboard.writeText(payload);
-      button.textContent = "Copied";
-    } catch {
-      button.textContent = "Copy unavailable";
-    }
-    setTimeout(() => { button.textContent = "Copy safe trace"; }, 1800);
-  });
   $$('[data-ad-open-pipeline]').forEach((button) => button.addEventListener("click", () => activate("pipeline")));
-}
-
-function normalizeModels(payload) {
-  const inventory = payload?.data || payload?.models || payload?.options || [];
-  const providers = Array.isArray(payload?.providers) ? payload.providers : [];
-  const capabilities = Array.isArray(payload?.ad_studio_capabilities) ? payload.ad_studio_capabilities : [];
-  const providerModels = providers.flatMap((provider) => {
-    const models = Array.isArray(provider?.models) ? provider.models : [];
-    return models.map((model) => ({
-      model: typeof model === "string" ? model : (model?.model || model?.id || model?.name),
-      provider: provider.slug || provider.id || provider.name,
-      available: provider.authenticated ?? provider.configured ?? false,
-      capabilities: typeof model === "object" ? (model.capabilities || []) : [],
-    }));
-  });
-  const source = [...providerModels, ...(Array.isArray(inventory) ? inventory : []), ...capabilities];
-  const normalized = source.map((item) => ({
-    model: clean(item.model || item.id || item.value || item.name),
-    provider: clean(item.provider || item.provider_id || item.gateway || "custom"),
-    available: item.available ?? item.configured ?? null,
-    capabilities: item.capabilities || item.input_modalities || [],
-    price: item.estimated_price || item.price || item.pricing || null,
-    checkedAt: item.price_checked_at || item.pricing_checked_at || "",
-    pricingStale: item.pricing_stale === true,
-  })).filter((item) => item.model);
-  const merged = new Map();
-  for (const item of normalized) {
-    const key = `${item.provider}/${item.model}`;
-    const previous = merged.get(key) || {};
-    merged.set(key, { ...previous, ...item, available: item.available ?? previous.available ?? null, capabilities: item.capabilities?.length ? item.capabilities : (previous.capabilities || []) });
-  }
-  return [...merged.values()];
-}
-
-function modelReadiness(candidate) {
-  const match = modelCatalog.find((item) => item.model === candidate.model && (!candidate.provider || item.provider === candidate.provider));
-  if (!match) return "Custom model · compatibility checked when saved";
-  const price = match.price ? ` · price ${typeof match.price === "string" ? match.price : "available"}` : " · price unknown";
-  const readiness = match.available === true ? "Credential ready" : match.available === false ? "Credential not ready" : "Credential readiness unknown";
-  const timestamp = match.checkedAt ? ` · ${match.pricingStale ? "price last checked" : "checked"} ${match.checkedAt}` : "";
-  return `${readiness}${price}${timestamp}`;
-}
-
-function renderActivePolicySummary() {
-  const host = $("#ad-run-policy-summary");
-  if (!host) return;
-  const strong = host.querySelector("strong");
-  if (!activePolicy) { strong.textContent = "Policy unavailable"; return; }
-  const policy = activePolicy.policy || {};
-  const ceiling = Object.values(policy.stages || {}).reduce((sum, stage) => sum + Number(stage.max_cost_usd || 0), 0);
-  strong.textContent = `${policy.name || policy.preset || "Ad Studio policy"} · revision ${activePolicy.revision} · cost ceiling $${ceiling.toFixed(2)}`;
-  $("#ad-run-policy-revision").value = activePolicy.revision || "";
-}
-
-async function loadActivePolicy() {
-  const projectId = clean($("#ad-run-project")?.value || $("#ad-model-project")?.value);
-  if (!projectId) return;
-  const response = await fetch(`/api/ad-studio/model-policies?project_id=${encodeURIComponent(projectId)}`);
-  if (!response.ok) throw new Error("Model policy is unavailable");
-  const data = await response.json();
-  const records = Array.isArray(data.data) ? data.data : Array.isArray(data.policies) ? data.policies : [];
-  activePolicy = records.find((item) => item.is_default) || records[0] || null;
-  renderActivePolicySummary();
-}
-
-function renderModelSettings() {
-  const host = $("#ad-model-stage-list");
-  host.replaceChildren();
-  const stages = activePolicy?.policy?.stages || {};
-  const labels = { analyse: "Analyse and vision extraction", "masked-text-cleanup": "Masked text cleanup", "story-extend": "Optional story-margin extension", "visual-qa": "Visual QA and critic" };
-  for (const [stageId, stage] of Object.entries(stages)) {
-    const card = document.createElement("section");
-    card.className = "ad-model-stage"; card.dataset.stage = stageId; card.dataset.capability = stage.capability;
-    const fallbacks = (stage.fallbacks || []).map((item) => `${item.provider}/${item.model}`).join("\n");
-    card.innerHTML = `
-      <header><div><span>${stage.optional ? "Optional AI stage" : "AI stage"}</span><h4>${escapeHtml(labels[stageId] || stageId)}</h4></div><code>${escapeHtml(stage.capability)}</code></header>
-      <div class="ad-model-grid">
-        <label>Provider<input data-field="provider" value="${escapeHtml(stage.primary?.provider || "")}" maxlength="80" list="ad-provider-options"></label>
-        <label>Primary model<input data-field="model" value="${escapeHtml(stage.primary?.model || "")}" maxlength="200" list="ad-model-options"></label>
-        <label>Maximum attempts<input data-field="attempts" type="number" min="1" max="10" value="${stage.max_attempts || 1}"></label>
-        <label>Timeout (seconds)<input data-field="timeout" type="number" min="1" value="${stage.timeout_seconds || 120}"></label>
-        <label>Cost limit (USD)<input data-field="cost" type="number" min="0" step="0.01" value="${stage.max_cost_usd ?? 0}"></label>
-      </div>
-      <label>Fallbacks <span>one provider/model per line, in order</span><textarea data-field="fallbacks" rows="3">${escapeHtml(fallbacks)}</textarea></label>
-      <p class="ad-model-readiness">${escapeHtml(modelReadiness(stage.primary || {}))}</p>`;
-    host.append(card);
-  }
-  let datalist = $("#ad-model-options");
-  if (!datalist) { datalist = document.createElement("datalist"); datalist.id = "ad-model-options"; document.body.append(datalist); }
-  datalist.replaceChildren(...modelCatalog.map((item) => { const option = document.createElement("option"); option.value = item.model; option.label = `${item.provider} · ${item.available === true ? "ready" : item.available === false ? "not ready" : "readiness unknown"}`; return option; }));
-  let providerList = $("#ad-provider-options");
-  if (!providerList) { providerList = document.createElement("datalist"); providerList.id = "ad-provider-options"; document.body.append(providerList); }
-  providerList.replaceChildren(...[...new Set(modelCatalog.map((item) => item.provider).filter(Boolean))].sort().map((provider) => { const option = document.createElement("option"); option.value = provider; return option; }));
-}
-
-function policyFromForm() {
-  const policy = structuredClone(activePolicy.policy);
-  const candidate = (provider, model) => {
-    const result = { provider, model };
-    const catalog = modelCatalog.find((item) => item.model === model && (!provider || item.provider === provider));
-    if (catalog && Array.isArray(catalog.capabilities) && catalog.capabilities.length) {
-      result.capabilities = catalog.capabilities;
-      result.capability_verified = true;
-    }
-    return result;
-  };
-  policy.preset = $("[data-ad-preset].is-on")?.dataset.adPreset || "balanced";
-  policy.name = `${policy.preset.replaceAll("-", " ")} routing`;
-  for (const card of $$(".ad-model-stage")) {
-    const get = (field) => clean(card.querySelector(`[data-field="${field}"]`).value);
-    policy.stages[card.dataset.stage] = {
-      ...policy.stages[card.dataset.stage], capability: card.dataset.capability,
-      primary: candidate(get("provider"), get("model")),
-      fallbacks: get("fallbacks").split(/\n+/).map(clean).filter(Boolean).map((line) => { const slash = line.indexOf("/"); return slash > 0 ? candidate(line.slice(0, slash).trim(), line.slice(slash + 1).trim()) : candidate("custom", line); }),
-      max_attempts: Number(get("attempts")), timeout_seconds: Number(get("timeout")), max_cost_usd: Number(get("cost")),
-    };
-  }
-  return policy;
-}
-
-async function loadModelSettings() {
-  const status = $("#ad-model-status");
-  try {
-    const tasks = [fetch("/api/ad-studio/models")];
-    if (modelEditMode !== "remaining") tasks.push(loadActivePolicy());
-    const [modelsResponse] = await Promise.all(tasks);
-    if (modelsResponse.ok) modelCatalog = normalizeModels(await modelsResponse.json());
-    renderModelSettings();
-    status.textContent = activePolicy ? (modelEditMode === "one-run" ? "Edit this routing, then use it once without changing the project default." : modelEditMode === "remaining" ? `Only stages not yet started in ${remainingRunId.slice(0, 14)}… will change.` : `Revision ${activePolicy.revision} is active. Pricing checked ${activePolicy.policy?.pricing_checked_at || "at an unknown time"}.`) : "No active model policy.";
-  } catch (error) { status.textContent = error.message || "Model settings are unavailable"; status.classList.add("is-error"); }
-}
-
-function setupModelForm() {
-  $("#ad-model-project").addEventListener("change", () => void loadModelSettings());
-  for (const button of $$("[data-ad-preset]")) button.addEventListener("click", () => {
-    $$("[data-ad-preset]").forEach((item) => item.classList.toggle("is-on", item === button));
-  });
-  $("#ad-model-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const status = $("#ad-model-status"); status.classList.remove("is-error");
-    const submit = event.submitter; submit.disabled = true;
-    try {
-      const policy = policyFromForm();
-      if (modelEditMode === "one-run") {
-        pendingPolicyOverride = policy;
-        const summary = $("#ad-run-policy-summary strong");
-        if (summary) summary.textContent = `${policy.name || "Custom routing"} · one-run override · project default unchanged`;
-        status.textContent = "One-run override ready. It will be pinned when you start the next job.";
-        modelEditMode = "default";
-        activate("run");
-        return;
-      }
-      const changingRemaining = modelEditMode === "remaining";
-      const url = changingRemaining ? `/api/ad-studio/runs/${encodeURIComponent(remainingRunId)}/models` : "/api/ad-studio/model-policies";
-      const body = changingRemaining ? { policy, reason: "Operator changed remaining stages in Frank" } : { project_id: $("#ad-model-project").value, policy };
-      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || data.message || "Policy could not be saved");
-      if (changingRemaining) {
-        const runId = remainingRunId; remainingRunId = ""; modelEditMode = "default";
-        activate("runs"); await selectRun(runId);
-      } else {
-        activePolicy = data; renderActivePolicySummary(); renderModelSettings();
-        status.textContent = `Revision ${data.revision} saved. Future jobs will pin it.`;
-      }
-    } catch (error) { status.textContent = error.message || "Policy could not be saved"; status.classList.add("is-error"); }
-    finally { submit.disabled = false; }
-  });
 }
 
 export function mountAdStudio() {
@@ -982,7 +664,7 @@ export function mountAdStudio() {
   mounted = true;
   const tabs = $$("[data-ad-tab]");
   tabs.forEach((button, index) => {
-    button.addEventListener("click", () => { if (button.dataset.adTab === "models") { modelEditMode = "default"; remainingRunId = ""; } activate(button.dataset.adTab); });
+    button.addEventListener("click", () => { activate(button.dataset.adTab); });
     button.addEventListener("keydown", (event) => {
       const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
       if (!direction) return;
@@ -994,9 +676,7 @@ export function mountAdStudio() {
   });
   setupRunForm();
   setupPipelineForm();
-  setupModelForm();
   void loadProjects().then(async () => {
-    await loadActivePolicy();
     await refreshRunsSafe();
     if ($("[data-ad-panel=\"pipeline\"]").classList.contains("is-on")) mountPipeline();
   }).catch((error) => {
