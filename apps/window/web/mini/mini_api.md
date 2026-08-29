@@ -9,8 +9,10 @@ with the same key as the same effect.
 The normal first-request path creates an intake, uploads any files, then streams
 one concise Hermes conversation turn. This is the customer-facing fast path:
 the UI renders the answer as it arrives and keeps the intake resumable if the
-browser disconnects. When the customer chooses **Resume**, the UI submits the
-intake. Submit returns `202` with `{ job, claim_token }`; the job is durably
+browser disconnects. Creating intakes and continuing the planning conversation
+do not consume a project entitlement. When the customer chooses **Start build**, the
+UI submits the intake and the server applies the free active-project limit at
+that build boundary. Submit returns `202` with `{ job, claim_token }`; the job is durably
 `queued` and the UI polls its status. Submit itself does not create a Hermes
 session or run; the background reconciler owns full build dispatch.
 
@@ -48,4 +50,6 @@ capability in `/api/mini/config` or the job response:
 Delete/revoke responses should be successful and idempotent. Error responses
 should be JSON with a human-readable `error` and optional stable `code`.
 `404` means the private record is no longer available; `409` means the current
-state does not allow that mutation; `429` should explain when to retry.
+state does not allow that mutation. `402` with `code: "project_limit_reached"`
+is reserved for the actual build boundary; the UI must leave planning chat open
+and explain that additional active build projects are a paid feature.

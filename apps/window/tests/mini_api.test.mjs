@@ -53,3 +53,22 @@ test("feedback and revoke use the published lifecycle routes and shapes", async 
   assert.equal(calls[1].options.method, "POST");
   assert.match(calls[1].options.headers["Idempotency-Key"], /^mini-/);
 });
+
+test("the build project entitlement remains a distinct recoverable API error", async () => {
+  const api = createMiniApi({
+    fetchImpl: async () => new Response(JSON.stringify({
+      error: "Keep chatting and refining your plan.",
+      code: "project_limit_reached",
+      project_limit: 1,
+      additional_projects: "paid",
+    }), { status: 402, headers: { "Content-Type": "application/json" } }),
+  });
+
+  await assert.rejects(
+    api.submitIntake(
+      { id: "intake-1", claim: "claim-token" },
+      { conversation: [{ role: "user", text: "Plan the build first." }] },
+    ),
+    (error) => error.status === 402 && error.code === "project_limit_reached",
+  );
+});

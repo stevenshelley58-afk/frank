@@ -6,7 +6,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
 
   const PROJECT_STORE = "mini_frank_projects_v1";
   const DRAFT_STORE = "mini_frank_conversation_v2";
-  const MAX_SAVED_MESSAGES = 80;
+  const MAX_SAVED_MESSAGES = 200;
   const MESSAGE_MAX_LENGTH = 4000;
   const GUIDE_IDLE_TIMEOUT_MS = 60000;
   const STATUS_POLL_BASE_MS = 8000;
@@ -535,7 +535,7 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
 
   function attachResume(message) {
     if (!message || message.querySelector('[data-action="resume"]')) return;
-    actionsFor(message, '<button class="primary-button" type="button" data-action="resume">Resume</button>');
+    actionsFor(message, '<button class="primary-button" type="button" data-action="resume">Start build</button>');
     state.phase = "decision";
     setComposer({ placeholder: "Add a detail or file (optional)…", attachments: true });
     saveDraft();
@@ -987,13 +987,25 @@ import { MiniApiError, createMiniApi } from "./api.mjs";
       thinking.remove();
       setBusy(false);
       const cancelled = mutationAbortReason === "user" || error.code === "cancelled";
+      const projectLimited = error.code === "project_limit_reached";
       const copy = cancelled
         ? "I stopped waiting. Your messages and files are still safe."
-        : `${cleanText(error.message, 400) || "I couldn’t start that just yet."} Your conversation and files are still safe.`;
+        : projectLimited
+          ? "Keep chatting and refining this plan. Your free plan includes one active build project; building more projects is a paid feature."
+          : `${cleanText(error.message, 400) || "I couldn’t start that just yet."} Your conversation and files are still safe.`;
       const reply = addMessage("assistant", copy, { record: false });
-      actionsFor(reply, `<button class="primary-button" type="button" data-action="${context === "change" ? "retry-change" : "resume"}">${context === "change" ? "Retry" : "Resume"}</button>`);
-      state.phase = context === "change" ? "ready" : "decision";
-      setComposer(context === "change" ? { placeholder: "Tell me what you want changed…", hint: "Plain words are perfect.", attachments: jobAttachmentsAvailable() } : { locked: true, hint: "Your request is safe.", attachments: false });
+      if (projectLimited) {
+        if (projects().length) {
+          actionsFor(reply, '<button class="secondary-button" type="button" data-action="work">Open your project</button>');
+        }
+        state.phase = "guiding";
+        setComposer({ placeholder: "Keep planning or refine this build…", attachments: true });
+        saveDraft();
+      } else {
+        actionsFor(reply, `<button class="primary-button" type="button" data-action="${context === "change" ? "retry-change" : "resume"}">${context === "change" ? "Retry" : "Try build again"}</button>`);
+        state.phase = context === "change" ? "ready" : "decision";
+        setComposer(context === "change" ? { placeholder: "Tell me what you want changed…", hint: "Plain words are perfect.", attachments: jobAttachmentsAvailable() } : { locked: true, hint: "Your request is safe.", attachments: false });
+      }
     }
   }
 

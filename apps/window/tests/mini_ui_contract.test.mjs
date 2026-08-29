@@ -48,12 +48,15 @@ test("customer-visible source has no legacy ready or privacy copy", async () => 
     "Private link access",
     "How private access works",
     "I’ll use only what you share",
+    "You have started several requests today",
+    "free chat limit",
   ]) {
     assert.doesNotMatch(customerSource, new RegExp(escapeRegExp(phrase), "i"), phrase);
   }
   assert.doesNotMatch(script, /data-action="start-build"|data-action="start-free"|attachDecision|function startBuild/i);
   assert.match(script, /data-action="resume"/);
-  assert.match(script, />Retry<|>Resume</);
+  assert.match(script, />Start build</);
+  assert.match(script, />Retry<|>Try build again</);
 });
 
 test("the composer stays focused and offers a stop control for active work", async () => {
@@ -79,4 +82,15 @@ test("the first non-empty message uses the fast streamed conversation before a f
   assert.doesNotMatch(script, /Before I build|outcome-contract|Build this for free/i);
   assert.doesNotMatch(css, /#302e2a|#88837a/i);
   assert.match(css, /--sans:\s*-apple-system/);
+});
+
+test("only the build boundary applies the project entitlement and planning stays open", async () => {
+  const script = await source("mini.js");
+
+  assert.match(script, /error\.code === "project_limit_reached"/);
+  assert.match(script, /one active build project/);
+  assert.match(script, /building more projects is a paid feature/);
+  assert.match(script, /state\.phase = "guiding"/);
+  assert.match(script, /Keep planning or refine this build/);
+  assert.match(script, /data-action="work">Open your project/);
 });
