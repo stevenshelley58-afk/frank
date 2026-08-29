@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Sole ad-template process",
+    "subtitle": "Frank UI \u2192 Hermes generation loop \u2192 Blockwise template",
+    "output": "ad-template-process.html"
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [
+      60,
+      120
+    ],
+    "cols": 3,
+    "gapX": 80,
+    "gapY": 80,
+    "cellW": 240,
+    "cellH": 110
+  },
+  "components": [
+    {
+      "id": "frank",
+      "type": "frontend",
+      "label": "Frank",
+      "sublabel": "UI + run monitor",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "hermes",
+      "type": "backend",
+      "label": "Hermes",
+      "sublabel": "Builder + reviews",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "blockwise",
+      "type": "cloud",
+      "label": "Blockwise",
+      "sublabel": "Store \u00b7 edit \u00b7 publish",
+      "row": 0,
+      "col": 2
+    }
+  ],
+  "connections": [
+    {
+      "from": "frank",
+      "to": "hermes",
+      "variant": "emphasis"
+    },
+    {
+      "from": "hermes",
+      "to": "blockwise",
+      "variant": "emphasis"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Observability overlays",
+      "items": [
+        "Archify renders this diagram as a pinned self-contained artifact",
+        "AgentTrail provides a read-only implementation board",
+        "Neither overlay is part of template-generation truth"
+      ]
+    }
+  ]
+}

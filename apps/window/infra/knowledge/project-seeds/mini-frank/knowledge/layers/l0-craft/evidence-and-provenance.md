@@ -1,8 +1,10 @@
 ---
-{"schema":"schema://mini-frank.knowledge-page/v1","id":"craft-evidence-and-provenance","title":"Evidence travels with the artifact","kind":"craft","status":"approved","summary":"Released work carries source, trace, settings and QA references so important claims and decisions remain auditable.","tags":["evidence","provenance","sources","qa","audit"],"source_refs":["src-ad-intelligence-contract","src-ad-intelligence-release-schema","src-content-factory-contract"],"verified_at":"2026-08-22","stale_after":"2027-08-22","privacy":"public","related_refs":["craft-immutable-release","craft-sanitise-before-release"]}
+{"schema":"schema://mini-frank.knowledge-page/v1","id":"craft-evidence-and-provenance","title":"Carry evidence and provenance","kind":"craft","status":"approved","summary":"A publishable result carries non-empty provenance, trace and passing QA references while private prompts, models, rationale and raw records remain behind their owning boundary.","tags":["evidence","provenance","qa","receipts"],"source_refs":["src-ad-intelligence-contract"],"verified_at":"2026-08-30","stale_after":"2027-02-28","privacy":"public","related_refs":["craft-sanitise-before-release","vertical-australian-real-estate-creative-intake"]}
 ---
-# Evidence travels with the artifact
+# Carry evidence and provenance
 
-Keep concise references to sources, pipeline and settings revisions, checks and
-traces. Public output exposes the evidence needed for trust without exposing
-private prompts, rationale, paths or credentials.
+Every publishable result retains its provenance, trace and passing QA receipt
+references. Private prompts, models, rationale, raw evidence and credentials stay
+behind the system that owns them instead of leaking into the released projection.
+
+Evidence is explicit and auditable; publication never silently skips a failed gate.

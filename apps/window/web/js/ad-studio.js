@@ -12,36 +12,24 @@ let selectedStage = null;
 let graphHandle = null;
 let selectedFiles = [];
 let sourcePreviewExpanded = false;
-let vpsPath = "";
-let vpsEntries = [];
-const selectedVpsFiles = new Map();
 const localRunInputs = new Map();
 const previewUrls = new Set();
 let runEvents = [];
 let eventStream = null;
-let activePolicy = null;
-let modelCatalog = [];
-let searchTimer = null;
-let modelEditMode = "default";
-let remainingRunId = "";
-let pendingPolicyOverride = null;
 const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"]);
 
 const clean = (value) => String(value || "").trim();
 const escapeHtml = (value) => clean(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
-const PIPELINE_STAGES = ["source", "analyse", "decompose", "restyle", "story-draft", "render", "visual-review", "check", "subject-invariance", "studio-qa", "ready", "release"];
+const PIPELINE_STAGES = ["source", "analyse", "decompose", "restyle", "story-draft", "render", "compare", "qa", "final-review", "import"];
 const PIPELINE_LABELS = {
   source: "Source", analyse: "Analyse", decompose: "Layer", restyle: "Restyle",
-  "story-draft": "Story", render: "Render", "visual-review": "Score + revise", check: "Validate",
-  "subject-invariance": "Replaceability", "studio-qa": "Approval", ready: "Ready", release: "Release",
+  "story-draft": "Story", render: "Render", compare: "Compare", qa: "Check",
+  "final-review": "Final review", import: "Import",
 };
-const GENERATION_EVENT_KINDS = new Set([
-  "generation.started", "generation.rendered", "generation.scored",
-  "generation.revision-requested", "generation.accepted", "generation.failed",
-]);
+
 
 function runStatusLabel(status) {
-  return ({ queued: "Queued", started: "Starting", running: "Running", waiting_for_approval: "Needs approval", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Starting";
+  return ({ queued: "Queued", started: "Starting", running: "Running", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Starting";
 }
 
 function dateLabel(seconds) {
@@ -65,11 +53,10 @@ function activate(tab) {
   });
   if (tab === "runs") void refreshRunsSafe();
   if (tab === "pipeline") { void refreshRunsSafe(); mountPipeline(); }
-  if (tab === "models") void loadModelSettings();
 }
 
 function fillProjects() {
-  for (const select of [$("#ad-run-project"), $("#ad-pipeline-project"), $("#ad-model-project")]) {
+  for (const select of [$("#ad-run-project"), $("#ad-pipeline-project")]) {
     if (!select) continue;
     const previous = select.value;
     select.replaceChildren();
@@ -91,9 +78,9 @@ function renderSourcePreview() {
   const host = $("#ad-source-preview");
   host.replaceChildren();
   host.classList.toggle("has-items", selectedFiles.length > 0);
-  $("#ad-run-mode").textContent = selectedFiles.length > 1 ? `Batch · ${selectedFiles.length}` : "Single";
-  if (selectedFiles.length <= 8) sourcePreviewExpanded = false;
-  const visibleSources = sourcePreviewExpanded ? selectedFiles : selectedFiles.slice(0, 8);
+  $("#ad-run-mode").textContent = selectedFiles.length ? "Source selected" : "Awaiting source";
+  sourcePreviewExpanded = false;
+  const visibleSources = selectedFiles.slice(0, 1);
   visibleSources.forEach((source) => {
     const item = document.createElement("div");
     item.className = "ad-source-item";
@@ -101,7 +88,7 @@ function renderSourcePreview() {
     image.src = source.previewUrl;
     image.alt = source.name;
     const label = document.createElement("span");
-    label.textContent = source.kind === "vps" ? `VPS · ${source.name}` : source.name;
+    label.textContent = source.name;
     const remove = document.createElement("button");
     remove.type = "button";
     remove.setAttribute("aria-label", `Remove ${source.name}`);
@@ -117,29 +104,7 @@ function renderSourcePreview() {
     item.append(image, label, remove);
     host.append(item);
   });
-  if (selectedFiles.length > 8) {
-    const controls = document.createElement("div");
-    controls.className = "ad-source-summary";
-    const count = document.createElement("span");
-    count.textContent = sourcePreviewExpanded ? `${selectedFiles.length} sources shown` : `${selectedFiles.length - 8} more sources selected`;
-    const toggle = document.createElement("button");
-    toggle.type = "button";
-    toggle.className = "ad-text-button";
-    toggle.textContent = sourcePreviewExpanded ? "Show first 8" : "Show all";
-    toggle.addEventListener("click", () => { sourcePreviewExpanded = !sourcePreviewExpanded; renderSourcePreview(); });
-    const clear = document.createElement("button");
-    clear.type = "button";
-    clear.className = "ad-text-button";
-    clear.textContent = "Remove all";
-    clear.addEventListener("click", () => {
-      selectedFiles.filter((source) => source.kind === "local").forEach((source) => { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); });
-      selectedFiles = [];
-      sourcePreviewExpanded = false;
-      renderSourcePreview();
-    });
-    controls.append(count, toggle, clear);
-    host.append(controls);
-  }
+
 }
 
 function addLocalFiles(files) {
@@ -148,156 +113,12 @@ function addLocalFiles(files) {
     previewUrls.add(previewUrl);
     return { kind: "local", key: `local:${file.name}:${file.size}:${file.lastModified}`, name: file.name, size: file.size, type: file.type, file, previewUrl };
   });
-  const existing = new Set(selectedFiles.map((source) => source.key));
-  for (const source of additions) {
-    if (existing.has(source.key)) {
-      URL.revokeObjectURL(source.previewUrl);
-      previewUrls.delete(source.previewUrl);
-      continue;
-    }
-    selectedFiles.push(source);
-    existing.add(source.key);
-  }
-  selectedFiles = selectedFiles.slice(0, 100);
+  const keep = additions[0];
+  if (!keep) return;
+  for (const source of additions.slice(1)) { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); }
+  selectedFiles.filter((source) => source.kind === "local").forEach((source) => { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); });
+  selectedFiles = [keep];
   renderSourcePreview();
-}
-
-function vpsPreviewUrl(entry) {
-  return `/api/file?root=vps&path=${encodeURIComponent(entry.path)}&raw=1`;
-}
-
-function renderVpsCrumbs() {
-  const host = $("#ad-source-crumbs");
-  host.replaceChildren();
-  const root = document.createElement("button");
-  root.type = "button";
-  root.textContent = "VPS";
-  root.addEventListener("click", () => void loadVpsFolder(""));
-  host.append(root);
-  let accumulated = "";
-  for (const segment of vpsPath.split("/").filter(Boolean)) {
-    accumulated = accumulated ? `${accumulated}/${segment}` : segment;
-    const path = accumulated;
-    const separator = document.createElement("span");
-    separator.textContent = "›";
-    const button = document.createElement("button");
-    button.type = "button";
-    button.textContent = segment;
-    button.addEventListener("click", () => void loadVpsFolder(path));
-    host.append(separator, button);
-  }
-}
-
-function updateVpsSelectionStatus() {
-  const count = selectedVpsFiles.size;
-  $("#ad-source-vps-status").textContent = count ? `${count} VPS image${count === 1 ? "" : "s"} selected` : "No VPS images selected";
-  $("#ad-source-add-vps").disabled = !count;
-}
-
-function renderVpsEntries() {
-  const host = $("#ad-source-vps-list");
-  const query = clean($("#ad-source-vps-search").value).toLowerCase();
-  const entries = vpsEntries;
-  host.replaceChildren();
-  if (!entries.length) {
-    const empty = document.createElement("div");
-    empty.className = "ad-source-vps-empty";
-    empty.textContent = query ? "No matching images in the approved VPS folders." : "No folders or images in this folder.";
-    host.append(empty);
-    return;
-  }
-  for (const entry of entries) {
-    const row = document.createElement(entry.dir ? "button" : "label");
-    row.className = "ad-source-vps-row";
-    if (entry.dir) row.type = "button";
-    const icon = document.createElement("span");
-    icon.className = "ad-source-icon";
-    icon.textContent = entry.dir ? "▰" : "▧";
-    const name = document.createElement("strong");
-    name.textContent = entry.name;
-    if (entry.dir) {
-      const hint = document.createElement("small");
-      hint.textContent = "Open";
-      row.append(icon, name, hint);
-      row.addEventListener("click", () => void loadVpsFolder(entry.path));
-    } else {
-      const checkbox = document.createElement("input");
-      checkbox.type = "checkbox";
-      checkbox.checked = selectedVpsFiles.has(entry.path);
-      checkbox.setAttribute("aria-label", `Select ${entry.name}`);
-      checkbox.addEventListener("change", () => {
-        if (checkbox.checked) selectedVpsFiles.set(entry.path, entry);
-        else selectedVpsFiles.delete(entry.path);
-        updateVpsSelectionStatus();
-      });
-      row.append(icon, name);
-      if (query) {
-        const location = document.createElement("small");
-        const suffix = `/${entry.name}`;
-        location.textContent = String(entry.path || "").endsWith(suffix)
-          ? String(entry.path).slice(0, -suffix.length)
-          : String(entry.path || "VPS");
-        row.append(location);
-      }
-      row.append(checkbox);
-    }
-    host.append(row);
-  }
-}
-
-async function loadVpsFolder(path) {
-  vpsPath = path;
-  $("#ad-source-vps-search").value = "";
-  $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">Loading VPS…</div>';
-  renderVpsCrumbs();
-  try {
-    const response = await fetch(`/api/tree?root=vps&path=${encodeURIComponent(path)}`);
-    if (!response.ok) throw new Error("VPS folder unavailable");
-    const data = await response.json();
-    vpsEntries = (data.entries || []).filter((entry) => entry.dir || IMAGE_EXTENSIONS.has(String(entry.ext || "").toLowerCase()));
-    renderVpsEntries();
-  } catch {
-    vpsEntries = [];
-    $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">Frank could not read this VPS folder.</div>';
-  }
-}
-
-async function searchVpsImages(query) {
-  if (query.length < 2) {
-    await loadVpsFolder(vpsPath);
-    return;
-  }
-  $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">Searching the VPS…</div>';
-  try {
-    const response = await fetch(`/api/tree/search?root=vps&q=${encodeURIComponent(query)}&limit=100`);
-    if (!response.ok) throw new Error("search unavailable");
-    const data = await response.json();
-    vpsEntries = Array.isArray(data.entries) ? data.entries : [];
-    renderVpsEntries();
-  } catch {
-    $("#ad-source-vps-list").innerHTML = '<div class="ad-source-vps-empty">VPS image search is unavailable.</div>';
-  }
-}
-
-function addSelectedVpsFiles() {
-  const existing = new Set(selectedFiles.map((source) => source.key));
-  for (const entry of selectedVpsFiles.values()) {
-    const key = `vps:${entry.path}`;
-    if (existing.has(key)) continue;
-    selectedFiles.push({ kind: "vps", key, root: "vps", path: entry.path, name: entry.name, size: entry.size, type: `image/${entry.ext || "unknown"}`, previewUrl: vpsPreviewUrl(entry) });
-    existing.add(key);
-  }
-  selectedFiles = selectedFiles.slice(0, 100);
-  selectedVpsFiles.clear();
-  updateVpsSelectionStatus();
-  renderSourcePreview();
-  $("#ad-source-dialog").close();
-}
-
-function openSourceDialog() {
-  const dialog = $("#ad-source-dialog");
-  if (!dialog.open) dialog.showModal();
-  void loadVpsFolder(vpsPath);
 }
 
 function renderRunOptions() {
@@ -393,64 +214,6 @@ function firstNumber(...values) {
   return null;
 }
 
-function qualityEvidence(run) {
-  const output = run.output || {};
-  const qa = output.qa && typeof output.qa === "object" ? output.qa : {};
-  const review = qa.visual_review || qa.visualReview || output.quality_gate || output.iteration_summary || {};
-  const scores = review.scores && typeof review.scores === "object" ? review.scores : (qa.scores || {});
-  const primary = firstNumber(
-    scores.primaryAdSystemLikeness, scores.primary_ad_system_likeness,
-    review.primaryAdSystemLikeness, review.primary_score, qa.primary_score,
-  );
-  const strict = firstNumber(
-    scores.strictAdSystemLikeness, scores.strict_ad_system_likeness,
-    review.strictAdSystemLikeness, review.strict_score, qa.strict_score,
-  );
-  const threshold = firstNumber(review.likenessThreshold, review.likeness_threshold, qa.likeness_threshold, 9.5);
-  const passed = primary !== null && strict !== null && primary >= threshold && strict >= threshold;
-  return { primary, strict, threshold, passed, recorded: primary !== null || strict !== null };
-}
-
-function generationRecords(run) {
-  const output = run.output || {};
-  const qa = output.qa && typeof output.qa === "object" ? output.qa : {};
-  const candidates = [output.generations, output.iteration_summary?.generations, qa.generations, qa.visual_review?.generations]
-    .find((value) => Array.isArray(value)) || [];
-  const records = new Map();
-  const ensure = (value) => {
-    const iteration = Math.max(1, Math.trunc(firstNumber(value, records.size + 1) || 1));
-    if (!records.has(iteration)) records.set(iteration, { iteration, status: "recorded", changes: "", model: "", provider: "", primary: null, strict: null, threshold: 9.5, timestamp: 0 });
-    return records.get(iteration);
-  };
-  candidates.forEach((item, index) => {
-    if (!item || typeof item !== "object") return;
-    const record = ensure(item.iteration ?? item.generation ?? index + 1);
-    const scores = item.scores && typeof item.scores === "object" ? item.scores : item;
-    record.status = clean(item.status || (item.accepted === true ? "accepted" : record.status));
-    record.primary = firstNumber(scores.primaryAdSystemLikeness, scores.primary_ad_system_likeness, scores.primary_score, record.primary);
-    record.strict = firstNumber(scores.strictAdSystemLikeness, scores.strict_ad_system_likeness, scores.strict_score, record.strict);
-    record.threshold = firstNumber(item.likenessThreshold, item.likeness_threshold, record.threshold, 9.5);
-    record.changes = clean(item.change_summary || item.changes || item.revision_reason || record.changes);
-    record.model = clean(item.model || record.model);
-    record.provider = clean(item.provider || record.provider);
-    record.timestamp = firstNumber(item.timestamp, item.created_at, record.timestamp, 0);
-  });
-  for (const event of runEvents) {
-    if (!GENERATION_EVENT_KINDS.has(event.kind)) continue;
-    const data = event.data && typeof event.data === "object" ? event.data : {};
-    const record = ensure(data.iteration ?? data.generation);
-    record.status = event.kind.replace("generation.", "") || record.status;
-    record.primary = firstNumber(data.primary_score, data.primaryAdSystemLikeness, record.primary);
-    record.strict = firstNumber(data.strict_score, data.strictAdSystemLikeness, record.strict);
-    record.threshold = firstNumber(data.threshold, data.likeness_threshold, record.threshold, 9.5);
-    record.changes = clean(data.change_summary || data.revision_reason || data.reason || record.changes);
-    record.model = clean(data.model || record.model);
-    record.provider = clean(data.provider || record.provider);
-    record.timestamp = firstNumber(event.timestamp, record.timestamp, 0);
-  }
-  return Array.from(records.values()).sort((a, b) => a.iteration - b.iteration);
-}
-
 function formatScore(value) {
   return value === null ? "Not recorded" : Number(value).toFixed(1);
 }
@@ -475,7 +238,7 @@ function renderPhaseTimeline(run, parent) {
     button.innerHTML = `<i aria-hidden="true"></i><span>${escapeHtml(PIPELINE_LABELS[id] || id)}</span>`;
     button.setAttribute("aria-label", `${PIPELINE_LABELS[id] || id}${active ? ", current stage" : completed ? ", completed" : ""}`);
     button.addEventListener("click", () => {
-      selectedStage = { source_id: id, label: PIPELINE_LABELS[id] || id, kind: id === "studio-qa" ? "approval" : "stage" };
+      selectedStage = { source_id: id, label: PIPELINE_LABELS[id] || id, kind: "stage" };
       activate("pipeline");
       updateEvidence();
     });
@@ -509,41 +272,43 @@ function renderPreviewGallery(run, parent) {
 }
 
 function renderGenerationHistory(run, parent) {
-  const evidence = qualityEvidence(run);
-  const records = generationRecords(run);
-  const section = document.createElement("section");
-  section.className = "ad-generation-section";
-  const heading = document.createElement("div");
-  heading.className = "ad-inline-heading";
-  heading.innerHTML = `<strong>Generation history</strong><span>${records.length ? `${records.length} recorded generation${records.length === 1 ? "" : "s"}` : "Every render, score and revision will appear here."}</span>`;
-  const quality = document.createElement("div");
-  quality.className = `ad-quality-gate${evidence.passed ? " is-passed" : ""}`;
-  quality.innerHTML = `<div><span>Primary review</span><strong>${formatScore(evidence.primary)}</strong></div><div><span>Strict review</span><strong>${formatScore(evidence.strict)}</strong></div><div><span>Release rule</span><strong>Both ≥ ${evidence.threshold.toFixed(1)}</strong></div><p>${evidence.passed ? "Visual gate passed. Human 100% review is still required." : evidence.recorded ? "Another revision is required before approval." : "This run has not emitted numeric visual evidence. It cannot be approved."}</p>`;
-  section.append(heading, quality);
-  const list = document.createElement("div");
-  list.className = "ad-generation-list";
-  if (!records.length) {
-    const empty = document.createElement("p");
-    empty.className = "ad-evidence-empty";
-    empty.textContent = "Legacy runs record tools and stages but not individual generations. New runs use the scored generation contract.";
-    list.append(empty);
-  }
+  const records = Array.isArray(run.output?.iterations) ? run.output.iterations : [];
+  const finalReview = run.output?.final_review;
+  const section = document.createElement("section"); section.className = "ad-generation-section";
+  const heading = document.createElement("div"); heading.className = "ad-inline-heading";
+  heading.innerHTML = "<strong>Iteration history</strong><span>" + (records.length ? records.length + " comparator" + (records.length === 1 ? "" : "s") + " recorded" : "Hermes will record each iteration.") + "</span>";
+  section.append(heading);
+  const list = document.createElement("div"); list.className = "ad-generation-list";
   records.forEach((record) => {
-    const row = document.createElement("article");
-    row.className = "ad-generation-row";
-    const title = document.createElement("div");
-    title.innerHTML = `<strong>Generation ${record.iteration}</strong><span>${escapeHtml(record.status.replaceAll("-", " ") || "recorded")}</span>`;
-    const scores = document.createElement("div");
-    scores.className = "ad-generation-scores";
-    scores.innerHTML = `<span>Primary <b>${formatScore(record.primary)}</b></span><span>Strict <b>${formatScore(record.strict)}</b></span>`;
-    const note = document.createElement("p");
-    note.textContent = record.changes || (record.status === "accepted" ? "Accepted by the numeric visual gate." : "No revision note was recorded.");
+    const row = document.createElement("article"); row.className = "ad-generation-row";
+    const comparison = record.comparison || {};
+    const title = document.createElement("div"); title.innerHTML = "<strong>Iteration " + record.iteration + "</strong><span>" + escapeHtml(String(record.decision || "revise")) + "</span>";
+    const scores = document.createElement("div"); scores.className = "ad-generation-scores";
+    scores.innerHTML = "<span>Comparator <b>" + formatScore(comparison.score) + "</b></span>";
+    const note = document.createElement("p"); note.textContent = comparison.reason || "No comparator note was recorded.";
     row.append(title, scores, note);
+    const previews = Array.isArray(record.previews) ? record.previews : [];
+    if (previews.length) {
+      const gallery = document.createElement("div"); gallery.className = "ad-preview-grid ad-iteration-previews";
+      previews.forEach((preview) => {
+        if (!preview?.url) return;
+        const figure = document.createElement("figure");
+        const image = document.createElement("img"); image.src = preview.url; image.alt = `Iteration ${record.iteration} ${preview.placement || "template"} preview`;
+        const caption = document.createElement("figcaption"); caption.textContent = (preview.placement || "template").replace(/^./, (char) => char.toUpperCase());
+        figure.append(image, caption); gallery.append(figure);
+      });
+      if (gallery.children.length) row.append(gallery);
+    }
     list.append(row);
   });
-  section.append(list);
-  parent.append(section);
+  if (finalReview && Array.isArray(finalReview.reviewers) && finalReview.reviewers.length) {
+    const review = document.createElement("p"); review.className = "ad-review-summary";
+    review.textContent = "Final review: " + finalReview.reviewers.map((item, index) => `Reviewer ${index + 1} ${formatScore(item.score)}`).join(" · ") + " · " + (finalReview.decision || "recorded");
+    section.append(review);
+  }
+  section.append(list); parent.append(section);
 }
+
 
 function renderRunDetail(run) {
   const detail = $("#ad-run-detail");
@@ -563,49 +328,31 @@ function renderRunDetail(run) {
   detail.append(summary);
   const overview = document.createElement("dl");
   overview.className = "ad-run-facts";
-  for (const [label, value] of [["Run", run.id], ["Policy", run.policy_revision ? `Revision ${run.policy_revision}` : "Pinned"], ["Model", run.current_model || "Deterministic / pending"], ["Trace", run.trace_id || "Pending"]]) {
+  const facts = [["Run", run.id], ["Stage", run.stage || "source"]];
+  if (run.output?.import?.template_id) facts.push(["Blockwise template", run.output.import.template_id]);
+  for (const [label, value] of facts) {
     const item = document.createElement("div");
     const term = document.createElement("dt"); term.textContent = label;
     const description = document.createElement("dd"); description.textContent = value;
-    if (label === "Run" || label === "Trace") description.title = value;
+    if (label === "Run" || label === "Blockwise template") description.title = value;
     item.append(term, description); overview.append(item);
   }
   detail.append(overview);
   renderPhaseTimeline(run, detail);
-  if (run.status === "completed" && run.output?.template_pack_ref) {
-    const release = document.createElement("section"); release.className = "ad-approval";
-    const title = document.createElement("strong"); title.textContent = "Portable TemplatePack released";
-    const evidence = document.createElement("p"); evidence.textContent = `Checksum ${run.output.sha256 || run.output.checksum || "unavailable"} · signature ${typeof run.output.signature === "object" ? run.output.signature.key_id || run.output.signature.algorithm || "recorded" : "recorded"} · ${Array.isArray(run.output.compatibility) ? run.output.compatibility.join(", ") : "compatibility recorded"}`;
-    const download = document.createElement("a"); download.className = "ad-primary"; download.href = `/api/ad-studio/runs/${encodeURIComponent(run.id)}/download`; download.textContent = "Download TemplatePack";
-    release.append(title, evidence, download); detail.append(release);
+  if (run.status === "completed" && ["imported", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase())) {
+    const readySection = document.createElement("section"); readySection.className = "ad-template-ready";
+    const title = document.createElement("strong"); title.textContent = "Template ready";
+    const evidence = document.createElement("p"); evidence.textContent = "Feed and Story are live in Blockwise.";
+    readySection.append(title, evidence); detail.append(readySection);
   }
+
   if (run.attention || run.error) {
     const attention = document.createElement("div"); attention.className = "ad-attention";
     attention.textContent = run.error || "This job needs attention."; detail.append(attention);
   }
   renderPreviewGallery(run, detail);
   renderGenerationHistory(run, detail);
-  if (run.status === "waiting_for_approval") {
-    const quality = qualityEvidence(run);
-    const gate = document.createElement("form"); gate.className = "ad-approval";
-    gate.innerHTML = `<strong>Human release review</strong><p>${quality.passed ? "The numeric visual gate passed. Confirm the final editable Feed and Story at native size." : "Approval is locked until both independent visual scores are recorded at 9.5 or higher."}</p><label><input type="checkbox" required${quality.passed ? "" : " disabled"}> I inspected Feed and Story at 100% zoom</label><textarea maxlength="600" placeholder="What you checked or changed"${quality.passed ? "" : " disabled"}></textarea><button class="ad-primary" type="submit"${quality.passed ? "" : " disabled"}>Approve and release</button><p class="ad-action-status" role="status"></p>`;
-    gate.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      const status = gate.querySelector(".ad-action-status");
-      const button = gate.querySelector("button[type=submit]");
-      button.disabled = true; status.textContent = "Recording approval…";
-      try {
-        const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/approval`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ decision: "approve", confirm_100_percent: true, reason: clean(gate.querySelector("textarea").value) }) });
-        const data = await response.json().catch(() => ({}));
-        if (!response.ok) throw new Error(data.error || "Approval failed");
-        await selectRun(run.id);
-      } catch (error) {
-        status.textContent = `${error.message || "Approval failed"} Try again without leaving this run.`;
-        button.disabled = false;
-      }
-    });
-    detail.append(gate);
-  }
+
   const activity = document.createElement("details");
   activity.className = "ad-live-activity";
   activity.innerHTML = '<summary>All recorded activity</summary><div id="ad-run-events"></div>';
@@ -614,28 +361,26 @@ function renderRunDetail(run) {
     const actions = document.createElement("div"); actions.className = "ad-run-actions";
     const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel job";
     cancel.addEventListener("click", async () => { cancel.disabled = true; try { const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); if (!response.ok) throw new Error("Cancel failed"); await selectRun(run.id); } catch { cancel.textContent = "Cancel failed — retry"; cancel.disabled = false; } });
-    const models = document.createElement("button"); models.type = "button"; models.className = "ad-text-button"; models.textContent = "Change remaining models";
-    models.addEventListener("click", () => { modelEditMode = "remaining"; remainingRunId = run.id; activePolicy = { revision: run.policy_revision, policy: structuredClone(run.policy) }; activate("models"); });
     if (run.status === "failed") {
       const retry = document.createElement("button"); retry.type = "button"; retry.className = "ad-primary"; retry.textContent = "Retry from checkpoint";
       retry.addEventListener("click", async () => { retry.disabled = true; try { const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from_stage: run.stage }) }); if (!response.ok) throw new Error("Retry failed"); await selectRun(run.id); } catch { retry.textContent = "Retry failed — try again"; retry.disabled = false; } });
       actions.append(retry);
     }
-    actions.append(models, cancel); detail.append(actions);
+    actions.append(cancel); detail.append(actions);
   }
   $("#ad-pipeline-run").value = run.id;
   updateEvidence();
   renderEventViews();
 }
 
-const EVENT_KINDS = ["command.accepted", "command.queued", "command.cancel-requested", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "generation.started", "generation.rendered", "generation.scored", "generation.revision-requested", "generation.accepted", "generation.failed", "artifact.recorded", "qa.gate", "approval.requested", "approval.approved", "approval.rejected", "model-policy.changed", "release.published"];
+const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "final-review.started", "final-review.completed", "template.imported"];
 
 const SAFE_TOOL_LABELS = {
-  terminal: "VPS command",
-  exec_command: "VPS command",
-  execute_code: "VPS calculation",
-  read_file: "Inspect private artifact",
-  write_file: "Create private artifact",
+  terminal: "Builder action",
+  exec_command: "Builder action",
+  execute_code: "Layout calculation",
+  read_file: "Inspect source artifact",
+  write_file: "Create template artifact",
   search_files: "Find builder assets",
   skill_view: "Load builder instructions",
   browser: "Browser check",
@@ -651,45 +396,30 @@ function redactOperatorText(value) {
 
 function safeEventData(event) {
   const data = event?.data || {};
-  if (event.kind === "provider.attempt") return { attempt: data.attempt, provider: data.provider, model: data.model, timeout_seconds: data.timeout_seconds };
-  if (event.kind === "provider.fallback") return { attempt: data.attempt, from_model: data.from_model, to_model: data.to_model, reason: redactOperatorText(data.reason) };
   if (event.kind === "stage.started") return { summary: `Started ${String(event.node_id || "pipeline stage").replaceAll("-", " ")}` };
-  if (event.kind === "tool.started" || event.kind === "tool.completed") return { tool: SAFE_TOOL_LABELS[data.tool] || "VPS builder tool", duration_seconds: data.duration_seconds, error: Boolean(data.error) };
-  if (GENERATION_EVENT_KINDS.has(event.kind)) return {
-    iteration: firstNumber(data.iteration, data.generation),
-    placement: clean(data.placement),
-    primary_score: firstNumber(data.primary_score, data.primaryAdSystemLikeness),
-    strict_score: firstNumber(data.strict_score, data.strictAdSystemLikeness),
-    threshold: firstNumber(data.threshold, data.likeness_threshold, 9.5),
-    revision_reason: redactOperatorText(data.revision_reason || data.change_summary || data.reason),
-    artifact_sha256: clean(data.artifact_sha256 || data.sha256),
+  if (event.kind === "tool.started" || event.kind === "tool.completed") return { tool: SAFE_TOOL_LABELS[data.tool] || "Builder action", duration_seconds: data.duration_seconds, error: Boolean(data.error) };
+  if (event.kind === "iteration.compared" || event.kind === "iteration.revised") return {
+    iteration: firstNumber(data.iteration), score: firstNumber(data.score),
+    reason: redactOperatorText(data.reason), decision: clean(data.decision),
   };
-  if (event.kind === "artifact.recorded") return { artifact_id: clean(data.artifact_id), placement: clean(data.placement), sha256: clean(data.sha256), media_type: clean(data.media_type) };
-  if (event.kind === "qa.gate") return { gate: clean(data.gate), decision: clean(data.decision), primary_score: firstNumber(data.primary_score), strict_score: firstNumber(data.strict_score), threshold: firstNumber(data.threshold, 9.5) };
-  if (event.kind === "run.failed") return { error: redactOperatorText(data.error) || "Run failed; protected diagnostics remain in Hermes." };
-  if (event.kind === "release.published") return { release_id: data.release_id, template_pack_ref: data.template_pack_ref, sha256: data.sha256, compatibility: data.compatibility };
-  return Object.fromEntries(Object.entries(data).filter(([key]) => ["attempt", "provider", "model", "cost_usd", "input_tokens", "output_tokens", "gate", "choices", "policy_revision", "will_resume", "release_id", "sha256", "compatibility"].includes(key)));
+  if (event.kind === "final-review.completed") return { decision: clean(data.decision), reviewer_count: data.reviewer_count };
+  if (event.kind === "run.failed") return { error: redactOperatorText(data.error) || "Run failed; diagnostics remain in Hermes." };
+  if (event.kind === "template.imported") return { status: "ready" };
+  return Object.fromEntries(Object.entries(data).filter(([key]) => ["attempt", "cost_usd", "input_tokens", "output_tokens", "will_resume"].includes(key)));
 }
 
 function safeEventSummary(event) {
   const data = safeEventData(event);
   if (event.kind === "tool.started" || event.kind === "tool.completed") return data.tool;
   if (event.kind === "stage.started") return data.summary;
-  if (event.kind === "provider.attempt") return `${data.provider || "provider"} · ${data.model || "model"} · attempt ${data.attempt || 1}`;
-  if (event.kind === "provider.fallback") return `${data.from_model || "model"} → ${data.to_model || "fallback"}`;
-  if (GENERATION_EVENT_KINDS.has(event.kind)) {
-    const scores = data.primary_score !== null || data.strict_score !== null ? ` · ${formatScore(data.primary_score)} / ${formatScore(data.strict_score)}` : "";
-    return `Generation ${data.iteration || "?"}${scores}${data.revision_reason ? ` · ${data.revision_reason}` : ""}`;
-  }
-  if (event.kind === "artifact.recorded") return `${data.placement || "Template"} artifact recorded${data.sha256 ? ` · ${data.sha256.slice(0, 12)}…` : ""}`;
-  if (event.kind === "qa.gate") return `${data.gate || "Quality gate"} · ${data.decision || "recorded"}`;
+  if (event.kind === "iteration.compared" || event.kind === "iteration.revised") return "Iteration " + (data.iteration || "?") + " - " + formatScore(data.score) + " - " + (data.decision || "revise") + (data.reason ? " - " + data.reason : "");
+  if (event.kind === "final-review.completed") return "Two final reviewers - " + (data.decision || "recorded");
   if (event.kind === "run.failed") return data.error;
-  return event.node_id || data.gate || data.release_id || "Recorded";
+  if (event.kind === "template.imported") return "Template imported";
+  return event.node_id || "Recorded";
 }
 
-function safeEventForTrace(event) {
-  return { sequence: event.sequence, timestamp: event.timestamp, kind: event.kind, status: event.status, node_id: event.node_id, trace_id: event.trace_id, data: safeEventData(event) };
-}
+
 
 function renderEventViews() {
   const host = $("#ad-run-events");
@@ -706,9 +436,28 @@ function renderEventViews() {
       copy.append(strong, p); row.append(time, copy); host.append(row);
     }
   }
-  const trace = $("#ad-full-trace");
-  if (trace) trace.textContent = runEvents.length ? JSON.stringify(runEvents.map(safeEventForTrace), null, 2) : "No events have been recorded for this run yet.";
   updateEvidence();
+}
+
+function mergeIterationEvent(run, item) {
+  const data = item?.data || {};
+  const iteration = firstNumber(data.iteration);
+  if (!iteration) return;
+  run.output = run.output && typeof run.output === "object" ? run.output : {};
+  const records = Array.isArray(run.output.iterations) ? [...run.output.iterations] : [];
+  let record = records.find((candidate) => Number(candidate?.iteration) === iteration);
+  if (!record) { record = { iteration, decision: "revise", comparison: {}, previews: [] }; records.push(record); }
+  if (item.kind === "iteration.rendered") {
+    record.previews = (Array.isArray(data.previews) ? data.previews : []).map((preview) => ({
+      ...preview,
+      url: `/api/ad-studio/runs/${encodeURIComponent(run.id)}/artifacts/${encodeURIComponent(preview.name || "")}`,
+    }));
+  }
+  if (item.kind === "iteration.compared") {
+    record.comparison = { score: firstNumber(data.score), reason: String(data.reason || "") };
+    record.decision = data.decision || (Number(data.score) >= 9.5 ? "accepted" : "revise");
+  }
+  run.output.iterations = records.sort((a, b) => Number(a.iteration) - Number(b.iteration));
 }
 
 function connectRunEvents(run) {
@@ -721,13 +470,13 @@ function connectRunEvents(run) {
     try {
       const item = JSON.parse(event.data);
       if (!runEvents.some((existing) => existing.sequence === item.sequence)) runEvents.push(item);
+      if (["iteration.rendered", "iteration.compared"].includes(item.kind)) mergeIterationEvent(run, item);
       if (item.kind === "stage.started" && item.node_id) {
         run.stage = item.node_id;
         run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(item.node_id)) / PIPELINE_STAGES.length);
       }
-      if (item.kind === "provider.attempt") { run.current_model = item.data?.model || run.current_model; run.current_provider = item.data?.provider || run.current_provider; }
       renderRunDetail(run);
-      if (["run.failed", "run.cancelled", "approval.requested", "release.published"].includes(item.kind)) void refreshRunsSafe().then(() => {
+      if (["run.failed", "run.cancelled", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {
         const updated = runs.find((candidate) => candidate.id === run.id);
         if (updated) renderRunDetail(updated);
       });
@@ -748,10 +497,32 @@ async function loadScopedGraph({ entityId, lens }) {
   return payload;
 }
 
+async function loadProcessMonitors() {
+  const archStatus = $("#ad-archify-status");
+  const archLink = $("#ad-archify-link");
+  const trailStatus = $("#ad-agenttrail-status");
+  const trailBoard = $("#ad-agenttrail-board");
+  try {
+    const response = await fetch("/api/ad-studio/architecture");
+    const data = await response.json();
+    archStatus.textContent = data.available ? `Archify typed-IR artifact ready | ${data.revision || "pinned"}` : (data.message || "Archify artifact unavailable.");
+    if (data.available && data.artifact_url) { archLink.href = data.artifact_url; archLink.hidden = false; }
+  } catch (error) { archStatus.textContent = "Archify status unavailable."; }
+  try {
+    const response = await fetch("/api/ad-studio/implementation-activity");
+    const data = await response.json();
+    if (!data.available) { trailStatus.textContent = data.message || "AgentTrail board unavailable."; return; }
+    trailStatus.textContent = `Read-only AgentTrail board | ${data.revision || "pinned"}`;
+    trailBoard.hidden = false;
+    trailBoard.textContent = JSON.stringify(data.board, null, 2);
+  } catch (error) { trailStatus.textContent = "AgentTrail status unavailable."; }
+}
+
 function mountPipeline() {
   const root = $("#ad-pipeline-graph");
   const panel = $("[data-ad-panel=\"pipeline\"]");
   if (!root || !panel.classList.contains("is-on")) return;
+  void loadProcessMonitors();
   graphHandle?.destroy();
   graphHandle = mountGraphWorkbench(root, {
     entityId: TOOL_ID,
@@ -779,7 +550,7 @@ function updateEvidence() {
     image.alt = local.name || "Source image";
     input.append(image);
   } else {
-    input.textContent = selectedStage && selectedRunId ? "Private inputs stay in Hermes; only safe evidence is shown here." : "Select a real run and stage to see its safe evidence.";
+    input.textContent = selectedStage && selectedRunId ? "Source and run evidence are recorded in Hermes." : "Select a real run and stage to see its evidence.";
   }
   output.classList.toggle("ad-evidence-empty", !stageEvents.length);
   if (!stageEvents.length) output.textContent = "No safe result has been recorded for this stage yet.";
@@ -798,7 +569,7 @@ function updateEvidence() {
     output.append(list);
   }
   const inspector = $("#ad-stage-events");
-  if (inspector) inspector.textContent = stageEvents.length ? `${stageEvents.length} durable event${stageEvents.length === 1 ? "" : "s"} recorded. Private prompts and paths remain in Hermes.` : "No events recorded for this stage yet.";
+  if (inspector) inspector.textContent = stageEvents.length ? `${stageEvents.length} durable event${stageEvents.length === 1 ? "" : "s"} recorded. Internal prompts and paths are excluded.` : "No events recorded for this stage yet.";
   const summary = $("#ad-stage-summary");
   if (summary) summary.textContent = selectedStage ? `${stageEvents.length} observed event${stageEvents.length === 1 ? "" : "s"} for ${selectedStage.label}.` : "Select a run or stage to inspect its recorded evidence.";
 }
@@ -819,13 +590,7 @@ function setupRunForm() {
   $("#ad-source-device").addEventListener("click", () => input.click());
   $("#ad-source-close").addEventListener("click", () => $("#ad-source-dialog").close());
   $("#ad-source-cancel").addEventListener("click", () => $("#ad-source-dialog").close());
-  $("#ad-source-add-vps").addEventListener("click", addSelectedVpsFiles);
-  $("#ad-source-vps-search").addEventListener("input", (event) => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => void searchVpsImages(clean(event.target.value).toLowerCase()), 250);
-  });
-  $("#ad-run-project").addEventListener("change", () => { void loadActivePolicy(); void refreshRunsSafe(); });
-  $("#ad-run-models").addEventListener("click", () => { modelEditMode = "one-run"; remainingRunId = ""; activate("models"); });
+  $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); });
   for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.add("is-drag"); });
   for (const type of ["dragleave", "drop"]) drop.addEventListener(type, (event) => {
     event.preventDefault();
@@ -838,25 +603,22 @@ function setupRunForm() {
     const submit = $("#ad-run-submit");
     status.classList.remove("is-error");
     if (!selectedFiles.length) {
-      status.textContent = "Choose at least one source image.";
+      status.textContent = "Choose one source image.";
       status.classList.add("is-error");
       return;
     }
     submit.disabled = true;
     submit.textContent = "Starting…";
-    status.textContent = "Uploading sources and starting Hermes…";
+    status.textContent = "Uploading source and starting Hermes…";
     try {
-      const placements = $$('input[name="ad-placement"]:checked').map((item) => item.value);
       const result = await requestEvent("frank:ad-studio-run", {
-        sources: selectedFiles.slice(), projectId: $("#ad-run-project").value,
-        name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value), placements,
-        policyRevision: clean($("#ad-run-policy-revision").value), policyOverride: pendingPolicyOverride,
+        sources: selectedFiles.slice(0, 1), projectId: $("#ad-run-project").value,
+        name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value),
       });
       const run = result.run;
       const first = selectedFiles[0];
       localRunInputs.set(run.id, { url: first.previewUrl, name: first.name });
       selectedRunId = run.id;
-      pendingPolicyOverride = null;
       status.textContent = `${result.runs.length} background job${result.runs.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
       await refreshRunsSafe();
       activate("runs");
@@ -874,186 +636,7 @@ function setupRunForm() {
 function setupPipelineForm() {
   $("#ad-pipeline-project").addEventListener("change", mountPipeline);
   $("#ad-pipeline-run").addEventListener("change", (event) => { selectedRunId = event.target.value; if (selectedRunId) void selectRun(selectedRunId); else updateEvidence(); });
-  $("#ad-copy-trace").addEventListener("click", async (event) => {
-    const button = event.currentTarget;
-    const payload = JSON.stringify(runEvents.map(safeEventForTrace), null, 2);
-    try {
-      await navigator.clipboard.writeText(payload);
-      button.textContent = "Copied";
-    } catch {
-      button.textContent = "Copy unavailable";
-    }
-    setTimeout(() => { button.textContent = "Copy safe trace"; }, 1800);
-  });
   $$('[data-ad-open-pipeline]').forEach((button) => button.addEventListener("click", () => activate("pipeline")));
-}
-
-function normalizeModels(payload) {
-  const inventory = payload?.data || payload?.models || payload?.options || [];
-  const providers = Array.isArray(payload?.providers) ? payload.providers : [];
-  const capabilities = Array.isArray(payload?.ad_studio_capabilities) ? payload.ad_studio_capabilities : [];
-  const providerModels = providers.flatMap((provider) => {
-    const models = Array.isArray(provider?.models) ? provider.models : [];
-    return models.map((model) => ({
-      model: typeof model === "string" ? model : (model?.model || model?.id || model?.name),
-      provider: provider.slug || provider.id || provider.name,
-      available: provider.authenticated ?? provider.configured ?? false,
-      capabilities: typeof model === "object" ? (model.capabilities || []) : [],
-    }));
-  });
-  const source = [...providerModels, ...(Array.isArray(inventory) ? inventory : []), ...capabilities];
-  const normalized = source.map((item) => ({
-    model: clean(item.model || item.id || item.value || item.name),
-    provider: clean(item.provider || item.provider_id || item.gateway || "custom"),
-    available: item.available ?? item.configured ?? null,
-    capabilities: item.capabilities || item.input_modalities || [],
-    price: item.estimated_price || item.price || item.pricing || null,
-    checkedAt: item.price_checked_at || item.pricing_checked_at || "",
-    pricingStale: item.pricing_stale === true,
-  })).filter((item) => item.model);
-  const merged = new Map();
-  for (const item of normalized) {
-    const key = `${item.provider}/${item.model}`;
-    const previous = merged.get(key) || {};
-    merged.set(key, { ...previous, ...item, available: item.available ?? previous.available ?? null, capabilities: item.capabilities?.length ? item.capabilities : (previous.capabilities || []) });
-  }
-  return [...merged.values()];
-}
-
-function modelReadiness(candidate) {
-  const match = modelCatalog.find((item) => item.model === candidate.model && (!candidate.provider || item.provider === candidate.provider));
-  if (!match) return "Custom model · compatibility checked when saved";
-  const price = match.price ? ` · price ${typeof match.price === "string" ? match.price : "available"}` : " · price unknown";
-  const readiness = match.available === true ? "Credential ready" : match.available === false ? "Credential not ready" : "Credential readiness unknown";
-  const timestamp = match.checkedAt ? ` · ${match.pricingStale ? "price last checked" : "checked"} ${match.checkedAt}` : "";
-  return `${readiness}${price}${timestamp}`;
-}
-
-function renderActivePolicySummary() {
-  const host = $("#ad-run-policy-summary");
-  if (!host) return;
-  const strong = host.querySelector("strong");
-  if (!activePolicy) { strong.textContent = "Policy unavailable"; return; }
-  const policy = activePolicy.policy || {};
-  const ceiling = Object.values(policy.stages || {}).reduce((sum, stage) => sum + Number(stage.max_cost_usd || 0), 0);
-  strong.textContent = `${policy.name || policy.preset || "Ad Studio policy"} · revision ${activePolicy.revision} · cost ceiling $${ceiling.toFixed(2)}`;
-  $("#ad-run-policy-revision").value = activePolicy.revision || "";
-}
-
-async function loadActivePolicy() {
-  const projectId = clean($("#ad-run-project")?.value || $("#ad-model-project")?.value);
-  if (!projectId) return;
-  const response = await fetch(`/api/ad-studio/model-policies?project_id=${encodeURIComponent(projectId)}`);
-  if (!response.ok) throw new Error("Model policy is unavailable");
-  const data = await response.json();
-  const records = Array.isArray(data.data) ? data.data : Array.isArray(data.policies) ? data.policies : [];
-  activePolicy = records.find((item) => item.is_default) || records[0] || null;
-  renderActivePolicySummary();
-}
-
-function renderModelSettings() {
-  const host = $("#ad-model-stage-list");
-  host.replaceChildren();
-  const stages = activePolicy?.policy?.stages || {};
-  const labels = { analyse: "Analyse and vision extraction", "masked-text-cleanup": "Masked text cleanup", "story-extend": "Optional story-margin extension", "visual-qa": "Visual QA and critic" };
-  for (const [stageId, stage] of Object.entries(stages)) {
-    const card = document.createElement("section");
-    card.className = "ad-model-stage"; card.dataset.stage = stageId; card.dataset.capability = stage.capability;
-    const fallbacks = (stage.fallbacks || []).map((item) => `${item.provider}/${item.model}`).join("\n");
-    card.innerHTML = `
-      <header><div><span>${stage.optional ? "Optional AI stage" : "AI stage"}</span><h4>${escapeHtml(labels[stageId] || stageId)}</h4></div><code>${escapeHtml(stage.capability)}</code></header>
-      <div class="ad-model-grid">
-        <label>Provider<input data-field="provider" value="${escapeHtml(stage.primary?.provider || "")}" maxlength="80" list="ad-provider-options"></label>
-        <label>Primary model<input data-field="model" value="${escapeHtml(stage.primary?.model || "")}" maxlength="200" list="ad-model-options"></label>
-        <label>Maximum attempts<input data-field="attempts" type="number" min="1" max="10" value="${stage.max_attempts || 1}"></label>
-        <label>Timeout (seconds)<input data-field="timeout" type="number" min="1" value="${stage.timeout_seconds || 120}"></label>
-        <label>Cost limit (USD)<input data-field="cost" type="number" min="0" step="0.01" value="${stage.max_cost_usd ?? 0}"></label>
-      </div>
-      <label>Fallbacks <span>one provider/model per line, in order</span><textarea data-field="fallbacks" rows="3">${escapeHtml(fallbacks)}</textarea></label>
-      <p class="ad-model-readiness">${escapeHtml(modelReadiness(stage.primary || {}))}</p>`;
-    host.append(card);
-  }
-  let datalist = $("#ad-model-options");
-  if (!datalist) { datalist = document.createElement("datalist"); datalist.id = "ad-model-options"; document.body.append(datalist); }
-  datalist.replaceChildren(...modelCatalog.map((item) => { const option = document.createElement("option"); option.value = item.model; option.label = `${item.provider} · ${item.available === true ? "ready" : item.available === false ? "not ready" : "readiness unknown"}`; return option; }));
-  let providerList = $("#ad-provider-options");
-  if (!providerList) { providerList = document.createElement("datalist"); providerList.id = "ad-provider-options"; document.body.append(providerList); }
-  providerList.replaceChildren(...[...new Set(modelCatalog.map((item) => item.provider).filter(Boolean))].sort().map((provider) => { const option = document.createElement("option"); option.value = provider; return option; }));
-}
-
-function policyFromForm() {
-  const policy = structuredClone(activePolicy.policy);
-  const candidate = (provider, model) => {
-    const result = { provider, model };
-    const catalog = modelCatalog.find((item) => item.model === model && (!provider || item.provider === provider));
-    if (catalog && Array.isArray(catalog.capabilities) && catalog.capabilities.length) {
-      result.capabilities = catalog.capabilities;
-      result.capability_verified = true;
-    }
-    return result;
-  };
-  policy.preset = $("[data-ad-preset].is-on")?.dataset.adPreset || "balanced";
-  policy.name = `${policy.preset.replaceAll("-", " ")} routing`;
-  for (const card of $$(".ad-model-stage")) {
-    const get = (field) => clean(card.querySelector(`[data-field="${field}"]`).value);
-    policy.stages[card.dataset.stage] = {
-      ...policy.stages[card.dataset.stage], capability: card.dataset.capability,
-      primary: candidate(get("provider"), get("model")),
-      fallbacks: get("fallbacks").split(/\n+/).map(clean).filter(Boolean).map((line) => { const slash = line.indexOf("/"); return slash > 0 ? candidate(line.slice(0, slash).trim(), line.slice(slash + 1).trim()) : candidate("custom", line); }),
-      max_attempts: Number(get("attempts")), timeout_seconds: Number(get("timeout")), max_cost_usd: Number(get("cost")),
-    };
-  }
-  return policy;
-}
-
-async function loadModelSettings() {
-  const status = $("#ad-model-status");
-  try {
-    const tasks = [fetch("/api/ad-studio/models")];
-    if (modelEditMode !== "remaining") tasks.push(loadActivePolicy());
-    const [modelsResponse] = await Promise.all(tasks);
-    if (modelsResponse.ok) modelCatalog = normalizeModels(await modelsResponse.json());
-    renderModelSettings();
-    status.textContent = activePolicy ? (modelEditMode === "one-run" ? "Edit this routing, then use it once without changing the project default." : modelEditMode === "remaining" ? `Only stages not yet started in ${remainingRunId.slice(0, 14)}… will change.` : `Revision ${activePolicy.revision} is active. Pricing checked ${activePolicy.policy?.pricing_checked_at || "at an unknown time"}.`) : "No active model policy.";
-  } catch (error) { status.textContent = error.message || "Model settings are unavailable"; status.classList.add("is-error"); }
-}
-
-function setupModelForm() {
-  $("#ad-model-project").addEventListener("change", () => void loadModelSettings());
-  for (const button of $$("[data-ad-preset]")) button.addEventListener("click", () => {
-    $$("[data-ad-preset]").forEach((item) => item.classList.toggle("is-on", item === button));
-  });
-  $("#ad-model-form").addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const status = $("#ad-model-status"); status.classList.remove("is-error");
-    const submit = event.submitter; submit.disabled = true;
-    try {
-      const policy = policyFromForm();
-      if (modelEditMode === "one-run") {
-        pendingPolicyOverride = policy;
-        const summary = $("#ad-run-policy-summary strong");
-        if (summary) summary.textContent = `${policy.name || "Custom routing"} · one-run override · project default unchanged`;
-        status.textContent = "One-run override ready. It will be pinned when you start the next job.";
-        modelEditMode = "default";
-        activate("run");
-        return;
-      }
-      const changingRemaining = modelEditMode === "remaining";
-      const url = changingRemaining ? `/api/ad-studio/runs/${encodeURIComponent(remainingRunId)}/models` : "/api/ad-studio/model-policies";
-      const body = changingRemaining ? { policy, reason: "Operator changed remaining stages in Frank" } : { project_id: $("#ad-model-project").value, policy };
-      const response = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      const data = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(data.error || data.message || "Policy could not be saved");
-      if (changingRemaining) {
-        const runId = remainingRunId; remainingRunId = ""; modelEditMode = "default";
-        activate("runs"); await selectRun(runId);
-      } else {
-        activePolicy = data; renderActivePolicySummary(); renderModelSettings();
-        status.textContent = `Revision ${data.revision} saved. Future jobs will pin it.`;
-      }
-    } catch (error) { status.textContent = error.message || "Policy could not be saved"; status.classList.add("is-error"); }
-    finally { submit.disabled = false; }
-  });
 }
 
 export function mountAdStudio() {
@@ -1061,7 +644,7 @@ export function mountAdStudio() {
   mounted = true;
   const tabs = $$("[data-ad-tab]");
   tabs.forEach((button, index) => {
-    button.addEventListener("click", () => { if (button.dataset.adTab === "models") { modelEditMode = "default"; remainingRunId = ""; } activate(button.dataset.adTab); });
+    button.addEventListener("click", () => { activate(button.dataset.adTab); });
     button.addEventListener("keydown", (event) => {
       const direction = event.key === "ArrowRight" ? 1 : event.key === "ArrowLeft" ? -1 : 0;
       if (!direction) return;
@@ -1073,9 +656,7 @@ export function mountAdStudio() {
   });
   setupRunForm();
   setupPipelineForm();
-  setupModelForm();
   void loadProjects().then(async () => {
-    await loadActivePolicy();
     await refreshRunsSafe();
     if ($("[data-ad-panel=\"pipeline\"]").classList.contains("is-on")) mountPipeline();
   }).catch((error) => {

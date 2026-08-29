@@ -10,6 +10,7 @@ import os
 import re
 import secrets
 import shutil
+import subprocess
 import tempfile
 import threading
 import time
@@ -84,15 +85,17 @@ def _mini_legacy_root() -> Path | None:
         return None
     return Path("/legacy-mini-projects")
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
-TEMPLATE_RELEASE_ROOT = Path(os.environ.get(
-    "AD_TEMPLATE_GENERATOR_RELEASE_ROOT", "/data/releases/ad-template-generator"
-)).resolve()
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
 HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
 HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
 HINDSIGHT_URL = os.environ.get("HINDSIGHT_API_URL", "http://172.16.1.1:9178").rstrip("/")
+# Read-only implementation monitors; Hermes remains template-run truth.
+ARCHIFY_ARTIFACT = Path(os.environ.get("ARCHIFY_ARTIFACT", str(Path(__file__).resolve().parent / "archify" / "ad-template-process.html"))).resolve()
+ARCHIFY_SPEC = Path(os.environ.get("ARCHIFY_SPEC", str(Path(__file__).resolve().parent / "archify" / "ad-template-process.json"))).resolve()
+ARCHIFY_CLI = Path(os.environ.get("ARCHIFY_CLI", str(Path(__file__).resolve().parent / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"))).resolve()
+AGENTTRAIL_URL = os.environ.get("AGENTTRAIL_URL", "http://127.0.0.1:5340").rstrip("/")
 ROOTS = {
     # The container receives only the explicitly approved read-only VPS mounts
     # beneath /vps. This presents one familiar tree without exposing the
@@ -142,22 +145,6 @@ AD_STUDIO_PLACEMENTS = {"square", "portrait", "story"}
 AD_STUDIO_IMAGE_EXTENSIONS = {
     ".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg",
     ".png", ".tif", ".tiff", ".webp",
-}
-TEMPLATE_RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
-TEMPLATE_RELEASE_EXTENSIONS = {
-    ".json", ".png", ".webp", ".jpg", ".jpeg", ".woff", ".woff2", ".ttf", ".otf",
-}
-TEMPLATE_RELEASE_MAX_BYTES = int(os.environ.get("AD_TEMPLATE_GENERATOR_RELEASE_MAX_BYTES", str(100 * 1024 * 1024)))
-TEMPLATE_RELEASE_MIME_TYPES = {
-    ".json": "application/json",
-    ".png": "image/png",
-    ".webp": "image/webp",
-    ".jpg": "image/jpeg",
-    ".jpeg": "image/jpeg",
-    ".woff": "font/woff",
-    ".woff2": "font/woff2",
-    ".ttf": "font/ttf",
-    ".otf": "font/otf",
 }
 ACCOUNT_FIELDS = {
     "project_id", "kind", "name", "identity", "provider", "purpose",
@@ -1320,101 +1307,119 @@ def _public_generation_text(value: object) -> str:
     return text
 
 
-def _public_ad_studio_generations(value: object) -> list[dict]:
+def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]:
     if not isinstance(value, list):
         return []
     public = []
     for index, raw in enumerate(value[:30], 1):
         if not isinstance(raw, dict):
             continue
-        scores = raw.get("scores") if isinstance(raw.get("scores"), dict) else raw
-        artifacts = raw.get("artifacts") if isinstance(raw.get("artifacts"), dict) else {}
-        reviewers = raw.get("reviewers") if isinstance(raw.get("reviewers"), dict) else {}
-        record = {
-            "iteration": int(_number_from(raw.get("iteration"), raw.get("generation"), index) or index),
-            "status": re.sub(r"[^a-z-]", "", str(raw.get("status") or raw.get("decision") or "recorded").lower())[:40],
-            "scores": {
-                "primary_ad_system_likeness": _number_from(scores.get("primary_ad_system_likeness"), scores.get("primaryAdSystemLikeness"), scores.get("primary_score")),
-                "strict_ad_system_likeness": _number_from(scores.get("strict_ad_system_likeness"), scores.get("strictAdSystemLikeness"), scores.get("strict_score")),
-            },
-            "likeness_threshold": _number_from(raw.get("likeness_threshold"), raw.get("likenessThreshold"), raw.get("threshold"), 9.5),
-            "revision_reason": _public_generation_text(raw.get("revision_reason") or raw.get("revisionReason") or raw.get("change_summary")),
-            "reviewers": {
-                "primary": str(reviewers.get("primary") or "")[:160] if EXTERNAL_REFERENCE.fullmatch(str(reviewers.get("primary") or "")) else "",
-                "strict": str(reviewers.get("strict") or "")[:160] if EXTERNAL_REFERENCE.fullmatch(str(reviewers.get("strict") or "")) else "",
-            },
-            "artifacts": {
-                key: str(artifacts.get(key) or "").lower()
-                for key in ("feedSha256", "storySha256", "renderSetSha256")
-                if re.fullmatch(r"[0-9a-f]{64}", str(artifacts.get(key) or "").lower())
-            },
-        }
-        public.append(record)
+        comparison = raw.get("comparison") if isinstance(raw.get("comparison"), dict) else {}
+        iteration = int(_number_from(raw.get("iteration"), index) or index)
+        previews = []
+        candidate = raw.get("candidate") if isinstance(raw.get("candidate"), dict) else {}
+        for item in candidate.get("previews") if isinstance(candidate.get("previews"), list) else []:
+            if not isinstance(item, dict): continue
+            name = str(item.get("name") or "").strip()
+            if not re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", name): continue
+            previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}"})
+        public.append({
+            "iteration": iteration,
+            "decision": str(raw.get("decision") or "revise")[:20],
+            "comparison": {"score": _number_from(comparison.get("score")), "reason": _public_generation_text(comparison.get("reason"))},
+            "previews": previews,
+        })
     return public
 
 
 def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
-    """Project a Tool run without exposing source paths or private command data."""
+    """Project Hermes state for Frank's internal operator monitor."""
     now = int(time.time())
     payload = run.get("payload") if isinstance(run.get("payload"), dict) else {}
     sources = payload.get("sources") if isinstance(payload.get("sources"), list) else []
     source = sources[0] if sources and isinstance(sources[0], dict) else {}
-    policy = run.get("model_policy") if isinstance(run.get("model_policy"), dict) else {}
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
-    safe_output_keys = {
-        "preview", "previews", "artifacts", "qa", "usage", "cost",
-        "release_id", "template_pack", "template_pack_ref", "checksum", "sha256",
-        "signature", "compatibility", "imports", "trace_ref",
-    }
-    safe_output = {key: value for key, value in output.items() if key in safe_output_keys}
-    if "generations" in output:
-        safe_output["generations"] = _public_ad_studio_generations(output.get("generations"))
-    item = {
+    safe_output = {key: output.get(key) for key in (
+        "iterations", "final_review", "import", "process",
+    ) if key in output}
+    previews = []
+    for item in output.get("previews") if isinstance(output.get("previews"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", name):
+            continue
+        previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-studio/runs/{run.get('run_id') or run.get('id')}/artifacts/{urllib.parse.quote(name, safe='')}"})
+    if previews:
+        safe_output["previews"] = previews
+    if "iterations" in output:
+        safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"), str(run.get("run_id") or run.get("id") or ""))
+    return {
         "id": str(run.get("id") or run.get("run_id") or ""),
         "request_id": str(run.get("request_id") or ""),
         "status": str(run.get("status") or "queued"),
         "stage": str(run.get("stage") or "source"),
         "progress": float(run.get("progress") or 0),
-        "attention": str(run.get("attention") or ""),
-        "trace_id": str(run.get("trace_id") or ""),
+        "attention": bool(run.get("attention")),
         "created_at": run.get("created_at") or now,
-        "updated_at": run.get("updated_at") or run.get("completed_at") or run.get("created_at") or now,
-        "policy_revision": str(run.get("model_policy_revision") or ""),
-        "policy": policy,
-        "current_model": str(run.get("current_model") or ""),
-        "current_provider": str(run.get("current_provider") or ""),
-        "source": {
-            "ref": str(source.get("ref") or ""),
-            "name": str(source.get("name") or ""),
-            "sha256": str(source.get("sha256") or ""),
-            "size": int(source.get("size") or 0),
-            "media_type": str(source.get("media_type") or ""),
-            "origin": str(source.get("origin") or ""),
-        },
+        "updated_at": run.get("updated_at") or run.get("created_at") or now,
+        "source": {"name": str(source.get("name") or ""), "size": int(source.get("size") or 0), "media_type": str(source.get("media_type") or ""), "origin": str(source.get("origin") or "")},
         "output": safe_output,
+        "cost": (output.get("cost") or {}).get("reported_usd") if isinstance(output.get("cost"), dict) else None,
+        "usage": {key: output.get("usage", {}).get(key) for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd") if isinstance(output.get("usage"), dict) and output.get("usage", {}).get(key) is not None},
+        "title": title or str(run.get("title") or payload.get("job_name") or "Ad template"),
+        "project_id": project_id or str(scope.get("project_id") or payload.get("project_id") or ""),
+        **({"error": str(run.get("error"))[:1200]} if run.get("error") else {}),
     }
-    item["title"] = title or str(run.get("title") or payload.get("job_name") or "Ad Studio job")
-    item["project_id"] = project_id or str(run.get("project_id") or scope.get("project_id") or payload.get("project_id") or "")
-    if run.get("error"):
-        item["error"] = str(run.get("error"))[:1200]
-    if isinstance(run.get("usage"), dict):
-        item["usage"] = run["usage"]
-    if run.get("cost") is not None:
-        item["cost"] = run["cost"]
-    return item
+
+
+@app.get("/api/ad-studio/architecture")
+def ad_studio_architecture():
+    available = ARCHIFY_ARTIFACT.is_file()
+    validated = False
+    if ARCHIFY_CLI.is_file() and ARCHIFY_SPEC.is_file() and shutil.which("node"):
+        try:
+            result = subprocess.run(["node", str(ARCHIFY_CLI), "validate", "architecture", str(ARCHIFY_SPEC), "--json"], capture_output=True, text=True, timeout=8, check=False)
+            validated = result.returncode == 0 and '"ok": true' in result.stdout.lower()
+        except (OSError, subprocess.TimeoutExpired):
+            validated = False
+    return jsonify({
+        "available": available and validated, "source": "archify",
+        "read_only": True, "validated": validated,
+        "artifact_url": "/api/ad-studio/architecture/artifact" if available and validated else None,
+        "message": "Archify pinned CLI/spec/artifact validation is unavailable." if not (available and validated) else "Archify typed-IR artifact is validated and available.",
+    })
+
+
+@app.get("/api/ad-studio/architecture/artifact")
+def ad_studio_architecture_artifact():
+    if not ARCHIFY_ARTIFACT.is_file():
+        abort(404, "Archify artifact is not available")
+    return send_file(ARCHIFY_ARTIFACT, mimetype="text/html", max_age=0)
+
+
+@app.get("/api/ad-studio/implementation-activity")
+def ad_studio_implementation_activity():
+    # AgentTrail is a loopback observer; Frank only proxies its read endpoint.
+    try:
+        req = urllib.request.Request(f"{AGENTTRAIL_URL}/summary", headers={"Accept": "application/json"})
+        with urllib.request.urlopen(req, timeout=2) as response:
+            board = json.loads(response.read(2 * 1024 * 1024 + 1).decode("utf-8"))
+    except Exception:
+        return jsonify({"available": False, "source": "agenttrail", "read_only": True, "message": "AgentTrail loopback observer is unavailable."}), 503
+    if not isinstance(board, (dict, list)):
+        return jsonify({"available": False, "source": "agenttrail", "read_only": True, "message": "AgentTrail returned an unsupported board shape."}), 503
+    return jsonify({"available": True, "source": "agenttrail", "read_only": True, "board": board})
 
 
 def _ad_studio_source(attachment: dict) -> dict:
     target = _upload_target(attachment["id"])
     if target is None or not target.is_file():
         abort(400, "source image is no longer available")
-    digest = hashlib.sha256(target.read_bytes()).hexdigest()
     return {
-        "ref": f"source:{digest}",
         "path": attachment["hermes_path"],
         "name": attachment["name"],
-        "sha256": digest,
         "size": attachment["size"],
         "media_type": attachment["type"],
         "origin": attachment.get("origin") or "device",
@@ -1429,7 +1434,7 @@ def _tool_run_path(run_id: str, suffix: str = "") -> str:
 
 @app.post("/api/ad-studio/runs")
 def ad_studio_run_create():
-    """Start the canonical Ad Studio work as a detached Hermes run."""
+    """Start exactly one canonical Feed + Story run in Hermes."""
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict):
         abort(400, "request body must be an object")
@@ -1438,70 +1443,39 @@ def ad_studio_run_create():
     if not project:
         abort(404, "project not found")
     raw_attachments = body.get("attachments")
-    if not isinstance(raw_attachments, list) or not raw_attachments or len(raw_attachments) > 100:
-        abort(400, "choose between 1 and 100 source images")
+    if not isinstance(raw_attachments, list) or len(raw_attachments) != 1:
+        abort(400, "choose exactly one source image")
     attachments = _clean_atts(raw_attachments)
-    if len(attachments) != len(raw_attachments):
-        abort(400, "one or more source images were not accepted")
-    if any(not item["type"].startswith("image/") for item in attachments):
-        abort(400, "Ad Studio accepts image sources only")
-
-    raw_placements = body.get("placements")
-    placements = [str(item).strip().lower() for item in raw_placements] if isinstance(raw_placements, list) else []
-    if not placements or any(item not in AD_STUDIO_PLACEMENTS for item in placements):
-        abort(400, "choose one or more supported placements")
-    placements = list(dict.fromkeys(placements))
-    name = _clean_project_text(body.get("name"), 60) or (
-        re.sub(r"\.[^.]+$", "", attachments[0]["name"])
-        if len(attachments) == 1 else f"{len(attachments)} source images"
-    )
+    if len(attachments) != 1 or not attachments[0]["type"].startswith("image/"):
+        abort(400, "Ad Studio accepts exactly one image source")
+    attachment = attachments[0]
+    name = _clean_project_text(body.get("name"), 60) or re.sub(r"\.[^.]+$", "", attachment["name"])
     brief = _clean_project_text(body.get("brief"), 800)
-    policy_revision = str(body.get("policy_revision") or "").strip()
-    policy_override = body.get("policy_override") if isinstance(body.get("policy_override"), dict) else None
-    batch_id = f"batch_{secrets.token_hex(16)}"
-    runs = []
+    command_payload = {
+        "job_name": name, "brief": brief, "placements": ["feed", "story"],
+        "sources": [_ad_studio_source(attachment)], "project_context": _project_context(project),
+    }
+    request_payload = {
+        "schema": "schema://hermes.tool-run-command/v1",
+        "request_id": f"req_{secrets.token_hex(16)}",
+        "tool_id": "ad-template-generator", "action": "build-template",
+        "scope": {"project_id": project_id}, "payload": command_payload,
+        "idempotency_key": f"ad-template:{secrets.token_hex(16)}",
+    }
     try:
-        for index, attachment in enumerate(attachments):
-            child_name = name if len(attachments) == 1 else f"{name} · {index + 1} of {len(attachments)}"
-            command_payload = {
-                "batch_id": batch_id,
-                "job_name": child_name,
-                "brief": brief,
-                "placements": placements,
-                "sources": [_ad_studio_source(attachment)],
-                "project_context": _project_context(project),
-            }
-            request_payload = {
-                "schema": "schema://hermes.tool-run-command/v1",
-                "request_id": f"req_{secrets.token_hex(16)}",
-                "tool_id": "ad-template-generator",
-                "action": "build-template",
-                "scope": {"project_id": project_id},
-                "payload": command_payload,
-                "idempotency_key": f"{batch_id}:{index}",
-            }
-            if policy_revision:
-                try:
-                    request_payload["model_policy_revision"] = int(policy_revision)
-                except ValueError:
-                    abort(400, "invalid model policy revision")
-            if policy_override:
-                request_payload["model_policy_override"] = policy_override
-            data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=15)
-            run_data = data.get("run") if isinstance(data.get("run"), dict) else data
-            run_id = str(run_data.get("id") or run_data.get("run_id") or "")
-            if not AD_STUDIO_RUN_ID.fullmatch(run_id):
-                return jsonify({"error": "Hermes did not return a valid Tool run id"}), 502
-            runs.append(_public_ad_studio_run(run_data, title=f"Ad Studio · {child_name}", project_id=project_id))
-            staging_target = _upload_target(attachment["id"])
-            if staging_target is not None:
-                try:
-                    staging_target.unlink(missing_ok=True)
-                except OSError:
-                    pass
+        data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=15)
+        run_data = data.get("run") if isinstance(data.get("run"), dict) else data
+        run_id = str(run_data.get("id") or run_data.get("run_id") or "")
+        if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+            return jsonify({"error": "Hermes did not return a valid Tool run id"}), 502
+        result = _public_ad_studio_run(run_data, title=f"Ad Studio · {name}", project_id=project_id)
+        staging_target = _upload_target(attachment["id"])
+        if staging_target is not None:
+            try: staging_target.unlink(missing_ok=True)
+            except OSError: pass
+        return jsonify({"ok": True, "run": result, "runs": [result]}), 202
     except Exception as error:
         return _hermes_error(error)
-    return jsonify({"ok": True, "batch_id": batch_id, "run": runs[0], "runs": runs}), 202
 
 
 @app.get("/api/ad-studio/runs")
@@ -1557,34 +1531,6 @@ def ad_studio_run_events(run_id: str):
     return Response(stream_with_context(generate()), mimetype="text/event-stream", headers=_sse_headers())
 
 
-@app.get("/api/ad-studio/runs/<run_id>/download")
-def ad_studio_run_download(run_id: str):
-    url = hermes_base() + _tool_run_path(run_id, "/download")
-    headers = {"Accept": "application/zip, application/json"}
-    if HERMES_KEY:
-        headers["Authorization"] = f"Bearer {HERMES_KEY}"
-    try:
-        upstream = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=30)
-    except Exception as error:
-        return _hermes_error(error)
-
-    def generate():
-        try:
-            while True:
-                chunk = upstream.read(64 * 1024)
-                if not chunk:
-                    break
-                yield chunk
-        finally:
-            upstream.close()
-
-    response_headers = {"Cache-Control": "private, no-store"}
-    disposition = upstream.headers.get("Content-Disposition")
-    if disposition:
-        response_headers["Content-Disposition"] = disposition
-    return Response(stream_with_context(generate()), mimetype=upstream.headers.get_content_type(), headers=response_headers)
-
-
 @app.get("/api/ad-studio/runs/<run_id>/artifacts/<name>")
 def ad_studio_run_artifact(run_id: str, name: str):
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", name):
@@ -1601,71 +1547,6 @@ def ad_studio_run_artifact(run_id: str, name: str):
         return Response(data, mimetype=upstream.headers.get_content_type(), headers={"Cache-Control": "private, no-store"})
     except Exception as error:
         return _hermes_error(error)
-
-
-def _template_release_target(release_id: str, artifact: str) -> Path | None:
-    if not TEMPLATE_RELEASE_ID.fullmatch(release_id or ""):
-        return None
-    if not artifact or "\\" in artifact or artifact.startswith("/"):
-        return None
-    parts = artifact.split("/")
-    if any(not part or part in {".", ".."} or part.startswith(".") for part in parts):
-        return None
-    target = (TEMPLATE_RELEASE_ROOT / release_id / Path(*parts)).resolve()
-    try:
-        target.relative_to(TEMPLATE_RELEASE_ROOT)
-    except ValueError:
-        return None
-    if target.suffix.lower() not in TEMPLATE_RELEASE_EXTENSIONS:
-        return None
-    current = TEMPLATE_RELEASE_ROOT
-    try:
-        for part in (release_id, *parts):
-            current = current / part
-            if current.is_symlink():
-                return None
-    except OSError:
-        return None
-    if not target.exists() or not target.is_file() or target.is_symlink():
-        return None
-    try:
-        if target.stat().st_size > TEMPLATE_RELEASE_MAX_BYTES:
-            return None
-    except OSError:
-        return None
-    return target
-
-
-@app.route("/releases/ad-template-generator/<release_id>/<path:artifact>", methods=["GET", "HEAD"])
-def ad_template_generator_release_artifact(release_id: str, artifact: str):
-    target = _template_release_target(release_id, artifact)
-    if target is None:
-        abort(404)
-    try:
-        stat = target.stat()
-        etag = hashlib.sha256(f"{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()
-        if request.if_none_match and request.if_none_match.contains(etag):
-            return Response(status=304, headers={"ETag": f'"{etag}"', "Cache-Control": "public, max-age=300"})
-        content_type = TEMPLATE_RELEASE_MIME_TYPES.get(target.suffix.lower(), mimetypes.guess_type(target.name)[0]) or "application/octet-stream"
-        headers = {
-            "ETag": f'"{etag}"',
-            "Cache-Control": "public, max-age=300",
-            "Content-Length": str(stat.st_size),
-        }
-        if request.method == "HEAD":
-            return Response(status=200, headers=headers, mimetype=content_type)
-
-        def stream():
-            with target.open("rb") as handle:
-                while True:
-                    chunk = handle.read(64 * 1024)
-                    if not chunk:
-                        break
-                    yield chunk
-
-        return Response(stream_with_context(stream()), headers=headers, mimetype=content_type, direct_passthrough=True)
-    except OSError:
-        abort(404)
 
 
 def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):
@@ -1693,52 +1574,6 @@ def _number_from(*values):
     return None
 
 
-def _ad_studio_visual_gate(run: dict) -> dict:
-    """Project the fail-closed two-review gate from a durable run result."""
-    output = run.get("output") if isinstance(run.get("output"), dict) else {}
-    qa = output.get("qa") if isinstance(output.get("qa"), dict) else {}
-    review = qa.get("visual_review") or qa.get("visualReview") or output.get("quality_gate") or output.get("iteration_summary") or {}
-    review = review if isinstance(review, dict) else {}
-    scores = review.get("scores") if isinstance(review.get("scores"), dict) else qa.get("scores")
-    scores = scores if isinstance(scores, dict) else {}
-    primary = _number_from(
-        scores.get("primaryAdSystemLikeness"), scores.get("primary_ad_system_likeness"),
-        review.get("primaryAdSystemLikeness"), review.get("primary_score"), qa.get("primary_score"),
-    )
-    strict = _number_from(
-        scores.get("strictAdSystemLikeness"), scores.get("strict_ad_system_likeness"),
-        review.get("strictAdSystemLikeness"), review.get("strict_score"), qa.get("strict_score"),
-    )
-    threshold = _number_from(review.get("likenessThreshold"), review.get("likeness_threshold"), qa.get("likeness_threshold"), 9.5)
-    passed = primary is not None and strict is not None and threshold is not None and primary >= threshold and strict >= threshold
-    return {"passed": passed, "primary_score": primary, "strict_score": strict, "threshold": threshold or 9.5}
-
-
-@app.post("/api/ad-studio/runs/<run_id>/approval")
-def ad_studio_run_approval(run_id: str):
-    body = request.get_json(silent=True) or {}
-    if isinstance(body, dict) and body.get("decision") == "approve":
-        if body.get("confirm_100_percent") is not True:
-            return jsonify({"error": "Approval requires an explicit 100% zoom confirmation."}), 400
-        try:
-            data = hermes_request(_tool_run_path(run_id), timeout=8)
-        except Exception as error:
-            return _hermes_error(error)
-        run = data.get("run") if isinstance(data.get("run"), dict) else data
-        gate = _ad_studio_visual_gate(run if isinstance(run, dict) else {})
-        if not gate["passed"]:
-            return jsonify({
-                "error": "Approval is locked until both independent visual scores are recorded at 9.5 or higher.",
-                "quality_gate": gate,
-            }), 409
-    return _proxy_ad_studio_action(run_id, "/approval", {"decision", "confirm_100_percent", "reason"})
-
-
-@app.post("/api/ad-studio/runs/<run_id>/models")
-def ad_studio_run_models(run_id: str):
-    return _proxy_ad_studio_action(run_id, "/models", {"policy", "reason"})
-
-
 @app.post("/api/ad-studio/runs/<run_id>/retry")
 def ad_studio_run_retry(run_id: str):
     return _proxy_ad_studio_action(run_id, "/retry", {"from_stage"})
@@ -1747,33 +1582,6 @@ def ad_studio_run_retry(run_id: str):
 @app.post("/api/ad-studio/runs/<run_id>/cancel")
 def ad_studio_run_cancel(run_id: str):
     return _proxy_ad_studio_action(run_id, "/cancel", {"reason"})
-
-
-@app.get("/api/ad-studio/models")
-def ad_studio_models():
-    try:
-        return jsonify(hermes_request("/v1/tool-runs/models?tool_id=ad-template-generator", timeout=8))
-    except Exception as error:
-        return _hermes_error(error)
-
-
-@app.route("/api/ad-studio/model-policies", methods=["GET", "POST"])
-def ad_studio_model_policies():
-    path = "/v1/tool-runs/policies/ad-template-generator"
-    if request.method == "GET":
-        query = urllib.parse.urlencode({"project_id": str(request.args.get("project_id") or "")})
-        try:
-            return jsonify(hermes_request(f"{path}?{query}", timeout=8))
-        except Exception as error:
-            return _hermes_error(error)
-    body = request.get_json(silent=True) or {}
-    if not isinstance(body, dict) or not isinstance(body.get("policy"), dict):
-        abort(400, "model policy required")
-    payload = {"project_id": str(body.get("project_id") or ""), "policy": body["policy"]}
-    try:
-        return jsonify(hermes_request(path, payload, method="POST", timeout=15))
-    except Exception as error:
-        return _hermes_error(error)
 
 
 def _hermes_chat_stream(chat_id: str, payload: dict, *, read_timeout: float | None = None):
@@ -1929,8 +1737,6 @@ def mini_legacy_redirect(mini_path: str):
 @app.get("/", defaults={"path": ""})
 @app.get("/<path:path>")
 def spa(path: str):
-    if path == "releases/ad-template-generator" or path.startswith("releases/ad-template-generator/"):
-        abort(404)
     candidate = (WEB / path).resolve()
     try:
         candidate.relative_to(WEB)

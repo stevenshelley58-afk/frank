@@ -1,8 +1,10 @@
 ---
-{"schema":"schema://mini-frank.knowledge-page/v1","id":"governance-private-context-boundary","title":"Private context never promotes directly","kind":"governance","status":"approved","summary":"Raw customer context, uploads and feedback remain project-private; only non-recognisable evidence-backed lessons may enter shared knowledge.","tags":["privacy","client-data","feedback","knowledge-promotion"],"source_refs":["src-frank-memory-contract","src-frank-reuse-contract","src-prospect-discovery-contract"],"verified_at":"2026-08-22","stale_after":"2027-02-22","privacy":"public","related_refs":["governance-project-isolation","craft-sanitise-before-release"]}
+{"schema":"schema://mini-frank.knowledge-page/v1","id":"governance-private-context-boundary","title":"Private context stays within its project","kind":"governance","status":"approved","summary":"Private customer context remains inside the customer's canonical project workspace and workspace-derived Hindsight bank; it never enters shared Mini Frank knowledge.","tags":["privacy","project","isolation","private-client"],"source_refs":["src-frank-project-contract","src-frank-memory-contract"],"verified_at":"2026-08-30","stale_after":"2027-08-30","privacy":"public","related_refs":["governance-project-isolation","platform-hindsight-is-memory"]}
 ---
-# Private context never promotes directly
+# Private context stays within its project
 
-Keep business profiles, records, uploads, preferences and raw job feedback in
-their project boundary. A reusable lesson must remove identity and unique
-content, retain evidence, and pass a recognisability check.
+Private customer context is scoped by the canonical project workspace and the
+Hindsight bank derived from that stable workspace slug. Shared Mini Frank
+knowledge contains reusable, sourced guidance only and never customer material.
+
+This boundary prevents context from crossing into another project or the shared core.
