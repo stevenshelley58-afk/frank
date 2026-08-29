@@ -61,6 +61,19 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("frame-ancestors 'self'", ui_policy)
         self.assertNotIn("defer", ui_policy)
 
+    def test_mini_project_site_is_project_owned_and_keeps_frank_shell_separate(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
+        project_site = caddyfile.split("@mini_project_root", 1)[1].split("@frank_ui", 1)[0]
+        caddy = compose.split("  frank-caddy:", 1)[1].split("\n  volumes:", 1)[0]
+
+        self.assertIn("path /mini-frank", project_site)
+        self.assertIn("handle_path /mini-frank/*", project_site)
+        self.assertIn("root * /srv/mini-frank-site", project_site)
+        self.assertIn("import frank_mini_ui_response_headers", project_site)
+        self.assertNotIn("reverse_proxy", project_site)
+        self.assertIn("/projects/mini-frank/site:/srv/mini-frank-site:ro", caddy)
+
     def test_private_response_policy_is_scoped_to_pavone_and_authenticated_frank(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         self.assertIn("import frank_common_security_headers", caddyfile)

@@ -34,23 +34,6 @@ test("the customer conversation is branded as Frank without legacy Mini copy", a
   assert.doesNotMatch(script, /outcome-contract|<h3[^>]*>Before I build|<dt>I know|<dt>I have|<dt>I.?m assuming/i);
 });
 
-test("the customer surface includes the SaaS landing sections around the real composer", async () => {
-  const html = await source("index.html");
-  const script = await source("mini.js");
-  const css = await source("mini.css");
-
-  assert.match(html, /id="free-projects"/);
-  assert.match(html, /id="business-automation"/);
-  assert.match(html, /id="previous-solutions"/);
-  assert.match(html, /id="questions"/);
-  assert.match(html, /Hospitality operations · Fremantle, WA/);
-  assert.match(html, /Foodservice ordering · Malaga, WA/);
-  assert.match(html, /Field-service operations · Perth metro/);
-  assert.match(script, /document\.body\.classList\.add\("is-conversation-active"\)/);
-  assert.match(script, /document\.body\.classList\.remove\("is-conversation-active"\)/);
-  assert.match(css, /\.is-conversation-active \.marketing/);
-});
-
 test("customer-visible source has no legacy ready or privacy copy", async () => {
   const html = await source("index.html");
   const script = await source("mini.js");

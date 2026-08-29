@@ -126,6 +126,18 @@ frank.fail {
             }
         }
 
+        # Mini Frank's product site is a project-owned artifact. Caddy serves
+        # the committed project files directly; the existing Window API remains
+        # the only customer backend and Frank's /frank shell stays independent.
+        @mini_project_root path /mini-frank
+        redir @mini_project_root /mini-frank/ 308
+        handle_path /mini-frank/* {
+            import frank_mini_ui_response_headers
+            root * /srv/mini-frank-site
+            try_files {path} {path}/index.html =404
+            file_server
+        }
+
         @frank_ui path /frank /frank/*
         handle @frank_ui {
             import frank_mini_ui_response_headers
