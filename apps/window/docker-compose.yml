@@ -61,6 +61,9 @@ services:
       - caddy_config:/config
     networks:
       - frank
+      # Blockwise owns its services and state on a separate Compose network.
+      # Frank's edge is the only Frank container allowed to join it.
+      - blockwise-product
     depends_on:
       frank-window:
         condition: service_healthy
@@ -75,3 +78,6 @@ networks:
   frank:
     external: true
     name: frank
+  blockwise-product:
+    external: true
+    name: blockwise-product

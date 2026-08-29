@@ -147,6 +147,23 @@ class InfraContractTest(unittest.TestCase):
         self.assertNotIn("mini-shared", preview)
         self.assertNotIn("rewrite", preview)
 
+    def test_blockwise_product_uses_a_persistent_isolated_edge_attachment(self):
+        compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        caddy = compose.split("  frank-caddy:", 1)[1].split("\nvolumes:", 1)[0]
+        window = compose.split("  frank-window:", 1)[1].split("\n  frank-caddy:", 1)[0]
+        product = caddyfile.split("blockwise.sale {", 1)[1].split("preview.frank.fail {", 1)[0]
+
+        self.assertIn("- blockwise-product", caddy)
+        self.assertNotIn("- blockwise-product", window)
+        self.assertIn("blockwise-product:\n    external: true\n    name: blockwise-product", compose)
+        self.assertIn("reverse_proxy product-caddy:80", product)
+        self.assertIn("header_up X-Forwarded-Proto https", product)
+        self.assertIn("max_size 14MB", product)
+        self.assertIn("request>headers>Authorization delete", product)
+        self.assertIn("request>headers>Cookie delete", product)
+        self.assertNotIn("basic_auth", product)
+
     def test_customer_previews_are_not_indexed_or_content_sniffed(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         preview = caddyfile.split("preview.frank.fail {", 1)[1].split("tasks.frank.fail {", 1)[0]

@@ -177,6 +177,39 @@ frank.fail {
     }
 }
 
+blockwise.sale {
+    encode zstd gzip
+    import frank_common_security_headers
+
+    log {
+        output stdout
+        format filter {
+            wrap json
+            fields {
+                request>headers>Authorization delete
+                request>headers>Proxy-Authorization delete
+                request>headers>Cookie delete
+                request>uri delete
+                response>headers>Set-Cookie delete
+            }
+        }
+    }
+
+    request_body {
+        # Product Storage rejects files above 10 MiB. Leave bounded room for
+        # multipart framing while keeping the shared edge fail-closed.
+        max_size 14MB
+    }
+
+    # TLS terminates once at Frank's public edge. The product Caddy owns only
+    # path routing on the isolated blockwise-product network.
+    reverse_proxy product-caddy:80 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+}
+
 preview.frank.fail {
     header {
         -Server
