@@ -7,6 +7,8 @@ data
 *.sqlite*
 *.log
 node_modules
+.git
+**/.git
 .npm-cache
 web/graph
 graph/isolated-harness.html

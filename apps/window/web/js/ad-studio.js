@@ -20,11 +20,19 @@ const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", 
 
 const clean = (value) => String(value || "").trim();
 const escapeHtml = (value) => clean(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
-const PIPELINE_STAGES = ["source", "analyse", "decompose", "restyle", "story-draft", "render", "compare", "qa", "final-review", "import"];
+const PIPELINE_STAGES = ["source", "build", "render", "compare", "final-check", "live"];
 const PIPELINE_LABELS = {
-  source: "Source", analyse: "Analyse", decompose: "Layer", restyle: "Restyle",
-  "story-draft": "Story", render: "Render", compare: "Compare", qa: "Check",
-  "final-review": "Final review", import: "Import",
+  source: "Source", build: "Build", render: "Render", compare: "Compare/revise",
+  "final-check": "Final check", live: "Live/import",
+};
+const STAGE_ALIASES = {
+  analyse: "build", analyze: "build", decompose: "build", restyle: "build", "story-draft": "build",
+  qa: "compare", "visual-review": "compare", check: "compare", "subject-invariance": "compare", "studio-qa": "compare",
+  "final-review": "final-check", ready: "final-check", import: "live", release: "live",
+};
+const canonicalStage = (stage) => {
+  const value = clean(stage).toLowerCase().replaceAll("_", "-").replaceAll(" ", "-");
+  return PIPELINE_STAGES.includes(value) ? value : (STAGE_ALIASES[value] || "source");
 };
 
 
@@ -226,9 +234,9 @@ function renderPhaseTimeline(run, parent) {
   heading.innerHTML = "<strong>Run lifecycle</strong><span>Select a stage to inspect its evidence.</span>";
   const stages = document.createElement("div");
   stages.className = "ad-phase-rail";
-  const current = run.stage;
+  const current = canonicalStage(run.stage);
   const currentIndex = PIPELINE_STAGES.indexOf(current);
-  const recorded = new Set(runEvents.filter((event) => event.kind === "stage.started").map((event) => event.node_id));
+  const recorded = new Set(runEvents.filter((event) => event.kind === "stage.started").map((event) => canonicalStage(event.node_id)));
   PIPELINE_STAGES.forEach((id, index) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -245,6 +253,25 @@ function renderPhaseTimeline(run, parent) {
     stages.append(button);
   });
   section.append(heading, stages);
+  parent.append(section);
+}
+
+function renderPersistedSource(run, parent) {
+  if (!run.source?.url) return;
+  const section = document.createElement("section");
+  section.className = "ad-preview-section ad-source-record";
+  section.innerHTML = '<div class="ad-inline-heading"><strong>Source</strong><span>Saved with this run and available after reconnecting.</span></div>';
+  const grid = document.createElement("div");
+  grid.className = "ad-preview-grid";
+  const figure = document.createElement("figure");
+  const image = document.createElement("img");
+  image.src = run.source.url;
+  image.alt = `${run.source.name || "Uploaded source"} source image`;
+  const caption = document.createElement("figcaption");
+  caption.textContent = run.source.name || "Uploaded source";
+  figure.append(image, caption);
+  grid.append(figure);
+  section.append(grid);
   parent.append(section);
 }
 
@@ -319,7 +346,8 @@ function renderRunDetail(run) {
   const heading = document.createElement("h3");
   heading.textContent = run.title || "Ad Studio job";
   const meta = document.createElement("p");
-  meta.textContent = `${runStatusLabel(run.status)} · ${PIPELINE_LABELS[run.stage] || run.stage || "Source"} · ${formatCost(run)}`;
+  const visibleStage = canonicalStage(run.stage);
+  meta.textContent = `${runStatusLabel(run.status)} · ${PIPELINE_LABELS[visibleStage]} · ${formatCost(run)}`;
   copy.append(heading, meta);
   const live = document.createElement("span");
   live.className = "ad-live-state";
@@ -328,7 +356,7 @@ function renderRunDetail(run) {
   detail.append(summary);
   const overview = document.createElement("dl");
   overview.className = "ad-run-facts";
-  const facts = [["Run", run.id], ["Stage", run.stage || "source"]];
+  const facts = [["Run", run.id], ["Stage", PIPELINE_LABELS[visibleStage]]];
   if (run.output?.import?.template_id) facts.push(["Blockwise template", run.output.import.template_id]);
   for (const [label, value] of facts) {
     const item = document.createElement("div");
@@ -338,8 +366,9 @@ function renderRunDetail(run) {
     item.append(term, description); overview.append(item);
   }
   detail.append(overview);
+  renderPersistedSource(run, detail);
   renderPhaseTimeline(run, detail);
-  if (run.status === "completed" && ["imported", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase())) {
+  if (run.status === "completed" && ["imported", "replayed", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase())) {
     const readySection = document.createElement("section"); readySection.className = "ad-template-ready";
     const title = document.createElement("strong"); title.textContent = "Template ready";
     const evidence = document.createElement("p"); evidence.textContent = "Feed and Story are live in Blockwise.";
@@ -472,8 +501,8 @@ function connectRunEvents(run) {
       if (!runEvents.some((existing) => existing.sequence === item.sequence)) runEvents.push(item);
       if (["iteration.rendered", "iteration.compared"].includes(item.kind)) mergeIterationEvent(run, item);
       if (item.kind === "stage.started" && item.node_id) {
-        run.stage = item.node_id;
-        run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(item.node_id)) / PIPELINE_STAGES.length);
+        run.stage = canonicalStage(item.node_id);
+        run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(run.stage)) / PIPELINE_STAGES.length);
       }
       renderRunDetail(run);
       if (["run.failed", "run.cancelled", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {

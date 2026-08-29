@@ -21,6 +21,9 @@ services:
       MINI_PREVIEW_ROOT: /previews/mini
       MINI_LEGACY_PROJECT_ROOT: /legacy-mini-projects
       HINDSIGHT_API_URL: http://172.16.1.1:9178
+      # The observer shares this container's loopback namespace. Its other
+      # local endpoints are never routed through Frank or Caddy.
+      AGENTTRAIL_URL: http://127.0.0.1:5340
       CONNECTIONS_STORE_FILE: /data/connections.json
       CONNECTION_ACTIONS_FILE: /data/connection-actions.jsonl
       CONNECTION_PLANS_FILE: /data/connection-plans.json
@@ -43,6 +46,29 @@ services:
       timeout: 5s
       retries: 12
       start_period: 10s
+
+  frank-agenttrail:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: agenttrail-runtime
+    image: frank-agenttrail:current
+    container_name: frank-agenttrail
+    restart: unless-stopped
+    network_mode: "service:frank-window"
+    depends_on:
+      frank-window:
+        condition: service_healthy
+    read_only: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    volumes:
+      # AgentTrail observes implementation changes only. This mount is
+      # read-only and never represents generator run truth.
+      - ${FRANK_AGENTTRAIL_REPO:-/projects/only-process-hermes}:/workspace:ro
+      - agenttrail_state:/home/node/.agenttrail
 
   frank-caddy:
     image: caddy:2.8-alpine
@@ -74,6 +100,8 @@ volumes:
     name: frank_caddy_data
   caddy_config:
     name: frank_caddy_config
+  agenttrail_state:
+    name: frank_agenttrail_state
 
 networks:
   frank:

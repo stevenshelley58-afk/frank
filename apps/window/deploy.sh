@@ -173,7 +173,7 @@ docker build \
   --tag frank-mini-builder:mini-v1 \
   --file "$app/infra/mini_builder/Dockerfile" \
   "$app/infra/mini_builder"
-docker compose build frank-window
+docker compose build frank-window frank-agenttrail
 docker compose config --quiet
 docker run --rm \
   --env-file "$caddy_secret_file" \
@@ -183,6 +183,7 @@ docker run --rm \
 # The previous Window and Caddy were created by two retired compose projects.
 # Build first, then make the shortest possible atomic cutover to this one stack.
 docker rm -f frank-window-sessions-candidate >/dev/null 2>&1 || true
+docker rm -f frank-agenttrail >/dev/null 2>&1 || true
 docker rm -f frank-window frank-caddy frank-frank-caddy-1 >/dev/null 2>&1 || true
 
 if ! docker compose up -d --remove-orphans; then

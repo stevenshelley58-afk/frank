@@ -13,9 +13,29 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("COPY mini_frank.py .", dockerfile)
         self.assertIn("COPY tool_apps ./tool_apps", dockerfile)
         self.assertIn("COPY tools ./tools", dockerfile)
+        self.assertIn("COPY archify ./archify", dockerfile)
+        self.assertIn("COPY vendor/archify/archify ./vendor/archify/archify", dockerfile)
+        self.assertIn("archify.mjs validate architecture", dockerfile)
+        self.assertIn("archify.mjs check archify/ad-template-process.html", dockerfile)
+        self.assertIn("frank.archify-build-validation.v1", dockerfile)
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
         self.assertIn('"import connections_agent, home_platform, server, tool_apps;', deploy)
         self.assertIn("import memory_inspector, mini_frank", deploy)
+
+    def test_agenttrail_is_a_read_only_loopback_sidecar(self):
+        compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
+        dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
+        deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        sidecar = compose.split("  frank-agenttrail:", 1)[1].split("\n  frank-caddy:", 1)[0]
+        self.assertIn("FROM node:22-alpine AS agenttrail-runtime", dockerfile)
+        self.assertIn('network_mode: "service:frank-window"', sidecar)
+        self.assertIn("read_only: true", sidecar)
+        self.assertIn("no-new-privileges:true", sidecar)
+        self.assertIn("/projects/only-process-hermes}:/workspace:ro", sidecar)
+        self.assertIn("agenttrail_state:/home/node/.agenttrail", sidecar)
+        self.assertNotIn("ports:", sidecar)
+        self.assertIn("docker compose build frank-window frank-agenttrail", deploy)
+        self.assertIn("docker rm -f frank-agenttrail", deploy)
 
     def test_caddy_receives_only_derived_basic_auth_env(self):
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")

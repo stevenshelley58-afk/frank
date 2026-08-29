@@ -95,7 +95,8 @@ HINDSIGHT_URL = os.environ.get("HINDSIGHT_API_URL", "http://172.16.1.1:9178").rs
 ARCHIFY_ARTIFACT = Path(os.environ.get("ARCHIFY_ARTIFACT", str(Path(__file__).resolve().parent / "archify" / "ad-template-process.html"))).resolve()
 ARCHIFY_SPEC = Path(os.environ.get("ARCHIFY_SPEC", str(Path(__file__).resolve().parent / "archify" / "ad-template-process.json"))).resolve()
 ARCHIFY_CLI = Path(os.environ.get("ARCHIFY_CLI", str(Path(__file__).resolve().parent / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"))).resolve()
-AGENTTRAIL_URL = os.environ.get("AGENTTRAIL_URL", "http://127.0.0.1:5340").rstrip("/")
+ARCHIFY_RECEIPT = Path(os.environ.get("ARCHIFY_RECEIPT", str(Path(__file__).resolve().parent / "archify" / "validation-receipt.json"))).resolve()
+AGENTTRAIL_URL = os.environ.get("AGENTTRAIL_URL", "").strip().rstrip("/")
 ROOTS = {
     # The container receives only the explicitly approved read-only VPS mounts
     # beneath /vps. This presents one familiar tree without exposing the
@@ -1332,6 +1333,14 @@ def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]
     return public
 
 
+def _ad_studio_source_url(run_id: str, name: str) -> str | None:
+    suffix = Path(str(name or "")).suffix.lower()
+    if suffix not in {".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}:
+        return None
+    artifact = f"source{suffix}"
+    return f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(artifact, safe='')}"
+
+
 def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
     """Project Hermes state for Frank's internal operator monitor."""
     now = int(time.time())
@@ -1355,8 +1364,18 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         safe_output["previews"] = previews
     if "iterations" in output:
         safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"), str(run.get("run_id") or run.get("id") or ""))
+    run_id = str(run.get("id") or run.get("run_id") or "")
+    source_public = {
+        "name": str(source.get("name") or ""),
+        "size": int(source.get("size") or 0),
+        "media_type": str(source.get("media_type") or ""),
+        "origin": str(source.get("origin") or ""),
+    }
+    source_url = _ad_studio_source_url(run_id, source_public["name"])
+    if source_url:
+        source_public["url"] = source_url
     return {
-        "id": str(run.get("id") or run.get("run_id") or ""),
+        "id": run_id,
         "request_id": str(run.get("request_id") or ""),
         "status": str(run.get("status") or "queued"),
         "stage": str(run.get("stage") or "source"),
@@ -1364,7 +1383,7 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "attention": bool(run.get("attention")),
         "created_at": run.get("created_at") or now,
         "updated_at": run.get("updated_at") or run.get("created_at") or now,
-        "source": {"name": str(source.get("name") or ""), "size": int(source.get("size") or 0), "media_type": str(source.get("media_type") or ""), "origin": str(source.get("origin") or "")},
+        "source": source_public,
         "output": safe_output,
         "cost": (output.get("cost") or {}).get("reported_usd") if isinstance(output.get("cost"), dict) else None,
         "usage": {key: output.get("usage", {}).get(key) for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd") if isinstance(output.get("usage"), dict) and output.get("usage", {}).get(key) is not None},
@@ -1376,38 +1395,55 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
 
 @app.get("/api/ad-studio/architecture")
 def ad_studio_architecture():
-    available = ARCHIFY_ARTIFACT.is_file()
-    validated = False
-    if ARCHIFY_CLI.is_file() and ARCHIFY_SPEC.is_file() and shutil.which("node"):
-        try:
-            result = subprocess.run(["node", str(ARCHIFY_CLI), "validate", "architecture", str(ARCHIFY_SPEC), "--json"], capture_output=True, text=True, timeout=8, check=False)
-            validated = result.returncode == 0 and '"ok": true' in result.stdout.lower()
-        except (OSError, subprocess.TimeoutExpired):
-            validated = False
+    validated = _archify_build_validated()
     return jsonify({
-        "available": available and validated, "source": "archify",
+        "available": validated, "source": "archify",
         "read_only": True, "validated": validated,
-        "artifact_url": "/api/ad-studio/architecture/artifact" if available and validated else None,
-        "message": "Archify pinned CLI/spec/artifact validation is unavailable." if not (available and validated) else "Archify typed-IR artifact is validated and available.",
+        "artifact_url": "/api/ad-studio/architecture/artifact" if validated else None,
+        "message": "Archify build validation or its content binding is unavailable." if not validated else "Archify typed-IR artifact is validated and available.",
     })
+
+
+def _archify_build_validated() -> bool:
+    files = {
+        "artifactSha256": ARCHIFY_ARTIFACT,
+        "specSha256": ARCHIFY_SPEC,
+        "validatorSha256": ARCHIFY_CLI,
+    }
+    try:
+        receipt = json.loads(ARCHIFY_RECEIPT.read_text(encoding="utf-8"))
+        if receipt.get("schema") != "frank.archify-build-validation.v1" or receipt.get("validated") is not True:
+            return False
+        for key, path in files.items():
+            if not path.is_file():
+                return False
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+            if not secrets.compare_digest(str(receipt.get(key) or ""), actual):
+                return False
+        return True
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return False
 
 
 @app.get("/api/ad-studio/architecture/artifact")
 def ad_studio_architecture_artifact():
-    if not ARCHIFY_ARTIFACT.is_file():
+    if not _archify_build_validated():
         abort(404, "Archify artifact is not available")
     return send_file(ARCHIFY_ARTIFACT, mimetype="text/html", max_age=0)
 
 
 @app.get("/api/ad-studio/implementation-activity")
 def ad_studio_implementation_activity():
-    # AgentTrail is a loopback observer; Frank only proxies its read endpoint.
+    # AgentTrail shares only Frank's loopback namespace. Frank proxies one read
+    # endpoint and never exposes AgentTrail's hook/setup/control surfaces.
+    if not AGENTTRAIL_URL:
+        return jsonify({"available": False, "source": "agenttrail", "read_only": True, "message": "AgentTrail observer is not configured for this deployment."}), 503
     try:
         req = urllib.request.Request(f"{AGENTTRAIL_URL}/summary", headers={"Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=2) as response:
             board = json.loads(response.read(2 * 1024 * 1024 + 1).decode("utf-8"))
     except Exception:
-        return jsonify({"available": False, "source": "agenttrail", "read_only": True, "message": "AgentTrail loopback observer is unavailable."}), 503
+        return jsonify({"available": False, "source": "agenttrail", "read_only": True, "message": "AgentTrail read-only observer is unavailable."}), 503
     if not isinstance(board, (dict, list)):
         return jsonify({"available": False, "source": "agenttrail", "read_only": True, "message": "AgentTrail returned an unsupported board shape."}), 503
     return jsonify({"available": True, "source": "agenttrail", "read_only": True, "board": board})
