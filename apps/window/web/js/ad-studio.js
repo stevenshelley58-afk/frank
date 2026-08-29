@@ -500,7 +500,7 @@ function renderRunDetail(run) {
   }
   detail.append(overview);
   renderPhaseTimeline(run, detail);
-  if (run.status === "completed" && run.output?.template_path) {
+  if (run.status === "completed" && run.output?.import?.status === "ready") {
     const release = document.createElement("section"); release.className = "ad-approval";
     const title = document.createElement("strong"); title.textContent = "Template ready";
     const evidence = document.createElement("p"); evidence.textContent = "Deterministic Feed and Story documents are ready to import.";

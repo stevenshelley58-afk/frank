@@ -1329,9 +1329,18 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     safe_output = {key: output.get(key) for key in (
-        "template", "previews", "deterministic_documents", "iterations",
-        "final_review", "import", "template_path", "render_path", "process",
+        "template", "deterministic_documents", "iterations", "final_review", "import", "process",
     ) if key in output}
+    previews = []
+    for item in output.get("previews") if isinstance(output.get("previews"), list) else []:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", name):
+            continue
+        previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-studio/runs/{run.get('run_id') or run.get('id')}/artifacts/{urllib.parse.quote(name, safe='')}"})
+    if previews:
+        safe_output["previews"] = previews
     if "iterations" in output:
         safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"))
     return {
