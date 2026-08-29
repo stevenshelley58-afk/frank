@@ -1581,11 +1581,6 @@ def _number_from(*values):
     return None
 
 
-@app.post("/api/ad-studio/runs/<run_id>/approval")
-def ad_studio_run_approval(run_id: str):
-    return jsonify({"error": "This process completes automatically; human approval is not used."}), 410
-
-
 @app.post("/api/ad-studio/runs/<run_id>/models")
 def ad_studio_run_models(run_id: str):
     return _proxy_ad_studio_action(run_id, "/models", {"policy", "reason"})

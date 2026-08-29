@@ -501,7 +501,7 @@ function renderRunDetail(run) {
   detail.append(overview);
   renderPhaseTimeline(run, detail);
   if (run.status === "completed" && run.output?.import?.status === "ready") {
-    const release = document.createElement("section"); release.className = "ad-approval";
+    const release = document.createElement("section"); release.className = "ad-template-ready";
     const title = document.createElement("strong"); title.textContent = "Template ready";
     const evidence = document.createElement("p"); evidence.textContent = "Deterministic Feed and Story documents are ready to import.";
     const download = document.createElement("a"); download.className = "ad-primary"; download.href = "/api/ad-studio/runs/" + encodeURIComponent(run.id) + "/download"; download.textContent = "Download template";
