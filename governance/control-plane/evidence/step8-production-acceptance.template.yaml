@@ -1,0 +1,52 @@
+# Operator-owned template. Replace every placeholder with evidence from the
+# committed release and VPS runbook. Never claim acceptance from this template.
+source_sha: ""
+image_digest: "sha256:<64 lowercase hex>"
+deployed_sha: ""
+graph_revision: "sha256:<64 lowercase hex>"
+projection_manifests: []
+tests: []
+runtime_health: []
+browser_review:
+  desktop: ""
+  mobile: ""
+  keyboard: ""
+  reduced_motion: ""
+screenshot_hashes: []
+reviewer: ""
+rollback_target: ""
+feature_flag_hash: "sha256:<64 lowercase hex>"
+feature_flags: {}
+timestamp: ""
+acceptance_checklist:
+  one_frank_one_checkout_one_hermes: false
+  no_local_persistent_service: false
+  vps_world_coverage_and_exclusions: false
+  projections_and_lkg_validation: false
+  ad_builder_blockwise_truth: false
+  live_is_pinned_agenttrail: false
+  runtime_summaries_and_links: false
+  control_counts_from_records: false
+  control_categories_understandable: false
+  managed_actions_end_to_end: false
+  source_changes_recoverable: false
+  duplicate_decisions_and_evaluations: false
+  drift_report_only: false
+  map_failure_preserves_lkg: false
+  cleanup_no_auto_delete: false
+  discovery_no_auto_install: false
+  oss_receipts_and_revisions: false
+  upstreams_remain_authorities: false
+  chat_patterns_private_content_free: false
+  desktop_mobile_keyboard_reduced_motion: false
+  deployed_revisions_and_rollbacks_visible: false
+  restore_and_rollback_drill: false
+  retention_restore_drill: false
+  reconciliation_timers_and_pointers: false
+  retention_quota_references_preserved: false
+restore_drill:
+  status: "pending"
+  timeout_seconds: 3600
+  dedupe_key: ""
+  disable_path: "disable_retention_restore_drills"
+  receipt_id: ""
