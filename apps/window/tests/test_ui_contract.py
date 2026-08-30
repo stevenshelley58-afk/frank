@@ -129,7 +129,10 @@ class UiContractTest(unittest.TestCase):
         self.assertNotIn("turnAbort || button.dataset.chatId === currentChatId", script)
         self.assertIn("const switchingChats = chatId !== currentChatId;", script)
         self.assertIn("if (switchingChats && chatAtts.length) void discardAttachments", script)
-        self.assertIn('show("hub");\n  await loadChatMessages(chatId);', script)
+        self.assertIn('async function selectChat(chatId, { navigate = true } = {})', script)
+        self.assertIn('if (navigate) show("hub");\n  await loadChatMessages(chatId);', script)
+        self.assertIn('selectChat(selected.id, { navigate: false })', script)
+        self.assertEqual(script.count('navigate: false'), 1)
 
     def test_accounts_tool_is_secret_safe_and_responsive(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")

@@ -307,7 +307,7 @@ async function loadChatMessages(chatId) {
   chatPinnedToBottom = true;
   chatScrollBottom(true);
 }
-async function selectChat(chatId) {
+async function selectChat(chatId, { navigate = true } = {}) {
   if (!chatId) return;
   const switchingChats = chatId !== currentChatId;
   if (switchingChats && chatAtts.length) void discardAttachments(chatAtts.slice(), true);
@@ -316,7 +316,7 @@ async function selectChat(chatId) {
   renderChatNav();
   const selected = chatSessions.find((chat) => chat.id === chatId);
   applySessionModel(selected);
-  show("hub");
+  if (navigate) show("hub");
   await loadChatMessages(chatId);
 }
 async function createChat(projectId = "", title = "New chat") {
@@ -1048,7 +1048,7 @@ function setupChat() {
 
   fetchChatSessions().then(async (sessions) => {
     const selected = sessions.find((chat) => chat.id === currentChatId) || sessions[0];
-    if (selected) await selectChat(selected.id);
+    if (selected) await selectChat(selected.id, { navigate: false });
   }).catch(() => {
     addChatMsg({ role: "sys", text: "Chats could not be loaded.", ts: Date.now() / 1000 | 0 });
   });
