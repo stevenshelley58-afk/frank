@@ -18,6 +18,11 @@ class FakeAdapter:
             "relationships": graph["relationships"],
             "coverage": {"status": "complete"},
             "exclusions": [],
+            "metadata": {
+                "stable_id_map": {"service:frank-window": "n_aaaaaaaaaaaaaaaa"},
+                "relationship_count": 3,
+                "rendered_relationship_count": 2,
+            },
         }
 
 
@@ -105,6 +110,8 @@ class MapPipelineTests(unittest.TestCase):
             self.assertEqual(len(store.generations), 6)
             self.assertEqual([p[0] for p in store.published], ["run-1"])
             self.assertTrue(all(m[2]["preview_only"] for m in store.generations))
+            self.assertTrue(all(m[2]["relationship_count"] == 3 for m in store.generations))
+            self.assertTrue(all(m[2]["rendered_relationship_count"] == 2 for m in store.generations))
             self.assertTrue(all(call[3] is False for call in runner.calls))
             self.assertTrue(all(call[0][3] == "architecture" for call in runner.calls if call[0][2] in {"validate", "deliver"}))
 

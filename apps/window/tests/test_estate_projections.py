@@ -57,6 +57,19 @@ class EstateProjectionTests(unittest.TestCase):
         with self.assertRaises(ProjectionError):
             build_projection(graph, "projection:mini-frank/knowledge-flow")
 
+    def test_mini_frank_keeps_frank_window_boundary_without_unrelated_routes(self):
+        graph = self.graph()
+        graph["nodes"].extend([
+            node("service:frank-window", "service", "Frank Window"),
+            node("route:unrelated-product", "route", "Unrelated route"),
+            node("hook:frank/infra/knowledge/generate-mini-frank-sh-a1b2c3d4", "hook", "Mini Frank generator"),
+        ])
+        result = build_projection(graph, "projection:mini-frank/knowledge-flow")
+        ids = {item["id"] for item in result["nodes"]}
+        self.assertIn("service:frank-window", ids)
+        self.assertIn("hook:frank/infra/knowledge/generate-mini-frank-sh-a1b2c3d4", ids)
+        self.assertNotIn("route:unrelated-product", ids)
+
     def test_unproved_blockwise_consumes_is_not_emitted_and_finding_is_visible(self):
         graph = self.graph()
         graph["nodes"].append(node("project:ad-template-builder", "project", "Ad Template Builder"))

@@ -78,21 +78,6 @@ def _id_text(node: Mapping[str, Any]) -> str:
     return str(node.get("id", "")).lower()
 
 
-def _connected_selection(nodes: list[Mapping[str, Any]], edges: list[Mapping[str, Any]], anchors: set[str]) -> list[Mapping[str, Any]]:
-    """Select stable-ID anchors and identities joined by typed graph edges."""
-    selected = set(anchors)
-    changed = True
-    while changed:
-        changed = False
-        for edge in edges:
-            source, target = _edge_endpoints(edge)
-            if source in selected or target in selected:
-                before = len(selected)
-                selected.update((source, target))
-                changed = changed or len(selected) != before
-    return [node for node in nodes if _node_id(node) in selected]
-
-
 def _copy_node(node: Mapping[str, Any]) -> dict[str, Any]:
     # Copy only JSON-like input and keep stable IDs/evidence intact.  A graph
     # node is already a closed contract; deepcopy prevents callers mutating the
@@ -177,20 +162,50 @@ def _select(graph: Mapping[str, Any], projection_id: str) -> tuple[list[Mapping[
     for edge in edges:
         _edge_endpoints(edge)
     if projection_id == "projection:blockwise/runtime":
-        selected = _connected_selection(nodes, edges, {_node_id(node) for node in nodes if "blockwise" in _id_text(node)})
+        # Keep the product slice bounded.  A transitive closure is unsafe here:
+        # the shared graph connects Blockwise to almost the entire estate.
+        context_ids = {"vps:dedicated", "project:frank", "service:frank-window", "runtime:hermes-default"}
+        useful_kinds = {"project", "release", "service", "route", "store", "data_store", "volume", "observer", "source", "host", "deployment"}
+        selected = [node for node in nodes if ("blockwise" in _id_text(node) and str(node.get("kind", "")).lower() in useful_kinds) or _node_id(node) in context_ids]
     elif projection_id == "projection:mini-frank/knowledge-flow":
-        selected = [node for node in nodes if any(token in _id_text(node) for token in ("mini-frank", "projectstore", "knowledge"))]
-        # Join the workflow to Frank's declared project/window boundary, but
-        # never pull a service/runtime identity into this non-runtime map.
-        selected += [node for node in nodes if str(node.get("kind", "")).lower() not in {"service", "runtime", "container", "systemd_unit", "worker"} and any(token in _id_text(node) for token in ("project:frank", "component:frank-window", "frank-window", "capability:frank"))]
-        # Mini Frank is a knowledge/build workflow inside Frank, never a runtime.
+        useful_kinds = {"project", "repo", "checkout", "source", "observer", "component", "data_store", "store", "volume", "route", "capability", "rule", "skill", "tool", "template", "library", "hook"}
         forbidden = {"service", "runtime", "container", "systemd_unit", "worker"}
-        if any(str(node.get("kind", "")).lower() in forbidden for node in selected):
+        if any(str(node.get("kind", "")).lower() in forbidden and "mini-frank" in _id_text(node) for node in nodes):
+            raise ProjectionError("Mini Frank projection cannot contain runtime/service nodes")
+        selected = []
+        for node in nodes:
+            kind, stable_id = str(node.get("kind", "")).lower(), _id_text(node)
+            if kind not in useful_kinds:
+                continue
+            if kind not in {"template", "hook"} and ("mini-frank" in stable_id or "projectstore" in stable_id):
+                selected.append(node)
+            elif kind == "template" and "/project-seeds/mini-frank/knowledge/sources/manifests/" in stable_id:
+                selected.append(node)
+            elif kind == "hook" and "/infra/knowledge/" in stable_id and any(token in stable_id for token in ("generate", "deploy")):
+                selected.append(node)
+        # Join the workflow to Frank's declared project/window boundary, but
+        # allow Frank Window itself while rejecting a separate Mini runtime.
+        selected += [node for node in nodes if _node_id(node) in {"project:frank", "service:frank-window", "component:frank-window"}]
+        if any(str(node.get("kind", "")).lower() in forbidden and "mini-frank" in _id_text(node) for node in selected):
             raise ProjectionError("Mini Frank projection cannot contain runtime/service nodes")
     elif projection_id.startswith("projection:ad-template-builder/"):
-        selected = [node for node in nodes if any(token in _id_text(node) for token in ("ad-template-builder", "ad_template_builder", "ad-template", "template-builder"))]
+        ad_tokens = ("ad-template-builder", "ad_template_builder", "ad-template", "template-builder")
+        if projection_id.endswith("/architecture"):
+            kinds = {"project", "component", "app", "frontend", "template", "data_store", "store", "volume", "service", "runtime", "capability", "skill", "tool", "plugin", "cli", "mcp"}
+            context_ids = {
+                "project:frank", "runtime:hermes-default", "service:frank-window",
+                "store:frank-window-data", "observer:agenttrail-hermes",
+                "source:archify", "tool:archify",
+            }
+        else:
+            kinds = {"capability", "rule", "skill", "tool", "plugin", "cli", "mcp", "route", "component", "template"}
+            context_ids = {
+                "project:frank", "runtime:hermes-default", "service:frank-window",
+                "tool:archify",
+            }
+        selected = [node for node in nodes if str(node.get("kind", "")).lower() in kinds and any(token in _id_text(node) or token in _text(node) for token in ad_tokens)]
         # The architecture/workflow projections must show the authority boundary.
-        selected += [node for node in nodes if "hermes" in _id_text(node) or "frank-window" in _id_text(node)]
+        selected += [node for node in nodes if _node_id(node) in context_ids]
     else:
         raise ProjectionError(f"unsupported Step 4A projection: {projection_id}")
     by_id = {_node_id(node): node for node in selected}

@@ -77,6 +77,48 @@ def _regular_json(path: Path) -> Mapping[str, Any]:
     return value
 
 
+def _with_assertion_titles(graph: Mapping[str, Any], assertions: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Join hash-verified, presentation-safe titles onto transient map nodes."""
+    raw_assertions = assertions.get("assertions", ())
+    if not isinstance(raw_assertions, list):
+        raise RuntimeError("graph assertions are malformed")
+    embedded_assertions = graph.get("assertions")
+    if embedded_assertions is not None and embedded_assertions != raw_assertions:
+        raise RuntimeError("graph assertion bundle mismatch")
+    raw_nodes = graph.get("nodes", ())
+    if not isinstance(raw_nodes, list):
+        raise RuntimeError("graph nodes are malformed")
+    node_ids = {str(node["id"]) for node in raw_nodes if isinstance(node, Mapping) and isinstance(node.get("id"), str)}
+    titles: dict[str, tuple[int, str]] = {}
+    for assertion in raw_assertions:
+        if not isinstance(assertion, Mapping) or assertion.get("predicate") != "title":
+            continue
+        subject, scope, value = assertion.get("subject_id"), assertion.get("scope_id"), assertion.get("value")
+        if not isinstance(subject, str) or subject not in node_ids or subject != scope or not isinstance(value, str):
+            continue
+        if any(ord(char) < 32 for char in value):
+            continue
+        title = re.sub(r"\s+", " ", value).strip()
+        # Inventory parsers sometimes expose an executable's shebang as its
+        # title.  That is verified source data, but it is not a useful label.
+        if not title or len(title) > 160 or title.startswith(("#!", "!/usr/bin/")):
+            continue
+        rank = {"declared": 2, "observed": 1}.get(str(assertion.get("layer", "")), 0)
+        current = titles.get(subject)
+        if current is not None and current[0] == rank and current[1] != title:
+            raise RuntimeError("graph contains conflicting title assertions")
+        if current is None or rank > current[0]:
+            titles[subject] = (rank, title)
+    enriched = dict(graph)
+    enriched["nodes"] = [
+        dict(node, title=titles[str(node["id"])][1])
+        if isinstance(node, Mapping) and isinstance(node.get("id"), str) and str(node["id"]) in titles
+        else dict(node) if isinstance(node, Mapping) else node
+        for node in raw_nodes
+    ]
+    return enriched
+
+
 def _resolve_graph(path: Path) -> Mapping[str, Any]:
     """Resolve a current pointer through the canonical hash-verifying store."""
     pointer = _regular_json(path)
@@ -90,10 +132,10 @@ def _resolve_graph(path: Path) -> Mapping[str, Any]:
         snapshot = ControlGraphStore(path.parent.parent).read_snapshot()
     except (OSError, ValueError, ControlContractError) as error:
         raise RuntimeError("graph current pointer failed hash verification") from error
-    graph = snapshot.get("graph")
-    if not isinstance(graph, Mapping):
+    graph, assertions = snapshot.get("graph"), snapshot.get("assertions")
+    if not isinstance(graph, Mapping) or not isinstance(assertions, Mapping):
         raise RuntimeError("graph current snapshot is malformed")
-    return graph
+    return _with_assertion_titles(graph, assertions)
 
 
 def _write_receipt(path: Path, rendered: str) -> None:

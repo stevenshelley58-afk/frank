@@ -310,6 +310,8 @@ def generate_maps(
                 "exclusions": projection.get("exclusions", graph_snapshot.get("exclusions", [])),
                 "findings": projection.get("findings", []),
                 "stable_id_map": copy.deepcopy(projection.get("metadata", {}).get("stable_id_map", {})) if isinstance(projection.get("metadata"), Mapping) else {},
+                "relationship_count": int(projection.get("metadata", {}).get("relationship_count", 0)) if isinstance(projection.get("metadata"), Mapping) else 0,
+                "rendered_relationship_count": int(projection.get("metadata", {}).get("rendered_relationship_count", 0)) if isinstance(projection.get("metadata"), Mapping) else 0,
                 "status": "generated",
                 "preview_only": True,
                 "freshness": "fresh",

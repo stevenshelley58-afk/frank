@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
@@ -80,7 +81,33 @@ def _title(node: Mapping[str, Any], stable_id: str) -> str:
         value = node.get(key)
         if isinstance(value, str) and value.strip():
             return value.strip()[:160]
-    return stable_id
+    # Some canonical nodes intentionally carry no title/name.  Make their
+    # stable ID readable as a fallback; identity itself remains in metadata.
+    raw = stable_id.rsplit(":", 1)[-1]
+    # File-backed identities often encode the extension and content hash in
+    # the basename (``home-json-7de40ad489db``). Select trailing path tokens
+    # rather than flattening the whole path, otherwise every card truncates to
+    # the shared ``frank frank app`` prefix.
+    parts = [part for part in re.split(r"[/\\]+", raw) if part]
+    cleaned: list[str] = []
+    for part in parts:
+        part = re.sub(r"(?:[-_.](?:json|yaml|yml|toml|md|py|js|ts|html|sh))?(?:[-_.][0-9a-f]{8,})$", "", part, flags=re.I)
+        part = re.sub(r"[-_.](?:json|yaml|yml|toml|md|py|js|ts|html|sh)$", "", part, flags=re.I)
+        words = re.sub(r"[-_.]+", " ", part).strip()
+        if words:
+            cleaned.append(words)
+    generic_leaf = {"home", "manifest", "deploy", "generate", "check", "install", "skill", "plugin", "package"}
+    if cleaned and cleaned[-1].casefold() in generic_leaf and len(cleaned) > 1:
+        selected = cleaned[-2:]
+    else:
+        selected = cleaned[-1:] or [raw]
+    # Drop adjacent duplicate path tokens while retaining distinctive names.
+    deduped: list[str] = []
+    for token in selected:
+        if not deduped or token.casefold() != deduped[-1].casefold():
+            deduped.append(token)
+    fallback = " ".join(deduped)
+    return fallback.title() or stable_id
 
 
 def _display_label(node: Mapping[str, Any], stable_id: str, index: int) -> tuple[str, str]:
@@ -95,14 +122,30 @@ def _display_label(node: Mapping[str, Any], stable_id: str, index: int) -> tuple
 
 def _projection_nodes(graph: Mapping[str, Any], projection_id: str) -> list[Mapping[str, Any]]:
     nodes = [item for item in graph.get("nodes", ()) if isinstance(item, Mapping) and isinstance(item.get("id"), str)]
+    # File inventory and reconciliation findings remain fully available in
+    # Control, but they are not systems in an architecture map.  Keep all
+    # declared identities plus any observed runtime/topology identities.
+    topology_kinds = {
+        "host", "project", "repo", "checkout", "release", "deployment",
+        "runtime", "service", "container", "systemd_unit", "worker",
+        "component", "route", "data_store", "store", "volume",
+        "capability", "observer", "source", "tool",
+    }
+    high_level = [
+        item for item in nodes
+        if str(item.get("layer", "declared")).casefold() != "observed"
+        or str(item.get("kind", "")).casefold() in topology_kinds
+    ]
     if projection_id == "projection:vps/world":
-        return nodes
+        return high_level
     if projection_id == "projection:frank/architecture":
         selected: list[Mapping[str, Any]] = []
-        for node in nodes:
+        for node in high_level:
             stable_id = str(node["id"])
             low = stable_id.casefold()
-            if any(token in low for token in ("frank", "hermes", "hindsight")):
+            if str(node.get("kind", "")).casefold() == "project" or stable_id == "vps:dedicated" or any(
+                token in low for token in ("frank", "hermes", "hindsight", "infisical", "agenttrail", "archify")
+            ):
                 selected.append(node)
         return selected
     if projection_id in ESTATE_PROJECTION_IDS:
@@ -162,42 +205,6 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     nodes = sorted(_projection_nodes(graph, projection_id), key=lambda item: str(item["id"]))
     stable_ids = {str(item["id"]) for item in nodes}
     id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(stable_ids)}
-    components: list[dict[str, Any]] = []
-    display_labels: dict[str, dict[str, str]] = {}
-    # Archify's showcase renderer cannot safely route a large graph in one
-    # SVG: a single-column projection over twelve cards exceeds the first-screen
-    # contract, while relationship-dense projections can overflow its diagnostic
-    # channel.  Keep those projections in a compact twelve-column index and leave
-    # relationships in the canonical Control graph.  Full stable identities
-    # remain attached to every visible card, so the overview never invents or
-    # drops systems and the operator can deep-link to the complete topology.
-    overview_only = len(nodes) > 12
-    cols = 12 if overview_only else 1
-    origin = (40, 44) if overview_only else (80, 90)
-    step = (108, 34) if overview_only else (260, 130)
-    component_size = (98, 26) if overview_only else (210, 76)
-    positions: dict[str, tuple[int, int]] = {}
-    for index, node in enumerate(nodes):
-        stable_id = str(node["id"])
-        label, sublabel = _display_label(node, stable_id, index)
-        if overview_only:
-            label = f"{stable_id.split(':', 1)[0][:3]} {index + 1:03d}"
-            sublabel = ""
-        display_labels[stable_id] = {"label": label, "sublabel": sublabel, "archify_id": id_map[stable_id]}
-        column, row = index % cols, index // cols
-        x, y = origin[0] + column * step[0], origin[1] + row * step[1]
-        positions[stable_id] = (x, y)
-        component: dict[str, Any] = {
-            "id": id_map[stable_id],
-            "type": _node_type(node.get("kind")),
-            "label": label,
-            "pos": [x, y],
-            "size": list(component_size),
-        }
-        if not overview_only:
-            component["sublabel"] = sublabel
-            component["tag"] = str(node.get("layer", "declared"))[:48]
-        components.append(component)
     edges: list[Mapping[str, Any]] = []
     for edge in graph.get("edges", graph.get("relationships", ())):
         if not isinstance(edge, Mapping):
@@ -207,13 +214,101 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
         if source not in stable_ids or target not in stable_ids or source == target:
             continue
         edges.append(edge)
+
+    overview_only = len(nodes) > 48
+    relationship_orders = {
+        "projection:mini-frank/knowledge-flow": ("owns", "exposes", "contains", "writes", "uses", "reads"),
+        "projection:blockwise/runtime": ("observes", "writes", "reads", "uses", "owns", "exposes", "contains"),
+        "projection:ad-template-builder/architecture": ("validates", "observes", "writes", "uses", "produces", "contains", "declares"),
+        "projection:ad-template-builder/workflow": ("validates", "uses", "produces", "contains", "writes", "observes"),
+    }
+    relationship_order = relationship_orders.get(
+        projection_id,
+        ("observes", "writes", "reads", "exposes", "uses", "owns", "declares", "produces", "validates", "contains"),
+    )
+    relationship_rank = {name: index for index, name in enumerate(relationship_order)}
+    rendered_edges: list[Mapping[str, Any]] = []
+    used_endpoints: set[str] = set()
+    if not overview_only:
+        for edge in sorted(
+            edges,
+            key=lambda item: (
+                relationship_rank.get(str(item.get("relationship", item.get("type", "depends_on"))), len(relationship_rank)),
+                str(item.get("id", "")), str(item.get("from", "")), str(item.get("to", "")),
+            ),
+        ):
+            source, target = str(edge["from"]), str(edge["to"])
+            if source in used_endpoints or target in used_endpoints:
+                continue
+            rendered_edges.append(edge)
+            used_endpoints.update((source, target))
+            if len(rendered_edges) >= 12:
+                break
+
+    # Put each displayed relationship on its own clear row.  This deliberately
+    # shows a truthful, representative matching instead of drawing an
+    # unreadable hairball; the manifest reports the exact shown/total counts.
+    node_by_id = {str(node["id"]): node for node in nodes}
+    ordered_ids = [stable_id for edge in rendered_edges for stable_id in (str(edge["from"]), str(edge["to"]))]
+    ordered_ids.extend(stable_id for stable_id in sorted(stable_ids) if stable_id not in used_endpoints)
+    nodes = [node_by_id[stable_id] for stable_id in ordered_ids]
+    components: list[dict[str, Any]] = []
+    display_labels: dict[str, dict[str, str]] = {}
+    # Archify's showcase renderer cannot safely route a large graph in one
+    # SVG: a single-column projection over twelve cards exceeds the first-screen
+    # contract, while relationship-dense projections can overflow its diagnostic
+    # channel.  Keep those projections in a compact twelve-column index and leave
+    # relationships in the canonical Control graph.  Full stable identities
+    # remain attached to every visible card, so the overview never invents or
+    # drops systems and the operator can deep-link to the complete topology.
+    # Medium graphs still need their verified topology.  Reserve the
+    # relationship-free index only for genuinely huge graphs where rendering
+    # every edge would make the Archify SVG unusable.
+    unmatched_count = max(0, len(nodes) - len(rendered_edges) * 2)
+    unmatched_cols = min(6, max(1, math.ceil(math.sqrt(max(1, unmatched_count)))))
+    cols = 12 if overview_only else max(2 if rendered_edges else 1, unmatched_cols)
+    origin = (40, 44) if overview_only else (80, 90)
+    step = (108, 34) if overview_only else (230, 110)
+    component_size = (98, 26) if overview_only else (190, 64)
+    for index, node in enumerate(nodes):
+        stable_id = str(node["id"])
+        label, sublabel = _display_label(node, stable_id, index)
+        if overview_only:
+            # Keep the authored title in the overview.  The former compact
+            # index (for example, ``cap 001``/``hoo 002``) threw away the only
+            # human-readable system name and made all large projections look
+            # like an inventory of opaque IDs.  The stable ID remains in the
+            # Frank metadata; the card should still communicate what the node
+            # is to a reader.  Bounded labels preserve the first-screen
+            # geometry, while the kind/index sublabel disambiguates repeated
+            # titles and keeps the overview searchable by meaning.
+            label = label[:15].rstrip() + ("…" if len(label) > 15 else "")
+            sublabel = sublabel[:24]
+        display_labels[stable_id] = {"label": label, "sublabel": sublabel, "archify_id": id_map[stable_id]}
+        paired_count = len(rendered_edges) * 2
+        if not overview_only and index < paired_count:
+            column, row = index % 2, index // 2
+            x, y = origin[0] + column * 350, origin[1] + row * step[1]
+        else:
+            remaining_index = index if overview_only else index - paired_count
+            column = remaining_index % cols
+            row = remaining_index // cols + (0 if overview_only else len(rendered_edges) + 1)
+            x, y = origin[0] + column * step[0], origin[1] + row * step[1]
+        component: dict[str, Any] = {
+            "id": id_map[stable_id],
+            "type": _node_type(node.get("kind")),
+            "label": label,
+            "sublabel": sublabel,
+            "pos": [x, y],
+            "size": list(component_size),
+        }
+        if not overview_only:
+            component["tag"] = str(node.get("layer", "declared"))[:48]
+        components.append(component)
     connections: list[dict[str, Any]] = []
-    rendered_edges = () if overview_only else edges
-    for edge in sorted(rendered_edges, key=lambda item: (str(item.get("from")), str(item.get("to")), str(item.get("id", "")))):
+    for edge in rendered_edges:
         relationship = edge.get("relationship", edge.get("type", "depends_on"))
         relationship = str(relationship)[:80]
-        from_x, from_y = positions[str(edge["from"])]
-        to_x, to_y = positions[str(edge["to"])]
         connection: dict[str, Any] = {
             "id": _safe_archify_id(str(edge.get("id", f"{edge.get('from')}->{edge.get('to')}"))),
             "from": id_map[str(edge["from"])],
@@ -221,8 +316,7 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
             "label": relationship,
             "route": "orthogonal-h",
             "fromSide": "right",
-            "toSide": "right",
-            "via": [[from_x + 250, from_y + 38], [to_x + 250, to_y + 38]],
+            "toSide": "left",
         }
         connections.append(connection)
     titles = {
@@ -253,7 +347,7 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
         "stable_id_map": id_map,
         "display_labels": display_labels,
         "coverage": coverage,
-        "exclusions": ["relationships_render_in_control_graph"] if overview_only and edges else [],
+        "exclusions": ["additional_relationships_in_control"] if len(rendered_edges) < len(edges) else [],
         "relationship_count": len(edges),
         "rendered_relationship_count": len(connections),
         "runtime_health_claims": False,
@@ -331,7 +425,10 @@ class ArchifyAdapter:
             built["metadata"]["findings"] = estate_metadata.get("findings", [])
             built["metadata"]["mappings"] = estate_metadata.get("mappings", [])
             built["metadata"]["cross_links"] = estate_metadata.get("cross_links", {})
-            built["metadata"]["exclusions"] = estate_metadata.get("exclusions", [])
+            built["metadata"]["exclusions"] = sorted(
+                set(built["metadata"].get("exclusions", ()))
+                | set(estate_metadata.get("exclusions", ()))
+            )
             built["metadata"]["estate_coverage"] = estate_metadata.get("coverage", {})
             if estate_metadata.get("status") != "generated":
                 raise ControlContractError(f"projection {projection_id} is not generated")

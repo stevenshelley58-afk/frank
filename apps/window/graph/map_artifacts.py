@@ -187,6 +187,11 @@ class MapArtifactStore:
             _stable_id(stable_id, "map stable ID")
             if not isinstance(archify_id, str) or re.fullmatch(r"n_[0-9a-f]{16}", archify_id) is None:
                 raise ControlContractError("map stable ID map value is invalid")
+        for field in ("relationship_count", "rendered_relationship_count"):
+            if field in value and (not isinstance(value[field], int) or isinstance(value[field], bool) or value[field] < 0):
+                raise ControlContractError(f"invalid map {field}")
+        if value.get("rendered_relationship_count", 0) > value.get("relationship_count", 0):
+            raise ControlContractError("rendered map relationship count exceeds source count")
         if not isinstance(value["exclusions"], list) or any(not isinstance(item, str) or not item for item in value["exclusions"]) or len(set(value["exclusions"])) != len(value["exclusions"]):
             raise ControlContractError("map exclusions must be a unique list")
         if value["freshness"] not in {"fresh", "stale", "unavailable", "unknown"}:

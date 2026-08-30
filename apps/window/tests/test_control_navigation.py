@@ -20,6 +20,16 @@ class ControlNavigationTests(unittest.TestCase):
         self.assertNotIn("setup-board", live)
         self.assertNotIn("spawn", live)
 
+    def test_map_heading_and_summary_follow_the_selected_projection(self):
+        mapping = (ROOT / "web" / "js" / "map.js").read_text(encoding="utf-8")
+        self.assertIn('id="map-heading"', mapping)
+        self.assertIn('id="map-summary"', mapping)
+        self.assertIn("heading.textContent = mapLabel(row)", mapping)
+        self.assertIn("summary.textContent = mapSummary(row)", mapping)
+        self.assertIn("stable_id_map", mapping)
+        self.assertIn("Relationships are listed in Control", mapping)
+        self.assertNotIn("<h2>VPS World</h2>", mapping)
+
 
 if __name__ == "__main__":
     unittest.main()
