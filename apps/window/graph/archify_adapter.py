@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -80,6 +81,16 @@ def _title(node: Mapping[str, Any], stable_id: str) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()[:160]
     return stable_id
+
+
+def _display_label(node: Mapping[str, Any], stable_id: str, index: int) -> tuple[str, str]:
+    """Return bounded human labels; the full ID remains in Frank metadata."""
+    title = _title(node, stable_id)
+    title = re.sub(r"\s+", " ", title).strip()
+    if len(title) > 28:
+        title = title[:27].rstrip() + "…"
+    kind = re.sub(r"[^a-z0-9-]+", "-", str(node.get("kind", "node")).casefold()).strip("-") or "node"
+    return title or kind, f"{kind} #{index + 1:03d}"[:24]
 
 
 def _projection_nodes(graph: Mapping[str, Any], projection_id: str) -> list[Mapping[str, Any]]:
@@ -152,6 +163,7 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     stable_ids = {str(item["id"]) for item in nodes}
     id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(stable_ids)}
     components: list[dict[str, Any]] = []
+    display_labels: dict[str, dict[str, str]] = {}
     # A single authored rail gives every relationship a deterministic clear
     # corridor on the right.  Archify's showcase validator treats a dense
     # multi-column grid as an authored topology and quite correctly rejects
@@ -160,11 +172,13 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     cols = 1
     for index, node in enumerate(nodes):
         stable_id = str(node["id"])
+        label, sublabel = _display_label(node, stable_id, index)
+        display_labels[stable_id] = {"label": label, "sublabel": sublabel, "archify_id": id_map[stable_id]}
         component: dict[str, Any] = {
             "id": id_map[stable_id],
             "type": _node_type(node.get("kind")),
-            "label": _title(node, stable_id),
-            "sublabel": stable_id,
+            "label": label,
+            "sublabel": sublabel,
             "tag": str(node.get("layer", "declared"))[:48],
             "pos": [80, 90 + index * 130],
             "size": [210, 76],
@@ -216,6 +230,7 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
         "projection_id": projection_id,
         "graph_revision": graph.get("graph_revision"),
         "stable_id_map": id_map,
+        "display_labels": display_labels,
         "coverage": coverage,
         "exclusions": [],
         "runtime_health_claims": False,

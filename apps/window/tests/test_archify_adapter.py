@@ -58,6 +58,20 @@ class ArchifyAdapterTest(unittest.TestCase):
         self.assertEqual(metadata["coverage"]["missing"], ["evidence_producers"])
         self.assertEqual(len(diagram["components"]), len(graph["nodes"]))
 
+    def test_many_long_ids_use_bounded_labels_and_retain_full_identity_metadata(self):
+        nodes = [
+            {"id": f"service:production-worker-{index:03d}-with-a-very-long-canonical-name", "kind": "service",
+             "title": f"Production worker {index:03d} with a very long descriptive title"}
+            for index in range(245)
+        ]
+        graph = {"graph_revision": GRAPH["graph_revision"], "nodes": nodes, "edges": []}
+        diagram, metadata = graph_to_archify(graph, "projection:vps/world")
+        self.assertEqual(len(diagram["components"]), 245)
+        self.assertTrue(all(len(component["label"]) <= 28 for component in diagram["components"]))
+        self.assertTrue(all(len(component["sublabel"]) <= 24 for component in diagram["components"]))
+        self.assertEqual(set(metadata["stable_id_map"]), {node["id"] for node in nodes})
+        self.assertEqual(set(metadata["display_labels"]), set(metadata["stable_id_map"]))
+
     def test_build_metadata_contains_revisions_and_input_hash(self):
         result = build_projection(GRAPH, "projection:frank/architecture", source_revisions={"repo:frank": "a" * 40}, deployed_revisions={"release:frank": "b" * 40})
         self.assertEqual(result["metadata"]["graph_revision"], GRAPH["graph_revision"])

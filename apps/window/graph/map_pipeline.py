@@ -8,6 +8,7 @@ making the window/server depend on either implementation.
 from __future__ import annotations
 
 import hashlib
+import copy
 import json
 import os
 import re
@@ -303,6 +304,7 @@ def generate_maps(
                 "missing_coverage": missing_coverage,
                 "exclusions": projection.get("exclusions", graph_snapshot.get("exclusions", [])),
                 "findings": projection.get("findings", []),
+                "stable_id_map": copy.deepcopy(projection.get("metadata", {}).get("stable_id_map", {})) if isinstance(projection.get("metadata"), Mapping) else {},
                 "status": "generated",
                 "preview_only": True,
                 "freshness": "fresh",

@@ -160,7 +160,7 @@ class MapArtifactStore:
         required = {
             "projection_id", "graph_revision", "generation_id", "source_revisions",
             "deployed_revisions", "coverage", "exclusions", "archify_version",
-            "archify_hash", "validation_receipt_id", "artifact_hash", "prior_passing_manifest",
+            "archify_hash", "validation_receipt_id", "artifact_hash", "prior_passing_manifest", "stable_id_map",
             "generated_at", "freshness", "stale_reason",
         }
         missing = required - set(value)
@@ -178,6 +178,15 @@ class MapArtifactStore:
                 raise ControlContractError(f"invalid map {name}")
         if not isinstance(value["coverage"], list) or any(not isinstance(item, str) or not item for item in value["coverage"]) or len(set(value["coverage"])) != len(value["coverage"]):
             raise ControlContractError("map coverage must be a unique list")
+        stable_id_map = value["stable_id_map"]
+        if not isinstance(stable_id_map, dict) or not stable_id_map or list(stable_id_map) != sorted(stable_id_map):
+            raise ControlContractError("map stable ID map must be a sorted object")
+        if len(set(stable_id_map.values())) != len(stable_id_map):
+            raise ControlContractError("map stable ID map must be one-to-one")
+        for stable_id, archify_id in stable_id_map.items():
+            _stable_id(stable_id, "map stable ID")
+            if not isinstance(archify_id, str) or re.fullmatch(r"n_[0-9a-f]{16}", archify_id) is None:
+                raise ControlContractError("map stable ID map value is invalid")
         if not isinstance(value["exclusions"], list) or any(not isinstance(item, str) or not item for item in value["exclusions"]) or len(set(value["exclusions"])) != len(value["exclusions"]):
             raise ControlContractError("map exclusions must be a unique list")
         if value["freshness"] not in {"fresh", "stale", "unavailable", "unknown"}:

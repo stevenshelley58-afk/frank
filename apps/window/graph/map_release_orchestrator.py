@@ -80,7 +80,7 @@ def promote(*, receipt: Mapping[str, Any], production_root: Path | str, mandator
         try: validated_manifest = MapArtifactStore._validate_manifest(source_manifest, projection, generation, artifact)
         except ControlContractError as error: raise PromotionError("preview manifest schema is invalid") from error
         if validated_manifest != source_manifest: raise PromotionError("preview manifest is not canonical")
-        for key in ("projection_id", "generation_id", "graph_revision", "artifact_hash", "status", "preview_only"):
+        for key in ("projection_id", "generation_id", "graph_revision", "artifact_hash", "stable_id_map", "status", "preview_only"):
             if key not in receipt_manifest or source_manifest.get(key) != receipt_manifest.get(key):
                 raise PromotionError("preview manifest identity does not match receipt")
         artifact_hash = "sha256:" + hashlib.sha256(artifact).hexdigest()

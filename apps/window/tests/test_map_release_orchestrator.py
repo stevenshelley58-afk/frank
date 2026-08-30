@@ -33,6 +33,7 @@ class MapReleaseTests(unittest.TestCase):
                 "generated_at": "2026-08-30T10:00:00Z",
                 "freshness": "fresh",
                 "stale_reason": None,
+                "stable_id_map": {"service:frank-window": "n_aaaaaaaaaaaaaaaa"},
             }
             target = Path(root) / "maps" / id_key(key) / id_key(generation)
             target.mkdir(parents=True, exist_ok=True)
@@ -48,6 +49,13 @@ class MapReleaseTests(unittest.TestCase):
             provider = MapArtifactProvider(MapArtifactStore(Path(d)))
             self.assertEqual({item["projection_id"] for item in provider.list_projections()}, MANDATORY)
             self.assertTrue(provider.resolve_current("projection:vps/world")["artifact"])
+
+    def test_selector_rejects_receipt_identity_map_drift(self):
+        with tempfile.TemporaryDirectory() as d:
+            receipt = self.receipt(d)
+            receipt["manifests"]["projection:vps/world"]["stable_id_map"] = {"service:frank-window": "n_bbbbbbbbbbbbbbbb"}
+            with self.assertRaises(PromotionError):
+                promote(receipt=receipt, production_root=d, mandatory=MANDATORY)
 
     def test_production_selector_requires_the_exact_six_map_set(self):
         with tempfile.TemporaryDirectory() as d:

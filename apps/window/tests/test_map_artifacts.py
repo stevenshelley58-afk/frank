@@ -30,6 +30,7 @@ def manifest(projection="projection:vps/world", generation="generation:vps-world
         "prior_passing_manifest": None,
         "freshness": "fresh",
         "stale_reason": None,
+        "stable_id_map": {"service:frank-window": "n_aaaaaaaaaaaaaaaa"},
         "status": "generated",
     }
     value.update(extra)

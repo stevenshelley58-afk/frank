@@ -62,6 +62,7 @@ class CaptureEvidenceTests(unittest.TestCase):
                 "stale_reason": None,
                 "status": "generated",
                 "preview_only": True,
+                "stable_id_map": {"service:frank-window": "n_aaaaaaaaaaaaaaaa"},
             }
             store.write_generation(projection_id, generation_id, manifest, artifact)
             manifests[projection_id] = manifest
