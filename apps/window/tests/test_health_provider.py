@@ -32,6 +32,20 @@ class HealthProviderTests(unittest.TestCase):
     def test_health_rejects_invalid_signal(self):
         p = HealthProvider(self.endpoints(), lambda u: {"health": "maybe"})
         with self.assertRaises(RuntimeEvidenceError): p.observe("frank")
+
+    def test_blockwise_verified_status_shape_normalizes_and_binds_revision(self):
+        p = HealthProvider(self.endpoints(), lambda u: {"app": "blockwise", "status": "ready"}, {"blockwise": "c" * 40})
+        observed = p.observe("blockwise")
+        self.assertEqual(observed["health"], "healthy")
+        self.assertEqual(observed["deployed_revision"], "c" * 40)
+        summary = RuntimeEvidenceAdapter(p).summary("blockwise")
+        self.assertEqual(summary.health, "healthy")
+
+    def test_blockwise_status_requires_verified_shape_and_value(self):
+        for body in ({"status": "ready"}, {"app": "blockwise"}, {"app": "other", "status": "ready"}, {"app": "blockwise", "status": "running"}, {"app": "blockwise", "status": 200}):
+            with self.subTest(body=body):
+                with self.assertRaises(RuntimeEvidenceError):
+                    HealthProvider(self.endpoints(), lambda u, body=body: body).observe("blockwise")
         p = HealthProvider(self.endpoints(), lambda u: {"message": "ok"})
         with self.assertRaises(RuntimeEvidenceError): p.observe("frank")
 

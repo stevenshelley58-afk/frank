@@ -74,10 +74,22 @@ class HealthProvider:
         if not isinstance(value, Mapping): raise RuntimeEvidenceError("health response is not an object")
         if "health" in value and value.get("health") not in HEALTH:
             raise RuntimeEvidenceError("health response contains an invalid health value")
-        if "health" not in value and not isinstance(value.get("ok"), bool):
-            raise RuntimeEvidenceError("health response contains no truthful health signal")
-        if "health" not in value and isinstance(value.get("ok"), bool):
-            value = {**value, "health": "healthy" if value["ok"] else "unhealthy"}
+        if "health" not in value:
+            if isinstance(value.get("ok"), bool):
+                value = {**value, "health": "healthy" if value["ok"] else "unhealthy"}
+            elif (
+                system_id == "blockwise"
+                and isinstance(value.get("app"), str)
+                and value["app"].strip().lower() == "blockwise"
+                and isinstance(value.get("status"), str)
+            ):
+                status = value["status"].strip().lower()
+                normalized = {"ok": "healthy", "ready": "healthy", "healthy": "healthy", "degraded": "degraded", "unhealthy": "unhealthy", "unavailable": "unavailable", "unknown": "unknown"}.get(status)
+                if normalized is None:
+                    raise RuntimeEvidenceError("Blockwise health response contains an invalid status")
+                value = {**value, "health": normalized}
+            else:
+                raise RuntimeEvidenceError("health response contains no truthful health signal")
         from datetime import datetime, timezone
         value = {**value, "route": self.endpoints[system_id], "evidence_url": self.endpoints[system_id], "deployed_revision": value.get("deployed_revision") or self.revisions.get(system_id), "observed_at": value.get("observed_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "freshness": value.get("freshness", "fresh")}
         return value

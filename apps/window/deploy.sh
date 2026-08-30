@@ -189,7 +189,7 @@ migrate_volume frank_frank_caddy_data frank_caddy_data
 migrate_volume frank_frank_caddy_config frank_caddy_config
 
 cd "$app"
-"$app/infra/control_plane/install.sh" --preserve-active-release
+bash "$app/infra/control_plane/install.sh" --preserve-active-release
 # Public Mini builds are deliberately networkless at runtime. Bake their
 # document, spreadsheet, PDF, image, and headless-browser tools ahead of time.
 docker build \
@@ -270,7 +270,7 @@ curl --fail --silent --show-error --output /dev/null \
 # Publish both fixed-input reconciliation scopes after every healthy release.
 # A collector failure has its own immutable failure receipt and must not turn
 # an already-promoted, healthy application into an ambiguously failed deploy.
-if ! "$app/infra/control_plane/post-deploy.sh"; then
+if ! bash "$app/infra/control_plane/post-deploy.sh"; then
   echo "warning: post-deploy control-plane reconciliation failed; the healthy release remains current" >&2
 fi
 echo "deployed $(git -C "$repo" rev-parse HEAD)"

@@ -23,8 +23,26 @@ fi
 
 source_dir="/projects/frank/apps/window/infra/control_plane"
 unit_dir="/etc/systemd/system"
+data_dir="/srv/frank/data/window"
 control_graph_dir="/srv/frank/data/window/control-graph"
+schedule_dir="$control_graph_dir/schedules"
 backup_dir="/srv/frank/backups/control-plane"
+
+# Scheduled report jobs run as a locked, non-login account.  Keep the account
+# narrow: it can traverse the existing data boundary, read the checkout, and
+# write only its fixed receipt directory; it never receives access to secrets.
+if ! getent group frank >/dev/null 2>&1; then
+  groupadd --system frank
+fi
+if ! id frank >/dev/null 2>&1; then
+  useradd --system --gid frank --home-dir /nonexistent --no-create-home --shell /usr/sbin/nologin frank
+else
+  existing_shell="$(getent passwd frank | cut -d: -f7)"
+  [[ "$existing_shell" == "/usr/sbin/nologin" || "$existing_shell" == "/bin/false" ]] || {
+    echo "existing frank service account has an interactive shell" >&2
+    exit 1
+  }
+fi
 install_units() {
   local source="$1"; shift
   for unit in "$@"; do
@@ -41,10 +59,15 @@ units=(
 install_units "$source_dir" "${units[@]}"
 install_units /projects/frank/apps/window/infra/cleanup frank-cleanup-report.service frank-cleanup-report.timer
 install_units /projects/frank/apps/window/infra/discovery frank-discovery-refresh.service frank-discovery-refresh.timer
-install_units /projects/frank/apps/window/infra/evaluations frank-chat-pattern.timer frank-evaluation.service frank-evaluation.timer
+install_units /projects/frank/apps/window/infra/evaluations frank-chat-pattern.service frank-chat-pattern.timer frank-evaluation.service frank-evaluation.timer
 install_units /projects/frank/apps/window/infra/retention frank-restore-drill.service frank-restore-drill.timer
 
 install -d -o root -g hermes -m 0750 -- "$control_graph_dir"
+install -d -o frank -g frank -m 0750 -- "$schedule_dir"
+# The parent data directories remain root:hermes and expose traversal only;
+# the schedules directory itself is the sole location writable by frank.
+chmod 2751 "$data_dir"
+chmod 0751 "$control_graph_dir"
 install -d -o root -g root -m 0750 -- "$backup_dir"
 systemctl daemon-reload
 
@@ -86,6 +109,14 @@ systemd-analyze verify \
   "$unit_dir/frank-control-reconcile-fast.timer" \
   "$unit_dir/frank-control-reconcile-full.service" \
   "$unit_dir/frank-control-reconcile-full.timer" \
+  "$unit_dir/frank-cleanup-report.service" \
+  "$unit_dir/frank-cleanup-report.timer" \
+  "$unit_dir/frank-discovery-refresh.service" \
+  "$unit_dir/frank-discovery-refresh.timer" \
+  "$unit_dir/frank-evaluation.service" \
+  "$unit_dir/frank-evaluation.timer" \
+  "$unit_dir/frank-chat-pattern.service" \
+  "$unit_dir/frank-chat-pattern.timer" \
   "$unit_dir/frank-restore-drill.service" \
   "$unit_dir/frank-restore-drill.timer"
 echo "installed Step 2 control-plane units"

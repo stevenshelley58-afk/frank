@@ -3,6 +3,7 @@ Description=Frank report-only cleanup candidates
 [Service]
 Type=oneshot
 User=frank
+Group=frank
 ExecStart=/usr/bin/python3 /projects/frank/apps/window/scripts/run_scheduled_control_job.py cleanup --timeout 1800
 TimeoutStartSec=30m
 NoNewPrivileges=true

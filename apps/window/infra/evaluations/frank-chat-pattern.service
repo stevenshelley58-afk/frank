@@ -4,6 +4,7 @@ Description=Frank monthly aggregate chat-pattern candidates (metadata only)
 [Service]
 Type=oneshot
 User=frank
+Group=frank
 WorkingDirectory=/projects/frank
 ExecStart=/usr/bin/python3 /projects/frank/apps/window/scripts/run_scheduled_control_job.py chat-pattern
 TimeoutStartSec=30m

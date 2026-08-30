@@ -3,6 +3,7 @@ Description=Frank bounded golden evaluation
 [Service]
 Type=oneshot
 User=frank
+Group=frank
 WorkingDirectory=/projects/frank
 ExecStart=/usr/bin/python3 /projects/frank/apps/window/scripts/run_scheduled_control_job.py evaluation
 TimeoutStartSec=30m

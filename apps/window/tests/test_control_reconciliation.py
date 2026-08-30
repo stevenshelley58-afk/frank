@@ -209,7 +209,7 @@ class ControlReconciliationTests(unittest.TestCase):
 
     def test_deploy_preserves_a_validated_release_when_installing_units(self):
         deploy = (Path(__file__).parents[1] / "deploy.sh").read_text(encoding="utf-8")
-        self.assertIn('install.sh" --preserve-active-release', deploy)
+        self.assertIn('bash "$app/infra/control_plane/install.sh" --preserve-active-release', deploy)
 
     def test_restore_drill_cannot_write_control_graph_schedules(self):
         service = (Path(__file__).parents[1] / "infra" / "retention" / "frank-restore-drill.service").read_text(encoding="utf-8")
