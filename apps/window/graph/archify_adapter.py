@@ -229,7 +229,7 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     relationship_rank = {name: index for index, name in enumerate(relationship_order)}
     rendered_edges: list[Mapping[str, Any]] = []
     used_endpoints: set[str] = set()
-    compact_medium = 12 < len(nodes) <= 48
+    compact_medium = 6 < len(nodes) <= 48
     if not overview_only:
         for edge in sorted(
             edges,
