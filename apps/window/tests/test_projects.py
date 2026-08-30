@@ -60,6 +60,44 @@ class ProjectApiTest(unittest.TestCase):
         self.temp.cleanup()
 
     @patch("server.hermes_request")
+    def test_tool_free_customer_session_uses_only_its_dedicated_prompt(self, request):
+        request.return_value = {"session": {"id": "mini-intake-guide1234"}}
+        project = {
+            "id": "mini-intake-guide1234",
+            "name": "Frank private customer work",
+            "root": "mini-intake-guide1234",
+        }
+        workspace = str(
+            server.HERMES_UPLOAD_ROOT.parent / "mini-shared" / "workspaces" / "guide1234"
+        )
+        customer_prompt = "Speak only in plain business outcomes. Never expose internal systems."
+
+        server._create_project_session(
+            project,
+            session_id_override="mini-intake-guide1234",
+            system_prompt_override=customer_prompt,
+            tool_policy="none",
+            workspace_override=workspace,
+            display_workspace_override="/workspace",
+            memory_scope_override="mini-intake/guide1234",
+        )
+
+        payload = request.call_args.args[1]
+        self.assertEqual(payload["system_prompt"], customer_prompt)
+        self.assertNotIn("Canonical workspace", payload["system_prompt"])
+        self.assertNotIn("AGENTS.md", payload["system_prompt"])
+        self.assertEqual(payload["tool_policy"], "none")
+
+        with self.assertRaises(ValueError):
+            server._create_project_session(
+                project,
+                system_prompt_override=customer_prompt,
+                tool_policy="isolated_terminal",
+                workspace_override=workspace,
+                memory_scope_override="mini-intake/guide1234",
+            )
+
+    @patch("server.hermes_request")
     def test_create_project_connects_native_hermes_workspace_chat_and_memory_scope(self, request):
         request.return_value = {"session": {"id": "session-mini", "source": "api_server", "started_at": 10}}
 

@@ -10,13 +10,42 @@ const PROFILE = path.join(os.tmpdir(), `frank-mini-browser-${process.pid}`);
 const WINDOW_SIZE = process.argv[2] || "1440,900";
 const SCREENSHOT = process.argv[3] || "";
 const EXERCISE_SUBMIT = process.env.FRANK_BROWSER_EXERCISE_SUBMIT === "1";
+// Keep the ordinary visual canary fast. Release checks can supply the real
+// customer wording here and repeat it against fresh browser drafts without
+// ever submitting a project for a full build.
+const CUSTOMER_PROMPT = process.env.FRANK_BROWSER_TEST_PROMPT || "Create a simple booking page for my customers.";
+const CONSECUTIVE_RUNS = Number(process.env.FRANK_BROWSER_CONSECUTIVE_RUNS || 1);
 // A real guide reply currently takes about 32 seconds in production. Keep the
 // optional end-to-end check useful without making the normal visual canary wait.
 const RESPONSE_BUDGET_MS = Number(process.env.FRANK_BROWSER_RESPONSE_BUDGET_MS || 45000);
 const COMPOSER_READY_BUDGET_MS = Number(process.env.FRANK_BROWSER_COMPOSER_READY_BUDGET_MS || 10000);
 const [WIDTH, HEIGHT] = WINDOW_SIZE.split(",").map(Number);
 
+if (!Number.isInteger(CONSECUTIVE_RUNS) || CONSECUTIVE_RUNS < 1 || CONSECUTIVE_RUNS > 10) {
+  throw new Error("FRANK_BROWSER_CONSECUTIVE_RUNS must be a whole number from 1 to 10");
+}
+if (CONSECUTIVE_RUNS > 1 && !EXERCISE_SUBMIT) {
+  throw new Error("FRANK_BROWSER_CONSECUTIVE_RUNS requires FRANK_BROWSER_EXERCISE_SUBMIT=1");
+}
+
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
+
+function guideReplyViolations(reply) {
+  const value = String(reply || "").trim();
+  const rules = [
+    ["internal term", /\b(?:hermes|mini frank|blockwise|workspace|skills?|pipeline|system prompt|api|stack|architecture|agent|tokens?|run id|repo(?:sitory)?|terminal|sandbox|docker|javascript|html|css|runtime|framework|tool call|canonical path)\b/i],
+    ["process narration", /\b(?:let me (?:check|inspect|probe|read|search|see|look)|i(?:'ll| will) (?:check|inspect|probe|read|search|see|look)|before i (?:build|make)|don['’]t want (?:to )?(?:build|make) the wrong|there(?:'s| is) a (?:real )?fork|which one|option [ab])\b/i],
+    ["technical fork", /\b(?:standalone|offline|existing editor|existing ad maker|spreadsheet|cli|code)\b.*\b(?:or|versus)\b|\b(?:or|versus)\b.*\b(?:standalone|offline|existing editor|existing ad maker|spreadsheet|cli|code)\b/i],
+  ];
+  return rules.filter(([, pattern]) => pattern.test(value)).map(([label]) => label);
+}
+
+const COMPOSER_READY_EXPRESSION = `(() => {
+  const composer = document.querySelector("#composer");
+  const input = document.querySelector("#message");
+  const send = composer?.querySelector('[data-action="send-message"]');
+  return Boolean(composer && input && !input.disabled && send);
+})()`;
 
 async function waitForEvaluation(browser, expression, deadline, intervalMs = 150) {
   while (Date.now() < deadline) {
@@ -82,12 +111,7 @@ async function main() {
     // snapshot does not turn normal visual checks into a boot-time race. An
     // empty composer is correctly disabled, so readiness is the action binding,
     // not the button's enabled state.
-    const composerReady = await waitForEvaluation(browser, `(() => {
-      const composer = document.querySelector("#composer");
-      const input = document.querySelector("#message");
-      const send = composer?.querySelector('[data-action="send-message"]');
-      return Boolean(composer && input && !input.disabled && send);
-    })()`, Date.now() + COMPOSER_READY_BUDGET_MS);
+    const composerReady = await waitForEvaluation(browser, COMPOSER_READY_EXPRESSION, Date.now() + COMPOSER_READY_BUDGET_MS);
     if (!composerReady) throw new Error("Composer did not become ready");
 
     const result = await browser.evaluate(`(() => {
@@ -128,63 +152,99 @@ async function main() {
       };
     })()`);
     if (EXERCISE_SUBMIT) {
-      const responseStarted = Date.now();
-      const checkpoints = {
-        requestStarted: true,
-        accepted: false,
-        complete: false,
-        acceptedMs: null,
-        completeMs: null,
-      };
-      const submissionStarted = await browser.evaluate(`(() => {
-        const composer = document.querySelector("#composer");
-        const input = document.querySelector("#message");
-        const send = composer?.querySelector('[data-action="send-message"]');
-        if (!composer || !input || input.disabled || !send || send.dataset.action !== "send-message") return false;
-        input.value = "Create a simple booking page for my customers.";
-        input.dispatchEvent(new Event("input", { bubbles: true }));
-        if (send.disabled || send.dataset.action !== "send-message") return false;
-        composer.requestSubmit();
-        return true;
-      })()`);
-      if (!submissionStarted) throw new Error("Composer was no longer ready when the optional submit check began");
+      const guideRuns = [];
+      for (let run = 1; run <= CONSECUTIVE_RUNS; run += 1) {
+        if (run > 1) {
+          // A completed guide leaves a local draft intentionally. Clear only
+          // this browser's local state before reloading so each canary pass
+          // begins as a new customer conversation. The server never receives
+          // the project's "solve" action in this test.
+          await browser.evaluate(`(() => { localStorage.clear(); location.reload(); return true; })()`);
+          const ready = await waitForEvaluation(browser, COMPOSER_READY_EXPRESSION, Date.now() + COMPOSER_READY_BUDGET_MS);
+          if (!ready) throw new Error(`Composer did not become ready for guide run ${run}`);
+        }
 
-      const deadline = responseStarted + RESPONSE_BUDGET_MS;
-      checkpoints.accepted = await waitForEvaluation(browser, `(() => {
-        const userMessage = document.querySelector(".message-user .message-text");
-        const conversation = document.querySelector("#conversation");
-        const completed = document.querySelector('.message-assistant [data-action="resume"]');
-        return Boolean(userMessage && (
-          conversation?.getAttribute("aria-busy") === "true" || completed
-        ));
-      })()`, deadline);
-      if (checkpoints.accepted) checkpoints.acceptedMs = Date.now() - responseStarted;
+        const responseStarted = Date.now();
+        const checkpoints = {
+          requestStarted: true,
+          accepted: false,
+          complete: false,
+          acceptedMs: null,
+          completeMs: null,
+        };
+        const submissionStarted = await browser.evaluate(`(() => {
+          const composer = document.querySelector("#composer");
+          const input = document.querySelector("#message");
+          const send = composer?.querySelector('[data-action="send-message"]');
+          if (!composer || !input || input.disabled || !send || send.dataset.action !== "send-message") return false;
+          input.value = ${JSON.stringify(CUSTOMER_PROMPT)};
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          if (send.disabled || send.dataset.action !== "send-message") return false;
+          composer.requestSubmit();
+          return true;
+        })()`);
+        if (!submissionStarted) throw new Error(`Composer was no longer ready when guide run ${run} began`);
 
-      checkpoints.complete = checkpoints.accepted && await waitForEvaluation(browser,
-        `Boolean(document.querySelector('.message-assistant [data-action="resume"]'))`,
-        deadline,
-      );
-      if (checkpoints.complete) checkpoints.completeMs = Date.now() - responseStarted;
-      const conversation = await browser.evaluate(`(() => ({
-        statusCard: Boolean(document.querySelector(".status-card")),
-        resumeAction: Boolean(document.querySelector('.message-assistant [data-action="resume"]')),
-        response: [...document.querySelectorAll(".message-assistant .message-text")].at(-1)?.textContent?.trim() || "",
-      }))()`);
-      result.fastConversation = {
-        responseMs: Date.now() - responseStarted,
-        withinBudget: checkpoints.complete,
-        hasResponse: Boolean(conversation.response),
-        resumeAction: conversation.resumeAction,
-        bypassedFullBuild: !conversation.statusCard,
-        checkpoints,
-      };
+        const deadline = responseStarted + RESPONSE_BUDGET_MS;
+        checkpoints.accepted = await waitForEvaluation(browser, `(() => {
+          const userMessage = document.querySelector(".message-user .message-text");
+          const conversation = document.querySelector("#conversation");
+          const completed = document.querySelector('.message-assistant [data-action="resume"]');
+          return Boolean(userMessage && (
+            conversation?.getAttribute("aria-busy") === "true" || completed
+          ));
+        })()`, deadline);
+        if (checkpoints.accepted) checkpoints.acceptedMs = Date.now() - responseStarted;
+
+        checkpoints.complete = checkpoints.accepted && await waitForEvaluation(browser,
+          `Boolean(document.querySelector('.message-assistant [data-action="resume"]'))`,
+          deadline,
+        );
+        if (checkpoints.complete) checkpoints.completeMs = Date.now() - responseStarted;
+        const conversation = await browser.evaluate(`(() => {
+          const message = [...document.querySelectorAll(".message-assistant .message-text")].at(-1);
+          const bounds = message?.getBoundingClientRect();
+          const style = message ? getComputedStyle(message) : null;
+          return {
+            statusCard: Boolean(document.querySelector(".status-card")),
+            submittedJob: performance.getEntriesByType("resource").some(({ name }) => (
+              /\/api\/mini\/intakes\/[^/]+\/submit(?:[?#]|$)/.test(name)
+              || /\/api\/mini\/jobs(?:[?#]|$)/.test(name)
+            )),
+            resumeAction: Boolean(document.querySelector('.message-assistant [data-action="resume"]')),
+            response: message?.textContent?.trim() || "",
+            responseVisible: Boolean(message && bounds && bounds.width > 0 && bounds.height > 0 && style?.visibility !== "hidden" && style?.display !== "none"),
+          };
+        })()`);
+        const violations = guideReplyViolations(conversation.response);
+        guideRuns.push({
+          run,
+          response: conversation.response,
+          responseVisible: conversation.responseVisible,
+          responseMs: Date.now() - responseStarted,
+          withinBudget: checkpoints.complete,
+          hasResponse: Boolean(conversation.response),
+          resumeAction: conversation.resumeAction,
+          bypassedFullBuild: !conversation.statusCard && !conversation.submittedJob,
+          submittedJob: conversation.submittedJob,
+          guideViolations: violations,
+          checkpoints,
+        });
+      }
+      // Preserve the existing result shape for callers while recording every
+      // visible customer reply for a release receipt.
+      result.fastConversation = guideRuns[0];
+      result.guideRuns = guideRuns;
     }
     if (SCREENSHOT) {
       const capture = await browser.send("Page.captureScreenshot", { format: "png", fromSurface: true });
       fs.writeFileSync(SCREENSHOT, Buffer.from(capture.data, "base64"));
     }
     console.log(JSON.stringify(result));
-    if (result.canonicalPath !== "/mini-frank/" || result.hasLegacyPublicPath || result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || (EXERCISE_SUBMIT && (!result.fastConversation.withinBudget || !result.fastConversation.hasResponse || !result.fastConversation.resumeAction || !result.fastConversation.bypassedFullBuild))) process.exitCode = 1;
+    const failedGuideRun = result.guideRuns?.find((run) => (
+      !run.withinBudget || !run.hasResponse || !run.responseVisible || !run.resumeAction || !run.bypassedFullBuild || run.guideViolations.length
+    ));
+    if (result.canonicalPath !== "/mini-frank/" || result.hasLegacyPublicPath || result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || failedGuideRun) process.exitCode = 1;
   } finally {
     try { browser?.close(); } catch {}
     chrome.kill();

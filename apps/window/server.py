@@ -645,6 +645,7 @@ def _create_project_session(
     model: str = "",
     provider: str = "",
     system_prompt_suffix: str = "",
+    system_prompt_override: str = "",
     tool_policy: str = "",
     workspace_override: str = "",
     display_workspace_override: str = "",
@@ -664,13 +665,22 @@ def _create_project_session(
         raise ValueError("unsupported Hermes display workspace override")
     if memory_scope_override and not re.fullmatch(r"mini-(?:intake|job)/[A-Za-z0-9_-]{8,80}", memory_scope_override):
         raise ValueError("unsupported Hermes memory scope override")
-    system_prompt = _project_context(
-        project,
-        canonical_workspace=display_workspace_override or workspace,
-        memory_scope=memory_scope_override,
-    )
-    if system_prompt_suffix:
-        system_prompt = f"{system_prompt}\n\n{system_prompt_suffix.strip()}"
+    if system_prompt_override:
+        if system_prompt_suffix:
+            raise ValueError("system prompt override cannot be combined with a suffix")
+        if tool_policy != "none" or not workspace_override or not memory_scope_override:
+            raise ValueError("system prompt override is restricted to isolated tool-free sessions")
+        system_prompt = system_prompt_override.strip()
+        if not system_prompt:
+            raise ValueError("system prompt override cannot be empty")
+    else:
+        system_prompt = _project_context(
+            project,
+            canonical_workspace=display_workspace_override or workspace,
+            memory_scope=memory_scope_override,
+        )
+        if system_prompt_suffix:
+            system_prompt = f"{system_prompt}\n\n{system_prompt_suffix.strip()}"
     payload = {
         "source": "api_server",
         "cwd": workspace,

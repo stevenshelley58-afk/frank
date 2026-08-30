@@ -49,6 +49,8 @@ from .results import (
     SELF_HOST_SCHEMA,
     RESULT_SUPPORT_FIELDS,
     build_result_support,
+    customer_result_projection,
+    customer_safe_build_notes,
     result_support_prompt,
     validate_guidance,
     validate_self_host_guide,

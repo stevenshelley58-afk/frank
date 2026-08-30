@@ -231,6 +231,150 @@ class MiniProductBackendTest(unittest.TestCase):
         self.assertEqual(job["guidance"]["related_free_projects"]["status"], "ready")
         self.assertEqual(job["self_host"]["source"], "hermes_supplied")
 
+    def test_legacy_result_copy_and_unsafe_build_notes_never_cross_customer_boundaries(self):
+        created = self.create_job()
+        ready = self.mark_ready(created)
+        job_id = ready["id"]
+        safe_owner = self.client.get(
+            f"/api/mini/jobs/{job_id}", headers=self.owner_headers(created)
+        ).get_json()["job"]
+        self.assertEqual(
+            self.client.get(safe_owner["result"]["details_url"], buffered=True).status_code,
+            200,
+        )
+
+        # Mimic a result completed before the customer-language boundary. The
+        # artifact itself remains useful; only its runtime narration must be
+        # removed on owner, link and published projections.
+        jobs_path = self.data_root / "mini" / "jobs.json"
+        jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+        stored = jobs[job_id]
+        result = stored["result"]
+        result["title"] = "Hermes workspace result"
+        result["summary"] = "The API inspected C:/workspace and used a private token."
+        result["artifacts"][0]["label"] = "Open the source code from the workspace"
+        result["checks"] = "The runtime run id was checked in the terminal."
+        result["limitations"] = "The Hermes agent needs a secret."
+        result["internal_note"] = "PRIVATE: root-owned dispatcher details"
+        result["guidance"]["use_now"][0]["prompt"] = "Open the workspace and inspect the pipeline."
+        result["guidance"]["extra"] = {"secret": "DATABASE_PASSWORD: hunter2"}
+        result["self_host"]["overview"] = "Deploy /workspace with the private API key."
+        result["self_host"]["service"]["token"] = "REDIS_TOKEN: value12345"
+        jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+        (self.preview_root / job_id / "build-notes.txt").write_text(
+            "Hermes checked the private workspace with an API key.", encoding="utf-8"
+        )
+
+        owner_response = self.client.get(
+            f"/api/mini/jobs/{job_id}", headers=self.owner_headers(created)
+        )
+        self.assertEqual(owner_response.status_code, 200)
+        owner = owner_response.get_json()["job"]
+        owner_result = owner["result"]
+        self.assertEqual(owner_result["title"], "Your solution is ready")
+        self.assertEqual(owner_result["summary"], (
+            "Open it below and tell us what you want changed. Changes to this project are free."
+        ))
+        self.assertEqual(owner_result["artifacts"][0]["label"], "Open your solution")
+        self.assertNotIn("checks", owner_result)
+        self.assertNotIn("limitations", owner_result)
+        self.assertNotIn("details_url", owner_result)
+        self.assertNotIn("internal_note", owner_result)
+        self.assertEqual(owner_result["guidance"]["source"], "frank_known")
+        self.assertEqual(owner_result["self_host"]["source"], "frank_known")
+        self.assertNotRegex(json.dumps(owner_result), r"(?i)hermes|workspace|api key|source code|runtime")
+
+        owner_artifact = owner_result["artifacts"][0]["url"]
+        self.assertEqual(self.client.get(owner_artifact, buffered=True).status_code, 200)
+        self.assertEqual(
+            self.client.get(owner_artifact.rstrip("/") + "/build-notes.txt").status_code,
+            404,
+        )
+
+        shared = self.client.post(
+            f"/api/mini/jobs/{job_id}/shares",
+            json={"base_version": 1, "scope": "result", "role": "viewer"},
+            headers=self.owner_headers(created),
+        ).get_json()["share"]
+        link_payload = self.client.get(f"/api/mini/shares/{shared['token']}").get_json()["shared"]
+        self.assertNotRegex(json.dumps(link_payload), r"(?i)hermes|workspace|api key|source code|runtime")
+        self.assertNotIn("details_url", link_payload["result"])
+        self.assertEqual(
+            self.client.get(link_payload["result"]["artifacts"][0]["url"] + "build-notes.txt").status_code,
+            404,
+        )
+
+        published = self.client.patch(
+            f"/api/mini/jobs/{job_id}/sharing",
+            json={"base_version": 2, "mode": "published", "scope": "result", "role": "viewer"},
+            headers=self.owner_headers(created),
+        )
+        self.assertEqual(published.status_code, 200)
+        published_payload = self.client.get(f"/api/mini/published/{job_id}").get_json()["shared"]
+        self.assertNotRegex(json.dumps(published_payload), r"(?i)hermes|workspace|api key|source code|runtime")
+        self.assertEqual(
+            self.client.get(published_payload["result"]["artifacts"][0]["url"] + "build-notes.txt").status_code,
+            404,
+        )
+
+    def test_self_host_guide_keeps_honest_operations_but_rejects_private_details(self):
+        safe = {
+            "schema": SELF_HOST_SCHEMA,
+            "applicability": "application",
+            "overview": "Host this service on a server you control, with HTTPS for visitors.",
+            "requirements": [
+                "A server, domain DNS access and HTTPS.",
+                "A Docker installation and the provider API key placeholder API_KEY=<your-key>.",
+            ],
+            "steps": [{"title": "Set it up", "detail": "Configure the service, start it with Docker, then check the HTTPS address."}],
+            "operations": [{"area": "Recovery", "detail": "Keep backups and test restoring a known working release."}],
+            "service_reason": "Frank can manage configuration, monitoring, updates and recovery if you prefer.",
+        }
+        from mini.results import validate_self_host_guide
+        self.assertEqual(validate_self_host_guide(safe)["source"], "hermes_supplied")
+        for leaked_secret in (
+            "Set API_KEY=supersecret12345 on the server.",
+            "Set DATABASE_PASSWORD: hunter2 on the server.",
+            "Set password: hunter2 on the server.",
+            "Set REDIS_TOKEN: value12345 on the server.",
+        ):
+            with self.subTest(leaked_secret=leaked_secret):
+                unsafe = json.loads(json.dumps(safe))
+                unsafe["steps"][0]["detail"] = leaked_secret
+                self.assertIsNone(validate_self_host_guide(unsafe))
+
+    def test_legacy_result_projection_reconstructs_only_canonical_customer_fields(self):
+        from mini.results import customer_result_projection
+
+        job_id = "legacy-safe-123"
+        prefix = f"https://preview.frank.fail/mini/{job_id}/"
+        projected = customer_result_projection({
+            "schema": RESULT_SCHEMA_V2,
+            "job_id": job_id,
+            "revision": 2,
+            "result_type": "interactive",
+            "title": "Enquiry follow-up",
+            "summary": "A clear way to keep every new enquiry moving.",
+            "artifacts": [{
+                "kind": "interactive", "label": "Open the follow-up board", "url": prefix,
+            }],
+            "details_url": "https://attacker.invalid/private-build-notes.txt",
+            "checks": "Hermes workspace token secret",
+            "limitations": "DATABASE_PASSWORD: hunter2",
+            "guidance": {"source": "hermes_supplied", "extra": "PRIVATE"},
+            "self_host": {"source": "hermes_supplied", "extra": "PRIVATE"},
+            "private": {"workspace": "C:/workspace", "secret": "REDIS_TOKEN: value12345"},
+        }, include_details=True, job_id=job_id)
+
+        self.assertEqual(projected["artifacts"][0]["url"], prefix)
+        self.assertNotIn("details_url", projected)
+        self.assertNotIn("checks", projected)
+        self.assertNotIn("limitations", projected)
+        self.assertNotIn("private", projected)
+        self.assertEqual(projected["guidance"]["source"], "frank_known")
+        self.assertEqual(projected["self_host"]["source"], "frank_known")
+        self.assertNotRegex(json.dumps(projected), r"(?i)hermes|workspace|hunter2|redis_token")
+
     def test_industry_candidates_remain_private_until_hermes_adapter_exists(self):
         created = self.create_job()
         candidate = {

@@ -2,12 +2,278 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import re
 from typing import Iterable
 
 
 GUIDANCE_SCHEMA = "schema://frank.mini-guidance/v1"
 SELF_HOST_SCHEMA = "schema://frank.mini-self-host/v1"
 RESULT_SUPPORT_FIELDS = {"guidance", "self_host"}
+
+
+# Result manifests are written by the build runtime.  They are *not* a safe
+# customer-facing boundary by themselves: an otherwise useful result must not
+# expose a workspace, an internal product name, or credentials in its title,
+# labels, help text, or notes.  Keep this deliberately high-confidence.  The
+# normal result view is plain-business language; the separate self-host guide
+# may still explain genuine hosting work such as DNS, HTTPS and Docker.
+_PRIVATE_RESULT_PATTERNS = (
+    re.compile(r"\b(?:hermes|blockwise|hindsight)\b", re.IGNORECASE),
+    re.compile(r"\b(?:workspace|system\s+prompt|tool\s+policy|memory\s+scope|"
+               r"agent\s+loop|prompt\s+file|tool\s+(?:call|output|result)|"
+               r"skills?\s+(?:loaded|path|folder|file)|chain[- ]of[- ]thought|reasoning\s+trace|"
+               r"run\s*(?:id|identifier)|session\s*(?:id|identifier)|"
+               r"canonical\s+(?:path|workspace)|internal\s+system|control\s+plane|"
+               r"root[- ]owned|dispatcher|AGENTS\.md|BUILD_GUIDE\.md|result\.json)\b", re.IGNORECASE),
+    re.compile(r"(?:[A-Za-z]:[\\/]|/(?:workspace|projects|srv|home|root|tmp|var|etc)/)", re.IGNORECASE),
+    re.compile(r"\b(?:id_rsa|id_ed25519)\b", re.IGNORECASE),
+    re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE),
+    re.compile(r"\b(?:sk-|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]{8,}", re.IGNORECASE),
+    re.compile(
+        r"\b[A-Z][A-Z0-9_]*(?:KEY|TOKEN|PASSWORD|SECRET)\s*(?:=|:)\s*"
+        r"(?!(?:[<{\[])?(?:your|replace|example|placeholder|redacted|change[-_]?me|x{3,}))\S+",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"\b(?:api[_ -]?key|access[_ -]?token|password|secret)\s*(?:=|:)\s*"
+        r"(?!(?:[<{\[])?(?:your|replace|example|placeholder|redacted|required|needed|unknown|"
+        r"not[-_ ]?set|change[-_]?me|x{3,}))\S+",
+        re.IGNORECASE,
+    ),
+)
+_DEFAULT_RESULT_TECHNICAL_PATTERNS = (
+    re.compile(r"\b(?:terminal|sandbox|repository|repo|source\s+code|tool\s+call|runtime|"
+               r"frontend|backend|docker|kubernetes|next\.?js)\b", re.IGNORECASE),
+    re.compile(r"\b(?:API|SDK)\s+(?:key|endpoint|integration|call|client)\b", re.IGNORECASE),
+    re.compile(r"\b(?:web|software|application)\s+framework\b", re.IGNORECASE),
+    re.compile(r"\b(?:javascript|typescript|html|css|python)\s+(?:code|file|bundle|script)\b", re.IGNORECASE),
+    re.compile(r"\b(?:built|written|implemented|runs?)\s+(?:in|with|using|on)\s+"
+               r"(?:javascript|typescript|html|css|python|docker|next\.?js)\b", re.IGNORECASE),
+)
+
+DEFAULT_RESULT_TITLE = "Your solution is ready"
+DEFAULT_RESULT_SUMMARY = (
+    "Open it below and tell us what you want changed. Changes to this project are free."
+)
+
+
+def _contains_private_detail(text: str) -> bool:
+    return any(pattern.search(text) for pattern in _PRIVATE_RESULT_PATTERNS)
+
+
+def customer_safe_text(value, *, self_host: bool = False) -> bool:
+    """Return whether one customer-visible string is safe to show.
+
+    This is a privacy boundary rather than a style grader.  It rejects
+    unambiguous internal/runtime references everywhere and additionally keeps
+    technical implementation language out of the ordinary result surface.
+    Self-host guidance is the explicit progressive-disclosure exception.
+    """
+    if not isinstance(value, str):
+        return False
+    text = " ".join(value.split()).strip()
+    if not text or any(ord(character) < 32 for character in text):
+        return False
+    if _contains_private_detail(text):
+        return False
+    return bool(self_host or not any(pattern.search(text) for pattern in _DEFAULT_RESULT_TECHNICAL_PATTERNS))
+
+
+def customer_safe_build_notes(value) -> bool:
+    """Build notes are a normal result surface, not a developer log."""
+    if not isinstance(value, str) or not 1 <= len(value) <= 64 * 1024:
+        return False
+    # Check each non-empty line so a harmless heading cannot mask a leaked
+    # runtime detail elsewhere in a longer note.
+    lines = [line for line in value.splitlines() if line.strip()]
+    return bool(lines) and all(
+        customer_safe_text(line, self_host=False)
+        for line in lines
+    )
+
+
+def _validated_normalised_guidance(value) -> dict | None:
+    """Convert a stored normalised guide back through the strict input validator."""
+    expected = {
+        "schema", "source", "use_now", "free_revisions", "related_free_projects",
+        "larger_project", "revision", "status",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected
+        or value.get("source") != "hermes_supplied"
+        or value.get("status") != "ready"
+    ):
+        return None
+    free_revisions = value.get("free_revisions")
+    related = value.get("related_free_projects")
+    if (
+        not isinstance(free_revisions, dict)
+        or set(free_revisions) != {"available", "items"}
+        or free_revisions.get("available") is not True
+        or not isinstance(related, dict)
+        or set(related) != {"status", "items"}
+        or related.get("status") not in {"ready", "needs_owner_input"}
+    ):
+        return None
+    raw = {
+        "schema": value.get("schema"),
+        "use_now": value.get("use_now"),
+        "free_revisions": free_revisions.get("items"),
+        "related_free_projects": related.get("items"),
+        "larger_project": value.get("larger_project"),
+    }
+    return raw if validate_guidance(raw) is not None else None
+
+
+def _validated_normalised_self_host(value) -> dict | None:
+    """Convert a stored normalised self-host guide through its exact validator."""
+    expected = {
+        "schema", "source", "applicability", "overview", "requirements", "steps",
+        "operations", "service", "revision",
+    }
+    if (
+        not isinstance(value, dict)
+        or set(value) != expected
+        or value.get("source") != "hermes_supplied"
+    ):
+        return None
+    service = value.get("service")
+    if (
+        not isinstance(service, dict)
+        or set(service) != {"available", "reason", "price_status"}
+        or service.get("available") is not True
+        or service.get("price_status") != "scope_required"
+    ):
+        return None
+    raw = {
+        "schema": value.get("schema"),
+        "applicability": value.get("applicability"),
+        "overview": value.get("overview"),
+        "requirements": value.get("requirements"),
+        "steps": value.get("steps"),
+        "operations": value.get("operations"),
+        "service_reason": service.get("reason"),
+    }
+    return raw if validate_self_host_guide(raw) is not None else None
+
+
+def _safe_annotation(value):
+    if isinstance(value, list):
+        if len(value) > 20 or not all(customer_safe_text(item) for item in value):
+            return None
+        return list(value)
+    if isinstance(value, dict):
+        if len(value) > 20 or not all(
+            customer_safe_text(key) and customer_safe_text(item)
+            for key, item in value.items()
+        ):
+            return None
+        return dict(value)
+    return None
+
+
+def customer_result_projection(result: dict, *, include_details: bool, job_id: str) -> dict:
+    """Return a safe, useful result projection without changing its artifacts.
+
+    Old jobs can contain an already-stored manifest from before this boundary
+    existed.  Projection therefore sanitises every public route as well as new
+    result loading.  A bad label/copy block never hides a valid artifact.
+    """
+    if not isinstance(result, dict):
+        return {}
+    safe_job_id = str(job_id or "")
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", safe_job_id):
+        return {}
+    try:
+        revision = max(1, int(result.get("revision") or 1))
+    except (TypeError, ValueError):
+        revision = 1
+    cleaned = {
+        "job_id": safe_job_id,
+        "revision": revision,
+        "title": (
+            result.get("title")
+            if customer_safe_text(result.get("title"))
+            else DEFAULT_RESULT_TITLE
+        ),
+        "summary": (
+            result.get("summary")
+            if customer_safe_text(result.get("summary"))
+            else DEFAULT_RESULT_SUMMARY
+        ),
+    }
+    schema = str(result.get("schema") or "")
+    if re.fullmatch(r"schema://frank\.mini-result/v[12]", schema):
+        cleaned["schema"] = schema
+    result_type = str(result.get("result_type") or "")
+    raw_artifacts = result.get("artifacts")
+    if not isinstance(raw_artifacts, list):
+        # Normalise legacy result URLs before they reach the client.  The old
+        # client would label source_url "the source package", which turns a
+        # perfectly useful download into developer-facing copy.
+        raw_artifacts = []
+        if isinstance(result.get("artifact_url"), str) and result["artifact_url"]:
+            raw_artifacts.append({
+                "kind": "interactive", "label": "Open your solution",
+                "url": result["artifact_url"],
+            })
+        if isinstance(result.get("source_url"), str) and result["source_url"]:
+            raw_artifacts.append({
+                "kind": "download", "label": "Download your solution",
+                "url": result["source_url"],
+            })
+    canonical_prefix = f"https://preview.frank.fail/mini/{safe_job_id}/"
+    artifacts = []
+    for item in raw_artifacts[:20]:
+        if not isinstance(item, dict):
+            continue
+        kind = str(item.get("kind") or "")
+        url = str(item.get("url") or "")
+        if kind not in {"interactive", "download"} or not url.startswith(canonical_prefix):
+            continue
+        relative = url[len(canonical_prefix):]
+        if "?" in relative or "#" in relative or "\\" in relative or ".." in relative.split("/"):
+            continue
+        if kind == "interactive" and relative not in {"", "index.html"}:
+            continue
+        if kind == "download" and not (
+            re.fullmatch(r"downloads/[A-Za-z0-9][A-Za-z0-9._-]{0,179}", relative)
+            or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,179}", relative)
+        ):
+            continue
+        label = item.get("label")
+        if not customer_safe_text(label):
+            label = "Open your solution" if kind == "interactive" else "Download your solution"
+        artifact = {"kind": kind, "label": label, "url": url}
+        media_type = str(item.get("media_type") or "")
+        if media_type and re.fullmatch(r"[A-Za-z0-9.+-]+/[A-Za-z0-9.+-]+", media_type):
+            artifact["media_type"] = media_type
+        artifacts.append(artifact)
+    if artifacts:
+        cleaned["artifacts"] = artifacts
+    kinds = {item["kind"] for item in artifacts}
+    expected_type = "combined" if kinds == {"interactive", "download"} else (
+        "interactive" if kinds == {"interactive"} else "download" if kinds == {"download"} else ""
+    )
+    if result_type == expected_type and result_type:
+        cleaned["result_type"] = result_type
+    elif expected_type:
+        cleaned["result_type"] = expected_type
+    if include_details:
+        expected_details = f"{canonical_prefix}build-notes.txt"
+        if result.get("details_url") == expected_details:
+            cleaned["details_url"] = expected_details
+    for field in ("checks", "limitations"):
+        annotation = _safe_annotation(result.get(field))
+        if annotation is not None:
+            cleaned[field] = annotation
+    guidance_input = _validated_normalised_guidance(result.get("guidance"))
+    self_host_input = _validated_normalised_self_host(result.get("self_host"))
+    guidance, self_host = build_result_support(cleaned, guidance_input, self_host_input)
+    cleaned["guidance"] = guidance
+    cleaned["self_host"] = self_host
+    return cleaned
 
 
 def _text(value, limit: int, *, minimum: int = 1) -> str | None:
@@ -80,7 +346,7 @@ def validate_guidance(value) -> dict | None:
         return None
     if use_now is None or not use_now or revisions is None or related is None:
         return None
-    return {
+    cleaned = {
         "schema": GUIDANCE_SCHEMA,
         "source": "hermes_supplied",
         "use_now": use_now,
@@ -91,6 +357,15 @@ def validate_guidance(value) -> dict | None:
         },
         "larger_project": larger,
     }
+    visible = [
+        *(text for item in use_now for text in item.values()),
+        *(text for item in revisions for text in item.values()),
+        *(text for item in related for text in item.values()),
+        *(text for key, text in larger.items() if key != "status"),
+    ]
+    if not all(customer_safe_text(text) for text in visible):
+        return None
+    return cleaned
 
 
 def validate_self_host_guide(value) -> dict | None:
@@ -134,7 +409,7 @@ def validate_self_host_guide(value) -> dict | None:
         operations.append({"area": area, "detail": detail})
     if applicability != "not_required" and (not requirements or not steps or not operations):
         return None
-    return {
+    cleaned = {
         "schema": SELF_HOST_SCHEMA,
         "source": "hermes_supplied",
         "applicability": applicability,
@@ -148,6 +423,14 @@ def validate_self_host_guide(value) -> dict | None:
             "price_status": "scope_required",
         },
     }
+    visible = [
+        overview, service_reason, *requirements,
+        *(text for item in steps for text in item.values()),
+        *(text for item in operations for text in item.values()),
+    ]
+    if not all(customer_safe_text(text, self_host=True) for text in visible):
+        return None
+    return cleaned
 
 
 def _artifact_items(result: dict) -> Iterable[dict]:
@@ -171,14 +454,14 @@ def _fallback_guidance(result: dict) -> dict:
             continue
         use_now.append({
             "title": f"Open {label}"[:100],
-            "why": "Frank verified that this finished artifact exists for the current revision.",
+            "why": "This is your finished solution and it is ready to try now.",
             "prompt": url,
         })
     if not use_now:
         use_now.append({
-            "title": "Review the finished result",
-            "why": "Frank has marked this revision structurally ready, but has not assessed whether it fits your business.",
-            "prompt": "Open the result and tell Frank what should change.",
+            "title": "Review your finished solution",
+            "why": "Your solution is ready to try. Tell Frank what does and does not fit your business.",
+            "prompt": "Open your solution and tell Frank what should change.",
         })
     return {
         "schema": GUIDANCE_SCHEMA,
@@ -195,7 +478,7 @@ def _fallback_guidance(result: dict) -> dict:
         "related_free_projects": {"status": "needs_owner_input", "items": []},
         "larger_project": {
             "status": "needs_owner_input",
-            "reason": "Frank needs your direction before suggesting a larger paid project for this result.",
+            "reason": "Tell Frank what would make this more valuable before it suggests a larger paid project.",
         },
     }
 
@@ -207,13 +490,13 @@ def _fallback_self_host(result: dict) -> dict:
             "schema": SELF_HOST_SCHEMA,
             "source": "frank_known",
             "applicability": "not_required",
-            "overview": "This revision contains downloadable work and Frank does not know of a website or service that needs hosting.",
+            "overview": "This solution contains files you can download. There is no website or service to host.",
             "requirements": [],
             "steps": [],
             "operations": [],
             "service": {
                 "available": True,
-                "reason": "If you later turn the result into a live service, Frank can scope hosting after the runtime and traffic are known.",
+                "reason": "If you later turn this into a live service, Frank can help once we know how it will be used.",
                 "price_status": "scope_required",
             },
         }

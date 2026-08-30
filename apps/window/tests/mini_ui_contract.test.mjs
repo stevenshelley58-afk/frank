@@ -102,8 +102,8 @@ test("service handoff is progressive, reviewed, optional and never starts execut
   assert.match(script, /mode === "service"[\s\S]*openService\(button, prompt\)[\s\S]*return/);
   assert.match(script, /serviceHandoff\.value = cleanText\(handoffOverride, SERVICE_NOTE_MAX_LENGTH\) \|\| options\.handoff/);
   assert.match(script, /returnTrigger = selfHostDialog\.open[\s\S]*showDialog\(serviceDialog, returnTrigger\)/);
-  assert.match(script, /Frank hasn’t contacted you yet/);
-  assert.match(script, /No payment or implementation has been approved or started/);
+  assert.match(script, /Your request is saved\. We’ll be in touch if you asked for hands-on help\./);
+  assert.match(script, /Nothing starts automatically\./);
   assert.doesNotMatch(script, /api\.createServiceHandoff/);
 });
 
@@ -126,11 +126,41 @@ test("account claim is a separate ma1 token and never enters URLs or shares", as
 test("a submitted intake restore opens only server-issued job access or starts a distinct free project", async () => {
   const script = await source("mini.js");
   assert.match(script, /function linkedJobAccess\(body\) \{[\s\S]*const linked = body && body\.linked_job;[\s\S]*linked\.job_id[\s\S]*linked\.claim_token[\s\S]*validId\(id\) && validClaim\(claim\)/);
-  assert.match(script, /function recoverSubmittedIntake\(\) \{[\s\S]*clearDraft\(\);[\s\S]*newConversation\(false\);[\s\S]*previous free project was already sent/);
+  assert.match(script, /function recoverSubmittedIntake\(\) \{[\s\S]*clearDraft\(\);[\s\S]*newConversation\(false\);[\s\S]*previous free solution is already under way/);
   const restore = script.split("async function restoreConversation(draft)", 2)[1].split("function handleSubmit()", 2)[0];
   const submitted = restore.split('toLowerCase() === "submitted")', 2)[1].split("const serverTranscript", 2)[0];
   assert.match(submitted, /const linked = linkedJobAccess\(body\);[\s\S]*clearDraft\(\);[\s\S]*if \(linked\) \{[\s\S]*await openProject\(linked, \{ source: "restored-submitted-intake" \}\);[\s\S]*return;[\s\S]*recoverSubmittedIntake\(\);[\s\S]*return;/);
   assert.doesNotMatch(submitted, /finishDraftRestore\(|attachResume\(/);
+});
+
+test("the free conversation shows only complete replies and keeps every decision in plain business language", async () => {
+  const script = await source("mini.js");
+  assert.match(script, /BUFFER_GUIDE_REPLIES_UNTIL_COMPLETE = true/);
+  const streamQueue = script.split("const queueStreamText = (partial) =>", 2)[1].split("updateSendButton();", 2)[0];
+  assert.match(streamQueue, /if \(BUFFER_GUIDE_REPLIES_UNTIL_COMPLETE\) \{[\s\S]*pendingStreamText = partial;[\s\S]*return;[\s\S]*\}[\s\S]*thinking\.remove\(\)/);
+  assert.match(script, /data-action="resume">Solve this for me — free<\/button>/);
+  assert.match(script, /placeholder: "Answer in your own words…"[\s\S]*hint: "A rough answer is enough\. You can also solve it now with what you’ve shared\."/);
+  assert.match(script, /if \(options\.hint\) \{[\s\S]*composerStatus\.textContent = options\.hint;[\s\S]*composerStatus\.hidden = false;/);
+  assert.doesNotMatch(script, />Start build<|>Try build again<|>Open build notes</);
+  const guide = script.split("async function guideAfter(text, files)", 2)[1].split("async function submitProblemOrAnswer()", 2)[0];
+  const recovery = guide.split("if (!reply)", 2)[1].split("let assistantMessage", 2)[0];
+  assert.match(recovery, /const recovery = addMessage\([\s\S]*attachResume\(recovery\);/);
+  const submit = script.split("async function submitIntake(options = {})", 2)[1].split("async function startFreeWork", 2)[0];
+  assert.doesNotMatch(submit, /conversation\s*:/);
+});
+
+test("customer-facing recovery, status and result copy never expose internal failures or mechanics", async () => {
+  const script = await source("mini.js");
+  assert.doesNotMatch(script, /error\.message|body\.error|body\.message|body\.reason|failure && failure\.message/);
+  assert.match(script, /I couldn’t finish that reply just now\. Your message and files are still here — try again in a moment\./);
+  assert.match(script, /I couldn’t confirm that started\. Nothing has been lost\. Try again when you’re ready\./);
+  assert.match(script, /That file didn’t come through\. Your message is still here\./);
+  assert.match(script, /This is a quick look\. Open or download it below to use the full version\./);
+  assert.doesNotMatch(script, /This preview is static and sandboxed|Sandboxed preview|private link if you want|status checks resume|saved server copy|Open build notes/);
+  assert.match(script, /Opening your conversation…/);
+  assert.match(script, /That saved conversation is no longer available\. Start again here\./);
+  assert.match(script, /Your solution is queued\.|We’re putting it together\.|Giving it a final check\./);
+  assert.doesNotMatch(script, /The service last reported/);
 });
 
 test("CSP, reduced motion, sandboxing and 320px reflow remain release constraints", async () => {
