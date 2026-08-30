@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import math
 import mimetypes
@@ -92,6 +93,15 @@ def _mini_legacy_root() -> Path | None:
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
+AD_STUDIO_MAX_SOURCES = min(50, max(1, int(os.environ.get("AD_STUDIO_MAX_SOURCES", "20"))))
+AD_STUDIO_MAX_SOURCE_BYTES = min(
+    MAX_UPLOAD_BYTES,
+    max(1, int(os.environ.get("AD_STUDIO_MAX_SOURCE_BYTES", str(25 * 1024 * 1024)))),
+)
+AD_STUDIO_MAX_BATCH_BYTES = min(
+    MAX_UPLOAD_BYTES,
+    max(AD_STUDIO_MAX_SOURCE_BYTES, int(os.environ.get("AD_STUDIO_MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
+)
 HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
 HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
@@ -1595,6 +1605,173 @@ def _ad_studio_source(attachment: dict) -> dict:
     }
 
 
+_AD_STUDIO_IMAGE_EXTENSIONS = MappingProxyType({
+    ".avif": "image/avif",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".webp": "image/webp",
+})
+
+
+class _AdStudioSourceError(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _ad_studio_safe_filename(raw: object, index: int) -> str:
+    """Return one display-safe basename; staging prefixes prevent collisions."""
+    basename = Path(str(raw or "").replace("\\", "/")).name.strip()
+    if not basename or basename in {".", ".."}:
+        basename = f"source-{index + 1}.bin"
+    suffix = Path(basename).suffix.lower()
+    stem = Path(basename).stem
+    stem = re.sub(r"[^A-Za-z0-9._ -]", "_", stem).strip(" ._") or f"source-{index + 1}"
+    return f"{stem[:96]}{suffix[:12]}"
+
+
+def _ad_studio_signature_matches(media_type: str, header: bytes) -> bool:
+    if media_type == "image/png":
+        return header.startswith(b"\x89PNG\r\n\x1a\n")
+    if media_type == "image/jpeg":
+        return header.startswith(b"\xff\xd8\xff")
+    if media_type == "image/gif":
+        return header.startswith((b"GIF87a", b"GIF89a"))
+    if media_type == "image/webp":
+        return len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+    if media_type == "image/bmp":
+        return header.startswith(b"BM")
+    if media_type == "image/tiff":
+        return header.startswith((b"II*\x00", b"MM\x00*"))
+    if media_type in {"image/avif", "image/heic", "image/heif"}:
+        if len(header) < 12 or header[4:8] != b"ftyp":
+            return False
+        brands = {header[8:12]}
+        brands.update(header[offset:offset + 4] for offset in range(16, min(len(header), 64), 4))
+        if media_type == "image/avif":
+            return bool(brands & {b"avif", b"avis"})
+        return bool(brands & {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1"})
+    return False
+
+
+def _validate_ad_studio_attachment(attachment: dict) -> dict:
+    target = _upload_target(str(attachment.get("id") or ""))
+    if target is None or not target.is_file():
+        raise _AdStudioSourceError("source_missing", "source image is no longer available")
+    size = target.stat().st_size
+    if size <= 0:
+        raise _AdStudioSourceError("empty_file", "source image is empty")
+    if size > AD_STUDIO_MAX_SOURCE_BYTES:
+        raise _AdStudioSourceError("file_too_large", "source image exceeds the per-file size limit")
+    suffix = target.suffix.lower()
+    media_type = _AD_STUDIO_IMAGE_EXTENSIONS.get(suffix)
+    if not media_type:
+        raise _AdStudioSourceError("unsupported_type", "source must use a supported image file type")
+    declared_type = str(attachment.get("type") or "").lower().split(";", 1)[0].strip()
+    if declared_type and declared_type not in {media_type, "application/octet-stream"}:
+        raise _AdStudioSourceError("type_mismatch", "source image type does not match its filename")
+    try:
+        with target.open("rb") as source_file:
+            header = source_file.read(64)
+    except OSError as error:
+        raise _AdStudioSourceError("source_unreadable", "source image could not be read") from error
+    if not _ad_studio_signature_matches(media_type, header):
+        raise _AdStudioSourceError("invalid_image", "source image content does not match its file type")
+    clean = dict(attachment)
+    clean.update({"name": target.name, "size": size, "type": media_type})
+    return clean
+
+
+def _remove_ad_studio_staging(attachment: dict) -> None:
+    target = _upload_target(str(attachment.get("id") or ""))
+    if target is None:
+        return
+    try:
+        target.unlink(missing_ok=True)
+    except OSError:
+        return
+    upload_root = UPLOAD_DIR.resolve()
+    parent = target.parent
+    while parent != upload_root:
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+        parent = parent.parent
+
+
+def _remove_raw_ad_studio_attachments(raw_attachments: list) -> None:
+    for raw_attachment in raw_attachments:
+        if not isinstance(raw_attachment, dict):
+            continue
+        cleaned = _clean_atts([raw_attachment])
+        if cleaned:
+            _remove_ad_studio_staging(cleaned[0])
+
+
+def _start_ad_studio_source_run(
+    source_item: dict,
+    *,
+    total_items: int,
+    common_name: str,
+    brief: str,
+    project_id: str,
+    project: dict,
+) -> tuple[dict | None, dict]:
+    index = source_item["index"]
+    attachment = source_item["attachment"]
+    source_name = re.sub(r"\.[^.]+$", "", attachment["name"])
+    name = common_name if total_items == 1 else (
+        f"{common_name} · {source_name}"[:60] if common_name else source_name[:60]
+    )
+    command_payload = {
+        "job_name": name,
+        "brief": brief,
+        "placements": ["feed", "story"],
+        "sources": [_ad_studio_source(attachment)],
+        "project_context": _project_context(project),
+    }
+    request_payload = {
+        "schema": "schema://hermes.tool-run-command/v1",
+        "request_id": f"req_{secrets.token_hex(16)}",
+        "tool_id": "ad-template-generator",
+        "action": "build-template",
+        "scope": {"project_id": project_id},
+        "payload": command_payload,
+        "idempotency_key": f"ad-template:{secrets.token_hex(16)}",
+    }
+    try:
+        data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=8)
+        run_data = data.get("run") if isinstance(data.get("run"), dict) else data
+        run_id = str(run_data.get("id") or run_data.get("run_id") or "")
+        if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+            raise _AdStudioSourceError("invalid_hermes_response", "Hermes did not return a valid Tool run id")
+        run = _public_ad_studio_run(run_data, title=f"Ad Studio · {name}", project_id=project_id)
+        return run, {"index": index, "name": attachment["name"], "status": "accepted", "run": run}
+    except _AdStudioSourceError as error:
+        return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": error.code, "message": str(error)}}
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")[:1200]
+        message = f"Hermes returned HTTP {error.code}."
+        try:
+            parsed = json.loads(detail)
+            message = parsed.get("error", {}).get("message") or parsed.get("message") or message
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": "hermes_rejected", "message": str(message)[:240]}}
+    except Exception as error:
+        return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": "hermes_unavailable", "message": f"Could not reach Hermes: {str(error).split(chr(10))[0][:180]}"}}
+    finally:
+        _remove_ad_studio_staging(attachment)
+
+
 def _tool_run_path(run_id: str, suffix: str = "") -> str:
     if not AD_STUDIO_RUN_ID.fullmatch(run_id):
         abort(404)
@@ -1603,48 +1780,87 @@ def _tool_run_path(run_id: str, suffix: str = "") -> str:
 
 @app.post("/api/ad-studio/runs")
 def ad_studio_run_create():
-    """Start exactly one canonical Feed + Story run in Hermes."""
+    """Start one durable canonical Feed + Story Hermes run per source image."""
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict):
         abort(400, "request body must be an object")
+    raw_attachments = body.get("attachments")
+    if not isinstance(raw_attachments, list) or not raw_attachments:
+        abort(400, "choose at least one source image")
+    if len(raw_attachments) > AD_STUDIO_MAX_SOURCES:
+        _remove_raw_ad_studio_attachments(raw_attachments)
+        abort(413, f"choose no more than {AD_STUDIO_MAX_SOURCES} source images")
+
     project_id = _clean_project_id(body.get("project_id")) if body.get("project_id") else ""
     project = _project_store.get_project(project_id) if project_id else None
     if not project:
+        _remove_raw_ad_studio_attachments(raw_attachments)
         abort(404, "project not found")
-    raw_attachments = body.get("attachments")
-    if not isinstance(raw_attachments, list) or len(raw_attachments) != 1:
-        abort(400, "choose exactly one source image")
-    attachments = _clean_atts(raw_attachments)
-    if len(attachments) != 1 or not attachments[0]["type"].startswith("image/"):
-        abort(400, "Ad Studio accepts exactly one image source")
-    attachment = attachments[0]
-    name = _clean_project_text(body.get("name"), 60) or re.sub(r"\.[^.]+$", "", attachment["name"])
+
+    sources = []
+    results = []
+    total_size = 0
+    for index, raw_attachment in enumerate(raw_attachments):
+        name = _ad_studio_safe_filename(raw_attachment.get("name") if isinstance(raw_attachment, dict) else "", index)
+        cleaned = _clean_atts([raw_attachment]) if isinstance(raw_attachment, dict) else []
+        attachment = cleaned[0] if cleaned else None
+        try:
+            if attachment is None:
+                raise _AdStudioSourceError("source_missing", "source image is no longer available")
+            attachment = _validate_ad_studio_attachment(attachment)
+            total_size += attachment["size"]
+            if total_size > AD_STUDIO_MAX_BATCH_BYTES:
+                raise _AdStudioSourceError("batch_too_large", "source images exceed the batch size limit")
+            sources.append({"index": index, "attachment": attachment})
+        except _AdStudioSourceError as error:
+            if attachment is not None:
+                _remove_ad_studio_staging(attachment)
+            results.append({"index": index, "name": name, "status": "rejected", "error": {"code": error.code, "message": str(error)}})
+
     brief = _clean_project_text(body.get("brief"), 800)
-    command_payload = {
-        "job_name": name, "brief": brief, "placements": ["feed", "story"],
-        "sources": [_ad_studio_source(attachment)], "project_context": _project_context(project),
+    common_name = _clean_project_text(body.get("name"), 60)
+    runs = []
+    if sources:
+        total_items = len(sources) + len(results)
+        worker_count = min(4, len(sources))
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ad-studio-start") as executor:
+            outcomes = executor.map(
+                lambda source_item: _start_ad_studio_source_run(
+                    source_item,
+                    total_items=total_items,
+                    common_name=common_name,
+                    brief=brief,
+                    project_id=project_id,
+                    project=project,
+                ),
+                sources,
+            )
+            for run, result in outcomes:
+                if run is not None:
+                    runs.append(run)
+                results.append(result)
+
+    results.sort(key=lambda item: item["index"])
+    failed = len(results) - len(runs)
+    response = {
+        "ok": bool(runs),
+        "partial": bool(runs and failed),
+        "accepted": len(runs),
+        "failed": failed,
+        "runs": runs,
+        "results": results,
     }
-    request_payload = {
-        "schema": "schema://hermes.tool-run-command/v1",
-        "request_id": f"req_{secrets.token_hex(16)}",
-        "tool_id": "ad-template-generator", "action": "build-template",
-        "scope": {"project_id": project_id}, "payload": command_payload,
-        "idempotency_key": f"ad-template:{secrets.token_hex(16)}",
-    }
-    try:
-        data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=15)
-        run_data = data.get("run") if isinstance(data.get("run"), dict) else data
-        run_id = str(run_data.get("id") or run_data.get("run_id") or "")
-        if not AD_STUDIO_RUN_ID.fullmatch(run_id):
-            return jsonify({"error": "Hermes did not return a valid Tool run id"}), 502
-        result = _public_ad_studio_run(run_data, title=f"Ad Studio · {name}", project_id=project_id)
-        staging_target = _upload_target(attachment["id"])
-        if staging_target is not None:
-            try: staging_target.unlink(missing_ok=True)
-            except OSError: pass
-        return jsonify({"ok": True, "run": result, "runs": [result]}), 202
-    except Exception as error:
-        return _hermes_error(error)
+    if len(results) == 1 and len(runs) == 1:
+        response["run"] = runs[0]
+    if runs and not failed:
+        status = 202
+    elif runs:
+        status = 207
+    elif any(item["status"] == "failed" for item in results):
+        status = 502
+    else:
+        status = 422
+    return jsonify(response), status
 
 
 @app.get("/api/ad-studio/runs")
