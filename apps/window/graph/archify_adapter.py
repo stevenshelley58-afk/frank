@@ -165,13 +165,13 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     components: list[dict[str, Any]] = []
     display_labels: dict[str, dict[str, str]] = {}
     # Archify's showcase renderer cannot safely route a large graph in one
-    # SVG: production projections can contain hundreds of cards and enough
-    # crossing relationships to overflow its diagnostic channel.  Keep every
-    # large projection bounded to a compact twelve-column index and leave those
+    # SVG: a single-column projection over twelve cards exceeds the first-screen
+    # contract, while relationship-dense projections can overflow its diagnostic
+    # channel.  Keep those projections in a compact twelve-column index and leave
     # relationships in the canonical Control graph.  Full stable identities
     # remain attached to every visible card, so the overview never invents or
     # drops systems and the operator can deep-link to the complete topology.
-    overview_only = len(nodes) > 90
+    overview_only = len(nodes) > 12
     cols = 12 if overview_only else 1
     origin = (40, 44) if overview_only else (80, 90)
     step = (108, 34) if overview_only else (260, 130)

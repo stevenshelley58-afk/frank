@@ -95,6 +95,15 @@ class ArchifyAdapterTest(unittest.TestCase):
         self.assertTrue(all(component["size"] == [98, 26] for component in diagram["components"]))
         self.assertEqual(metadata["rendered_relationship_count"], 0)
 
+    def test_multirow_projection_uses_first_screen_overview(self):
+        nodes = [{"id": f"service:blockwise-{index:02d}", "kind": "service"} for index in range(14)]
+        edges = [{"id": "edge:blockwise", "from": nodes[0]["id"], "to": nodes[-1]["id"]}]
+        graph = {"graph_revision": GRAPH["graph_revision"], "nodes": nodes, "edges": edges}
+        diagram, metadata = graph_to_archify(graph, "projection:blockwise/runtime")
+        self.assertEqual(diagram["layout"]["cols"], 12)
+        self.assertEqual(diagram["connections"], [])
+        self.assertEqual(metadata["exclusions"], ["relationships_render_in_control_graph"])
+
     def test_build_metadata_contains_revisions_and_input_hash(self):
         result = build_projection(GRAPH, "projection:frank/architecture", source_revisions={"repo:frank": "a" * 40}, deployed_revisions={"release:frank": "b" * 40})
         self.assertEqual(result["metadata"]["graph_revision"], GRAPH["graph_revision"])
