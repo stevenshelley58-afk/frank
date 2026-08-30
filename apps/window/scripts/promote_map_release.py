@@ -2,6 +2,11 @@
 """Promote a hash-verified map preview receipt."""
 import argparse, json, sys
 from pathlib import Path
+
+# This CLI is invoked by the deploy hook with an absolute path, so Python's
+# import path contains ``scripts/`` rather than the sibling ``graph/`` package.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
 from graph.map_release_orchestrator import promote, PromotionError
 
 # Ad Builder -> Blockwise flow is conditional and is never required without

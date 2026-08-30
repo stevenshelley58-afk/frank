@@ -17,11 +17,15 @@ operator-supplied Playwright storage-state file:
 python -m pip install -r requirements-acceptance.txt
 python -m playwright install chromium
 FRANK_STORAGE_STATE=/secure/frank-storage-state.json \
+FRANK_BROWSER_BASIC_AUTH_USER="$FRANK_BASIC_AUTH_USER" \
+FRANK_BROWSER_BASIC_AUTH_PASSWORD="$FRANK_BASIC_AUTH_PASSWORD" \
   python acceptance/browser_journey.py --url https://frank.fail --output /secure/frank-browser-receipt.json
 ```
 
-The storage-state file is never committed or printed. The receipt contains
-both desktop and mobile journeys and must be reviewed by the release gate.
+The storage-state file and both Basic Auth variables are supplied only by the
+operator and are never committed, printed, or copied into the receipt. The
+receipt contains both desktop and mobile journeys and must be reviewed by the
+release gate.
 
 Activate private Infisical and the Hermes Connections bundle before the Window
 deploy. The activation generates dedicated keys on the VPS, bootstraps a
@@ -128,6 +132,21 @@ non-placeholder `receipt_id` from the resulting JSON. Supply that receipt to
 the Step 8 evidence capture; it is deliberately not the generic control-plane
 receipt schema, and a metadata-only scheduled-job receipt is not restore proof.
 
+Capture staged release evidence with the same fixed inputs before promotion;
+use `--stage step5`, `step6c`, or `step7c` for the corresponding flag set, and
+`--stage step8 --restore-receipt` only after the restore drill passes:
+
+```bash
+python3 /projects/frank/apps/window/scripts/capture_control_release_evidence.py \
+  --stage step7c --maps-root /srv/frank/data/window/maps \
+  --browser-receipt /srv/frank/data/window/evidence/browser.json \
+  --tests /srv/frank/data/window/evidence/tests.json \
+  --runtime-evidence /srv/frank/data/window/evidence/runtime.json \
+  --release-id rel-step7c --source-sha <source-sha> --deployed-sha <deployed-sha> \
+  --image-digest <image-digest> --rollback-target <rollback-sha> \
+  --reviewer <reviewer> --output-dir /srv/frank/data/window/evidence/rel-step7c
+```
+
 The accepted graph input is the regular pointer at
 `/srv/frank/data/window/control-graph/graph/current.json`. The generator reads
 that pointer and emits one passing receipt containing exactly six maps: VPS
@@ -190,7 +209,7 @@ explicitly present:
 
 ```bash
 python3 apps/window/scripts/promote_map_release.py RECEIPT.json \
-  --production-root /srv/frank/data/window/control-graph/maps
+  --production-root /srv/frank/data/window/maps
 ```
 
 Promotion publishes immutable manifests and atomically advances `current.json`;

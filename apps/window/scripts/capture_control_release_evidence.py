@@ -48,6 +48,7 @@ FLAGS = (
     "chat_pattern_candidates",
     "retention_restore_drills",
 )
+STAGE_FLAGS = {"step5": FLAGS[:5], "step6c": FLAGS[:8], "step7c": FLAGS[:12], "step8": FLAGS}
 CHECKLIST = (
     "one_frank_one_checkout_one_hermes",
     "no_local_persistent_service",
@@ -249,7 +250,12 @@ def _capture(args: argparse.Namespace, bundle: Path) -> dict[str, Any]:
 
     tests = _evidence_list(args.tests)
     runtime = _evidence_list(args.runtime_evidence)
-    restore = _load_json(args.restore_receipt, args.restore_receipt.absolute().parent)
+    stage_name = args.stage
+    restore: dict[str, Any] = {}
+    if stage_name == "step8":
+        if args.restore_receipt is None:
+            raise ValueError("Step 8 requires restore drill evidence")
+        restore = _load_json(args.restore_receipt, args.restore_receipt.absolute().parent)
     restore_revisions = {"project:frank": args.deployed_sha}
     restore_uris = restore.get("evidence_uris") if isinstance(restore, dict) else None
     restore_is_fresh = False
@@ -265,7 +271,7 @@ def _capture(args: argparse.Namespace, bundle: Path) -> dict[str, Any]:
             )
         except ValueError:
             restore_is_fresh = False
-    if (
+    if stage_name == "step8" and (
         not isinstance(restore, dict)
         or restore.get("schema") != "frank.restore-drill-evidence/v1"
         or restore.get("status") != "passed"
@@ -288,12 +294,12 @@ def _capture(args: argparse.Namespace, bundle: Path) -> dict[str, Any]:
     ):
         raise ValueError("restore drill evidence is not passing")
 
-    feature_flags = {key: True for key in FLAGS}
+    feature_flags = {key: True for key in STAGE_FLAGS[stage_name]}
     captured_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
-    return {
+    result = {
         "schema": "frank.release-evidence/v1",
         "release_id": args.release_id,
-        "stage": "step8",
+        "stage": stage_name,
         "source_sha": args.source_sha,
         "deployed_sha": args.deployed_sha,
         "image_digest": args.image_digest,
@@ -309,20 +315,22 @@ def _capture(args: argparse.Namespace, bundle: Path) -> dict[str, Any]:
         "rollback_target": args.rollback_target,
         "feature_flags": feature_flags,
         "feature_flag_hash": _digest(_canonical(feature_flags).rstrip(b"\n")),
-        "restore_drill": restore,
         "acceptance_checklist": {key: True for key in CHECKLIST},
         "timestamp": captured_at,
         "captured_at": captured_at,
     }
+    if stage_name == "step8": result["restore_drill"] = restore
+    return result
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--maps-root", type=Path, required=True)
+    parser.add_argument("--stage", choices=("step5", "step6c", "step7c", "step8"), default="step8")
     parser.add_argument("--browser-receipt", type=Path, required=True)
     parser.add_argument("--tests", type=Path, required=True)
     parser.add_argument("--runtime-evidence", type=Path, required=True)
-    parser.add_argument("--restore-receipt", type=Path, required=True)
+    parser.add_argument("--restore-receipt", type=Path, required=False)
     parser.add_argument("--release-id", required=True)
     parser.add_argument("--source-sha", required=True)
     parser.add_argument("--deployed-sha", required=True)

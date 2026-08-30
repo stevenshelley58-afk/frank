@@ -34,6 +34,17 @@ def _storage_state() -> str:
     return str(path)
 
 
+def _basic_auth() -> dict[str, str]:
+    """Read production Basic Auth without exposing either credential."""
+    username = os.environ.get("FRANK_BROWSER_BASIC_AUTH_USER", "").strip()
+    password = os.environ.get("FRANK_BROWSER_BASIC_AUTH_PASSWORD", "")
+    if bool(username) != bool(password):
+        raise RuntimeError("FRANK_BROWSER_BASIC_AUTH_USER and PASSWORD must be supplied together")
+    if not username:
+        raise RuntimeError("FRANK_BROWSER_BASIC_AUTH_USER and PASSWORD are required")
+    return {"username": username, "password": password}
+
+
 def _navigate(page: Any, base_url: str, surface: str) -> Any:
     # AgentTrail's board intentionally keeps an EventSource open, so waiting
     # for network-idle would make the real read-only route time out forever.
@@ -51,11 +62,11 @@ def _click(page: Any, selector: str, purpose: str) -> None:
     item.first.click()
 
 
-def _run_viewport(browser: Any, base_url: str, evidence_root: Path, name: str, viewport: dict[str, int], storage_state: str) -> dict[str, Any]:
+def _run_viewport(browser: Any, base_url: str, evidence_root: Path, name: str, viewport: dict[str, int], storage_state: str, basic_auth: dict[str, str]) -> dict[str, Any]:
     # ``storage_state`` belongs to a browser context, not a page.  Creating a
     # fresh context per viewport also prevents desktop state leaking into the
     # mobile result while retaining the operator-supplied authenticated state.
-    context = browser.new_context(viewport=viewport, reduced_motion="reduce", storage_state=storage_state)
+    context = browser.new_context(viewport=viewport, reduced_motion="reduce", storage_state=storage_state, http_credentials=basic_auth)
     page = context.new_page()
     outcomes: dict[str, bool] = {}
     screenshots: dict[str, dict[str, str]] = {}
@@ -112,6 +123,7 @@ def run(base_url: str, output: Path, *, headed: bool = False) -> dict[str, Any]:
     except ImportError as exc:
         raise RuntimeError("Playwright is required; refusing synthetic browser evidence") from exc
     storage_state = _storage_state()
+    basic_auth = _basic_auth()
     if output.is_symlink():
         raise RuntimeError("evidence receipt must not be a symlink")
     output = output.resolve()
@@ -122,7 +134,7 @@ def run(base_url: str, output: Path, *, headed: bool = False) -> dict[str, Any]:
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=not headed)
         try:
-            journeys = {name: _run_viewport(browser, base_url, evidence_root, name, viewport, storage_state) for name, viewport in VIEWPORTS.items()}
+            journeys = {name: _run_viewport(browser, base_url, evidence_root, name, viewport, storage_state, basic_auth) for name, viewport in VIEWPORTS.items()}
             browser_version = browser.version
         finally:
             browser.close()

@@ -44,7 +44,7 @@ else
   chmod 0600 "$flags_tmp"; chown root:root "$flags_tmp"; mv -f -- "$flags_tmp" "$flags_file"
 fi
 while IFS='=' read -r key value; do
-  [[ "$key" =~ ^FRANK_FEATURE_FLAG_(LIVE_VIEW|MAP_VIEW|CONTROL_READ|RECONCILIATION_SCHEDULES|RUNTIME_MONITORING|SAFE_ACTIONS|OPERATIONAL_ACTIONS|SOURCE_ACTIONS|CLEANUP_JOBS|DISCOVERY_JOBS|EVALUATION_JOBS|CHAT_PATTERN_CANDIDATES|RETENTION_RESTORE_DRILLS)$" && "$value" =~ ^[01]$ ]] || { echo "invalid feature flag entry" >&2; exit 1; }
+  [[ "$key" =~ ^FRANK_FEATURE_FLAG_(LIVE_VIEW|MAP_VIEW|CONTROL_READ|RECONCILIATION_SCHEDULES|RUNTIME_MONITORING|SAFE_ACTIONS|OPERATIONAL_ACTIONS|SOURCE_ACTIONS|CLEANUP_JOBS|DISCOVERY_JOBS|EVALUATION_JOBS|CHAT_PATTERN_CANDIDATES|RETENTION_RESTORE_DRILLS)$ && "$value" =~ ^[01]$ ]] || { echo "invalid feature flag entry" >&2; exit 1; }
 done < "$flags_file"
 # Hermes provisions new project workspaces before their first turn. Keep the
 # canonical parent root-owned while granting the sole agent runtime a setgid

@@ -32,6 +32,12 @@ OUTCOMES = {
 
 
 class CaptureEvidenceTests(unittest.TestCase):
+    def test_stage_flag_contract_is_ordered(self):
+        from scripts import capture_control_release_evidence as c
+        self.assertEqual(c.STAGE_FLAGS["step5"], c.FLAGS[:5])
+        self.assertEqual(c.STAGE_FLAGS["step6c"], c.FLAGS[:8])
+        self.assertEqual(c.STAGE_FLAGS["step7c"], c.FLAGS[:12])
+
     def _maps(self, root: Path) -> None:
         store = MapArtifactStore(root)
         manifests = {}
@@ -143,6 +149,40 @@ class CaptureEvidenceTests(unittest.TestCase):
             report = AcceptanceReport(); _evidence_checks(evidence, ROOT, report, True, bundle)
             self.assertFalse(report.failed, [item.detail for item in report.failed])
             self.assertEqual({item["projection_id"] for item in evidence["projection_manifests"]}, MANDATORY)
+
+    def test_pre_step8_bundles_have_exact_flags_without_restore_claims(self):
+        from scripts import capture_control_release_evidence as c
+        expected_counts = {"step5": 5, "step6c": 8, "step7c": 12}
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); self._maps(root / "maps-root")
+            for stage, count in expected_counts.items():
+                args = self._inputs(root)
+                args[args.index("--restore-receipt"):args.index("--restore-receipt") + 2] = []
+                args.extend(["--stage", stage])
+                args[args.index("--release-id") + 1] = f"release-{stage}-test"
+                output = root / f"bundle-{stage}"
+                args[args.index("--output-dir") + 1] = str(output)
+                result = subprocess.run(args, capture_output=True, text=True)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                evidence = json.loads((output / "evidence.json").read_text(encoding="utf-8"))
+                self.assertEqual(evidence["stage"], stage)
+                self.assertEqual(set(evidence["feature_flags"]), set(c.STAGE_FLAGS[stage]))
+                self.assertEqual(len(evidence["feature_flags"]), count)
+                self.assertTrue(all(evidence["feature_flags"].values()))
+                self.assertNotIn("restore_drill", evidence)
+                ReleaseStateStore(root / f"release-store-{stage}").create_release(
+                    f"release-{stage}-test", stage, evidence
+                )
+
+    def test_step8_without_restore_receipt_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory); self._maps(root / "maps-root")
+            args = self._inputs(root)
+            args[args.index("--restore-receipt"):args.index("--restore-receipt") + 2] = []
+            result = subprocess.run(args, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout)["error_code"], "evidence_rejected")
+            self.assertFalse((root / "bundle").exists())
 
     def test_incomplete_selector_fails_without_publishing_bundle(self):
         with tempfile.TemporaryDirectory() as directory:

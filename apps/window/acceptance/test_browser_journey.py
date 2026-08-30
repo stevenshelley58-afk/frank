@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 
 from acceptance.production_acceptance import AcceptanceReport, REQUIRED_CHECKLIST, _canonical_hash, _evidence_checks
-from acceptance.browser_journey import run
+from acceptance.browser_journey import _basic_auth, run
 
 SCRIPT = Path(__file__).with_name("browser_journey.py")
 ROOT = Path(__file__).parents[3]
@@ -80,9 +80,10 @@ class BrowserJourneyTests(unittest.TestCase):
         class BrowserContext:
             def new_page(self): return Page()
             def close(self): pass
+        captured_contexts = []
         class Browser:
             version = "mock"
-            def new_context(self, **kwargs): return BrowserContext()
+            def new_context(self, **kwargs): captured_contexts.append(kwargs); return BrowserContext()
             def close(self): pass
         class Playwright:
             chromium = types.SimpleNamespace(launch=lambda **kwargs: Browser())
@@ -92,15 +93,26 @@ class BrowserJourneyTests(unittest.TestCase):
         fake_sync = types.ModuleType("playwright.sync_api"); fake_sync.sync_playwright = lambda: SyncContext()
         with tempfile.TemporaryDirectory() as tmp:
             folder = Path(tmp); state = folder / "state.json"; state.write_text("{}")
-            with patch.dict(sys.modules, {"playwright": types.ModuleType("playwright"), "playwright.sync_api": fake_sync}), patch.dict("os.environ", {"FRANK_STORAGE_STATE": str(state)}, clear=False):
+            with patch.dict(sys.modules, {"playwright": types.ModuleType("playwright"), "playwright.sync_api": fake_sync}), patch.dict("os.environ", {"FRANK_STORAGE_STATE": str(state), "FRANK_BROWSER_BASIC_AUTH_USER": "operator", "FRANK_BROWSER_BASIC_AUTH_PASSWORD": "secret-value"}, clear=False):
                 receipt = run("https://frank.invalid", folder / "receipt.json")
             self.assertEqual(receipt["status"], "pass")
             self.assertEqual(set(receipt["journeys"]), {"desktop", "mobile"})
+            self.assertNotIn("secret-value", json.dumps(receipt))
+            self.assertEqual(len(captured_contexts), 2)
+            self.assertTrue(all(item["http_credentials"] == {"username": "operator", "password": "secret-value"} for item in captured_contexts))
 
     def test_complete_real_file_receipt_passes_and_binds_hashes(self):
         with tempfile.TemporaryDirectory() as tmp:
             report = AcceptanceReport(); _evidence_checks(self._evidence(Path(tmp)), ROOT, report, True, Path(tmp))
             self.assertFalse(report.failed, [item.detail for item in report.failed])
+
+    def test_basic_auth_requires_both_values_and_never_echoes_secret(self):
+        with patch.dict("os.environ", {"FRANK_BROWSER_BASIC_AUTH_USER": "operator", "FRANK_BROWSER_BASIC_AUTH_PASSWORD": "secret-value"}, clear=True):
+            self.assertEqual(_basic_auth(), {"username": "operator", "password": "secret-value"})
+        with patch.dict("os.environ", {"FRANK_BROWSER_BASIC_AUTH_USER": "operator"}, clear=True):
+            with self.assertRaisesRegex(RuntimeError, "supplied together") as failure:
+                _basic_auth()
+            self.assertNotIn("secret-value", str(failure.exception))
 
     def test_rejects_missing_mobile_outcome_and_a_symlinked_screenshot(self):
         with tempfile.TemporaryDirectory() as tmp:
