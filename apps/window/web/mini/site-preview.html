@@ -4,10 +4,11 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#ffffff">
-  <meta name="description" content="A working business website preview created with Frank.">
-  <title>Your website preview</title>
-  <link rel="stylesheet" href="/frank/site-preview.css">
-  <script src="/frank/site-preview.js" defer></script>
+  <meta name="description" content="An interactive business website demonstration created with Frank.">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Website demonstration</title>
+  <link rel="stylesheet" href="/mini-frank/site-preview.css">
+  <script src="/mini-frank/site-preview.js" defer></script>
 </head>
 <body>
   <a class="skip-link" href="#enquire">Skip to the enquiry form</a>
@@ -28,7 +29,7 @@
         <a class="hero-action" href="#enquire">Tell us what you need</a>
         <span>Clear answers. No runaround.</span>
       </div>
-      <img src="/frank/assets/demo-business-hero.png" alt="A small business team working together with a customer">
+      <img src="/mini-frank/assets/demo-business-hero.png" alt="A small business team working together with a customer">
     </section>
 
     <section class="trust-strip" aria-label="Why customers choose us">
@@ -59,13 +60,19 @@
         <h2 id="enquiry-title">How can we help?</h2>
         <p>You do not need the perfect words. Give us the basics and we will take it from there.</p>
       </div>
-      <form id="site-enquiry-form">
-        <label>Your name<input name="name" autocomplete="name" required></label>
-        <label>Email or phone<input name="contact" autocomplete="email" required></label>
-        <label>What do you need?<textarea name="message" rows="4" required></textarea></label>
-        <button type="submit">Send my enquiry</button>
+      <div id="site-enquiry-form" role="group" aria-labelledby="enquiry-title" aria-describedby="demo-boundary">
+        <p class="demo-label">Interactive demonstration · preview data only</p>
+        <p class="demo-boundary" id="demo-boundary">Try the form to inspect the acknowledgement state. Submitting changes this preview only; it does not send an enquiry to a business.</p>
+        <label>Your name<input name="name" autocomplete="name" required disabled></label>
+        <label>Email or phone<input name="contact" autocomplete="email" required disabled></label>
+        <label>What do you need?<textarea name="message" rows="4" required disabled></textarea></label>
+        <div class="form-actions">
+          <button id="show-acknowledgement" type="button" disabled>Show sample acknowledgement</button>
+          <button id="reset-sample" class="reset-sample" type="button" hidden>Reset sample</button>
+        </div>
         <p class="form-result" id="form-result" role="status" aria-live="polite"></p>
-      </form>
+        <noscript><p class="demo-fallback">This acknowledgement check needs JavaScript. It cannot send an enquiry.</p></noscript>
+      </div>
     </section>
   </main>
 

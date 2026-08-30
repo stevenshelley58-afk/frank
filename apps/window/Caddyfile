@@ -30,10 +30,30 @@
 
 (frank_mini_ui_response_headers) {
     header {
-        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self' https://preview.frank.fail; manifest-src 'self'"
+        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-src 'self'; manifest-src 'self'"
         # Revalidate the tiny Mini shell so a rebuilt conversation experience
         # cannot leave returning customers on an older cached script.
         Cache-Control "public, no-cache"
+        X-Robots-Tag "index, follow"
+    }
+}
+
+(frank_mini_private_artifact_response_headers) {
+    header {
+        -X-Frame-Options
+        Content-Security-Policy "sandbox allow-same-origin allow-downloads; default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; media-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+        Cache-Control "no-store, private"
+        Referrer-Policy "no-referrer"
+        X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+    }
+}
+
+(frank_mini_published_artifact_response_headers) {
+    header {
+        -X-Frame-Options
+        Content-Security-Policy "sandbox allow-same-origin allow-downloads; default-src 'self'; script-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; media-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+        Cache-Control "public, no-cache, must-revalidate"
+        Referrer-Policy "no-referrer"
         X-Robots-Tag "index, follow"
     }
 }
@@ -51,6 +71,9 @@ frank.fail {
                 request>headers>Proxy-Authorization delete
                 request>headers>X-Frank-Operator-Attestation delete
                 request>headers>X-Mini-Claim delete
+                request>headers>X-Mini-Account-Claim delete
+                request>headers>Idempotency-Key delete
+                request>headers>Referer delete
                 request>headers>Cookie delete
                 request>uri delete
                 response>headers>Set-Cookie delete
@@ -102,21 +125,14 @@ frank.fail {
             }
         }
 
-        # Mini Frank's product site is a project-owned artifact. Caddy serves
-        # the committed project files directly; the existing Window API remains
-        # the only customer backend and Frank's /frank shell stays independent.
-        @mini_project_root path /mini-frank
-        redir @mini_project_root /mini-frank/ 308
-        handle_path /mini-frank/* {
-            import frank_mini_ui_response_headers
-            root * /srv/mini-frank-site
-            try_files {path} {path}/index.html =404
-            file_server
-        }
-
-        @frank_ui path /frank /frank/*
-        handle @frank_ui {
-            import frank_mini_ui_response_headers
+        # Generated artifacts are passive snapshots, but their delivery
+        # authority differs. Owner and link routes contain bearer material and
+        # must never be cached, indexed, or leaked in a same-origin Referer.
+        # Published artifacts remain revalidated on every use so unpublishing
+        # immediately withdraws the Window-backed projection.
+        @mini_private_artifacts path /mini-frank/owner-artifacts/* /mini-frank/shared-artifacts/*
+        handle @mini_private_artifacts {
+            import frank_mini_private_artifact_response_headers
             reverse_proxy frank-window:8080 {
                 header_up Host {host}
                 header_up X-Real-IP {remote_host}
@@ -129,20 +145,38 @@ frank.fail {
             }
         }
 
-        # Preserve old customer links and asset references without leaving the
-        # browser on the retired public path. Caddy keeps the original query.
-        @mini_style path /mini/mini.css
-        redir @mini_style /frank/style.css?{http.request.uri.query} 308
-        @mini_app path /mini/mini.js
-        redir @mini_app /frank/app.js?{http.request.uri.query} 308
-        @mini_stream path /mini/mini_stream.mjs
-        redir @mini_stream /frank/stream.mjs?{http.request.uri.query} 308
-        @mini_api_module path /mini/mini_api.mjs
-        redir @mini_api_module /frank/api.mjs?{http.request.uri.query} 308
-        @mini_index path /mini/index.html
-        redir @mini_index /frank/?{http.request.uri.query} 308
-        @mini_legacy path /mini /mini/*
-        redir @mini_legacy /frank/?{http.request.uri.query} 308
+        @mini_published_artifacts path /mini-frank/published-artifacts/*
+        handle @mini_published_artifacts {
+            import frank_mini_published_artifact_response_headers
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -Cookie
+                header_up -X-Frank-Operator-Attestation
+                header_down -Set-Cookie
+            }
+        }
+
+        # Mini Frank is one scoped product surface inside the canonical Frank
+        # Window. Legacy /frank and /mini requests reach the same Window only
+        # long enough to receive its path-preserving redirect.
+        @mini_ui path /mini-frank /mini-frank/* /frank /frank/* /mini /mini/*
+        handle @mini_ui {
+            import frank_mini_ui_response_headers
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -Cookie
+                header_up -X-Frank-Operator-Attestation
+                header_down -Set-Cookie
+            }
+        }
 
         handle {
             import frank_private_response_headers
@@ -213,6 +247,12 @@ preview.frank.fail {
         X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
     }
     route {
+        # Mini artifacts are no longer anonymously addressable by job id.
+        # Window now rechecks owner, active-share, or published authority for
+        # every artifact request before reading this private projection.
+        @mini_disabled path /mini /mini/*
+        respond @mini_disabled 404
+
         # Frank publishes validated, regular, non-symlink snapshots here.
         # Hidden staging/backup paths are never customer-addressable.
         @mini_hidden path_regexp mini_hidden ^/mini/(?:[^/]+/)*\.

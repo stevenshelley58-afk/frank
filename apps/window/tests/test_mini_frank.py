@@ -5,6 +5,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import threading
 import time
 import unittest
 import urllib.error
@@ -136,6 +137,10 @@ class MiniFrankTest(unittest.TestCase):
         max_intake_store_bytes=None,
         max_rate_store_bytes=None,
         metadata_write_margin_bytes=None,
+        intake_create_rate_limit=None,
+        guide_turn_rate_limit=None,
+        build_start_rate_limit=None,
+        rate_window_seconds=None,
     ):
         app = Flask(__name__)
         blueprint_args = dict(
@@ -169,6 +174,14 @@ class MiniFrankTest(unittest.TestCase):
             blueprint_args["max_rate_store_bytes"] = max_rate_store_bytes
         if metadata_write_margin_bytes is not None:
             blueprint_args["metadata_write_margin_bytes"] = metadata_write_margin_bytes
+        if intake_create_rate_limit is not None:
+            blueprint_args["intake_create_rate_limit"] = intake_create_rate_limit
+        if guide_turn_rate_limit is not None:
+            blueprint_args["guide_turn_rate_limit"] = guide_turn_rate_limit
+        if build_start_rate_limit is not None:
+            blueprint_args["build_start_rate_limit"] = build_start_rate_limit
+        if rate_window_seconds is not None:
+            blueprint_args["rate_window_seconds"] = rate_window_seconds
         self.blueprint = create_blueprint(**blueprint_args)
         app.register_blueprint(self.blueprint)
         app.testing = True
@@ -177,14 +190,29 @@ class MiniFrankTest(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
-    def create_job(self, *, ip="203.0.113.10", **overrides):
+    def create_job(
+        self,
+        *,
+        ip="203.0.113.10",
+        account_claim="",
+        idempotency_key="",
+        **overrides,
+    ):
         payload = {"problem": "I need customers to book appointments without calling me."}
         payload.update(overrides)
-        return self.client.post("/api/mini/jobs", json=payload, headers={"X-Real-IP": ip})
+        headers = {"X-Real-IP": ip}
+        if account_claim:
+            headers["X-Mini-Account-Claim"] = account_claim
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
+        return self.client.post("/api/mini/jobs", json=payload, headers=headers)
 
-    def create_intake(self, *, ip="203.0.113.30", conversation=None):
+    def create_intake(self, *, ip="203.0.113.30", conversation=None, account_claim=""):
         payload = {} if conversation is None else {"conversation": conversation}
-        response = self.client.post("/api/mini/intakes", json=payload, headers={"X-Real-IP": ip})
+        headers = {"X-Real-IP": ip}
+        if account_claim:
+            headers["X-Mini-Account-Claim"] = account_claim
+        response = self.client.post("/api/mini/intakes", json=payload, headers=headers)
         self.assertEqual(response.status_code, 201)
         return response.get_json()
 
@@ -435,6 +463,103 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(second.status_code, 200)
         self.assertEqual(len(self.guide_turns), 1)
 
+    def test_guide_fair_use_charges_acceptance_once_and_is_not_refunded_by_delete(self):
+        self.client = self.make_client(guide_turn_rate_limit=1, max_rate_events=20)
+        ip = "203.0.113.249"
+        created = self.create_intake(ip=ip)
+        headers = {
+            **self.claim_headers(created),
+            "X-Real-IP": ip,
+            "Idempotency-Key": "guide-fair-use-replay",
+        }
+        first = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/chat",
+            json={"text": "Help me plan a booking helper."},
+            headers=headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        first.data
+        replay = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/chat",
+            json={"text": "Help me plan a booking helper."},
+            headers=headers,
+        )
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(len(self.guide_turns), 1)
+        deleted = self.client.delete(
+            f"/api/mini/intakes/{created['intake']['id']}",
+            headers=self.claim_headers(created),
+        )
+        self.assertEqual(deleted.status_code, 200)
+
+        next_intake = self.create_intake(ip=ip)
+        limited = self.client.post(
+            f"/api/mini/intakes/{next_intake['intake']['id']}/chat",
+            json={"text": "Help me plan another free project."},
+            headers={
+                **self.claim_headers(next_intake),
+                "X-Real-IP": ip,
+                "Idempotency-Key": "guide-fair-use-second",
+            },
+        )
+        self.assertEqual(limited.status_code, 429)
+        self.assertEqual(limited.get_json()["code"], "fair_use_limit_reached")
+        self.assertIn("Retry-After", limited.headers)
+
+    def test_one_network_cannot_occupy_both_guide_slots_concurrently(self):
+        entered = threading.Event()
+        release = threading.Event()
+
+        def blocking_guide(session_id, payload, **kwargs):
+            self.guide_turns.append({"session_id": session_id, "payload": payload, "kwargs": kwargs})
+            entered.set()
+            release.wait(5)
+            reply = "The first private guide reply is complete."
+            yield b"event: assistant.completed\n"
+            yield f"data: {json.dumps({'type': 'assistant.completed', 'content': reply})}\n".encode()
+            yield b"\n"
+            yield b"event: done\n"
+            yield b'data: {"type":"done"}\n\n'
+
+        self.hermes_chat_stream = blocking_guide
+        self.client = self.make_client(guide_turn_rate_limit=10)
+        ip = "203.0.113.250"
+        first = self.create_intake(ip=ip)
+        second = self.create_intake(ip=ip)
+
+        def run_first():
+            client = self.client.application.test_client()
+            response = client.post(
+                f"/api/mini/intakes/{first['intake']['id']}/chat",
+                json={"text": "Plan the first project."},
+                headers={
+                    **self.claim_headers(first),
+                    "X-Real-IP": ip,
+                    "Idempotency-Key": "guide-concurrency-first",
+                },
+            )
+            response.data
+            return response.status_code
+
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(run_first)
+            self.assertTrue(entered.wait(2))
+            blocked = self.client.post(
+                f"/api/mini/intakes/{second['intake']['id']}/chat",
+                json={"text": "Plan the second project."},
+                headers={
+                    **self.claim_headers(second),
+                    "X-Real-IP": ip,
+                    "Idempotency-Key": "guide-concurrency-second",
+                },
+            )
+            self.assertEqual(blocked.status_code, 429)
+            self.assertEqual(blocked.get_json()["code"], "temporarily_busy")
+            self.assertEqual(blocked.headers["Retry-After"], "5")
+            release.set()
+            self.assertEqual(future.result(timeout=5), 200)
+        self.assertEqual(len(self.guide_turns), 1)
+
     def test_customer_generated_responses_do_not_expose_product_owned_name(self):
         created = self.create_intake(conversation=[{
             "role": "user", "text": "Create meta ads for my business.",
@@ -477,15 +602,19 @@ class MiniFrankTest(unittest.TestCase):
         self.assertIn("/workspace/public", self.runs[0]["payload"]["input"])
         self.assertNotIn(str(self.project_root), json.dumps(self.runs[0]["payload"]))
 
-    def test_product_contract_keeps_planning_open_and_offers_paid_additional_projects(self):
+    def test_product_contract_keeps_planning_and_future_projects_free(self):
         config = self.client.get("/api/mini/config")
         self.assertEqual(config.status_code, 200)
         config_body = config.get_json()
         config_text = json.dumps(config_body).lower()
         self.assertNotIn("email", config_text)
-        self.assertNotIn("priority", config_text)
-        self.assertTrue(config_body["conversation"]["planning_unmetered"])
-        self.assertEqual(config_body["projects"]["additional_projects"], "paid")
+        self.assertFalse(config_body["tips"]["priority_changed"])
+        self.assertFalse(config_body["tips"]["entitlement_changed"])
+        self.assertTrue(config_body["conversation"]["planning_free"])
+        self.assertTrue(config_body["conversation"]["fair_use_protected"])
+        self.assertFalse(config_body["fair_use"]["billing_gate"])
+        self.assertEqual(config_body["projects"]["additional_projects"], "free_after_current_build")
+        self.assertEqual(config_body["projects"]["future_projects"], "free")
         self.assertEqual(config_body["projects"]["free_active"], 20)
 
         created = self.create_job(email="ignored@example.com").get_json()
@@ -587,7 +716,15 @@ class MiniFrankTest(unittest.TestCase):
         job = response.get_json()["job"]
         self.assertEqual(job["stage"], "ready")
         self.assertEqual(job["result"]["revision"], 1)
-        self.assertEqual(job["result"]["artifacts"], manifest["artifacts"])
+        self.assertEqual(
+            [(item["kind"], item["label"]) for item in job["result"]["artifacts"]],
+            [(item["kind"], item["label"]) for item in manifest["artifacts"]],
+        )
+        self.assertTrue(all(
+            item["url"].startswith(f"/mini-frank/owner-artifacts/{job_id}/")
+            for item in job["result"]["artifacts"]
+        ))
+        self.assertNotIn("preview.frank.fail/mini/", json.dumps(job["result"]))
         self.assertEqual(job["result"]["checks"], manifest["checks"])
         self.assertEqual(job["result"]["limitations"], manifest["limitations"])
 
@@ -1421,10 +1558,10 @@ class MiniFrankTest(unittest.TestCase):
         )
         self.assertEqual(len(stored), 1)
 
-    def test_planning_intakes_do_not_consume_the_private_build_ledger(self):
+    def test_planning_intakes_use_the_privacy_safe_fair_use_ledger(self):
         self.client = self.make_client(
             max_intake_records=10,
-            max_rate_events=1,
+            max_rate_events=10,
             storage_min_free_bytes=0,
         )
         accepted = self.client.post(
@@ -1435,7 +1572,11 @@ class MiniFrankTest(unittest.TestCase):
         )
         self.assertEqual(accepted.status_code, 201)
         self.assertEqual(second.status_code, 201)
-        self.assertFalse((self.data_root / "mini" / "rate-events.json").exists())
+        events = json.loads(
+            (self.data_root / "mini" / "rate-events.json").read_text(encoding="utf-8")
+        )
+        self.assertEqual([event["kind"] for event in events], ["intake_create", "intake_create"])
+        self.assertNotEqual(events[0]["requester_hash"], events[1]["requester_hash"])
 
     def test_global_storage_reservation_is_atomic_across_parallel_owners(self):
         payload = self.pdf_bytes(b"C" * 70_000)
@@ -1635,12 +1776,16 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(malformed.status_code, 400)
         self.assertTrue(malformed.is_json)
         self.client = self.make_client(free_project_limit=1)
-        self.assertEqual(self.create_job(ip="203.0.113.99").status_code, 202)
-        limited = self.create_job(ip="203.0.113.99")
-        self.assertEqual(limited.status_code, 402)
+        first = self.create_job(ip="203.0.113.99")
+        self.assertEqual(first.status_code, 202)
+        limited = self.create_job(
+            ip="203.0.113.99",
+            account_claim=first.get_json()["account_claim_token"],
+        )
+        self.assertEqual(limited.status_code, 429)
         self.assertEqual(limited.get_json()["code"], "project_limit_reached")
-        self.assertEqual(limited.get_json()["additional_projects"], "paid")
-        self.assertIn("paid feature", limited.get_json()["error"])
+        self.assertEqual(limited.get_json()["additional_projects"], "free_after_current_build")
+        self.assertIn("next project is free", limited.get_json()["error"])
         self.assertNotIn("traceback", json.dumps(limited.get_json()).lower())
 
     def test_rate_ledger_atomically_caps_parallel_events_and_expires_private_entries(self):
@@ -1664,6 +1809,201 @@ class MiniFrankTest(unittest.TestCase):
             "kind": "guide",
             "created_at": 1_000_000 + RATE_WINDOW_SECONDS + 1,
         }])
+
+    def test_live_intake_fair_use_is_idempotent_atomic_and_not_refunded_by_delete(self):
+        self.client = self.make_client(
+            intake_create_rate_limit=2,
+            max_rate_events=20,
+        )
+        base_headers = {"X-Real-IP": "203.0.113.240"}
+        first_headers = {
+            **base_headers,
+            "Idempotency-Key": hashlib.sha256(b"intake-one").hexdigest(),
+        }
+        first = self.client.post("/api/mini/intakes", json={}, headers=first_headers)
+        self.assertEqual(first.status_code, 201)
+        replay = self.client.post("/api/mini/intakes", json={}, headers=first_headers)
+        self.assertEqual(replay.status_code, 200)
+        self.assertEqual(replay.get_json()["intake"]["id"], first.get_json()["intake"]["id"])
+        second = self.client.post(
+            "/api/mini/intakes",
+            json={},
+            headers={
+                **base_headers,
+                "Idempotency-Key": hashlib.sha256(b"intake-two").hexdigest(),
+            },
+        )
+        self.assertEqual(second.status_code, 201)
+        deleted = self.client.delete(
+            f"/api/mini/intakes/{first.get_json()['intake']['id']}",
+            headers=self.claim_headers(first.get_json()),
+        )
+        self.assertEqual(deleted.status_code, 200)
+        limited = self.client.post(
+            "/api/mini/intakes",
+            json={},
+            headers={
+                **base_headers,
+                "Idempotency-Key": hashlib.sha256(b"intake-three").hexdigest(),
+            },
+        )
+        self.assertEqual(limited.status_code, 429)
+        self.assertEqual(limited.get_json()["code"], "fair_use_limit_reached")
+        self.assertGreater(int(limited.headers["Retry-After"]), 0)
+
+    def test_live_intake_admission_is_atomic_under_concurrency(self):
+        self.client = self.make_client(
+            intake_create_rate_limit=3,
+            max_rate_events=20,
+        )
+
+        def create(index):
+            client = self.client.application.test_client()
+            return client.post(
+                "/api/mini/intakes",
+                json={},
+                headers={
+                    "X-Real-IP": "203.0.113.241",
+                    "Idempotency-Key": hashlib.sha256(
+                        f"parallel-{index}".encode("utf-8")
+                    ).hexdigest(),
+                },
+            ).status_code
+
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            statuses = list(pool.map(create, range(8)))
+        self.assertEqual(statuses.count(201), 3)
+        self.assertEqual(statuses.count(429), 5)
+
+    def test_same_network_accounts_do_not_share_the_one_active_build_slot(self):
+        self.client = self.make_client(
+            free_project_limit=1,
+            intake_create_rate_limit=10,
+            build_start_rate_limit=10,
+        )
+        ip = "203.0.113.242"
+        first = self.create_job(
+            ip=ip, idempotency_key=hashlib.sha256(b"office-one").hexdigest()
+        )
+        second = self.create_job(
+            ip=ip, idempotency_key=hashlib.sha256(b"office-two").hexdigest()
+        )
+        self.assertEqual(first.status_code, 202)
+        self.assertEqual(second.status_code, 202)
+        self.assertNotEqual(
+            first.get_json()["job"]["account_id"], second.get_json()["job"]["account_id"]
+        )
+        same_account = self.create_job(
+            ip=ip,
+            idempotency_key=hashlib.sha256(b"office-same-account").hexdigest(),
+            account_claim=first.get_json()["account_claim_token"],
+        )
+        self.assertEqual(same_account.status_code, 429)
+        self.assertEqual(same_account.get_json()["code"], "project_limit_reached")
+
+    def test_create_replay_uses_a_strong_bearer_and_preserves_account_claim_scope(self):
+        ip = "203.0.113.243"
+        weak_intake = self.client.post(
+            "/api/mini/intakes",
+            json={},
+            headers={"X-Real-IP": ip, "Idempotency-Key": "guessable-key"},
+        )
+        self.assertEqual(weak_intake.status_code, 400)
+        weak_job = self.client.post(
+            "/api/mini/jobs",
+            json={"problem": "Build a safe replay test."},
+            headers={"X-Real-IP": ip, "Idempotency-Key": "guessable-key"},
+        )
+        self.assertEqual(weak_job.status_code, 400)
+
+        anonymous_key = hashlib.sha256(b"anonymous-replay-bearer").hexdigest()
+        anonymous = self.client.post(
+            "/api/mini/intakes",
+            json={},
+            headers={"X-Real-IP": ip, "Idempotency-Key": anonymous_key},
+        )
+        self.assertEqual(anonymous.status_code, 201)
+        # The strong redacted key is the anonymous replay bearer, so a network
+        # change does not create a second intake or consume a second event.
+        anonymous_replay = self.client.post(
+            "/api/mini/intakes",
+            json={},
+            headers={"X-Real-IP": "203.0.113.244", "Idempotency-Key": anonymous_key},
+        )
+        self.assertEqual(anonymous_replay.status_code, 200)
+        self.assertEqual(
+            anonymous_replay.get_json()["claim_token"], anonymous.get_json()["claim_token"]
+        )
+        stored_intakes = json.loads(
+            (self.data_root / "mini" / "intakes.json").read_text(encoding="utf-8")
+        )
+        stored_anonymous = stored_intakes[anonymous.get_json()["intake"]["id"]]
+        self.assertNotIn("create_idempotency_key", stored_anonymous)
+        self.assertNotIn(anonymous_key, json.dumps(stored_anonymous))
+        self.assertEqual(len(stored_anonymous["create_idempotency_hash"]), 64)
+
+        account_claim = anonymous.get_json()["account_claim_token"]
+        claimed_key = hashlib.sha256(b"account-bound-intake-replay").hexdigest()
+        claimed = self.client.post(
+            "/api/mini/intakes",
+            json={},
+            headers={
+                "X-Real-IP": ip,
+                "Idempotency-Key": claimed_key,
+                "X-Mini-Account-Claim": account_claim,
+            },
+        )
+        self.assertEqual(claimed.status_code, 201)
+        omitted_claim = self.client.post(
+            "/api/mini/intakes",
+            json={},
+            headers={"X-Real-IP": ip, "Idempotency-Key": claimed_key},
+        )
+        self.assertEqual(omitted_claim.status_code, 404)
+        claimed_replay = self.client.post(
+            "/api/mini/intakes",
+            json={},
+            headers={
+                "X-Real-IP": "203.0.113.245",
+                "Idempotency-Key": claimed_key,
+                "X-Mini-Account-Claim": account_claim,
+            },
+        )
+        self.assertEqual(claimed_replay.status_code, 200)
+
+        direct_key = hashlib.sha256(b"account-bound-direct-replay").hexdigest()
+        direct = self.create_job(
+            ip=ip,
+            idempotency_key=direct_key,
+            account_claim=account_claim,
+            problem="Build the account-bound direct replay test.",
+        )
+        self.assertEqual(direct.status_code, 202)
+        direct_body = {"problem": "Build the account-bound direct replay test."}
+        direct_omitted = self.client.post(
+            "/api/mini/jobs",
+            json=direct_body,
+            headers={"X-Real-IP": ip, "Idempotency-Key": direct_key},
+        )
+        self.assertEqual(direct_omitted.status_code, 404)
+        direct_replay = self.client.post(
+            "/api/mini/jobs",
+            json=direct_body,
+            headers={
+                "X-Real-IP": "203.0.113.246",
+                "Idempotency-Key": direct_key,
+                "X-Mini-Account-Claim": account_claim,
+            },
+        )
+        self.assertEqual(direct_replay.status_code, 202)
+        self.assertTrue(direct_replay.get_json()["replayed"])
+        stored_jobs = json.loads(
+            (self.data_root / "mini" / "jobs.json").read_text(encoding="utf-8")
+        )
+        stored_direct = stored_jobs[direct.get_json()["job"]["id"]]
+        self.assertNotIn("create_idempotency_key", stored_direct)
+        self.assertNotIn(direct_key, json.dumps(stored_direct))
+        self.assertEqual(len(stored_direct["create_idempotency_hash"]), 64)
 
     def test_deleted_intakes_never_consume_the_project_entitlement(self):
         self.client = self.make_client(free_project_limit=1)
@@ -1722,7 +2062,9 @@ class MiniFrankTest(unittest.TestCase):
         )
         self.assertEqual(first_submit.status_code, 202)
 
-        second = self.create_intake(ip=ip)
+        second = self.create_intake(
+            ip=ip, account_claim=first["account_claim_token"]
+        )
         second_headers = self.claim_headers(second)
         before_build = self.client.post(
             f"/api/mini/intakes/{second['intake']['id']}/chat",
@@ -1737,7 +2079,7 @@ class MiniFrankTest(unittest.TestCase):
             json={},
             headers=second_headers,
         )
-        self.assertEqual(limited.status_code, 402)
+        self.assertEqual(limited.status_code, 429)
         self.assertEqual(limited.get_json()["code"], "project_limit_reached")
 
         after_limit = self.client.post(
@@ -1757,8 +2099,11 @@ class MiniFrankTest(unittest.TestCase):
         ip = "203.0.113.146"
         first = self.create_job(ip=ip)
         self.assertEqual(first.status_code, 202)
-        limited = self.create_job(ip=ip)
-        self.assertEqual(limited.status_code, 402)
+        limited = self.create_job(
+            ip=ip,
+            account_claim=first.get_json()["account_claim_token"],
+        )
+        self.assertEqual(limited.status_code, 429)
         self.assertEqual(limited.get_json()["code"], "project_limit_reached")
         jobs_path = self.data_root / "mini" / "jobs.json"
         jobs = json.loads(jobs_path.read_text(encoding="utf-8"))

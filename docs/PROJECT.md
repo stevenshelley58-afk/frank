@@ -9,6 +9,38 @@ unassigned sessions in that profile. Blockwise, Merrypaws, Elf & Wonder,
 Pavone, and future bodies of work are projects/workspaces within the same
 profile; they are never separate Hermes profiles.
 
+## Mini Frank hierarchy
+
+Mini Frank is `project:mini-frank` inside this same Frank source, Window
+runtime, control boundary, Hermes profile, and release. Its public route is the
+thin client at `/mini-frank/`; it renders state and submits typed requests but
+does not reason, select models, run tools, or maintain its own skills, rules,
+policies, memory service, repository, or control plane. Hermes is the only
+brain for intake, research, building, revisions, and tool execution.
+
+Customer work is subordinate to the Mini project:
+
+```text
+project:mini-frank
+└── account:mini-frank/<account-id>
+    └── job:mini-frank/<account-id>/<job-id>
+        └── revisions, runs, artifacts, shares and service requests
+```
+
+These are stable scopes in Frank, not extra checkouts or Hermes profiles. Mini
+uses centrally versioned Frank capabilities and deterministic policies through
+project-scoped bindings. Shared Hermes skills remain in the one central skills
+library and are executed only by Hermes; a Mini binding never copies their
+implementation.
+
+Mini currently ships in the central `apps/window` image on Frank's main VPS.
+Moving its public edge to another VPS later must be a deployment-adapter change
+against the same committed Frank revision, not a fork of its source or state.
+The retired `/projects/mini-frank` checkout is not a product source. Only its
+`customer-projects` directory remains mounted as narrowly scoped legacy data
+so retention and migration cleanup can preserve or erase old customer work
+safely; the retired `site` directory is never mounted or served.
+
 The sole product source is `apps/window`. The previous Next.js/API platform,
 databases, caches, embedded skills, agent harnesses, and alternate preview
 applications were retired because they duplicated Hermes or produced multiple
@@ -42,7 +74,7 @@ contract; tool and agent homes open inside the existing content pane.
 | Responsibility | Path |
 | --- | --- |
 | Frank source | `/projects/frank` |
-| Project source | `/projects/<slug>` |
+| External project workspaces | `/projects/<slug>` |
 | Window data | `/srv/frank/data/window` |
 | Window secrets | `/srv/frank/secrets/window.env` |
 | Shared skills | `/srv/skills` |
@@ -52,8 +84,8 @@ The Window container sees only its explicit read-only mounts through the
 virtual `/vps` tree. Hindsight and Hermes state are never mounted into Frank.
 
 The authoritative memory design is [MEMORY.md](MEMORY.md): one Hindsight
-provider in Hermes' `default` profile, with one bank derived from each bound
-project workspace slug.
+service in Hermes' `default` profile, with private project/account/job scopes
+and a separately approved, provenance-bearing industry knowledge scope.
 
 ## Creating projects
 
@@ -76,3 +108,9 @@ or an agent loop.
 Project creation fails if Hermes cannot create the bound session. If Frank
 cannot persist the project registry after Hermes creates the empty session, it
 best-effort deletes that session rather than presenting a disconnected project.
+
+Mini customer accounts and jobs do not use this generic project-creation flow.
+They remain children of the already registered `project:mini-frank`, use
+isolated private workspaces and memory scopes, and call the same central Hermes
+session boundary. Creating a Mini job must never create another Frank project,
+repository, provider profile, skill tree, or policy source.

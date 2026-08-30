@@ -1,55 +1,88 @@
-# Frank frontend API contract
+# Mini Frank browser API contract
 
-`mini_api.mjs` is the only transport boundary used by the Frank UI. The
-frontend sends `Accept: application/json` on every request, `credentials: omit`,
-`X-Mini-Claim`, and `Authorization: Bearer <claim>` on claimed requests. Every
-mutation also sends a unique `Idempotency-Key`. The server should treat retries
-with the same key as the same effect.
+`mini_api.mjs` is Mini Frank's only browser transport boundary. Frank owns
+authentication, policy, version checks, idempotency and durable state; Hermes
+is the only reasoning/build brain. The browser renders typed server state and
+does not infer provider availability, prices, DNS settings or authority.
 
-The normal first-request path creates an intake, uploads any files, then streams
-one concise Hermes conversation turn. This is the customer-facing fast path:
-the UI renders the answer as it arrives and keeps the intake resumable if the
-browser disconnects. Creating intakes and continuing the planning conversation
-do not consume a project entitlement. When the customer chooses **Start build**, the
-UI submits the intake and the server applies the free active-project limit at
-that build boundary. Submit returns `202` with `{ job, claim_token }`; the job is durably
-`queued` and the UI polls its status. Submit itself does not create a Hermes
-session or run; the background reconciler owns full build dispatch.
+Every claimed job/intake request sends `X-Mini-Claim` and a bearer header.
+Every mutation sends `Idempotency-Key`. Versioned mutations include
+`base_version` in JSON plus `X-Mini-Base-Version`/`If-Match` transport hints.
 
-## Existing routes
+Mini's browser account continuity token is separate from each job claim. The
+server returns `account_claim_token` (`ma1.<payload>.<signature>`); the browser
+stores it under its own key and sends it only as `X-Mini-Account-Claim` when
+creating a later intake. It never appears in a URL, share or customer-facing
+screen.
 
-| Method | Route | Response used by the UI |
+## Core project lifecycle
+
+| Method | Route | Main response |
 | --- | --- | --- |
-| GET | `/api/mini/config` | `attachments`, `job_attachment_uploads`; optional `delete_available`, `revoke_available`, `make_another` |
-| POST | `/api/mini/intakes` | `claim_token`, `intake` |
-| GET / DELETE | `/api/mini/intakes/:id` | `intake` / `{ deleted }` |
-| POST / DELETE | `/api/mini/intakes/:id/attachments[/:attachment]` | `intake` |
-| POST | `/api/mini/intakes/:id/chat` | JSON reply or SSE assistant stream |
-| POST | `/api/mini/intakes/:id/submit` | `job`, optional `claim_token` |
-| GET | `/api/mini/jobs/:id` | `job` |
-| POST / DELETE | `/api/mini/jobs/:id/attachments[/:attachment]` | `job` |
-| POST | `/api/mini/jobs/:id/dispatch` | `job` |
-| POST | `/api/mini/jobs/:id/changes` | `job` |
+| GET | `/api/mini/config` | product capabilities and attachment limits |
+| POST | `/api/mini/intakes` | `claim_token`, `account_claim_token`, `intake` |
+| GET / DELETE | `/api/mini/intakes/:id` | `intake` / deletion receipt |
+| POST / DELETE | `/api/mini/intakes/:id/attachments[/:attachment]` | updated intake |
+| POST | `/api/mini/intakes/:id/chat` | Hermes SSE/JSON reply |
+| POST | `/api/mini/intakes/:id/submit` | `job`, `claim_token`, `account_claim_token` |
+| GET | `/api/mini/jobs/:id` | typed owner job projection |
+| POST / DELETE | `/api/mini/jobs/:id/attachments[/:attachment]` | updated job |
+| POST | `/api/mini/jobs/:id/dispatch` | updated job |
+| POST | `/api/mini/jobs/:id/changes` | next free revision |
+| DELETE | `/api/mini/jobs/:id` | deletion receipt |
+| POST | `/api/mini/jobs/:id/revoke` | owner-return-link revocation receipt |
 
-The UI expects `job.id`, `stage`, `problem`, `created_at`, `updated_at`,
-`available_until`, `retry_available`, `automatic_retry_at` when queued, and
-`result` when `stage` is `ready`. A result can include `title`, `summary`,
-`preview_url`, `artifacts[]`, `checks`, `limitations`, and `details_url`.
-Artifact items use `kind` (`interactive` or `download`), `label`, `url`, and
-optional `media_type`. Preview URLs are rendered in a sandboxed iframe.
+Planning, builds, revisions and later projects retain a free path. There is no
+paid additional-project entitlement or quota copy in the browser. A transient
+capacity response is recoverable and must not be converted into a sales gate.
 
-## Optional lifecycle routes
+## Result continuation
 
-These controls stay hidden until the server advertises the corresponding
-capability in `/api/mini/config` or the job response:
+Ready jobs carry versioned `guidance` and `self_host` objects. Dedicated reads
+are also available at `GET /api/mini/jobs/:id/guidance` and
+`GET /api/mini/jobs/:id/self-host-guide`. Guidance is specific to the current
+revision: use now, free revisions, related free work and an optional larger
+implementation path. The self-host guide contains honest applicability,
+requirements, steps, ongoing operations and a server-owned service boundary.
 
-- `POST /api/mini/jobs/:id/feedback` with `{ rating: "useful" | "not_yet", reason?: "missing_piece" | "wrong_format" | "needs_more_context" | "hard_to_use" | "other" }`.
-- `DELETE /api/mini/jobs/:id` to immediately delete the conversation, files, and result.
-- `POST /api/mini/jobs/:id/revoke` to revoke bearer-link access.
+## Sharing
 
-Delete/revoke responses should be successful and idempotent. Error responses
-should be JSON with a human-readable `error` and optional stable `code`.
-`404` means the private record is no longer available; `409` means the current
-state does not allow that mutation. `402` with `code: "project_limit_reached"`
-is reserved for the actual build boundary; the UI must leave planning chat open
-and explain that additional active build projects are a paid feature.
+| Method | Route | Purpose |
+| --- | --- | --- |
+| GET / PATCH | `/api/mini/jobs/:id/sharing` | read/change mode, role and scope using the sharing version |
+| POST | `/api/mini/jobs/:id/shares` | atomically create a fresh bearer link from restricted mode |
+| POST | `/api/mini/jobs/:id/shares/:share/rotate` | rotate the active link |
+| DELETE | `/api/mini/jobs/:id/shares/:share` | revoke the active link |
+| GET | `/api/mini/shares/:token` | read the safe shared projection |
+| GET / POST | `/api/mini/shares/:token/comments` | read/add comments or suggestions allowed by the role |
+| GET | `/api/mini/published/:job` | read the published projection |
+
+Modes are `restricted|link|published`, roles are
+`viewer|commenter|editor`, and the shipped scopes are `result|project`.
+Named invitations remain unavailable while identity/email delivery is
+deferred; the UI says so plainly. Shared users can never execute, pay, request
+service, or obtain owner/account claims.
+
+## Optional money and service requests
+
+`GET /api/mini/tips/config` and `POST /api/mini/tips/intents` return a
+provider-neutral tip intent. Unless the server explicitly advertises amount
+support, the browser sends `{}` and lets the provider collect the amount. Tips
+never alter entitlement or priority.
+
+`GET /api/mini/jobs/:id/service-options` supplies the available hands-on paths,
+contact methods, honest availability message and `price_status`. The browser
+does not invent options when this state is unavailable.
+
+`GET|POST /api/mini/jobs/:id/service-requests` lists or submits an explicitly
+owner-reviewed request. Kinds are `self_host_help`, `managed_hosting`,
+`video_call`, `perth_visit`, or `custom_project`. The required private contact
+is `{method: email|phone|whatsapp|other, value}` so the saved request has an
+actionable reply path. A successful request is
+`saved_for_review`; no notification, execution or payment is implied unless
+the typed response explicitly reports it.
+
+Errors are JSON with a human-readable `error` and optional stable `code`.
+`404` means a private/shared record is unavailable; `409` means the supplied
+version or current state conflicts. The browser preserves the conversation and
+offers a safe retry without inventing a commercial explanation.

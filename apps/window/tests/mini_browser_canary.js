@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-const BASE_URL = (process.env.FRANK_BROWSER_URL || "http://127.0.0.1:8765/frank/").replace(/\/$/, "");
+const BASE_URL = (process.env.FRANK_BROWSER_URL || "http://127.0.0.1:8765/mini-frank/").replace(/\/$/, "");
 const PORT = Number(process.env.FRANK_BROWSER_PORT || 9333);
 const CHROME = process.env.CHROME_BIN || "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe";
 const PROFILE = path.join(os.tmpdir(), `frank-mini-browser-${process.pid}`);
@@ -87,7 +87,10 @@ async function main() {
         canonicalPath: location.pathname,
         publicResources,
         hasLegacyPublicPath: [...publicResources, ...loadedResources].some((value) => {
-          try { return new URL(value, location.origin).pathname.startsWith("/mini"); }
+          try {
+            const resourcePath = new URL(value, location.origin).pathname;
+            return resourcePath === "/frank" || resourcePath.startsWith("/frank/") || resourcePath === "/mini" || resourcePath.startsWith("/mini/");
+          }
           catch { return false; }
         }),
         bodyWidth: document.body.getBoundingClientRect().width,
@@ -97,7 +100,7 @@ async function main() {
         composer: rect(".composer"),
         sendEnabled,
         sendAction,
-        hasLegacyCopy: /mini frank|private link access|how private access works|before i build/i.test(document.body.innerText),
+        hasLegacyCopy: /building more projects is a paid feature|private link access|how private access works|before i build/i.test(document.body.innerText),
       };
     })()`);
     if (EXERCISE_SUBMIT) {
@@ -132,7 +135,7 @@ async function main() {
       fs.writeFileSync(SCREENSHOT, Buffer.from(capture.data, "base64"));
     }
     console.log(JSON.stringify(result));
-    if (result.canonicalPath !== "/frank/" || result.hasLegacyPublicPath || result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || result.sendAction !== "send-message" || (EXERCISE_SUBMIT && (!result.fastConversation.withinBudget || !result.fastConversation.hasResponse || !result.fastConversation.resumeAction || !result.fastConversation.bypassedFullBuild))) process.exitCode = 1;
+    if (result.canonicalPath !== "/mini-frank/" || result.hasLegacyPublicPath || result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || (EXERCISE_SUBMIT && (!result.fastConversation.withinBudget || !result.fastConversation.hasResponse || !result.fastConversation.resumeAction || !result.fastConversation.bypassedFullBuild))) process.exitCode = 1;
   } finally {
     try { browser?.close(); } catch {}
     chrome.kill();

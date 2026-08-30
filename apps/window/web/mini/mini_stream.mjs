@@ -12,7 +12,6 @@ export function parseSseBlock(block) {
   try { return { event, data: JSON.parse(joined) }; }
   catch (_error) { return { event, data: { text: joined } }; }
 }
-
 export function eventType(event, data) {
   return String((data && data.type) || event || "");
 }

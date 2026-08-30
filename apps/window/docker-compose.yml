@@ -88,7 +88,6 @@ services:
       - "443:443/udp"
     volumes:
       - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - /projects/mini-frank/site:/srv/mini-frank-site:ro
       - /srv/frank/previews:/srv/frank/previews:ro
       - caddy_data:/data
       - caddy_config:/config

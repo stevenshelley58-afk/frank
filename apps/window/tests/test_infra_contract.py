@@ -12,6 +12,7 @@ class InfraContractTest(unittest.TestCase):
         workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")
         self.assertIn("COPY apps/window/connections_agent.py .", dockerfile)
         self.assertIn("COPY apps/window/mini_frank.py .", dockerfile)
+        self.assertIn("COPY apps/window/mini ./mini", dockerfile)
         self.assertIn("COPY apps/window/tool_apps ./tool_apps", dockerfile)
         self.assertIn("COPY apps/window/tools ./tools", dockerfile)
         self.assertIn("COPY apps/window/archify ./archify", dockerfile)
@@ -23,7 +24,15 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("frank.archify-build-validation.v1", dockerfile)
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
         self.assertIn('"import connections_agent, home_platform, server, tool_apps;', deploy)
-        self.assertIn("import memory_inspector, mini_frank", deploy)
+        self.assertIn("import memory_inspector, mini, mini_frank", deploy)
+
+    def test_ci_runs_every_mini_test_and_checks_every_mini_script(self):
+        workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")
+        self.assertIn("python -m compileall -q mini", workflow)
+        self.assertIn("python -m unittest discover -s tests", workflow)
+        self.assertIn("find apps/window/web/mini -type f", workflow)
+        self.assertIn("node --check \"$file\"", workflow)
+        self.assertIn("node --test apps/window/tests/mini_*.test.mjs", workflow)
 
     def test_agenttrail_is_a_read_only_loopback_sidecar(self):
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
@@ -53,49 +62,87 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}", caddyfile)
         self.assertIn("request>headers>X-Frank-Operator-Attestation delete", caddyfile)
         self.assertIn("request>headers>X-Mini-Claim delete", caddyfile)
+        self.assertIn("request>headers>X-Mini-Account-Claim delete", caddyfile)
+        self.assertIn("request>headers>Idempotency-Key delete", caddyfile)
+        self.assertIn("request>headers>Referer delete", caddyfile)
 
     def test_mini_routes_are_public_without_exposing_operator_attestation(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         mini_api = caddyfile.index("@mini_api path /api/mini /api/mini/*")
-        frank_ui = caddyfile.index("@frank_ui path /frank /frank/*")
-        legacy_mini = caddyfile.index("@mini_legacy path /mini /mini/*")
-        fallback = caddyfile.index("        handle {\n            import frank_private_response_headers", legacy_mini)
+        mini_ui = caddyfile.index("@mini_ui path /mini-frank /mini-frank/* /frank /frank/* /mini /mini/*")
+        fallback = caddyfile.index("        handle {\n            import frank_private_response_headers", mini_ui)
         basic_auth = caddyfile.index("basic_auth")
         self.assertLess(mini_api, basic_auth)
-        self.assertLess(frank_ui, basic_auth)
+        self.assertLess(mini_ui, basic_auth)
         public_routes = caddyfile[mini_api:basic_auth]
-        mini_api_route = caddyfile[mini_api:frank_ui]
-        frank_ui_route = caddyfile[frank_ui:legacy_mini]
+        mini_api_route = caddyfile[mini_api:mini_ui]
+        mini_ui_route = caddyfile[mini_ui:fallback]
         api_policy = caddyfile.split("(frank_mini_api_response_headers) {", 1)[1].split("}", 2)[0]
         ui_policy = caddyfile.split("(frank_mini_ui_response_headers) {", 1)[1].split("}", 2)[0]
         self.assertNotIn("{$FRANK_BASIC_AUTH_HASH}", public_routes)
         self.assertIn("header_up -X-Frank-Operator-Attestation", public_routes)
         self.assertIn("import frank_mini_api_response_headers", mini_api_route)
-        self.assertIn("import frank_mini_ui_response_headers", frank_ui_route)
+        self.assertIn("import frank_mini_ui_response_headers", mini_ui_route)
         self.assertNotIn("frank_private_response_headers", mini_api_route)
-        self.assertNotIn("frank_private_response_headers", frank_ui_route)
+        self.assertNotIn("frank_private_response_headers", mini_ui_route)
         self.assertIn('Cache-Control "no-store"', api_policy)
         self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"', api_policy)
         self.assertIn('Cache-Control "public, no-cache"', ui_policy)
         self.assertIn("max_size 56MB", mini_api_route)
         self.assertIn('X-Robots-Tag "index, follow"', ui_policy)
-        self.assertIn("script-src 'self'; style-src 'self';", ui_policy)
-        self.assertIn("frame-src 'self' https://preview.frank.fail", ui_policy)
+        self.assertIn("script-src 'self'; style-src 'self' 'unsafe-inline';", ui_policy)
+        self.assertIn("frame-src 'self'", ui_policy)
+        self.assertNotIn("preview.frank.fail", ui_policy)
         self.assertIn("frame-ancestors 'self'", ui_policy)
         self.assertNotIn("defer", ui_policy)
 
-    def test_mini_project_site_is_project_owned_and_keeps_frank_shell_separate(self):
+    def test_mini_artifacts_have_authority_specific_passive_edge_policies(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        private_matcher = caddyfile.index(
+            "@mini_private_artifacts path /mini-frank/owner-artifacts/* /mini-frank/shared-artifacts/*"
+        )
+        published_matcher = caddyfile.index(
+            "@mini_published_artifacts path /mini-frank/published-artifacts/*"
+        )
+        ui_matcher = caddyfile.index(
+            "@mini_ui path /mini-frank /mini-frank/* /frank /frank/* /mini /mini/*"
+        )
+        self.assertLess(private_matcher, ui_matcher)
+        self.assertLess(published_matcher, ui_matcher)
+
+        private_policy = caddyfile.split(
+            "(frank_mini_private_artifact_response_headers) {", 1
+        )[1].split("}\n", 1)[0]
+        published_policy = caddyfile.split(
+            "(frank_mini_published_artifact_response_headers) {", 1
+        )[1].split("}\n", 1)[0]
+        for policy in (private_policy, published_policy):
+            self.assertIn("-X-Frame-Options", policy)
+            self.assertIn("sandbox allow-same-origin allow-downloads", policy)
+            self.assertIn("script-src 'none'", policy)
+            self.assertIn("form-action 'none'", policy)
+            self.assertIn("frame-ancestors 'self'", policy)
+            self.assertIn('Referrer-Policy "no-referrer"', policy)
+        self.assertIn('Cache-Control "no-store, private"', private_policy)
+        self.assertIn('X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"', private_policy)
+        self.assertIn('Cache-Control "public, no-cache, must-revalidate"', published_policy)
+        self.assertIn('X-Robots-Tag "index, follow"', published_policy)
+
+    def test_mini_product_site_has_one_canonical_frank_source(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
-        project_site = caddyfile.split("@mini_project_root", 1)[1].split("@frank_ui", 1)[0]
+        dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
+        product_site = caddyfile.split("@mini_ui", 1)[1].split("        handle {\n            import frank_private_response_headers", 1)[0]
         caddy = compose.split("  frank-caddy:", 1)[1].split("\n  volumes:", 1)[0]
 
-        self.assertIn("path /mini-frank", project_site)
-        self.assertIn("handle_path /mini-frank/*", project_site)
-        self.assertIn("root * /srv/mini-frank-site", project_site)
-        self.assertIn("import frank_mini_ui_response_headers", project_site)
-        self.assertNotIn("reverse_proxy", project_site)
-        self.assertIn("/projects/mini-frank/site:/srv/mini-frank-site:ro", caddy)
+        self.assertIn("path /mini-frank /mini-frank/*", product_site)
+        self.assertIn("import frank_mini_ui_response_headers", product_site)
+        self.assertIn("reverse_proxy frank-window:8080", product_site)
+        self.assertIn("COPY apps/window/web /web", dockerfile)
+        self.assertNotIn("/srv/mini-frank-site", caddyfile)
+        self.assertNotIn("/projects/mini-frank/site", caddy)
+        self.assertNotIn("/projects/mini-frank/site", compose)
+        self.assertNotIn("/projects/mini-frank/site", (APP / "deploy.sh").read_text(encoding="utf-8"))
 
     def test_private_response_policy_is_scoped_to_pavone_and_authenticated_frank(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
@@ -170,7 +217,12 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("infra/mini_builder/Dockerfile", deploy)
         self.assertIn("docker compose config --quiet", deploy)
         self.assertIn("caddy validate --config /etc/caddy/Caddyfile", deploy)
-        self.assertIn("https://frank.fail/frank/", deploy)
+        self.assertIn("https://frank.fail/mini-frank/", deploy)
+        self.assertIn("Mini Frank canary returned the wrong document", deploy)
+        self.assertLess(
+            deploy.index("https://frank.fail/mini-frank/"),
+            deploy.index('release_dir=/var/lib/frank/release'),
+        )
 
         builder = (APP / "infra" / "mini_builder" / "Dockerfile").read_text(encoding="utf-8")
         self.assertIn("@sha256:", builder)
@@ -182,6 +234,8 @@ class InfraContractTest(unittest.TestCase):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         preview = caddyfile.split("preview.frank.fail {", 1)[1].split("tasks.frank.fail {", 1)[0]
         self.assertIn("Frank publishes validated, regular, non-symlink snapshots here", preview)
+        self.assertIn("@mini_disabled path /mini /mini/*", preview)
+        self.assertIn("respond @mini_disabled 404", preview)
         self.assertIn("root * /srv/frank/previews", preview)
         self.assertIn("try_files {path} {path}/index.html =404", preview)
         self.assertIn("@mini_hidden path_regexp", preview)
@@ -253,6 +307,8 @@ class InfraContractTest(unittest.TestCase):
         self.assertNotIn("HERMES_CONNECTIONS_AGENT_KEY", required)
         self.assertNotIn("HERMES_VAULT_BROKER_KEY", required)
         self.assertIn("Connections Agent ingress is not configured", deploy)
+        self.assertIn("MINI_TIP_PROVIDER_URL", deploy)
+        self.assertIn("the explicit tip CTA remains honestly unavailable", deploy)
         self.assertIn("vault/provider status remains setup_needed", deploy)
         self.assertIn("never invent a key or broker URL", deploy)
 

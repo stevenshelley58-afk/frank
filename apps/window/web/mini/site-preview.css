@@ -9,7 +9,6 @@
   --accent-dark: #173d53;
   --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Arial, sans-serif;
 }
-
 *, *::before, *::after { box-sizing: border-box; }
 html { min-width: 320px; scroll-behavior: smooth; background: var(--paper); }
 body { min-width: 320px; margin: 0; background: var(--paper); color: var(--ink); font: 16px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
@@ -62,9 +61,14 @@ button, input, textarea { font: inherit; }
 #site-enquiry-form input, #site-enquiry-form textarea { width: 100%; border: 1px solid #cbd2d8; border-radius: 8px; background: white; color: var(--ink); }
 #site-enquiry-form input { min-height: 48px; padding: 0 13px; }
 #site-enquiry-form textarea { min-height: 112px; padding: 12px 13px; resize: vertical; }
-#site-enquiry-form button { justify-self: start; min-height: 48px; padding: 0 20px; border: 0; border-radius: 999px; background: var(--ink); color: white; font-weight: 720; cursor: pointer; }
+#site-enquiry-form button { min-height: 48px; padding: 0 20px; border: 0; border-radius: 999px; background: var(--ink); color: white; font-weight: 720; cursor: pointer; }
 #site-enquiry-form button:hover { background: var(--accent-dark); }
 #site-enquiry-form button:disabled { cursor: default; opacity: .65; }
+.demo-label { margin: 0 0 -9px; color: var(--accent-dark); font-size: 12px; font-weight: 760; letter-spacing: .08em; text-transform: uppercase; }
+.demo-boundary, .demo-fallback { margin: 0; color: var(--soft); font-size: 14px; }
+.form-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+#site-enquiry-form .reset-sample { border: 1px solid #cbd2d8; background: white; color: var(--ink); }
+#site-enquiry-form .reset-sample:hover { background: var(--mist); }
 .form-result { min-height: 24px; margin: 0; color: #176440; font-size: 13px; font-weight: 700; }
 
 footer { display: flex; justify-content: space-between; gap: 24px; padding: 28px clamp(20px, 5vw, 76px); border-top: 1px solid var(--line); color: var(--soft); font-size: 12px; }
@@ -84,6 +88,8 @@ body[data-look="calm"] { --accent: #47616c; --accent-dark: #2c3e46; }
   .trust-strip p + p { border-top: 1px solid var(--line); border-left: 0; }
   .service-section, .enquiry-section { grid-template-columns: 1fr; padding: 78px 22px; }
   .service-section li { grid-template-columns: 1fr; gap: 5px; }
+  .form-actions { align-items: stretch; flex-direction: column; }
+  .form-actions button { width: 100%; }
   .about-section { padding: 78px 22px; }
   footer { align-items: flex-start; flex-direction: column; }
 }

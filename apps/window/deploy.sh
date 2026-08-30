@@ -80,7 +80,7 @@ if [[ ! -f "$secret_file" ]]; then
   # Private Hermes extensions are optional until their separately deployed
   # routes exist. Preserve exact values when an existing source has them, but
   # never invent a key or broker URL merely to make a release pass.
-  for key in HERMES_CONNECTIONS_AGENT_KEY HERMES_VAULT_BROKER_KEY HERMES_VAULT_BROKER_URL; do
+  for key in HERMES_CONNECTIONS_AGENT_KEY HERMES_VAULT_BROKER_KEY HERMES_VAULT_BROKER_URL MINI_TIP_PROVIDER_URL; do
     for source in /frank/window/.env /frank/deployed/infra/.env; do
       [[ -f "$source" ]] || continue
       value="$(grep -m1 -E "^${key}=" "$source" || true)"
@@ -135,6 +135,9 @@ fi
 if ! grep -q -E '^HERMES_VAULT_BROKER_KEY=[^[:space:]]' "$secret_file" \
   || ! grep -q -E '^HERMES_VAULT_BROKER_URL=[^[:space:]]' "$secret_file"; then
   echo "Hermes vault broker is not configured; vault/provider status remains setup_needed." >&2
+fi
+if ! grep -q -E '^MINI_TIP_PROVIDER_URL=https://[^[:space:]]+' "$secret_file"; then
+  echo "Mini Frank tip provider is not configured; the explicit tip CTA remains honestly unavailable." >&2
 fi
 
 # Caddy receives only the two values required by its basic-auth directive.
@@ -219,9 +222,25 @@ done
 }
 
 docker exec frank-window python -c \
-  "import connections_agent, home_platform, server, tool_apps; import memory_inspector, mini_frank; assert connections_agent and home_platform and server and tool_apps and memory_inspector and mini_frank"
+  "import connections_agent, home_platform, server, tool_apps; import memory_inspector, mini, mini_frank; assert connections_agent and home_platform and server and tool_apps and memory_inspector and mini and mini_frank"
 docker exec frank-window python -c \
   "import json,urllib.request; data=json.load(urllib.request.urlopen('http://127.0.0.1:8080/api/health',timeout=5)); assert data['ok'] is True"
+
+# Prove the public canonical Mini surface reached this Window before recording
+# the revision as approved. The main Frank root remains behind Caddy auth.
+mini_canary_file="$(mktemp)"
+trap 'rm -f -- "$mini_canary_file"' EXIT
+curl --fail --silent --show-error \
+  --retry 10 --retry-delay 2 --retry-all-errors \
+  --output "$mini_canary_file" \
+  https://frank.fail/mini-frank/
+grep -Fq '<title>Mini Frank' "$mini_canary_file" || {
+  echo "Mini Frank canary returned the wrong document" >&2
+  exit 1
+}
+rm -f -- "$mini_canary_file"
+trap - EXIT
+
 release_dir=/var/lib/frank/release
 install -d -o root -g root -m 0755 -- "$release_dir"
 release_tmp="$(mktemp "$release_dir/.approved-sha.XXXXXX")"

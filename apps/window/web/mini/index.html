@@ -3,83 +3,257 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <meta name="description" content="Describe a practical file, template, report, or private page you need to make.">
+  <meta name="description" content="Mini Frank turns ordinary business problems into working solutions.">
   <meta name="theme-color" content="#ffffff">
-  <title>Frank — Tell me what you need</title>
-  <link rel="stylesheet" href="/frank/style.css">
-  <script src="/frank/app.js" type="module"></script>
+  <link rel="icon" href="/mini-frank/favicon.svg" type="image/svg+xml">
+  <link rel="canonical" href="https://frank.fail/mini-frank/">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Mini Frank — useful work, without the technical fuss">
+  <meta property="og:description" content="Describe a real business problem. Mini Frank helps turn it into a working solution.">
+  <meta property="og:url" content="https://frank.fail/mini-frank/">
+  <meta name="twitter:card" content="summary">
+  <title>Mini Frank — useful work, without the technical fuss</title>
+  <link rel="stylesheet" href="/mini-frank/mini.css">
+  <script src="/mini-frank/mini.js" type="module"></script>
 </head>
 <body>
+  <!--
+  THESIS: Mini Frank begins as a usable conversation, not a generic SaaS hero or feature-card catalogue.
+  OWN-WORLD: Cool paper whites, graphite type, cobalt signals, hairlines, pill actions and dense Australian operations interfaces.
+  STORY: A business owner describes one problem, sees free and hands-on paths, trusts the proof, then starts real work.
+  FIRST VIEWPORT: A quiet sticky masthead frames a centred two-line promise; the live composer is the largest object, with practical starters directly beneath it.
+  FORM: Approved studio landing composition, first and binding direction; seed pinned-artifact-2026-08-29.
+  FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+  -->
   <a class="skip-link" href="#conversation">Skip to the conversation</a>
 
-  <div class="app-shell">
-    <header class="topbar">
-      <button class="brand" type="button" data-action="new" aria-label="Start a new conversation">
-        <span class="brand-mark" aria-hidden="true"></span>
-        <span>Frank</span>
-      </button>
-      <button class="work-button" type="button" data-action="work" aria-haspopup="dialog" aria-busy="false">
-        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 7v5l3 2M21 12a9 9 0 1 1-3.1-6.8"/></svg>
-        <span>Your work</span>
-      </button>
-    </header>
-
-    <main id="conversation" class="conversation" tabindex="-1">
-      <div class="thread" id="thread">
-        <section class="welcome" id="welcome" aria-labelledby="welcome-title">
-          <h1 id="welcome-title">What could we make easier today?</h1>
-          <p class="welcome-copy">Describe it normally, or pick a useful starting point below.</p>
-        </section>
-
-        <div class="messages" id="messages" role="log" aria-live="polite" aria-relevant="additions text" aria-label="Conversation"></div>
-        <div class="end-marker" id="end-marker" aria-hidden="true"></div>
+  <header class="site-header" id="site-header">
+    <nav class="nav-shell" aria-label="Main navigation">
+      <button class="brand" type="button" data-action="new" aria-label="Start a new Mini Frank conversation"><span class="dot brand-mark" aria-hidden="true"></span>Mini Frank</button>
+      <div class="nav-links">
+        <a href="#free">Free projects</a><a href="#automation">Business automation</a><a href="#work">Example solutions</a><a href="#faq">FAQ</a>
       </div>
+      <div class="nav-action">
+        <button class="tip-button" type="button" data-action="tip" aria-haspopup="dialog">Tip Frank</button>
+        <button class="button dark work-button" type="button" data-action="work" aria-haspopup="dialog" aria-busy="false">Your work <span class="arrow" aria-hidden="true">→</span></button>
+      </div>
+    </nav>
+  </header>
 
-      <div class="composer-dock" id="composer-dock">
-        <form class="composer" id="composer" novalidate>
-          <div class="attachment-list" id="attachment-list" aria-live="polite"></div>
-          <div class="composer-main">
-            <button class="attach-button" type="button" data-action="attach" aria-label="Add photos or documents" title="Add photos or documents">
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
-            </button>
-            <label class="visually-hidden" for="message">Your message</label>
-            <textarea id="message" name="message" rows="1" maxlength="4000" placeholder="Tell me what’s not working…" enterkeyhint="send"></textarea>
-            <button class="send-button" type="submit" aria-label="Send message" disabled>
-              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 12 6-6 6 6M12 6v12"/></svg>
-            </button>
+  <main id="top">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-inner conversation" id="conversation" tabindex="-1">
+        <div class="thread" id="thread">
+           <section class="welcome hero-intro" id="welcome">
+             <span class="eyebrow"><span class="dot" aria-hidden="true"></span> Free to use</span>
+             <h1 id="hero-title"><span class="mask-line"><span>What could we solve</span></span><span class="mask-line"><span>for your business?</span></span></h1>
+             <p class="hero-sub">Describe the problem normally. Mini Frank will help turn it into something that works.</p>
+           </section>
+           <section class="project-receipt" id="project-receipt" aria-labelledby="project-receipt-title" hidden>
+             <h2 id="project-receipt-title" tabindex="-1">Where your work is up to</h2>
+             <dl id="project-receipt-details"></dl>
+           </section>
+           <div class="messages" id="messages" role="log" aria-live="off" aria-label="Conversation"></div>
+          <div class="end-marker" id="end-marker" aria-hidden="true"></div>
+        </div>
+        <div class="composer-dock" id="composer-dock">
+          <button class="secondary-button jump-to-latest" id="jump-to-latest" type="button" aria-controls="thread" hidden>New reply — jump to latest</button>
+          <form class="composer" id="composer" novalidate>
+            <div class="attachment-list" id="attachment-list" aria-live="polite"></div>
+            <label class="visually-hidden" for="message">What do you need solved?</label>
+            <textarea id="message" name="message" rows="1" maxlength="4000" placeholder="I want to spend less time chasing customer enquiries…" enterkeyhint="send" aria-describedby="composer-status"></textarea>
+            <p class="composer-status" id="composer-status" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+            <div class="composer-tools">
+              <button class="circle-control attach-button" type="button" data-action="attach" aria-label="Add photos or documents" title="Add photos or documents"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></button>
+              <span class="private"><span aria-hidden="true">⌁</span> Private by default</span>
+              <button class="circle-control send send-button" type="submit" aria-label="Send problem" disabled><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m6 12 6-6 6 6M12 6v12"/></svg></button>
+            </div>
+            <button class="quiet-button danger-button" type="button" data-action="delete-draft" hidden>Delete this draft</button>
+            <input id="file-input" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif">
+          </form>
+          <div class="starters solution-starters" id="solution-starters" aria-label="Business solution starters">
+            <button class="starter" type="button" data-solution="leads">Convert more enquiries</button>
+            <button class="starter" type="button" data-solution="admin">Remove repetitive admin</button>
+            <button class="starter" type="button" data-solution="cash">Get paid faster</button>
+            <button class="starter" type="button" data-solution="numbers">See what needs attention</button>
+            <button class="starter" type="button" data-solution="knowledge">Preserve staff knowledge</button>
           </div>
-          <button class="quiet-button danger-button" type="button" data-action="delete-draft" hidden>Delete this draft</button>
-          <input id="file-input" type="file" multiple hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.txt,.png,.jpg,.jpeg,.gif,.webp,.bmp,.tif,.tiff,.heic,.heif">
-        </form>
-        <div class="solution-starters" id="solution-starters" aria-label="Business solution starters">
-          <button class="solution-pill is-featured" type="button" data-solution="leads">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 18v-2.3c0-1.5 1.4-2.7 3.1-2.7h3.8c1.7 0 3.1 1.2 3.1 2.7V18M9 10a3 3 0 1 0 0-6 3 3 0 0 0 0 6m6-1 2 2 4-5"/></svg>
-            <span>Turn enquiries into customers</span><small>Try it</small>
-          </button>
-          <button class="solution-pill" type="button" data-solution="admin">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 9h8M8 13h5M8 17h3"/></svg>
-            <span>Automate repetitive admin</span>
-          </button>
-          <button class="solution-pill" type="button" data-solution="cash">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16v11H4zM7 7V5h10v2M8 12h8M8 15h5"/></svg>
-            <span>Get paid faster</span>
-          </button>
-          <button class="solution-pill" type="button" data-solution="numbers">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 19V9M12 19V5M19 19v-7"/></svg>
-            <span>See what needs attention</span>
-          </button>
-          <button class="solution-pill" type="button" data-solution="service">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M5 16H4a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h1m14 7h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2h-1M5 10a7 7 0 0 1 14 0v6a3 3 0 0 1-3 3h-3"/></svg>
-            <span>Improve customer service</span>
-          </button>
-          <button class="solution-pill" type="button" data-solution="knowledge">
-            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3H11v16H6.5A2.5 2.5 0 0 0 4 21.5zm16 0A2.5 2.5 0 0 0 17.5 3H13v16h4.5a2.5 2.5 0 0 1 2.5 2.5z"/></svg>
-            <span>Make staff know-how reusable</span>
-          </button>
+          <p class="no-tech">No technical knowledge needed.</p>
         </div>
       </div>
-    </main>
-  </div>
+    </section>
+    <div class="marketing">
+    <section class="section free-section" id="free">
+      <div class="section-shell reveal">
+        <div class="free-head">
+          <div>
+            <p class="section-kicker">Free projects</p>
+            <h2>Start with one real problem. It’s free.</h2>
+            <p class="lead">Use Mini Frank to solve projects for your business without paying or choosing any technology.</p>
+          </div>
+          <a class="button dark" href="#conversation">Start a free project <span class="arrow">→</span></a>
+        </div>
+        <div class="steps">
+          <article class="step"><span class="step-num">01</span><h3>Tell us the problem</h3><p>Use plain English.</p></article>
+          <article class="step"><span class="step-num">02</span><h3>Frank builds and checks it</h3><p>You can refine it if you want.</p></article>
+          <article class="step"><span class="step-num">03</span><h3>Use the result</h3><p>Change it, download it, keep it.</p></article>
+        </div>
+        <p class="fine-print">No card required. Private by default. Yours to keep.</p>
+      </div>
+    </section>
+
+    <section class="section automation" id="automation">
+      <div class="section-shell split reveal">
+        <div>
+          <p class="section-kicker">Need a human?</p>
+          <h2>We can automate the work that slows your business down.</h2>
+          <p class="lead">We map the repetitive work, find the useful opportunities, and build the automation with you.</p>
+          <div class="service-options">
+            <div class="service-row"><strong>Video call</strong><span>Work with us from anywhere.</span></div>
+            <div class="service-row"><strong>Face to face in Perth</strong><span>We can come to your business and see how the work really happens.</span></div>
+          </div>
+          <div class="action-row"><a class="button dark" href="#final">Start a free project <span class="arrow">→</span></a></div>
+          <p class="fine-print">Your free result is yours to change, download and keep. Hands-on work is scoped before any cost.</p>
+        </div>
+        <div class="workflow" aria-label="Detailed business automation system map">
+          <div class="workflow-top"><strong>Enquiry-to-job workflow</strong><span class="workflow-status"><span class="green-dot"></span>Illustrative workflow</span></div>
+          <div class="workflow-metrics">
+            <div class="metric"><span>Sample enquiries</span><strong>47 enquiries</strong></div>
+            <div class="metric"><span>Sample admin time</span><strong>6.4 hours</strong></div>
+            <div class="metric"><span>Sample exceptions</span><strong>2 items</strong></div>
+          </div>
+          <div class="system-map">
+            <svg class="system-links" viewBox="0 0 600 390" preserveAspectRatio="none" aria-hidden="true">
+              <path d="M112 70 C205 70 190 130 270 130"/><path d="M112 166 C205 166 190 168 270 168"/><path d="M112 264 C205 264 190 205 270 205"/>
+              <path d="M330 130 C410 130 395 72 488 72"/><path d="M330 168 C410 168 395 167 488 167"/><path d="M330 205 C410 205 395 262 488 262"/>
+              <circle cx="270" cy="168" r="4"/><circle cx="330" cy="168" r="4"/>
+            </svg>
+            <div class="system-column">
+              <p class="system-label">Work coming in</p>
+              <div class="source-card"><b>Website form</b><span>Commercial switchboard quote</span></div>
+              <div class="source-card"><b>Phone note</b><span>Voicemail transcribed at 8:42 am</span></div>
+              <div class="source-card"><b>Email</b><span>Plans + three site photos attached</span></div>
+            </div>
+            <div class="system-column logic-stack">
+              <div class="logic-title">Frank workflow <span>v1.8</span></div>
+              <div class="logic-card"><b>Capture the job</b><span>Customer, site, urgency and requested work</span></div>
+              <div class="logic-card active"><b>Apply business rules</b><span>Service area, licence type, margin and availability</span></div>
+              <div class="logic-card"><b>Prepare the next action</b><span>Draft quote, booking options and customer update</span></div>
+              <div class="logic-card"><b>Record the outcome</b><span>Every change stays visible and reversible</span></div>
+            </div>
+            <div class="system-column">
+              <p class="system-label">Useful work out</p>
+              <div class="output-card"><b>Job #PER-2841</b><span>Created with site notes and attachments</span></div>
+              <div class="output-card"><b>Quote ready</b><span>A$3,740 incl. GST · waiting approval</span></div>
+              <div class="output-card"><b>Customer updated</b><span>Two visit windows offered by SMS</span></div>
+            </div>
+            <div class="audit-strip"><span><strong>Owner approval:</strong> quotes above A$2,500</span><span><strong>Last checked:</strong> today, 9:14 am AWST</span></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section technical" aria-labelledby="technical-title">
+      <div class="section-shell reveal">
+        <p class="section-kicker">The technical part is ours</p>
+        <h2 id="technical-title">You run the business. We <span class="rotator" aria-hidden="true"><span class="active">handle</span><span>build</span><span>simplify</span></span><span class="visually-hidden">handle</span> the AI.</h2>
+        <p class="lead">We take care of all the boring technical AI stuff, so you can focus on your business and earn more money.</p>
+      </div>
+      <div class="marquee" aria-label="Technical tasks handled by Frank">
+        <div class="marquee-track">
+          <div class="marquee-group"><span>AI tools</span><span>integrations</span><span>hosting</span><span>data flows</span><span>testing</span><span>security</span><span>maintenance</span><span>updates</span></div>
+          <div class="marquee-group" aria-hidden="true"><span>AI tools</span><span>integrations</span><span>hosting</span><span>data flows</span><span>testing</span><span>security</span><span>maintenance</span><span>updates</span></div>
+        </div>
+      </div>
+      <p class="technical-close">You get the working result, not another system to learn.</p>
+    </section>
+
+    <section class="section work" id="work">
+      <div class="section-shell">
+        <div class="work-intro reveal">
+          <div><p class="section-kicker">Illustrative solution patterns</p><h2>Built around Australian work.</h2></div>
+          <p>Illustrative hospitality, wholesale and field-service demonstrations shaped around the details Australian teams use every day.</p>
+        </div>
+        <div class="cases">
+          <article class="case reveal">
+            <div class="case-preview" role="img" aria-label="Illustrative sample: Venue Desk interface showing a Saturday service timeline, deposits, bookings and guest needs for a Fremantle hospitality business">
+              <div class="preview-bar"><span class="preview-dot"></span>Hospitality operations · Fremantle, WA <span class="illustrative-label">Illustrative example</span></div>
+              <div class="business-app">
+                <aside class="app-side"><div class="app-identity"><span class="app-mark">V</span>Venue desk</div><div class="app-nav active">Today</div><div class="app-nav">Reservations</div><div class="app-nav">Waitlist</div><div class="app-nav">Functions</div><div class="app-nav">Guest notes</div><div class="app-nav">Settings</div></aside>
+                <div class="app-main">
+                  <div class="app-toolbar"><span><b>Saturday service</b><small>17 August · Fremantle WA</small></span><span class="toolbar-actions"><span class="toolbar-chip">Export run sheet</span><span class="toolbar-chip primary">+ Booking</span></span></div>
+                  <div class="app-body">
+                    <div class="app-stats"><div class="app-stat"><span>Booked covers</span><strong>126</strong><em>18 more than last Saturday</em></div><div class="app-stat"><span>Deposits held</span><strong>A$1,860</strong><em>All payments reconciled</em></div><div class="app-stat"><span>Needs a call</span><strong>3 guests</strong><em>Dietary or access notes</em></div></div>
+                    <div class="reservation-layout">
+                      <div class="panel"><div class="panel-head"><b>Service timeline</b><span>Doors 7:30 am · Kitchen closes 2:00 pm</span></div><div class="service-timeline"><div class="timeline-row"><time>8:00</time><div class="booking-block"><b>Turner · 4 guests · Table 12</b><span>High chair · deposit paid</span></div></div><div class="timeline-row"><time>9:30</time><div class="booking-block teal"><b>Nguyen · 6 guests · Courtyard</b><span>Birthday · cake arriving 9:15</span></div></div><div class="timeline-row"><time>11:00</time><div class="booking-block lilac"><b>Rodriguez · 2 guests · Window</b><span>Wheelchair access confirmed</span></div></div><div class="timeline-row"><time>12:30</time><div class="booking-block"><b>Patel · 8 guests · Long table</b><span>Set menu · 2 vegetarian</span></div></div></div></div>
+                      <div class="panel"><div class="panel-head"><b>Service check</b><span class="ui-pill teal">Ready</span></div><div class="service-summary"><div class="summary-line"><span>Tables seated</span><strong>18 / 24</strong></div><div class="summary-line"><span>Waitlist</span><strong>7 guests</strong></div><div class="summary-line"><span>Average turn</span><strong>74 min</strong></div><div class="summary-line"><span>No-shows</span><strong>1</strong></div><div class="summary-line"><span>SMS confirmations</span><strong>Sent 7:02 am</strong></div></div></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="case-copy"><span class="index">01 / 03 · HOSPITALITY</span><h3>Bookings, deposits and service notes in one view</h3><div class="case-detail"><span class="case-label">PROBLEM</span><p>Weekend bookings arrived through the website, Instagram and voicemail. Front-of-house staff retyped every request, chased deposits and carried dietary notes on paper.</p></div><div class="case-detail"><span class="case-label">SOLUTION</span><p><span class="highlight">One live Saturday service board</span> that collects bookings, deposits, access needs and guest messages before the doors open.</p></div><button class="case-link" type="button" data-action="guide">Open a working example ↗</button></div>
+          </article>
+
+          <article class="case reveal">
+            <div class="case-preview" role="img" aria-label="Illustrative sample: Supply Desk interface showing a wholesale replenishment order, stock levels, recommendations, GST and a Malaga delivery cut-off">
+              <div class="preview-bar"><span class="preview-dot"></span>Foodservice ordering · Malaga, WA <span class="illustrative-label">Illustrative example</span></div>
+              <div class="business-app">
+                <aside class="app-side"><div class="app-identity"><span class="app-mark">S</span>Supply desk</div><div class="app-nav active">Orders</div><div class="app-nav">Catalogue</div><div class="app-nav">Customers</div><div class="app-nav">Deliveries</div><div class="app-nav">Price lists</div><div class="app-nav">Suppliers</div></aside>
+                <div class="app-main">
+                  <div class="app-toolbar"><span><b>Draft order · PO-1048</b><small>Malaga branch · delivery Tuesday 20 Aug</small></span><span class="toolbar-actions"><span class="toolbar-chip">Save draft</span><span class="toolbar-chip primary">Send for approval</span></span></div>
+                  <div class="app-body">
+                    <div class="app-stats"><div class="app-stat"><span>Delivery cut-off</span><strong>3:00 pm</strong><em>1 hr 42 min remaining</em></div><div class="app-stat"><span>Order lines</span><strong>18</strong><em>4 suggested by par levels</em></div><div class="app-stat"><span>Subtotal</span><strong>A$2,841.60</strong><em>Contract pricing applied</em></div></div>
+                    <div class="panel"><div class="panel-head"><b>Replenishment order</b><span>Prices ex. GST · customer #WA-48372</span></div><table class="ui-table"><thead><tr><th class="product-column">Product</th><th>On hand</th><th>Par</th><th>Recommended</th><th>Order</th></tr></thead><tbody><tr><td><strong>Oat milk · 1L × 12</strong><small>Chilled · SKU 118204</small></td><td>8</td><td>36</td><td><span class="ui-pill">28 units</span></td><td><span class="qty-box">3</span> ctn</td></tr><tr><td><strong>Espresso blend · 1kg</strong><small>Local roast · SKU 440187</small></td><td>6</td><td>18</td><td><span class="ui-pill">12 bags</span></td><td><span class="qty-box">12</span></td></tr><tr><td><strong>Compostable cup · 12oz</strong><small>Packaging · SKU 772950</small></td><td>2</td><td>8</td><td><span class="ui-pill sky">6 cartons</span></td><td><span class="qty-box">6</span></td></tr><tr><td><strong>Dishwashing liquid · 5L</strong><small>Cleaning · SKU 901142</small></td><td>5</td><td>4</td><td><span class="ui-pill teal">No order</span></td><td><span class="qty-box">0</span></td></tr><tr><td><strong>Free-range eggs · 15 dozen</strong><small>Chilled · SKU 330486</small></td><td>1</td><td>5</td><td><span class="ui-pill lilac">4 cartons</span></td><td><span class="qty-box">4</span></td></tr></tbody></table><div class="procurement-foot"><span>GST 10%<br><strong>A$284.16</strong></span><span>Order total<br><strong>A$3,125.76</strong></span></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="case-copy"><span class="index">02 / 03 · FOODSERVICE</span><h3>Wholesale replenishment before the cut-off</h3><div class="case-detail"><span class="case-label">PROBLEM</span><p>A multi-site café group counted stock on paper, checked three supplier price lists and rebuilt Monday’s order in a spreadsheet before the WA branch cut-off.</p></div><div class="case-detail"><span class="case-label">SOLUTION</span><p>A procurement workspace with <span class="highlight">par levels, contract prices, GST and delivery cut-offs</span> built into one approval-ready order.</p></div><a class="case-link" href="#conversation">Solve a similar problem ↗</a></div>
+          </article>
+
+          <article class="case reveal">
+            <div class="case-preview" role="img" aria-label="Illustrative sample: Job Desk interface showing Perth field-service dispatch, technicians, quotes and an electrical job ready to schedule">
+              <div class="preview-bar"><span class="preview-dot"></span>Field-service operations · Perth metro <span class="illustrative-label">Illustrative example</span></div>
+              <div class="business-app">
+                <aside class="app-side"><div class="app-identity"><span class="app-mark">J</span>Job desk</div><div class="app-nav active">Dispatch</div><div class="app-nav">Jobs</div><div class="app-nav">Quotes</div><div class="app-nav">Invoices</div><div class="app-nav">Customers</div><div class="app-nav">Staff</div></aside>
+                <div class="app-main">
+                  <div class="app-toolbar"><span><b>Tuesday dispatch</b><small>Perth metro · 20 August</small></span><span class="toolbar-actions"><span class="toolbar-chip">Map view</span><span class="toolbar-chip primary">+ New job</span></span></div>
+                  <div class="app-body">
+                    <div class="app-stats"><div class="app-stat"><span>Jobs today</span><strong>8</strong><em>3 technicians dispatched</em></div><div class="app-stat"><span>Quotes waiting</span><strong>3</strong><em>A$7,920 awaiting approval</em></div><div class="app-stat"><span>Scheduled value</span><strong>A$12,480</strong><em>Excluding GST</em></div></div>
+                    <div class="dispatch-layout"><div class="panel"><div class="panel-head"><b>Today’s run</b><span>Route updated 9:12 am</span></div><div class="job-list"><div class="job-row"><span class="job-time">8:00</span><span><b>#2840 · RCD fault</b><small>Mount Lawley · Nick C.</small></span><span class="ui-pill teal">On site</span></div><div class="job-row"><span class="job-time">10:30</span><span><b>#2841 · Switchboard upgrade</b><small>Osborne Park · Priya S.</small></span><span class="ui-pill">Travelling</span></div><div class="job-row"><span class="job-time">1:00</span><span><b>#2842 · Lighting repair</b><small>Subiaco · Nick C.</small></span><span class="ui-pill slate">Scheduled</span></div><div class="job-row"><span class="job-time">2:30</span><span><b>#2843 · Safety inspection</b><small>Welshpool · Aaron B.</small></span><span class="ui-pill lilac">Needs parts</span></div></div></div><div class="panel"><div class="panel-head"><b>Quote Q-2417</b><span class="ui-pill sky">Draft ready</span></div><div class="quote-sheet"><div class="quote-customer"><b>Elizabeth Turner</b><span>Mount Hawthorn WA 6016 · switchboard replacement</span></div><div class="quote-line"><span>Licensed labour · 8.0 hrs</span><strong>A$1,120</strong></div><div class="quote-line"><span>RCBO switchboard + enclosure</span><strong>A$1,860</strong></div><div class="quote-line"><span>Testing, certification &amp; disposal</span><strong>A$420</strong></div><div class="quote-line"><span>Call-out</span><strong>A$140</strong></div><div class="quote-total"><span>GST included<br><small>A$354.00</small></span><strong>A$3,894.00</strong></div></div></div></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="case-copy"><span class="index">03 / 03 · TRADES</span><h3>From an electrical enquiry to a scheduled job</h3><div class="case-detail"><span class="case-label">PROBLEM</span><p>Calls, site photos and handwritten measurements had to be re-entered into quoting, scheduling and invoicing tools. Good jobs stalled before a quote went out.</p></div><div class="case-detail"><span class="case-label">SOLUTION</span><p>A field-service workflow that <span class="highlight">captures the request once, drafts a GST-ready quote</span> and schedules the approved job with every site note attached.</p></div><a class="case-link" href="#conversation">Solve a similar problem ↗</a></div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section faq" id="faq">
+      <div class="section-shell faq-grid reveal">
+        <div><p class="section-kicker">FAQ</p><h2>Questions, answered plainly.</h2></div>
+        <div class="faq-list">
+          <details><summary>Is Mini Frank really free to use?<span class="faq-plus">+</span></summary><p>Yes. Every Mini Frank project and revision is free. Optional human hosting, integration or implementation help is scoped separately, and nothing paid begins without your review.</p></details>
+          <details><summary>What can Frank build?<span class="faq-plus">+</span></summary><p>Websites, admin tools, follow-up systems, simple dashboards, automations, reusable guides and other practical business solutions.</p></details>
+          <details><summary>Do I need to understand AI or software?<span class="faq-plus">+</span></summary><p>No. Tell us the business problem in normal language. We handle the technical choices.</p></details>
+          <details><summary>Can you automate my existing business processes?<span class="faq-plus">+</span></summary><p>Yes. We can work through them with you over video, or visit your business in Perth.</p></details>
+          <details><summary>Do I own what gets built?<span class="faq-plus">+</span></summary><p>Yes. Your working solution and source are yours to use, change and keep.</p></details>
+          <details><summary>What happens after it is ready?<span class="faq-plus">+</span></summary><p>Open it, request a change, download it, or ask us to help put it into your business.</p></details>
+        </div>
+      </div>
+    </section>
+
+    <section class="final-cta" id="final">
+      <div class="reveal"><span class="eyebrow"><span class="dot"></span>Ready when you are</span><h2>What should we solve first?</h2><form class="compact-composer" id="final-composer"><label for="final-problem" class="visually-hidden">Tell Frank what to solve</label><input id="final-problem" placeholder="Tell Frank what needs fixing…"><button class="button dark" type="submit">Tell Frank <span class="arrow">→</span></button></form></div>
+    </section>
+
+    </div>
+  </main>
+
+  <footer><div class="footer-shell"><a class="brand" href="#top"><span class="dot"></span>Mini Frank</a><span class="footer-note">Private by default · Your result stays yours</span><div class="footer-links"><button class="footer-work" type="button" data-action="work">Your work</button></div></div></footer>
 
   <dialog class="work-drawer" id="work-drawer" aria-labelledby="work-title">
     <div class="drawer-head">
@@ -94,8 +268,9 @@
     </div>
   </dialog>
 
-  <dialog class="solution-guide" id="solution-guide" aria-labelledby="guide-title">
+  <dialog class="solution-guide" id="solution-guide" aria-labelledby="worked-example-title guide-title">
     <div class="solution-guide-shell">
+      <h2 id="worked-example-title" class="visually-hidden">Worked example</h2>
       <header class="guide-head">
         <div><span class="brand-mark" aria-hidden="true"></span><strong>Turn enquiries into customers</strong></div>
         <span class="guide-count" id="guide-count">Step 1 of 6</span>
@@ -106,6 +281,109 @@
       <div class="guide-progress" aria-hidden="true"><i id="guide-progress-bar"></i></div>
       <div class="guide-stage" id="guide-stage"></div>
       <footer class="guide-foot" id="guide-foot"></footer>
+    </div>
+  </dialog>
+
+  <dialog class="utility-dialog tip-dialog" id="tip-dialog" aria-labelledby="tip-title">
+    <div class="dialog-shell">
+      <header class="dialog-head">
+        <div><span class="dialog-kicker">Optional support</span><h2 id="tip-title">Tip Frank</h2></div>
+        <button class="icon-button" type="button" data-action="close-tip" aria-label="Close tip window"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+      </header>
+      <form id="tip-form" class="dialog-body">
+        <p class="dialog-lead">Everything in Mini Frank is free. This is just a tip. If you like this app, please leave a tip to help us keep it free. A tip does not unlock anything, change your result, or give you priority.</p>
+        <fieldset class="tip-amounts">
+          <legend>Choose a tip amount</legend>
+          <label><input type="radio" name="tip-amount" value="5"><span>A$5</span></label>
+          <label><input type="radio" name="tip-amount" value="15"><span>A$15</span></label>
+          <label><input type="radio" name="tip-amount" value="30"><span>A$30</span></label>
+          <label><input type="radio" name="tip-amount" value="custom"><span>Custom</span></label>
+        </fieldset>
+        <div class="field-row custom-tip" id="custom-tip" hidden>
+          <label for="custom-tip-amount">Custom amount in Australian dollars</label>
+          <input id="custom-tip-amount" name="custom-tip-amount" inputmode="decimal" autocomplete="off" placeholder="0.00">
+        </div>
+        <p class="dialog-status" id="tip-status" role="status" aria-live="polite">Choose an amount if you would like to leave a tip.</p>
+        <div class="dialog-actions"><button class="quiet-button" type="button" data-action="close-tip">Not now</button><button class="primary-button" id="tip-submit" type="submit" disabled>Continue to tip</button></div>
+      </form>
+    </div>
+  </dialog>
+
+  <dialog class="utility-dialog share-dialog" id="share-dialog" aria-labelledby="share-title">
+    <div class="dialog-shell dialog-shell-wide">
+      <header class="dialog-head">
+        <div><span class="dialog-kicker">Owner controls</span><h2 id="share-title">Share this work</h2></div>
+        <button class="icon-button" type="button" data-action="close-share" aria-label="Close sharing window"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+      </header>
+      <div class="dialog-body">
+        <p class="dialog-lead">Choose who can open this work and what they can do, like sharing a document.</p>
+        <form id="share-form" class="share-form">
+          <fieldset class="share-modes">
+            <legend>Access</legend>
+            <label><input type="radio" name="share-mode" value="restricted" checked><span><strong>Restricted</strong><small>Owner only</small></span></label>
+            <label><input type="radio" name="share-mode" value="link"><span><strong>Anyone with the link</strong><small>Unlisted access</small></span></label>
+            <label><input type="radio" name="share-mode" value="published"><span><strong>Publish</strong><small>Public result or web copy</small></span></label>
+          </fieldset>
+          <div class="owner-boundary" id="share-people-field"><strong>Named invitations are not connected yet.</strong><span>Mini Frank will not pretend an email invitation was sent. Use a revocable link for now, or keep the project restricted to you.</span></div>
+          <div class="share-settings">
+            <div class="field-row"><label for="share-role">Role</label><select id="share-role" name="share-role"><option value="viewer">Can view</option><option value="commenter">Can comment</option><option value="editor">Can suggest changes</option></select></div>
+            <div class="field-row"><label for="share-scope">What is shared</label><select id="share-scope" name="share-scope"><option value="result">Current result</option><option value="project">Whole project</option></select></div>
+          </div>
+          <div class="owner-boundary"><strong>Sharing never grants spending or execution authority.</strong><span>Only the owner can approve paid work, deployment, integrations or actions in connected systems. Your private return link remains separate from every share.</span></div>
+          <p class="dialog-status" id="share-status" role="status" aria-live="polite">Loading sharing controls…</p>
+          <div class="dialog-actions"><button class="primary-button" id="share-submit" type="submit" disabled>Create share</button></div>
+        </form>
+        <section class="share-list-section" aria-labelledby="current-shares-title"><div class="subhead"><h3 id="current-shares-title">Current access</h3><button class="quiet-button" type="button" data-action="refresh-shares">Refresh</button></div><div class="share-list" id="share-list"></div></section>
+      </div>
+    </div>
+  </dialog>
+
+  <dialog class="utility-dialog self-host-dialog" id="self-host-dialog" aria-labelledby="self-host-title">
+    <div class="dialog-shell dialog-shell-guide">
+      <header class="dialog-head">
+        <div><span class="dialog-kicker">Free handover</span><h2 id="self-host-title">Self-host this result</h2></div>
+        <button class="icon-button" type="button" data-action="close-self-host" aria-label="Close self-hosting guide"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+      </header>
+      <div class="dialog-body self-host-body" id="self-host-content"></div>
+      <footer class="dialog-foot"><p>The guide is yours to use for free. Hands-on help is optional.</p><div class="dialog-actions"><button class="quiet-button" type="button" data-action="close-self-host">Use the guide myself</button><button class="primary-button" type="button" data-action="open-service">Get hands-on help</button></div></footer>
+    </div>
+  </dialog>
+
+  <dialog class="utility-dialog service-dialog" id="service-dialog" aria-labelledby="service-title">
+    <div class="dialog-shell">
+      <header class="dialog-head">
+        <div><span class="dialog-kicker">Optional hands-on work</span><h2 id="service-title">How would you like help?</h2></div>
+        <button class="icon-button" type="button" data-action="close-service" aria-label="Close service options"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="m7 7 10 10M17 7 7 17"/></svg></button>
+      </header>
+      <form id="service-form" class="dialog-body">
+        <p class="dialog-lead">Review what Mini Frank will send before anything leaves this project. Availability and any cost must come from Frank; this page does not guess them.</p>
+        <fieldset class="service-choices">
+          <legend>Choose a next step</legend>
+          <label><input type="radio" name="service-mode" value="self_host_help"><span><strong>Help me follow the guide</strong><small>Save the exact part of the free guide you want help with.</small></span></label>
+          <label><input type="radio" name="service-mode" value="managed_hosting"><span><strong>Frank hosts it</strong><small>Ask for hosting, monitoring, updates and recovery to be scoped.</small></span></label>
+          <label><input type="radio" name="service-mode" value="video_call"><span><strong>Video call</strong><small>Work through the implementation together.</small></span></label>
+          <label><input type="radio" name="service-mode" value="perth_visit"><span><strong>Face to face in Perth</strong><small>Review the workflow where the work happens.</small></span></label>
+          <label><input type="radio" name="service-mode" value="custom_project"><span><strong>Written scope</strong><small>Get a reviewed implementation or hosting proposal.</small></span></label>
+          <label><input type="radio" name="service-mode" value="not_now"><span><strong>Not now</strong><small>Keep using Mini Frank for free.</small></span></label>
+        </fieldset>
+        <div class="field-row">
+          <label for="service-contact-value">How should Frank contact you?</label>
+          <div class="contact-fields">
+            <select id="service-contact-method" name="service-contact-method" aria-label="Contact method" aria-describedby="service-contact-notice" required>
+              <option value="">Choose a method</option>
+              <option value="email">Email</option>
+              <option value="phone">Phone</option>
+              <option value="whatsapp">WhatsApp</option>
+              <option value="other">Other</option>
+            </select>
+            <input id="service-contact-value" name="service-contact-value" maxlength="200" autocomplete="email" placeholder="Email address or phone number" aria-describedby="service-contact-notice" required>
+          </div>
+          <small id="service-contact-notice">Saved privately for operator review. Do not include passwords, access keys or other secrets. Frank has not contacted you yet.</small>
+        </div>
+        <div class="field-row"><label for="service-handoff">Review the handoff</label><textarea id="service-handoff" name="service-handoff" rows="7" maxlength="2000" placeholder="Frank has not supplied a handoff summary yet."></textarea><small>Edit or remove anything you do not want to send.</small></div>
+        <p class="dialog-status" id="service-status" role="status" aria-live="polite">Review the request before saving it to this project.</p>
+        <div class="dialog-actions"><button class="quiet-button" type="button" data-action="close-service">Not now</button><button class="primary-button" id="service-submit" type="submit" disabled>Save reviewed request</button></div>
+      </form>
     </div>
   </dialog>
 

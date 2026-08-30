@@ -33,6 +33,7 @@ COPY apps/window/home_defaults.py .
 COPY apps/window/home_providers.py .
 COPY apps/window/memory_inspector.py .
 COPY apps/window/mini_frank.py .
+COPY apps/window/mini ./mini
 COPY apps/window/connections_agent.py .
 COPY apps/window/provider_adapters.py .
 COPY apps/window/vault_broker.py .

@@ -38,7 +38,7 @@ from graph.provider import (
 from tool_apps import discover_tool_apps
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
-FRANK_PUBLIC_ASSETS = {
+MINI_PUBLIC_ASSETS = {
     "style.css": "mini.css",
     "app.js": "mini.js",
     "stream.mjs": "mini_stream.mjs",
@@ -46,13 +46,17 @@ FRANK_PUBLIC_ASSETS = {
     "site-preview.html": "site-preview.html",
     "site-preview.css": "site-preview.css",
     "site-preview.js": "site-preview.js",
+    "favicon.svg": "favicon.svg",
     "assets/demo-business-hero.png": "assets/demo-business-hero.png",
 }
+MINI_PUBLIC_FILE = re.compile(
+    r"(?:[A-Za-z0-9][A-Za-z0-9._-]*/)*[A-Za-z0-9][A-Za-z0-9._-]*\.(?:css|js|mjs|svg|png|webp|woff2)"
+)
 LEGACY_MINI_ASSETS = {
-    "mini.css": "style.css",
-    "mini.js": "app.js",
-    "mini_stream.mjs": "stream.mjs",
-    "mini_api.mjs": "api.mjs",
+    "mini.css": "mini.css",
+    "mini.js": "mini.js",
+    "mini_stream.mjs": "mini_stream.mjs",
+    "mini_api.mjs": "mini_api.mjs",
 }
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 UPLOAD_DIR = CHAT_DIR / "uploads"
@@ -1780,41 +1784,61 @@ app.register_blueprint(mini_frank.create_blueprint(
 ))
 
 
-@app.get("/frank")
-def frank_root_redirect():
-    target = "/frank/"
+@app.get("/mini-frank")
+def mini_frank_root_redirect():
+    return _mini_redirect("/mini-frank/")
+
+
+def _mini_redirect(target: str):
     if request.query_string:
         target = f"{target}?{request.query_string.decode('latin-1')}"
     return redirect(target, code=308)
 
 
-@app.get("/frank/", defaults={"frank_path": ""})
-@app.get("/frank/<path:frank_path>")
-def frank_spa(frank_path: str):
-    public_path = str(frank_path or "").strip("/")
+def _mini_legacy_target(legacy_path: str, aliases: dict[str, str] | None = None) -> str:
+    public_path = str(legacy_path or "").strip("/")
+    if public_path in {"", "index.html"}:
+        return "/mini-frank/"
+    public_path = (aliases or {}).get(public_path, public_path)
+    segments = public_path.split("/")
+    if any(not segment or segment in {".", ".."} for segment in segments):
+        abort(404)
+    encoded = "/".join(urllib.parse.quote(segment, safe="-._~") for segment in segments)
+    return f"/mini-frank/{encoded}"
+
+
+@app.get("/mini-frank/", defaults={"mini_frank_path": ""})
+@app.get("/mini-frank/<path:mini_frank_path>")
+def mini_frank_spa(mini_frank_path: str):
+    public_path = str(mini_frank_path or "").strip("/")
     if public_path == "":
         return send_from_directory(WEB / "mini", "index.html")
     if public_path == "index.html":
-        return redirect("/frank/", code=308)
-    source_name = FRANK_PUBLIC_ASSETS.get(public_path)
-    if not source_name:
+        return _mini_redirect("/mini-frank/")
+    source_name = MINI_PUBLIC_ASSETS.get(public_path, public_path)
+    if public_path not in MINI_PUBLIC_ASSETS and not MINI_PUBLIC_FILE.fullmatch(source_name):
         abort(404)
-    return send_from_directory(WEB / "mini", source_name)
+    root = (WEB / "mini").resolve()
+    candidate = (root / source_name).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        abort(404)
+    if not candidate.is_file():
+        abort(404)
+    return send_from_directory(root, source_name)
+
+
+@app.get("/frank", defaults={"frank_path": ""}, strict_slashes=False)
+@app.get("/frank/<path:frank_path>")
+def frank_legacy_redirect(frank_path: str):
+    return _mini_redirect(_mini_legacy_target(frank_path))
 
 
 @app.get("/mini", defaults={"mini_path": ""}, strict_slashes=False)
 @app.get("/mini/<path:mini_path>")
 def mini_legacy_redirect(mini_path: str):
-    legacy_path = str(mini_path or "").strip("/")
-    if legacy_path in {"", "index.html"}:
-        target = "/frank/"
-    elif legacy_path in LEGACY_MINI_ASSETS:
-        target = f"/frank/{LEGACY_MINI_ASSETS[legacy_path]}"
-    else:
-        abort(404)
-    if request.query_string:
-        target = f"{target}?{request.query_string.decode('latin-1')}"
-    return redirect(target, code=308)
+    return _mini_redirect(_mini_legacy_target(mini_path, LEGACY_MINI_ASSETS))
 
 
 @app.get("/", defaults={"path": ""})

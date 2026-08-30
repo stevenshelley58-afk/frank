@@ -1,9 +1,10 @@
 # Memory contract
 
-Hermes owns memory. Hindsight is the single external semantic memory provider;
-Hermes' built-in `MEMORY.md` and `USER.md` remain active alongside it. Frank is
-only the Window: it forwards chat and renders Hermes' answers and status. Frank
-does not own a memory database, extraction worker, provider API, or agent loop.
+Hermes owns memory use. Hindsight is the single external semantic memory
+service; Hermes' built-in `MEMORY.md` and `USER.md` remain active alongside it.
+Frank supplies deterministic scope and consent metadata, forwards work, and
+renders Hermes' answers and status. It does not own a second memory database,
+extraction worker, provider API, or agent loop.
 
 ## Identity and isolation
 
@@ -22,10 +23,48 @@ The native provider uses:
 }
 ```
 
-This produces one isolated bank per project (`steven-frank`,
-`steven-blockwise`, and so on). Session IDs are document lineage, not bank
-identity. Unassigned sessions use `steven-unassigned`; they do not silently
-write to a project bank.
+For ordinary project workspaces this produces one isolated bank per project
+(`steven-frank`, `steven-blockwise`, and so on). Session IDs are document
+lineage, not bank identity. Unassigned sessions use `steven-unassigned`; they
+do not silently write to a project bank.
+
+Mini Frank is one Frank project with subordinate customer scopes, not one
+project or bank shared by every customer. Its logical hierarchy is:
+
+```text
+project:mini-frank
+├── account:mini-frank/<account-id>          private customer context
+└── job:mini-frank/<account-id>/<job-id>     private job context and outcomes
+```
+
+Frank passes the exact account/job scope with the Hermes request. Hermes maps
+that scope to the corresponding private Hindsight namespace. A missing or
+unavailable private scope fails closed; it never falls back to another account
+or searches all Mini customer memory.
+
+## Reusable industry knowledge
+
+Hindsight also holds centrally approved industry knowledge, for example an
+`industry/med-spa` scope. This is not a customer-memory pool. It contains only
+sanitised, reusable knowledge with industry tags, source provenance,
+confidence, reviewed/expiry dates, and status such as candidate, approved,
+superseded, deprecated, or retracted.
+
+Useful research or outcomes from a private Mini job may become a candidate,
+but promotion is a separate deterministic admission step. Public-source facts
+may be approved under the central policy. Customer-derived, uncertain, or
+potentially identifying material requires operator review. Customer names,
+contacts, credentials, files, private URLs, performance figures, strategies,
+health information, chat excerpts, and recognisable artifacts must never enter
+the shared industry scope.
+
+Hermes retrieves Mini context in this order: exact job, owning account, Mini
+project guidance, then approved industry knowledge. If approved med-spa
+knowledge is current, a later med-spa project reuses it and researches only
+missing or stale areas. Private customer facts always stay in their original
+scope, and project files or explicit customer corrections override recalled
+knowledge. Hindsight content is untrusted context; it cannot grant tool,
+permission, consent, publication, or payment authority.
 
 ## Runtime flow
 
@@ -33,8 +72,9 @@ write to a project bank.
    workspace.
 2. Hermes supplies the profile, workspace slug, platform, and session context
    to its bundled provider.
-3. Hindsight resolves the project bank, recalls relevant durable context before
-   the turn, and offers explicit retain, recall, and reflect tools.
+3. Hindsight resolves the exact private scope, recalls relevant durable context
+   and any separately approved industry knowledge before the turn, and offers
+   explicit retain, recall, and reflect tools.
 4. Hermes retains completed turns asynchronously and keeps its small built-in
    memory files active for high-value operator preferences.
 5. Frank's project Memory inspector reads the native Hindsight API through a
@@ -53,10 +93,12 @@ those same paths according to Unix permissions. Desktop coding agents use the
 same Git repositories and can connect to the same Hindsight API when an
 authenticated endpoint or SSH tunnel is deliberately configured.
 
-For Codex, use Hindsight's maintained coding-agent integration and configure
-one bank per repository. Its derived bank must equal the Hermes name
-`steven-<slug>`; do not include the client name in the bank identity. This lets
-Codex and Hermes share project memory without sharing sessions or profiles.
+For Codex working on an ordinary repository, use Hindsight's maintained
+coding-agent integration and configure one bank per repository. Its derived
+bank must equal the Hermes name `steven-<slug>`. Mini customer accounts and
+jobs are not repositories, so coding clients must use the explicit Mini scope
+assigned by Frank rather than inventing a bank name. This lets Codex and Hermes
+share authorised project memory without sharing sessions or profiles.
 
 ## Frank project knowledge view
 

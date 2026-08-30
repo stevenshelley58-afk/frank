@@ -29,8 +29,39 @@ from html.parser import HTMLParser
 from pathlib import Path
 from typing import Callable
 
-from flask import Blueprint, Response, abort, current_app, jsonify, request, stream_with_context
+from flask import Blueprint, Response, abort, current_app, jsonify, request, send_file, stream_with_context
 from werkzeug.exceptions import HTTPException
+
+from mini import (
+    RESULT_SUPPORT_FIELDS,
+    INDUSTRY_CANDIDATES_SCHEMA,
+    account_claim_token,
+    add_comment,
+    append_audit,
+    binding_receipt,
+    build_result_support,
+    create_service_request,
+    create_share,
+    derive_legacy_account_id,
+    find_share,
+    industry_candidate_prompt,
+    knowledge_binding,
+    new_account_id,
+    owner_comments,
+    owner_sharing,
+    published_projection,
+    quality_projection,
+    reject_client_scope_fields,
+    result_support_prompt,
+    revoke_share,
+    rotate_share,
+    share_projection,
+    shared_comments,
+    update_sharing,
+    validate_industry_candidates,
+    verify_account_claim,
+)
+from mini.product import CONTACT_METHODS, ProductCapacity, ProductConflict, ProductValidation
 
 
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9_-]{8,80}$")
@@ -45,7 +76,7 @@ RESULT_FIELDS = {
 RESULT_V2_FIELDS = {
     "schema", "job_id", "revision", "result_type", "title", "summary", "artifacts", "details_url",
 }
-RESULT_V2_OPTIONAL_FIELDS = {"checks", "limitations"}
+RESULT_V2_OPTIONAL_FIELDS = {"checks", "limitations"} | RESULT_SUPPORT_FIELDS
 MAX_RESULT_ARTIFACTS = 12
 MAX_PUBLISHED_FILES = 500
 MAX_PUBLISHED_FILE_BYTES = 50 * 1024 * 1024
@@ -247,6 +278,10 @@ GUIDE_TOTAL_TIMEOUT_SECONDS = 90
 INTAKE_DRAFT_TTL_SECONDS = 48 * 60 * 60
 JOB_TTL_SECONDS = 30 * 24 * 60 * 60
 RATE_WINDOW_SECONDS = 24 * 60 * 60
+INTAKE_CREATE_RATE_LIMIT = 40
+GUIDE_TURN_RATE_LIMIT = 80
+BUILD_START_RATE_LIMIT = 20
+SHARED_COMMENT_RATE_LIMIT = 40
 ATTACHMENT_EXTENSIONS = (
     ".pdf", ".doc", ".docx", ".xls", ".xlsx", ".csv", ".txt",
     ".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".tif", ".tiff",
@@ -562,22 +597,35 @@ class MiniFrankStore:
                 self._save_locked(jobs)
         return migrated
 
-    def create(self, job: dict, *, project_limit: int) -> None:
+    def create(
+        self,
+        job: dict,
+        *,
+        project_limit: int,
+        admission: Callable[[], Callable[[], None]] | None = None,
+    ) -> None:
         with self.lock:
             jobs = self._load_locked()
             if job["id"] not in jobs and len(jobs) >= self.max_records:
                 raise MiniFrankStorageFull("Mini Frank has reached its active work limit")
             now = int(time.time())
-            same_requester = sum(
+            same_account = sum(
                 1 for item in jobs.values()
-                if item.get("requester_hash") == job["requester_hash"]
-                and item.get("stage") != "expired_cleanup_pending"
+                if job.get("account_id")
+                and item.get("account_id") == job.get("account_id")
+                and item.get("stage") in ACTIVE_STAGES
                 and int(item.get("expires_at") or 0) > now
             )
-            if same_requester >= max(1, int(project_limit)):
+            if same_account >= max(1, int(project_limit)):
                 raise MiniFrankProjectLimit
-            jobs[job["id"]] = job
-            self._save_locked(jobs)
+            rollback = admission() if admission is not None else None
+            try:
+                jobs[job["id"]] = job
+                self._save_locked(jobs)
+            except Exception:
+                if rollback is not None:
+                    rollback()
+                raise
 
     def update(self, item_id: str, **changes) -> dict:
         with self.lock:
@@ -748,6 +796,51 @@ class MiniFrankRateLedger:
             self._save_locked(retained)
             return True
 
+    def retry_after(
+        self,
+        requester_hash: str,
+        kind: str,
+        *,
+        limit: int,
+        now: int | None = None,
+    ) -> int:
+        """Return a conservative second count until one matching slot expires."""
+        requester_hash = str(requester_hash or "").strip()
+        kind = str(kind or "").strip()
+        limit = max(1, int(limit))
+        timestamp = int(time.time()) if now is None else int(now)
+        cutoff = timestamp - self.window_seconds
+        with self.lock:
+            matching = sorted(
+                int(event["created_at"])
+                for event in self._load_locked()
+                if int(event["created_at"]) >= cutoff
+                and event["requester_hash"] == requester_hash
+                and event["kind"] == kind
+            )
+        if len(matching) < limit:
+            return 1
+        return max(1, matching[-limit] + self.window_seconds - timestamp + 1)
+
+    def rollback_record(self, requester_hash: str, kind: str, *, created_at: int) -> bool:
+        """Undo one uncommitted admission; successful/deleted work is never refunded."""
+        requester_hash = str(requester_hash or "").strip()
+        kind = str(kind or "").strip()
+        timestamp = int(created_at)
+        with self.lock:
+            loaded = self._load_locked()
+            for index in range(len(loaded) - 1, -1, -1):
+                event = loaded[index]
+                if (
+                    event["requester_hash"] == requester_hash
+                    and event["kind"] == kind
+                    and int(event["created_at"]) == timestamp
+                ):
+                    del loaded[index]
+                    self._save_locked(loaded)
+                    return True
+        return False
+
 
 class MiniFrankTelemetry:
     """Bounded, privacy-safe operational counters for the Mini transport.
@@ -794,6 +887,15 @@ class MiniFrankStorageFull(RuntimeError):
 
 class MiniFrankProjectLimit(RuntimeError):
     """The anonymous customer already has the free active build project."""
+
+
+class MiniFrankRateLimited(RuntimeError):
+    """A privacy-safe free fair-use window rejected one anonymous event."""
+
+    def __init__(self, kind: str, retry_after: int):
+        super().__init__(kind)
+        self.kind = str(kind or "request")
+        self.retry_after = max(1, int(retry_after))
 
 
 class MiniFrankStorageFence:
@@ -1419,7 +1521,6 @@ def _hermes_attachment_path(hermes_data_root: Path, storage_rel: str) -> str:
 def _build_prompt(
     job: dict,
     change: str = "",
-    customer_link: str = "",
     hermes_data_root: Path = Path("/srv/frank/data/window"),
 ) -> str:
     public_dir = "/workspace/public"
@@ -1459,6 +1560,11 @@ def _build_prompt(
             + json.dumps(attachments, ensure_ascii=False, separators=(",", ":"))
         )
     brief_text = "\n".join(brief)
+    central_binding = binding_receipt()
+    item_knowledge = knowledge_binding(str(job.get("account_id") or ""), str(job.get("id") or ""))
+    hermes_knowledge = {
+        key: value for key, value in item_knowledge.items() if key != "account_id"
+    }
     return f"""Build the finished result for this customer. This is revision {int(job.get('revision') or 1)}.
 
 {brief_text}
@@ -1471,7 +1577,17 @@ The customer owns the result. Keep technical detail optional. Do not expose priv
 
 Publish a browser-ready result, when useful, to {public_dir}/index.html. Hosted previews are deliberately static and offline: use no JavaScript, forms, frames, SVG, external URLs, meta redirects, popups, or navigable links other than page anchors and files under downloads/. Use plain HTML/CSS and passive local or data assets. If the solution needs program logic, put its rebuildable source in a ZIP download and make the hosted page a useful no-script guide or preview. Put customer downloads under {public_dir}/downloads/ using a plain safe filename. Put concise, customer-readable build notes at {public_dir}/build-notes.txt. Never copy the private attachment directory into public.
 
-As the final operation, atomically write {source_dir}/result.json using schema {RESULT_SCHEMA_V2}. Include schema, job_id, revision, result_type, title, summary, artifacts, and details_url; checks and limitations are optional bounded customer-facing lists or label/value maps. job_id must be {job['id']} and revision must be {int(job.get('revision') or 1)}. result_type must be interactive, download, or combined and must agree with the artifact kinds. artifacts must contain 1 to {MAX_RESULT_ARTIFACTS} entries, each with exactly kind, label, and url, plus optional media_type. kind is interactive or download. Use {PREVIEW_PREFIX}{job['id']}/ for the main interactive artifact, and put downloads at {PREVIEW_PREFIX}{job['id']}/downloads/<safe filename>. Multiple downloads are allowed when they are genuinely useful. details_url must be exactly {PREVIEW_PREFIX}{job['id']}/build-notes.txt. Do not include null fields, extra fields, private paths, or internal notes. Keep title under 100 characters, artifact labels under 80 characters, summary to two concise customer-facing sentences, and each check or limitation under 240 characters with no more than 20 entries.
+As the final operation, atomically write {source_dir}/result.json using schema {RESULT_SCHEMA_V2}. Include schema, job_id, revision, result_type, title, summary, artifacts, and details_url; checks, limitations, guidance, and self_host are optional. job_id must be {job['id']} and revision must be {int(job.get('revision') or 1)}. result_type must be interactive, download, or combined and must agree with the artifact kinds. artifacts must contain 1 to {MAX_RESULT_ARTIFACTS} entries, each with exactly kind, label, and url, plus optional media_type. kind is interactive or download. Use {PREVIEW_PREFIX}{job['id']}/ for the main interactive artifact, and put downloads at {PREVIEW_PREFIX}{job['id']}/downloads/<safe filename>. Multiple downloads are allowed when they are genuinely useful. details_url must be exactly {PREVIEW_PREFIX}{job['id']}/build-notes.txt. Do not include null fields, extra fields, private paths, or internal notes. Keep title under 100 characters, artifact labels under 80 characters, summary to two concise customer-facing sentences, and each check or limitation under 240 characters with no more than 20 entries.
+
+Frank central binding receipt (server-owned references, not copied capability bodies):
+{json.dumps(central_binding, ensure_ascii=False, separators=(',', ':'))}
+
+Knowledge binding for this job (server-owned):
+{json.dumps(hermes_knowledge, ensure_ascii=False, separators=(',', ':'))}
+
+{result_support_prompt()}
+
+{industry_candidate_prompt()}
 
 Do not write result.json until every listed artifact exists and has passed the checks you record in build-notes.txt. Do not send messages or email; Frank owns delivery."""
 
@@ -1500,6 +1616,12 @@ def create_blueprint(
     max_intake_store_bytes: int = MINI_INTAKE_STORE_MAX_BYTES,
     max_rate_store_bytes: int = MINI_RATE_STORE_MAX_BYTES,
     metadata_write_margin_bytes: int | None = None,
+    tip_provider_url: str | None = None,
+    intake_create_rate_limit: int = INTAKE_CREATE_RATE_LIMIT,
+    guide_turn_rate_limit: int = GUIDE_TURN_RATE_LIMIT,
+    build_start_rate_limit: int = BUILD_START_RATE_LIMIT,
+    shared_comment_rate_limit: int = SHARED_COMMENT_RATE_LIMIT,
+    rate_window_seconds: int = RATE_WINDOW_SECONDS,
 ) -> Blueprint:
     blueprint = Blueprint("mini_frank", __name__)
     max_job_store_bytes = max(2, int(max_job_store_bytes))
@@ -1545,6 +1667,7 @@ def create_blueprint(
     )
     rate_ledger = MiniFrankRateLedger(
         metadata_root / "rate-events.json",
+        window_seconds=max(1, int(rate_window_seconds)),
         max_events=max_rate_events,
         max_serialized_bytes=max_rate_store_bytes,
     )
@@ -1596,10 +1719,79 @@ def create_blueprint(
     rate_ledger.set_write_reservation(metadata_write_reservation)
     store.migrate_legacy_expiry(ttl_seconds=JOB_TTL_SECONDS)
     rate_key = (rate_limit_key or secrets.token_urlsafe(32)).encode("utf-8")
+    configured_tip_url = str(
+        tip_provider_url
+        if tip_provider_url is not None
+        else os.environ.get("MINI_TIP_PROVIDER_URL", "")
+    ).strip()
+    parsed_tip_url = urllib.parse.urlsplit(configured_tip_url) if configured_tip_url else None
+    if (
+        parsed_tip_url is None
+        or parsed_tip_url.scheme != "https"
+        or not parsed_tip_url.netloc
+        or parsed_tip_url.username is not None
+        or parsed_tip_url.password is not None
+        or len(configured_tip_url) > 2048
+    ):
+        configured_tip_url = ""
+
+    # One-time additive migration for records created before Mini gained a
+    # server-derived account hierarchy.  IDs are derived from existing secret
+    # hashes so restarts are stable, and linked intake/job records share the
+    # same account.  Existing binding pins are intentionally never rewritten.
+    for snapshot in store.list_items():
+        changes: dict[str, object] = {}
+        account_id = str(snapshot.get("account_id") or "")
+        if not account_id:
+            account_id = derive_legacy_account_id(snapshot, rate_key)
+            changes["account_id"] = account_id
+        if not isinstance(snapshot.get("binding_receipt"), dict):
+            changes["binding_receipt"] = binding_receipt()
+        if not isinstance(snapshot.get("knowledge_binding"), dict):
+            changes["knowledge_binding"] = knowledge_binding(account_id, str(snapshot.get("id") or ""))
+        legacy_create_key = str(snapshot.get("create_idempotency_key") or "")
+        if legacy_create_key:
+            changes["create_idempotency_hash"] = hmac.new(
+                rate_key,
+                f"mini-create-replay:{legacy_create_key}".encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            changes["create_idempotency_key"] = ""
+            changes["create_account_claim_required"] = True
+        if changes:
+            store.update(str(snapshot["id"]), **changes)
+    for snapshot in intake_store.list_items():
+        changes = {}
+        account_id = str(snapshot.get("account_id") or "")
+        linked_job = store.get(str(snapshot.get("job_id") or "")) if snapshot.get("job_id") else None
+        if not account_id:
+            account_id = (
+                str((linked_job or {}).get("account_id") or "")
+                or derive_legacy_account_id(snapshot, rate_key)
+            )
+            changes["account_id"] = account_id
+        if not isinstance(snapshot.get("binding_receipt"), dict):
+            changes["binding_receipt"] = binding_receipt()
+        if not isinstance(snapshot.get("knowledge_binding"), dict):
+            changes["knowledge_binding"] = knowledge_binding(
+                account_id, intake_id=str(snapshot.get("id") or "")
+            )
+        legacy_create_key = str(snapshot.get("create_idempotency_key") or "")
+        if legacy_create_key:
+            changes["create_idempotency_hash"] = hmac.new(
+                rate_key,
+                f"mini-create-replay:{legacy_create_key}".encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            changes["create_idempotency_key"] = ""
+            changes["create_account_claim_required"] = True
+        if changes:
+            intake_store.update(str(snapshot["id"]), **changes)
     dispatch_locks: dict[str, threading.RLock] = {}
     dispatch_locks_guard = threading.Lock()
     guide_slots = threading.BoundedSemaphore(GUIDE_STREAM_LIMIT)
     active_guides: set[str] = set()
+    active_guide_requesters: set[str] = set()
     active_guides_lock = threading.Lock()
     reconcile_delay = max(0.25, min(60.0, float(reconcile_interval_seconds)))
 
@@ -1636,13 +1828,50 @@ def create_blueprint(
     def project_limit_error(_error: MiniFrankProjectLimit):
         return jsonify({
             "error": (
-                "Keep chatting and refining your plan. Your free plan includes one active "
-                "build project; building more projects is a paid feature."
+                "Keep chatting and refining your plan. Mini Frank keeps one project actively "
+                "building at a time for fair use. When it is ready, your next project is free too."
             ),
             "code": "project_limit_reached",
             "project_limit": max(1, int(free_project_limit)),
-            "additional_projects": "paid",
-        }), 402
+            "additional_projects": "free_after_current_build",
+        }), 429
+
+    @blueprint.errorhandler(MiniFrankRateLimited)
+    def fair_use_limit_error(error: MiniFrankRateLimited):
+        busy = error.kind in {"guide_busy", "guide_requester_busy"}
+        response = jsonify({
+            "error": (
+                "Frank is answering the maximum number of requests just now. Your work is safe; "
+                "try again shortly."
+                if busy
+                else "Mini Frank is still free. This device or network has reached a generous "
+                "fair-use limit for now; try again after the window resets."
+            ),
+            "code": "temporarily_busy" if busy else "fair_use_limit_reached",
+            "fair_use": True,
+            "everything_remains_free": True,
+        })
+        response.status_code = 429
+        response.headers["Retry-After"] = str(error.retry_after)
+        return response
+
+    @blueprint.errorhandler(ProductValidation)
+    def product_validation_error(error: ProductValidation):
+        return jsonify({"error": str(error) or "Mini Frank product request is invalid."}), 400
+
+    @blueprint.errorhandler(ProductConflict)
+    def product_conflict_error(error: ProductConflict):
+        return jsonify({
+            "error": str(error) or "This Mini Frank record changed.",
+            "code": "version_conflict",
+        }), 409
+
+    @blueprint.errorhandler(ProductCapacity)
+    def product_capacity_error(error: ProductCapacity):
+        return jsonify({
+            "error": str(error) or "This Mini Frank resource is at its safe capacity.",
+            "code": "comment_capacity_reached",
+        }), 507
 
     @blueprint.errorhandler(Exception)
     def unexpected_api_error(error: Exception):
@@ -1657,9 +1886,43 @@ def create_blueprint(
             abort(400, "Request body must be a JSON object.")
         return body
 
+    def reject_client_scope(body: dict) -> None:
+        forbidden = reject_client_scope_fields(body)
+        if forbidden:
+            abort(400, "Account, project, job, memory and capability scopes are assigned by Frank.")
+
+    def account_for_create() -> str:
+        raw = str(request.headers.get("X-Mini-Account-Claim") or "").strip()
+        if not raw:
+            return new_account_id()
+        account_id = verify_account_claim(raw, rate_key)
+        if not account_id:
+            abort(404)
+        return account_id
+
     def requester_hash() -> str:
         address = str(request.headers.get("X-Real-IP") or request.remote_addr or "unknown")
         return hmac.new(rate_key, address.encode("utf-8"), hashlib.sha256).hexdigest()
+
+    def require_fair_use(owner_hash: str, kind: str, limit: int) -> Callable[[], None]:
+        now = int(time.time())
+        bounded_limit = max(1, int(limit))
+        if rate_ledger.try_record(owner_hash, kind, limit=bounded_limit, now=now):
+            rolled_back = threading.Event()
+
+            def rollback() -> None:
+                if rolled_back.is_set():
+                    return
+                rolled_back.set()
+                rate_ledger.rollback_record(owner_hash, kind, created_at=now)
+
+            return rollback
+        raise MiniFrankRateLimited(
+            kind,
+            rate_ledger.retry_after(
+                owner_hash, kind, limit=bounded_limit, now=now
+            ),
+        )
 
     def classify_failure(error: Exception, *, operation: str) -> str:
         """Map transport failures to stable customer-safe categories."""
@@ -1697,6 +1960,31 @@ def create_blueprint(
         if not IDEMPOTENCY_KEY_RE.fullmatch(raw):
             abort(400, "Idempotency-Key must be a short token.")
         return raw
+
+    def create_idempotency_key() -> str:
+        """Return the redacted high-entropy bearer used for create replay.
+
+        Create responses contain durable owner/account capabilities. A short,
+        guessable key combined with a shared office/NAT address must never be
+        enough to replay those capabilities.
+        """
+        raw = idempotency_key()
+        significant = raw.replace("-", "").replace("_", "")
+        if raw and (len(raw) < 32 or len(set(significant)) < 10):
+            abort(
+                400,
+                "Create Idempotency-Key must be a high-entropy URL-safe value of at least 32 characters.",
+            )
+        return raw
+
+    def create_idempotency_hash(raw: str) -> str:
+        if not raw:
+            return ""
+        return hmac.new(
+            rate_key,
+            f"mini-create-replay:{raw}".encode("utf-8"),
+            hashlib.sha256,
+        ).hexdigest()
 
     def change_fingerprint(change: str, attachment_ids: list[str]) -> str:
         value = json.dumps(
@@ -1775,6 +2063,7 @@ def create_blueprint(
         conversation = intake.get("conversation") if isinstance(intake.get("conversation"), list) else []
         return {
             "id": intake["id"],
+            "account_id": str(intake.get("account_id") or ""),
             "status": str(intake.get("status") or "draft"),
             "conversation": conversation,
             "attachments": attachments,
@@ -1784,6 +2073,19 @@ def create_blueprint(
             "job_id": str(intake.get("job_id") or ""),
             "guide_status": str(intake.get("guide_status") or "idle"),
             "guide_resumable": str(intake.get("guide_status") or "") == "unavailable",
+            "binding_receipt": (
+                dict(intake.get("binding_receipt"))
+                if isinstance(intake.get("binding_receipt"), dict)
+                else binding_receipt()
+            ),
+            "knowledge_binding": (
+                dict(intake.get("knowledge_binding"))
+                if isinstance(intake.get("knowledge_binding"), dict)
+                else knowledge_binding(
+                    str(intake.get("account_id") or ""),
+                    intake_id=str(intake.get("id") or ""),
+                )
+            ),
         }
 
     def attachment_target(item: dict) -> Path:
@@ -1925,7 +2227,11 @@ def create_blueprint(
             except OSError as error:
                 raise RuntimeError("Mini Frank public result cannot be inspected") from error
             for entry in entries:
-                if entry.name in {"", ".", ".."} or "\x00" in entry.name:
+                if (
+                    entry.name in {"", ".", ".."}
+                    or entry.name.startswith(".")
+                    or "\x00" in entry.name
+                ):
                     raise RuntimeError("Mini Frank public result contains an unsafe name")
                 relative = relative_dir / entry.name
                 source = directory / entry.name
@@ -2418,10 +2724,18 @@ def create_blueprint(
 
     def public_job(job: dict) -> dict:
         result = job.get("result") if isinstance(job.get("result"), dict) else None
+        if result and (not isinstance(result.get("guidance"), dict) or not isinstance(result.get("self_host"), dict)):
+            result = dict(result)
+            guidance, self_host = build_result_support(
+                result, result.get("guidance"), result.get("self_host")
+            )
+            result["guidance"] = guidance
+            result["self_host"] = self_host
         attachments = [public_attachment(item) for item in job.get("attachments") or [] if isinstance(item, dict)]
         attempts = max(0, int(job.get("dispatch_attempts") or 0))
         response = {
             "id": job["id"],
+            "account_id": str(job.get("account_id") or ""),
             "title": (result or {}).get("title") or "Your solution",
             "problem": job["problem"],
             "stage": job["stage"],
@@ -2429,6 +2743,7 @@ def create_blueprint(
             "updated_at": job["updated_at"],
             "available_until": int(job.get("expires_at") or 0),
             "revision": int(job.get("revision") or 1),
+            "version": int(job.get("revision") or 1),
             "attachments": attachments,
             "attachment_count": len(attachments),
             "conversation": _clean_conversation(job.get("conversation")),
@@ -2436,6 +2751,34 @@ def create_blueprint(
             "retry_available": job.get("stage") == "needs_attention",
             "retry_reason": str(job.get("dispatch_error") or "") or None,
             "next_reconcile_at": int(job.get("next_reconcile_at") or 0),
+            "binding_receipt": (
+                dict(job.get("binding_receipt"))
+                if isinstance(job.get("binding_receipt"), dict)
+                else binding_receipt()
+            ),
+            "knowledge_binding": (
+                dict(job.get("knowledge_binding"))
+                if isinstance(job.get("knowledge_binding"), dict)
+                else knowledge_binding(str(job.get("account_id") or ""), str(job.get("id") or ""))
+            ),
+            "industry_candidate_receipt": (
+                dict(job.get("industry_candidate_receipt"))
+                if isinstance(job.get("industry_candidate_receipt"), dict)
+                else {
+                    "schema": INDUSTRY_CANDIDATES_SCHEMA,
+                    "status": "not_supplied",
+                    "promoted": False,
+                }
+            ),
+            "quality": quality_projection(job),
+            "sharing": owner_sharing(job),
+            "comments": owner_comments(job),
+            "comment_version": max(0, int(job.get("comment_version") or 0)),
+            "service_requests": [
+                public_service(item)
+                for item in (job.get("service_requests") or [])
+                if isinstance(item, dict)
+            ],
         }
         feedback = job.get("feedback")
         if isinstance(feedback, dict):
@@ -2449,6 +2792,8 @@ def create_blueprint(
             )
         if result and job.get("stage") == "ready":
             response["result"] = result
+            response["guidance"] = result.get("guidance")
+            response["self_host"] = result.get("self_host")
         return response
 
     def load_result(job: dict) -> dict | None:
@@ -2551,12 +2896,19 @@ def create_blueprint(
                 "artifacts": artifacts,
                 "details_url": details_url,
             }
-            for field in RESULT_V2_OPTIONAL_FIELDS:
+            for field in {"checks", "limitations"}:
                 if field in value:
                     details = _manifest_details(value[field])
                     if details is None:
                         return None
                     cleaned_result[field] = details
+            guidance, self_host = build_result_support(
+                cleaned_result,
+                value.get("guidance"),
+                value.get("self_host"),
+            )
+            cleaned_result["guidance"] = guidance
+            cleaned_result["self_host"] = self_host
             return cleaned_result
         if value.get("schema") != RESULT_SCHEMA or set(value) != RESULT_FIELDS:
             return None
@@ -2580,7 +2932,43 @@ def create_blueprint(
             "summary": summary,
             **expected_urls,
         }
+        guidance, self_host = build_result_support(cleaned)
+        cleaned["guidance"] = guidance
+        cleaned["self_host"] = self_host
         return cleaned
+
+    def industry_candidate_receipt(job: dict) -> dict:
+        """Validate Hermes' private handoff without promoting or exposing facts."""
+        workspace = workspace_for_job(str(job["id"]))
+        path = workspace / "industry-candidates.json"
+        if not path.exists():
+            return {
+                "schema": INDUSTRY_CANDIDATES_SCHEMA,
+                "status": "not_supplied",
+                "promoted": False,
+            }
+        try:
+            resolved = path.resolve(strict=True)
+            resolved.relative_to(workspace.resolve(strict=True))
+            if path.is_symlink() or not path.is_file() or path.stat().st_size > 256 * 1024:
+                raise RuntimeError("unsafe candidate artifact")
+            value = validate_industry_candidates(json.loads(path.read_text(encoding="utf-8")))
+        except (OSError, UnicodeError, ValueError, json.JSONDecodeError, RuntimeError):
+            value = None
+        if not value:
+            return {
+                "schema": INDUSTRY_CANDIDATES_SCHEMA,
+                "status": "rejected_invalid",
+                "promoted": False,
+            }
+        return {
+            "schema": INDUSTRY_CANDIDATES_SCHEMA,
+            "status": "captured_private",
+            "industry": str(value.get("industry") or ""),
+            "candidate_count": len(value.get("candidates") or []),
+            "promoted": False,
+            "adapter_seam": "HermesExecutionPort.knowledge_binding.shared_industry",
+        }
 
     def finalize_completed_result(job: dict) -> dict | None:
         """Validate/publish only after Hermes has quiesced the run sandbox."""
@@ -2605,13 +2993,25 @@ def create_blueprint(
             first_publish_for_revision = (
                 int(job.get("published_revision") or 0) != int(job.get("revision") or 1)
             )
+            ready_at = int(time.time())
+            audit = job.get("audit") or []
+            if first_publish_for_revision:
+                audit = append_audit(
+                    job,
+                    "result.ready",
+                    actor="system",
+                    created_at=ready_at,
+                    metadata={"revision": int(job.get("revision") or 1)},
+                )
             return store.update(
                 job["id"], stage="ready", result=result, dispatch_error="",
                 status_error="", next_reconcile_at=0,
                 pending_change="", checking_since=0, storage_reserved=False,
                 published_revision=int(job.get("revision") or 1),
+                audit=audit,
+                industry_candidate_receipt=industry_candidate_receipt(job),
                 expires_at=(
-                    int(time.time()) + JOB_TTL_SECONDS
+                    ready_at + JOB_TTL_SECONDS
                     if first_publish_for_revision else int(job.get("expires_at") or 0)
                 ),
             )
@@ -2871,8 +3271,7 @@ def create_blueprint(
                 "input": _build_prompt(
                     job,
                     change,
-                    f"https://frank.fail/frank/#project={job['id']}&key={_claim_token(job['id'], rate_key)}",
-                    hermes_data_root,
+                    hermes_data_root=hermes_data_root,
                 ),
                 "session_id": session_id,
                 "idempotency_key": (
@@ -2881,7 +3280,8 @@ def create_blueprint(
                 ),
                 "instructions": (
                     "Hermes is the sole brain and executor. Keep customer-facing copy plain, "
-                    "use commercially compatible open source first, and finish the working artifact."
+                    "use commercially compatible open source first, and finish the working artifact. "
+                    "Use only the bound private session memory. Shared industry promotion is unavailable."
                 ),
             }
             # Persist this admission before the HTTP request. If the response
@@ -2905,7 +3305,12 @@ def create_blueprint(
         intake_id: str = "",
         session_id: str = "",
         dispatch_now: bool = True,
+        account_id: str = "",
+        create_key_hash: str = "",
+        create_fingerprint: str = "",
+        create_account_claim_required: bool = False,
     ) -> tuple[dict, str]:
+        reject_client_scope(body)
         if "delivery" in body and str(body.get("delivery") or "free").strip().lower() != "free":
             abort(400, "Frank is free. Start the free solution instead.")
         clean_conversation = conversation if conversation is not None else _clean_conversation(body.get("conversation"))
@@ -2913,8 +3318,12 @@ def create_blueprint(
         now = int(time.time())
         job_id = secrets.token_urlsafe(9)
         token = _claim_token(job_id, rate_key)
+        account_id = str(account_id or account_for_create())
+        item_binding = binding_receipt()
+        item_knowledge = knowledge_binding(account_id, job_id)
         job = {
             "id": job_id,
+            "account_id": account_id,
             "claim_hash": _claim_hash(token),
             "requester_hash": owner_hash,
             "problem": _clean_text(problem_value, 6000, required=True),
@@ -2949,8 +3358,32 @@ def create_blueprint(
             "status_error": "",
             "feedback": None,
             "change_idempotency": [],
+            "binding_receipt": item_binding,
+            "knowledge_binding": item_knowledge,
+            "sharing": {
+                "mode": "restricted", "scope": "result", "role": "viewer",
+                "version": 1, "active_link": None, "published_at": 0,
+            },
+            "comments": [],
+            "comment_version": 0,
+            "service_requests": [],
+            "tip_intents": [],
+            "product_idempotency": [],
+            "create_idempotency_hash": str(create_key_hash or ""),
+            "create_fingerprint": str(create_fingerprint or ""),
+            "create_account_claim_required": bool(create_account_claim_required),
+            "audit": [{
+                "event": "job.created", "actor": "owner", "created_at": now,
+                "metadata": {"revision": 1},
+            }],
         }
-        store.create(job, project_limit=max(1, free_project_limit))
+        store.create(
+            job,
+            project_limit=max(1, free_project_limit),
+            admission=lambda: require_fair_use(
+                owner_hash, "build_start", build_start_rate_limit
+            ),
+        )
         if dispatch_now:
             try:
                 job = dispatch(job)
@@ -2966,14 +3399,236 @@ def create_blueprint(
         return job, token
 
     def job_response(job: dict, token: str = "") -> dict:
-        response = {"job": public_job(job)}
+        response = {"job": owner_job(job)}
         if token:
             response["claim_token"] = token
+            response["account_claim_token"] = account_claim_token(
+                str(job.get("account_id") or ""), rate_key
+            )
+            response["customer_url"] = (
+                f"/mini-frank/#project={urllib.parse.quote(str(job.get('id') or ''), safe='')}"
+                f"&key={urllib.parse.quote(token, safe='')}"
+            )
         return response
+
+    tip_copy = (
+        "Everything in Mini Frank is free. This is just a tip. If you like this app, "
+        "please leave a tip so we can keep it free. A tip does not unlock anything, "
+        "change your result, or give you priority."
+    )
+
+    def normalized_version_body(body: dict) -> dict:
+        value = dict(body)
+        if "expected_version" not in value and "base_version" in value:
+            value["expected_version"] = value["base_version"]
+        value.pop("base_version", None)
+        return value
+
+    def product_command(job: dict, action: str, body: dict, *, resource: str = "") -> tuple[str, str, dict | None]:
+        key = idempotency_key()
+        fingerprint = hashlib.sha256(json.dumps(
+            {"action": action, "resource": resource, "body": body},
+            ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        if not key:
+            return "", fingerprint, None
+        for raw in job.get("product_idempotency") or []:
+            if not isinstance(raw, dict) or raw.get("key") != key:
+                continue
+            if raw.get("action") != action or raw.get("fingerprint") != fingerprint:
+                raise ProductConflict("idempotency key changed")
+            response = raw.get("response")
+            if not isinstance(response, dict):
+                raise ProductConflict("idempotent response is unavailable")
+            return key, fingerprint, dict(response)
+        return key, fingerprint, None
+
+    def record_product_command(
+        job: dict, key: str, action: str, fingerprint: str, response: dict
+    ) -> list[dict]:
+        records = [dict(raw) for raw in job.get("product_idempotency") or [] if isinstance(raw, dict)]
+        if key:
+            # Round-trip through JSON so an endpoint can never retain a live
+            # mutable object or a non-serializable value in Frank's state.
+            records.append({
+                "key": key,
+                "action": action,
+                "fingerprint": fingerprint,
+                "response": json.loads(json.dumps(response, ensure_ascii=False)),
+                "created_at": int(time.time()),
+            })
+        return records[-100:]
+
+    def deterministic_intent_id(prefix: str, action: str, key: str, resource: str = "") -> str:
+        if not key:
+            return prefix + secrets.token_urlsafe(18)
+        digest = hmac.new(
+            rate_key,
+            f"mini-product:{action}:{resource}:{key}".encode("utf-8"),
+            hashlib.sha256,
+        ).digest()
+        return prefix + base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+    def public_service(item: dict) -> dict:
+        raw_contact = item.get("contact") if isinstance(item.get("contact"), dict) else None
+        contact = None
+        if raw_contact:
+            method = str(raw_contact.get("method") or "").strip().lower()
+            value = " ".join(str(raw_contact.get("value") or "").split()).strip()[:200]
+            if method in CONTACT_METHODS and value:
+                contact = {"method": method, "value": value}
+        status = str(item.get("status") or "saved_for_review")
+        if status == "pending_operator_review":
+            status = "saved_for_review"
+        return {
+            "id": str(item.get("id") or ""),
+            "kind": str(item.get("kind") or ""),
+            "status": status,
+            "owner_reviewed": bool(item.get("owner_reviewed")),
+            "note": str(item.get("note") or ""),
+            "contact": contact,
+            "created_at": int(item.get("created_at") or 0),
+            "updated_at": int(item.get("updated_at") or 0),
+            "price_status": str(item.get("price_status") or "scope_required"),
+            "notification_sent": False,
+            "execution_started": False,
+        }
+
+    def require_operator_attestation() -> None:
+        """Require Caddy's overwritten internal attestation and fail closed."""
+        expected = os.environ.get("FRANK_BASIC_AUTH_HASH", "").strip()
+        presented = request.headers.get("X-Frank-Operator-Attestation", "").strip()
+        if not expected:
+            abort(503, "The Mini Frank operator boundary is unavailable.")
+        if not presented:
+            abort(401, "Mini Frank operator authentication is required.")
+        if not hmac.compare_digest(expected, presented):
+            abort(403, "Mini Frank operator authentication was denied.")
+
+    def operator_service_projection(job: dict, item: dict) -> dict:
+        result = job.get("result") if isinstance(job.get("result"), dict) else {}
+        return {
+            "project": {"id": "project:mini-frank", "name": "Mini Frank"},
+            "job": {
+                "id": str(job.get("id") or ""),
+                "revision": max(1, int(job.get("revision") or 1)),
+                "stage": str(job.get("stage") or ""),
+                "title": str(result.get("title") or "Mini Frank project")[:100],
+            },
+            "request": public_service(item),
+        }
+
+    def share_target(token: str) -> tuple[dict, dict]:
+        found = find_share(store.list_items(), token, key=rate_key)
+        if not found:
+            abort(404)
+        job, link = found
+        if job_is_expired(job):
+            abort(404)
+        # Add deterministic support to pre-upgrade ready results without
+        # mutating their archived manifest.
+        projected = public_job(job)
+        if isinstance(projected.get("result"), dict):
+            job = {**job, "result": projected["result"]}
+        return job, link
+
+    def rewrite_delivery_urls(value, *, job_id: str, delivery_prefix: str):
+        canonical_prefix = f"{PREVIEW_PREFIX}{job_id}/"
+        if isinstance(value, str):
+            return value.replace(canonical_prefix, delivery_prefix)
+        if isinstance(value, list):
+            return [
+                rewrite_delivery_urls(item, job_id=job_id, delivery_prefix=delivery_prefix)
+                for item in value
+            ]
+        if isinstance(value, dict):
+            return {
+                key: rewrite_delivery_urls(item, job_id=job_id, delivery_prefix=delivery_prefix)
+                for key, item in value.items()
+            }
+        return value
+
+    def owner_artifact_token(job: dict) -> str:
+        payload = (
+            f"mini-owner-artifact:{job.get('id') or ''}:"
+            f"{max(1, int(job.get('revision') or 1))}:"
+            f"{max(0, int(job.get('published_revision') or 0))}"
+        )
+        digest = hmac.new(rate_key, payload.encode("utf-8"), hashlib.sha256).digest()
+        return base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")
+
+    def owner_job(job: dict) -> dict:
+        """Owner-only projection whose artifact URLs carry asset-only authority."""
+        job_id = str(job.get("id") or "")
+        projected = public_job(job)
+        token = owner_artifact_token(job)
+        delivery_prefix = (
+            f"/mini-frank/owner-artifacts/{urllib.parse.quote(job_id, safe='')}/"
+            f"{urllib.parse.quote(token, safe='')}/"
+        )
+        return rewrite_delivery_urls(
+            projected, job_id=job_id, delivery_prefix=delivery_prefix
+        )
+
+    def serve_authorized_artifact(job: dict, relative: str):
+        job_id = str(job.get("id") or "")
+        if not JOB_ID_RE.fullmatch(job_id):
+            abort(404)
+        relative = str(relative or "index.html").replace("\\", "/")
+        if relative.startswith("/") or any(
+            part in {"", ".", ".."} or part.startswith(".")
+            for part in relative.split("/")
+        ):
+            abort(404)
+        try:
+            base = (publish_root / job_id).resolve(strict=True)
+            target = (base / relative).resolve(strict=True)
+            target.relative_to(base)
+        except (OSError, ValueError):
+            abort(404)
+        if target.is_symlink() or not target.is_file():
+            abort(404)
+        is_download = relative.split("/", 1)[0] == "downloads"
+        response = send_file(
+            target,
+            conditional=True,
+            max_age=0,
+            as_attachment=is_download,
+            download_name=target.name if is_download else None,
+        )
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["X-Robots-Tag"] = "noindex, nofollow, noarchive, nosnippet"
+        response.headers["Content-Security-Policy"] = (
+            "sandbox allow-same-origin allow-downloads; default-src 'self'; script-src 'none'; "
+            "style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; "
+            "media-src 'self' data:; connect-src 'none'; frame-src 'none'; object-src 'none'; "
+            "base-uri 'none'; form-action 'none'; frame-ancestors 'self'"
+        )
+        return response
+
+    def tip_intent_payload(intent_id: str = "") -> dict:
+        return {
+            "id": intent_id or ("tip_" + secrets.token_urlsafe(10)),
+            "status": "ready" if configured_tip_url else "unavailable",
+            "provider_url": configured_tip_url or "",
+            "copy": tip_copy,
+            "entitlement_changed": False,
+            "priority_changed": False,
+            "everything_remains_free": True,
+        }
 
     @blueprint.get("/api/mini/config")
     def config():
         return jsonify({
+            "product": "mini-frank",
+            "binding_receipt": binding_receipt(),
+            "brain": {"provider": "hermes", "exclusive": True},
+            "knowledge": {
+                "private_job_memory": "active_via_hermes",
+                "shared_industry": "unavailable",
+                "adapter_seam": "HermesExecutionPort.knowledge_binding.shared_industry",
+            },
             "feedback_available": True,
             "job_attachment_uploads": True,
             "delete_available": True,
@@ -2991,11 +3646,40 @@ def create_blueprint(
             "conversation": {
                 "max_messages": MAX_CONVERSATION_MESSAGES,
                 "max_message_chars": MAX_CONVERSATION_MESSAGE_CHARS,
-                "planning_unmetered": True,
+                "planning_free": True,
+                "fair_use_protected": True,
+            },
+            "fair_use": {
+                "free": True,
+                "billing_gate": False,
+                "window_seconds": max(1, int(rate_window_seconds)),
+                "intake_creates_per_network": max(1, int(intake_create_rate_limit)),
+                "guide_turns_per_network": max(1, int(guide_turn_rate_limit)),
+                "build_starts_per_network": max(1, int(build_start_rate_limit)),
+                "shared_comments_per_link_network": max(1, int(shared_comment_rate_limit)),
+                "guide_concurrency_per_network": 1,
             },
             "projects": {
                 "free_active": max(1, int(free_project_limit)),
-                "additional_projects": "paid",
+                "additional_projects": "free_after_current_build",
+                "future_projects": "free",
+                "revisions": "free",
+            },
+            "tips": {
+                "available": bool(configured_tip_url),
+                "entitlement_changed": False,
+                "priority_changed": False,
+                "copy": (
+                    "Everything in Mini Frank is free. This is just a tip. If you like this app, "
+                    "please leave a tip so we can keep it free. A tip does not unlock anything, "
+                    "change your result, or give you priority."
+                ),
+            },
+            "sharing": {
+                "modes": ["restricted", "link", "published"],
+                "scopes": ["result", "project"],
+                "roles": ["viewer", "commenter", "editor"],
+                "named_people": "unavailable_identity_deferred",
             },
         })
 
@@ -3030,36 +3714,100 @@ def create_blueprint(
     @blueprint.post("/api/mini/intakes")
     def create_intake():
         sweep_abandoned_intakes()
+        create_key = create_idempotency_key()
+        create_key_hash = create_idempotency_hash(create_key)
         body = request.get_json(silent=True) if request.is_json else {}
         if not isinstance(body, dict):
             abort(400, "Request body must be a JSON object.")
+        reject_client_scope(body)
         conversation = _clean_conversation(body.get("conversation"))
+        fingerprint = hashlib.sha256(json.dumps(
+            {"conversation": conversation, "body": body},
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
         now = int(time.time())
-        intake_id = secrets.token_urlsafe(9)
-        token = _intake_claim_token(intake_id, rate_key)
         owner_hash = requester_hash()
-        intake = {
-            "id": intake_id,
-            "claim_hash": _claim_hash(token),
-            "requester_hash": owner_hash,
-            "status": "draft",
-            "conversation": conversation,
-            "attachments": [],
-            "session_id": "",
-            "job_id": "",
-            "created_at": now,
-            "updated_at": now,
-            "guide_attachment_context": [],
-            "guide_context_sent": [],
-            "submit_idempotency_key": "",
-            "guide_status": "idle",
-            "guide_error": "",
-            "guide_idempotency_key": "",
-            "guide_started_at": 0,
-            "guide_finished_at": 0,
-        }
-        intake_store.create(intake)
-        return jsonify({"claim_token": token, "intake": public_intake(intake)}), 201
+        with intake_store.lock:
+            prior = None
+            if create_key_hash:
+                prior = next((
+                    item for item in intake_store.list_items()
+                    if item.get("create_idempotency_hash") == create_key_hash
+                ), None)
+            if prior is not None:
+                if str(prior.get("create_fingerprint") or "") != fingerprint:
+                    raise ProductConflict("idempotency key changed")
+                raw_account_claim = str(
+                    request.headers.get("X-Mini-Account-Claim") or ""
+                ).strip()
+                claim_required = bool(prior.get("create_account_claim_required", True))
+                if claim_required and not raw_account_claim:
+                    abort(404)
+                if raw_account_claim:
+                    claimed_account = verify_account_claim(raw_account_claim, rate_key)
+                    if not claimed_account:
+                        abort(404)
+                    if claimed_account != str(prior.get("account_id") or ""):
+                        raise ProductConflict("idempotency key changed")
+                intake_id = str(prior["id"])
+                token = _intake_claim_token(intake_id, rate_key)
+                return jsonify({
+                    "claim_token": token,
+                    "account_claim_token": account_claim_token(
+                        str(prior.get("account_id") or ""), rate_key
+                    ),
+                    "intake": public_intake(prior),
+                    "replayed": True,
+                }), 200
+
+            raw_account_claim = str(
+                request.headers.get("X-Mini-Account-Claim") or ""
+            ).strip()
+            account_id = account_for_create()
+            rollback_admission = require_fair_use(
+                owner_hash, "intake_create", intake_create_rate_limit
+            )
+            intake_id = secrets.token_urlsafe(9)
+            token = _intake_claim_token(intake_id, rate_key)
+            intake = {
+                "id": intake_id,
+                "account_id": account_id,
+                "claim_hash": _claim_hash(token),
+                "requester_hash": owner_hash,
+                "status": "draft",
+                "conversation": conversation,
+                "attachments": [],
+                "session_id": "",
+                "job_id": "",
+                "created_at": now,
+                "updated_at": now,
+                "guide_attachment_context": [],
+                "guide_context_sent": [],
+                "create_idempotency_hash": create_key_hash,
+                "create_fingerprint": fingerprint,
+                "create_account_claim_required": bool(raw_account_claim),
+                "submit_idempotency_key": "",
+                "guide_status": "idle",
+                "guide_error": "",
+                "guide_idempotency_key": "",
+                "guide_started_at": 0,
+                "guide_finished_at": 0,
+                "binding_receipt": binding_receipt(),
+                "knowledge_binding": knowledge_binding(account_id, intake_id=intake_id),
+            }
+            try:
+                intake_store.create(intake)
+            except Exception:
+                rollback_admission()
+                raise
+        return jsonify({
+            "claim_token": token,
+            "account_claim_token": account_claim_token(account_id, rate_key),
+            "intake": public_intake(intake),
+            "replayed": False,
+        }), 201
 
     @blueprint.get("/api/mini/intakes/<intake_id>")
     def read_intake(intake_id: str):
@@ -3116,12 +3864,16 @@ def create_blueprint(
                     "status": status,
                     "intake": public_intake(intake),
                 }), (200 if status == "complete" else 202)
+            guide_owner_hash = str(intake.get("requester_hash") or requester_hash())
         with active_guides_lock:
             if intake_id in active_guides:
                 abort(409, "I’m still answering your last message. Check this request again shortly.")
+            if guide_owner_hash in active_guide_requesters:
+                raise MiniFrankRateLimited("guide_requester_busy", 5)
             if not guide_slots.acquire(blocking=False):
-                abort(429, "Frank is busy just now. Your request is safe; check it again shortly.")
+                raise MiniFrankRateLimited("guide_busy", 5)
             active_guides.add(intake_id)
+            active_guide_requesters.add(guide_owner_hash)
         released = threading.Event()
 
         def release_slot() -> None:
@@ -3132,9 +3884,11 @@ def create_blueprint(
                     return
                 released.set()
                 active_guides.discard(intake_id)
+                active_guide_requesters.discard(guide_owner_hash)
                 guide_slots.release()
 
         guide_started = False
+        guide_admission_rollback: Callable[[], None] | None = None
         try:
             with intake_store.lock:
                 intake = claimed_intake(intake_id)
@@ -3149,6 +3903,9 @@ def create_blueprint(
                 conversation = _clean_conversation(
                     conversation + [{"role": "user", "text": text}], required=True
                 )
+                guide_admission_rollback = require_fair_use(
+                    guide_owner_hash, "guide_turn", guide_turn_rate_limit
+                )
                 intake = intake_store.update(
                     intake_id,
                     conversation=conversation,
@@ -3159,6 +3916,7 @@ def create_blueprint(
                     guide_finished_at=0,
                 )
                 guide_started = True
+                guide_admission_rollback = None
                 intake = ensure_intake_session(intake)
 
             with intake_store.lock:
@@ -3217,6 +3975,8 @@ def create_blueprint(
             )
             telemetry.record("guide.accepted", outcome="with_context" if attachment_context else "cached_context")
         except Exception as error:
+            if guide_admission_rollback is not None:
+                guide_admission_rollback()
             if guide_started:
                 failure = classify_failure(error, operation="guide")
                 with intake_store.lock:
@@ -3524,6 +4284,7 @@ def create_blueprint(
     @blueprint.post("/api/mini/intakes/<intake_id>/submit")
     def submit_intake(intake_id: str):
         body = json_object()
+        reject_client_scope(body)
         submit_key = idempotency_key()
         existing_job_id = ""
         with intake_store.lock:
@@ -3555,6 +4316,7 @@ def create_blueprint(
                     # session so Hermes can inspect files and create the result.
                     session_id="",
                     dispatch_now=False,
+                    account_id=str(intake.get("account_id") or ""),
                 )
                 try:
                     intake_store.update(
@@ -3566,6 +4328,11 @@ def create_blueprint(
                     )
                 except Exception:
                     store.delete(job["id"])
+                    rate_ledger.rollback_record(
+                        str(job.get("requester_hash") or ""),
+                        "build_start",
+                        created_at=int(job.get("created_at") or 0),
+                    )
                     raise
         if existing_job_id:
             # Never mint a fresh claim for a linked record unless it is still
@@ -3589,8 +4356,80 @@ def create_blueprint(
     @blueprint.post("/api/mini/jobs")
     def create_job():
         body = json_object()
-        job, token = new_job(body, owner_hash=requester_hash())
-        return jsonify(job_response(job, token)), 202
+        reject_client_scope(body)
+        create_key = create_idempotency_key()
+        create_key_hash = create_idempotency_hash(create_key)
+        owner_hash = requester_hash()
+        fingerprint = hashlib.sha256(json.dumps(
+            body,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode("utf-8")).hexdigest()
+        with store.lock:
+            prior = None
+            if create_key_hash:
+                prior = next((
+                    item for item in store.list_items()
+                    if item.get("create_idempotency_hash") == create_key_hash
+                ), None)
+            if prior is not None:
+                if str(prior.get("create_fingerprint") or "") != fingerprint:
+                    raise ProductConflict("idempotency key changed")
+                raw_account_claim = str(
+                    request.headers.get("X-Mini-Account-Claim") or ""
+                ).strip()
+                claim_required = bool(prior.get("create_account_claim_required", True))
+                if claim_required and not raw_account_claim:
+                    abort(404)
+                if raw_account_claim:
+                    claimed_account = verify_account_claim(raw_account_claim, rate_key)
+                    if not claimed_account:
+                        abort(404)
+                    if claimed_account != str(prior.get("account_id") or ""):
+                        raise ProductConflict("idempotency key changed")
+                if job_is_expired(prior):
+                    abort(404)
+                return jsonify({
+                    **job_response(
+                        prior, _claim_token(str(prior["id"]), rate_key)
+                    ),
+                    "replayed": True,
+                }), 202
+
+            raw_account_claim = str(
+                request.headers.get("X-Mini-Account-Claim") or ""
+            ).strip()
+            account_id = account_for_create()
+            rollback_entry = require_fair_use(
+                owner_hash, "intake_create", intake_create_rate_limit
+            )
+            try:
+                job, token = new_job(
+                    body,
+                    owner_hash=owner_hash,
+                    dispatch_now=False,
+                    account_id=account_id,
+                    create_key_hash=create_key_hash,
+                    create_fingerprint=fingerprint,
+                    create_account_claim_required=bool(raw_account_claim),
+                )
+            except Exception:
+                rollback_entry()
+                raise
+
+        try:
+            job = dispatch(job)
+        except HTTPException:
+            raise
+        except Exception as error:
+            failure = classify_failure(error, operation="dispatch")
+            telemetry.record("dispatch.failure", outcome=failure)
+            job = store.update(
+                str(job["id"]), stage="queued", dispatch_error=failure,
+                next_reconcile_at=int(time.time()) + dispatch_retry_delay(1),
+            )
+        return jsonify({**job_response(job, token), "replayed": False}), 202
 
     @blueprint.get("/api/mini/jobs/<job_id>")
     def read_job(job_id: str):
@@ -3604,7 +4443,12 @@ def create_blueprint(
             # projection and must never fan out to Hermes, even at the deadline.
             remove_public_projection(job_id)
             abort(404)
-        return jsonify({"job": public_job(job)})
+        return jsonify({
+            "job": owner_job(job),
+            "account_claim_token": account_claim_token(
+                str(job.get("account_id") or ""), rate_key
+            ),
+        })
 
     @blueprint.post("/api/mini/jobs/<job_id>/feedback")
     def job_feedback(job_id: str):
@@ -3624,7 +4468,569 @@ def create_blueprint(
                 feedback={"status": outcome, "reason": reason, "created_at": int(time.time())},
             )
         telemetry.record("job.feedback", outcome=outcome)
-        return jsonify({"job": public_job(job)}), 200
+        return jsonify({"job": owner_job(job)}), 200
+
+    @blueprint.get("/api/mini/jobs/<job_id>/guidance")
+    def read_result_guidance(job_id: str):
+        job = claimed_job(job_id)
+        result = owner_job(job).get("result")
+        if not isinstance(result, dict):
+            abort(409, "The result guidance will be available when this revision is ready.")
+        return jsonify({
+            "job_id": job_id,
+            "revision": int(job.get("revision") or 1),
+            "guidance": result.get("guidance"),
+            "quality": quality_projection(job),
+        })
+
+    @blueprint.get("/api/mini/jobs/<job_id>/self-host-guide")
+    @blueprint.post("/api/mini/jobs/<job_id>/self-host-guide")
+    def read_self_host_guide(job_id: str):
+        body = {}
+        if request.method == "POST":
+            body = json_object()
+            reject_client_scope(body)
+        job = claimed_job(job_id)
+        if body:
+            raw_version = body.get("expected_revision", body.get("base_version"))
+            try:
+                expected_revision = int(raw_version)
+            except (TypeError, ValueError):
+                abort(400, "expected_revision is required.")
+            if expected_revision != int(job.get("revision") or 1):
+                return jsonify({"error": "This result revision changed.", "code": "version_conflict"}), 409
+        result = owner_job(job).get("result")
+        if not isinstance(result, dict):
+            abort(409, "The self-host guide will be available when this revision is ready.")
+        return jsonify({
+            "job_id": job_id,
+            "revision": int(job.get("revision") or 1),
+            "guide": result.get("self_host"),
+        })
+
+    @blueprint.get("/api/mini/tips/config")
+    def tip_config():
+        return jsonify({
+            "available": bool(configured_tip_url),
+            "copy": tip_copy,
+            "entitlement_changed": False,
+            "priority_changed": False,
+            "everything_remains_free": True,
+        })
+
+    @blueprint.post("/api/mini/tips")
+    @blueprint.post("/api/mini/tips/intents")
+    @blueprint.post("/api/mini/tips/checkout")
+    def create_public_tip_intent():
+        body = json_object()
+        reject_client_scope(body)
+        if body:
+            raise ProductValidation("tip intent does not accept an amount or product choice")
+        request_key = idempotency_key()
+        intent_id = deterministic_intent_id("tip_", "public-tip", request_key)
+        telemetry.record("tip.intent", outcome="ready" if configured_tip_url else "unavailable")
+        return jsonify({"intent": tip_intent_payload(intent_id)}), (201 if configured_tip_url else 200)
+
+    @blueprint.post("/api/mini/jobs/<job_id>/tips/intents")
+    def create_job_tip_intent(job_id: str):
+        body = json_object()
+        reject_client_scope(body)
+        if body:
+            raise ProductValidation("tip intent does not accept an amount or product choice")
+        with job_dispatch_lock(job_id):
+            job = claimed_job(job_id)
+            request_key = idempotency_key()
+            prior = next((
+                item for item in (job.get("tip_intents") or [])
+                if isinstance(item, dict) and request_key and item.get("idempotency_key") == request_key
+            ), None)
+            if prior:
+                intent = tip_intent_payload(str(prior.get("id") or ""))
+            else:
+                intent = tip_intent_payload(deterministic_intent_id(
+                    "tip_", "job-tip", request_key, job_id
+                ))
+                tip_intents = [dict(item) for item in (job.get("tip_intents") or []) if isinstance(item, dict)]
+                tip_intents.append({
+                    "id": intent["id"],
+                    "status": intent["status"],
+                    "created_at": int(time.time()),
+                    **({"idempotency_key": request_key} if request_key else {}),
+                })
+                job = store.update(
+                    job_id,
+                    tip_intents=tip_intents[-20:],
+                    audit=append_audit(
+                        job, "tip.intent", actor="owner", created_at=int(time.time()),
+                        metadata={"status": intent["status"]},
+                    ),
+                )
+        telemetry.record("tip.intent", outcome=intent["status"])
+        return jsonify({"intent": intent, "job": owner_job(job)}), (201 if configured_tip_url else 200)
+
+    @blueprint.get("/api/mini/jobs/<job_id>/sharing")
+    @blueprint.get("/api/mini/jobs/<job_id>/shares")
+    def read_sharing(job_id: str):
+        job = claimed_job(job_id)
+        return jsonify({"job_id": job_id, "sharing": owner_sharing(job)})
+
+    @blueprint.patch("/api/mini/jobs/<job_id>/sharing")
+    def change_sharing(job_id: str):
+        body = normalized_version_body(json_object())
+        reject_client_scope(body)
+        with job_dispatch_lock(job_id):
+            job = claimed_job(job_id)
+            command_key, fingerprint, replay = product_command(job, "sharing.update", body)
+            if replay is not None:
+                return jsonify(replay)
+            if str(body.get("mode") or "") == "published" and job.get("stage") != "ready":
+                abort(409, "A result must be ready before it can be published.")
+            sharing, projection = update_sharing(job, body, now=int(time.time()))
+            response_payload = {"job_id": job_id, "sharing": projection}
+            job = store.update(
+                job_id,
+                sharing=sharing,
+                product_idempotency=record_product_command(
+                    job, command_key, "sharing.update", fingerprint, response_payload
+                ),
+                audit=append_audit(
+                    job, "sharing.updated", actor="owner", created_at=int(time.time()),
+                    metadata={
+                        "mode": sharing["mode"], "scope": sharing["scope"],
+                        "role": sharing["role"],
+                    },
+                ),
+            )
+        return jsonify(response_payload)
+
+    @blueprint.post("/api/mini/jobs/<job_id>/shares")
+    def new_share(job_id: str):
+        body = normalized_version_body(json_object())
+        reject_client_scope(body)
+        with job_dispatch_lock(job_id):
+            job = claimed_job(job_id)
+            command_key, fingerprint, replay = product_command(job, "share.create", body)
+            token = deterministic_intent_id("ms1_", "share-create", command_key, job_id)
+            if replay is not None:
+                share = dict(replay.get("share") or {})
+                share.update({
+                    "token": token,
+                    "url": f"/mini-frank/#share={urllib.parse.quote(token, safe='')}",
+                })
+                return jsonify({**replay, "share": share}), 200
+            try:
+                expected = int(body.get("expected_version"))
+            except (TypeError, ValueError) as error:
+                raise ProductValidation("expected_version is required") from error
+            sharing, token, link = create_share(
+                job, key=rate_key, now=int(time.time()), expected_version=expected,
+                scope=str(body.get("scope") or ""), role=str(body.get("role") or ""),
+                token=token,
+            )
+            provisional_job = {**job, "sharing": sharing}
+            response_payload = {
+                "job_id": job_id,
+                "sharing": owner_sharing(provisional_job),
+                "share": link,
+            }
+            job = store.update(
+                job_id,
+                sharing=sharing,
+                product_idempotency=record_product_command(
+                    job, command_key, "share.create", fingerprint, response_payload
+                ),
+                audit=append_audit(
+                    job, "share.created", actor="owner", created_at=int(time.time()),
+                    metadata={
+                        "share_id": link["id"], "scope": link["scope"], "role": link["role"],
+                    },
+                ),
+            )
+        return jsonify({
+            **response_payload,
+            "share": {**link, "token": token, "url": f"/mini-frank/#share={urllib.parse.quote(token, safe='')}"},
+        }), 201
+
+    @blueprint.post("/api/mini/jobs/<job_id>/shares/<share_id>/rotate")
+    def rotate_job_share(job_id: str, share_id: str):
+        body = normalized_version_body(json_object())
+        reject_client_scope(body)
+        with job_dispatch_lock(job_id):
+            job = claimed_job(job_id)
+            command_key, fingerprint, replay = product_command(
+                job, "share.rotate", body, resource=share_id
+            )
+            token = deterministic_intent_id("ms1_", "share-rotate", command_key, f"{job_id}:{share_id}")
+            if replay is not None:
+                share = dict(replay.get("share") or {})
+                share.update({
+                    "token": token,
+                    "url": f"/mini-frank/#share={urllib.parse.quote(token, safe='')}",
+                })
+                return jsonify({**replay, "share": share})
+            active = owner_sharing(job).get("active_link") or {}
+            if str(active.get("id") or "") != share_id:
+                abort(404)
+            try:
+                expected = int(body.get("expected_version"))
+            except (TypeError, ValueError) as error:
+                raise ProductValidation("expected_version is required") from error
+            sharing, token, link = rotate_share(
+                job, key=rate_key, now=int(time.time()), expected_version=expected, token=token
+            )
+            provisional_job = {**job, "sharing": sharing}
+            response_payload = {
+                "job_id": job_id,
+                "sharing": owner_sharing(provisional_job),
+                "share": link,
+            }
+            job = store.update(
+                job_id,
+                sharing=sharing,
+                product_idempotency=record_product_command(
+                    job, command_key, "share.rotate", fingerprint, response_payload
+                ),
+                audit=append_audit(
+                    job, "share.rotated", actor="owner", created_at=int(time.time()),
+                    metadata={"share_id": share_id},
+                ),
+            )
+        return jsonify({
+            **response_payload,
+            "share": {**link, "token": token, "url": f"/mini-frank/#share={urllib.parse.quote(token, safe='')}"},
+        })
+
+    @blueprint.delete("/api/mini/jobs/<job_id>/shares/<share_id>")
+    @blueprint.post("/api/mini/jobs/<job_id>/shares/<share_id>/revoke")
+    def revoke_job_share(job_id: str, share_id: str):
+        body = normalized_version_body(json_object())
+        reject_client_scope(body)
+        with job_dispatch_lock(job_id):
+            job = claimed_job(job_id)
+            command_key, fingerprint, replay = product_command(
+                job, "share.revoke", body, resource=share_id
+            )
+            if replay is not None:
+                return jsonify(replay)
+            active = owner_sharing(job).get("active_link") or {}
+            if str(active.get("id") or "") != share_id:
+                abort(404)
+            try:
+                expected = int(body.get("expected_version"))
+            except (TypeError, ValueError) as error:
+                raise ProductValidation("expected_version is required") from error
+            sharing, projection = revoke_share(job, now=int(time.time()), expected_version=expected)
+            response_payload = {"job_id": job_id, "sharing": projection}
+            job = store.update(
+                job_id,
+                sharing=sharing,
+                product_idempotency=record_product_command(
+                    job, command_key, "share.revoke", fingerprint, response_payload
+                ),
+                audit=append_audit(
+                    job, "share.revoked", actor="owner", created_at=int(time.time()),
+                    metadata={"share_id": share_id},
+                ),
+            )
+        return jsonify(response_payload)
+
+    @blueprint.get("/api/mini/shares/<token>")
+    def read_shared_result(token: str):
+        job, link = share_target(token)
+        delivery_prefix = f"/mini-frank/shared-artifacts/{urllib.parse.quote(token, safe='')}/"
+        shared = rewrite_delivery_urls(
+            share_projection(job, link),
+            job_id=str(job["id"]),
+            delivery_prefix=delivery_prefix,
+        )
+        return jsonify({"shared": shared})
+
+    @blueprint.get("/mini-frank/shared-artifacts/<token>/")
+    @blueprint.get("/mini-frank/shared-artifacts/<token>/<path:relative>")
+    def read_shared_artifact(token: str, relative: str = "index.html"):
+        job, _link = share_target(token)
+        return serve_authorized_artifact(job, relative)
+
+    @blueprint.get("/mini-frank/owner-artifacts/<job_id>/<token>/")
+    @blueprint.get("/mini-frank/owner-artifacts/<job_id>/<token>/<path:relative>")
+    def read_owner_artifact(job_id: str, token: str, relative: str = "index.html"):
+        if not JOB_ID_RE.fullmatch(job_id):
+            abort(404)
+        job = store.get(job_id)
+        if (
+            not job
+            or job_is_expired(job)
+            or job.get("stage") != "ready"
+            or not isinstance(job.get("result"), dict)
+            or not hmac.compare_digest(owner_artifact_token(job), str(token or ""))
+        ):
+            abort(404)
+        return serve_authorized_artifact(job, relative)
+
+    @blueprint.get("/api/mini/shares/<token>/comments")
+    def read_shared_comments(token: str):
+        job, link = share_target(token)
+        return jsonify({
+            "version": max(0, int(job.get("comment_version") or 0)),
+            "comments": shared_comments(job, link),
+        })
+
+    @blueprint.post("/api/mini/shares/<token>/comments")
+    def create_shared_comment(token: str):
+        body = normalized_version_body(json_object())
+        reject_client_scope(body)
+        job, link = share_target(token)
+        role = str(link.get("role") or "viewer")
+        actor = f"share_{role}"
+        job_id = str(job["id"])
+        with job_dispatch_lock(job_id):
+            # Resolve again after the lock so rotation/revocation cannot race a
+            # comment into a no-longer-authorised link.
+            current_job, current_link = share_target(token)
+            role = str(current_link.get("role") or "viewer")
+            actor = f"share_{role}"
+            command_key, fingerprint, replay = product_command(
+                current_job,
+                "comment.create",
+                body,
+                resource=f"share:{current_link.get('id') or ''}",
+            )
+            if replay is not None:
+                return jsonify(replay), 200
+            comment_owner_hash = hmac.new(
+                rate_key,
+                f"{requester_hash()}:{current_link.get('id') or ''}".encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
+            rollback_admission = require_fair_use(
+                comment_owner_hash, "shared_comment", shared_comment_rate_limit
+            )
+            try:
+                comments, version, item = add_comment(
+                    current_job, body, actor=actor, now=int(time.time()),
+                    allowed_to_comment=role in {"commenter", "editor"},
+                    share=current_link,
+                )
+                response_payload = {"comment": item, "version": version}
+                job = store.update(
+                    job_id,
+                    comments=comments,
+                    comment_version=version,
+                    product_idempotency=record_product_command(
+                        current_job,
+                        command_key,
+                        "comment.create",
+                        fingerprint,
+                        response_payload,
+                    ),
+                    audit=append_audit(
+                        current_job, "comment.created", actor=actor, created_at=int(time.time()),
+                        metadata={"role": role, "scope": current_link.get("scope", "result")},
+                    ),
+                )
+            except Exception:
+                rollback_admission()
+                raise
+        return jsonify(response_payload), 201
+
+    @blueprint.get("/api/mini/jobs/<job_id>/comments")
+    def read_owner_comments(job_id: str):
+        job = claimed_job(job_id)
+        return jsonify({
+            "job_id": job_id,
+            "version": max(0, int(job.get("comment_version") or 0)),
+            "comments": owner_comments(job),
+        })
+
+    @blueprint.post("/api/mini/jobs/<job_id>/comments")
+    def create_owner_comment(job_id: str):
+        body = normalized_version_body(json_object())
+        reject_client_scope(body)
+        with job_dispatch_lock(job_id):
+            job = claimed_job(job_id)
+            command_key, fingerprint, replay = product_command(
+                job, "comment.create", body, resource="owner"
+            )
+            if replay is not None:
+                return jsonify(replay), 200
+            comments, version, item = add_comment(
+                job, body, actor="owner", now=int(time.time()), allowed_to_comment=True
+            )
+            response_payload = {"comment": item, "version": version}
+            job = store.update(
+                job_id,
+                comments=comments,
+                comment_version=version,
+                product_idempotency=record_product_command(
+                    job,
+                    command_key,
+                    "comment.create",
+                    fingerprint,
+                    response_payload,
+                ),
+                audit=append_audit(
+                    job, "comment.created", actor="owner", created_at=int(time.time())
+                ),
+            )
+        return jsonify(response_payload), 201
+
+    @blueprint.get("/api/mini/published/<job_id>")
+    def read_published_job(job_id: str):
+        if not JOB_ID_RE.fullmatch(job_id):
+            abort(404)
+        job = store.get(job_id)
+        if not job or job_is_expired(job):
+            abort(404)
+        projected = public_job(job)
+        if isinstance(projected.get("result"), dict):
+            job = {**job, "result": projected["result"]}
+        shared = published_projection(job)
+        if not shared:
+            abort(404)
+        delivery_prefix = f"/mini-frank/published-artifacts/{urllib.parse.quote(job_id, safe='')}/"
+        return jsonify({
+            "shared": rewrite_delivery_urls(
+                shared, job_id=job_id, delivery_prefix=delivery_prefix
+            )
+        })
+
+    @blueprint.get("/mini-frank/published-artifacts/<job_id>/")
+    @blueprint.get("/mini-frank/published-artifacts/<job_id>/<path:relative>")
+    def read_published_artifact(job_id: str, relative: str = "index.html"):
+        if not JOB_ID_RE.fullmatch(job_id):
+            abort(404)
+        job = store.get(job_id)
+        if not job or job_is_expired(job) or not published_projection(job):
+            abort(404)
+        return serve_authorized_artifact(job, relative)
+
+    @blueprint.get("/api/mini/jobs/<job_id>/service-requests")
+    def list_service_requests(job_id: str):
+        job = claimed_job(job_id)
+        return jsonify({
+            "job_id": job_id,
+            "status": "saved_for_review",
+            "message": "Saved requests are reviewed by Frank. No notification or work has started yet.",
+            "requests": [public_service(item) for item in (job.get("service_requests") or []) if isinstance(item, dict)],
+        })
+
+    @blueprint.get("/api/mini/jobs/<job_id>/service-options")
+    def list_service_options(job_id: str):
+        job = claimed_job(job_id)
+        has_guide = isinstance((public_job(job).get("result") or {}).get("self_host"), dict)
+        return jsonify({
+            "job_id": job_id,
+            "revision": int(job.get("revision") or 1),
+            "status": "available",
+            "message": (
+                "These services are optional. Your result, revisions and future Mini Frank "
+                "projects remain free."
+            ),
+            "self_host_guide_available": has_guide,
+            "price_status": "scope_required",
+            "contact": {
+                "required": True,
+                "methods": ["email", "phone", "whatsapp", "other"],
+                "notice": (
+                    "Contact details are saved privately for operator review. Do not include "
+                    "passwords, access keys or other secrets."
+                ),
+            },
+            "options": [
+                {
+                    "kind": kind,
+                    "label": label,
+                    "status": "available_after_owner_review",
+                    "price_status": "scope_required",
+                    "requires_owner_review": True,
+                }
+                for kind, label in (
+                    ("self_host_help", "Help me self-host"),
+                    ("managed_hosting", "Frank hosts it"),
+                    ("video_call", "Book a video call"),
+                    ("perth_visit", "Meet in Perth"),
+                    ("custom_project", "Discuss a custom project"),
+                )
+            ],
+        })
+
+    @blueprint.post("/api/mini/jobs/<job_id>/service-requests")
+    @blueprint.post("/api/mini/jobs/<job_id>/service-handoffs")
+    def request_service(job_id: str):
+        body = json_object()
+        reject_client_scope(body)
+        request_key = idempotency_key()
+        with job_dispatch_lock(job_id):
+            job = claimed_job(job_id)
+            requests, item, replayed = create_service_request(
+                job, body, now=int(time.time()), idempotency_key=request_key
+            )
+            if not replayed:
+                job = store.update(
+                    job_id,
+                    service_requests=requests,
+                    audit=append_audit(
+                        job, "service.requested", actor="owner", created_at=int(time.time()),
+                        metadata={"kind": item["kind"], "status": item["status"], "request_id": item["id"]},
+                    ),
+                )
+        telemetry.record(
+            "service.request",
+            outcome=str(item.get("kind") or "custom_project").replace("_", "-"),
+        )
+        return jsonify({
+            "request": public_service(item),
+            "replayed": replayed,
+            "message": "Saved for review. Frank has not contacted you yet.",
+            "notification_sent": False,
+            "execution_started": False,
+        }), (200 if replayed else 201)
+
+    @blueprint.get("/api/operator/mini/service-requests")
+    def operator_service_requests():
+        require_operator_attestation()
+        items = []
+        for job in store.list_items():
+            if job_is_expired(job) or job.get("stage") == "expired_cleanup_pending":
+                continue
+            for item in job.get("service_requests") or []:
+                if isinstance(item, dict):
+                    items.append(operator_service_projection(job, item))
+        items.sort(
+            key=lambda value: (
+                int((value.get("request") or {}).get("created_at") or 0),
+                str((value.get("request") or {}).get("id") or ""),
+            ),
+            reverse=True,
+        )
+        items = items[:200]
+        return jsonify({
+            "project_id": "project:mini-frank",
+            "status": "available",
+            "count": len(items),
+            "requests": items,
+        })
+
+    @blueprint.get("/api/operator/mini/service-requests/<request_id>")
+    def operator_service_request(request_id: str):
+        require_operator_attestation()
+        if not JOB_ID_RE.fullmatch(request_id):
+            abort(404)
+        for job in store.list_items():
+            if job_is_expired(job) or job.get("stage") == "expired_cleanup_pending":
+                continue
+            for item in job.get("service_requests") or []:
+                if isinstance(item, dict) and str(item.get("id") or "") == request_id:
+                    return jsonify({"service_request": operator_service_projection(job, item)})
+        abort(404)
+
+    @blueprint.get("/api/mini/jobs/<job_id>/audit")
+    def read_job_audit(job_id: str):
+        job = claimed_job(job_id)
+        return jsonify({
+            "job_id": job_id,
+            "events": [dict(item) for item in (job.get("audit") or []) if isinstance(item, dict)],
+        })
 
     @blueprint.delete("/api/mini/jobs/<job_id>")
     @blueprint.post("/api/mini/jobs/<job_id>/revoke")
@@ -3749,7 +5155,7 @@ def create_blueprint(
                     pass
                 finally:
                     storage_fence.release(storage_token)
-        return jsonify({"job": public_job(job)}), 201
+        return jsonify({"job": owner_job(job)}), 201
 
     @blueprint.delete("/api/mini/jobs/<job_id>/attachments/<attachment_id>")
     def remove_job_attachment(job_id: str, attachment_id: str):
@@ -3772,13 +5178,13 @@ def create_blueprint(
                 target.parent.rmdir()
             except OSError:
                 current_app.logger.warning("Mini Frank job attachment cleanup failed for %s", attachment_id)
-        return jsonify({"job": public_job(job), "deleted": attachment_id})
+        return jsonify({"job": owner_job(job), "deleted": attachment_id})
 
     @blueprint.post("/api/mini/jobs/<job_id>/dispatch")
     def retry_job(job_id: str):
         job = claimed_job(job_id)
         if job.get("stage") == "ready" or (job.get("run_id") and job.get("stage") != "needs_attention"):
-            return jsonify({"job": public_job(job)})
+            return jsonify({"job": owner_job(job)})
         if job.get("stage") == "needs_attention":
             confirmed_terminal = {
                 "run_failed", "run_cancelled", "run_interrupted",
@@ -3810,9 +5216,9 @@ def create_blueprint(
                     if failure == "capacity_unavailable"
                     else "We have your request, but Hermes is temporarily unavailable. We will retry it."
                 ),
-                "job": public_job(job),
+                "job": owner_job(job),
             }), 503
-        return jsonify({"job": public_job(job)}), 202
+        return jsonify({"job": owner_job(job)}), 202
 
     @blueprint.post("/api/mini/jobs/<job_id>/changes")
     def request_change(job_id: str):
@@ -3846,7 +5252,7 @@ def create_blueprint(
                 if previous is not None:
                     if previous.get("fingerprint") != fingerprint:
                         abort(409, "That Idempotency-Key was already used for a different change.")
-                    return jsonify({"job": public_job(job)}), 202
+                    return jsonify({"job": owner_job(job)}), 202
             if job.get("stage") != "ready" or job.get("run_id") and job.get("stage") in ACTIVE_STAGES:
                 abort(409, "I’m already working on this solution. Wait for it to finish before changing it again.")
             known_ids = {str(item.get("id") or "") for item in job.get("attachments") or [] if isinstance(item, dict)}
@@ -3893,7 +5299,7 @@ def create_blueprint(
                     job_id, stage="queued", dispatch_error=failure,
                     next_reconcile_at=int(time.time()) + dispatch_retry_delay(1),
                 )
-        return jsonify({"job": public_job(job)}), 202
+        return jsonify({"job": owner_job(job)}), 202
 
     def reconcile_once() -> None:
         try:
