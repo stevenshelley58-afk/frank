@@ -144,9 +144,7 @@ class ReleaseStateStore:
     def advance_current(self, release_id: str) -> dict[str, Any]:
         if not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,63}", release_id):
             raise ReleaseEvidenceError("invalid release id")
-        target = self.records / (release_id + ".json")
-        if not target.is_file() or target.is_symlink(): raise ReleaseEvidenceError("release record not found")
-        record = json.loads(target.read_text(encoding="utf-8"))
+        record = self.read_release(release_id)
         current = self.read_current()
         if current:
             old, new = _STAGES.index(current["stage"]), _STAGES.index(record["stage"])
@@ -168,7 +166,13 @@ class ReleaseStateStore:
         if record.get("release_id") != release_id or record.get("id") != "release:" + release_id or record.get("stage") not in _STAGES:
             raise ReleaseEvidenceError("rollback release identity mismatch")
         checked = self._validate_evidence(record.get("evidence", {}), record["stage"])
-        if checked != record.get("evidence"):
+        expected = {
+            "id": "release:" + release_id,
+            "release_id": release_id,
+            "stage": record["stage"],
+            "evidence": checked,
+        }
+        if record != expected:
             raise ReleaseEvidenceError("rollback release evidence mismatch")
         return record
 
@@ -210,9 +214,14 @@ class ReleaseStateStore:
         if path.is_symlink(): raise ReleaseEvidenceError("invalid current release pointer")
         if not path.exists(): return None
         pointer = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(pointer.get("release_id"), str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,63}", pointer["release_id"]): raise ReleaseEvidenceError("invalid current release pointer")
-        record_path = self.records / (pointer.get("release_id", "") + ".json")
-        if record_path.is_symlink() or not record_path.is_file(): raise ReleaseEvidenceError("invalid current release pointer")
-        record = json.loads(record_path.read_text(encoding="utf-8"))
+        if (
+            set(pointer) != {"release_id", "record_hash"}
+            or not isinstance(pointer.get("release_id"), str)
+            or not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,63}", pointer["release_id"])
+            or not isinstance(pointer.get("record_hash"), str)
+            or not _DIGEST.fullmatch(pointer["record_hash"])
+        ):
+            raise ReleaseEvidenceError("invalid current release pointer")
+        record = self.read_release(pointer["release_id"])
         if pointer.get("record_hash") != _sha(record): raise ReleaseEvidenceError("current release hash mismatch")
         return record

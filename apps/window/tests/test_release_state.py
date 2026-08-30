@@ -51,6 +51,24 @@ class ReleaseStateTests(unittest.TestCase):
             (Path(d)/'releases'/'rel-1.json').write_text('{}')
             with self.assertRaises(ReleaseEvidenceError): s.read_current()
 
+    def test_tampered_next_record_cannot_be_promoted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            store = ReleaseStateStore(root)
+            step5 = dict(BASE, feature_flags={key: FLAGS[key] for key in list(FLAGS)[:5]})
+            step6 = dict(BASE, feature_flags={key: FLAGS[key] for key in list(FLAGS)[:8]})
+            store.create_release("rel-1", "step5", step5)
+            store.advance_current("rel-1")
+            store.create_release("rel-2", "step6c", step6)
+            pointer_before = (root / "current.json").read_bytes()
+            (root / "releases" / "rel-2.json").write_text(
+                '{"id":"release:rel-2","release_id":"rel-2","stage":"step6c","evidence":{}}',
+                encoding="utf-8",
+            )
+            with self.assertRaises(ReleaseEvidenceError):
+                store.advance_current("rel-2")
+            self.assertEqual((root / "current.json").read_bytes(), pointer_before)
+
     def test_graph_revision_uses_control_graph_key_not_content_digest(self):
         with tempfile.TemporaryDirectory() as d:
             evidence = dict(BASE, feature_flags={k: FLAGS[k] for k in list(FLAGS)[:5]}, graph_revision='sha256:' + 'd' * 64)
