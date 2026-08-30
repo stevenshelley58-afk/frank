@@ -44,16 +44,33 @@ class ReleaseStateStore:
 
     def __init__(self, root: Path):
         raw_root = Path(root)
-        if raw_root.exists() and raw_root.is_symlink():
+        if self._contains_symlink(raw_root):
             raise ReleaseEvidenceError("release store paths must not be symlinks")
         self.root = raw_root.resolve()
         self.records = self.root / "releases"
         self.root.mkdir(parents=True, exist_ok=True)
         self.records.mkdir(parents=True, exist_ok=True)
-        if self.root.is_symlink() or self.records.is_symlink():
-            raise ReleaseEvidenceError("release store paths must not be symlinks")
+        self._assert_secure_roots()
+
+    @staticmethod
+    def _contains_symlink(path: Path) -> bool:
+        absolute = path.absolute()
+        return any(candidate.is_symlink() for candidate in (absolute, *absolute.parents))
+
+    def _assert_secure_roots(self) -> None:
+        for path in (self.root, self.records):
+            if path.is_symlink() or not path.is_dir():
+                raise ReleaseEvidenceError("release store paths must remain real directories")
+            cursor = path
+            while cursor != cursor.parent:
+                if cursor.is_symlink():
+                    raise ReleaseEvidenceError("release store path contains a symlink")
+                cursor = cursor.parent
 
     def _write(self, path: Path, value: Mapping[str, Any]) -> None:
+        self._assert_secure_roots()
+        if path.is_symlink() or path.parent.resolve() not in {self.root, self.records}:
+            raise ReleaseEvidenceError("release target path is unsafe")
         fd, tmp = tempfile.mkstemp(prefix=".release-", dir=path.parent)
         try:
             with os.fdopen(fd, "wb") as stream:
@@ -115,6 +132,8 @@ class ReleaseStateStore:
         record = {"id": "release:" + release_id, "release_id": release_id, "stage": stage,
                   "evidence": self._validate_evidence(evidence, stage)}
         target = self.records / (release_id + ".json")
+        if target.is_symlink():
+            raise ReleaseEvidenceError("release record path is unsafe")
         if target.exists():
             if json.loads(target.read_text(encoding="utf-8")) != record: raise ReleaseEvidenceError("immutable release collision")
             return record
@@ -132,12 +151,62 @@ class ReleaseStateStore:
             old, new = _STAGES.index(current["stage"]), _STAGES.index(record["stage"])
             if new != old + (0 if record["release_id"] == current["release_id"] else 1):
                 raise ReleaseEvidenceError("release stage cannot skip or move backwards")
+        elif record.get("stage") != "step5":
+            raise ReleaseEvidenceError("the first promoted release must be step5")
         pointer = {"release_id": release_id, "record_hash": _sha(record)}
         self._write(self.root / "current.json", pointer)
         return record
 
-    def read_current(self) -> dict[str, Any] | None:
+    def read_release(self, release_id: str) -> dict[str, Any]:
+        """Read and fully validate one immutable release record."""
+        self._assert_secure_roots()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,63}", release_id): raise ReleaseEvidenceError("invalid rollback release id")
+        target = self.records / (release_id + ".json")
+        if target.is_symlink() or not target.is_file(): raise ReleaseEvidenceError("rollback release not found")
+        record = json.loads(target.read_text(encoding="utf-8"))
+        if record.get("release_id") != release_id or record.get("id") != "release:" + release_id or record.get("stage") not in _STAGES:
+            raise ReleaseEvidenceError("rollback release identity mismatch")
+        checked = self._validate_evidence(record.get("evidence", {}), record["stage"])
+        if checked != record.get("evidence"):
+            raise ReleaseEvidenceError("rollback release evidence mismatch")
+        return record
+
+    def rollback_current(self, release_id: str, *, expected_current_release_id: str | None = None) -> dict[str, Any]:
+        """Select an existing immutable release, deliberately permitting a prior stage."""
+        record = self.read_release(release_id)
+        if expected_current_release_id is not None:
+            current = self.read_current()
+            if current is None or current.get("release_id") != expected_current_release_id:
+                raise ReleaseEvidenceError("current release changed before rollback")
+        self._write(self.root / "current.json", {"release_id": release_id, "record_hash": _sha(record)})
+        return record
+
+    def clear_current(self, expected_release_id: str) -> None:
+        """Remove only an expected pointer while compensating a failed first promotion."""
+        self._assert_secure_roots()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,63}", expected_release_id):
+            raise ReleaseEvidenceError("invalid expected release id")
         path = self.root / "current.json"
+        if path.is_symlink():
+            raise ReleaseEvidenceError("invalid current release pointer")
+        if not path.exists():
+            return
+        pointer = json.loads(path.read_text(encoding="utf-8"))
+        if pointer.get("release_id") != expected_release_id:
+            raise ReleaseEvidenceError("current release changed during compensation")
+        path.unlink()
+        try:
+            parent = os.open(path.parent, os.O_RDONLY)
+            os.fsync(parent)
+            os.close(parent)
+        except OSError:
+            if os.name != "nt":
+                raise
+
+    def read_current(self) -> dict[str, Any] | None:
+        self._assert_secure_roots()
+        path = self.root / "current.json"
+        if path.is_symlink(): raise ReleaseEvidenceError("invalid current release pointer")
         if not path.exists(): return None
         pointer = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(pointer.get("release_id"), str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,63}", pointer["release_id"]): raise ReleaseEvidenceError("invalid current release pointer")
