@@ -5,7 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from graph.control_contract import ControlContractError, derive_graph_revision, graph_from_collector_receipt, materialize_control_graph, reconcile_assertions
+from graph.control_contract import ControlContractError, _resolve_repository_root, derive_graph_revision, graph_from_collector_receipt, materialize_control_graph, reconcile_assertions
 from graph.control_store import ControlGraphStore
 from graph.control_provider import ControlProvider
 
@@ -29,6 +29,18 @@ RUNTIME_CATALOG = {
 }
 
 class ControlGraphContractTest(unittest.TestCase):
+    def test_shallow_image_path_does_not_crash_repository_resolution(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            shallow = Path(tmp) / "app" / "graph" / "control_contract.py"
+            shallow.parent.mkdir(parents=True)
+            shallow.touch()
+            self.assertEqual(_resolve_repository_root(shallow), shallow.parent.resolve())
+            configured = Path(tmp) / "schema-root"
+            self.assertEqual(
+                _resolve_repository_root(shallow, str(configured)),
+                configured.resolve(),
+            )
+
     def test_deterministic_and_does_not_mutate_inputs(self):
         original = copy.deepcopy(DECLARED)
         a = materialize_control_graph(DECLARED, OBSERVED, receipt_ids=["receipt:one"])
