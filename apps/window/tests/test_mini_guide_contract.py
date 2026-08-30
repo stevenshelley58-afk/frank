@@ -61,7 +61,7 @@ class MiniGuideContractTests(unittest.TestCase):
         self.assert_retained(
             "Yes. I'll make a simple Meta ad helper that turns a few details about your "
             "business into ready-to-use ads. I'll choose sensible defaults and keep it easy. "
-            "Click Solve this for me -- free, then ask for free changes after you try it."
+            "Click Solve this for me — free."
         )
 
     def test_rejects_unicode_list_glyphs(self):
@@ -73,31 +73,23 @@ class MiniGuideContractTests(unittest.TestCase):
         cases = (
             "Yes. I'll help your software company organise new customer enquiries so the "
             "right person follows up quickly. I'll keep it simple. Click Solve this for me "
-            "-- free, then ask for free changes after you try it.",
+            "— free.",
             "Yes. I'll help your technical service team turn new calls into clear jobs and "
-            "follow-ups. I'll keep it simple. Click Solve this for me -- free, then ask for "
-            "free changes after you try it.",
+            "follow-ups. I'll keep it simple. Click Solve this for me — free.",
             "Yes. I'll help your restaurant server team keep bookings clear during busy "
-            "services. I'll keep it simple. Click Solve this for me -- free, then ask for "
-            "free changes after you try it.",
+            "services. I'll keep it simple. Click Solve this for me — free.",
             "Yes. I'll help API Plumbing turn online enquiries into booked jobs and prompt "
-            "follow-ups. I'll keep it simple. Click Solve this for me -- free, then ask for "
-            "free changes after you try it.",
+            "follow-ups. I'll keep it simple. Click Solve this for me — free.",
             "Yes. I'll help Code Electrical turn site enquiries into clear quotes and next "
-            "steps. I'll keep it simple. Click Solve this for me -- free, then ask for free "
-            "changes after you try it.",
+            "steps. I'll keep it simple. Click Solve this for me — free.",
             "Yes. I'll help your architecture studio keep client approvals and next steps "
-            "clear. I'll keep it simple. Click Solve this for me -- free, then ask for free "
-            "changes after you try it.",
+            "clear. I'll keep it simple. Click Solve this for me — free.",
             "Yes. I'll help Framework Fitness follow up new members without missed messages. "
-            "I'll keep it simple. Click Solve this for me -- free, then ask for free changes "
-            "after you try it.",
+            "I'll keep it simple. Click Solve this for me — free.",
             "Yes. I'll upgrade the way new leads are followed up so customers hear back "
-            "quickly. I'll keep it simple. Click Solve this for me -- free, then ask for free "
-            "changes after you try it.",
+            "quickly. I'll keep it simple. Click Solve this for me — free.",
             "Yes. I'll help HTML Homes turn inspection enquiries into clear viewing times and "
-            "follow-ups. I'll keep it simple. Click Solve this for me -- free, then ask for "
-            "free changes after you try it.",
+            "follow-ups. I'll keep it simple. Click Solve this for me — free.",
         )
         for reply in cases:
             with self.subTest(reply=reply):

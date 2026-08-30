@@ -207,10 +207,15 @@ async function main() {
           const style = message ? getComputedStyle(message) : null;
           return {
             statusCard: Boolean(document.querySelector(".status-card")),
-            submittedJob: performance.getEntriesByType("resource").some(({ name }) => (
-              /\/api\/mini\/intakes\/[^/]+\/submit(?:[?#]|$)/.test(name)
-              || /\/api\/mini\/jobs(?:[?#]|$)/.test(name)
-            )),
+            submittedJob: performance.getEntriesByType("resource").some(({ name }) => {
+              try {
+                const resourcePath = new URL(name, location.origin).pathname;
+                return (
+                  resourcePath.startsWith("/api/mini/intakes/") && resourcePath.endsWith("/submit")
+                ) || resourcePath === "/api/mini/jobs";
+              }
+              catch { return false; }
+            }),
             resumeAction: Boolean(document.querySelector('.message-assistant [data-action="resume"]')),
             response: message?.textContent?.trim() || "",
             responseVisible: Boolean(message && bounds && bounds.width > 0 && bounds.height > 0 && style?.visibility !== "hidden" && style?.display !== "none"),
@@ -230,6 +235,12 @@ async function main() {
           guideViolations: violations,
           checkpoints,
         });
+        // Do not clear/reload a browser while a guide response is still in
+        // flight. A later pass could otherwise inherit activity from the
+        // earlier customer conversation and produce a false release result.
+        if (!checkpoints.complete) {
+          throw new Error(`Guide run ${run} did not complete before the next browser reset`);
+        }
       }
       // Preserve the existing result shape for callers while recording every
       // visible customer reply for a release receipt.
