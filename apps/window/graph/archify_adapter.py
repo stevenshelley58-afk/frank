@@ -164,14 +164,14 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(stable_ids)}
     components: list[dict[str, Any]] = []
     display_labels: dict[str, dict[str, str]] = {}
-    # Archify's showcase renderer cannot safely route a large estate graph in
-    # one SVG: the production graph has hundreds of cards and enough crossing
-    # relationships to overflow its diagnostic channel.  Keep the overview
-    # bounded to a compact twelve-column index and leave those
+    # Archify's showcase renderer cannot safely route a large graph in one
+    # SVG: production projections can contain hundreds of cards and enough
+    # crossing relationships to overflow its diagnostic channel.  Keep every
+    # large projection bounded to a compact twelve-column index and leave those
     # relationships in the canonical Control graph.  Full stable identities
     # remain attached to every visible card, so the overview never invents or
     # drops systems and the operator can deep-link to the complete topology.
-    overview_only = projection_id == "projection:vps/world" and len(nodes) > 90
+    overview_only = len(nodes) > 90
     cols = 12 if overview_only else 1
     origin = (40, 44) if overview_only else (80, 90)
     step = (108, 34) if overview_only else (260, 130)

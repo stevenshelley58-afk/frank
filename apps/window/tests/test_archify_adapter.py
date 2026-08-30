@@ -83,6 +83,18 @@ class ArchifyAdapterTest(unittest.TestCase):
         self.assertEqual(set(metadata["stable_id_map"]), {node["id"] for node in nodes})
         self.assertEqual(set(metadata["display_labels"]), set(metadata["stable_id_map"]))
 
+    def test_large_frank_projection_uses_bounded_overview(self):
+        nodes = [
+            {"id": f"service:frank-worker-{index:03d}", "kind": "service"}
+            for index in range(100)
+        ]
+        graph = {"graph_revision": GRAPH["graph_revision"], "nodes": nodes, "edges": []}
+        diagram, metadata = graph_to_archify(graph, "projection:frank/architecture")
+        self.assertEqual(len(diagram["components"]), 100)
+        self.assertEqual(diagram["layout"]["cols"], 12)
+        self.assertTrue(all(component["size"] == [98, 26] for component in diagram["components"]))
+        self.assertEqual(metadata["rendered_relationship_count"], 0)
+
     def test_build_metadata_contains_revisions_and_input_hash(self):
         result = build_projection(GRAPH, "projection:frank/architecture", source_revisions={"repo:frank": "a" * 40}, deployed_revisions={"release:frank": "b" * 40})
         self.assertEqual(result["metadata"]["graph_revision"], GRAPH["graph_revision"])
