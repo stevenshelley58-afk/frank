@@ -64,11 +64,22 @@ class ArchifyAdapterTest(unittest.TestCase):
              "title": f"Production worker {index:03d} with a very long descriptive title"}
             for index in range(245)
         ]
-        graph = {"graph_revision": GRAPH["graph_revision"], "nodes": nodes, "edges": []}
+        edges = [
+            {"id": f"edge:worker-{index:03d}", "from": nodes[index]["id"], "to": nodes[index + 1]["id"], "relationship": "feeds"}
+            for index in range(244)
+        ]
+        graph = {"graph_revision": GRAPH["graph_revision"], "nodes": nodes, "edges": edges}
         diagram, metadata = graph_to_archify(graph, "projection:vps/world")
         self.assertEqual(len(diagram["components"]), 245)
         self.assertTrue(all(len(component["label"]) <= 28 for component in diagram["components"]))
-        self.assertTrue(all(len(component["sublabel"]) <= 24 for component in diagram["components"]))
+        self.assertTrue(all(len(component.get("sublabel", "")) <= 24 for component in diagram["components"]))
+        self.assertEqual(diagram["layout"]["cols"], 12)
+        self.assertTrue(all(component["size"] == [98, 26] for component in diagram["components"]))
+        self.assertEqual(len({tuple(component["pos"]) for component in diagram["components"]}), 245)
+        self.assertEqual(diagram["connections"], [])
+        self.assertEqual(metadata["relationship_count"], 244)
+        self.assertEqual(metadata["rendered_relationship_count"], 0)
+        self.assertEqual(metadata["exclusions"], ["relationships_render_in_control_graph"])
         self.assertEqual(set(metadata["stable_id_map"]), {node["id"] for node in nodes})
         self.assertEqual(set(metadata["display_labels"]), set(metadata["stable_id_map"]))
 
