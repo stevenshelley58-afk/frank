@@ -1,0 +1,12 @@
+[Unit]
+Description=Frank fast control-plane reconciliation timer (disabled by default)
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=15m
+Persistent=true
+Unit=frank-control-reconcile-fast.service
+
+[Install]
+# Deliberately disabled until Step 5.
+WantedBy=timers.target

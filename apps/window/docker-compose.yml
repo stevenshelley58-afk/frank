@@ -3,8 +3,8 @@ name: frank
 services:
   frank-window:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/window/Dockerfile
     image: frank-window:current
     container_name: frank-window
     restart: unless-stopped
@@ -36,8 +36,14 @@ services:
       - /srv/frank/data/window:/data
       - /srv/frank/previews/mini:/previews/mini
       - /projects/mini-frank/customer-projects:/legacy-mini-projects
-      - /projects:/vps/projects:ro
-      - /srv/skills:/vps/srv/skills:ro
+      # Project browsing is limited to named product roots. Host-wide
+      # inventory reaches Window only through redacted control receipts.
+      - /projects/frank:/vps/projects/frank:ro
+      - /projects/mini-frank:/vps/projects/mini-frank:ro
+      - /projects/blockwise-product-release-21a192cd2420:/vps/projects/blockwise:ro
+      - /projects/merrypaws:/vps/projects/merrypaws:ro
+      - /projects/elfandwonder:/vps/projects/elfandwonder:ro
+      - /projects/pavone-demo:/vps/projects/pavone-demo:ro
     networks:
       - frank
     healthcheck:
@@ -49,8 +55,8 @@ services:
 
   frank-agenttrail:
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: apps/window/Dockerfile
       target: agenttrail-runtime
     image: frank-agenttrail:current
     container_name: frank-agenttrail

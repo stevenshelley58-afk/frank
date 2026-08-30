@@ -1,0 +1,21 @@
+[Unit]
+Description=Frank fixed-input full control-plane reconciliation
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=root
+Group=hermes
+UMask=0027
+WorkingDirectory=/projects/frank
+ExecStart=/usr/bin/python3 /projects/frank/apps/window/scripts/control_reconcile.py full
+TimeoutStartSec=15m
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/srv/frank/data/window/control-graph
+
+[Install]
+# Deliberately disabled until Step 5; install does not enable this unit.
+WantedBy=multi-user.target

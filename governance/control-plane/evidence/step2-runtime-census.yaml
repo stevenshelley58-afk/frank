@@ -1,0 +1,51 @@
+id: receipt:inventory/step-2-vps-20260830-001
+kind: runtime_inventory
+subject_ids:
+  - vps:dedicated
+producer: frank-control-reconcile
+source_revision_set:
+  project:frank: 39802cb39b9413fe0fce633c600212c80c7e3420
+deployed_revision_set:
+  project:frank: 39802cb39b9413fe0fce633c600212c80c7e3420
+captured_at: "2026-08-30T11:07:38Z"
+fresh_until: "2026-08-31T11:07:38Z"
+# The fixed census observed bounded metadata, but did not expose worker/queue
+# health or backup/restore proof. Those omissions make this partial evidence.
+outcome: partial
+evidence_uris:
+  - evidence://vps/dedicated/runtime-census/20260830
+redaction: secret_filtered
+coverage_dispositions:
+  - class: worker_queue
+    disposition: unavailable
+    status: not_present
+    finding_id: finding:inventory/worker-queue-health-20260830
+    subject_ids: [project:frank, project:blockwise]
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+    reason: No worker or queue health source was exposed by the fixed-input census; runtime presence and health are unknown.
+  - class: backup_restore
+    disposition: unavailable
+    status: not_present
+    finding_id: finding:inventory/backup-restore-evidence-20260830
+    subject_ids: [project:frank, project:blockwise]
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+    reason: No last-successful backup or restore evidence was exposed by the fixed-input census; backup state is unknown.
+findings:
+  - id: finding:inventory/worker-queue-health-20260830
+    kind: worker_queue_health
+    subject_ids: [project:frank, project:blockwise]
+    severity: low
+    status: candidate
+    summary: Worker and queue health evidence was not present in the bounded Step 2 census; runtime status is unavailable.
+    reconciliation_result: inaccessible
+    confidence: none
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+  - id: finding:inventory/backup-restore-evidence-20260830
+    kind: backup_restore_evidence
+    subject_ids: [project:frank, project:blockwise]
+    severity: low
+    status: candidate
+    summary: Last-successful backup and restore evidence was not present in the bounded Step 2 census; state is unavailable.
+    reconciliation_result: inaccessible
+    confidence: none
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]

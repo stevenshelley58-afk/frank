@@ -1,0 +1,11 @@
+[Unit]
+Description=Frank full control-plane reconciliation timer (disabled by default)
+
+[Timer]
+OnCalendar=*-*-* 03:10:00 UTC
+Persistent=true
+Unit=frank-control-reconcile-full.service
+
+[Install]
+# Deliberately disabled until Step 5.
+WantedBy=timers.target

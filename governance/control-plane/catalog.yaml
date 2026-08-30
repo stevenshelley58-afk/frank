@@ -7,6 +7,11 @@ nodes:
     title: Dedicated VPS
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: component:platform
+    kind: component
+    title: Base operating-system platform boundary
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
   - id: project:frank
     kind: project
     title: Frank
@@ -47,11 +52,36 @@ nodes:
     title: Frank Window service
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: service:frank-caddy
+    kind: service
+    title: Frank Caddy edge service
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
   - id: service:blockwise-app
     kind: service
     title: Blockwise product application
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: service:blockwise-caddy
+    kind: service
+    title: Blockwise Caddy edge service
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+  - id: service:blockwise-auth
+    kind: service
+    title: Blockwise authentication service
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+  - id: service:blockwise-rest
+    kind: service
+    title: Blockwise database REST service
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+  - id: service:infisical
+    kind: service
+    title: Infisical secret service
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
   - id: route:frank-public
     kind: route
     title: Frank authenticated public route
@@ -77,6 +107,31 @@ nodes:
     title: Mini Frank source artifacts and project workspaces
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: store:blockwise-db
+    kind: data_store
+    title: Blockwise product database
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+  - id: store:blockwise-storage
+    kind: data_store
+    title: Blockwise object storage
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+  - id: store:blockwise-research-db
+    kind: data_store
+    title: Blockwise isolated research database
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+  - id: store:infisical-db
+    kind: data_store
+    title: Infisical database
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+  - id: store:infisical-redis
+    kind: data_store
+    title: Infisical cache and queue store
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
   - id: observer:agenttrail-frank
     kind: observer
     title: AgentTrail Frank observer
@@ -146,7 +201,7 @@ nodes:
   - id: run:reconciliation
     kind: component
     title: Reconciliation job type
-    state_axes: {lifecycle: draft, trust: reviewed, installation: not_installed, enablement: disabled, production_authority: none}
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: read_only}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
   - id: rule:frank
     kind: rule
@@ -160,19 +215,31 @@ nodes:
     evidence_receipt_ids: [receipt:skills/census-20260830-001]
 
 relationships:
+  - {id: edge:vps/contains-platform, type: contains, from: vps:dedicated, to: component:platform, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:vps/contains-frank, type: contains, from: vps:dedicated, to: project:frank, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:vps/contains-mini-frank, type: contains, from: vps:dedicated, to: project:mini-frank, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:vps/contains-blockwise, type: contains, from: vps:dedicated, to: project:blockwise, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:frank/contains-window, type: contains, from: project:frank, to: service:frank-window, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:frank/contains-caddy, type: contains, from: project:frank, to: service:frank-caddy, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
   - {id: edge:frank/contains-hermes, type: contains, from: project:frank, to: runtime:hermes-default, evidence_receipt_ids: [receipt:hermes/consolidation-20260830-001]}
   - {id: edge:hermes/uses-hindsight, type: uses, from: runtime:hermes-default, to: service:hindsight, evidence_receipt_ids: [receipt:hermes/consolidation-20260830-001]}
   - {id: edge:blockwise/contains-app, type: contains, from: project:blockwise, to: service:blockwise-app, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:blockwise/contains-caddy, type: contains, from: project:blockwise, to: service:blockwise-caddy, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
+  - {id: edge:blockwise/contains-auth, type: contains, from: project:blockwise, to: service:blockwise-auth, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
+  - {id: edge:blockwise/contains-rest, type: contains, from: project:blockwise, to: service:blockwise-rest, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
+  - {id: edge:frank/contains-infisical, type: contains, from: project:frank, to: service:infisical, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
   - {id: edge:frank/repo-owns-checkout, type: owns, from: repo:frank, to: repo:frank-production-checkout, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:window/exposes-public-route, type: exposes, from: service:frank-window, to: route:frank-public, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:window/exposes-loopback-route, type: exposes, from: service:frank-window, to: route:frank-loopback, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:blockwise/exposes-health-route, type: exposes, from: service:blockwise-app, to: route:blockwise-health, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:window/writes-data, type: writes, from: service:frank-window, to: store:frank-window-data, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:mini-frank/owns-project-store, type: owns, from: project:mini-frank, to: store:mini-frank-projects, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:blockwise/app-reads-db, type: reads, from: service:blockwise-app, to: store:blockwise-db, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
+  - {id: edge:blockwise/rest-reads-db, type: reads, from: service:blockwise-rest, to: store:blockwise-db, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
+  - {id: edge:blockwise/app-writes-storage, type: writes, from: service:blockwise-app, to: store:blockwise-storage, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
+  - {id: edge:blockwise/owns-research-db, type: owns, from: project:blockwise, to: store:blockwise-research-db, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
+  - {id: edge:infisical/writes-db, type: writes, from: service:infisical, to: store:infisical-db, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
+  - {id: edge:infisical/uses-redis, type: uses, from: service:infisical, to: store:infisical-redis, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
   - {id: edge:agenttrail/observes-frank, type: observes, from: observer:agenttrail-frank, to: project:frank, evidence_receipt_ids: [receipt:agenttrail/frame-proof-20260830-001]}
   - {id: edge:agenttrail/observes-hermes, type: observes, from: observer:agenttrail-hermes, to: runtime:hermes-default, evidence_receipt_ids: [receipt:agenttrail/frame-proof-20260830-001]}
   - {id: edge:agenttrail/observes-blockwise, type: observes, from: observer:agenttrail-blockwise, to: project:blockwise, evidence_receipt_ids: [receipt:agenttrail/frame-proof-20260830-001]}

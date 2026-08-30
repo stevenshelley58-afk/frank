@@ -1,0 +1,63 @@
+schema_version: 1
+excluded:
+  - class: cache
+    disposition: excluded_evidence
+  - class: quarantine
+    disposition: excluded_evidence
+  - class: symlink_escape
+    disposition: rejected
+  - class: unknown_root
+    disposition: rejected
+  - class: full_instruction_body
+    disposition: redacted
+  - class: base_os_services
+    disposition: represented_by_platform_node
+    reason: Release 1 inventories repository-managed units; ordinary operating-system services are not product capabilities.
+  - class: conversation_and_session_state
+    disposition: excluded_evidence
+    reason: Runtime conversations and local agent state are neither rules nor capability manifests.
+observed_only:
+  - identity: container:pavone-demo
+    disposition: observed-only/unclassified
+    reason: A running container was observed in Step 2 preflight without an accepted managed declaration.
+unresolved_aliases:
+  - name: grill
+    status: unknown_after_bounded_search
+  - name: grill-me
+    status: unknown_after_bounded_search
+  - name: grilling
+    status: unknown_after_bounded_search
+coverage_dispositions:
+  - class: worker_queue
+    disposition: unavailable
+    status: not_present
+    finding_id: finding:inventory/worker-queue-health-20260830
+    subject_ids: [project:frank, project:blockwise]
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+    reason: No worker or queue health source was present in the bounded census; no runtime absence claim is made.
+  - class: backup_restore
+    disposition: unavailable
+    status: not_present
+    finding_id: finding:inventory/backup-restore-evidence-20260830
+    subject_ids: [project:frank, project:blockwise]
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+    reason: No successful backup or restore evidence was present in the bounded census; backup state is unavailable.
+findings:
+  - id: finding:inventory/worker-queue-health-20260830
+    kind: worker_queue_health
+    subject_ids: [project:frank, project:blockwise]
+    severity: low
+    status: candidate
+    summary: Worker and queue health evidence was not present in the bounded Step 2 census; runtime status is unavailable.
+    reconciliation_result: inaccessible
+    confidence: none
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]
+  - id: finding:inventory/backup-restore-evidence-20260830
+    kind: backup_restore_evidence
+    subject_ids: [project:frank, project:blockwise]
+    severity: low
+    status: candidate
+    summary: Last-successful backup and restore evidence was not present in the bounded Step 2 census; state is unavailable.
+    reconciliation_result: inaccessible
+    confidence: none
+    evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]

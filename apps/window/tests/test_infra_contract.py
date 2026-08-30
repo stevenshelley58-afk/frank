@@ -9,12 +9,13 @@ APP = ROOT / "apps" / "window"
 class InfraContractTest(unittest.TestCase):
     def test_window_image_copies_all_imported_runtime_modules(self):
         dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
-        self.assertIn("COPY connections_agent.py .", dockerfile)
-        self.assertIn("COPY mini_frank.py .", dockerfile)
-        self.assertIn("COPY tool_apps ./tool_apps", dockerfile)
-        self.assertIn("COPY tools ./tools", dockerfile)
-        self.assertIn("COPY archify ./archify", dockerfile)
-        self.assertIn("COPY vendor/archify/archify ./vendor/archify/archify", dockerfile)
+        self.assertIn("COPY apps/window/connections_agent.py .", dockerfile)
+        self.assertIn("COPY apps/window/mini_frank.py .", dockerfile)
+        self.assertIn("COPY apps/window/tool_apps ./tool_apps", dockerfile)
+        self.assertIn("COPY apps/window/tools ./tools", dockerfile)
+        self.assertIn("COPY apps/window/archify ./archify", dockerfile)
+        self.assertIn("COPY apps/window/vendor/archify/archify ./vendor/archify/archify", dockerfile)
+        self.assertIn("COPY governance/control-plane/schema ./governance/control-plane/schema", dockerfile)
         self.assertIn("archify.mjs validate architecture", dockerfile)
         self.assertIn("archify.mjs check archify/ad-template-process.html", dockerfile)
         self.assertIn("frank.archify-build-validation.v1", dockerfile)
@@ -116,6 +117,15 @@ class InfraContractTest(unittest.TestCase):
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
         self.assertIn("docker rm -f frank-window frank-caddy frank-frank-caddy-1", deploy)
 
+    def test_deploy_uses_shared_fixed_post_deploy_hook_without_failing_release(self):
+        deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        hook = (APP / "infra" / "control_plane" / "post-deploy.sh").read_text(encoding="utf-8")
+        self.assertIn('"$app/infra/control_plane/post-deploy.sh"', deploy)
+        self.assertIn("the healthy release remains current", deploy)
+        self.assertIn('repo="/projects/frank"', hook)
+        self.assertIn('control_reconcile.py" post_deploy', hook)
+        self.assertNotRegex(hook, r"\$\{?[1-9@*]")
+
     def test_deploy_provisions_mini_runtime_contract(self):
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
@@ -136,8 +146,17 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("/srv/frank/previews/mini:/previews/mini", window)
         self.assertIn("/projects/mini-frank/customer-projects:/legacy-mini-projects", window)
         self.assertIn("/srv/frank/data/window:/data", window)
-        self.assertIn("/projects:/vps/projects:ro", window)
-        self.assertNotIn("/projects:/vps/projects:rw", window)
+        self.assertNotIn("/projects:/vps/projects", window)
+        self.assertNotIn("/var/run/docker.sock", window)
+        for mount in (
+            "/projects/frank:/vps/projects/frank:ro",
+            "/projects/mini-frank:/vps/projects/mini-frank:ro",
+            "/projects/blockwise-product-release-21a192cd2420:/vps/projects/blockwise:ro",
+            "/projects/merrypaws:/vps/projects/merrypaws:ro",
+            "/projects/elfandwonder:/vps/projects/elfandwonder:ro",
+            "/projects/pavone-demo:/vps/projects/pavone-demo:ro",
+        ):
+            self.assertIn(mount, window)
         self.assertIn("/srv/frank/previews:/srv/frank/previews:ro", caddy)
         self.assertNotIn("mini-shared/workspaces", caddy)
         self.assertIn("secrets.token_urlsafe(48)", deploy)

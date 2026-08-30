@@ -7,6 +7,7 @@ secret_dir="/srv/frank/secrets"
 secret_file="$secret_dir/window.env"
 caddy_secret_file="$secret_dir/caddy.env"
 data_dir="/srv/frank/data/window"
+control_graph_dir="$data_dir/control-graph"
 preview_dir="/srv/frank/previews"
 mini_preview_dir="$preview_dir/mini"
 mini_workspace_dir="$data_dir/mini-shared/workspaces"
@@ -26,6 +27,7 @@ install -d -m 0700 -- "$secret_dir"
 # on the host. Keep the directory private to root + the existing Hermes group;
 # setgid preserves that boundary for newly-created staging directories.
 install -d -o root -g hermes -m 2750 -- "$data_dir"
+install -d -o root -g hermes -m 0750 -- "$control_graph_dir"
 install -d -m 0755 -- "$preview_dir"
 # Hermes provisions new project workspaces before their first turn. Keep the
 # canonical parent root-owned while granting the sole agent runtime a setgid
@@ -228,4 +230,10 @@ chown root:root "$release_tmp"; chmod 0644 "$release_tmp"; mv -f -- "$release_tm
 curl --fail --silent --show-error --output /dev/null \
   --retry 10 --retry-delay 2 --retry-all-errors \
   https://frank.fail/frank/
+# Publish both fixed-input reconciliation scopes after every healthy release.
+# A collector failure has its own immutable failure receipt and must not turn
+# an already-promoted, healthy application into an ambiguously failed deploy.
+if ! "$app/infra/control_plane/post-deploy.sh"; then
+  echo "warning: post-deploy control-plane reconciliation failed; the healthy release remains current" >&2
+fi
 echo "deployed $(git -C "$repo" rev-parse HEAD)"

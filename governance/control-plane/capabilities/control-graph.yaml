@@ -10,7 +10,7 @@ does_not_apply_when: [arbitrary shell execution]
 scope_ids: [project:frank, vps:dedicated]
 source_locator: governance/control-plane/catalog.yaml
 source_revision: 366f4bacad6294261a57751289121193ac162b08
-content_hash: sha256:69ff071026edf420e095cdfdcbfc37ca6fdffb9fca47c44600f4e546884c2bb9
+content_hash: sha256:6f6a854395541a27303cc4ca5e7f827180790bf81cccb28f18b05d5f1a58bffc
 authority_tier: repo
 enforcement: ci
 state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: read_only}
