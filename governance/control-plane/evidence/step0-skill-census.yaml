@@ -1,0 +1,61 @@
+id: receipt:skills/census-20260830-001
+kind: canonical_skill_source_census
+subject_ids:
+  - project:frank
+  - runtime:hermes-default
+  - project:blockwise
+producer: codex-frontier-integrator
+source_revision_set:
+  project:frank: 366f4bacad6294261a57751289121193ac162b08
+  source:archify: b36d79fdbc3aec3728744341485a7e79f03c0071
+  project:blockwise-release-contract: 21a192cd242029c4c35d406734a62cb0591590a1
+deployed_revision_set:
+  runtime:hermes-default: e50d5819690251a6896a78ae9dd9fc6192bcaf43208e0046fd2f0f0bc1d8045f
+captured_at: "2026-08-30T09:32:00Z"
+fresh_until: null
+outcome: partial
+evidence_uris:
+  - host:/home/hermes/.hermes/skills
+  - git:/projects/frank/apps/window/vendor/archify@b36d79fdbc3aec3728744341485a7e79f03c0071
+  - git:/projects/blockwise-product-release-21a192cd2420@21a192cd242029c4c35d406734a62cb0591590a1
+redaction: secret_filtered
+
+located_sources:
+  - id: skill:hermes/impeccable
+    path: /home/hermes/.hermes/skills/impeccable/SKILL.md
+    sha256: 64705eff7f655552fbbcc346bbc0ce63625d0bb633d57164e459946438a39f05
+    consumer: runtime:hermes-default
+  - id: skill:hermes/webapp-testing
+    path: /home/hermes/.hermes/skills/webapp-testing/SKILL.md
+    sha256: 51b7349e77ec63b7744a6f63647e7566a0b4d2e301121cc10e8c2113af6556a2
+    consumer: runtime:hermes-default
+  - id: skill:frank/archify
+    path: /projects/frank/apps/window/vendor/archify/archify/SKILL.md
+    sha256: baabdc65dce19b9d345cf9fca7b6d75ba172043544242d478b32532b84adcc22
+    consumer: project:frank
+  - id: skill:blockwise/adstudio-template-builder-v2
+    path: /projects/blockwise-product-release-21a192cd2420/hermes/skills/adstudio-template-builder-v2/SKILL.md
+    sha256: 98e196948832c0951d4f3e8b4d7f58b4364c0451bc1b0e1cd988375a84225582
+    consumer: project:blockwise
+
+negative_search:
+  names:
+    - grill
+    - grill-me
+    - grilling
+  roots:
+    - /projects
+    - /home/hermes/.hermes
+    - /root/.claude
+    - /root/.codex
+  manifest_classes:
+    - SKILL.md
+    - manifest.json
+    - plugin.json
+  result: no_matching_canonical_manifest
+  classification: unknown
+  rule: Do not infer aliases, duplicates, absence or runtime consumers without a canonical manifest or external registry receipt.
+
+privacy:
+  manifest_bodies_retained: false
+  conversation_bodies_read: false

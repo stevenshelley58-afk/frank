@@ -1,0 +1,77 @@
+id: receipt:agenttrail/frame-proof-20260830-001
+kind: agenttrail_same_origin_frame_proof
+subject_ids:
+  - observer:agenttrail-frank
+  - project:frank
+producer: codex-frontier-integrator
+source_revision_set:
+  source:agenttrail: 5b97cf3cef548a0c668731e7f569fa36c14832f2
+  project:frank: 366f4bacad6294261a57751289121193ac162b08
+deployed_revision_set:
+  observer:agenttrail-frank: 5b97cf3cef548a0c668731e7f569fa36c14832f2
+captured_at: "2026-08-30T09:29:00Z"
+fresh_until: null
+outcome: pass
+evidence_uris:
+  - host:http://127.0.0.1:5340/
+  - source:apps/window/vendor/agenttrail/bin/agenttrail.mjs
+redaction: secret_filtered
+
+canary:
+  location: dedicated_vps
+  proxy: caddy:2.8-alpine
+  temporary_listener: 127.0.0.1:18084
+  board_path: /live/
+  board_status: 200
+  model_path: /model
+  model_status: 200
+  frame_headers_absent:
+    - X-Frame-Options
+    - Content-Security-Policy frame-ancestors
+  read_methods:
+    - GET
+    - HEAD
+  denied_methods:
+    - POST
+    - PUT
+    - PATCH
+    - DELETE
+  denied_status: 405
+  tested_denied_paths:
+    - /setup
+    - /setup-board
+    - /spawn
+    - /hook
+    - /nudge
+    - /live/setup
+    - /live/setup-board
+    - /live/spawn
+    - /live/hook
+    - /model
+    - /events
+  pinned_upstream_route_inventory:
+    read_only:
+      - /
+      - /whoami
+      - /board-lite
+      - /world
+      - /tree
+      - /suggest
+      - /nudge
+      - /tree-of
+      - /summary
+      - /fleet
+      - /model
+      - /events
+    mutating:
+      - /setup
+      - /setup-board
+      - /spawn
+      - /hook
+  upstream_modified: false
+  cleanup:
+    container_absent: true
+    listener_absent: true
+    temporary_config_absent: true
+
+implementation_boundary: Frank may add only a same-origin read-only edge route and iframe; AgentTrail owns the board UI and event model.

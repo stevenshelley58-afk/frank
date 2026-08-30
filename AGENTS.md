@@ -29,7 +29,7 @@ never additional Hermes profiles.
 ## Delivery
 
 1. Start from current `main`.
-2. Run `python -m unittest discover -s apps/window/tests` from `apps/window`
+2. Run `python -m unittest discover -s tests` from `apps/window`
    and `node --check` on every JavaScript file.
 3. Build the container before release.
 4. Commit and push the exact revision.

@@ -1,0 +1,136 @@
+schema_version: 1
+accepted_baseline_sha: 366f4bacad6294261a57751289121193ac162b08
+canonical_remote: https://github.com/stevenshelley58-afk/frank.git
+default_branch: main
+canonical_checkout: /projects/frank
+observed_at: "2026-08-30T09:30:14Z"
+
+baseline:
+  receipt_id: receipt:baseline/frank-vps-20260830-001
+  receipt_path: governance/control-plane/evidence/step0-baseline.yaml
+  checkout_state: clean
+  origin_sha: 366f4bacad6294261a57751289121193ac162b08
+  deployed_source_sha: 366f4bacad6294261a57751289121193ac162b08
+  deployed_source_receipt_path: /var/lib/frank/release/approved-sha
+  deployed_source_receipt_sha256: 2126e24ed0c931015345b0985c962b4d424cc13e20df398cba3df047c1e15c1c
+  deployed_image: frank-window:current
+  deployed_image_id: sha256:fdb6ebeef3921c9d7f1e6b0b339aa044b1edb48c2b2ab32a82490c494d07dbad
+
+bootstrap_open_source_register:
+  source_locator: external-companion:frank-control-plane-open-source-register
+  sha256: 65e3f913a2e87006574eee767159c81ccb42933b1179a1cda18dba51d0ff2587
+  reviewed_at: "2026-08-30"
+  repository_copy_sha256: null
+  repository_copy_status: pending_step_1
+
+read_first:
+  # Resolve every relative path beneath /projects/frank.
+  - AGENTS.md
+  - docs/PROJECT.md
+  - apps/window/DESIGN.md
+  - docs/FRANK_RELEASE_RUNBOOK.md
+  - docs/FRANK_AGENTTRAIL_ARCHIFY.md
+  - docs/MEMORY.md
+  - apps/window/docker-compose.yml
+  - apps/window/Caddyfile
+  - apps/window/deploy.sh
+  - apps/window/graph/ASSEMBLY.md
+  - apps/window/infra/knowledge/README.md
+  - apps/window/infra/knowledge/project-seeds/mini-frank/README.md
+
+canonical_commands:
+  clean_worktree: git status --short --branch
+  remote_baseline: git ls-remote origin refs/heads/main
+  focused_tests: cd /projects/frank/apps/window && python -m unittest discover -s tests
+  graph_contract_tests: cd /projects/frank/apps/window && python -m unittest tests.test_graph_contract tests.test_graph_provider
+  javascript_syntax: cd /projects/frank && git ls-files -z '*.js' '*.mjs' | xargs -0 -n1 node --check
+  dashboard_build: cd /projects/frank/apps/window && npm run build:dashboard
+  graph_build: cd /projects/frank/apps/window && npm run build:graph
+  container_build: cd /projects/frank/apps/window && docker compose config --quiet && docker compose build frank-window frank-agenttrail
+  deploy: cd /projects/frank && apps/window/deploy.sh
+  post_deploy_health: docker inspect frank-window --format '{{.State.Health.Status}}' && curl --fail --silent --show-error https://frank.fail/frank/ >/dev/null
+  rollback:
+    status: resolved_per_release_receipt
+    rule: Check out the exact prior accepted commit in the canonical clean checkout, run apps/window/deploy.sh, then require its health and approved-sha receipts to match that commit.
+    forbidden: Never switch to or pull a mutable branch as the rollback target.
+  preview:
+    status: unavailable
+    reason: No canonical isolated VPS preview command exists at the accepted baseline; Step 5 must add the preview-<run-slug> contract before preview use.
+
+pinned_upstreams:
+  agenttrail:
+    source: https://github.com/sodiumsun/agenttrail.git
+    revision: 5b97cf3cef548a0c668731e7f569fa36c14832f2
+    executable_path: apps/window/vendor/agenttrail/bin/agenttrail.mjs
+    executable_sha256_vps: 8be079af9b1f038d2288475e28377a524f6797bb846206b2ac8094e63dec7ab
+    board_path: apps/window/vendor/agenttrail/public/index.html
+    same_origin_embedding: verified
+    frame_proof_receipt_id: receipt:agenttrail/frame-proof-20260830-001
+    edge_mutation_policy: allow only GET/HEAD on the pinned board read-route allowlist; deny POST/PUT/PATCH/DELETE before prefix stripping
+  archify:
+    source: https://github.com/tt-a1i/archify.git
+    revision: b36d79fdbc3aec3728744341485a7e79f03c0071
+    version: v2.15.0-39-gb36d79f
+    executable_path: apps/window/vendor/archify/archify/bin/archify.mjs
+    executable_sha256_vps: 86aa44dd70ddcfb81def18bea9ae5e44a6cd04293d80f92792ed1b165a113b67
+
+authorities:
+  hermes:
+    id: runtime:hermes-default
+    profile: default
+    home: /home/hermes/.hermes
+    config_sha256: e50d5819690251a6896a78ae9dd9fc6192bcaf43208e0046fd2f0f0bc1d8045f
+    frank_dispatch_endpoint: http://172.16.1.1:8642
+    operator_endpoint: http://100.78.126.112:9119
+    hindsight_endpoint: http://172.16.1.1:9178
+    dispatch_unit: service:hermes-gateway
+    serve_unit: service:hermes-serve
+    memory_provider: hindsight
+    remediation_receipt_id: receipt:hermes/consolidation-20260830-001
+    rollback_drill_receipt_id: receipt:hermes/rollback-drill-20260830-001
+    bounded_canary_receipt_id: receipt:hermes/canary-20260830-001
+  hindsight:
+    id: service:hindsight
+    native_endpoint: http://127.0.0.1:9177
+    frank_endpoint: http://172.16.1.1:9178
+    state_access: hermes_only
+
+runtime_routes:
+  frank_window: http://127.0.0.1:18080
+  frank_public: https://frank.fail/frank/
+  agenttrail_frank: http://127.0.0.1:5340
+  agenttrail_hermes: http://127.0.0.1:5341
+  agenttrail_blockwise: http://127.0.0.1:5342
+  blockwise_public: https://blockwise.sale/api/health
+  frank_caddy_source_sha256: acce5c7254f89e39f405ae3d4eca92e6112a97c312de9099eef1b161be426b80
+  host_legacy_caddy_sha256: 456a983861697f585849b87d2abbc9f67ed2b8f5c084ca43ee50d028d7ecf526
+
+runtime_monitoring:
+  provider: null
+  status: unavailable
+  decision_required: receipt:oss-decision/runtime-monitoring/provider
+  note: AgentTrail is present but is not runtime-health authority.
+
+evidence_status:
+  mini_frank_runtime: absent_separate_runtime
+  mini_frank_surface: embedded_in_frank_window
+  ad_template_builder_source_contract: present
+  ad_template_builder_blockwise_runtime_consumption: unknown
+  custom_grill_skill_sources: unknown_after_bounded_search
+  custom_skill_census_receipt_id: receipt:skills/census-20260830-001
+  graph_authority_tree: governance/control-plane
+  competing_vps_graph_tree: absent
+
+feature_flags:
+  active_release_contract: not_yet_created
+  expected_declared_defaults: all_false
+
+step_0_receipts:
+  manifest_path: governance/control-plane/evidence/step0-receipts.sha256
+  receipts:
+    receipt:baseline/frank-vps-20260830-001: cbb32c423649e2647d9c7741cb6fdccfdd4aa5655d320304ed18c5198ce79bd3
+    receipt:hermes/consolidation-20260830-001: edc2cb46254578a0809dba64d64241a2a4becbdad363b96d3ef5058f16c9a0bf
+    receipt:hermes/rollback-drill-20260830-001: ddaa72d10e04afe80581efbacab26cac0fa67c5eae8afec4fb38936e22e033a8
+    receipt:hermes/canary-20260830-001: d5e00137d96e2afa11bbc0cff8e0ed7d88037d2992f20a6537195b15df890249
+    receipt:agenttrail/frame-proof-20260830-001: 9b04d41d279e32367c7c3619c46391bd55b47f77973acf6bafbda01b1c70e35a
+    receipt:skills/census-20260830-001: 10c979b6f0dbebb59786d23d5a4a0001feeac7a3abd8f210cdd97f9f9cae349a

@@ -1,0 +1,27 @@
+id: receipt:hermes/canary-20260830-001
+kind: hermes_bounded_authority_canary
+subject_ids:
+  - runtime:hermes-default
+  - project:frank
+producer: codex-frontier-integrator
+source_revision_set:
+  project:frank: 366f4bacad6294261a57751289121193ac162b08
+deployed_revision_set:
+  runtime:hermes-default: e50d5819690251a6896a78ae9dd9fc6192bcaf43208e0046fd2f0f0bc1d8045f
+captured_at: "2026-08-30T09:21:30Z"
+fresh_until: null
+outcome: pass
+evidence_uris:
+  - service:http://172.16.1.1:8642
+  - service:http://172.16.1.1:9178
+redaction: secret_filtered
+
+path: Frank Window container to its configured default-profile Hermes endpoint
+session_id_sha256: c68b898a624402666857ddd6e22dc37422a50bdf8d60e6da282683b66eab8380
+create_status: 201
+turn_status: 200
+terminal_event: done
+delete_status: 200
+tools_allowed: false
+response_content_retained: false
+hindsight_native_provider_check: pass

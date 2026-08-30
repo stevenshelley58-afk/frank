@@ -1,0 +1,123 @@
+id: receipt:baseline/frank-vps-20260830-001
+kind: baseline_provenance
+subject_ids:
+  - vps:dedicated
+  - project:frank
+  - project:blockwise
+  - project:mini-frank
+  - runtime:hermes-default
+producer: codex-frontier-integrator
+source_revision_set:
+  project:frank: 366f4bacad6294261a57751289121193ac162b08
+  source:agenttrail: 5b97cf3cef548a0c668731e7f569fa36c14832f2
+  source:archify: b36d79fdbc3aec3728744341485a7e79f03c0071
+  project:blockwise-release-contract: 21a192cd242029c4c35d406734a62cb0591590a1
+deployed_revision_set:
+  service:frank-window: 366f4bacad6294261a57751289121193ac162b08
+  service:blockwise-app: a8beeff
+captured_at: "2026-08-30T09:22:21Z"
+fresh_until: "2026-08-30T09:52:21Z"
+outcome: pass
+gate_scope: Step 0 source, deployment and authority baseline; unknown optional relationships remain findings and are not asserted as graph edges.
+evidence_uris:
+  - git:/projects/frank@366f4bacad6294261a57751289121193ac162b08
+  - host:/var/lib/frank/release/approved-sha
+  - docker:/frank-window@sha256:fdb6ebeef3921c9d7f1e6b0b339aa044b1edb48c2b2ab32a82490c494d07dbad
+  - docker:/frank-agenttrail@sha256:e2936bada2c365a40205af28c63cceb75eafa157ddc03265782cc8470a1fc894
+  - docker:/frank-caddy@sha256:af32e97399febea808609119bb21544d0265c58a02836576e32a2d082c262c17
+  - docker:/blockwise-product-product-app-1@sha256:cc08b50c95d5d46e7d9f8c0b2012fa78563e8d6d8141aaf0cc60284174fbff52
+redaction: secret_filtered
+
+host:
+  hostname: srv1625369
+  kernel: 6.8.0-137-generic
+  architecture: x86_64
+
+repository:
+  canonical_checkout: /projects/frank
+  remote: https://github.com/stevenshelley58-afk/frank.git
+  branch: main
+  working_tree: clean
+  head_matches_origin: true
+  deployed_source_receipt_sha256: 2126e24ed0c931015345b0985c962b4d424cc13e20df398cba3df047c1e15c1c
+
+services:
+  - id: service:frank-window
+    container_id: 700ce9a0dddd133a9a535ba5cfb85e0971a23d4c6dacdea12697e89ff68e9872
+    image_id: sha256:fdb6ebeef3921c9d7f1e6b0b339aa044b1edb48c2b2ab32a82490c494d07dbad
+    listener: 127.0.0.1:18080
+    health: healthy
+  - id: observer:agenttrail-frank
+    unit: agenttrail-only-process-frank.service
+    repository_path: /projects/only-process-frank
+    listener: 127.0.0.1:5340
+    health: healthy
+  - id: observer:agenttrail-hermes
+    unit: agenttrail-only-process-hermes.service
+    repository_path: /projects/only-process-hermes
+    listener: 127.0.0.1:5341
+    health: healthy
+  - id: observer:agenttrail-blockwise
+    unit: agenttrail-only-process-blockwise.service
+    repository_path: /projects/only-process-blockwise
+    listener: 127.0.0.1:5342
+    health: healthy
+  - id: service:blockwise-app
+    container_id: dd43947ab52303a4281a25ff1d4d6b447a4a633fe4b33ad1894e0a714d086e68
+    image_id: sha256:cc08b50c95d5d46e7d9f8c0b2012fa78563e8d6d8141aaf0cc60284174fbff52
+    health: healthy
+
+routes:
+  frank_caddy_source: apps/window/Caddyfile
+  frank_caddy_sha256_vps: acce5c7254f89e39f405ae3d4eca92e6112a97c312de9099eef1b161be426b80
+  public_route: https://frank.fail
+  upstream: service:frank-window
+  note: /etc/caddy/Caddyfile is a separate host legacy/dev Caddy authority and is not the Frank container mount.
+
+agenttrail_embedding:
+  status: verified
+  receipt_id: receipt:agenttrail/frame-proof-20260830-001
+  evidence:
+    - Board root returns HTML without X-Frame-Options or frame-ancestors restrictions.
+    - Frank CSP permits same-origin frames.
+    - The pinned board uses closed root-relative GET endpoints that can be reverse-proxied same-origin.
+    - A short-lived VPS Caddy canary returned the board and model on one origin while setup, setup-board, spawn, hook and nudge returned HTTP 405.
+    - The proof container, listener and temporary configuration were absent after the canary.
+
+mini_frank:
+  status: embedded_surface_no_separate_runtime
+  source_path: apps/window/mini_frank.py
+  source_sha256_vps: f82deff002f282a9a7308bc300e83e7e64176ff7333d37985b03d3fdfb0d6127
+  workspace: /projects/mini-frank
+  artifact_root: /projects/mini-frank/customer-projects
+  runtime_evidence: No Mini-specific systemd unit, process or container exists; routes and transport are owned by Frank Window/Caddy.
+
+ad_template_builder:
+  source_contract_status: present
+  runtime_consumption_status: unknown
+  frank_spec_sha256_vps: 53815818f4b5416d97aee413e172cab2cfc4f5cce292f7ab5ef4a0b0d34267a6
+  frank_artifact_sha256_vps: d7581e6113c719e96568303e558ad9a8d623f5cd246be503a3f2111d2945c37a
+  reason: Blockwise runtime points to release a8beeff while the verified source contract is in checkout 21a192cd; no active release receipt binds them.
+  graph_rule: Do not create a consumes edge until both source-contract and deployed/runtime evidence match.
+
+runtime_monitoring:
+  status: unavailable
+  excluded_authority: AgentTrail
+  required_next_step: Step 1 must select the smallest valid OSS fallback from the accepted register.
+
+custom_skills:
+  grill_family_status: unknown
+  searched_roots:
+    - /projects
+    - /home/hermes/.hermes
+    - /root/.claude
+    - /root/.codex
+  note: No canonical grill, grill-me or grilling manifest was found; absence was not inferred.
+
+verification:
+  python_tests: 335 passed, 3 skipped
+  javascript_syntax_files: 26
+  hermes_memory_check: pass
+  hermes_bounded_job: pass
+  separate_mini_runtime: absent
+  accidental_new_service_port_route: false

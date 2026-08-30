@@ -1,0 +1,26 @@
+id: receipt:hermes/rollback-drill-20260830-001
+kind: hermes_single_authority_rollback_drill
+subject_ids:
+  - runtime:hermes-default
+producer: codex-frontier-integrator
+source_revision_set:
+  project:frank: 366f4bacad6294261a57751289121193ac162b08
+deployed_revision_set:
+  runtime:hermes-default: e50d5819690251a6896a78ae9dd9fc6192bcaf43208e0046fd2f0f0bc1d8045f
+captured_at: "2026-08-30T09:22:21Z"
+fresh_until: null
+outcome: pass
+evidence_uris:
+  - host:/srv/frank/backups/control-plane-step0/hermes-consolidation-20260830T091935Z/rollback-drill.json
+  - host:/srv/frank/backups/control-plane-step0/restore-dry-run-20260830T091935Z
+redaction: secret_filtered
+
+empty_delta_restore_dry_run: pass
+simulated_post_cutover_delta_sha256: a0a971ebf964106a14c7fc319f791d9b85cf91d9ec4248f3846773fb56021f28
+incompatible_delta_guard: pass
+compatibility_result: unavailable_state_delta
+selected_authority_units:
+  hermes-gateway.service: active
+  hermes-serve.service: active
+obsolete_authority_state: inactive
+decision: Keep the selected authority active and fix forward; never discard an incompatible delta or start both authorities.

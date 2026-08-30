@@ -1,0 +1,88 @@
+id: receipt:hermes/consolidation-20260830-001
+kind: hermes_authority_consolidation
+subject_ids:
+  - runtime:hermes-default
+producer: codex-frontier-integrator
+source_revision_set:
+  project:frank: 366f4bacad6294261a57751289121193ac162b08
+deployed_revision_set:
+  runtime:hermes-default: e50d5819690251a6896a78ae9dd9fc6192bcaf43208e0046fd2f0f0bc1d8045f
+captured_at: "2026-08-30T09:22:21Z"
+fresh_until: "2026-08-30T10:00:14Z"
+outcome: pass
+evidence_uris:
+  - host:/srv/frank/backups/control-plane-step0/hermes-consolidation-20260830T091935Z
+  - host:/srv/frank/backups/control-plane-step0/restore-dry-run-20260830T091935Z
+redaction: secret_filtered
+
+selected_authority:
+  id: runtime:hermes-default
+  home: /home/hermes/.hermes
+  profile: default
+  config_sha256: e50d5819690251a6896a78ae9dd9fc6192bcaf43208e0046fd2f0f0bc1d8045f
+  frank_dispatch_endpoint:
+    endpoint: http://172.16.1.1:8642
+    process_id_at_cutover: 3947270
+    unit: hermes-gateway.service
+    executable: /home/hermes/.hermes/hermes-agent/venv/bin/python
+    working_directory: /home/hermes/.hermes
+    role: Frank-facing dispatcher over the canonical default-profile state
+  operator_endpoint:
+    endpoint: http://100.78.126.112:9119
+    process_id_at_cutover: 2969339
+    unit: hermes-serve.service
+    working_directory: /home/hermes/.hermes
+    role: authenticated operator API over the same canonical default-profile state
+  lease_scoped_desktop_transport:
+    listener_at_cutover: 127.0.0.1:39897
+    state_root: /home/hermes/.hermes
+    persistence: ssh_session_scope
+    independent_queue_or_memory_store: false
+  queue_store: /home/hermes/.hermes/state.db
+  active_turn_leases_at_cutover: 0
+
+memory_provider:
+  id: service:hindsight
+  native_endpoint: http://127.0.0.1:9177
+  frank_proxy_endpoint: http://172.16.1.1:9178
+  role: semantic memory provider behind Hermes, not a reasoning or dispatch authority
+
+retired_competing_authority:
+  unit: hermes-dashboard.service
+  home: /home/codex/.hermes
+  config_sha256: 6f6fbea868e51f77673cd208a0efd7c402aed126e12aa29fde97c37d1925516f
+  prior_listener: 100.78.126.112:9120
+  active_clients_at_quiesce: 0
+  job_queue_or_lease_tables: 0
+  preserved_sessions: 1
+  state_action: preserved_in_place
+  final_state: disabled_and_inactive
+
+backup:
+  manifest_sha256: 6ab812904e18281c6dd2b9a6a4fc135f8d2ba5e429153702db55d9abfc3ab9f3
+  restore_dry_run: pass
+  contains_secrets: false
+
+rollback_drill:
+  receipt_id: receipt:hermes/rollback-drill-20260830-001
+  receipt_sha256: df9f1fbc7bb81c142389dead7b17fca67582b97cfeb0a821cf64aae578a43d72
+  simulated_delta_sha256: a0a971ebf964106a14c7fc319f791d9b85cf91d9ec4248f3846773fb56021f28
+  compatibility_result: unavailable_state_delta
+  empty_delta_restore_dry_run: pass
+  incompatible_delta_guard: pass
+  decision: Keep the selected authority active and fix forward; never discard the delta or start both authorities.
+
+post_cutover:
+  revalidated_at: "2026-08-30T09:30:14Z"
+  canonical_units_active: true
+  obsolete_listener_absent: true
+  hindsight_native_provider_check: pass
+  bounded_job_receipt_id: receipt:hermes/canary-20260830-001
+  bounded_job_session_id_sha256: c68b898a624402666857ddd6e22dc37422a50bdf8d60e6da282683b66eab8380
+  bounded_job_create_status: 201
+  bounded_job_turn_status: 200
+  bounded_job_delete_status: 200
+
+rollback_command: unavailable_until_a_compatible_delta_receipt_exists
+rollback_procedure: Quiesce runtime:hermes-default, snapshot post-cutover queue/job/lease deltas, prove reverse-migration compatibility, stop the selected authority, restore the backed-up unit and start exactly one authority.
+rollback_constraint: The incompatible-delta guard passed, so the selected authority must remain active and the retired dashboard must remain disabled unless a later receipt proves all deltas compatible.
