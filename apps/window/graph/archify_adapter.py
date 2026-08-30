@@ -319,6 +319,270 @@ def _coverage(nodes: Iterable[Mapping[str, Any]], edges: Iterable[Mapping[str, A
     return {"required": sorted(set(required)), "present": sorted(present), "missing": missing}
 
 
+_CURATED_ARCHITECTURES: dict[str, dict[str, Any]] = {
+    "projection:vps/world": {
+        "title": "VPS World",
+        "subtitle": "Canonical host, product, service, route, and store topology",
+        "viewBox": [1240, 620],
+        "nodes": (
+            ("vps:dedicated", "Dedicated VPS", 560, 30),
+            ("component:platform", "OS Platform", 40, 30),
+            ("project:frank", "Frank", 120, 170),
+            ("project:mini-frank", "Mini Frank", 560, 170),
+            ("project:blockwise", "Blockwise", 980, 170),
+            ("service:frank-caddy", "Frank Edge", 0, 320),
+            ("service:frank-window", "Frank Window", 170, 320),
+            ("runtime:hermes-default", "Hermes", 340, 320),
+            ("service:infisical", "Infisical", 510, 320),
+            ("store:mini-frank-projects", "Mini Projects", 680, 320),
+            ("service:blockwise-app", "Blockwise App", 890, 320),
+            ("service:blockwise-auth", "Blockwise Auth", 1060, 320),
+            ("route:frank-public", "Public Route", 170, 470),
+            ("service:hindsight", "Hindsight", 340, 470),
+            ("store:blockwise-db", "Blockwise DB", 890, 470),
+        ),
+        "edges": (
+            "edge:vps/contains-platform",
+            "edge:vps/contains-frank",
+            "edge:vps/contains-mini-frank",
+            "edge:vps/contains-blockwise",
+            "edge:frank/contains-caddy",
+            "edge:frank/contains-window",
+            "edge:frank/contains-hermes",
+            "edge:frank/contains-infisical",
+            "edge:window/exposes-public-route",
+            "edge:hermes/uses-hindsight",
+            "edge:mini-frank/owns-project-store",
+            "edge:blockwise/contains-app",
+            "edge:blockwise/contains-auth",
+            "edge:blockwise/app-reads-db",
+        ),
+        "type_overrides": {"component:platform": "cloud"},
+    },
+    "projection:frank/architecture": {
+        "title": "Frank Architecture",
+        "subtitle": "Canonical ingress, Window, Hermes, secrets, and owned capability topology",
+        "viewBox": [1240, 620],
+        "nodes": (
+            ("vps:dedicated", "Dedicated VPS", 510, 20),
+            ("project:frank", "Frank", 510, 145),
+            ("service:frank-caddy", "Frank Edge", 0, 300),
+            ("service:frank-window", "Frank Window", 170, 300),
+            ("component:frank/ad-studio", "Ad Studio", 340, 300),
+            ("runtime:hermes-default", "Hermes", 510, 300),
+            ("service:infisical", "Infisical", 680, 300),
+            ("capability:frank/ad-template-builder", "Ad Builder", 850, 300),
+            ("route:frank-public", "Public Route", 80, 455),
+            ("store:frank-window-data", "Window Data", 250, 455),
+            ("route:hermes-tool-runs", "Tool-run API", 430, 455),
+            ("service:hindsight", "Hindsight", 600, 455),
+            ("store:infisical-db", "Infisical DB", 770, 455),
+            ("tool:archify", "Archify", 940, 455),
+        ),
+        "edges": (
+            "edge:vps/contains-frank",
+            "edge:frank/contains-caddy",
+            "edge:frank/contains-window",
+            "edge:frank/contains-ad-studio",
+            "edge:frank/contains-hermes",
+            "edge:frank/contains-infisical",
+            "edge:frank/contains-ad-template-builder",
+            "edge:window/exposes-public-route",
+            "edge:window/writes-data",
+            "edge:ad-studio/routes-tool-runs",
+            "edge:hermes-tool-runs/routes-hermes",
+            "edge:hermes/uses-hindsight",
+            "edge:infisical/writes-db",
+            "edge:ad-template-builder/uses-archify",
+        ),
+    },
+    "projection:blockwise/runtime": {
+        "title": "Blockwise Runtime",
+        "subtitle": "Canonical Blockwise services, stores, and Frank runtime links",
+        "viewBox": [1240, 700],
+        "nodes": (
+            ("vps:dedicated", "Dedicated VPS", 510, 20),
+            ("project:frank", "Frank", 120, 155),
+            ("project:blockwise", "Blockwise", 720, 155),
+            ("store:blockwise-research-db", "Research DB", 1080, 155),
+            ("service:frank-window", "Frank Window", 20, 310),
+            ("runtime:hermes-default", "Hermes", 200, 310),
+            ("service:blockwise-caddy", "Blockwise Edge", 400, 310),
+            ("service:blockwise-app", "Blockwise App", 580, 310),
+            ("service:blockwise-auth", "Blockwise Auth", 760, 310),
+            ("service:blockwise-rest", "Database REST", 940, 310),
+            ("route:blockwise-health", "Health Route", 400, 470),
+            ("store:blockwise-db", "Product DB", 940, 470),
+            ("store:blockwise-storage", "Object Storage", 580, 540),
+        ),
+        "edges": (
+            "edge:vps/contains-frank",
+            "edge:vps/contains-blockwise",
+            "edge:frank/contains-window",
+            "edge:frank/contains-hermes",
+            "edge:blockwise/owns-research-db",
+            "edge:blockwise/contains-caddy",
+            "edge:blockwise/contains-app",
+            "edge:blockwise/contains-auth",
+            "edge:blockwise/contains-rest",
+            "edge:blockwise/exposes-health-route",
+            "edge:blockwise/app-reads-db",
+            "edge:blockwise/app-writes-storage",
+            "edge:blockwise/rest-reads-db",
+        ),
+    },
+    "projection:mini-frank/knowledge-flow": {
+        "title": "Mini Frank Knowledge Flow",
+        "subtitle": "Canonical Window routes and project artifact storage",
+        "viewBox": [1240, 700],
+        "nodes": (
+            ("project:frank", "Frank", 0, 40),
+            ("project:mini-frank", "Mini Frank", 0, 300),
+            ("service:frank-window", "Frank Window", 300, 170),
+            ("route:mini-frank-public", "Public Product", 650, 0),
+            ("route:mini-frank-owner-artifacts", "Owner Artifacts", 700, 130),
+            ("route:mini-frank-shared-artifacts", "Shared Artifacts", 700, 290),
+            ("route:mini-frank-published-artifacts", "Published Artifacts", 900, 430),
+            ("store:mini-frank-projects", "Project Store", 250, 440),
+        ),
+        "edges": (
+            "edge:frank/contains-window",
+            "edge:mini-frank/uses-window",
+            "edge:mini-frank/owns-project-store",
+            "edge:window/exposes-mini-frank-public",
+            "edge:window/exposes-mini-frank-owner-artifacts",
+            "edge:window/exposes-mini-frank-shared-artifacts",
+            "edge:window/exposes-mini-frank-published-artifacts",
+            "edge:window/writes-mini-frank-projects",
+        ),
+    },
+}
+
+
+def _curated_connection_geometry(
+    edge_id: str, source_pos: tuple[float, float], target_pos: tuple[float, float],
+) -> dict[str, Any]:
+    """Return the validated side-aware route for one curated real edge."""
+    if edge_id == "edge:window/exposes-mini-frank-published-artifacts":
+        return {
+            "fromSide": "bottom", "toSide": "top",
+            "via": [[375, 385], [975, 385]],
+        }
+    source_x, source_y = source_pos
+    target_x, target_y = target_pos
+    component_width, component_height = 150, 54
+    vertical_overlap = (
+        min(source_y + component_height, target_y + component_height)
+        - max(source_y, target_y)
+    ) > 0
+    if vertical_overlap:
+        target_is_right = target_x > source_x
+        return {
+            "fromSide": "right" if target_is_right else "left",
+            "toSide": "left" if target_is_right else "right",
+            "route": "orthogonal-h",
+        }
+    target_is_below = target_y > source_y
+    return {
+        "fromSide": "bottom" if target_is_below else "top",
+        "toSide": "top" if target_is_below else "bottom",
+        "route": "orthogonal-v",
+    }
+
+
+def _curated_architecture_projection(
+    graph: Mapping[str, Any], projection_id: str, nodes: list[Mapping[str, Any]],
+    edges: list[Mapping[str, Any]], *, required_coverage: Iterable[str],
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Build a bounded view only when every authored identity and edge exists."""
+    specification = _CURATED_ARCHITECTURES.get(projection_id)
+    if specification is None:
+        return None
+    nodes_by_id = {str(node["id"]): node for node in nodes}
+    edges_by_id = {str(edge.get("id")): edge for edge in edges if edge.get("id")}
+    visible_ids = [str(item[0]) for item in specification["nodes"]]
+    rendered_edge_ids = [str(edge_id) for edge_id in specification["edges"]]
+    if any(stable_id not in nodes_by_id for stable_id in visible_ids):
+        return None
+    if any(edge_id not in edges_by_id for edge_id in rendered_edge_ids):
+        return None
+    id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(visible_ids)}
+    positions = {
+        str(stable_id): (float(x), float(y))
+        for stable_id, _label, x, y in specification["nodes"]
+    }
+    type_overrides = specification.get("type_overrides", {})
+    components = []
+    display_labels: dict[str, dict[str, str]] = {}
+    for stable_id, label, x, y in specification["nodes"]:
+        node = nodes_by_id[str(stable_id)]
+        sublabel = str(node.get("kind", "component")).replace("_", " ")[:24]
+        components.append({
+            "id": id_map[str(stable_id)],
+            "type": str(type_overrides.get(stable_id, _node_type(node.get("kind")))),
+            "label": str(label),
+            "sublabel": sublabel,
+            "pos": [x, y],
+            "size": [150, 54],
+        })
+        display_labels[str(stable_id)] = {
+            "label": str(label), "sublabel": sublabel,
+            "archify_id": id_map[str(stable_id)],
+        }
+    connections = []
+    for edge_id in rendered_edge_ids:
+        edge = edges_by_id[edge_id]
+        source, target = str(edge["from"]), str(edge["to"])
+        connection: dict[str, Any] = {
+            "id": _safe_archify_id(edge_id),
+            "from": id_map[source],
+            "to": id_map[target],
+            **_curated_connection_geometry(edge_id, positions[source], positions[target]),
+        }
+        relationship = str(edge.get("relationship", edge.get("type", "")))
+        if relationship in {"exposes", "routes_to"}:
+            connection["variant"] = "emphasis"
+        elif relationship in {"reads", "writes", "uses", "owns"}:
+            connection["variant"] = "dashed"
+        connections.append(connection)
+    diagram = {
+        "schema_version": 1,
+        "diagram_type": "architecture",
+        "meta": {
+            "title": specification["title"],
+            "subtitle": specification["subtitle"],
+            "quality_profile": "showcase",
+            "viewBox": list(specification["viewBox"]),
+        },
+        "components": components,
+        "connections": connections,
+    }
+    all_ids = {str(node["id"]) for node in nodes}
+    supporting_ids = sorted(all_ids - set(visible_ids))
+    coverage = _coverage(nodes, edges, required_coverage)
+    metadata = {
+        "projection_id": projection_id,
+        "graph_revision": graph.get("graph_revision"),
+        "stable_id_map": id_map,
+        "supporting_stable_id_map": {
+            stable_id: _safe_archify_id(stable_id) for stable_id in supporting_ids
+        },
+        "display_labels": display_labels,
+        "coverage": coverage,
+        "coverage_scope": "projection_with_supporting_evidence",
+        "exclusions": ["supporting_topology_in_control"] if supporting_ids or len(edges) > len(connections) else [],
+        "relationship_count": len(edges),
+        "rendered_relationship_count": len(connections),
+        "supporting_identity_count": len(supporting_ids),
+        "supporting_relationship_count": max(0, len(edges) - len(connections)),
+        "rendered_relationship_ids": [connection["id"] for connection in connections],
+        "represented_relationship_ids": rendered_edge_ids,
+        "runtime_health_claims": False,
+        "showcase_checks": list(SHOWCASE_CHECKS),
+    }
+    return diagram, metadata
+
+
 def _overview_graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_coverage: Iterable[str] = ()) -> tuple[dict[str, Any], dict[str, Any]]:
     """Convert one canonical graph into an Archify architecture document.
 
@@ -341,6 +605,12 @@ def _overview_graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, 
         if source not in stable_ids or target not in stable_ids or source == target:
             continue
         edges.append(edge)
+
+    curated = _curated_architecture_projection(
+        graph, projection_id, nodes, edges, required_coverage=required_coverage,
+    )
+    if curated is not None:
+        return curated
 
     overview_only = len(nodes) > 48
     relationship_orders = {
