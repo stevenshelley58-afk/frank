@@ -1,0 +1,89 @@
+id: receipt:oss-decision/report-normalizer
+subject_id: receipt:oss-decision/report-normalizer
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github cleanup finding schema
+- github dead code report JSON
+- github dependency report normalizer
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github cleanup finding schema
+- github dead code report JSON
+- github dependency report normalizer
+- official repository/API searches retained in research-sources.md
+- Official source/license/release and package-applicability outcomes are recorded per candidate below.
+candidates:
+- name: Knip
+  source_url: https://github.com/webpro-nl/knip
+  source_revision: 3c785f55ce608d7921e37e41dd5fc61b623e5da2
+  licence: ISC
+  latest_release: no GitHub release object (official /releases/latest returned 404 on 2026-08-30)
+  last_material_activity: HEAD 3c785f55ce608d7921e37e41dd5fc61b623e5da2; refs checked 2026-08-30
+  maintenance_evidence:
+  - ISC LICENSE; official source HEAD pinned above
+  fit: bounded candidate
+  gaps: [JS/TS reports need normalization into Frank finding schema]
+  runtime_cost: CLI only; no daemon
+  integration_cost: bounded JSON finding parser
+  overlaps: [overlaps cleanup-reporters Knip candidate]
+  export_removal_path: disable cleanup reports
+  dependency_health_receipts:
+  - 'deps.dev/OSV: exact Knip package version must be scanned before use'
+- name: Vulture
+  source_url: https://github.com/jendrikseipp/vulture
+  source_revision: 2c21cb0ae2afa657e36f6a397cb573608a65d79e
+  licence: MIT
+  latest_release: v2.16 (official release 2026-03-25)
+  last_material_activity: HEAD 2c21cb0ae2afa657e36f6a397cb573608a65d79e; refs checked 2026-08-30
+  maintenance_evidence:
+  - MIT LICENSE; official release v2.16; Scorecard 3.0 (2026-08-17), Security-Policy 0
+  fit: bounded candidate
+  gaps: [confidence output is advisory, not deletion authority]
+  runtime_cost: Python CLI; no daemon
+  integration_cost: bounded finding parser
+  overlaps: [overlaps cleanup-reporters Vulture candidate]
+  export_removal_path: disable cleanup reports
+  dependency_health_receipts:
+  - 'OSV/deps.dev: scan exact package version when pinned'
+- name: OSV-Scanner
+  source_url: https://github.com/google/osv-scanner
+  source_revision: 78bc2469a1ea51a9f6819e08b1ff84780fe233af
+  licence: Apache-2.0
+  latest_release: v2.5.1 (official tag)
+  last_material_activity: HEAD 78bc2469a1ea51a9f6819e08b1ff84780fe233af; refs checked 2026-08-30
+  maintenance_evidence:
+  - Apache-2.0 LICENSE; official tag v2.5.1; security scanner source pinned above
+  fit: bounded candidate
+  gaps: [security findings are advisory; does not normalize dead-code reports]
+  runtime_cost: CLI scan; no daemon
+  integration_cost: bounded advisory parser
+  overlaps: [complements cleanup reporters; no delete authority]
+  export_removal_path: disable cleanup reports
+  dependency_health_receipts:
+  - 'OSV/deps.dev: this is the scanner authority; scan its exact binary/package supply chain before adoption'
+decision: custom_gap
+selected_candidate: null
+custom_gap:
+  why_oss_does_not_cover_it: Frank-specific bounded authority adapter boundary
+  owned_files:
+  - governance/control-plane/decisions/oss/report-normalizer.yaml
+  - governance/control-plane/schema/finding.schema.json
+  estimated_surface: one pure report-to-finding mapping; no cleanup daemon
+rollback_removal_path: disable cleanup reports
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Upstream reporters produce heterogeneous outputs; Frank owns only stable finding normalization and preserves raw evidence.
+security_evidence:
+- Official source/license/release refs checked; Scorecard evidence recorded for Vulture.
+- OSV-Scanner remains the security-report candidate; its exact package/binary pin must be scanned before use.
+security_unknowns:
+- Knip current release metadata and transitive health require package-manager lockfile resolution.
+cost: Pure bounded parser; no additional runtime service.

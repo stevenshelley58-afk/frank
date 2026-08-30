@@ -1,0 +1,21 @@
+id: capability:frank/mini-knowledge-flow
+kind: runbook
+title: Mini Frank knowledge flow
+eli5: Brings Mini Frank seed knowledge into the Frank Window.
+why_it_exists: Model Mini Frank as a workflow, never a second runtime.
+benefits: [single Frank runtime]
+tradeoffs: [no independent Mini service]
+applies_when: [project knowledge build]
+does_not_apply_when: [Mini Frank deployment]
+scope_ids: [project:mini-frank, project:frank]
+source_locator: apps/window/infra/knowledge/project-seeds/mini-frank/README.md
+source_revision: 366f4bacad6294261a57751289121193ac162b08
+content_hash: sha256:0f0621b4e0895f581d20d9029ee945c60b5a0ab18fe4bdf3641d59c8ed9ab835
+authority_tier: scoped
+enforcement: documentation
+state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: read_only}
+retirement_assessment: retain
+replacement_ids: []
+consolidation_group: mini-frank
+evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+oss_decision_id: receipt:oss-decision/catalog-model

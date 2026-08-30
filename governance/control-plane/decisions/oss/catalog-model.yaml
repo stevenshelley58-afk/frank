@@ -1,0 +1,107 @@
+id: receipt:oss-decision/catalog-model
+subject_id: receipt:oss-decision/catalog-model
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github backstage software catalog
+- github netbox source of truth
+- github openmetadata standards
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github backstage software catalog
+- github netbox source of truth
+- github openmetadata standards
+- github cartography cncf
+- official repository/API searches retained in research-sources.md
+- GitHub repository APIs (2026-08-30 UTC) checked for all candidates; exact Step 0 revisions retained as immutable pins. Scorecard API returned scores for Backstage 6.3 (2026-08-21), NetBox 6.7 (2026-08-17), and Cartography 8.2 (2026-08-20); OpenMetadata Standards returned 404. OSV applicability is repository/package-coordinate dependent and no repository-level claim is inferred.
+candidates:
+- name: Backstage Catalog
+  source_url: https://github.com/backstage/backstage
+  source_revision: d5731882a9a45a6dea41df40ce9c25dafc2b4859
+  licence: Apache-2.0
+  latest_release: v1.54.6 (2026-08-28), https://github.com/backstage/backstage/releases/tag/v1.54.6
+  last_material_activity: GitHub API pushed_at 2026-08-30T09:56:55Z; updated_at 2026-08-30T09:52:23Z
+  maintenance_evidence:
+  - 'GitHub API: Apache-2.0, archived=false, 34274 stars, 7593 forks, 432 open issues; Scorecard 6.3 dated 2026-08-21.'
+  fit: catalog vocabulary for Git-owned metadata, ownership, and relations.
+  gaps:
+  - full Backstage runtime is outside Frank's lightweight control plane
+  runtime_cost: catalog model only; no Backstage runtime deployed
+  integration_cost: medium; map selected entities into Frank manifest fields
+  overlaps:
+  - OpenMetadata Standards also supplies typed metadata vocabulary
+  export_removal_path: disable adapter and restore previous manifest
+  dependency_health_receipts:
+  - https://api.securityscorecards.dev/projects/github.com/backstage/backstage -> score 6.3 (2026-08-21)
+  - 'OSV applicability: repository metadata checked; no package coordinate supplied for this receipt'
+- name: NetBox
+  source_url: https://github.com/netbox-community/netbox
+  source_revision: dcc6afcf3014ed295a06c35717f09563d2b0aa59
+  licence: Apache-2.0
+  latest_release: v4.6.9 (2026-08-25), https://github.com/netbox-community/netbox/releases/tag/v4.6.9
+  last_material_activity: GitHub API pushed_at 2026-08-29T05:02:17Z; updated_at 2026-08-30T04:16:48Z
+  maintenance_evidence:
+  - 'GitHub API: Apache-2.0, archived=false, 21430 stars, 3112 forks, 195 open issues; Scorecard 6.7 dated 2026-08-17.'
+  fit: infrastructure relationships and source-of-truth patterns.
+  gaps:
+  - DCIM/IPAM domain is substantially broader than Frank's catalog need
+  runtime_cost: would require a separate Django/PostgreSQL service; not selected
+  integration_cost: high; API/data-model boundary rather than an in-process library
+  overlaps:
+  - Backstage covers ownership/catalog vocabulary with a smaller conceptual fit
+  export_removal_path: disable adapter and restore previous manifest
+  dependency_health_receipts:
+  - https://api.securityscorecards.dev/projects/github.com/netbox-community/netbox -> score 6.7 (2026-08-17)
+  - 'OSV applicability: repository metadata checked; no package coordinate supplied for this receipt'
+- name: OpenMetadata Standards
+  source_url: https://github.com/open-metadata/OpenMetadataStandards
+  source_revision: 17f0244916e9ae111b54f8b1b1e02e76cfc6b374
+  licence: Apache-2.0
+  latest_release: no published GitHub release (GET https://api.github.com/repos/open-metadata/OpenMetadataStandards/releases/latest returned 404 on 2026-08-30 UTC)
+  last_material_activity: GitHub API pushed_at 2026-08-24T16:15:33Z; updated_at 2026-08-24T16:26:52Z
+  maintenance_evidence:
+  - 'GitHub API: Apache-2.0, archived=false, 23 stars, 1 fork, 0 open issues; Scorecard endpoint returned 404.'
+  fit: typed provenance and metadata vocabulary.
+  gaps:
+  - standards repository is vocabulary, not a complete Frank catalog service
+  runtime_cost: none as a service; consume selected schemas/pointers only
+  integration_cost: low; map provenance terms into receipt fields
+  overlaps:
+  - Backstage provides overlapping ownership/catalog vocabulary
+  export_removal_path: disable adapter and restore previous manifest
+  dependency_health_receipts:
+  - https://api.github.com/repos/open-metadata/OpenMetadataStandards/releases/latest -> 404; no release evidence
+  - https://api.securityscorecards.dev/projects/github.com/open-metadata/OpenMetadataStandards -> 404; no Scorecard result
+  - 'OSV applicability: repository metadata checked; no package coordinate supplied for this receipt'
+- name: Cartography
+  source_url: https://github.com/cartography-cncf/cartography
+  source_revision: 030848289203969e19a17bf25e45ff94a527bcef
+  licence: Apache-2.0
+  latest_release: 0.140.0 (2026-08-11), https://github.com/cartography-cncf/cartography/releases/tag/0.140.0
+  last_material_activity: GitHub API pushed_at 2026-08-30T03:07:25Z; updated_at 2026-08-30T01:41:32Z
+  maintenance_evidence:
+  - 'GitHub API: Apache-2.0, archived=false, 4030 stars, 558 forks, 116 open issues; Scorecard 8.2 dated 2026-08-20.'
+  fit: cloud/infrastructure collectors and graph relationships.
+  gaps:
+  - requires Neo4j and collector runtime; materially exceeds Frank's manifest boundary
+  runtime_cost: separate Python collector plus Neo4j service; not selected
+  integration_cost: high; external graph storage and collector adapters
+  overlaps:
+  - NetBox also models infrastructure relationships
+  export_removal_path: disable adapter and restore previous manifest
+  dependency_health_receipts:
+  - https://api.securityscorecards.dev/projects/github.com/cartography-cncf/cartography -> score 8.2 (2026-08-20)
+  - 'OSV applicability: repository metadata checked; no package coordinate supplied for this receipt'
+decision: adapt
+selected_candidate: Backstage Catalog
+custom_gap: null
+rollback_removal_path: disable adapter and restore previous manifest
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane

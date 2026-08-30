@@ -1,0 +1,67 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frank.fail/schema/control-projection/v1",
+  "title": "Frank projection declaration or immutable materialization manifest",
+  "oneOf": [
+    {"$ref": "#/$defs/declaration"},
+    {"$ref": "#/$defs/manifest"}
+  ],
+  "$defs": {
+    "projection_id": {"type": "string", "pattern": "^projection:[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "generation_id": {"type": "string", "pattern": "^generation:[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "receipt_id": {"type": "string", "pattern": "^receipt:[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "graph_revision": {"type": "string", "pattern": "^g_[0-9a-f]{64}$"},
+    "declaration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "mandatory", "status", "must_show", "exclusions"],
+      "properties": {
+        "id": {"$ref": "#/$defs/projection_id"},
+        "type": {"enum": ["architecture", "workflow", "workflow_data_flow", "data_flow"]},
+        "mandatory": {"type": "boolean"},
+        "status": {"enum": ["declared", "not_generated"]},
+        "must_show": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"}},
+        "exclusions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "pattern": "^[a-z0-9]+(?:_[a-z0-9]+)*$"}},
+        "missing_evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "not_generated"}}, "required": ["status"]}, "then": {"required": ["missing_evidence"]}},
+        {"if": {"properties": {"mandatory": {"const": true}}, "required": ["mandatory"]}, "then": {"properties": {"status": {"const": "declared"}}}}
+      ]
+    },
+    "manifest": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "projection_id", "graph_revision", "generation_id", "source_revisions",
+        "deployed_revisions", "generated_at", "coverage", "exclusions",
+        "archify_version", "archify_hash", "validation_receipt_id",
+        "artifact_hash", "prior_passing_manifest", "freshness", "stale_reason"
+      ],
+      "properties": {
+        "projection_id": {"$ref": "#/$defs/projection_id"},
+        "graph_revision": {"$ref": "#/$defs/graph_revision"},
+        "generation_id": {"$ref": "#/$defs/generation_id"},
+        "source_revisions": {"type": "object", "minProperties": 1, "additionalProperties": {"type": "string", "minLength": 1}},
+        "deployed_revisions": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+        "generated_at": {"type": "string", "format": "date-time"},
+        "coverage": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "exclusions": {"type": "array", "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "archify_version": {"type": "string", "minLength": 1},
+        "archify_hash": {"$ref": "#/$defs/sha256"},
+        "validation_receipt_id": {"$ref": "#/$defs/receipt_id"},
+        "artifact_hash": {"$ref": "#/$defs/sha256"},
+        "prior_passing_manifest": {"type": ["string", "null"]},
+        "freshness": {"enum": ["fresh", "stale", "unavailable", "unknown"]},
+        "stale_reason": {"type": ["string", "null"]},
+        "status": {"enum": ["generated", "not_generated"]},
+        "missing_evidence": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}}
+      },
+      "allOf": [
+        {"if": {"properties": {"status": {"const": "not_generated"}}, "required": ["status"]}, "then": {"required": ["missing_evidence"]}},
+        {"if": {"properties": {"freshness": {"const": "fresh"}}, "required": ["freshness"]}, "then": {"properties": {"stale_reason": {"type": "null"}}}}
+      ]
+    }
+  }
+}

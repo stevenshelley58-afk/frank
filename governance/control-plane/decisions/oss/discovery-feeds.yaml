@@ -1,0 +1,84 @@
+id: receipt:oss-decision/discovery-feeds
+subject_id: receipt:oss-decision/discovery-feeds
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- GitHub repository search API
+- official MCP Registry API
+- deps.dev OpenSSF OSV metadata
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- GitHub repository search API
+- official MCP Registry API
+- deps.dev OpenSSF OSV metadata
+- official repository/API searches retained in research-sources.md
+- Official API/source metadata and hosted-service applicability outcomes are recorded per candidate below.
+candidates:
+- name: GitHub APIs
+  source_url: https://docs.github.com/en/rest/search/search
+  source_revision: GitHub REST API version 2022-11-28
+  licence: GitHub terms
+  latest_release: REST API version 2022-11-28 (official contract)
+  last_material_activity: GitHub API contract checked 2026-08-30
+  maintenance_evidence:
+  - Official docs/API contract; unauthenticated rate limits and terms apply
+  fit: repository metadata and search
+  gaps: [rate limits; discovery leads are untrusted and do not enable repositories]
+  runtime_cost: network requests only; no daemon
+  integration_cost: bounded metadata snapshot adapter
+  overlaps: [overlaps MCP registry only for metadata discovery]
+  export_removal_path: disable discovery job and retain snapshots/decisions
+  dependency_health_receipts:
+  - 'deps.dev/OSV/Scorecard: not applicable to a hosted API; scan the adapter dependency lockfile separately'
+- name: MCP Registry API
+  source_url: https://github.com/modelcontextprotocol/registry
+  source_revision: 6036804f1c62633b5e7d2927f411a6f4127f148a
+  licence: API terms
+  latest_release: live Registry API contract (official docs checked 2026-08-30)
+  last_material_activity: Registry API docs and official registry source checked 2026-08-30
+  maintenance_evidence:
+  - Official API docs and https://github.com/modelcontextprotocol/registry; metadata only, no install authority
+  fit: MCP metadata
+  gaps: [registry availability/schema may change; untrusted publisher metadata]
+  runtime_cost: network requests only; no daemon
+  integration_cost: bounded snapshot parser
+  overlaps: [overlaps GitHub API discovery at metadata layer]
+  export_removal_path: disable discovery job and retain snapshots/decisions
+  dependency_health_receipts:
+  - 'deps.dev/OSV/Scorecard: not applicable to hosted registry API; scan local adapter dependencies'
+- name: deps.dev
+  source_url: https://github.com/google/deps.dev
+  source_revision: dc936a45c6574bb6e6bd5433de8c74e4cdff1276
+  licence: Apache-2.0 source
+  latest_release: API v3 (official API docs checked 2026-08-30)
+  last_material_activity: source HEAD dc936a45c6574bb6e6bd5433de8c74e4cdff1276 checked 2026-08-30
+  maintenance_evidence:
+  - Apache-2.0 source; official API docs and source HEAD pinned above
+  fit: package/dependency evidence
+  gaps: [package ecosystem/version must be supplied; API is evidence, not a package mirror]
+  runtime_cost: network requests only; no daemon
+  integration_cost: bounded package-health receipt adapter
+  overlaps: [overlaps OSV package advisory lookups]
+  export_removal_path: disable discovery job and retain snapshots/decisions
+  dependency_health_receipts:
+  - 'OSV: applicable when exact package/version is supplied; no package selected in this receipt'
+decision: compose
+selected_candidate: GitHub APIs + MCP Registry API + deps.dev
+custom_gap: null
+rollback_removal_path: disable discovery job and retain snapshots/decisions
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Compose read-only metadata APIs; feeds remain disabled and cannot auto-install or auto-enable anything.
+security_evidence:
+- Official API documentation and source repositories checked 2026-08-30.
+- Hosted APIs have no repository Scorecard/OSV package target; local adapter dependencies must be scanned separately.
+security_unknowns:
+- Unauthenticated rate limits, provider availability and publisher metadata trust remain explicit unknowns.
+cost: Bounded HTTPS requests and retained snapshots; no persistent service or mirror.

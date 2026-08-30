@@ -1,0 +1,16 @@
+schema_version: 1
+defaults: {live_view: false, map_view: false, control_read: false, reconciliation_schedules: false, runtime_monitoring: false, safe_actions: false, operational_actions: false, source_actions: false, cleanup_jobs: false, discovery_jobs: false, evaluation_jobs: false, chat_pattern_candidates: false, retention_restore_drills: false}
+flags:
+  live_view: {default: false, owner: live-owner, enable_condition: step5_canary_passed, rollback_command: disable_live_view, test: test_live_view_flag}
+  map_view: {default: false, owner: map-owner, enable_condition: step5_canary_passed, rollback_command: disable_map_view, test: test_map_view_flag}
+  control_read: {default: false, owner: control-owner, enable_condition: step5_canary_passed, rollback_command: disable_control_read, test: test_control_read_flag}
+  reconciliation_schedules: {default: false, owner: operations-owner, enable_condition: step5_canary_passed, rollback_command: disable_reconciliation_schedules, test: test_reconciliation_flag}
+  runtime_monitoring: {default: false, owner: operations-owner, enable_condition: runtime_provider_ready, rollback_command: disable_runtime_monitoring, test: test_runtime_monitoring_flag}
+  safe_actions: {default: false, owner: actions-owner, enable_condition: step6c_canary_passed, rollback_command: disable_safe_actions, test: test_safe_actions_flag}
+  operational_actions: {default: false, owner: actions-owner, enable_condition: step6c_canary_passed, rollback_command: disable_operational_actions, test: test_operational_actions_flag}
+  source_actions: {default: false, owner: source-owner, enable_condition: step6c_canary_passed, rollback_command: disable_source_actions, test: test_source_actions_flag}
+  cleanup_jobs: {default: false, owner: cleanup-owner, enable_condition: step7c_canary_passed, rollback_command: disable_cleanup_jobs, test: test_cleanup_jobs_flag}
+  discovery_jobs: {default: false, owner: discovery-owner, enable_condition: step7c_canary_passed, rollback_command: disable_discovery_jobs, test: test_discovery_jobs_flag}
+  evaluation_jobs: {default: false, owner: evaluation-owner, enable_condition: step7c_canary_passed, rollback_command: disable_evaluation_jobs, test: test_evaluation_jobs_flag}
+  chat_pattern_candidates: {default: false, owner: evaluation-owner, enable_condition: step7c_canary_passed, rollback_command: disable_chat_pattern_candidates, test: test_chat_pattern_candidates_flag}
+  retention_restore_drills: {default: false, owner: operations-owner, enable_condition: step8_restore_drill_passed, rollback_command: disable_retention_restore_drills, test: test_retention_restore_drills_flag}

@@ -1,0 +1,92 @@
+id: receipt:oss-decision/agenttrail
+subject_id: receipt:oss-decision/agenttrail
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github sodiumsun agenttrail
+- github agent activity board
+- github agent observability board
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github sodiumsun agenttrail
+- github agent activity board
+- github agent observability board
+- official repository/API searches retained in research-sources.md
+- 'GitHub repository API (2026-08-30 UTC): MIT, unarchived, main pushed 2026-08-29T23:27:22Z; latest-release endpoint returned 404 (no published release).'
+- OpenSSF Scorecard API returned 404 for github.com/sodiumsun/agenttrail; no score claimed. OSV is not applicable without a package coordinate; repository-level advisories were not inferred.
+candidates:
+- name: AgentTrail
+  source_url: https://github.com/sodiumsun/agenttrail
+  source_revision: 5b97cf3cef548a0c668731e7f569fa36c14832f2
+  licence: MIT
+  latest_release: no published GitHub release (GET https://api.github.com/repos/sodiumsun/agenttrail/releases/latest returned 404 on 2026-08-30 UTC)
+  last_material_activity: GitHub API pushed_at 2026-08-29T23:27:22Z; updated_at 2026-08-30T09:54:31Z
+  maintenance_evidence:
+  - 'GitHub API: 445 stars, 34 forks, 5 open issues, archived=false; pinned commit is the Step 0 immutable revision.'
+  - MIT license confirmed by GitHub repository metadata; Scorecard unavailable (404).
+  fit: upstream live agent activity board and file-progress view; preserves upstream observer-only authority.
+  gaps:
+  - no published release means the pinned commit must remain the distribution unit
+  - not a runtime-health or deployment authority
+  runtime_cost: isolated Node process plus embedded static board; no new Frank control loop
+  integration_cost: low; bounded iframe/embed and protected route seam
+  overlaps:
+  - Grafana and OpenTelemetry provide observability/telemetry, not the agent board UX
+  export_removal_path: disable embed and protected route, retain receipts
+  dependency_health_receipts:
+  - https://api.github.com/repos/sodiumsun/agenttrail/releases/latest -> 404; no release evidence
+  - https://api.securityscorecards.dev/projects/github.com/sodiumsun/agenttrail -> 404; no Scorecard result
+  - 'OSV applicability: no package coordinate; no repository vulnerability claim made'
+- name: Grafana
+  source_url: https://github.com/grafana/grafana
+  source_revision: 5e3a02f81d2aadf4bf24fe49ed97d872556f5bf9
+  licence: AGPL-3.0
+  latest_release: v13.2.0 (2026-08-18), https://github.com/grafana/grafana/releases/tag/v13.2.0
+  last_material_activity: GitHub API pushed_at 2026-08-30T09:48:06Z; updated_at 2026-08-30T09:53:21Z
+  maintenance_evidence:
+  - 'GitHub API: AGPL-3.0, archived=false, 76498 stars, 14655 forks, 3317 open issues; Scorecard 6.8 dated 2026-08-17.'
+  fit: broad dashboards and metrics, but duplicates Frank UI and is not selected
+  gaps:
+  - full dashboard/runtime is outside the bounded agent-board need
+  runtime_cost: separate Grafana service and storage integrations; not selected
+  integration_cost: high; external dashboard and auth boundary
+  overlaps:
+  - duplicates Frank presentation surface for this need
+  export_removal_path: disable embed and protected route, retain receipts
+  dependency_health_receipts:
+  - 'https://api.github.com/repos/grafana/grafana/releases/latest -> v13.2.0'
+  - 'https://api.securityscorecards.dev/projects/github.com/grafana/grafana -> score 6.8 (2026-08-17)'
+  - 'OSV applicability: repository metadata checked; no package coordinate supplied for this receipt'
+- name: OpenTelemetry
+  source_url: https://github.com/open-telemetry/opentelemetry-collector
+  source_revision: a183c9cc604a9921c75b2eda0bf8fbb0bb9833b5
+  licence: Apache-2.0
+  latest_release: v0.159.0 (2026-08-17), https://github.com/open-telemetry/opentelemetry-collector/releases/tag/v0.159.0
+  last_material_activity: GitHub API pushed_at 2026-08-28T18:44:04Z; updated_at 2026-08-30T02:24:42Z
+  maintenance_evidence:
+  - 'GitHub API: Apache-2.0, archived=false, 7470 stars, 2224 forks, 698 open issues; Scorecard 7.9 dated 2026-08-21.'
+  fit: telemetry pipeline, not agent activity board
+  gaps:
+  - does not provide the live plan/file activity UX required here
+  runtime_cost: separate collector process and exporters; not selected
+  integration_cost: medium-high; telemetry schema/exporter boundary
+  overlaps:
+  - complements rather than replaces AgentTrail
+  export_removal_path: disable embed and protected route, retain receipts
+  dependency_health_receipts:
+  - 'https://api.github.com/repos/open-telemetry/opentelemetry-collector/releases/latest -> v0.159.0'
+  - 'https://api.securityscorecards.dev/projects/github.com/open-telemetry/opentelemetry-collector -> score 7.9 (2026-08-21)'
+  - 'OSV applicability: repository metadata checked; no package coordinate supplied for this receipt'
+decision: adopt
+selected_candidate: AgentTrail
+custom_gap: null
+rollback_removal_path: disable embed and protected route, retain receipts
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane

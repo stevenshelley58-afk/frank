@@ -1,0 +1,19 @@
+schema_version: 1
+graph_source: release:frank
+projections:
+  - {id: projection:vps/world, type: architecture, mandatory: true, status: declared, must_show: [workloads, routes, listeners, repositories, checkouts, stores, capabilities, evidence_producers], exclusions: [unclassified_base_os_services]}
+  - {id: projection:frank/architecture, type: architecture, mandatory: true, status: declared, must_show: [window, hermes_boundary, hindsight_boundary, projects, data, routes, tools], exclusions: [hindsight_raw_state]}
+  - {id: projection:blockwise/runtime, type: architecture, mandatory: true, status: declared, must_show: [product_app, auth, database, storage, workers, research_boundary, frank_links, active_release], exclusions: [unverified_consumers]}
+  - {id: projection:mini-frank/knowledge-flow, type: workflow_data_flow, mandatory: true, status: declared, must_show: [seed_sources, build, frank_window_knowledge], exclusions: [mini_frank_runtime, mini_frank_service]}
+  - {id: projection:ad-template-builder/architecture, type: architecture, mandatory: true, status: declared, must_show: [owner, source_components, hermes_boundary, tools, artifacts, validation, consumers], exclusions: [private_inputs]}
+  - {id: projection:ad-template-builder/workflow, type: workflow, mandatory: true, status: declared, must_show: [request, capability_resolution, build, checks, preview_review, release], exclusions: [secrets]}
+  - id: projection:ad-template-builder/data-flow
+    type: data_flow
+    mandatory: false
+    status: not_generated
+    missing_evidence: [active_deployed_runtime_consumption_receipt]
+    must_show: [inputs, stores, generated_assets, retention, verified_consumers]
+    exclusions: [unverified_blockwise_consumes_edge]
+manifest_contract:
+  required_fields: [projection_id, graph_revision, generation_id, source_revisions, deployed_revisions, generated_at, coverage, exclusions, archify_version, archify_hash, validation_receipt_id, artifact_hash, prior_passing_manifest, freshness, stale_reason]
+  conditional_fields: [status, missing_evidence]

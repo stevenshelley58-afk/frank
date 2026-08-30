@@ -1,0 +1,92 @@
+id: receipt:oss-decision/archify
+subject_id: receipt:oss-decision/archify
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github tt-a1i archify
+- github architecture diagram generator typed JSON
+- github validated architecture HTML generator
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github tt-a1i archify
+- github architecture diagram generator typed JSON
+- github validated architecture HTML generator
+- official repository/API searches retained in research-sources.md
+- 'GitHub repository API (2026-08-30 UTC): MIT, unarchived, main pushed 2026-08-30T09:44:42Z; latest release v2.15.0 published 2026-08-17T15:50:19Z.'
+- OpenSSF Scorecard API returned 404 for github.com/tt-a1i/archify; no score claimed. OSV is not applicable without a package coordinate; repository-level advisories were not inferred.
+candidates:
+- name: Archify
+  source_url: https://github.com/tt-a1i/archify
+  source_revision: b36d79fdbc3aec3728744341485a7e79f03c0071
+  licence: MIT
+  latest_release: v2.15.0 (2026-08-17), https://github.com/tt-a1i/archify/releases/tag/v2.15.0
+  last_material_activity: GitHub API pushed_at 2026-08-30T09:44:42Z; updated_at 2026-08-30T10:01:24Z
+  maintenance_evidence:
+  - 'GitHub API: 32541 stars, 2048 forks, 66 open issues, archived=false; pinned commit is the Step 0 immutable revision.'
+  - MIT license confirmed by GitHub repository metadata; Scorecard unavailable (404).
+  fit: upstream typed IR, validation checks, and architecture/workflow projection generator.
+  gaps:
+  - Frank-specific catalog/provenance fields require a thin serializer adapter
+  - viewer remains upstream-owned and must not be recreated
+  runtime_cost: isolated generator process; deterministic artifact generation, no resident Frank loop
+  integration_cost: medium; subprocess invocation plus schema/hash and LKG projection seam
+  overlaps:
+  - Mermaid and Graphviz render diagrams but do not provide Archify's typed validated projection boundary
+  export_removal_path: disable adapter and repoint LKG to prior artifact
+  dependency_health_receipts:
+  - https://api.github.com/repos/tt-a1i/archify/releases/latest -> v2.15.0
+  - https://api.securityscorecards.dev/projects/github.com/tt-a1i/archify -> 404; no Scorecard result
+  - 'OSV applicability: no package coordinate; no repository vulnerability claim made'
+- name: Mermaid
+  source_url: https://github.com/mermaid-js/mermaid
+  source_revision: a8bff7b01acf24b080ecce973b940373eea79aac
+  licence: MIT
+  latest_release: v11.17.2 (2026-08-25), https://github.com/mermaid-js/mermaid/releases/tag/@mermaid-js/tiny@11.17.2
+  last_material_activity: GitHub API pushed_at 2026-08-28T20:19:25Z; updated_at 2026-08-30T09:51:10Z
+  maintenance_evidence:
+  - 'GitHub API: MIT, archived=false, 89986 stars, 9202 forks, 1754 open issues; Scorecard 6.7 dated 2026-07-30.'
+  fit: generic diagram rendering
+  gaps:
+  - no typed Archify projection IR or Frank authority semantics
+  runtime_cost: in-process/browser renderer; not selected as projection authority
+  integration_cost: medium; diagram syntax/rendering seam
+  overlaps:
+  - overlaps Archify viewer/rendering only
+  export_removal_path: disable adapter and repoint LKG to prior artifact
+  dependency_health_receipts:
+  - 'https://api.github.com/repos/mermaid-js/mermaid/releases/latest -> @mermaid-js/tiny@11.17.2'
+  - 'https://api.securityscorecards.dev/projects/github.com/mermaid-js/mermaid -> score 6.7 (2026-07-30)'
+  - 'OSV applicability: repository metadata checked; no package coordinate supplied for this receipt'
+- name: Graphviz
+  source_url: https://gitlab.com/graphviz/graphviz
+  source_revision: 80837292c549eaa058c3c4a0062ff05c7885352f
+  licence: EPL-1.0
+  latest_release: 16.0.0 (2026-08-14), https://gitlab.com/graphviz/graphviz/-/releases/16.0.0
+  last_material_activity: GitLab API last_activity_at 2026-08-29T22:54:43Z
+  maintenance_evidence:
+  - 'GitLab API: repository metadata and release API confirm 16.0.0; pinned commit is the Step 0 immutable revision.'
+  fit: renderer only
+  gaps:
+  - no typed projection model or Frank-specific validation boundary
+  runtime_cost: native renderer subprocess; not selected as projection authority
+  integration_cost: medium; process and format conversion seam
+  overlaps:
+  - overlaps Archify rendering only
+  export_removal_path: disable adapter and repoint LKG to prior artifact
+  dependency_health_receipts:
+  - 'https://gitlab.com/api/v4/projects/graphviz%2Fgraphviz/releases -> 16.0.0 (2026-08-14)'
+  - 'OpenSSF Scorecard: no GitHub project result for GitLab repository; no score claimed'
+  - 'OSV applicability: repository metadata checked; no package coordinate supplied for this receipt'
+decision: adopt
+selected_candidate: Archify
+custom_gap: null
+rollback_removal_path: disable adapter and repoint LKG to prior artifact
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane

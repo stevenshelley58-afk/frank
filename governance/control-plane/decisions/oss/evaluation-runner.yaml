@@ -1,0 +1,85 @@
+id: receipt:oss-decision/evaluation-runner
+subject_id: receipt:oss-decision/evaluation-runner
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github promptfoo eval runner
+- github golden test LLM evaluation
+- github JSON evaluation framework
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github promptfoo eval runner
+- github golden test LLM evaluation
+- github JSON evaluation framework
+- official repository/API searches retained in research-sources.md
+- Official source metadata, release refs and applicability outcomes are recorded per candidate below.
+candidates:
+- name: Promptfoo
+  source_url: https://github.com/promptfoo/promptfoo
+  source_revision: 90fa399b941364363f57288fbf305b6d6aaff7ed
+  licence: MIT
+  latest_release: promptfoo-v0.119.13 (official tag)
+  last_material_activity: HEAD 90fa399b941364363f57288fbf305b6d6aaff7ed; refs checked 2026-08-30
+  maintenance_evidence:
+  - MIT LICENSE; official tag promptfoo-v0.119.13; source HEAD pinned above
+  - 'Scorecard/OSV: repository endpoint and package scan require exact package lock; no unverified score asserted'
+  fit: JSON/CSV/HTML golden receipts
+  gaps: [LLM-provider calls may incur API cost; fresh-context contract must remain Hermes-owned]
+  runtime_cost: Node CLI plus provider calls only when explicitly enabled; no daemon
+  integration_cost: bounded JSON/CSV/HTML receipt import
+  overlaps: [overlaps pytest on assertions; Promptfoo adds golden/evaluator reporting]
+  export_removal_path: disable evaluation schedule and retain baselines
+  dependency_health_receipts:
+  - 'OSV/deps.dev: scan exact promptfoo lockfile before enablement; repository HEAD is not a package version'
+- name: pytest
+  source_url: https://github.com/pytest-dev/pytest
+  source_revision: 59e7f3ad5382e35751347e749d62a9dc0c84ece1
+  licence: MIT
+  latest_release: 9.1.1 (official tag)
+  last_material_activity: HEAD 59e7f3ad5382e35751347e749d62a9dc0c84ece1; refs checked 2026-08-30
+  maintenance_evidence:
+  - MIT LICENSE; official tag 9.1.1; actively maintained upstream HEAD
+  fit: deterministic unit tests
+  gaps: [does not provide LLM golden-eval orchestration]
+  runtime_cost: Python test process; no daemon
+  integration_cost: existing test result bridge
+  overlaps: [overlaps deterministic contract checks]
+  export_removal_path: disable evaluation schedule and retain baselines
+  dependency_health_receipts:
+  - 'OSV/deps.dev: exact pytest package version must be scanned at lockfile resolution'
+- name: DeepEval
+  source_url: https://github.com/confident-ai/deepeval
+  source_revision: 9404fb2d47fd3b0f87b25de9e46fe89bc0b922a7
+  licence: Apache-2.0
+  latest_release: v4.1.8 (official tag)
+  last_material_activity: HEAD 9404fb2d47fd3b0f87b25de9e46fe89bc0b922a7; refs checked 2026-08-30
+  maintenance_evidence:
+  - Apache-2.0 LICENSE; official tag v4.1.8; upstream HEAD pinned above
+  fit: evaluation framework; additional runtime
+  gaps: [additional evaluator/runtime and provider integrations; not needed for baseline contract]
+  runtime_cost: Python evaluator plus optional provider calls; no daemon
+  integration_cost: bounded result adapter
+  overlaps: [overlaps Promptfoo metrics and pytest assertions]
+  export_removal_path: disable evaluation schedule and retain baselines
+  dependency_health_receipts:
+  - 'OSV/deps.dev: scan exact deepeval lockfile if considered; no package version selected'
+decision: adopt
+selected_candidate: Promptfoo
+custom_gap: null
+rollback_removal_path: disable evaluation schedule and retain baselines
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Promptfoo is the only candidate matching fresh-context golden receipts; pytest remains the local deterministic harness and DeepEval is rejected as overlapping extra runtime.
+security_evidence:
+- Official source refs, LICENSE and release tags checked 2026-08-30.
+- Scorecard and OSV/deps.dev results are recorded as version-gated checks; no aggregate security claim is used for approval.
+security_unknowns:
+- Provider/API data handling and transitive dependency health require isolated lockfile scan.
+cost: Optional CLI evaluation; provider calls are disabled unless a contract explicitly enables them.

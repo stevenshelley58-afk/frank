@@ -1,0 +1,90 @@
+id: receipt:oss-decision/runtime-evidence-adapter
+subject_id: receipt:oss-decision/runtime-evidence-adapter
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github beszel API health
+- github prometheus health API
+- github opentelemetry health endpoint
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github beszel API health
+- github prometheus health API
+- github opentelemetry health endpoint
+- official repository/API searches retained in research-sources.md
+- GitHub REST metadata/release API queried 2026-08-30; exact tip, latest stable tag,
+  SPDX licence and pushed_at are recorded below. Scorecard is Prometheus 8.1
+  (2026-08-24); OTel Collector 7.9 (2026-08-21); Beszel HTTP 404 (no project).
+- 'Exact-release OSV API queries: Beszel 0 matching advisories; Prometheus 1 (GO-2026-5264); OTel Collector 0. These are evidence outcomes, not approval.'
+candidates:
+- name: Beszel
+  source_url: https://github.com/henrygd/beszel
+  source_revision: 467f1767132b8b4e68ae6652b3763e3cbf609586
+  licence: MIT
+  latest_release: v0.18.8 (2026-08-17) https://github.com/henrygd/beszel/releases/tag/v0.18.8
+  last_material_activity: pushed 2026-08-27; tip 467f1767132b8b4e68ae6652b3763e3cbf609586
+  maintenance_evidence:
+  - 'MIT; GitHub metadata https://api.github.com/repos/henrygd/beszel; Scorecard https://api.securityscorecards.dev/projects/github.com/henrygd/beszel returned 404'
+  fit: bounded candidate
+  gaps: [health API/auth contract and provider availability must be verified]
+  runtime_cost: 1 vCPU/256 MB RAM hub+agent planning minimum; 1 GB for 7-day history
+  integration_cost: low; read-only authenticated adapter and deep-link, no licence fee
+  overlaps: [host/container health only; does not replace Frank evidence receipts]
+  export_removal_path: disable provider adapter
+  dependency_health_receipts:
+  - 'https://api.osv.dev/v1/query Go github.com/henrygd/beszel@0.18.8: 0 matching advisories'
+- name: Prometheus
+  source_url: https://github.com/prometheus/prometheus
+  source_revision: 09fdfcd2659dd9c816e9e23c992fc161c0091757
+  licence: Apache-2.0
+  latest_release: v3.14.0 (2026-08-18) https://github.com/prometheus/prometheus/releases/tag/v3.14.0
+  last_material_activity: pushed 2026-08-30; tip 09fdfcd2659dd9c816e9e23c992fc161c0091757
+  maintenance_evidence:
+  - 'Apache-2.0; GitHub metadata https://api.github.com/repos/prometheus/prometheus; Scorecard 8.1 https://api.securityscorecards.dev/projects/github.com/prometheus/prometheus'
+  fit: bounded candidate
+  gaps: [query API is metrics-only and requires scrape/exporter configuration]
+  runtime_cost: 1 vCPU/512 MB RAM and 5 GB for 7-day low-cardinality TSDB planning minimum
+  integration_cost: medium; authenticated read-only query adapter plus reverse-proxy auth
+  overlaps: [metrics backend overlaps any existing VPS monitor]
+  export_removal_path: disable provider adapter
+  dependency_health_receipts:
+  - 'https://api.osv.dev/v1/query Go github.com/prometheus/prometheus@3.14.0: 1 matching advisory GO-2026-5264'
+- name: OpenTelemetry Collector
+  source_url: https://github.com/open-telemetry/opentelemetry-collector
+  source_revision: a183c9cc604a9921c75b2eda0bf8fbb0bb9833b5
+  licence: Apache-2.0
+  latest_release: v0.159.0 (2026-08-17) https://github.com/open-telemetry/opentelemetry-collector/releases/tag/v0.159.0
+  last_material_activity: pushed 2026-08-28; tip a183c9cc604a9921c75b2eda0bf8fbb0bb9833b5
+  maintenance_evidence:
+  - 'Apache-2.0; GitHub metadata https://api.github.com/repos/open-telemetry/opentelemetry-collector; Scorecard 7.9 https://api.securityscorecards.dev/projects/github.com/open-telemetry/opentelemetry-collector'
+  fit: bounded candidate
+  gaps: [collector has no history/UI and needs configured receiver/exporter/backend]
+  runtime_cost: 0.25 vCPU/128 MB RAM and 512 MB buffer planning minimum; backend owns retention
+  integration_cost: medium; pipeline configuration, credentials and health endpoint
+  overlaps: [telemetry-pipeline overlap with Alloy]
+  export_removal_path: disable provider adapter
+  dependency_health_receipts:
+  - 'https://api.osv.dev/v1/query Go go.opentelemetry.io/collector@0.159.0: 0 matching advisories'
+decision: custom_gap
+selected_candidate: null
+custom_gap:
+  why_oss_does_not_cover_it: Frank-specific bounded authority adapter boundary
+  owned_files:
+  - governance/control-plane
+  estimated_surface: small
+rollback_removal_path: disable provider adapter
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: The adapter is a Frank-specific read-only normalization seam; it must not become a provider or duplicate upstream UI.
+security_evidence:
+- Scorecard and exact-release OSV outcomes are retained in search evidence and candidate receipts.
+security_unknowns:
+- Auth route, endpoint shape and resource use remain unverified until isolated provider test.
+cost: Small adapter; no provider installation or licence fee. Promotion requires authenticated endpoint and measured retention/resource evidence.

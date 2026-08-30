@@ -1,0 +1,143 @@
+id: receipt:oss-decision/runtime-monitoring
+subject_id: receipt:oss-decision/runtime-monitoring
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github beszel monitoring
+- github prometheus grafana monitoring
+- github opentelemetry collector runtime monitoring
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github beszel monitoring
+- github prometheus grafana monitoring
+- github opentelemetry collector runtime monitoring
+- official repository/API searches retained in research-sources.md
+- GitHub REST metadata/release API queried 2026-08-30; repository tip, latest stable
+  tag, SPDX licence and pushed_at are recorded per candidate below.
+- 'OpenSSF Scorecard API: Grafana 6.8 (2026-08-17), Prometheus 8.1 (2026-08-24),
+  Loki 8.1 (2026-08-17), OTel Collector 7.9 (2026-08-21); Beszel and Alloy returned
+  HTTP 404 (no Scorecard project record), an explicit negative result.'
+- OSV API version queries (Go module, exact release) recorded per candidate; a null
+  result means no matching advisory in that query, not a guarantee of safety.
+candidates:
+- name: Beszel
+  source_url: https://github.com/henrygd/beszel
+  source_revision: 467f1767132b8b4e68ae6652b3763e3cbf609586
+  licence: MIT
+  latest_release: v0.18.8 (2026-08-17) https://github.com/henrygd/beszel/releases/tag/v0.18.8
+  last_material_activity: repository pushed 2026-08-27; tip 467f1767132b8b4e68ae6652b3763e3cbf609586
+  maintenance_evidence:
+  - 'GitHub API: MIT, pushed_at 2026-08-27, latest release v0.18.8; https://api.github.com/repos/henrygd/beszel'
+  - Scorecard API https://api.securityscorecards.dev/projects/github.com/henrygd/beszel returned 404; no project record
+  fit: smallest host/container fallback
+  gaps: [requires Beszel hub plus agent and authenticated deep-link; not a Frank evidence authority]
+  runtime_cost: planning minimum 1 vCPU/256 MB RAM for hub+one agent, 1 GB persistent storage for 7-day compact history; verify in isolated test
+  integration_cost: low; read-only authenticated URL/API adapter, no licence fee, small config/secret boundary
+  overlaps: [host/container health overlaps any existing VPS monitor; no metrics/log query UI replacement]
+  export_removal_path: set runtime_monitoring false and stop isolated provider
+  dependency_health_receipts:
+  - 'https://api.osv.dev/v1/query package Go github.com/henrygd/beszel version 0.18.8: 0 matching advisories (null vulns)'
+- name: Grafana
+  source_url: https://github.com/grafana/grafana
+  source_revision: 5e3a02f81d2aadf4bf24fe49ed97d872556f5bf9
+  licence: AGPL-3.0
+  latest_release: v13.2.0 (2026-08-18) https://github.com/grafana/grafana/releases/tag/v13.2.0
+  last_material_activity: repository pushed 2026-08-30; tip 5e3a02f81d2aadf4bf24fe49ed97d872556f5bf9
+  maintenance_evidence:
+  - 'GitHub API: AGPL-3.0, pushed_at 2026-08-30, latest release v13.2.0; https://api.github.com/repos/grafana/grafana'
+  - 'Scorecard API https://api.securityscorecards.dev/projects/github.com/grafana/grafana: 6.8 on 2026-08-17'
+  fit: full observability UI
+  gaps: [needs a metrics/log backend and datasource provisioning; dashboard/auth surface overlaps Frank presentation]
+  runtime_cost: planning minimum 1 vCPU/512 MB RAM, 2 GB storage for binaries/config and 7-day UI metadata; backend storage extra
+  integration_cost: medium; authenticated datasource/deep-link provisioning and AGPL distribution review
+  overlaps: [duplicates dashboard/navigation concerns; does not itself collect host metrics]
+  export_removal_path: set runtime_monitoring false and stop isolated provider
+  dependency_health_receipts:
+  - 'https://api.osv.dev/v1/query package Go github.com/grafana/grafana version 13.2.0: 39 matching advisories (includes GHSA-3q27-7qjq-p9c5 and GO-2024/2025/2026 records); block promotion pending release-specific remediation review'
+- name: Prometheus
+  source_url: https://github.com/prometheus/prometheus
+  source_revision: 09fdfcd2659dd9c816e9e23c992fc161c0091757
+  licence: Apache-2.0
+  latest_release: v3.14.0 (2026-08-18) https://github.com/prometheus/prometheus/releases/tag/v3.14.0
+  last_material_activity: repository pushed 2026-08-30; tip 09fdfcd2659dd9c816e9e23c992fc161c0091757
+  maintenance_evidence:
+  - 'GitHub API: Apache-2.0, pushed_at 2026-08-30, latest release v3.14.0; https://api.github.com/repos/prometheus/prometheus'
+  - 'Scorecard API https://api.securityscorecards.dev/projects/github.com/prometheus/prometheus: 8.1 on 2026-08-24'
+  fit: metrics backend; needs exporters/UI
+  gaps: [requires exporters and a UI/deep-link; local TSDB retention must be bounded]
+  runtime_cost: planning minimum 1 vCPU/512 MB RAM, 5 GB persistent storage for 7-day low-cardinality metrics; auth is supplied by reverse proxy
+  integration_cost: medium; scrape config, authenticated read-only query endpoint, and exporter mapping
+  overlaps: [metrics history overlaps any existing monitor; no host agent or logs]
+  export_removal_path: set runtime_monitoring false and stop isolated provider
+  dependency_health_receipts:
+  - 'https://api.osv.dev/v1/query package Go github.com/prometheus/prometheus version 3.14.0: 1 matching advisory GO-2026-5264; release-specific remediation required'
+- name: Grafana Alloy
+  source_url: https://github.com/grafana/alloy
+  source_revision: 041d2911a30a53f2c9c0317333aedee108a56b0a
+  licence: Apache-2.0
+  latest_release: v1.19.2 (2026-08-26) https://github.com/grafana/alloy/releases/tag/v1.19.2
+  last_material_activity: repository pushed 2026-08-28; tip 041d2911a30a53f2c9c0317333aedee108a56b0a
+  maintenance_evidence:
+  - 'GitHub API: Apache-2.0, pushed_at 2026-08-28, latest release v1.19.2; https://api.github.com/repos/grafana/alloy'
+  - Scorecard API https://api.securityscorecards.dev/projects/github.com/grafana/alloy returned 404; no project record
+  fit: collector; no backend
+  gaps: [collector only; requires configured receiver/exporter destination and does not provide history or UI]
+  runtime_cost: planning minimum 0.25 vCPU/128 MB RAM, 512 MB local buffer storage; retention is destination-owned
+  integration_cost: medium; pipeline config, credentials and authenticated health endpoint
+  overlaps: [overlaps OTel Collector as telemetry pipeline; adds no backend]
+  export_removal_path: set runtime_monitoring false and stop isolated provider
+  dependency_health_receipts:
+  - 'https://api.osv.dev/v1/query package Go github.com/grafana/alloy version 1.19.2: 0 matching advisories (null vulns)'
+- name: Loki
+  source_url: https://github.com/grafana/loki
+  source_revision: d8a4d755695929a19ce53ab730a8776ddae09ea2
+  licence: AGPL-3.0
+  latest_release: v3.7.7 (2026-08-27) https://github.com/grafana/loki/releases/tag/v3.7.7
+  last_material_activity: repository pushed 2026-08-30; tip d8a4d755695929a19ce53ab730a8776ddae09ea2
+  maintenance_evidence:
+  - 'GitHub API: AGPL-3.0, pushed_at 2026-08-30, latest release v3.7.7; https://api.github.com/repos/grafana/loki'
+  - 'Scorecard API https://api.securityscorecards.dev/projects/github.com/grafana/loki: 8.1 on 2026-08-17'
+  fit: logs only
+  gaps: [logs only; requires shipper, auth and object/local storage; not host-health authority]
+  runtime_cost: planning minimum 1 vCPU/512 MB RAM, 5 GB persistent storage for 7-day low-volume logs; scale with volume/index/cache
+  integration_cost: medium; log labels/retention policy, authenticated query deep-link, and redaction review
+  overlaps: [overlaps any existing log sink; adds substantial storage/retention burden]
+  export_removal_path: set runtime_monitoring false and stop isolated provider
+  dependency_health_receipts:
+  - 'https://api.osv.dev/v1/query package Go github.com/grafana/loki version 3.7.7: 1 matching advisory GO-2026-5115; release-specific remediation required'
+- name: OpenTelemetry Collector
+  source_url: https://github.com/open-telemetry/opentelemetry-collector
+  source_revision: a183c9cc604a9921c75b2eda0bf8fbb0bb9833b5
+  licence: Apache-2.0
+  latest_release: v0.159.0 (2026-08-17) https://github.com/open-telemetry/opentelemetry-collector/releases/tag/v0.159.0
+  last_material_activity: repository pushed 2026-08-28; tip a183c9cc604a9921c75b2eda0bf8fbb0bb9833b5
+  maintenance_evidence:
+  - 'GitHub API: Apache-2.0, pushed_at 2026-08-28, latest release v0.159.0; https://api.github.com/repos/open-telemetry/opentelemetry-collector'
+  - 'Scorecard API https://api.securityscorecards.dev/projects/github.com/open-telemetry/opentelemetry-collector: 7.9 on 2026-08-21'
+  fit: pipeline only
+  gaps: [pipeline only; requires receivers/exporters and backend; core distribution is not host monitor]
+  runtime_cost: planning minimum 0.25 vCPU/128 MB RAM, 512 MB buffer storage; retention is backend-owned
+  integration_cost: medium; receiver/exporter config, credentials and authenticated health endpoint
+  overlaps: [overlaps Grafana Alloy as telemetry pipeline; no UI/backend]
+  export_removal_path: set runtime_monitoring false and stop isolated provider
+  dependency_health_receipts:
+  - 'https://api.osv.dev/v1/query package Go go.opentelemetry.io/collector version 0.159.0: 0 matching advisories (null vulns)'
+decision: adopt
+selected_candidate: Beszel (disabled fallback; promotion deferred)
+custom_gap: null
+rollback_removal_path: set runtime_monitoring false and stop isolated provider
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Step 0 has no provider and the smallest defensible fallback is Beszel; the full telemetry composition is deferred until an authenticated VPS inventory proves a missing signal.
+security_evidence:
+- Scorecard and OSV API outcomes are recorded per candidate; exact release advisories remain a promotion gate.
+security_unknowns:
+- No provider was installed; runtime sizing, VPS auth route and retained-volume measurements require the isolated Step 4B test.
+cost: Beszel target <=1 vCPU, <=256 MB RAM, <=1 GB retained history for 7 days; no licence fee; one authenticated read-only adapter.

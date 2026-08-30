@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frank.fail/schema/control-action-receipt/v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id", "kind", "subject_ids", "producer", "source_revision_set",
+    "deployed_revision_set", "captured_at", "fresh_until", "outcome",
+    "evidence_uris", "redaction", "action_id", "adapter_id",
+    "adapter_version", "adapter_hash", "target_id", "target_revision_before",
+    "target_revision_requested", "idempotency_key", "lock_key", "started_at",
+    "completed_at", "before_state_receipt_id", "after_state_receipt_id",
+    "preconditions", "postconditions", "rollback_action_id", "rollback_outcome"
+  ],
+  "properties": {
+    "id": {"$ref": "#/$defs/receipt_id"},
+    "kind": {"const": "action"},
+    "subject_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/stable_id"}},
+    "producer": {"type": "string", "minLength": 1},
+    "source_revision_set": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "deployed_revision_set": {"type": "object", "additionalProperties": {"type": "string", "minLength": 1}},
+    "captured_at": {"type": "string", "format": "date-time"},
+    "fresh_until": {"type": ["string", "null"], "format": "date-time"},
+    "outcome": {"enum": ["pass", "fail", "partial"]},
+    "evidence_uris": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+    "redaction": {"const": "secret_filtered"},
+    "action_id": {"$ref": "#/$defs/action_id"},
+    "adapter_id": {"$ref": "#/$defs/stable_id"},
+    "adapter_version": {"type": "string", "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"},
+    "adapter_hash": {"$ref": "#/$defs/sha256"},
+    "target_id": {"$ref": "#/$defs/stable_id"},
+    "target_revision_before": {"type": ["string", "null"]},
+    "target_revision_requested": {"type": ["string", "null"]},
+    "idempotency_key": {"type": "string", "pattern": "^[A-Za-z0-9_-]{8,128}$"},
+    "lock_key": {"type": "string", "pattern": "^[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "started_at": {"type": "string", "format": "date-time"},
+    "completed_at": {"type": ["string", "null"], "format": "date-time"},
+    "before_state_receipt_id": {"oneOf": [{"$ref": "#/$defs/receipt_id"}, {"type": "null"}]},
+    "after_state_receipt_id": {"oneOf": [{"$ref": "#/$defs/receipt_id"}, {"type": "null"}]},
+    "preconditions": {"type": "array", "items": {"$ref": "#/$defs/check_result"}},
+    "postconditions": {"type": "array", "items": {"$ref": "#/$defs/check_result"}},
+    "rollback_action_id": {"oneOf": [{"$ref": "#/$defs/action_id"}, {"type": "null"}]},
+    "rollback_outcome": {"enum": ["not_needed", "succeeded", "failed", "not_attempted"]},
+    "parent_run_id": {"$ref": "#/$defs/stable_id"},
+    "failed_action_receipt_id": {"$ref": "#/$defs/receipt_id"}
+  },
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^(vps|project|repo|runtime|service|component|worker|store|route|capability|rule|skill|tool|plugin|cli|mcp|app|template|library|hook|gate|policy|runbook|eval|observer|source|release|projection|generation|receipt|proposal|finding|mapping|run|edge):[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "receipt_id": {"type": "string", "pattern": "^receipt:[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "action_id": {"type": "string", "pattern": "^tool:[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "check_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "outcome"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[a-z][a-z0-9_]*$"},
+        "outcome": {"enum": ["pass", "fail", "skipped"]}
+      }
+    }
+  }
+}

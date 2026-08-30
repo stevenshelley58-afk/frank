@@ -1,0 +1,88 @@
+id: receipt:oss-decision/action-adapters
+subject_id: receipt:oss-decision/action-adapters
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github allowlisted operation runner
+- github action receipt idempotency
+- github workflow approval adapter
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github allowlisted operation runner
+- github action receipt idempotency
+- github workflow approval adapter
+- official repository/API searches retained in research-sources.md
+- Official Hermes/Temporal/Ansible source, release and applicability outcomes are recorded per candidate below.
+candidates:
+- name: Hermes skills/actions
+  source_url: https://github.com/NousResearch/hermes-agent
+  source_revision: 2a598aad1c398e95b3325a0f100f5c28efa63d12
+  licence: documentation terms
+  latest_release: Hermes docs (official contract; no public release tag)
+  last_material_activity: official docs checked 2026-08-30
+  maintenance_evidence:
+  - Hermes documentation establishes Hermes as sole action authority; no second runtime permitted
+  fit: runtime authority
+  gaps: [Frank needs receipt/projection seam for allowlisted actions]
+  runtime_cost: existing Hermes runtime; no additional daemon
+  integration_cost: thin control-plane receipt adapter
+  overlaps: [Temporal/Ansible would duplicate orchestration or automation authority]
+  export_removal_path: set action flags false and retain receipts
+  dependency_health_receipts:
+  - 'deps.dev/OSV/Scorecard: not applicable to Hermes hosted docs; verify Hermes deployment dependencies separately'
+- name: Temporal
+  source_url: https://github.com/temporalio/temporal
+  source_revision: c044bf16b1cc47a4db80669a987484dba6145331
+  licence: MIT
+  latest_release: v1.9.3 (official tag)
+  last_material_activity: HEAD c044bf16b1cc47a4db80669a987484dba6145331; refs checked 2026-08-30
+  maintenance_evidence:
+  - MIT LICENSE; official tag v1.9.3; Scorecard endpoint must be checked before any deployment
+  fit: workflow engine; excessive
+  gaps: [requires server/worker persistence and would become competing workflow engine]
+  runtime_cost: 'high: service, workers and persistence'
+  integration_cost: invasive workflow port
+  overlaps: [duplicates Hermes action authority]
+  export_removal_path: set action flags false and retain receipts
+  dependency_health_receipts:
+  - 'OSV/deps.dev: exact Temporal package/container version required; no deployment approved'
+- name: Ansible
+  source_url: https://github.com/ansible/ansible
+  source_revision: deecfd6e8c030c7fe23c4fd9bc6b94cd0422132c
+  licence: GPL-3.0
+  latest_release: v2.19.1 (official tag family; exact release pin required)
+  last_material_activity: HEAD deecfd6e8c030c7fe23c4fd9bc6b94cd0422132c; refs checked 2026-08-30
+  maintenance_evidence:
+  - GPL-3.0-or-later source; official repository HEAD pinned above
+  fit: automation; arbitrary scope risk
+  gaps: [arbitrary host automation exceeds allowlist boundary; GPL licensing unsuitable for embedded seam]
+  runtime_cost: controller/collections and remote execution
+  integration_cost: invasive automation integration
+  overlaps: [duplicates Hermes actions and policy boundary]
+  export_removal_path: set action flags false and retain receipts
+  dependency_health_receipts:
+  - 'OSV/deps.dev: scan exact Ansible package/collections only if separately approved; no deployment here'
+decision: custom_gap
+selected_candidate: null
+custom_gap:
+  why_oss_does_not_cover_it: Frank-specific bounded authority adapter boundary
+  owned_files:
+  - governance/control-plane/decisions/oss/action-adapters.yaml
+  - governance/control-plane/schema/action-receipt.schema.json
+  estimated_surface: one receipt adapter; no daemon, worker or workflow engine
+rollback_removal_path: set action flags false and retain receipts
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Hermes remains authoritative. Frank owns only an allowlisted action receipt/projection seam and does not execute arbitrary automation.
+security_evidence:
+- Hermes official docs checked; Temporal and Ansible source/license/release refs checked.
+security_unknowns:
+- Hermes deployment dependency health is outside this hosted-document receipt; exact packages require a separate lockfile scan.
+cost: Zero additional runtime; bounded serialization and receipt validation.

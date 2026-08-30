@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frank.fail/schema/control-catalog/v1",
+  "title": "Frank release-1 declared catalog",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "revision", "nodes", "relationships"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "revision": {"$ref": "#/$defs/revision_key"},
+    "nodes": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/node"}},
+    "relationships": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/relationship"}},
+    "aliases": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/alias"}},
+    "capabilities": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/capability"}}
+  },
+  "$defs": {
+    "stable_id": {
+      "type": "string",
+      "pattern": "^(vps|project|repo|runtime|service|component|worker|store|route|capability|rule|skill|tool|plugin|cli|mcp|app|template|library|hook|gate|policy|runbook|eval|observer|source|release|projection|generation|receipt|proposal|finding|mapping|run|edge):[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"
+    },
+    "receipt_id": {"type": "string", "pattern": "^receipt:[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "revision_key": {"type": "string", "pattern": "^rev_[0-9a-f]{40,64}$"},
+    "sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "state_axes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lifecycle", "trust", "installation", "enablement", "production_authority"],
+      "properties": {
+        "lifecycle": {"enum": ["draft", "review", "approved", "deprecated", "retired"]},
+        "trust": {"enum": ["unreviewed", "quarantined", "reviewed", "rejected"]},
+        "installation": {"enum": ["not_installed", "installed"]},
+        "enablement": {"enum": ["disabled", "enabled"]},
+        "production_authority": {"enum": ["none", "read_only", "operate"]},
+        "freshness": {"enum": ["fresh", "stale", "unavailable", "unknown"]},
+        "health": {"enum": ["healthy", "degraded", "unhealthy", "unavailable", "unknown"]},
+        "provider_status": {"enum": ["ready", "empty", "attention", "unavailable", "error"]},
+        "reconciliation_result": {"enum": ["match", "missing_runtime", "undeclared_runtime", "revision_mismatch", "config_hash_mismatch", "route_mismatch", "unit_mismatch", "unparseable", "inaccessible", "stale"]},
+        "confidence": {"enum": ["high", "medium", "low", "none"]}
+      }
+    },
+    "node": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "kind", "title", "state_axes", "evidence_receipt_ids"],
+      "properties": {
+        "id": {"$ref": "#/$defs/stable_id"},
+        "kind": {"enum": ["host", "edge", "route", "service", "container", "systemd_unit", "repo", "checkout", "project", "component", "capability", "rule", "skill", "tool", "plugin", "cli", "mcp", "app", "library", "template", "worker", "data_store", "volume", "artifact", "deployment", "release", "observer", "source", "evidence_receipt", "cleanup_finding", "change_proposal"]},
+        "title": {"type": "string", "minLength": 1, "maxLength": 160},
+        "state_axes": {"$ref": "#/$defs/state_axes"},
+        "source_locator": {"type": "string", "minLength": 1},
+        "source_revision": {"type": "string", "minLength": 1},
+        "content_hash": {"$ref": "#/$defs/sha256"},
+        "oss_decision_id": {"$ref": "#/$defs/receipt_id"},
+        "evidence_receipt_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/receipt_id"}}
+      }
+    },
+    "relationship": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "from", "to", "evidence_receipt_ids"],
+      "properties": {
+        "id": {"type": "string", "pattern": "^edge:[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+        "type": {"enum": ["contains", "owns", "runs", "exposes", "routes_to", "reads", "writes", "depends_on", "uses", "executes", "declares", "produces", "consumes", "validates", "deploys", "observes", "replaces"]},
+        "from": {"$ref": "#/$defs/stable_id"},
+        "to": {"$ref": "#/$defs/stable_id"},
+        "evidence_receipt_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/receipt_id"}}
+      }
+    },
+    "alias": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["alias_id", "canonical_id", "evidence_receipt_id"],
+      "properties": {
+        "alias_id": {"$ref": "#/$defs/stable_id"},
+        "canonical_id": {"$ref": "#/$defs/stable_id"},
+        "evidence_receipt_id": {"$ref": "#/$defs/receipt_id"}
+      }
+    },
+    "capability": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id", "kind", "title", "eli5", "why_it_exists", "benefits",
+        "tradeoffs", "applies_when", "does_not_apply_when", "scope_ids",
+        "source_locator", "source_revision", "content_hash",
+        "authority_tier", "enforcement", "state_axes",
+        "retirement_assessment", "replacement_ids", "consolidation_group",
+        "evidence_receipt_ids", "oss_decision_id"
+      ],
+      "properties": {
+        "id": {"$ref": "#/$defs/stable_id"},
+        "kind": {"enum": ["rule", "skill", "plugin", "cli", "mcp", "app", "template", "library", "hook", "ci_gate", "runtime_policy", "runbook"]},
+        "title": {"type": "string", "minLength": 1},
+        "eli5": {"type": "string", "minLength": 1},
+        "why_it_exists": {"type": "string", "minLength": 1},
+        "benefits": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "tradeoffs": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "applies_when": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "does_not_apply_when": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1}},
+        "scope_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/stable_id"}},
+        "source_locator": {"type": "string", "minLength": 1},
+        "source_revision": {"type": "string", "minLength": 1},
+        "content_hash": {"$ref": "#/$defs/sha256"},
+        "authority_tier": {"enum": ["global", "repo", "scoped", "runtime"]},
+        "enforcement": {"enum": ["documentation", "prompt", "skill_trigger", "hook", "ci", "deploy", "runtime"]},
+        "state_axes": {"$ref": "#/$defs/state_axes"},
+        "retirement_assessment": {"type": "string", "minLength": 1},
+        "replacement_ids": {"type": "array", "uniqueItems": true, "items": {"$ref": "#/$defs/stable_id"}},
+        "consolidation_group": {"type": ["string", "null"]},
+        "evidence_receipt_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/receipt_id"}},
+        "oss_decision_id": {"$ref": "#/$defs/receipt_id"}
+      }
+    }
+  }
+}

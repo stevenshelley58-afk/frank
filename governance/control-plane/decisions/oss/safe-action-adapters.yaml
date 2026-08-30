@@ -1,0 +1,88 @@
+id: receipt:oss-decision/safe-action-adapters
+subject_id: receipt:oss-decision/safe-action-adapters
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github idempotent safe action adapter
+- github workflow receipt API
+- github Hermes action client
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github idempotent safe action adapter
+- github workflow receipt API
+- github Hermes action client
+- official repository/API searches retained in research-sources.md
+- Official Hermes/Temporal/Ansible source, release and applicability outcomes are recorded per candidate below.
+candidates:
+- name: Hermes
+  source_url: https://github.com/NousResearch/hermes-agent
+  source_revision: 2a598aad1c398e95b3325a0f100f5c28efa63d12
+  licence: documentation terms
+  latest_release: Hermes docs (official contract; no public release tag)
+  last_material_activity: official docs checked 2026-08-30
+  maintenance_evidence:
+  - Hermes remains sole execution authority; safe-action seam is receipt-only
+  fit: bounded candidate
+  gaps: [Frank-specific idempotency/approval receipt mapping]
+  runtime_cost: existing Hermes runtime; no daemon
+  integration_cost: thin receipt adapter
+  overlaps: [Temporal and Ansible introduce competing execution authority]
+  export_removal_path: set safe_actions false
+  dependency_health_receipts:
+  - 'deps.dev/OSV/Scorecard: not applicable to hosted Hermes docs; deployment lockfile remains to be scanned'
+- name: Temporal
+  source_url: https://github.com/temporalio/temporal
+  source_revision: c044bf16b1cc47a4db80669a987484dba6145331
+  licence: MIT
+  latest_release: v1.9.3 (official tag)
+  last_material_activity: HEAD c044bf16b1cc47a4db80669a987484dba6145331; refs checked 2026-08-30
+  maintenance_evidence:
+  - MIT LICENSE; official tag v1.9.3; requires separate Scorecard/package review if adopted
+  fit: bounded candidate
+  gaps: [workflow service is materially larger than safe-action receipt need]
+  runtime_cost: 'high: server/worker/persistence'
+  integration_cost: invasive
+  overlaps: [duplicates Hermes authority]
+  export_removal_path: set safe_actions false
+  dependency_health_receipts:
+  - 'OSV/deps.dev: exact package/container version required; no deployment selected'
+- name: Ansible
+  source_url: https://github.com/ansible/ansible
+  source_revision: deecfd6e8c030c7fe23c4fd9bc6b94cd0422132c
+  licence: GPL-3.0
+  latest_release: v2.19.1 (official tag family; exact release pin required)
+  last_material_activity: HEAD deecfd6e8c030c7fe23c4fd9bc6b94cd0422132c; refs checked 2026-08-30
+  maintenance_evidence:
+  - GPL-3.0-or-later source; official repository HEAD pinned above
+  fit: bounded candidate
+  gaps: [arbitrary automation violates safe-action boundary; GPL integration cost]
+  runtime_cost: controller plus remote execution
+  integration_cost: invasive
+  overlaps: [duplicates Hermes actions]
+  export_removal_path: set safe_actions false
+  dependency_health_receipts:
+  - 'OSV/deps.dev: package/collection scan only if separately approved'
+decision: custom_gap
+selected_candidate: null
+custom_gap:
+  why_oss_does_not_cover_it: Frank-specific bounded authority adapter boundary
+  owned_files:
+  - governance/control-plane/decisions/oss/safe-action-adapters.yaml
+  - governance/control-plane/schema/action-receipt.schema.json
+  estimated_surface: one idempotency/approval receipt seam; no competing daemon
+rollback_removal_path: set safe_actions false
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Safe actions are Hermes-owned; Frank only records allowlist, approval, idempotency and outcome receipts.
+security_evidence:
+- Official Hermes docs and Temporal/Ansible source/license refs checked 2026-08-30.
+security_unknowns:
+- Runtime package health requires the actual Hermes deployment lockfile.
+cost: No additional runtime; deterministic validation only.

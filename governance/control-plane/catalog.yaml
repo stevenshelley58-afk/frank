@@ -1,0 +1,184 @@
+schema_version: 1
+revision: rev_366f4bacad6294261a57751289121193ac162b08
+
+nodes:
+  - id: vps:dedicated
+    kind: host
+    title: Dedicated VPS
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: project:frank
+    kind: project
+    title: Frank
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: project:mini-frank
+    kind: project
+    title: Mini Frank source and knowledge project
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: project:blockwise
+    kind: project
+    title: Blockwise
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: repo:frank
+    kind: repo
+    title: Frank canonical repository
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: repo:frank-production-checkout
+    kind: checkout
+    title: Frank production checkout
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: runtime:hermes-default
+    kind: service
+    title: Hermes default profile
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:hermes/consolidation-20260830-001, receipt:hermes/canary-20260830-001]
+  - id: service:hindsight
+    kind: service
+    title: Hindsight memory service
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:hermes/consolidation-20260830-001]
+  - id: service:frank-window
+    kind: service
+    title: Frank Window service
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: service:blockwise-app
+    kind: service
+    title: Blockwise product application
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: route:frank-public
+    kind: route
+    title: Frank authenticated public route
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: route:frank-loopback
+    kind: route
+    title: Frank loopback route
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: route:blockwise-health
+    kind: route
+    title: Blockwise public health route
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: store:frank-window-data
+    kind: data_store
+    title: Frank Window application data
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: store:mini-frank-projects
+    kind: data_store
+    title: Mini Frank source artifacts and project workspaces
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: observer:agenttrail-frank
+    kind: observer
+    title: AgentTrail Frank observer
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    oss_decision_id: receipt:oss-decision/agenttrail
+    evidence_receipt_ids: [receipt:agenttrail/frame-proof-20260830-001]
+  - id: observer:agenttrail-hermes
+    kind: observer
+    title: AgentTrail Hermes observer
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    oss_decision_id: receipt:oss-decision/agenttrail
+    evidence_receipt_ids: [receipt:agenttrail/frame-proof-20260830-001]
+  - id: observer:agenttrail-blockwise
+    kind: observer
+    title: AgentTrail Blockwise observer
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    oss_decision_id: receipt:oss-decision/agenttrail
+    evidence_receipt_ids: [receipt:agenttrail/frame-proof-20260830-001]
+  - id: source:agenttrail
+    kind: source
+    title: Pinned AgentTrail upstream source
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    source_locator: apps/window/vendor/agenttrail
+    source_revision: 5b97cf3cef548a0c668731e7f569fa36c14832f2
+    oss_decision_id: receipt:oss-decision/agenttrail
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: source:archify
+    kind: source
+    title: Pinned Archify upstream source
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    source_locator: apps/window/vendor/archify
+    source_revision: b36d79fdbc3aec3728744341485a7e79f03c0071
+    oss_decision_id: receipt:oss-decision/archify
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: tool:archify
+    kind: cli
+    title: Archify projection generator
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: read_only}
+    oss_decision_id: receipt:oss-decision/archify
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: capability:frank/ad-template-builder
+    kind: capability
+    title: Frank Ad Template Builder
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
+    oss_decision_id: receipt:oss-decision/custom-adapters
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: template:frank/ad-template-process
+    kind: template
+    title: Ad Template Builder process artifact
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: gate:frank/ad-template-validation
+    kind: component
+    title: Ad Template Builder validation gate
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: release:frank
+    kind: release
+    title: Frank release target
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: release:blockwise
+    kind: release
+    title: Blockwise release target
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: run:reconciliation
+    kind: component
+    title: Reconciliation job type
+    state_axes: {lifecycle: draft, trust: reviewed, installation: not_installed, enablement: disabled, production_authority: none}
+    evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: rule:frank
+    kind: rule
+    title: Frank canonical rule sources
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:skills/census-20260830-001]
+  - id: skill:frank
+    kind: skill
+    title: Frank canonical skill sources
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
+    evidence_receipt_ids: [receipt:skills/census-20260830-001]
+
+relationships:
+  - {id: edge:vps/contains-frank, type: contains, from: vps:dedicated, to: project:frank, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:vps/contains-mini-frank, type: contains, from: vps:dedicated, to: project:mini-frank, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:vps/contains-blockwise, type: contains, from: vps:dedicated, to: project:blockwise, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:frank/contains-window, type: contains, from: project:frank, to: service:frank-window, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:frank/contains-hermes, type: contains, from: project:frank, to: runtime:hermes-default, evidence_receipt_ids: [receipt:hermes/consolidation-20260830-001]}
+  - {id: edge:hermes/uses-hindsight, type: uses, from: runtime:hermes-default, to: service:hindsight, evidence_receipt_ids: [receipt:hermes/consolidation-20260830-001]}
+  - {id: edge:blockwise/contains-app, type: contains, from: project:blockwise, to: service:blockwise-app, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:frank/repo-owns-checkout, type: owns, from: repo:frank, to: repo:frank-production-checkout, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:window/exposes-public-route, type: exposes, from: service:frank-window, to: route:frank-public, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:window/exposes-loopback-route, type: exposes, from: service:frank-window, to: route:frank-loopback, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:blockwise/exposes-health-route, type: exposes, from: service:blockwise-app, to: route:blockwise-health, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:window/writes-data, type: writes, from: service:frank-window, to: store:frank-window-data, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:mini-frank/owns-project-store, type: owns, from: project:mini-frank, to: store:mini-frank-projects, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:agenttrail/observes-frank, type: observes, from: observer:agenttrail-frank, to: project:frank, evidence_receipt_ids: [receipt:agenttrail/frame-proof-20260830-001]}
+  - {id: edge:agenttrail/observes-hermes, type: observes, from: observer:agenttrail-hermes, to: runtime:hermes-default, evidence_receipt_ids: [receipt:agenttrail/frame-proof-20260830-001]}
+  - {id: edge:agenttrail/observes-blockwise, type: observes, from: observer:agenttrail-blockwise, to: project:blockwise, evidence_receipt_ids: [receipt:agenttrail/frame-proof-20260830-001]}
+  - {id: edge:agenttrail/source-declares-observers, type: declares, from: source:agenttrail, to: observer:agenttrail-frank, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:archify/source-declares-tool, type: declares, from: source:archify, to: tool:archify, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:frank/contains-ad-template-builder, type: contains, from: project:frank, to: capability:frank/ad-template-builder, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:ad-template-builder/uses-archify, type: uses, from: capability:frank/ad-template-builder, to: tool:archify, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:ad-template-builder/produces-template, type: produces, from: capability:frank/ad-template-builder, to: template:frank/ad-template-process, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:ad-template-validation/validates-template, type: validates, from: gate:frank/ad-template-validation, to: template:frank/ad-template-process, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}

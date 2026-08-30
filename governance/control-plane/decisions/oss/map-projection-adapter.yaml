@@ -1,0 +1,89 @@
+id: receipt:oss-decision/map-projection-adapter
+subject_id: receipt:oss-decision/map-projection-adapter
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github archify typed projection
+- github graph projection adapter
+- github architecture JSON schema
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github archify typed projection
+- github graph projection adapter
+- github architecture JSON schema
+- official repository/API searches retained in research-sources.md
+- Official source/license/release and package-applicability outcomes are recorded per candidate below.
+candidates:
+- name: Archify
+  source_url: https://github.com/tt-a1i/archify
+  source_revision: b36d79fdbc3aec3728744341485a7e79f03c0071
+  licence: MIT
+  latest_release: v2.9.0 (official tag)
+  last_material_activity: upstream HEAD f58298be408d62385407ca26bc5a7b612f68be2b; selected Step 0 pin b36d79f... checked 2026-08-30
+  maintenance_evidence:
+  - MIT LICENSE; official v2.9.0 tag and Step 0 immutable pin recorded
+  fit: bounded candidate
+  gaps: [Frank projection envelope and receipt links are product-specific]
+  runtime_cost: existing generator/viewer; no new daemon
+  integration_cost: thin typed projection mapping
+  overlaps: [Archify owns architecture generation; Frank must not fork its viewer]
+  export_removal_path: disable adapter and retain LKG
+  dependency_health_receipts:
+  - 'deps.dev/OSV: scan exact Archify package/lockfile if packaged; source-only embedding has no package advisory'
+- name: Mermaid
+  source_url: https://github.com/mermaid-js/mermaid
+  source_revision: a8bff7b01acf24b080ecce973b940373eea79aac
+  licence: MIT
+  latest_release: latest upstream tag unavailable from official refs; HEAD a8bff7b01acf24b080ecce973b940373eea79aac
+  last_material_activity: HEAD checked 2026-08-30
+  maintenance_evidence:
+  - MIT LICENSE; official source HEAD pinned above
+  fit: bounded candidate
+  gaps: [renderer does not define Frank typed receipt envelope]
+  runtime_cost: JS renderer; no daemon
+  integration_cost: bounded render handoff
+  overlaps: [overlaps Archify rendering; not selected as authority]
+  export_removal_path: disable adapter and retain LKG
+  dependency_health_receipts:
+  - 'OSV/deps.dev: exact Mermaid package version required; no package selected'
+- name: Graphviz
+  source_url: https://gitlab.com/graphviz/graphviz
+  source_revision: 80837292c549eaa058c3c4a0062ff05c7885352f
+  licence: EPL-1.0
+  latest_release: latest upstream tag unavailable from official refs; HEAD 80837292c549eaa058c3c4a0062ff05c7885352f
+  last_material_activity: official source HEAD checked 2026-08-30
+  maintenance_evidence:
+  - EPL-1.0 source; official repository HEAD pinned above
+  fit: bounded candidate
+  gaps: [DOT renderer does not provide Archify/Frank typed IR]
+  runtime_cost: native renderer process if used; no Frank daemon selected
+  integration_cost: conversion layer would be invasive
+  overlaps: [overlaps Archify graph rendering]
+  export_removal_path: disable adapter and retain LKG
+  dependency_health_receipts:
+  - 'OSV/deps.dev: no Graphviz package selected; scan only if separately approved'
+decision: custom_gap
+selected_candidate: null
+custom_gap:
+  why_oss_does_not_cover_it: Frank-specific bounded authority adapter boundary
+  owned_files:
+  - governance/control-plane/decisions/oss/map-projection-adapter.yaml
+  - governance/control-plane/schema/projection.schema.json
+  estimated_surface: one typed projection seam; no competing viewer or graph store
+rollback_removal_path: disable adapter and retain LKG
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Archify is the selected upstream authority; Frank adds only a typed projection envelope and stable receipt links.
+security_evidence:
+- Official Archify, Mermaid and Graphviz source/license/tag refs checked 2026-08-30.
+- No renderer is enabled by this receipt; package scans are version-gated.
+security_unknowns:
+- Selected Step 0 Archify pin is immutable; current upstream HEAD differs and is not adopted.
+cost: Existing Archify generation/rendering plus pure mapping; no new daemon.

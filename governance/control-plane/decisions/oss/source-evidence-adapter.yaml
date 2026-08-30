@@ -1,0 +1,88 @@
+id: receipt:oss-decision/source-evidence-adapter
+subject_id: receipt:oss-decision/source-evidence-adapter
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github provenance metadata adapter
+- github source evidence receipt
+- github secure path containment
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github provenance metadata adapter
+- github source evidence receipt
+- github secure path containment
+- official repository/API searches retained in research-sources.md
+- Official source/license/release and package-applicability outcomes are recorded per candidate below.
+candidates:
+- name: OpenMetadata Standards
+  source_url: https://github.com/open-metadata/OpenMetadataStandards
+  source_revision: 17f0244916e9ae111b54f8b1b1e02e76cfc6b374
+  licence: Apache-2.0
+  latest_release: repository standards (no tagged release; HEAD 17f0244916e9ae111b54f8b1b1e02e76cfc6b374)
+  last_material_activity: HEAD checked 2026-08-30
+  maintenance_evidence:
+  - Apache-2.0 LICENSE; official standards repository HEAD pinned above
+  fit: bounded candidate
+  gaps: [standards do not implement Frank receipt/path containment]
+  runtime_cost: schema-only; no daemon
+  integration_cost: bounded provenance field mapping
+  overlaps: [overlaps Backstage entity/provenance vocabulary]
+  export_removal_path: disable adapter and retain receipts
+  dependency_health_receipts:
+  - 'deps.dev/OSV: repository standards are not consumed as a package; scan adapter lockfile separately'
+- name: Backstage Catalog
+  source_url: https://github.com/backstage/backstage
+  source_revision: d5731882a9a45a6dea41df40ce9c25dafc2b4859
+  licence: Apache-2.0
+  latest_release: v1.9.1 (official tag)
+  last_material_activity: HEAD d5731882a9a45a6dea41df40ce9c25dafc2b4859; refs checked 2026-08-30
+  maintenance_evidence:
+  - Apache-2.0 LICENSE; official tag v1.9.1; source HEAD pinned above
+  fit: bounded candidate
+  gaps: [full catalog backend/portal is out of Frank scope]
+  runtime_cost: high if deployed; adapter remains schema-only
+  integration_cost: bounded entity/provenance mapping
+  overlaps: [would overlap Frank catalog if deployed]
+  export_removal_path: disable adapter and retain receipts
+  dependency_health_receipts:
+  - 'deps.dev/OSV: no Backstage package adoption; exact adapter dependencies require scan'
+- name: deps.dev
+  source_url: https://github.com/google/deps.dev
+  source_revision: dc936a45c6574bb6e6bd5433de8c74e4cdff1276
+  licence: Apache-2.0
+  latest_release: no tagged release (official source HEAD dc936a45c6574bb6e6bd5433de8c74e4cdff1276)
+  last_material_activity: source HEAD checked 2026-08-30
+  maintenance_evidence:
+  - Apache-2.0 source; official deps.dev API/source repository HEAD pinned above
+  fit: bounded candidate
+  gaps: [dependency metadata does not define Frank provenance fields]
+  runtime_cost: HTTPS lookup only; no daemon
+  integration_cost: bounded evidence lookup mapping
+  overlaps: [overlaps discovery-feeds deps.dev candidate]
+  export_removal_path: disable adapter and retain receipts
+  dependency_health_receipts:
+  - 'OSV: applicable only for exact package/version evidence; no package selected here'
+decision: custom_gap
+selected_candidate: null
+custom_gap:
+  why_oss_does_not_cover_it: Frank-specific bounded authority adapter boundary
+  owned_files:
+  - governance/control-plane
+  estimated_surface: small
+rollback_removal_path: disable adapter and retain receipts
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Reuse provenance/entity vocabulary while keeping Frank's source-path containment and receipt semantics as a thin adapter.
+security_evidence:
+- Official OpenMetadata, Backstage and deps.dev sources/license/HEAD refs checked 2026-08-30.
+- Hosted standards/API candidates have no direct Scorecard package target; adapter dependencies remain scan-gated.
+security_unknowns:
+- No claim about private catalog deployment security or transitive dependency health.
+cost: Schema mapping and path validation only; no catalog, graph store or daemon.

@@ -1,0 +1,145 @@
+{
+  "valid_ids": [
+    "vps:dedicated",
+    "project:frank",
+    "capability:frank/ad-template-builder",
+    "receipt:map/vps-world-20260830-001",
+    "receipt:oss-decision/catalog-model"
+  ],
+  "invalid_ids": [
+    "artifact:receipt",
+    "Project:Frank",
+    "project:../escape",
+    "receipt:a_b",
+    "project:frank//window"
+  ],
+  "valid_state": {
+    "lifecycle": "approved",
+    "trust": "reviewed",
+    "installation": "installed",
+    "enablement": "enabled",
+    "production_authority": "read_only",
+    "freshness": "fresh",
+    "health": "healthy",
+    "provider_status": "ready",
+    "reconciliation_result": "match",
+    "confidence": "high"
+  },
+  "invalid_states": [
+    {
+      "lifecycle": "active",
+      "trust": "reviewed",
+      "installation": "installed",
+      "enablement": "enabled",
+      "production_authority": "read_only"
+    },
+    {
+      "lifecycle": "approved",
+      "trust": "reviewed",
+      "installation": "installed",
+      "enablement": "enabled",
+      "production_authority": "operate",
+      "combined_status": "healthy"
+    }
+  ],
+  "unsafe_paths": [
+    "%2e%2e",
+    "../secret",
+    "id_abc=",
+    "id_",
+    "id_\\escape"
+  ],
+  "fabricated_connection": {
+    "id": "edge:ad-template-builder/blockwise",
+    "from": "capability:frank/ad-template-builder",
+    "to": "project:blockwise",
+    "relationship": "consumes",
+    "evidence_receipt_ids": []
+  },
+  "missing_evidence_receipt": {
+    "id": "receipt:test/missing-evidence",
+    "kind": "validation",
+    "subject_ids": [],
+    "producer": "fixture",
+    "source_revision_set": {},
+    "deployed_revision_set": {},
+    "captured_at": "2026-08-30T00:00:00Z",
+    "fresh_until": null,
+    "outcome": "pass",
+    "evidence_uris": [],
+    "redaction": "secret_filtered"
+  },
+  "invalid_projection": {
+    "id": "projection:ad-template-builder/data-flow",
+    "type": "data_flow",
+    "mandatory": false,
+    "status": "not_generated",
+    "must_show": ["verified_consumers"],
+    "exclusions": ["unverified_consumers"]
+  },
+  "valid_oss_decision": {
+    "id": "receipt:oss-decision/fixture",
+    "subject_id": "component:frank/catalog",
+    "need": "Validate one OSS decision fixture",
+    "must_have": ["exact_revision", "removal_path"],
+    "existing_local_solution": null,
+    "search_queries": ["fixture search one", "fixture search two", "fixture search three"],
+    "search_evidence": ["fixture:bounded-search-results"],
+    "candidates": [
+      {
+        "name": "Fixture Candidate",
+        "source_url": "https://example.com/fixture",
+        "source_revision": "0123456789abcdef0123456789abcdef01234567",
+        "licence": "MIT",
+        "latest_release": "v1.0.0",
+        "last_material_activity": "2026-08-30",
+        "maintenance_evidence": ["fixture:repository-metadata"],
+        "fit": "Exercises the receipt contract",
+        "gaps": [],
+        "runtime_cost": "none",
+        "integration_cost": "test only",
+        "overlaps": [],
+        "export_removal_path": "delete fixture",
+        "dependency_health_receipts": ["fixture:deps-dev-scorecard-osv"]
+      }
+    ],
+    "decision": "custom_gap",
+    "selected_candidate": null,
+    "custom_gap": {
+      "why_oss_does_not_cover_it": "The fixture is repository-specific test data",
+      "owned_files": ["governance/control-plane/fixtures/schema-fixtures.json"],
+      "estimated_surface": "one fixture"
+    },
+    "rollback_removal_path": "delete fixture",
+    "reviewed_at": "2026-08-30",
+    "reviewer": "control-contract-tests"
+  },
+  "invalid_oss_decisions": [
+    {
+      "name": "too_few_searches",
+      "remove": null,
+      "override": {"search_queries": ["one", "two"]}
+    },
+    {
+      "name": "custom_gap_without_scope",
+      "remove": null,
+      "override": {"custom_gap": null}
+    },
+    {
+      "name": "candidate_without_health_evidence",
+      "remove": "candidates.0.dependency_health_receipts",
+      "override": {}
+    },
+    {
+      "name": "adopt_without_selected_candidate",
+      "remove": null,
+      "override": {"decision": "adopt", "selected_candidate": null, "custom_gap": null}
+    },
+    {
+      "name": "candidate_without_exact_revision",
+      "remove": null,
+      "override": {},
+      "candidate_override": {"source_revision": "latest"}
+    }
+  ]
+}

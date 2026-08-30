@@ -1,0 +1,21 @@
+id: capability:frank/control-graph
+kind: runtime_policy
+title: Canonical control graph
+eli5: Records what exists and which evidence supports it.
+why_it_exists: Give Map and Control one stable identity source.
+benefits: [closed relationships, evidence-backed truth]
+tradeoffs: [unknowns remain explicit]
+applies_when: [catalog and evidence reconciliation]
+does_not_apply_when: [arbitrary shell execution]
+scope_ids: [project:frank, vps:dedicated]
+source_locator: governance/control-plane/catalog.yaml
+source_revision: 366f4bacad6294261a57751289121193ac162b08
+content_hash: sha256:69ff071026edf420e095cdfdcbfc37ca6fdffb9fca47c44600f4e546884c2bb9
+authority_tier: repo
+enforcement: ci
+state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: read_only}
+retirement_assessment: retain
+replacement_ids: []
+consolidation_group: control-plane
+evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+oss_decision_id: receipt:oss-decision/catalog-model

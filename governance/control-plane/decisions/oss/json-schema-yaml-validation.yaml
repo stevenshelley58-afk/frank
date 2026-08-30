@@ -1,0 +1,95 @@
+id: receipt:oss-decision/json-schema-yaml-validation
+subject_id: receipt:oss-decision/json-schema-yaml-validation
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- python jsonschema Draft 2020-12 validator
+- PyYAML safe_load security
+- ruamel.yaml safe YAML parser
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- python jsonschema Draft 2020-12 validator
+- PyYAML safe_load security
+- ruamel.yaml safe YAML parser
+- official repository/API searches retained in research-sources.md
+- PyPI JSON and GitHub release APIs checked 2026-08-30 UTC; exact runtime pins are jsonschema 4.26.0 and PyYAML 6.0.3. deps.dev v3 package-version endpoint returned 404 for these package lookups; OSV package queries returned 0 advisories for jsonschema and ruamel.yaml, and 8 historical advisories for PyYAML (version applicability not asserted here).
+candidates:
+- name: jsonschema
+  source_url: https://github.com/python-jsonschema/jsonschema
+  source_revision: 4.26.0
+  licence: MIT
+  latest_release: v4.26.0 (2026-01-07), https://github.com/python-jsonschema/jsonschema/releases/tag/v4.26.0
+  last_material_activity: GitHub API pushed_at 2026-08-27T14:07:40Z; updated_at 2026-08-29T17:40:14Z
+  maintenance_evidence:
+  - 'GitHub API: MIT, archived=false, 4979 stars, 658 forks, 61 open issues; Scorecard 8.3 dated 2026-08-24.'
+  fit: Draft 2020-12 schema validation and FormatChecker support.
+  gaps:
+  - does not parse YAML; pair with PyYAML safe_load
+  runtime_cost: in-process Python dependency; no resident service
+  integration_cost: low; validator seam around existing schema fixtures
+  overlaps:
+  - standard-library checks do not provide equivalent Draft 2020-12 coverage
+  export_removal_path: remove validator seam and retain schema fixtures; use standard-library
+    checks only if equivalent proven
+  dependency_health_receipts:
+  - https://pypi.org/pypi/jsonschema/json -> 4.26.0 uploaded 2026-01-07
+  - https://api.deps.dev/v3/systems/pypi/packages/jsonschema/versions -> 404 from requested endpoint; no deps.dev result claimed
+  - https://api.osv.dev/v1/query (PyPI jsonschema) -> 0 vulnerabilities
+  - https://api.securityscorecards.dev/projects/github.com/python-jsonschema/jsonschema -> score 8.3 (2026-08-24)
+- name: PyYAML
+  source_url: https://github.com/yaml/pyyaml
+  source_revision: 6.0.3
+  licence: MIT
+  latest_release: 6.0.3 (2025-09-25), https://github.com/yaml/pyyaml/releases/tag/6.0.3
+  last_material_activity: GitHub API pushed_at 2026-06-17T22:18:20Z; updated_at 2026-08-28T14:41:18Z
+  maintenance_evidence:
+  - 'GitHub API: MIT, archived=false, 2944 stars, 602 forks, 361 open issues; Scorecard 5.0 dated 2026-08-17.'
+  fit: safe_load-only parsing of controlled YAML declarations.
+  gaps:
+  - unsafe/full loader modes are out of scope and must not be used
+  runtime_cost: in-process Python dependency; no resident service
+  integration_cost: low; parse then validate against JSON Schema
+  overlaps:
+  - ruamel.yaml offers round-trip preservation but adds surface not needed here
+  export_removal_path: remove validator seam and retain schema fixtures; use standard-library
+    checks only if equivalent proven
+  dependency_health_receipts:
+  - https://pypi.org/pypi/PyYAML/json -> 6.0.3 uploaded 2025-09-25
+  - https://api.deps.dev/v3/systems/pypi/packages/PyYAML/versions -> 404 from requested endpoint; no deps.dev result claimed
+  - https://api.osv.dev/v1/query (PyPI PyYAML) -> 8 advisories returned; applicability to 6.0.3 requires separate range review
+  - https://api.securityscorecards.dev/projects/github.com/yaml/pyyaml -> score 5.0 (2026-08-17)
+- name: ruamel.yaml
+  source_url: https://sourceforge.net/p/ruamel-yaml/code/ci/default/tree/
+  source_revision: 0.18.15
+  licence: MIT
+  latest_release: 0.19.1 (2026-01-02), https://pypi.org/project/ruamel.yaml/0.19.1/
+  last_material_activity: PyPI latest release uploaded 2026-01-02; upstream code browser is SourceForge (no GitHub Scorecard endpoint)
+  maintenance_evidence:
+  - PyPI latest version is 0.19.1; requested comparison pin 0.18.15 is not the current latest.
+  fit: round-trip YAML and comment-preserving edits if Frank later needs them.
+  gaps:
+  - larger API/surface than safe_load-only parsing; not selected for declarations
+  runtime_cost: in-process Python dependency
+  integration_cost: medium; round-trip semantics require additional tests
+  overlaps:
+  - overlaps PyYAML parsing; PyYAML is smaller for this use
+  export_removal_path: remove validator seam and retain schema fixtures; use standard-library
+    checks only if equivalent proven
+  dependency_health_receipts:
+  - https://pypi.org/pypi/ruamel.yaml/json -> latest 0.19.1 uploaded 2026-01-02
+  - https://api.deps.dev/v3/systems/pypi/packages/ruamel.yaml/versions -> 404 from requested endpoint; no deps.dev result claimed
+  - https://api.osv.dev/v1/query (PyPI ruamel.yaml) -> 0 vulnerabilities
+decision: adopt
+selected_candidate: jsonschema + PyYAML
+custom_gap: null
+rollback_removal_path: remove validator seam and retain schema fixtures; use standard-library
+  checks only if equivalent proven
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane

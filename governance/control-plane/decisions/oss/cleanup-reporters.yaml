@@ -1,0 +1,101 @@
+id: receipt:oss-decision/cleanup-reporters
+subject_id: receipt:oss-decision/cleanup-reporters
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github knip unused dependencies
+- github dependency-cruiser jscpd vulture
+- github osv-scanner cleanup
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github knip unused dependencies
+- github dependency-cruiser jscpd vulture
+- github osv-scanner cleanup
+- official repository/API searches retained in research-sources.md
+- Official source metadata, release refs and applicability outcomes are recorded per candidate below.
+candidates:
+- name: Knip
+  source_url: https://github.com/webpro-nl/knip
+  source_revision: 3c785f55ce608d7921e37e41dd5fc61b623e5da2
+  licence: ISC
+  latest_release: no GitHub release object (official /releases/latest returned 404 on 2026-08-30)
+  last_material_activity: HEAD 3c785f55ce608d7921e37e41dd5fc61b623e5da2; upstream refs checked 2026-08-30
+  maintenance_evidence:
+  - 'GitHub source and refs: HEAD 3c785f55ce608d7921e37e41dd5fc61b623e5da2; ISC LICENSE'
+  - 'Scorecard API: https://api.securityscorecards.dev/projects/github.com/webpro-nl/knip (score unavailable; endpoint returned 404)'
+  fit: JS/TS unused reports
+  gaps: [JS/TS only; findings require human confirmation]
+  runtime_cost: CLI dev dependency; scan-time CPU only, no daemon
+  integration_cost: parse JSON report in control-plane receipt
+  overlaps: [overlaps dependency-cruiser on JS/TS dependency edges]
+  export_removal_path: disable cleanup schedule and retain reports
+  dependency_health_receipts:
+  - 'deps.dev: not applicable to repository tool until a package version is selected; OSV: scan tool package lock at adoption time'
+- name: dependency-cruiser
+  source_url: https://github.com/sverweij/dependency-cruiser
+  source_revision: 1f28f44a49c054dc128226543188220818b1ab52
+  licence: MIT
+  latest_release: v18.2.0 (official release 2026-08-10)
+  last_material_activity: pushed 2026-08-29; HEAD 1f28f44a49c054dc128226543188220818b1ab52
+  maintenance_evidence:
+  - MIT LICENSE and official release v18.2.0; Scorecard 7.0 (2026-08-24), Security-Policy 10, Code-Review 0
+  fit: JS/TS dependency graph
+  gaps: [reports dependency structure, not dead-code certainty]
+  runtime_cost: CLI scan; no daemon
+  integration_cost: bounded JSON/SVG report adapter
+  overlaps: [overlaps Knip dependency analysis]
+  export_removal_path: disable cleanup schedule and retain reports
+  dependency_health_receipts:
+  - 'deps.dev/OSV: no selected package version; repository-level security evidence recorded above'
+- name: jscpd
+  source_url: https://github.com/kucherenko/jscpd
+  source_revision: b816fb777d885d963c7167cd9ae81035c1731660
+  licence: MIT
+  latest_release: v5.0.16 (official release 2026-08-18)
+  last_material_activity: pushed 2026-08-30; HEAD 0e803affed3220928a325d8481f9c55869dff76d
+  maintenance_evidence:
+  - MIT LICENSE and official release v5.0.16; Scorecard 7.4 (2026-08-24), Security-Policy 10, Code-Review 0
+  fit: duplication candidates
+  gaps: [duplicate candidates need review; thresholds can miss semantic duplication]
+  runtime_cost: CLI scan; no daemon
+  integration_cost: bounded duplicate-finding parser
+  overlaps: [overlaps cleanup reporter output but not Knip semantics]
+  export_removal_path: disable cleanup schedule and retain reports
+  dependency_health_receipts:
+  - 'deps.dev/OSV: no selected package version; scan package lock before use'
+- name: Vulture
+  source_url: https://github.com/jendrikseipp/vulture
+  source_revision: 2c21cb0ae2afa657e36f6a397cb573608a65d79e
+  licence: MIT
+  latest_release: v2.16 (official release 2026-03-25)
+  last_material_activity: pushed 2026-04-30; HEAD 2c21cb0ae2afa657e36f6a397cb573608a65d79e
+  maintenance_evidence:
+  - MIT LICENSE and official release v2.16; Scorecard 3.0 (2026-08-17), Security-Policy 0, Code-Review 2
+  fit: Python dead-code candidates
+  gaps: [Python only; confidence findings are not deletion authorization]
+  runtime_cost: Python CLI; no daemon
+  integration_cost: bounded text/JSON finding adapter
+  overlaps: [complements, but does not replace, JS reporters]
+  export_removal_path: disable cleanup schedule and retain reports
+  dependency_health_receipts:
+  - 'deps.dev: not applicable until Python package version is pinned; OSV package scan required before adoption'
+decision: compose
+selected_candidate: Knip + dependency-cruiser + jscpd + Vulture (report-only)
+custom_gap: null
+rollback_removal_path: disable cleanup schedule and retain reports
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Language-specific upstream reporters cover distinct candidate classes; no reporter may delete files. Composition avoids a second cleanup daemon.
+security_evidence:
+- Scorecard project endpoints checked for dependency-cruiser (7.0), jscpd (7.4), Vulture (3.0); Knip endpoint returned 404.
+- OSV/deps.dev are applicable only after exact package versions are pinned; no vulnerability claim is made for unpinned repository HEADs.
+security_unknowns:
+- Knip Scorecard endpoint unavailable; transitive package health requires lockfile scan.
+cost: Four bounded CLI reports; no persistent service; retain raw reports for audit and removal.

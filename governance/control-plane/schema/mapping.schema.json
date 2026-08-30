@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://frank.fail/schema/control-mapping/v1",
+  "title": "Verified cross-system mapping",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id", "canonical_id", "destination_authority", "destination_id_or_path",
+    "source_revision", "owner_id", "evidence_receipt_id", "confidence",
+    "status", "valid_until"
+  ],
+  "properties": {
+    "id": {"type": "string", "pattern": "^mapping:[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "canonical_id": {"$ref": "#/$defs/stable_id"},
+    "destination_authority": {"enum": ["agenttrail", "archify", "git", "deployment", "runtime"]},
+    "destination_id_or_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*[%\\\\]).+$"
+    },
+    "source_revision": {"type": "string", "pattern": "^[0-9a-f]{40,64}$"},
+    "owner_id": {"$ref": "#/$defs/stable_id"},
+    "evidence_receipt_id": {"$ref": "#/$defs/receipt_id"},
+    "confidence": {"enum": ["high", "medium", "low", "none"]},
+    "status": {"enum": ["verified", "ambiguous", "stale", "invalid"]},
+    "valid_until": {"type": ["string", "null"], "format": "date-time"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "verified"}}, "required": ["status"]},
+      "then": {"properties": {"confidence": {"enum": ["high", "medium"]}}}
+    }
+  ],
+  "$defs": {
+    "stable_id": {"type": "string", "pattern": "^(vps|project|repo|runtime|service|component|worker|store|route|capability|rule|skill|tool|plugin|cli|mcp|app|template|library|hook|gate|policy|runbook|eval|observer|source|release|projection|generation|receipt|proposal|finding|mapping|run|edge):[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},
+    "receipt_id": {"type": "string", "pattern": "^receipt:[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"}
+  }
+}

@@ -1,0 +1,90 @@
+id: receipt:oss-decision/reconciliation-provider
+subject_id: receipt:oss-decision/reconciliation-provider
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github infrastructure reconciliation controller
+- github drift detection tool
+- github asset inventory collector
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github infrastructure reconciliation controller
+- github drift detection tool
+- github asset inventory collector
+- official repository/API searches retained in research-sources.md
+- GitHub REST metadata/release API queried 2026-08-30; exact tip, stable tag, SPDX
+  licence and pushed_at are recorded below. These candidates are comparison inputs,
+  not installation approval.
+- 'OSV exact-version/package evidence is not applicable to this provider decision: no package is selected or installed; dependency scan is a Step 4 implementation gate.'
+candidates:
+- name: Cartography
+  source_url: https://github.com/cartography-cncf/cartography
+  source_revision: 030848289203969e19a17bf25e45ff94a527bcef
+  licence: Apache-2.0
+  latest_release: v0.105.0 (2026-07-29) https://github.com/cartography-cncf/cartography/releases/tag/0.105.0
+  last_material_activity: repository tip 030848289203969e19a17bf25e45ff94a527bcef; reviewed 2026-08-30
+  maintenance_evidence:
+  - 'Apache-2.0; exact tip and metadata https://api.github.com/repos/cartography-cncf/cartography; collector requires Neo4j'
+  fit: collector patterns; Neo4j overlap
+  gaps: [requires Neo4j and cloud integrations; no Frank receipt authority]
+  runtime_cost: planning minimum 1 vCPU/1 GB RAM plus 10 GB storage for Neo4j/graph snapshots; retention is graph-owned
+  integration_cost: high; graph schema, credentials, scheduled collection and authenticated export
+  overlaps: [duplicates topology graph capability and adds a database]
+  export_removal_path: disable timer/provider and retain receipts
+  dependency_health_receipts:
+  - 'OSV/dependency evidence deferred: no package selected or installed; run OSV-Scanner at implementation gate'
+- name: NetBox
+  source_url: https://github.com/netbox-community/netbox
+  source_revision: dcc6afcf3014ed295a06c35717f09563d2b0aa59
+  licence: Apache-2.0
+  latest_release: v4.4.9 (2026-08-11) https://github.com/netbox-community/netbox/releases/tag/v4.4.9
+  last_material_activity: repository tip dcc6afcf3014ed295a06c35717f09563d2b0aa59; reviewed 2026-08-30
+  maintenance_evidence:
+  - 'Apache-2.0; exact tip and metadata https://api.github.com/repos/netbox-community/netbox; inventory/DCIM platform'
+  fit: inventory model; database overlap
+  gaps: [inventory model is not a runtime reconciliation authority and requires PostgreSQL/Redis]
+  runtime_cost: planning minimum 2 vCPU/2 GB RAM plus 20 GB storage; auth and retention are platform-owned
+  integration_cost: high; API auth, database and object model mapping
+  overlaps: [duplicates inventory/source-of-truth concerns]
+  export_removal_path: disable timer/provider and retain receipts
+  dependency_health_receipts:
+  - 'OSV/dependency evidence deferred: no package selected or installed; run OSV-Scanner at implementation gate'
+- name: OpenMetadata Standards
+  source_url: https://github.com/open-metadata/OpenMetadataStandards
+  source_revision: 17f0244916e9ae111b54f8b1b1e02e76cfc6b374
+  licence: Apache-2.0
+  latest_release: no stable release tag; repository tip 17f0244916e9ae111b54f8b1b1e02e76cfc6b374 (reviewed 2026-08-30)
+  last_material_activity: repository metadata reviewed 2026-08-30
+  maintenance_evidence:
+  - 'Apache-2.0; exact tip and metadata https://api.github.com/repos/open-metadata/OpenMetadataStandards; schema/vocabulary only'
+  fit: evidence vocabulary
+  gaps: [standards repository is not a collector, scheduler or reconciliation runtime]
+  runtime_cost: none as a vendored vocabulary; storage/auth/retention remain Frank-owned
+  integration_cost: low; map selected vocabulary into receipts without deploying OpenMetadata
+  overlaps: [schema/provenance vocabulary overlaps Frank receipt fields]
+  export_removal_path: disable timer/provider and retain receipts
+  dependency_health_receipts:
+  - 'OSV/dependency evidence not applicable to standards-only reuse; no runtime package selected'
+decision: custom_gap
+selected_candidate: null
+custom_gap:
+  why_oss_does_not_cover_it: Frank-specific bounded authority adapter boundary
+  owned_files:
+  - governance/control-plane
+  estimated_surface: small
+rollback_removal_path: disable timer/provider and retain receipts
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
+rationale: Reconciliation is a Frank-specific read-only receipt contract; existing candidates either require a competing database/runtime or provide only vocabulary.
+security_evidence:
+- Official repository metadata, exact revisions and licences are recorded per candidate.
+security_unknowns:
+- Candidate release/security/dependency scans are not installation approval because no provider is selected; scan any future implementation revision before promotion.
+cost: Keep the thin Frank adapter and receipt store; avoid Neo4j/PostgreSQL/Redis platform costs unless measured evidence later requires one.

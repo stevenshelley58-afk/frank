@@ -1,0 +1,92 @@
+id: receipt:oss-decision/stable-id-adapter
+subject_id: receipt:oss-decision/stable-id-adapter
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github stable identifier catalog
+- github entity identity mapping
+- github provenance stable IDs
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github stable identifier catalog
+- github entity identity mapping
+- github provenance stable IDs
+- official repository/API searches retained in research-sources.md
+- 'GitHub APIs checked 2026-08-30 UTC. Backstage: Apache-2.0, pushed 2026-08-30T09:56:55Z, v1.54.6 (2026-08-28), Scorecard 6.3 (2026-08-21). OpenMetadata Standards: Apache-2.0, pushed 2026-08-24T16:15:33Z, no release (releases/latest 404), Scorecard 404. Archify: MIT, pushed 2026-08-30T09:44:42Z, v2.15.0 (2026-08-17), Scorecard 404. OSV applicability is not claimed without package coordinates.'
+candidates:
+- name: Backstage
+  source_url: https://github.com/backstage/backstage
+  source_revision: d5731882a9a45a6dea41df40ce9c25dafc2b4859
+  licence: Apache-2.0
+  latest_release: v1.54.6 (2026-08-28), https://github.com/backstage/backstage/releases/tag/v1.54.6
+  last_material_activity: GitHub API pushed_at 2026-08-30T09:56:55Z; updated_at 2026-08-30T09:52:23Z
+  maintenance_evidence:
+  - GitHub API confirms Apache-2.0, archived=false; Scorecard 6.3 dated 2026-08-21.
+  fit: entity ownership and catalog identity vocabulary
+  gaps:
+  - does not define Frank's stable-id namespace or receipt lineage
+  runtime_cost: model vocabulary only; no Backstage runtime
+  integration_cost: low; deterministic namespace mapping
+  overlaps:
+  - OpenMetadata Standards provides overlapping metadata vocabulary
+  export_removal_path: disable resolver and restore previous manifest
+  dependency_health_receipts:
+  - https://api.securityscorecards.dev/projects/github.com/backstage/backstage -> score 6.3 (2026-08-21)
+  - 'OSV applicability: no package coordinate supplied; no repository vulnerability claim made'
+- name: OpenMetadata Standards
+  source_url: https://github.com/open-metadata/OpenMetadataStandards
+  source_revision: 17f0244916e9ae111b54f8b1b1e02e76cfc6b374
+  licence: Apache-2.0
+  latest_release: no published GitHub release (GET https://api.github.com/repos/open-metadata/OpenMetadataStandards/releases/latest returned 404)
+  last_material_activity: GitHub API pushed_at 2026-08-24T16:15:33Z; updated_at 2026-08-24T16:26:52Z
+  maintenance_evidence:
+  - GitHub API confirms Apache-2.0, archived=false, 0 open issues; Scorecard endpoint returned 404.
+  fit: provenance and entity identity vocabulary
+  gaps:
+  - standards do not provide Frank's collision-resistant ID algorithm
+  runtime_cost: no service; consume selected terms only
+  integration_cost: low; map vocabulary into Frank IDs
+  overlaps:
+  - Backstage has overlapping ownership/catalog terms
+  export_removal_path: disable resolver and restore previous manifest
+  dependency_health_receipts:
+  - https://api.github.com/repos/open-metadata/OpenMetadataStandards/releases/latest -> 404; no release evidence
+  - https://api.securityscorecards.dev/projects/github.com/open-metadata/OpenMetadataStandards -> 404; no Scorecard result
+  - 'OSV applicability: no package coordinate supplied; no repository vulnerability claim made'
+- name: Archify
+  source_url: https://github.com/tt-a1i/archify
+  source_revision: b36d79fdbc3aec3728744341485a7e79f03c0071
+  licence: MIT
+  latest_release: v2.15.0 (2026-08-17), https://github.com/tt-a1i/archify/releases/tag/v2.15.0
+  last_material_activity: GitHub API pushed_at 2026-08-30T09:44:42Z; updated_at 2026-08-30T10:01:24Z
+  maintenance_evidence:
+  - GitHub API confirms MIT, archived=false; Scorecard endpoint returned 404.
+  fit: typed projection entity IDs can inform stable references
+  gaps:
+  - does not own Frank's cross-source stable-ID namespace
+  runtime_cost: generator only; no resident service
+  integration_cost: medium; preserve Archify IDs while mapping Frank authorities
+  overlaps:
+  - Backstage/OpenMetadata supply adjacent identity vocabulary
+  export_removal_path: disable resolver and restore previous manifest
+  dependency_health_receipts:
+  - https://api.github.com/repos/tt-a1i/archify/releases/latest -> v2.15.0
+  - https://api.securityscorecards.dev/projects/github.com/tt-a1i/archify -> 404; no Scorecard result
+  - 'OSV applicability: no package coordinate supplied; no repository vulnerability claim made'
+decision: custom_gap
+selected_candidate: null
+custom_gap:
+  why_oss_does_not_cover_it: Frank-specific bounded authority adapter boundary
+  owned_files:
+  - governance/control-plane
+  estimated_surface: small
+rollback_removal_path: disable resolver and restore previous manifest
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane

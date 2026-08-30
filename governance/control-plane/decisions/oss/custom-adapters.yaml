@@ -1,0 +1,92 @@
+id: receipt:oss-decision/custom-adapters
+subject_id: receipt:oss-decision/custom-adapters
+need: OSS decision
+must_have:
+- exact source revision
+- licence
+- maintenance and security evidence
+- cost and integration boundary
+- export/removal path
+existing_local_solution: null
+search_queries:
+- github stable identity catalog adapter
+- github provenance receipt adapter
+- github allowlisted action adapter
+- bounded official repository search retained
+- exact revision and licence review retained
+search_evidence:
+- github stable identity catalog adapter
+- github provenance receipt adapter
+- github allowlisted action adapter
+- official repository/API searches retained in research-sources.md
+- 'GitHub APIs checked 2026-08-30 UTC. Backstage: Apache-2.0, pushed 2026-08-30T09:56:55Z, v1.54.6 (2026-08-28), Scorecard 6.3 (2026-08-21). OpenMetadata Standards: Apache-2.0, pushed 2026-08-24T16:15:33Z, no release (releases/latest 404), Scorecard 404. Archify: MIT, pushed 2026-08-30T09:44:42Z, v2.15.0 (2026-08-17), Scorecard 404. OSV applicability is not claimed without package coordinates.'
+candidates:
+- name: Backstage model
+  source_url: https://github.com/backstage/backstage
+  source_revision: d5731882a9a45a6dea41df40ce9c25dafc2b4859
+  licence: Apache-2.0
+  latest_release: v1.54.6 (2026-08-28), https://github.com/backstage/backstage/releases/tag/v1.54.6
+  last_material_activity: GitHub API pushed_at 2026-08-30T09:56:55Z; updated_at 2026-08-30T09:52:23Z
+  maintenance_evidence:
+  - GitHub API confirms Apache-2.0, archived=false; Scorecard 6.3 dated 2026-08-21.
+  fit: identity and ownership vocabulary for thin adapters
+  gaps:
+  - no Frank-specific receipt, allowlist, or authority semantics
+  runtime_cost: model vocabulary only; no Backstage runtime
+  integration_cost: low per adapter; explicit field mapping
+  overlaps:
+  - OpenMetadata overlaps provenance vocabulary
+  export_removal_path: disable each adapter independently and restore prior manifest/pointer
+  dependency_health_receipts:
+  - https://api.securityscorecards.dev/projects/github.com/backstage/backstage -> score 6.3 (2026-08-21)
+  - 'OSV applicability: no package coordinate supplied; no repository vulnerability claim made'
+- name: OpenMetadata Standards
+  source_url: https://github.com/open-metadata/OpenMetadataStandards
+  source_revision: 17f0244916e9ae111b54f8b1b1e02e76cfc6b374
+  licence: Apache-2.0
+  latest_release: no published GitHub release (GET https://api.github.com/repos/open-metadata/OpenMetadataStandards/releases/latest returned 404)
+  last_material_activity: GitHub API pushed_at 2026-08-24T16:15:33Z; updated_at 2026-08-24T16:26:52Z
+  maintenance_evidence:
+  - GitHub API confirms Apache-2.0, archived=false, 0 open issues; Scorecard endpoint returned 404.
+  fit: provenance vocabulary for source/evidence adapters
+  gaps:
+  - does not provide Frank's immutable receipt format or authority enforcement
+  runtime_cost: no service; consume vocabulary only
+  integration_cost: low; map source pointers to receipt fields
+  overlaps:
+  - Backstage overlaps ownership and entity vocabulary
+  export_removal_path: disable each adapter independently and restore prior manifest/pointer
+  dependency_health_receipts:
+  - https://api.github.com/repos/open-metadata/OpenMetadataStandards/releases/latest -> 404; no release evidence
+  - https://api.securityscorecards.dev/projects/github.com/open-metadata/OpenMetadataStandards -> 404; no Scorecard result
+  - 'OSV applicability: no package coordinate supplied; no repository vulnerability claim made'
+- name: Archify
+  source_url: https://github.com/tt-a1i/archify
+  source_revision: b36d79fdbc3aec3728744341485a7e79f03c0071
+  licence: MIT
+  latest_release: v2.15.0 (2026-08-17), https://github.com/tt-a1i/archify/releases/tag/v2.15.0
+  last_material_activity: GitHub API pushed_at 2026-08-30T09:44:42Z; updated_at 2026-08-30T10:01:24Z
+  maintenance_evidence:
+  - GitHub API confirms MIT, archived=false; Scorecard endpoint returned 404.
+  fit: typed projection boundary for map/architecture adapters
+  gaps:
+  - Frank-specific authority, receipt, and export seams remain custom
+  runtime_cost: isolated generator process; no resident service
+  integration_cost: medium; serializer, hash, validation and LKG seam
+  overlaps:
+  - Mermaid/Graphviz overlap rendering only, not typed projection semantics
+  export_removal_path: disable each adapter independently and restore prior manifest/pointer
+  dependency_health_receipts:
+  - https://api.github.com/repos/tt-a1i/archify/releases/latest -> v2.15.0
+  - https://api.securityscorecards.dev/projects/github.com/tt-a1i/archify -> 404; no Scorecard result
+  - 'OSV applicability: no package coordinate supplied; no repository vulnerability claim made'
+decision: custom_gap
+selected_candidate: null
+custom_gap:
+  why_oss_does_not_cover_it: Frank-specific bounded authority adapter boundary
+  owned_files:
+  - governance/control-plane
+  estimated_surface: small
+rollback_removal_path: disable each adapter independently and restore prior manifest/pointer
+reviewed_at: '2026-08-30'
+reviewer: Step 1 OSS research lane
