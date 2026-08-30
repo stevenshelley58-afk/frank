@@ -70,11 +70,24 @@ def _state_path(flags_file: Path, store: Path) -> Path:
 
 
 def _assert_first_release(store: Path) -> None:
-    if store.is_symlink() or not store.is_dir():
-        raise RuntimeError("release store must be a real directory")
+    _validate_store(store)
     current = store / "current.json"
     if current.is_symlink() or current.exists():
         raise RuntimeError("Step 5 bootstrap requires no existing release selector")
+
+
+def _validate_store(store: Path) -> Path:
+    store = store.absolute()
+    if store.is_symlink() or not store.is_dir():
+        raise RuntimeError("release store must be a real directory")
+    cursor = store
+    while True:
+        if cursor.is_symlink():
+            raise RuntimeError("release store ancestry contains a symlink")
+        if cursor == cursor.parent:
+            break
+        cursor = cursor.parent
+    return store
 
 
 def _write_state(path: Path, flags_file: Path, store: Path, previous: bytes | None, target: bytes) -> None:
@@ -215,11 +228,13 @@ def cleanup(flags_file: Path, store: Path, compose_file: Path) -> None:
 
 
 def _locked_apply(flags_file: Path, store: Path, compose_file: Path) -> None:
+    _validate_store(store)
     with _promotion_lock(store):
         apply(flags_file, store, compose_file)
 
 
 def _locked_cleanup(flags_file: Path, store: Path, compose_file: Path) -> None:
+    _validate_store(store)
     with _promotion_lock(store):
         cleanup(flags_file, store, compose_file)
 
