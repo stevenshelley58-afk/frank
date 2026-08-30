@@ -28,7 +28,7 @@ from graph.control_plane import ControlContractError, id_key, stable_id_from_key
 from graph.control_provider import ControlProvider
 from graph.control_store import ControlGraphStore
 from graph.map_artifacts import MapArtifactProvider, MapArtifactStore
-from runtime_evidence import BeszelProvider, RuntimeEvidenceAdapter, RuntimeEvidenceError, RuntimeProvider
+from runtime_evidence import BeszelProvider, HealthProvider, RuntimeEvidenceAdapter, RuntimeEvidenceError, RuntimeProvider
 from action_dispatcher import HermesDispatcher, DispatchError
 
 
@@ -114,6 +114,10 @@ def feature_flags() -> dict[str, bool]:
 
 def _runtime_provider_ready() -> bool:
     """Apply the runtime promotion gate without making a network request."""
+    if os.environ.get("RUNTIME_PROVIDER_MODE", "").strip().lower() == "health":
+        try: HealthProvider({"frank": os.environ.get("RUNTIME_HEALTH_FRANK_URL", ""), "blockwise": os.environ.get("RUNTIME_HEALTH_BLOCKWISE_URL", "")}, _fetch_runtime)
+        except RuntimeEvidenceError: return False
+        return True
     base = os.environ.get("RUNTIME_PROVIDER_URL", "").strip()
     if not base:
         return False
@@ -146,7 +150,10 @@ def _fetch_runtime(url: str) -> Mapping[str, Any]:
     """Fetch one already-validated Beszel URL with a bounded response."""
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=3) as response:
-        result = json.loads(response.read(256 * 1024).decode("utf-8"))
+        if response.geturl() != url: raise OSError("runtime provider redirect rejected")
+        if getattr(response, "status", 200) != 200: raise OSError("runtime provider returned non-success")
+        if "json" not in response.headers.get("Content-Type", "application/json").lower(): raise OSError("runtime provider returned non-json")
+        result = json.loads(response.read(256 * 1024 + 1).decode("utf-8"))
     if not isinstance(result, Mapping):
         raise OSError("runtime provider response is not an object")
     return result
@@ -167,6 +174,10 @@ def _runtime_adapter() -> RuntimeEvidenceAdapter:
         value = os.environ.get(f"RUNTIME_{system.upper()}_REVISION", "").strip()
         if value:
             revisions[system] = value
+    if os.environ.get("RUNTIME_PROVIDER_MODE", "").strip().lower() == "health":
+        try: provider = HealthProvider({"frank": os.environ.get("RUNTIME_HEALTH_FRANK_URL", ""), "blockwise": os.environ.get("RUNTIME_HEALTH_BLOCKWISE_URL", "")}, _fetch_runtime, revisions)
+        except RuntimeEvidenceError: provider = _UnavailableRuntime()
+        return RuntimeEvidenceAdapter(provider, release_revisions=revisions, evidence_base_url=os.environ.get("RUNTIME_EVIDENCE_URL", "").strip() or None)
     return RuntimeEvidenceAdapter(
         provider,
         release_revisions=revisions,

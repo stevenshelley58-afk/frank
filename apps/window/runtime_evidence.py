@@ -57,6 +57,27 @@ class BeszelProvider:
             raise RuntimeEvidenceError("Beszel response is not an object")
         return value
 
+class HealthProvider:
+    """Fixed, read-only health endpoints for deployments without Beszel."""
+    name = "health"
+    def __init__(self, endpoints: Mapping[str, str], fetch: Any, revisions: Mapping[str, str] | None = None):
+        if set(endpoints) != {"frank", "blockwise"}:
+            raise RuntimeEvidenceError("health endpoints must declare exactly frank and blockwise")
+        self.endpoints = {k: (_safe_url(v) or "") for k, v in endpoints.items() if k in {"frank", "blockwise"}}
+        if set(self.endpoints) != {"frank", "blockwise"} or any(not v for v in self.endpoints.values()):
+            raise RuntimeEvidenceError("health endpoints must be fixed internal URLs")
+        self.fetch = fetch
+        self.revisions = dict(revisions or {})
+    def observe(self, system_id: str) -> Mapping[str, Any]:
+        if system_id not in self.endpoints: raise RuntimeEvidenceError("invalid system ID")
+        value = self.fetch(self.endpoints[system_id])
+        if not isinstance(value, Mapping): raise RuntimeEvidenceError("health response is not an object")
+        if "health" not in value and isinstance(value.get("ok"), bool):
+            value = {**value, "health": "healthy" if value["ok"] else "unhealthy"}
+        from datetime import datetime, timezone
+        value = {**value, "route": self.endpoints[system_id], "evidence_url": self.endpoints[system_id], "deployed_revision": value.get("deployed_revision") or self.revisions.get(system_id), "observed_at": value.get("observed_at") or datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "freshness": value.get("freshness", "fresh")}
+        return value
+
 
 @dataclass(frozen=True)
 class RuntimeSummary:
@@ -115,7 +136,8 @@ def _safe_url(value: Any) -> str | None:
         # Hostnames are accepted only for explicitly internal/authenticated
         # routes; callers should still place them behind Caddy auth.
         if host.lower() not in {"localhost", "beszel", "beszel-hub", "monitoring"} and not host.lower().endswith(".internal"):
-            return None
+            allowed = {("https", "frank.fail", "/frank/"), ("https", "frank.fail", "/api/health"), ("https", "blockwise.sale", "/api/health")}
+            if (parts.scheme, host.lower(), parts.path) not in allowed: return None
     return f"{parts.scheme}://{parts.netloc}{parts.path or '/'}"
 
 
