@@ -2,11 +2,15 @@
 Description=Frank quarterly isolated retention restore drill (non-destructive)
 [Service]
 Type=oneshot
-User=frank
+User=root
 WorkingDirectory=/projects/frank
-ExecStart=/usr/bin/python3 /projects/frank/apps/window/scripts/run_scheduled_control_job.py retention --timeout 3600
+ExecStart=/usr/bin/python3 /projects/frank/apps/window/scripts/run_restore_drill.py
 TimeoutStartSec=60m
+UMask=0077
 NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+CapabilityBoundingSet=CAP_DAC_READ_SEARCH
 ProtectSystem=strict
 ReadOnlyPaths=/projects/frank /srv/frank/data/window
-ReadWritePaths=/srv/frank/data/window/control-graph/schedules
+ReadWritePaths=/srv/frank/backups/control-plane

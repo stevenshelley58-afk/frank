@@ -250,11 +250,41 @@ def _capture(args: argparse.Namespace, bundle: Path) -> dict[str, Any]:
     tests = _evidence_list(args.tests)
     runtime = _evidence_list(args.runtime_evidence)
     restore = _load_json(args.restore_receipt, args.restore_receipt.absolute().parent)
+    restore_revisions = {"project:frank": args.deployed_sha}
+    restore_uris = restore.get("evidence_uris") if isinstance(restore, dict) else None
+    restore_is_fresh = False
+    if isinstance(restore, dict):
+        try:
+            restore_captured = datetime.fromisoformat(str(restore.get("captured_at", "")).replace("Z", "+00:00"))
+            restore_fresh_until = datetime.fromisoformat(str(restore.get("fresh_until", "")).replace("Z", "+00:00"))
+            now = datetime.now(timezone.utc)
+            restore_is_fresh = (
+                restore_captured.tzinfo is not None
+                and restore_fresh_until.tzinfo is not None
+                and restore_captured <= now < restore_fresh_until
+            )
+        except ValueError:
+            restore_is_fresh = False
     if (
         not isinstance(restore, dict)
+        or restore.get("schema") != "frank.restore-drill-evidence/v1"
         or restore.get("status") != "passed"
+        or restore.get("outcome") != "pass"
+        or restore.get("content_match") is not True
         or not isinstance(restore.get("receipt_id"), str)
         or _contains_placeholder(restore.get("receipt_id"))
+        or re.fullmatch(r"receipt:retention/restore-drill-[a-z0-9]+(?:-[a-z0-9]+)*", restore["receipt_id"]) is None
+        or not restore_is_fresh
+        or restore.get("source_revision_set") != restore_revisions
+        or restore.get("deployed_revision_set") != restore_revisions
+        or not DIGEST.fullmatch(str(restore.get("backup_sha256", "")))
+        or not isinstance(restore.get("file_count"), int)
+        or isinstance(restore.get("file_count"), bool)
+        or not 1 <= restore["file_count"] <= 10_000
+        or restore.get("redaction") != "secret_filtered"
+        or not isinstance(restore_uris, list)
+        or len(restore_uris) < 3
+        or any(not isinstance(uri, str) or not uri.startswith("host:/") or _contains_placeholder(uri) for uri in restore_uris)
     ):
         raise ValueError("restore drill evidence is not passing")
 

@@ -1,5 +1,6 @@
 import copy
 import json
+import os
 import tempfile
 import unittest
 from concurrent.futures import ThreadPoolExecutor
@@ -9,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from graph.control_contract import ControlContractError, _resolve_repository_root, derive_graph_revision, graph_from_collector_receipt, materialize_control_graph, reconcile_assertions
 from graph.control_store import ControlGraphStore
 from graph.control_provider import ControlProvider
-from scripts.generate_control_maps import _resolve_graph
+from scripts.generate_control_maps import MAX_RECEIPT_BYTES, _resolve_graph, _write_receipt
 
 DECLARED = {"nodes": [{"id": "service:frank-window", "kind": "service", "version": "1"}], "relationships": []}
 OBSERVED = {"nodes": [{"id": "service:frank-window", "kind": "service", "version": "2"}, {"name": "mystery"}], "relationships": []}
@@ -82,6 +83,33 @@ class ControlGraphContractTest(unittest.TestCase):
             pointer.write_text(json.dumps(tampered), encoding="utf-8")
             with self.assertRaises(RuntimeError):
                 _resolve_graph(pointer)
+
+    def test_map_generator_writes_a_bounded_private_atomic_receipt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            target = Path(tmp) / "evidence" / "map-receipt.json"
+            _write_receipt(target, '{"status":"passed"}')
+            self.assertEqual(json.loads(target.read_text(encoding="utf-8")), {"status": "passed"})
+            if os.name != "nt":
+                self.assertEqual(target.stat().st_mode & 0o777, 0o600)
+            before = target.read_bytes()
+            with self.assertRaises(RuntimeError):
+                _write_receipt(target, "x" * MAX_RECEIPT_BYTES)
+            self.assertEqual(target.read_bytes(), before)
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
+    def test_map_generator_rejects_symlinked_receipt_ancestry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            real = root / "real"
+            real.mkdir()
+            linked = root / "linked"
+            try:
+                linked.symlink_to(real, target_is_directory=True)
+            except OSError:
+                self.skipTest("directory symlinks unavailable")
+            with self.assertRaises(RuntimeError):
+                _write_receipt(linked / "new-directory" / "receipt.json", '{"status":"passed"}')
+            self.assertFalse((real / "new-directory").exists())
 
     def test_store_binds_revision_to_manifest_inputs(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -3,12 +3,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
+
+
+MAX_RECEIPT_BYTES = 1024 * 1024
 
 
 class BoundedRunner:
@@ -84,6 +89,41 @@ def _resolve_graph(path: Path) -> Mapping[str, Any]:
     return graph
 
 
+def _write_receipt(path: Path, rendered: str) -> None:
+    """Atomically persist one private, bounded receipt without following links."""
+    data = (rendered + "\n").encode("utf-8")
+    if len(data) > MAX_RECEIPT_BYTES:
+        raise RuntimeError("map receipt exceeds the one MiB bound")
+    target = path.absolute()
+    if any(candidate.is_symlink() for candidate in (target, *target.parents)):
+        raise RuntimeError("map receipt path contains a symlink")
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if any(candidate.is_symlink() for candidate in (target, *target.parents)):
+        raise RuntimeError("map receipt path contains a symlink")
+    if target.exists() and not target.is_file():
+        raise RuntimeError("map receipt target is not a regular file")
+    descriptor, temporary = tempfile.mkstemp(prefix=".map-receipt-", dir=target.parent)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, target)
+        try:
+            parent = os.open(target.parent, os.O_RDONLY)
+            try:
+                os.fsync(parent)
+            finally:
+                os.close(parent)
+        except OSError:
+            if os.name != "nt":
+                raise
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[3]
     window_root = root / "apps" / "window"
@@ -94,6 +134,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--preview-root", type=Path, default=Path("/srv/frank/data/window/maps"))
     parser.add_argument("--run-key", default=None)
     parser.add_argument("--timeout", type=float, default=120.0)
+    parser.add_argument("--receipt-out", type=Path, default=None)
     args = parser.parse_args(argv)
     try:
         from graph.map_artifacts import MapArtifactStore  # type: ignore
@@ -118,7 +159,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         )
     except Exception as error:  # noqa: BLE001 - CLI emits one typed-safe failure
         result = {"status": "failed", "reason": str(error)[:240], "preview_published": False}
-    print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+    rendered = json.dumps(result, sort_keys=True, separators=(",", ":"))
+    if args.receipt_out:
+        try:
+            _write_receipt(args.receipt_out, rendered)
+        except (OSError, RuntimeError, ValueError):
+            result = {
+                "status": "failed",
+                "reason": "map receipt output was rejected",
+                "preview_published": bool(result.get("preview_published", False)),
+            }
+            rendered = json.dumps(result, sort_keys=True, separators=(",", ":"))
+    print(rendered)
     return 0 if result.get("status") in ("passed", "skipped") else 1
 
 

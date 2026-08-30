@@ -4,7 +4,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from acceptance.production_acceptance import AcceptanceReport, _evidence_checks
@@ -94,7 +94,27 @@ class CaptureEvidenceTests(unittest.TestCase):
         browser = self._browser(root)
         tests = root / "tests.json"; tests.write_text(json.dumps([{"suite": "full", "status": "passed"}]), encoding="utf-8")
         runtime = root / "runtime.json"; runtime.write_text(json.dumps([{"system": "frank", "health": "healthy"}, {"system": "blockwise", "health": "healthy"}]), encoding="utf-8")
-        restore = root / "restore.json"; restore.write_text(json.dumps({"status": "passed", "receipt_id": "receipt:restore/step8-test"}), encoding="utf-8")
+        restore = root / "restore.json"
+        restore_captured = datetime.now(timezone.utc).replace(microsecond=0)
+        restore.write_text(json.dumps({
+            "schema": "frank.restore-drill-evidence/v1",
+            "status": "passed",
+            "outcome": "pass",
+            "content_match": True,
+            "receipt_id": "receipt:retention/restore-drill-step8-test",
+            "captured_at": restore_captured.isoformat().replace("+00:00", "Z"),
+            "fresh_until": (restore_captured + timedelta(days=1)).isoformat().replace("+00:00", "Z"),
+            "source_revision_set": {"project:frank": "f" * 40},
+            "deployed_revision_set": {"project:frank": "f" * 40},
+            "backup_sha256": "sha256:" + "3" * 64,
+            "file_count": 3,
+            "redaction": "secret_filtered",
+            "evidence_uris": [
+                "host:/srv/frank/backups/step8/control-graph.tar.gz",
+                "host:/srv/frank/backups/step8/source-manifest.json",
+                "host:/srv/frank/backups/step8/restored-manifest.json",
+            ],
+        }), encoding="utf-8")
         return [
             sys.executable, str(SCRIPT),
             "--maps-root", str(root / "maps-root"),
@@ -130,6 +150,23 @@ class CaptureEvidenceTests(unittest.TestCase):
             current_path = maps_root / "current.json"; current = json.loads(current_path.read_text(encoding="utf-8"))
             current["projections"].pop("projection:blockwise/runtime"); current_path.write_text(json.dumps(current), encoding="utf-8")
             result = subprocess.run(self._inputs(root), capture_output=True, text=True)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(json.loads(result.stdout)["error_code"], "evidence_rejected")
+            self.assertFalse((root / "bundle").exists())
+
+    def test_metadata_only_restore_receipt_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self._maps(root / "maps-root")
+            args = self._inputs(root)
+            (root / "restore.json").write_text(
+                json.dumps({
+                    "status": "passed",
+                    "receipt_id": "receipt:retention/metadata-only",
+                }),
+                encoding="utf-8",
+            )
+            result = subprocess.run(args, capture_output=True, text=True)
             self.assertEqual(result.returncode, 1)
             self.assertEqual(json.loads(result.stdout)["error_code"], "evidence_rejected")
             self.assertFalse((root / "bundle").exists())

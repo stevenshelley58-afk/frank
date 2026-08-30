@@ -70,6 +70,11 @@ off until the Hermes plugin, broker, and vault checks below are live.
    Window; do not add a public unauthenticated callback route.
 
 6. **Deploy Frank.** Run `apps/window/deploy.sh` for the exact committed SHA.
+   The deploy installs/verifies all host control-plane units and creates
+   `/srv/frank/backups/control-plane` as a root-owned `0750` directory. A fresh
+   install (or an invalid/missing current release pointer) leaves every timer
+   stopped and disabled; a routine deploy preserves timers only when the
+   existing production current pointer and immutable release record validate.
    It validates the secret boundary, derives a Caddy env file containing only
    basic-auth settings, and uses the existing private basic-auth hash solely
    for Caddy's overwritten internal vault operator-attestation header. Caddy
@@ -106,9 +111,22 @@ and retain the dedicated keys until the incident is understood. Re-run the
 private port checks and provider-receipt canary before attempting the release
 again. A blank or guessed vault broker URL is always a release blocker.
 
-## Ownership boundary
-
 ## Production control maps
+
+Before enabling `retention_restore_drills`, run the fixed-input restore drill
+as root on the VPS. It archives the bounded control-graph tree, restores it
+under a new isolated backup directory, compares every file hash, and emits a
+redacted `receipt.json`; it never writes over live state:
+
+```sh
+sudo /usr/bin/python3 /projects/frank/apps/window/scripts/run_restore_drill.py
+```
+
+Require the nested evidence schema `frank.restore-drill-evidence/v1`,
+`status: passed`, `outcome: pass`, `content_match: true`, and the
+non-placeholder `receipt_id` from the resulting JSON. Supply that receipt to
+the Step 8 evidence capture; it is deliberately not the generic control-plane
+receipt schema, and a metadata-only scheduled-job receipt is not restore proof.
 
 The accepted graph input is the regular pointer at
 `/srv/frank/data/window/control-graph/graph/current.json`. The generator reads
@@ -116,6 +134,21 @@ that pointer and emits one passing receipt containing exactly six maps: VPS
 World, Frank Architecture, Blockwise Runtime, Mini Frank Knowledge Flow, Ad
 Template Builder Architecture, and Ad Template Builder Workflow. Preview
 artifacts remain under `/srv/frank/data/window/maps/maps/` until promotion.
+
+Persist the generator receipt atomically, then promote that exact regular file:
+
+```sh
+map_receipt=/srv/frank/data/window/control-graph/evidence/map-generation-receipt.json
+sudo /usr/bin/python3 /projects/frank/apps/window/scripts/generate_control_maps.py \
+  --graph /srv/frank/data/window/control-graph/graph/current.json \
+  --preview-root /srv/frank/data/window/maps \
+  --receipt-out "$map_receipt" \
+  --timeout 120
+sudo /usr/bin/python3 /projects/frank/apps/window/scripts/promote_map_release.py \
+  "$map_receipt" \
+  --production-root /srv/frank/data/window/maps \
+  --timeout 300
+```
 
 Promotion verifies every persisted manifest and artifact hash, writes an
 immutable release record, and then atomically advances only
@@ -125,6 +158,8 @@ the Window reads it as one consistent production snapshot. A failed or
 tampered promotion leaves the previous selector (the last-known-good release)
 untouched. Set `MAP_PREVIEW_RUN_KEY` only for an explicitly isolated preview;
 production compose has no default preview key.
+
+## Ownership boundary
 
 Frank owns this order, its loopback compose bindings, Caddy least-privilege
 environment, image import/health canary, and data-preserving rollback. Hermes

@@ -24,8 +24,16 @@ class ScheduledJobTests(unittest.TestCase):
             self.assertIn(f"OnCalendar={calendar}", timer_text, job)
             self.assertIn("Persistent=true", timer_text, job)
             self.assertIn(f"TimeoutStartSec={timeout}", service_text, job)
-            if job != "cleanup":
+            if job == "retention":
+                self.assertIn("run_restore_drill.py", service_text, job)
+                self.assertIn("User=root", service_text, job)
+                self.assertIn("ReadWritePaths=/srv/frank/backups/control-plane", service_text, job)
+                self.assertNotIn("run_scheduled_control_job.py retention", service_text, job)
+            elif job != "cleanup":
                 self.assertIn(f"run_scheduled_control_job.py {job}", service_text, job)
+            if "run_scheduled_control_job.py" in service_text:
+                self.assertIn("/projects/frank/apps/window/scripts/run_scheduled_control_job.py", service_text, job)
+                self.assertNotIn("/srv/frank/apps/window", service_text, job)
             self.assertNotIn("--enable", service_text)
             self.assertIn(flag, (RUNNER.read_text() + service_text), job)
 

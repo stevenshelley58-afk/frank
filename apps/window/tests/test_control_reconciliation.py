@@ -201,6 +201,21 @@ class ControlReconciliationTests(unittest.TestCase):
         self.assertIn("systemctl disable", installer)
         self.assertIn("systemctl stop", installer)
         self.assertNotIn("systemctl enable", installer)
+        self.assertIn("--preserve-active-release", installer)
+        self.assertIn("current_release_id", installer)
+        self.assertIn("ReleaseStateStore", installer)
+        self.assertIn("promote_control_release.py", installer)
+        self.assertIn('preserve_active_release=false', installer)
+
+    def test_deploy_preserves_a_validated_release_when_installing_units(self):
+        deploy = (Path(__file__).parents[1] / "deploy.sh").read_text(encoding="utf-8")
+        self.assertIn('install.sh" --preserve-active-release', deploy)
+
+    def test_restore_drill_cannot_write_control_graph_schedules(self):
+        service = (Path(__file__).parents[1] / "infra" / "retention" / "frank-restore-drill.service").read_text(encoding="utf-8")
+        self.assertIn("ReadWritePaths=/srv/frank/backups/control-plane", service)
+        self.assertIn("UMask=0077", service)
+        self.assertNotIn("control-graph/schedules", service)
 
     def test_timeout_does_not_advance_pointer(self):
         c = Collector(self.root, sources=self.sources, timeout_seconds=-1)

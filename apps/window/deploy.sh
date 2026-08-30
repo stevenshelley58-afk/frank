@@ -32,6 +32,7 @@ install -d -o root -g hermes -m 2750 -- "$data_dir"
 install -d -o root -g hermes -m 0750 -- "$control_graph_dir"
 install -d -m 0755 -- "$preview_dir"
 install -d -o root -g root -m 0755 -- "$release_dir"
+install -d -o root -g root -m 0750 -- /srv/frank/backups/control-plane
 if [[ -e "$flags_file" || -L "$flags_file" ]]; then
   [[ -f "$flags_file" && ! -L "$flags_file" ]] || { echo "invalid feature flag file" >&2; exit 1; }
   [[ "$(stat -c '%a' -- "$flags_file")" == "600" ]] || { echo "feature flag file must be mode 0600" >&2; exit 1; }
@@ -188,6 +189,7 @@ migrate_volume frank_frank_caddy_data frank_caddy_data
 migrate_volume frank_frank_caddy_config frank_caddy_config
 
 cd "$app"
+"$app/infra/control_plane/install.sh" --preserve-active-release
 # Public Mini builds are deliberately networkless at runtime. Bake their
 # document, spreadsheet, PDF, image, and headless-browser tools ahead of time.
 docker build \
