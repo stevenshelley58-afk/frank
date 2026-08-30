@@ -166,7 +166,7 @@ def _quality_checks(result: Mapping[str, Any]) -> None:
     elif isinstance(checks, Sequence) and not isinstance(checks, (str, bytes)):
         values = {item.get("name"): item for item in checks if isinstance(item, Mapping)}
         missing = [name for name in SHOWCASE_CHECKS if name not in values]
-        failed = [name for name in SHOWCASE_CHECKS if name in values and values[name].get("status", values[name].get("passed")) not in (True, "passed", "pass", "ok")]
+        failed = [name for name in SHOWCASE_CHECKS if name in values and values[name].get("ok", values[name].get("status", values[name].get("passed"))) not in (True, "passed", "pass", "ok")]
     else:
         raise MapPipelineError("Archify showcase checks are malformed")
     if missing or failed:

@@ -6,7 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from graph.map_pipeline import PROJECTION_IDS, generate_maps, load_archify_pin
+from graph.map_pipeline import PROJECTION_IDS, SHOWCASE_CHECKS, _quality_checks, generate_maps, load_archify_pin
 
 
 class FakeAdapter:
@@ -19,6 +19,11 @@ class FakeAdapter:
             "coverage": {"status": "complete"},
             "exclusions": [],
         }
+
+
+class MapPipelineContractTests(unittest.TestCase):
+    def test_accepts_production_archify_json_ok_checks(self):
+        _quality_checks({"checks": [{"name": name, "ok": True} for name in SHOWCASE_CHECKS]})
 
 
 class FakeRunner:
