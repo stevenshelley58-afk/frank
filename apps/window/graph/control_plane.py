@@ -11,6 +11,7 @@ import binascii
 import hashlib
 import json
 import re
+import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable, Mapping
@@ -225,6 +226,25 @@ def _duplicates(values: Iterable[str]) -> set[str]:
     return duplicates
 
 
+def _capability_source_bytes(
+    repository_root: Path,
+    source: Path,
+    source_revision: str,
+) -> bytes:
+    """Read the pinned Git blob when available, else the validated local source."""
+    if re.fullmatch(r"[0-9a-f]{40}", source_revision):
+        relative = source.relative_to(repository_root).as_posix()
+        result = subprocess.run(
+            ["git", "show", f"{source_revision}:{relative}"],
+            cwd=repository_root,
+            check=False,
+            capture_output=True,
+        )
+        if result.returncode == 0:
+            return result.stdout
+    return source.read_bytes()
+
+
 class ControlPlaneContracts:
     """Load and cross-check one exact repository declaration set."""
 
@@ -246,6 +266,7 @@ class ControlPlaneContracts:
         return _load_json(path) if path.suffix == ".json" else _load_yaml(path)
 
     def validate(self) -> dict[str, Any]:
+        self.verify_register_acceptance()
         catalog = self.load("catalog.yaml")
         _validate(catalog, self.schema("catalog.schema.json"), "catalog")
 
@@ -348,7 +369,11 @@ class ControlPlaneContracts:
             source = (repository_root / capability["source_locator"]).resolve()
             if repository_root not in source.parents or not source.is_file() or source.is_symlink():
                 raise ControlContractError(f"capability {capability_id} source is not a repository file")
-            source_bytes = source.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+            source_bytes = _capability_source_bytes(
+                repository_root,
+                source,
+                capability["source_revision"],
+            ).replace(b"\r\n", b"\n").replace(b"\r", b"\n")
             expected_hash = "sha256:" + hashlib.sha256(source_bytes).hexdigest()
             if capability["content_hash"] != expected_hash:
                 raise ControlContractError(f"capability {capability_id} content hash drift")

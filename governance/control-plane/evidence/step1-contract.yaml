@@ -1,0 +1,25 @@
+id: receipt:contract/step-1-20260830-001
+kind: contract_validation
+subject_ids:
+  - project:frank
+  - capability:frank/control-graph
+producer: frontier-integrator
+source_revision_set:
+  project:frank: 9f99ba26d7942d96ee08764c6996efc094441d00
+  schema-set: sha256:37a69e5486e81ac651b6340543c239016cbc6169d4199d9921fea4afe92aa2b1
+  control-contract: sha256:53194ebe74af0c743a3f188be3000f46434c483bfb68fc6d4fea2b62914c40ed
+  catalog: sha256:69ff071026edf420e095cdfdcbfc37ca6fdffb9fca47c44600f4e546884c2bb9
+deployed_revision_set:
+  service:frank-window: 366f4bacad6294261a57751289121193ac162b08
+captured_at: "2026-08-30T10:15:02Z"
+fresh_until: null
+outcome: pass
+evidence_uris:
+  - test:python-focused/47-passed
+  - test:python-full/351-passed-3-skipped
+  - test:node/22-passed
+  - build:dashboard/pass
+  - build:graph/pass
+  - candidate-revisions:50-verified
+  - repo:governance/control-plane/fixtures/schema-fixtures.json
+redaction: secret_filtered

@@ -1,7 +1,10 @@
+import hashlib
 import re
 import tempfile
 import unittest
 from pathlib import Path
+
+from jsonschema import Draft202012Validator, FormatChecker
 
 from graph.control_plane import (
     ControlContractError,
@@ -80,6 +83,10 @@ class ControlPlaneContractTests(unittest.TestCase):
 
     def test_declared_contract_is_cross_record_valid_and_byte_deterministic(self):
         contracts = ControlPlaneContracts(CONTROL_ROOT)
+        self.assertEqual(
+            contracts.verify_register_acceptance(),
+            "65e3f913a2e87006574eee767159c81ccb42933b1179a1cda18dba51d0ff2587",
+        )
         first = contracts.validate()
         second = contracts.validate()
         self.assertEqual(canonical_bytes(first), canonical_bytes(second))
@@ -104,6 +111,34 @@ class ControlPlaneContractTests(unittest.TestCase):
                     f"{path.name} drifted from the release-1 ID grammar",
                 )
         self.assertTrue(re.fullmatch(STABLE_ID_PATTERN, "edge:frank/window-routes"))
+
+    def test_step_one_acceptance_receipt_and_manifest_are_hash_bound(self):
+        contracts = ControlPlaneContracts(CONTROL_ROOT)
+        receipt = contracts.load("evidence/step1-contract.yaml")
+        errors = list(
+            Draft202012Validator(
+                contracts.schema("receipt.schema.json"),
+                format_checker=FormatChecker(),
+            ).iter_errors(receipt)
+        )
+        self.assertEqual(errors, [])
+
+        receipt_path = CONTROL_ROOT / "evidence" / "step1-contract.yaml"
+        body = receipt_path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        actual = hashlib.sha256(body).hexdigest()
+        manifest = (CONTROL_ROOT / "evidence" / "step1-receipts.sha256").read_text(
+            encoding="utf-8"
+        )
+        self.assertEqual(manifest.strip(), f"{actual}  step1-contract.yaml")
+
+        context = contracts.load("build-context.yaml")["step_1_contract"]
+        self.assertEqual(context["receipt_sha256"], actual)
+        self.assertEqual(
+            receipt["source_revision_set"]["control-contract"],
+            "sha256:" + context["contract_sha256"],
+        )
+        defaults = contracts.load("feature-flags.yaml")["defaults"]
+        self.assertTrue(all(value is False for value in defaults.values()))
 
 
 if __name__ == "__main__":

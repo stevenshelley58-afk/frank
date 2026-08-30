@@ -3,5 +3,5 @@ source_sha256: 65e3f913a2e87006574eee767159c81ccb42933b1179a1cda18dba51d0ff2587
 repository_copy: governance/control-plane/decisions/open-source-register.md
 repository_copy_sha256: 65e3f913a2e87006574eee767159c81ccb42933b1179a1cda18dba51d0ff2587
 reviewed_at: '2026-08-30'
-copy_status: byte_identical
-provenance_note: Copied from the Step 0 companion register; this sidecar records provenance without changing the source copy.
+copy_status: accepted_step_1
+provenance_note: Byte-identical Step 0 companion copy accepted as the repository authority at Step 1.

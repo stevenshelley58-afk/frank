@@ -47,7 +47,9 @@ class ControlBaselineContractTests(unittest.TestCase):
         register_hash = scalar(self.context, "sha256")
         self.assertRegex(register_hash, SHA256)
         self.assertIn('reviewed_at: "2026-08-30"', self.context)
-        self.assertIn("repository_copy_status: pending_step_1", self.context)
+        self.assertIn("repository_copy_status: accepted_step_1", self.context)
+        repository_hash = scalar(self.context, "repository_copy_sha256")
+        self.assertEqual(repository_hash, register_hash)
 
     def test_receipts_are_redacted_and_stable_id_scoped(self):
         self.assertIn("id: receipt:baseline/frank-vps-20260830-001", self.baseline)

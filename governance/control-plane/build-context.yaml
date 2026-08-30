@@ -20,8 +20,8 @@ bootstrap_open_source_register:
   source_locator: external-companion:frank-control-plane-open-source-register
   sha256: 65e3f913a2e87006574eee767159c81ccb42933b1179a1cda18dba51d0ff2587
   reviewed_at: "2026-08-30"
-  repository_copy_sha256: null
-  repository_copy_status: pending_step_1
+  repository_copy_sha256: 65e3f913a2e87006574eee767159c81ccb42933b1179a1cda18dba51d0ff2587
+  repository_copy_status: accepted_step_1
 
 read_first:
   # Resolve every relative path beneath /projects/frank.
@@ -122,8 +122,49 @@ evidence_status:
   competing_vps_graph_tree: absent
 
 feature_flags:
-  active_release_contract: not_yet_created
+  active_release_contract: step_1_contract_accepted
   expected_declared_defaults: all_false
+
+step_1_contract:
+  accepted_contract_sha: 9f99ba26d7942d96ee08764c6996efc094441d00
+  schema_version: 1
+  schema_set_sha256: 37a69e5486e81ac651b6340543c239016cbc6169d4199d9921fea4afe92aa2b1
+  contract_sha256: 53194ebe74af0c743a3f188be3000f46434c483bfb68fc6d4fea2b62914c40ed
+  catalog_sha256: 69ff071026edf420e095cdfdcbfc37ca6fdffb9fca47c44600f4e546884c2bb9
+  focused_test_receipt_id: receipt:contract/step-1-20260830-001
+  focused_test_receipt_path: governance/control-plane/evidence/step1-contract.yaml
+  receipt_manifest_path: governance/control-plane/evidence/step1-receipts.sha256
+  receipt_sha256: 3329edd557a7b33f746f026e1246d43045ce59d6e6dc2f4b0fc5cdc1dcc36fdc
+  fixture_paths:
+    - governance/control-plane/fixtures/schema-fixtures.json
+    - apps/window/tests/test_control_plane_schemas.py
+    - apps/window/tests/test_control_plane_contract.py
+  decision_receipt_ids:
+    - receipt:oss-decision/action-adapters
+    - receipt:oss-decision/agenttrail
+    - receipt:oss-decision/archify
+    - receipt:oss-decision/catalog-model
+    - receipt:oss-decision/cleanup-reporters
+    - receipt:oss-decision/custom-adapters
+    - receipt:oss-decision/discovery-feeds
+    - receipt:oss-decision/evaluation-runner
+    - receipt:oss-decision/json-schema-yaml-validation
+    - receipt:oss-decision/map-projection-adapter
+    - receipt:oss-decision/reconciliation-provider
+    - receipt:oss-decision/report-normalizer
+    - receipt:oss-decision/runtime-evidence-adapter
+    - receipt:oss-decision/runtime-monitoring
+    - receipt:oss-decision/safe-action-adapters
+    - receipt:oss-decision/source-evidence-adapter
+    - receipt:oss-decision/stable-id-adapter
+  verification:
+    focused_python: 47_passed
+    full_python: 351_passed_3_skipped
+    node: 22_passed
+    dashboard_build: passed
+    graph_build: passed
+    candidate_revisions: 50_verified
+    feature_flags: all_false
 
 step_0_receipts:
   manifest_path: governance/control-plane/evidence/step0-receipts.sha256
