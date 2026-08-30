@@ -2,13 +2,17 @@ const AD_STUDIO_PATH = "/ad-studio";
 const BLOCKWISE_ORIGIN = "https://blockwise.sale";
 const TEMPLATE_PATH = "/ad-studio/templates/";
 const TEMPLATE_ID = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
+const OPERATE_PATHS = { "/live": "live", "/map": "map", "/control": "control" };
 
 export function viewForPath(pathname) {
-  return pathname === AD_STUDIO_PATH || pathname === `${AD_STUDIO_PATH}/` ? "ad-studio" : "hub";
+  if (pathname === AD_STUDIO_PATH || pathname === `${AD_STUDIO_PATH}/`) return "ad-studio";
+  return OPERATE_PATHS[pathname.replace(/\/$/, "")] || "hub";
 }
 
 export function pathForView(view) {
-  return view === "ad-studio" ? AD_STUDIO_PATH : "/";
+  if (view === "ad-studio") return AD_STUDIO_PATH;
+  if (view === "live" || view === "map" || view === "control") return `/${view}`;
+  return "/";
 }
 
 export function blockwiseTemplateUrl(value) {

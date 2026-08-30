@@ -8,6 +8,8 @@ secret_file="$secret_dir/window.env"
 caddy_secret_file="$secret_dir/caddy.env"
 data_dir="/srv/frank/data/window"
 control_graph_dir="$data_dir/control-graph"
+release_dir="/var/lib/frank/release"
+flags_file="$release_dir/feature-flags.env"
 preview_dir="/srv/frank/previews"
 mini_preview_dir="$preview_dir/mini"
 mini_workspace_dir="$data_dir/mini-shared/workspaces"
@@ -29,6 +31,21 @@ install -d -m 0700 -- "$secret_dir"
 install -d -o root -g hermes -m 2750 -- "$data_dir"
 install -d -o root -g hermes -m 0750 -- "$control_graph_dir"
 install -d -m 0755 -- "$preview_dir"
+install -d -o root -g root -m 0755 -- "$release_dir"
+install -d -o root -g root -m 0750 -- /srv/frank/backups/control-plane
+if [[ -e "$flags_file" || -L "$flags_file" ]]; then
+  [[ -f "$flags_file" && ! -L "$flags_file" ]] || { echo "invalid feature flag file" >&2; exit 1; }
+  [[ "$(stat -c '%a' -- "$flags_file")" == "600" ]] || { echo "feature flag file must be mode 0600" >&2; exit 1; }
+else
+  flags_tmp="$(mktemp "$release_dir/.feature-flags.XXXXXX")"
+  for flag in live_view map_view control_read reconciliation_schedules runtime_monitoring safe_actions operational_actions source_actions cleanup_jobs discovery_jobs evaluation_jobs chat_pattern_candidates retention_restore_drills; do
+    printf 'FRANK_FEATURE_FLAG_%s=0\n' "${flag^^}" >> "$flags_tmp"
+  done
+  chmod 0600 "$flags_tmp"; chown root:root "$flags_tmp"; mv -f -- "$flags_tmp" "$flags_file"
+fi
+while IFS='=' read -r key value; do
+  [[ "$key" =~ ^FRANK_FEATURE_FLAG_(LIVE_VIEW|MAP_VIEW|CONTROL_READ|RECONCILIATION_SCHEDULES|RUNTIME_MONITORING|SAFE_ACTIONS|OPERATIONAL_ACTIONS|SOURCE_ACTIONS|CLEANUP_JOBS|DISCOVERY_JOBS|EVALUATION_JOBS|CHAT_PATTERN_CANDIDATES|RETENTION_RESTORE_DRILLS)$ && "$value" =~ ^[01]$ ]] || { echo "invalid feature flag entry" >&2; exit 1; }
+done < "$flags_file"
 # Hermes provisions new project workspaces before their first turn. Keep the
 # canonical parent root-owned while granting the sole agent runtime a setgid
 # directory in which it can create isolated /projects/<slug> children.
@@ -172,6 +189,7 @@ migrate_volume frank_frank_caddy_data frank_caddy_data
 migrate_volume frank_frank_caddy_config frank_caddy_config
 
 cd "$app"
+bash "$app/infra/control_plane/install.sh" --preserve-active-release
 # Public Mini builds are deliberately networkless at runtime. Bake their
 # document, spreadsheet, PDF, image, and headless-browser tools ahead of time.
 docker build \
@@ -252,7 +270,7 @@ curl --fail --silent --show-error --output /dev/null \
 # Publish both fixed-input reconciliation scopes after every healthy release.
 # A collector failure has its own immutable failure receipt and must not turn
 # an already-promoted, healthy application into an ambiguously failed deploy.
-if ! "$app/infra/control_plane/post-deploy.sh"; then
+if ! bash "$app/infra/control_plane/post-deploy.sh"; then
   echo "warning: post-deploy control-plane reconciliation failed; the healthy release remains current" >&2
 fi
 echo "deployed $(git -C "$repo" rev-parse HEAD)"

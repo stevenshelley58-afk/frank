@@ -1,0 +1,6 @@
+[Timer]
+OnCalendar=*-*-* 04:20:00 UTC
+Persistent=true
+Unit=frank-discovery-refresh.service
+[Install]
+WantedBy=timers.target

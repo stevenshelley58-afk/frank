@@ -1,0 +1,32 @@
+{
+  "schema": "frank.evaluation-suite/v1",
+  "id": "eval:rules-skills/regression",
+  "max_tasks": 100,
+  "timeout_seconds": 1800,
+  "tasks": [
+    {
+      "id": "rule-precedence",
+      "kind": "rule_precedence",
+      "scope": "frank",
+      "input": {"declared_layers": ["base", "project", "session"]},
+      "expected": {"precedence": ["base", "project", "session"]},
+      "source_ids": ["rule:frank/base"]
+    },
+    {
+      "id": "skill-invocation",
+      "kind": "skill_invocation",
+      "scope": "mini-frank",
+      "input": {"capability": "knowledge-build", "source_only": true},
+      "expected": {"execution_authority": "hermes"},
+      "source_ids": ["skill:mini-frank/knowledge-build"]
+    },
+    {
+      "id": "representative-outcome",
+      "kind": "representative_outcome",
+      "scope": "blockwise",
+      "input": {"operation": "explain-deployment-truth"},
+      "expected": {"unknown_without_evidence": true},
+      "source_ids": ["rule:frank/evidence-backed-truth"]
+    }
+  ]
+}

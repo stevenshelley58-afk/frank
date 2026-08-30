@@ -57,6 +57,11 @@
     <header class="topbar">
       <h1 id="view-title" tabindex="-1">Hub</h1>
       <span class="sub" id="view-sub"></span>
+      <nav class="operate-tabs" aria-label="Operate modes">
+        <button type="button" class="operate-tab" data-view="live">Live</button>
+        <button type="button" class="operate-tab" data-view="map">Map</button>
+        <button type="button" class="operate-tab" data-view="control">Control</button>
+      </nav>
       <div class="right" id="top-actions"></div>
     </header>
 
@@ -407,6 +412,9 @@
       </section>
       <section class="view" data-view="trace"><div class="grid" id="slot-trace"></div></section>
       <section class="view" data-view="releases"><div class="grid" id="slot-releases"></div></section>
+      <section class="view operate-view" data-view="live" id="operate-live"></section>
+      <section class="view operate-view" data-view="map" id="operate-map"></section>
+      <section class="view operate-view" data-view="control" id="operate-control"></section>
     </div>
   </main>
 </div>

@@ -1,0 +1,13 @@
+[Unit]
+Description=Frank metadata-only discovery refresh
+[Service]
+Type=oneshot
+User=frank
+Group=frank
+WorkingDirectory=/projects/frank
+ExecStart=/usr/bin/python3 /projects/frank/apps/window/scripts/run_scheduled_control_job.py discovery
+TimeoutStartSec=20m
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadOnlyPaths=/projects/frank
+ReadWritePaths=/srv/frank/data/window/control-graph/schedules

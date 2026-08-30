@@ -7,6 +7,25 @@ APP = ROOT / "apps" / "window"
 
 
 class InfraContractTest(unittest.TestCase):
+    def test_scheduled_jobs_have_locked_account_and_narrow_receipt_path(self):
+        installer = (APP / "infra" / "control_plane" / "install.sh").read_text(encoding="utf-8")
+        self.assertIn("groupadd --system frank", installer)
+        self.assertIn("useradd --system --gid frank", installer)
+        self.assertIn("/usr/sbin/nologin", installer)
+        self.assertIn('install -d -o frank -g frank -m 0750 -- "$schedule_dir"', installer)
+        self.assertIn('data_dir="/srv/frank/data/window"', installer)
+        self.assertIn('chmod 2751 "$data_dir"', installer)
+        self.assertIn('chmod 0751 "$control_graph_dir"', installer)
+        for relative in (
+            "infra/cleanup/frank-cleanup-report.service",
+            "infra/discovery/frank-discovery-refresh.service",
+            "infra/evaluations/frank-evaluation.service",
+            "infra/evaluations/frank-chat-pattern.service",
+        ):
+            service = (APP / relative).read_text(encoding="utf-8")
+            self.assertIn("User=frank", service)
+            self.assertIn("Group=frank", service)
+
     def test_window_image_copies_all_imported_runtime_modules(self):
         dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
         workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")

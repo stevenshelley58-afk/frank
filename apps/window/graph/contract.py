@@ -1,4 +1,9 @@
-"""Pure, fail-closed normalization for the shared Frank graph contract."""
+"""Pure normalization for disposable ``schema://frank.graph/v1`` tool views.
+
+Its ``sha256:`` revision identifies one renderer snapshot. It is not the
+canonical control-graph revision (``g_<64 hex>``) used by ControlGraphStore,
+release evidence, and production maps.
+"""
 
 from __future__ import annotations
 
