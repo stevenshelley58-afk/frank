@@ -1,0 +1,6 @@
+[Timer]
+OnCalendar=Sun *-*-* 05:00:00 UTC
+Persistent=true
+Unit=frank-evaluation.service
+[Install]
+WantedBy=timers.target

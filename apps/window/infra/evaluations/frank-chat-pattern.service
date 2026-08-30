@@ -1,0 +1,14 @@
+[Unit]
+Description=Frank monthly aggregate chat-pattern candidates (metadata only)
+
+[Service]
+Type=oneshot
+User=frank
+WorkingDirectory=/projects/frank
+ExecStart=/usr/bin/python3 /projects/frank/apps/window/scripts/run_scheduled_control_job.py chat-pattern
+TimeoutStartSec=30m
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=read-only
+ReadOnlyPaths=/projects/frank
+ReadWritePaths=/srv/frank/data/window/control-graph/schedules

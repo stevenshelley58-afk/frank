@@ -1,0 +1,10 @@
+[Unit]
+Description=Frank monthly chat-pattern candidate timer (disabled by default)
+
+[Timer]
+OnCalendar=*-*-01 05:30:00 UTC
+Persistent=true
+Unit=frank-chat-pattern.service
+
+[Install]
+WantedBy=timers.target

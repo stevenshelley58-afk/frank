@@ -1,0 +1,6 @@
+[Timer]
+OnCalendar=quarterly
+Persistent=true
+Unit=frank-restore-drill.service
+[Install]
+WantedBy=timers.target

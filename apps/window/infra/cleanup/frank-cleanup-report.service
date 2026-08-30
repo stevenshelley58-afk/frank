@@ -1,12 +1,12 @@
 [Unit]
 Description=Frank report-only cleanup candidates
-
 [Service]
 Type=oneshot
 User=frank
-ExecStart=/usr/bin/env python3 /srv/frank/apps/window/scripts/run_cleanup_report.py --weekly --output /srv/frank/data/window/control-graph/cleanup/weekly-frank.json
+ExecStart=/usr/bin/python3 /srv/frank/apps/window/scripts/run_scheduled_control_job.py cleanup --timeout 1800
+TimeoutStartSec=30m
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectSystem=strict
-ReadWritePaths=/srv/frank/data/window/control-graph/cleanup
+ReadWritePaths=/srv/frank/data/window/control-graph/schedules
 ReadOnlyPaths=/projects/frank
