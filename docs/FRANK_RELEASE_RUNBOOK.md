@@ -90,3 +90,34 @@ owns its `default` profile, `config.yaml`, Connections Agent registration,
 provider adapters, receipt truth, and the final vault broker route/port. The
 release is not complete until both owners have signed the same candidate SHA
 and route contract.
+
+## Control, map, and scheduled evidence
+
+The Window Control/Live/Map surfaces are read-only projections. Hermes remains
+the action boundary; browser requests never execute collectors or provider
+actions directly. Scheduled jobs are opt-in feature flags and use fixed inputs:
+cleanup, discovery, evaluation, chat-pattern candidates, and retention drills
+write only redacted metadata receipts under the schedules root. They never
+install, delete, or mutate source data.
+
+Run a bounded scheduler manually with:
+
+```bash
+python3 apps/window/scripts/run_scheduled_control_job.py discovery --timeout 1800
+```
+
+Map promotion is separate from deploy health and is fail-closed. It requires a
+passing preview receipt containing exactly the six mandatory projections; the
+Ad Builder-to-Blockwise flow is omitted unless runtime-consumption evidence is
+explicitly present:
+
+```bash
+python3 apps/window/scripts/promote_map_release.py RECEIPT.json \
+  --production-root /srv/frank/data/window/control-graph/maps
+```
+
+Promotion publishes immutable manifests and atomically advances `current.json`;
+any validation, hash, timeout, or path failure preserves the last-known-good
+pointer. Keep the receipt, graph/reconciliation hashes, Archify pin, test
+evidence, and rollback SHA together for sign-off. Never claim Ad Builder
+consumption from a diagram or declaration alone.
