@@ -29,10 +29,23 @@ from graph.control_provider import ControlProvider
 from graph.control_store import ControlGraphStore
 from graph.map_artifacts import MapArtifactProvider, MapArtifactStore
 from runtime_evidence import BeszelProvider, RuntimeEvidenceAdapter, RuntimeEvidenceError, RuntimeProvider
+from action_dispatcher import HermesDispatcher, DispatchError
 
 
 api = Blueprint("control_plane_view", __name__)
-REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+
+def _repository_root() -> Path:
+    configured = os.environ.get("FRANK_REPOSITORY_ROOT", "").strip()
+    if configured:
+        return Path(configured)
+    here = Path(__file__).resolve()
+    for candidate in (here.parent, *here.parents):
+        if (candidate / "governance" / "control-plane").is_dir():
+            return candidate
+    # Container images place this module directly under /app.
+    return here.parent
+
+REPOSITORY_ROOT = _repository_root()
 CONTROL_ROOT = REPOSITORY_ROOT / "governance" / "control-plane"
 FLAGS_PATH = CONTROL_ROOT / "feature-flags.yaml"
 PROJECTIONS_PATH = CONTROL_ROOT / "projections.yaml"
@@ -417,6 +430,20 @@ def import_preview():
         abort(400, description="import preview requires one JSON object")
     safe = _safe_value(body)
     return jsonify({"schema": "schema://frank.control-import-preview/v1", "status": "preview", "applies": False, "provenance_valid": bool(body.get("schema") or body.get("source_revision")), "preview": safe, "message": "Preview only; no canonical source or control state was changed."})
+
+@api.post("/api/control/actions")
+def dispatch_action():
+    """Forward a bounded, typed request to Hermes; never execute locally."""
+    flag = {"tool:refresh-evidence":"safe_actions", "tool:regenerate-map":"safe_actions"}.get(str((request.get_json(silent=True) or {}).get("action_id", "")), "operational_actions")
+    _require_flag(flag)
+    body = request.get_json(silent=True)
+    if not isinstance(body, Mapping) or not isinstance(body.get("action_id"), str) or not isinstance(body.get("target_id"), str) or not isinstance(body.get("arguments"), Mapping): abort(400, description="typed action request required")
+    try:
+        attestation = request.headers.get("X-Frank-Operator-Attestation") or request.headers.get("X-Operator-Attestation", "")
+        result = HermesDispatcher(CONTROL_ROOT / "actions.yaml").dispatch(action_id=body["action_id"], target_id=body["target_id"], arguments=body["arguments"], attestation=attestation)
+    except DispatchError as error:
+        return jsonify({"status":"preview", "applies":False, "error":str(error)}), 503
+    return jsonify({"schema":"schema://frank.action-receipt/v1", **result})
 
 
 __all__ = ["api", "feature_flags"]
