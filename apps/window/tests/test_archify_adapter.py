@@ -1,5 +1,6 @@
 import json
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -7,6 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from graph.archify_adapter import (
     SHOWCASE_CHECKS,
+    _resolve_window_root,
     build_projection,
     graph_to_archify,
     showcase_check_results,
@@ -29,6 +31,14 @@ GRAPH = {
 
 
 class ArchifyAdapterTest(unittest.TestCase):
+    def test_window_root_supports_the_shallow_app_image_layout(self):
+        with tempfile.TemporaryDirectory() as directory:
+            app = Path(directory) / "app"
+            executable = app / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"
+            executable.parent.mkdir(parents=True)
+            executable.write_text("", encoding="utf-8")
+            self.assertEqual(_resolve_window_root(app / "graph" / "archify_adapter.py", str(app)), app)
+
     def test_conversion_is_deterministic_and_keeps_stable_cross_links(self):
         first, metadata = graph_to_archify(GRAPH, "projection:frank/architecture", required_coverage=["window", "hermes_boundary", "data", "routes"])
         shuffled = dict(GRAPH, nodes=list(reversed(GRAPH["nodes"])), edges=list(reversed(GRAPH["edges"])))

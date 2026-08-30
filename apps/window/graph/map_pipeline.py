@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
 
-PROJECTION_IDS = ("projection:vps/world", "projection:frank/architecture")
+PROJECTION_IDS = ("projection:vps/world", "projection:frank/architecture", "projection:blockwise/runtime", "projection:mini-frank/knowledge-flow", "projection:ad-template-builder/architecture", "projection:ad-template-builder/workflow")
 _MAX_OUTPUT = 1_000_000
 _DEFAULT_TIMEOUT = 120.0
 SHOWCASE_CHECKS = (
@@ -238,7 +238,7 @@ def generate_maps(
             projection = _project(adapter, graph_snapshot, projection_id)
             if projection.get("projection_id", projection_id) != projection_id:
                 raise MapPipelineError("projection id mismatch")
-            generation_id = f"{run_key}-{projection_id.split(':', 1)[1].replace('/', '-') }"
+            generation_id = f"generation:{run_key.removeprefix('run:')}-{projection_id.split(':', 1)[1].replace('/', '-') }"
             generation_ids[projection_id] = generation_id
             generation_name = generation_id.replace(":", "_").replace("/", "_")
             input_path = staging / f"{generation_name}.json"
@@ -302,6 +302,7 @@ def generate_maps(
                 "coverage": coverage,
                 "missing_coverage": missing_coverage,
                 "exclusions": projection.get("exclusions", graph_snapshot.get("exclusions", [])),
+                "findings": projection.get("findings", []),
                 "status": "generated",
                 "preview_only": True,
                 "freshness": "fresh",

@@ -100,6 +100,24 @@ again. A blank or guessed vault broker URL is always a release blocker.
 
 ## Ownership boundary
 
+## Production control maps
+
+The accepted graph input is the regular pointer at
+`/srv/frank/data/window/control-graph/graph/current.json`. The generator reads
+that pointer and emits one passing receipt containing exactly six maps: VPS
+World, Frank Architecture, Blockwise Runtime, Mini Frank Knowledge Flow, Ad
+Template Builder Architecture, and Ad Template Builder Workflow. Preview
+artifacts remain under `/srv/frank/data/window/maps/maps/` until promotion.
+
+Promotion verifies every persisted manifest and artifact hash, writes an
+immutable release record, and then atomically advances only
+`/srv/frank/data/window/maps/current.json`. That selector contains the shared
+graph revision plus each projection's manifest path, artifact path, and hashes;
+the Window reads it as one consistent production snapshot. A failed or
+tampered promotion leaves the previous selector (the last-known-good release)
+untouched. Set `MAP_PREVIEW_RUN_KEY` only for an explicitly isolated preview;
+production compose has no default preview key.
+
 Frank owns this order, its loopback compose bindings, Caddy least-privilege
 environment, image import/health canary, and data-preserving rollback. Hermes
 owns its `default` profile, `config.yaml`, Connections Agent registration,

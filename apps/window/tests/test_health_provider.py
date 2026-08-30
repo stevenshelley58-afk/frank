@@ -2,6 +2,16 @@ import unittest, sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from runtime_evidence import HealthProvider, RuntimeEvidenceError, RuntimeEvidenceAdapter
+from control_plane_view import _fetch_runtime
+
+class FakeResponse:
+    def __init__(self, body, *, status=200, url="http://127.0.0.1/health", content_type="application/json"):
+        self.body = body; self.status = status; self._url = url
+        self.headers = {"Content-Type": content_type}
+    def __enter__(self): return self
+    def __exit__(self, *_): return False
+    def geturl(self): return self._url
+    def read(self, limit=-1): return self.body if limit < 0 else self.body[:limit]
 
 class HealthProviderTests(unittest.TestCase):
     def endpoints(self): return {"frank":"https://monitoring.internal/frank", "blockwise":"http://127.0.0.1:8081/health"}
@@ -18,3 +28,34 @@ class HealthProviderTests(unittest.TestCase):
         p=HealthProvider(self.endpoints(), lambda u: (_ for _ in ()).throw(TimeoutError()))
         s=RuntimeEvidenceAdapter(p).summary("blockwise")
         self.assertEqual((s.health,s.freshness),("unavailable","unavailable"))
+
+    def test_health_rejects_invalid_signal(self):
+        p = HealthProvider(self.endpoints(), lambda u: {"health": "maybe"})
+        with self.assertRaises(RuntimeEvidenceError): p.observe("frank")
+        p = HealthProvider(self.endpoints(), lambda u: {"message": "ok"})
+        with self.assertRaises(RuntimeEvidenceError): p.observe("frank")
+
+    def test_fetch_boundary_rejects_redirect_non_json_non_200_and_oversize(self):
+        import urllib.request
+        cases = [
+            FakeResponse(b'{"ok":true}', url="http://127.0.0.1/other"),
+            FakeResponse(b'{"ok":true}', status=503),
+            FakeResponse(b'{"ok":true}', content_type="text/html"),
+            FakeResponse(b'{' + b'"x":' + b'"a"' * (256 * 1024)),
+        ]
+        original = urllib.request.urlopen
+        try:
+            for response in cases:
+                urllib.request.urlopen = lambda *a, response=response, **k: response
+                with self.assertRaises(OSError): _fetch_runtime("http://127.0.0.1/health")
+        finally:
+            urllib.request.urlopen = original
+
+    def test_fetch_boundary_accepts_json_with_trailing_whitespace_only(self):
+        import urllib.request
+        original = urllib.request.urlopen
+        try:
+            urllib.request.urlopen = lambda *a, **k: FakeResponse(b'{"ok":true}\n  ')
+            self.assertEqual(_fetch_runtime("http://127.0.0.1/health"), {"ok": True})
+        finally:
+            urllib.request.urlopen = original

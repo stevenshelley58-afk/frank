@@ -65,14 +65,33 @@ def _regular_json(path: Path) -> Mapping[str, Any]:
     return value
 
 
+def _resolve_graph(path: Path) -> Mapping[str, Any]:
+    """Resolve a current pointer through the canonical hash-verifying store."""
+    pointer = _regular_json(path)
+    if path.name != "current.json" or not isinstance(pointer.get("path"), str):
+        return pointer
+    if path.parent.name != "graph":
+        raise RuntimeError("graph current pointer is outside the canonical store layout")
+    from graph.control_plane import ControlContractError
+    from graph.control_store import ControlGraphStore
+    try:
+        snapshot = ControlGraphStore(path.parent.parent).read_snapshot()
+    except (OSError, ValueError, ControlContractError) as error:
+        raise RuntimeError("graph current pointer failed hash verification") from error
+    graph = snapshot.get("graph")
+    if not isinstance(graph, Mapping):
+        raise RuntimeError("graph current snapshot is malformed")
+    return graph
+
+
 def main(argv: Sequence[str] | None = None) -> int:
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     window_root = root / "apps" / "window"
     if str(window_root) not in sys.path:
         sys.path.insert(0, str(window_root))
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--graph", type=Path, default=Path("/var/lib/frank/data/window/control-graph/current.json"))
-    parser.add_argument("--preview-root", type=Path, default=Path("/var/lib/frank/data/window/maps"))
+    parser.add_argument("--graph", type=Path, default=Path("/srv/frank/data/window/control-graph/graph/current.json"))
+    parser.add_argument("--preview-root", type=Path, default=Path("/srv/frank/data/window/maps"))
     parser.add_argument("--run-key", default=None)
     parser.add_argument("--timeout", type=float, default=120.0)
     args = parser.parse_args(argv)
@@ -81,7 +100,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         from graph.archify_adapter import ArchifyAdapter  # type: ignore
         from graph.map_pipeline import generate_maps
 
-        graph = _regular_json(args.graph)
+        graph = _resolve_graph(args.graph)
         graph_revision = graph.get("graph_revision", graph.get("revision", "unknown"))
         run_key = args.run_key or f"run:graph-{str(graph_revision).replace(':', '-')}-{int(time.time())}"
         adapter = ArchifyAdapter()

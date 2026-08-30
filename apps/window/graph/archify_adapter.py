@@ -16,9 +16,26 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping
 
 from .control_plane import ControlContractError, canonical_bytes
+from .estate_projections import PROJECTION_IDS as ESTATE_PROJECTION_IDS, build_projection as build_estate_projection
 
-REPOSITORY_ROOT = Path(os.environ.get("FRANK_REPOSITORY_ROOT", str(Path(__file__).resolve().parents[3]))).resolve()
-ARCHIFY_EXECUTABLE = REPOSITORY_ROOT / "apps" / "window" / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"
+def _resolve_window_root(module_path: Path, configured: str | None = None) -> Path:
+    """Resolve both the full checkout and the shallow ``/app`` image layout."""
+    candidates: list[Path] = []
+    if configured:
+        base = Path(configured).resolve()
+        candidates.extend((base / "apps" / "window", base))
+    module = module_path.resolve()
+    candidates.extend((module.parents[1], *(parent / "apps" / "window" for parent in module.parents)))
+    for candidate in candidates:
+        if (candidate / "vendor" / "archify" / "archify" / "bin" / "archify.mjs").is_file():
+            return candidate
+    # The executable resolution remains fail-closed at invocation time, while
+    # importing this module stays safe during an uninitialized checkout.
+    return Path(configured).resolve() if configured else module.parents[1]
+
+
+WINDOW_ROOT = _resolve_window_root(Path(__file__), os.environ.get("FRANK_REPOSITORY_ROOT"))
+ARCHIFY_EXECUTABLE = WINDOW_ROOT / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"
 ARCHIFY_VERSION = "v2.15.0-39-gb36d79f"
 ARCHIFY_SHA256 = "86aa44dd70ddcfb81def18bea9ae5e44a6cd04293d80f92792ed1b165a113b67"
 SHOWCASE_CHECKS = (
@@ -77,6 +94,10 @@ def _projection_nodes(graph: Mapping[str, Any], projection_id: str) -> list[Mapp
             if any(token in low for token in ("frank", "hermes", "hindsight")):
                 selected.append(node)
         return selected
+    if projection_id in ESTATE_PROJECTION_IDS:
+        # Step 4A has already performed typed selection.  Do not re-select by
+        # names here: doing so would silently drop evidence-bearing nodes.
+        return nodes
     raise ControlContractError(f"unsupported Step 3 projection: {projection_id}")
 
 
@@ -173,7 +194,15 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
             "via": [[350, 90 + sorted(stable_ids).index(str(edge["from"])) * 130 + 38], [350, 90 + sorted(stable_ids).index(str(edge["to"])) * 130 + 38]],
         }
         connections.append(connection)
-    title = "VPS World" if projection_id == "projection:vps/world" else "Frank Architecture"
+    titles = {
+        "projection:vps/world": "VPS World",
+        "projection:frank/architecture": "Frank Architecture",
+        "projection:blockwise/runtime": "Blockwise Runtime",
+        "projection:mini-frank/knowledge-flow": "Mini Frank Knowledge Flow",
+        "projection:ad-template-builder/architecture": "Ad Template Builder Architecture",
+        "projection:ad-template-builder/workflow": "Ad Template Builder Workflow",
+    }
+    title = titles.get(projection_id, projection_id)
     diagram = {
         "schema_version": 1,
         "diagram_type": "architecture",
@@ -247,6 +276,26 @@ class ArchifyAdapter:
     """Runtime seam separating Archify input from Frank metadata."""
 
     def project(self, graph: Mapping[str, Any], *, projection_id: str) -> dict[str, Any]:
+        estate_metadata: Mapping[str, Any] | None = None
+        if projection_id in ESTATE_PROJECTION_IDS:
+            estate = build_estate_projection(graph, projection_id)
+            # Convert only the typed, evidence-preserving projection.  The
+            # estate seam remains authoritative for findings/exclusions and
+            # conditional-flow decisions.
+            graph = dict(graph, nodes=estate["nodes"], edges=estate["relationships"], relationships=estate["relationships"])
+            estate_metadata = estate
         required = ("workloads", "routes", "repositories", "stores", "capabilities") if projection_id == "projection:vps/world" else ("window", "hermes_boundary", "hindsight_boundary")
+        if projection_id in ESTATE_PROJECTION_IDS:
+            required = tuple(estate_metadata["coverage"]["required"]) if estate_metadata else ()
         built = build_projection(graph, projection_id, source_revisions=graph.get("source_revisions", {}), deployed_revisions=graph.get("deployed_revisions", {}), required_coverage=required, exclusions=graph.get("exclusions", ()))
-        return {"projection_id": projection_id, "diagram": built["diagram"], "coverage": built["metadata"]["coverage"], "exclusions": built["metadata"]["exclusions"], "metadata": built["metadata"]}
+        if estate_metadata is not None:
+            built["metadata"]["estate_status"] = estate_metadata.get("status")
+            built["metadata"]["findings"] = estate_metadata.get("findings", [])
+            built["metadata"]["mappings"] = estate_metadata.get("mappings", [])
+            built["metadata"]["cross_links"] = estate_metadata.get("cross_links", {})
+            built["metadata"]["exclusions"] = estate_metadata.get("exclusions", [])
+            built["metadata"]["estate_coverage"] = estate_metadata.get("coverage", {})
+            if estate_metadata.get("status") != "generated":
+                raise ControlContractError(f"projection {projection_id} is not generated")
+        coverage = estate_metadata.get("coverage", {}) if estate_metadata is not None else built["metadata"]["coverage"]
+        return {"projection_id": projection_id, "diagram": built["diagram"], "coverage": coverage, "exclusions": built["metadata"]["exclusions"], "metadata": built["metadata"], "findings": built["metadata"].get("findings", [])}

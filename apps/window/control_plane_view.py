@@ -137,8 +137,9 @@ def _control_provider() -> ControlProvider:
     return ControlProvider(ControlGraphStore(root))
 
 
-def _preview_key() -> str:
-    return os.environ.get("MAP_PREVIEW_RUN_KEY", "run:step5-preview").strip() or "run:step5-preview"
+def _preview_key() -> str | None:
+    value = os.environ.get("MAP_PREVIEW_RUN_KEY")
+    return value.strip() if value and value.strip() else None
 
 
 def _map_provider() -> MapArtifactProvider:
@@ -147,13 +148,16 @@ def _map_provider() -> MapArtifactProvider:
 
 
 def _fetch_runtime(url: str) -> Mapping[str, Any]:
-    """Fetch one already-validated Beszel URL with a bounded response."""
+    """Fetch one already-validated runtime URL with a strict bounded response."""
     req = urllib.request.Request(url, headers={"Accept": "application/json"})
     with urllib.request.urlopen(req, timeout=3) as response:
         if response.geturl() != url: raise OSError("runtime provider redirect rejected")
         if getattr(response, "status", 200) != 200: raise OSError("runtime provider returned non-success")
         if "json" not in response.headers.get("Content-Type", "application/json").lower(): raise OSError("runtime provider returned non-json")
-        result = json.loads(response.read(256 * 1024 + 1).decode("utf-8"))
+        payload = response.read(256 * 1024 + 1)
+        if len(payload) > 256 * 1024:
+            raise OSError("runtime provider response too large")
+        result = json.loads(payload.decode("utf-8"))
     if not isinstance(result, Mapping):
         raise OSError("runtime provider response is not an object")
     return result
@@ -326,7 +330,8 @@ def _require_flag(name: str) -> None:
 @api.get("/api/control/overview")
 def overview():
     flags = feature_flags()
-    return jsonify({"schema": "schema://frank.control-plane/v1", "feature_flags": flags, "control": _snapshot() if flags.get("control_read") else {"status": "disabled"}, "projections": _map_rows() if flags.get("map_view") else [], "live": {"enabled": bool(flags.get("live_view")), "board_url": "/agenttrail/" if flags.get("live_view") else None}, "runtime": {"enabled": bool(flags.get("runtime_monitoring")), "provider": os.environ.get("RUNTIME_PROVIDER_NAME", "beszel") if flags.get("runtime_monitoring") else None}})
+    provider_label = "health" if os.environ.get("RUNTIME_PROVIDER_MODE", "").strip().lower() == "health" else os.environ.get("RUNTIME_PROVIDER_NAME", "beszel")
+    return jsonify({"schema": "schema://frank.control-plane/v1", "feature_flags": flags, "control": _snapshot() if flags.get("control_read") else {"status": "disabled"}, "projections": _map_rows() if flags.get("map_view") else [], "live": {"enabled": bool(flags.get("live_view")), "board_url": "/agenttrail/" if flags.get("live_view") else None}, "runtime": {"enabled": bool(flags.get("runtime_monitoring")), "provider": provider_label if flags.get("runtime_monitoring") else None}})
 
 
 @api.get("/api/control/graph")

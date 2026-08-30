@@ -97,7 +97,7 @@ class MapPipelineTests(unittest.TestCase):
             result = generate_maps(self._graph(), run_key="run-1", build_context_path=context, repo_root=root, preview_root=root / "preview", adapter=FakeAdapter(), artifact_store=store, runner=runner, now="2026-08-30T00:00:00Z")
             self.assertEqual(result["status"], "passed")
             self.assertEqual(set(result["generation_ids"]), set(PROJECTION_IDS))
-            self.assertEqual(len(store.generations), 2)
+            self.assertEqual(len(store.generations), 6)
             self.assertEqual([p[0] for p in store.published], ["run-1"])
             self.assertTrue(all(m[2]["preview_only"] for m in store.generations))
             self.assertTrue(all(call[3] is False for call in runner.calls))

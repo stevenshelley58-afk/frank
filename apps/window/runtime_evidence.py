@@ -72,6 +72,10 @@ class HealthProvider:
         if system_id not in self.endpoints: raise RuntimeEvidenceError("invalid system ID")
         value = self.fetch(self.endpoints[system_id])
         if not isinstance(value, Mapping): raise RuntimeEvidenceError("health response is not an object")
+        if "health" in value and value.get("health") not in HEALTH:
+            raise RuntimeEvidenceError("health response contains an invalid health value")
+        if "health" not in value and not isinstance(value.get("ok"), bool):
+            raise RuntimeEvidenceError("health response contains no truthful health signal")
         if "health" not in value and isinstance(value.get("ok"), bool):
             value = {**value, "health": "healthy" if value["ok"] else "unhealthy"}
         from datetime import datetime, timezone

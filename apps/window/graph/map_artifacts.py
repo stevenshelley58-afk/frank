@@ -22,6 +22,14 @@ from .control_plane import ControlContractError, canonical_bytes
 
 
 _SHA256 = "sha256:"
+MANDATORY_PROJECTIONS = frozenset({
+    "projection:vps/world",
+    "projection:frank/architecture",
+    "projection:blockwise/runtime",
+    "projection:mini-frank/knowledge-flow",
+    "projection:ad-template-builder/architecture",
+    "projection:ad-template-builder/workflow",
+})
 _ID_RE = re.compile(
     r"^(?:vps|project|repo|runtime|service|component|worker|store|route|"
     r"capability|rule|skill|tool|plugin|cli|mcp|app|template|library|hook|"
@@ -264,8 +272,8 @@ class MapArtifactStore:
     def publish_preview(self, preview_run_key: str, manifests: Mapping[str, Mapping[str, Any]]) -> dict[str, str]:
         """Advance both mandatory map pointers for a single preview."""
         _stable_id(preview_run_key, "preview run ID")
-        if not isinstance(manifests, Mapping) or set(manifests) != {"projection:vps/world", "projection:frank/architecture"}:
-            raise ControlContractError("preview must contain both mandatory projections")
+        if not isinstance(manifests, Mapping) or set(manifests) != MANDATORY_PROJECTIONS:
+            raise ControlContractError("preview must contain exactly six mandatory projections")
         pointers: dict[str, str] = {}
         for projection_id in sorted(manifests):
             generation_id = manifests[projection_id].get("generation_id")
@@ -397,16 +405,53 @@ class MapArtifactStore:
         return result
 
 
-class MapArtifactProvider:
-    """Read-only provider facade over a preview-scoped map store."""
+    def resolve_production_current(self, projection_id: str) -> dict[str, Any]:
+        """Resolve one projection through the single atomic production selector."""
+        self._secure(); _stable_id(projection_id, "projection ID")
+        current = _regular(self.root / "current.json", self.root, json_object=True)
+        if (
+            current.get("schema") != "frank.map-promotion/v1"
+            or current.get("status") != "promoted"
+            or not isinstance(current.get("graph_revision"), str)
+            or re.fullmatch(r"g_[0-9a-f]{64}", current["graph_revision"]) is None
+            or not isinstance(current.get("projections"), dict)
+            or set(current["projections"]) != MANDATORY_PROJECTIONS
+        ):
+            raise ControlContractError("production map selector is unavailable")
+        pointer = current["projections"].get(projection_id)
+        if not isinstance(pointer, dict) or pointer.get("graph_revision") != current.get("graph_revision"):
+            raise ControlContractError("production map projection is not selected")
+        for key in ("manifest_path", "artifact_path"):
+            value = pointer.get(key)
+            if not isinstance(value, str) or Path(value).is_absolute() or any(part in {"", ".", ".."} for part in Path(value).parts):
+                raise ControlContractError("production map pointer path is unsafe")
+        manifest_path = self.root / pointer["manifest_path"]; artifact_path = self.root / pointer["artifact_path"]
+        manifest = _regular(manifest_path, self.root, json_object=True)
+        artifact = _regular(artifact_path, self.root)
+        if manifest.get("projection_id") != projection_id or manifest.get("generation_id") != pointer.get("generation_id") or manifest.get("graph_revision") != current.get("graph_revision"):
+            raise ControlContractError("production map manifest identity mismatch")
+        if pointer.get("manifest_hash") != _hash_json(manifest) or pointer.get("artifact_hash") != _hash_bytes(artifact) or manifest.get("artifact_hash") != _hash_bytes(artifact):
+            raise ControlContractError("production map hash mismatch")
+        return {"pointer": pointer, "manifest": manifest, "artifact": artifact, "artifact_path": pointer["artifact_path"]}
 
-    def __init__(self, store: MapArtifactStore, preview_run_key: str):
+    def list_production_projections(self) -> list[dict[str, Any]]:
+        current = _regular(self.root / "current.json", self.root, json_object=True)
+        projections = current.get("projections", {})
+        if not isinstance(projections, dict) or set(projections) != MANDATORY_PROJECTIONS:
+            raise ControlContractError("production map selector is malformed")
+        return [{"projection_id": projection, "manifest": self.resolve_production_current(projection)["manifest"], "pointer": pointer} for projection, pointer in sorted(projections.items())]
+
+
+class MapArtifactProvider:
+    """Read-only provider facade over preview or production map state."""
+
+    def __init__(self, store: MapArtifactStore, preview_run_key: str | None = None):
         self.store = store
-        _stable_id(preview_run_key, "preview run ID")
+        if preview_run_key is not None: _stable_id(preview_run_key, "preview run ID")
         self.preview_run_key = preview_run_key
 
     def list_projections(self) -> list[dict[str, Any]]:
-        return self.store.list_projections(preview_run_key=self.preview_run_key)
+        return self.store.list_projections(preview_run_key=self.preview_run_key) if self.preview_run_key else self.store.list_production_projections()
 
     def resolve_current(self, projection_id: str) -> dict[str, Any]:
-        return self.store.resolve_current(projection_id, preview_run_key=self.preview_run_key)
+        return self.store.resolve_current(projection_id, preview_run_key=self.preview_run_key) if self.preview_run_key else self.store.resolve_production_current(projection_id)

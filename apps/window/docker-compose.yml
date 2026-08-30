@@ -11,6 +11,9 @@ services:
     env_file:
       - ${FRANK_WINDOW_ENV_FILE:-/srv/frank/secrets/window.env}
       - /var/lib/frank/release/feature-flags.env
+      # MAP_PREVIEW_RUN_KEY is intentionally not declared here: production
+      # reads the single promoted maps/current.json selector. Explicit preview
+      # runs may provide it through a separate isolated environment.
     environment:
       FRANK_WEB: /web
       CHAT_STORE_DIR: /data

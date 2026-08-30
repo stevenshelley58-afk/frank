@@ -8,7 +8,7 @@ from graph.map_release_orchestrator import promote, PromotionError
 # explicit runtime-consumption evidence.
 MANDATORY = {"projection:vps/world", "projection:frank/architecture", "projection:blockwise/runtime", "projection:mini-frank/knowledge-flow", "projection:ad-template-builder/architecture", "projection:ad-template-builder/workflow"}
 def main(argv=None):
-    p=argparse.ArgumentParser(); p.add_argument("receipt", type=Path); p.add_argument("--production-root", required=True); p.add_argument("--timeout", type=float, default=300); a=p.parse_args(argv)
+    p=argparse.ArgumentParser(); p.add_argument("receipt", type=Path); p.add_argument("--production-root", default="/srv/frank/data/window/maps"); p.add_argument("--timeout", type=float, default=300); a=p.parse_args(argv)
     if not 1 <= a.timeout <= 1800: p.error("timeout outside 1..1800 seconds")
     try:
         value=json.loads(a.receipt.read_text(encoding="utf-8")); result=promote(receipt=value, production_root=a.production_root, mandatory=MANDATORY, timeout_seconds=a.timeout)
