@@ -2070,7 +2070,6 @@ def create_blueprint(
             "attachment_count": len(attachments),
             "created_at": int(intake.get("created_at") or 0),
             "updated_at": int(intake.get("updated_at") or 0),
-            "job_id": str(intake.get("job_id") or ""),
             "guide_status": str(intake.get("guide_status") or "idle"),
             "guide_resumable": str(intake.get("guide_status") or "") == "unavailable",
             "binding_receipt": (
@@ -2087,6 +2086,37 @@ def create_blueprint(
                 )
             ),
         }
+
+    def intake_linked_job(intake: dict) -> dict | None:
+        """Return the private reopen handle for one submitted, live intake.
+
+        The intake bearer is validated by ``claimed_intake`` before this helper
+        is reached. Keep this deliberately separate from ``public_intake``:
+        projections used by create/update flows (and any future non-owner
+        surface) must never gain authority to reopen a job.
+        """
+        if str(intake.get("status") or "") != "submitted":
+            return None
+        job_id = str(intake.get("job_id") or "")
+        if not JOB_ID_RE.fullmatch(job_id):
+            return None
+        # Match the job's expiry serialization point so an expired job never
+        # receives a newly exposed claim while its cleanup is in progress.
+        with job_dispatch_lock(job_id):
+            job = store.get(job_id)
+            if (
+                job_is_expired(job)
+                or not hmac.compare_digest(
+                    str((job or {}).get("account_id") or ""),
+                    str(intake.get("account_id") or ""),
+                )
+            ):
+                return None
+            return {
+                "job_id": job_id,
+                "claim_token": _claim_token(job_id, rate_key),
+                "status": str(job.get("stage") or "queued"),
+            }
 
     def attachment_target(item: dict) -> Path:
         storage_rel = str(item.get("storage_rel") or "").replace("\\", "/").lstrip("/")
@@ -3811,7 +3841,12 @@ def create_blueprint(
 
     @blueprint.get("/api/mini/intakes/<intake_id>")
     def read_intake(intake_id: str):
-        return jsonify({"intake": public_intake(claimed_intake(intake_id))})
+        intake = claimed_intake(intake_id)
+        response = {"intake": public_intake(intake)}
+        linked_job = intake_linked_job(intake)
+        if linked_job is not None:
+            response["linked_job"] = linked_job
+        return jsonify(response)
 
     @blueprint.delete("/api/mini/intakes/<intake_id>")
     def abandon_intake(intake_id: str):
@@ -4344,7 +4379,13 @@ def create_blueprint(
                 if str(intake.get("job_id") or "") != existing_job_id:
                     abort(409, "This request changed while it was being reopened.")
                 job = store.get(existing_job_id)
-                if job_is_expired(job):
+                if (
+                    job_is_expired(job)
+                    or not hmac.compare_digest(
+                        str((job or {}).get("account_id") or ""),
+                        str(intake.get("account_id") or ""),
+                    )
+                ):
                     abort(404)
                 return jsonify(job_response(job, _claim_token(existing_job_id, rate_key))), 202
         # The durable job is the acceptance response. The due-based
