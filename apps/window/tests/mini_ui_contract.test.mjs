@@ -123,6 +123,16 @@ test("account claim is a separate ma1 token and never enters URLs or shares", as
   assert.doesNotMatch(script, /new URLSearchParams\([^)]*accountClaim|key: state\.accountClaim/);
 });
 
+test("a submitted intake restore opens only server-issued job access or starts a distinct free project", async () => {
+  const script = await source("mini.js");
+  assert.match(script, /function linkedJobAccess\(body\) \{[\s\S]*const linked = body && body\.linked_job;[\s\S]*linked\.job_id[\s\S]*linked\.claim_token[\s\S]*validId\(id\) && validClaim\(claim\)/);
+  assert.match(script, /function recoverSubmittedIntake\(\) \{[\s\S]*clearDraft\(\);[\s\S]*newConversation\(false\);[\s\S]*previous free project was already sent/);
+  const restore = script.split("async function restoreConversation(draft)", 2)[1].split("function handleSubmit()", 2)[0];
+  const submitted = restore.split('toLowerCase() === "submitted")', 2)[1].split("const serverTranscript", 2)[0];
+  assert.match(submitted, /const linked = linkedJobAccess\(body\);[\s\S]*clearDraft\(\);[\s\S]*if \(linked\) \{[\s\S]*await openProject\(linked, \{ source: "restored-submitted-intake" \}\);[\s\S]*return;[\s\S]*recoverSubmittedIntake\(\);[\s\S]*return;/);
+  assert.doesNotMatch(submitted, /finishDraftRestore\(|attachResume\(/);
+});
+
 test("CSP, reduced motion, sandboxing and 320px reflow remain release constraints", async () => {
   const [html, css, script] = await Promise.all([source("index.html"), source("mini.css"), source("mini.js")]);
   assert.match(css, /min-width:\s*320px/);

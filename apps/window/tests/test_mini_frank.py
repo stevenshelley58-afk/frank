@@ -387,6 +387,92 @@ class MiniFrankTest(unittest.TestCase):
         self.assertIn("Create meta ads", self.runs[0]["payload"]["input"])
         self.assertNotIn("Before I build", self.runs[0]["payload"]["input"])
 
+    def test_claimed_submitted_intake_exposes_only_a_top_level_live_job_reopen_handle(self):
+        created = self.create_intake(conversation=[{
+            "role": "user", "text": "Create a practical booking helper.",
+        }])
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+
+        draft = self.client.get(f"/api/mini/intakes/{intake_id}", headers=headers)
+        self.assertEqual(draft.status_code, 200)
+        self.assertNotIn("linked_job", draft.get_json())
+        self.assertNotIn("job_id", draft.get_json()["intake"])
+
+        submitted = self.client.post(
+            f"/api/mini/intakes/{intake_id}/submit", json={}, headers=headers,
+        )
+        self.assertEqual(submitted.status_code, 202)
+        accepted = submitted.get_json()
+        reopened = self.client.get(f"/api/mini/intakes/{intake_id}", headers=headers)
+        self.assertEqual(reopened.status_code, 200)
+        body = reopened.get_json()
+        self.assertEqual(body["linked_job"], {
+            "job_id": accepted["job"]["id"],
+            "claim_token": accepted["claim_token"],
+            "status": accepted["job"]["stage"],
+        })
+        self.assertNotIn("linked_job", body["intake"])
+        self.assertNotIn("claim_token", body["intake"])
+        self.assertNotIn("job_id", body["intake"])
+
+        reopened_job = self.client.get(
+            f"/api/mini/jobs/{body['linked_job']['job_id']}",
+            headers={"X-Mini-Claim": body["linked_job"]["claim_token"]},
+        )
+        self.assertEqual(reopened_job.status_code, 200)
+
+        denied = self.client.get(f"/api/mini/intakes/{intake_id}")
+        self.assertEqual(denied.status_code, 404)
+
+    def test_submitted_intake_never_mints_a_claim_for_a_mismatched_or_missing_job(self):
+        created = self.create_intake(conversation=[{
+            "role": "user", "text": "Create a practical booking helper.",
+        }])
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+        submitted = self.client.post(
+            f"/api/mini/intakes/{intake_id}/submit", json={}, headers=headers,
+        ).get_json()
+        job_id = submitted["job"]["id"]
+        jobs_path = self.data_root / "mini" / "jobs.json"
+        jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+        jobs[job_id]["account_id"] = "ma1-different-owner"
+        jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+
+        mismatched = self.client.get(f"/api/mini/intakes/{intake_id}", headers=headers)
+        self.assertEqual(mismatched.status_code, 200)
+        self.assertNotIn("linked_job", mismatched.get_json())
+
+        replayed = self.client.post(
+            f"/api/mini/intakes/{intake_id}/submit", json={}, headers=headers,
+        )
+        self.assertEqual(replayed.status_code, 404)
+
+        jobs.pop(job_id)
+        jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+        missing = self.client.get(f"/api/mini/intakes/{intake_id}", headers=headers)
+        self.assertEqual(missing.status_code, 404)
+
+    def test_submitted_intake_does_not_expose_an_expired_linked_job(self):
+        created = self.create_intake(conversation=[{
+            "role": "user", "text": "Create a practical booking helper.",
+        }])
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+        submitted = self.client.post(
+            f"/api/mini/intakes/{intake_id}/submit", json={}, headers=headers,
+        ).get_json()
+        job_id = submitted["job"]["id"]
+        jobs_path = self.data_root / "mini" / "jobs.json"
+        jobs = json.loads(jobs_path.read_text(encoding="utf-8"))
+        jobs[job_id]["expires_at"] = 1
+        jobs_path.write_text(json.dumps(jobs), encoding="utf-8")
+
+        with patch("mini_frank.time.time", return_value=2):
+            response = self.client.get(f"/api/mini/intakes/{intake_id}", headers=headers)
+        self.assertEqual(response.status_code, 404)
+
     def test_first_submit_stays_fast_when_hermes_is_blocked(self):
         self.block_hermes = True
         created = self.create_intake(conversation=[{
@@ -1581,10 +1667,10 @@ class MiniFrankTest(unittest.TestCase):
     def test_global_storage_reservation_is_atomic_across_parallel_owners(self):
         payload = self.pdf_bytes(b"C" * 70_000)
         self.client = self.make_client(
-            # Leave enough room for filesystem allocation blocks consumed by
-            # the two intake/ledger records while keeping two payloads over
-            # the aggregate cap on every supported platform.
-            storage_cap_bytes=len(payload) + (64 * 1024),
+            # Linux and other filesystems can allocate metadata blocks beyond
+            # logical JSON/file bytes. Two actual payloads still cannot fit,
+            # so this remains an atomic cross-owner admission check.
+            storage_cap_bytes=(2 * len(payload)) - 1,
             storage_min_free_bytes=0,
         )
         owners = [

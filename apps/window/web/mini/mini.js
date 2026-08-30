@@ -677,6 +677,25 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     state.intake = intakeFrom(body, state.intake.claim);
   }
 
+  // A submitted intake is no longer a draft.  The server only includes this
+  // short-lived private access when the intake bearer was accepted, so never
+  // infer a job from any other response field or from browser storage.
+  function linkedJobAccess(body) {
+    const linked = body && body.linked_job;
+    if (!linked || typeof linked !== "object") return null;
+    const id = cleanText(linked.job_id, 180);
+    const claim = cleanText(linked.claim_token, 300);
+    return validId(id) && validClaim(claim) ? { id, claim } : null;
+  }
+
+  function recoverSubmittedIntake() {
+    clearDraft();
+    // Do not abandon the submitted intake: it may already have created work.
+    // This merely discards the unusable local draft and starts a distinct one.
+    newConversation(false);
+    addMessage("assistant", "Your previous free project was already sent. I couldn’t safely reopen it from this browser, so I cleared that old draft. Tell me the next problem you want solved and I’ll start a new free project.", { record: false });
+  }
+
   async function ensureIntake() {
     if (state.intake) return state.intake;
     if (intakePromise) return intakePromise;
@@ -2624,6 +2643,17 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       if (generation !== state.generation) return;
       updateIntake(body);
       const serverIntake = body && body.intake ? body.intake : body;
+      if (cleanText(serverIntake && serverIntake.status, 80).toLowerCase() === "submitted") {
+        const linked = linkedJobAccess(body);
+        clearDraft();
+        if (linked) {
+          notify("Your free project was already started. Opening it now.");
+          await openProject(linked, { source: "restored-submitted-intake" });
+          return;
+        }
+        recoverSubmittedIntake();
+        return;
+      }
       const serverTranscript = Array.isArray(serverIntake && serverIntake.conversation)
         ? cleanTranscript(serverIntake.conversation)
         : [];
