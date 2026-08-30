@@ -205,6 +205,9 @@ class ControlGraphStore:
         return {"graph": graph, "assertions": assertions, "findings": findings, "manifest": manifest}
 
     def read_current(self) -> dict[str, Any]:
+        return self._read_current_snapshot()["manifest"]
+
+    def _read_current_snapshot(self) -> dict[str, Any]:
         self._assert_secure_roots()
         pointer = self.graph_root / "current.json"
         if pointer.is_symlink():
@@ -218,9 +221,8 @@ class ControlGraphStore:
         snapshot = self._read_generation(self._generation(graph_hash), graph_hash)
         if value.get("manifest_hash") != self._digest(snapshot["manifest"]):
             raise ControlContractError("pointer hash mismatch")
-        return snapshot["manifest"]
+        return snapshot
 
     def read_snapshot(self) -> dict[str, Any]:
-        manifest = self.read_current()
-        revision = manifest.get("graph_revision")
-        return self._read_generation(self._generation(revision), revision)
+        # _read_current_snapshot validates and loads the generation once.
+        return self._read_current_snapshot()

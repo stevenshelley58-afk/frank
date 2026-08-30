@@ -28,6 +28,18 @@
     }
 }
 
+(frank_map_artifact_response_headers) {
+    header {
+        # Map projections are rendered in the authenticated Window via a
+        # same-origin iframe.  The common edge policy's DENY/none values would
+        # make the browser reject the otherwise valid artifact response.
+        -X-Frame-Options
+        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'self'; form-action 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'"
+        Cache-Control "no-store, private"
+        X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+    }
+}
+
 (frank_mini_api_response_headers) {
     header {
         Content-Security-Policy "default-src 'none'; base-uri 'none'; frame-ancestors 'none'"
@@ -206,6 +218,23 @@ frank.fail {
                 header_up -Authorization
                 header_up -Proxy-Authorization
                 header_up -Cookie
+                header_up -X-Frank-Operator-Attestation
+                header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}
+                header_down -Set-Cookie
+            }
+        }
+
+        @map_artifact path /api/control/maps/artifact /api/control/projections/*/artifact
+        handle @map_artifact {
+            import frank_map_artifact_response_headers
+            basic_auth {
+                {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
+            }
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
                 header_up -X-Frank-Operator-Attestation
                 header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}
                 header_down -Set-Cookie

@@ -170,6 +170,19 @@ class InfraContractTest(unittest.TestCase):
         fallback = caddyfile[caddyfile.index("        handle {\n            import frank_private_response_headers"):]
         self.assertLess(fallback.index("import frank_private_response_headers"), fallback.index("basic_auth"))
 
+    def test_map_artifacts_allow_authenticated_same_origin_embedding(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        matcher = caddyfile.index("@map_artifact path /api/control/maps/artifact")
+        fallback = caddyfile.index("        handle {\n            import frank_private_response_headers", matcher)
+        route = caddyfile[matcher:fallback]
+        policy = caddyfile.split("(frank_map_artifact_response_headers) {", 1)[1].split("}\n", 1)[0]
+        self.assertIn("import frank_map_artifact_response_headers", route)
+        self.assertIn("basic_auth", route)
+        self.assertIn("-X-Frame-Options", policy)
+        self.assertIn("frame-ancestors 'self'", policy)
+        self.assertIn("script-src 'self' 'unsafe-inline'", policy)
+        self.assertLess(matcher, fallback)
+
     def test_retired_template_release_surface_is_absent(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")

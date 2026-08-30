@@ -13,6 +13,7 @@ import io
 import json
 import os
 import re
+import threading
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -54,6 +55,13 @@ SENSITIVE = re.compile(r"(?i)(?:password|passphrase|secret|token|api[_-]?key|pri
 SYSTEMS = frozenset({"host", "edge", "route", "service", "container", "systemd_unit", "repo", "checkout", "project", "component", "worker", "data_store", "volume", "artifact", "deployment", "release", "observer", "source"})
 CAPABILITIES = frozenset({"capability", "rule", "skill", "tool", "plugin", "cli", "mcp", "app", "library", "template", "agent", "bundle", "eval", "runtime_policy"})
 PROJECTION_ORDER = ("projection:vps/world", "projection:frank/architecture", "projection:blockwise/runtime", "projection:mini-frank/knowledge-flow", "projection:ad-template-builder/architecture", "projection:ad-template-builder/workflow", "projection:ad-template-builder/data-flow")
+
+# The graph is immutable once published. Keep the last fully validated
+# snapshot in-process so overview and records requests do not re-read and
+# re-hash a large generation. The selector is read on every request; changing
+# it invalidates the cache and requires a fresh validation.
+_SNAPSHOT_CACHE_LOCK = threading.Lock()
+_SNAPSHOT_CACHE: dict[str, Any] = {}
 
 
 @api.errorhandler(HTTPException)
@@ -216,11 +224,33 @@ def _source_url(locator: Any) -> str | None:
 
 
 def _snapshot() -> dict[str, Any]:
+    root = _configured_path("CONTROL_GRAPH_ROOT", Path(os.environ.get("CHAT_STORE_DIR", "/data")) / "control-graph")
+    selector = root / "graph" / "current.json"
     try:
-        result = _control_provider().get()
-    except (ControlContractError, OSError):
-        return {"status": "unavailable", "manifest": None, "graph": None, "assertions": None, "findings": None, "error": "control graph is unavailable"}
-    return _safe_value(result)
+        stat = selector.stat()
+        fingerprint = (str(selector.resolve()), stat.st_ino, stat.st_size, stat.st_mtime_ns)
+    except (OSError, RuntimeError):
+        fingerprint = None
+
+    def load_validated() -> dict[str, Any]:
+        try:
+            result = _control_provider().get()
+        except (ControlContractError, OSError):
+            result = {"status": "unavailable", "manifest": None, "graph": None, "assertions": None, "findings": None, "error": "control graph is unavailable"}
+        return _safe_value(result)
+
+    if fingerprint is not None:
+        with _SNAPSHOT_CACHE_LOCK:
+            if _SNAPSHOT_CACHE.get("fingerprint") == fingerprint:
+                return deepcopy(_SNAPSHOT_CACHE["value"])
+            # Keep one cache fill in flight. Control starts overview and records
+            # together; both must reuse one full integrity validation.
+            safe = load_validated()
+            if isinstance(safe.get("graph"), Mapping) and isinstance(safe.get("manifest"), Mapping):
+                _SNAPSHOT_CACHE.clear()
+                _SNAPSHOT_CACHE.update({"fingerprint": fingerprint, "value": safe})
+            return deepcopy(safe)
+    return deepcopy(load_validated())
 
 
 def _projection_declarations() -> list[dict[str, Any]]:

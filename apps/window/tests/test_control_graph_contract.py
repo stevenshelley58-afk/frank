@@ -7,7 +7,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from graph.control_contract import ControlContractError, _resolve_repository_root, derive_graph_revision, graph_from_collector_receipt, materialize_control_graph, reconcile_assertions
+from graph.control_contract import ControlContractError, _resolve_repository_root, _validate_graph, derive_graph_revision, graph_from_collector_receipt, materialize_control_graph, reconcile_assertions
 from graph.control_store import ControlGraphStore
 from graph.control_provider import ControlProvider
 from scripts.generate_control_maps import MAX_RECEIPT_BYTES, _default_run_key, _resolve_graph, _write_receipt
@@ -73,6 +73,28 @@ class ControlGraphContractTest(unittest.TestCase):
         got = reconcile_assertions([{"subject_id":"service:x","predicate":"revision","scope_id":"service:x","value":"a"}],
                                    [{"subject_id":"service:x","predicate":"revision","scope_id":"service:x","value":"b"}])
         self.assertEqual(got[0]["reconciliation_result"], "revision_mismatch")
+
+    def test_graph_validation_rejects_duplicate_full_items(self):
+        graph, _, _ = materialize_control_graph(DECLARED)
+        graph["nodes"].append(copy.deepcopy(graph["nodes"][0]))
+        with self.assertRaisesRegex(ControlContractError, "not unique"):
+            _validate_graph(graph)
+
+    def test_read_snapshot_validates_generation_once(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            store = ControlGraphStore(Path(tmp))
+            graph, assertions, manifest = materialize_control_graph(DECLARED)
+            revision = graph["graph_revision"]
+            store.write_generation(revision, graph, assertions, manifest)
+            store.advance_current(revision)
+            original = store._read_generation
+            calls = []
+            def counted(*args, **kwargs):
+                calls.append(args)
+                return original(*args, **kwargs)
+            store._read_generation = counted
+            store.read_snapshot()
+            self.assertEqual(len(calls), 1)
 
     def test_store_pointer_and_provider(self):
         with tempfile.TemporaryDirectory() as tmp:

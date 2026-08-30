@@ -1548,10 +1548,21 @@ def agenttrail_proxy(agenttrail_path: str):
         def _events():
             try:
                 while True:
-                    chunk = upstream.read(64 * 1024)
+                    # ``HTTPResponse.read(n)`` may wait until it has collected
+                    # n bytes.  SSE emits tiny frames and keeps the connection
+                    # open, so that turns a healthy stream into a timeout (and
+                    # leaves the browser stuck on its connecting placeholder).
+                    # ``read1`` returns as soon as one buffered frame is
+                    # available while retaining the bounded read size.
+                    reader = getattr(upstream, "read1", None) or upstream.read
+                    chunk = reader(64 * 1024)
                     if not chunk:
                         break
                     yield chunk
+            except (OSError, TimeoutError, urllib.error.URLError):
+                # A disconnected observer is equivalent to the stream ending;
+                # the browser's EventSource will reconnect on its own.
+                return
             finally:
                 upstream.close()
         return Response(stream_with_context(_events()), content_type="text/event-stream", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})

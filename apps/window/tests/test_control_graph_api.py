@@ -8,6 +8,7 @@ from unittest.mock import patch
 from graph.control_contract import materialize_control_graph
 from graph.control_store import ControlGraphStore
 import server
+import control_plane_view
 
 
 class ControlGraphApiTests(unittest.TestCase):
@@ -27,7 +28,29 @@ class ControlGraphApiTests(unittest.TestCase):
         store.advance_current(graph["graph_revision"])
 
     def tearDown(self):
+        control_plane_view._SNAPSHOT_CACHE.clear()
         self.temp.cleanup()
+
+    def test_snapshot_cache_reuses_validated_generation_and_invalidates_selector(self):
+        env = {"FRANK_PREVIEW": "1", "CONTROL_GRAPH_ROOT": str(self.root / "control-graph")}
+        with patch.dict(os.environ, env, clear=False), patch.object(control_plane_view.ControlProvider, "get", wraps=control_plane_view._control_provider().get) as get:
+            first = control_plane_view._snapshot()
+            second = control_plane_view._snapshot()
+            self.assertIn(first["status"], {"ready", "attention"})
+            self.assertEqual(second["status"], first["status"])
+            self.assertEqual(get.call_count, 1)
+            selector = self.root / "control-graph" / "graph" / "current.json"
+            selector.write_text(selector.read_text(encoding="utf-8"), encoding="utf-8")
+            control_plane_view._snapshot()
+            self.assertEqual(get.call_count, 2)
+
+    def test_snapshot_cache_does_not_pin_unavailable_result(self):
+        env = {"CONTROL_GRAPH_ROOT": str(self.root / "control-graph")}
+        unavailable = {"status": "unavailable", "manifest": None, "graph": None, "assertions": None, "findings": None}
+        with patch.dict(os.environ, env, clear=False), patch.object(control_plane_view.ControlProvider, "get", side_effect=[unavailable, unavailable]) as get:
+            control_plane_view._snapshot()
+            control_plane_view._snapshot()
+        self.assertEqual(get.call_count, 2)
 
     def test_flags_are_off_by_default_and_preview_is_explicit(self):
         with patch.dict(os.environ, {"CONTROL_GRAPH_ROOT": str(self.root / "control-graph")}, clear=False):
@@ -68,6 +91,27 @@ class ControlGraphApiTests(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertIn("fetch('/agenttrail/world')", response.get_data(as_text=True))
         self.assertIn("EventSource('/agenttrail/events'", response.get_data(as_text=True))
+
+    def test_agenttrail_events_forwards_small_sse_frames_without_waiting_for_buffer(self):
+        class Upstream:
+            headers = {"Content-Type": "text/event-stream; charset=utf-8"}
+
+            def __init__(self):
+                self.calls = []
+
+            def read1(self, limit):
+                self.calls.append(limit)
+                return b"data: {\"partial\":true}\n\n" if len(self.calls) == 1 else b""
+
+            def close(self):
+                return None
+
+        upstream = Upstream()
+        with patch.object(server, "AGENTTRAIL_URL", "http://127.0.0.1:5340"), patch.object(server.urllib.request, "urlopen", return_value=upstream):
+            response = self.client.get("/agenttrail/events")
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.get_data(), b"data: {\"partial\":true}\n\n")
+        self.assertEqual(upstream.calls, [64 * 1024, 64 * 1024])
 
 
 if __name__ == "__main__":

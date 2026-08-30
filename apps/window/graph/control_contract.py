@@ -339,10 +339,27 @@ def _validate_graph(graph: Mapping[str, Any]) -> None:
         schema = json.loads(_GRAPH_SCHEMA.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:
         raise ControlContractError("control graph schema is unavailable") from error
+    # jsonschema's ``uniqueItems`` compares every pair of objects.  Graphs can
+    # contain tens of thousands of large records, making that check quadratic.
+    # Keep schema validation for shape/type constraints, and perform the three
+    # top-level JSON equality checks with canonical bytes (a linear hash set).
+    for field in ("nodes", "edges", "assertions"):
+        definition = schema.get("properties", {}).get(field)
+        if isinstance(definition, dict):
+            definition.pop("uniqueItems", None)
     errors = sorted(Draft202012Validator(schema).iter_errors(graph), key=lambda item: list(item.path))
     if errors:
         location = "/".join(str(part) for part in errors[0].path) or "<root>"
         raise ControlContractError(f"graph schema validation failed at {location}: {errors[0].message}")
+    for field in ("nodes", "edges", "assertions"):
+        values = graph.get(field)
+        if isinstance(values, list):
+            seen: set[bytes] = set()
+            for value in values:
+                key = canonical_bytes(value)
+                if key in seen:
+                    raise ControlContractError(f"graph schema validation failed at {field}: array items are not unique")
+                seen.add(key)
 
 
 def _validate_catalog(catalog: Mapping[str, Any]) -> None:

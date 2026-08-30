@@ -58,5 +58,19 @@ export async function mountControl(root) {
     if (!file) return;
     try { const value = JSON.parse(await file.text()); const response = await fetch("/api/control/import/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(value) }); const data = await response.json(); inspector.innerHTML = `<div class="operate-empty"><strong>Import preview</strong><span>${esc(data.message || "Preview only; no changes applied.")}</span></div>`; } catch { inspector.innerHTML = `<div class="operate-empty"><strong>Import preview failed</strong><span>Provide one valid JSON object with provenance.</span></div>`; }
   });
-  try { const response = await fetch("/api/control/overview"); const data = await response.json(); if (!response.ok || !data.control || data.control.status === "disabled") throw new Error(); state.textContent = data.control.status === "ready" ? "Evidence-backed" : "Attention"; await load(); } catch { state.textContent = "Disabled by release flag"; records.innerHTML = `<div class="operate-empty"><strong>Control is not promoted in this release.</strong><span>Enable <code>control_read</code> only in the isolated Step 5 preview.</span></div>`; }
+  // These are independent read-only projections. Start the potentially large
+  // overview validation and records projection together so a slow graph read
+  // cannot add another full round trip before records become visible.
+  try {
+    const [overviewResponse] = await Promise.all([
+      fetch("/api/control/overview"),
+      load(),
+    ]);
+    const data = await overviewResponse.json();
+    if (!overviewResponse.ok || !data.control || data.control.status === "disabled") throw new Error();
+    state.textContent = data.control.status === "ready" ? "Evidence-backed" : "Attention";
+  } catch {
+    state.textContent = "Disabled by release flag";
+    records.innerHTML = `<div class="operate-empty"><strong>Control is not promoted in this release.</strong><span>Enable <code>control_read</code> only in the isolated Step 5 preview.</span></div>`;
+  }
 }
