@@ -11,6 +11,7 @@ import argparse
 import hashlib
 import json
 import re
+from datetime import datetime, timezone
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -180,16 +181,47 @@ def _evidence_checks(evidence: dict[str, Any] | None, root: Path, report: Accept
         manifest = root / item["path"]
         if manifest.exists() and _hash(manifest) != item["sha256"]:
             manifest_errors.append(item["path"])
+    browser = evidence.get("browser_review", {})
+    browser_errors = []
+    try:
+        captured = datetime.fromisoformat(str(browser.get("captured_at", "") if isinstance(browser, dict) else "").replace("Z", "+00:00"))
+        age = (datetime.now(timezone.utc) - captured).total_seconds()
+        if captured.tzinfo is None or age > 86400 or age < 0:
+            browser_errors.append("stale browser receipt")
+    except ValueError:
+        browser_errors.append("browser timestamp")
+    if not isinstance(browser, dict) or browser.get("schema") != "frank.browser-journey/v1":
+        browser_errors.append("browser receipt missing or wrong schema")
+    else:
+        if not browser.get("browser_version") or not isinstance(browser.get("viewport"), dict): browser_errors.append("browser metadata")
+        if browser.get("reduced_motion") is not True or browser.get("keyboard") is not True or browser.get("authenticated_context") is not True or browser.get("agenttrail_mutation_denied") is not True or browser.get("csp_verified") is not True: browser_errors.append("interaction/security checks")
+        shots = browser.get("screenshots", {})
+        required_surfaces = {"/", "/mini-frank", "/live", "/map", "/control", "/agenttrail/"}
+        if set(shots) != required_surfaces: browser_errors.append("required surfaces missing")
+        seen = set()
+        if not isinstance(shots, dict) or len(shots) != len(set(shots)):
+            browser_errors.append("duplicate/missing screenshots")
+        else:
+            for item in shots.values():
+                if not isinstance(item, dict) or item.get("path") in seen: browser_errors.append("duplicate screenshot"); continue
+                raw_path = item.get("path", "")
+                path = Path(raw_path)
+                if path.is_absolute(): browser_errors.append("screenshot path escapes evidence root"); continue
+                path = (root / path).resolve()
+                try: path.relative_to(root.resolve())
+                except (ValueError, TypeError): browser_errors.append("screenshot path escapes evidence root"); continue
+                seen.add(raw_path)
+                if not path.is_file() or _hash(path) != item.get("sha256"): browser_errors.append("screenshot hash/file mismatch")
     nonempty_lists = all(isinstance(evidence.get(key), list) and bool(evidence[key]) for key in (
         "projection_manifests", "tests", "runtime_health", "screenshot_hashes"))
     checklist = evidence.get("acceptance_checklist", {})
     checklist_shape = isinstance(checklist, dict) and set(checklist) == REQUIRED_CHECKLIST
     secret_free = not SECRET_MARKERS.search(json.dumps(evidence, sort_keys=True, default=str))
-    status = "fail" if (missing or not hashes_ok or not revisions_ok or manifest_errors
+    status = "fail" if (missing or not hashes_ok or not revisions_ok or manifest_errors or browser_errors
                          or not nonempty_lists or not checklist_shape or not secret_free) else "pass"
     _add(report, "production.receipt-binding", status,
          f"missing={missing}; hashes={hashes_ok}; revisions={revisions_ok}; "
-         f"manifest_errors={manifest_errors}; nonempty={nonempty_lists}; "
+         f"manifest_errors={manifest_errors}; browser_errors={browser_errors}; nonempty={nonempty_lists}; "
          f"checklist_shape={checklist_shape}; secret_free={secret_free}")
     flags = _load(root / "governance" / "control-plane" / "feature-flags.yaml").get("defaults", {})
     supplied_flags = evidence.get("feature_flags", {})
@@ -198,6 +230,9 @@ def _evidence_checks(evidence: dict[str, Any] | None, root: Path, report: Accept
     restore = evidence.get("restore_drill", {})
     restore_ok = isinstance(restore, dict) and restore.get("status") == "passed" and restore.get("receipt_id")
     _add(report, "production.all-flags-bound", "pass" if flags_ok else "fail", "exact all-true Step 8 flag set is bound" if flags_ok else "feature_flags must explicitly contain every declared flag=true")
+    receipt_hashes = {v.get("sha256") for v in browser.get("screenshots", {}).values()} if isinstance(browser, dict) else set()
+    supplied_hashes = set(evidence.get("screenshot_hashes", []))
+    _add(report, "production.screenshot-hash-binding", "pass" if receipt_hashes == supplied_hashes else "fail", "top-level screenshot hashes match browser receipt" if receipt_hashes == supplied_hashes else "screenshot hashes do not match browser receipt")
     _add(report, "production.restore-drill", "pass" if restore_ok else "fail", "restore drill receipt is bound" if restore_ok else "restore_drill.status=passed and receipt_id are required before enabling retention_restore_drills")
     checklist_ok = checklist_shape and all(value is True for value in checklist.values())
     _add(report, "production.acceptance-checklist", "pass" if checklist_ok else "fail", "all final acceptance items explicitly passed" if checklist_ok else "acceptance_checklist must explicitly record true for every final item")

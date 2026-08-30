@@ -102,6 +102,7 @@ class ReleaseStateStore:
             "step8": {"live_view", "map_view", "control_read", "reconciliation_schedules", "runtime_monitoring", "safe_actions", "operational_actions", "source_actions", "cleanup_jobs", "discovery_jobs", "evaluation_jobs", "chat_pattern_candidates", "retention_restore_drills"},
         }
         if not isinstance(flags, dict) or set(flags) != expected[current_stage]: raise ReleaseEvidenceError("feature_flags must exactly match the release stage")
+        if not all(flags.values()): raise ReleaseEvidenceError("release feature flags must all be enabled")
         if any(not isinstance(k, str) or not isinstance(v, bool) for k, v in flags.items()):
             raise ReleaseEvidenceError("feature_flags must be a boolean mapping")
         result = dict(evidence)
@@ -139,6 +140,7 @@ class ReleaseStateStore:
         path = self.root / "current.json"
         if not path.exists(): return None
         pointer = json.loads(path.read_text(encoding="utf-8"))
+        if not isinstance(pointer.get("release_id"), str) or not re.fullmatch(r"[a-z0-9][a-z0-9-]{2,63}", pointer["release_id"]): raise ReleaseEvidenceError("invalid current release pointer")
         record_path = self.records / (pointer.get("release_id", "") + ".json")
         if record_path.is_symlink() or not record_path.is_file(): raise ReleaseEvidenceError("invalid current release pointer")
         record = json.loads(record_path.read_text(encoding="utf-8"))
