@@ -9,6 +9,7 @@ APP = ROOT / "apps" / "window"
 class InfraContractTest(unittest.TestCase):
     def test_window_image_copies_all_imported_runtime_modules(self):
         dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
+        workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")
         self.assertIn("COPY apps/window/connections_agent.py .", dockerfile)
         self.assertIn("COPY apps/window/mini_frank.py .", dockerfile)
         self.assertIn("COPY apps/window/tool_apps ./tool_apps", dockerfile)
@@ -16,6 +17,7 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("COPY apps/window/archify ./archify", dockerfile)
         self.assertIn("COPY apps/window/vendor/archify/archify ./vendor/archify/archify", dockerfile)
         self.assertIn("COPY governance/control-plane/schema ./governance/control-plane/schema", dockerfile)
+        self.assertIn("docker build -f apps/window/Dockerfile -t frank-window:verify .", workflow)
         self.assertIn("archify.mjs validate architecture", dockerfile)
         self.assertIn("archify.mjs check archify/ad-template-process.html", dockerfile)
         self.assertIn("frank.archify-build-validation.v1", dockerfile)

@@ -45,7 +45,7 @@ jobs:
           node --check apps/window/web/js/registry.js
           node --check apps/window/web/js/widgets.js
       - name: Container build
-        run: docker build -t frank-window:verify apps/window
+        run: docker build -f apps/window/Dockerfile -t frank-window:verify .
 
   secrets:
     runs-on: ubuntu-latest
