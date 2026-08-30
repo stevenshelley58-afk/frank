@@ -106,6 +106,7 @@ class MapPipelineTests(unittest.TestCase):
             self.assertEqual([p[0] for p in store.published], ["run-1"])
             self.assertTrue(all(m[2]["preview_only"] for m in store.generations))
             self.assertTrue(all(call[3] is False for call in runner.calls))
+            self.assertTrue(all(call[0][3] == "architecture" for call in runner.calls if call[0][2] in {"validate", "deliver"}))
 
     def test_failure_does_not_publish_or_leak_stderr(self):
         with tempfile.TemporaryDirectory() as directory:

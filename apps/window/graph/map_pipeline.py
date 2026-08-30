@@ -248,7 +248,12 @@ def generate_maps(
                 raise MapPipelineError("Archify projection document is invalid")
             input_path.write_bytes(_canonical(input_document))
             # The adapter receives no command authority: every argv is assembled here.
-            type_name = "workflow_data_flow" if projection_id.endswith("/workflow") else "architecture"
+            # Dispatch from the actual Archify document contract.  A projection
+            # name describes Frank's semantic view; it must not be substituted
+            # for an Archify CLI type when the adapter emitted another schema.
+            type_name = str(input_document.get("diagram_type", "architecture"))
+            if type_name not in {"architecture", "workflow", "sequence", "dataflow", "lifecycle"}:
+                raise MapPipelineError("Archify projection type is invalid")
             remaining = max(0.1, timeout_seconds - (time.monotonic() - started))
             for phase, argv in (
                 ("validate", (pin.node, str(pin.executable), "validate", type_name, str(input_path), "--quality", "showcase", "--json")),
