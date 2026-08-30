@@ -4,6 +4,9 @@ import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, op
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
 import { mountAdStudio } from "./ad-studio.js?v=20260830-builder-escalation-v1";
 import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
+import { mountLive } from "./live.js?v=20260830-step5";
+import { mountMap } from "./map.js?v=20260830-step5";
+import { mountControl } from "./control.js?v=20260830-step5";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -20,6 +23,9 @@ const TITLES = {
   accounts: ["Accounts", "Customer directory; provider actions connect through Hermes later"],
   trace: ["Trace", "One run, fully visible"],
   releases: ["Releases", "Signed and verified"],
+  live: ["Live", "Pinned AgentTrail activity"],
+  map: ["Map", "Validated Archify projections"],
+  control: ["Control", "Evidence-backed read-only records"],
 };
 
 let projects = { projects: [] };
@@ -43,6 +49,10 @@ function show(id, { syncHistory = true } = {}) {
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
   if (syncHistory) syncViewLocation(id);
+  $$(".operate-tab").forEach((button) => button.classList.toggle("is-on", button.dataset.view === id));
+  if (id === "live") void mountLive($("#operate-live"));
+  if (id === "map") void mountMap($("#operate-map"));
+  if (id === "control") void mountControl($("#operate-control"));
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
@@ -74,6 +84,8 @@ function showProject(id) {
   show("project");
   openProjectHome(currentProject);
 }
+
+$$(`.operate-tab[data-view]`).forEach((button) => button.addEventListener("click", () => show(button.dataset.view)));
 
 $$(".rail-item[data-view]").forEach((b) =>
   b.addEventListener("click", () => {
@@ -138,7 +150,7 @@ function openPathView() {
   show(id, { syncHistory: false });
   if (id === "ad-studio") mountAdStudio();
   const canonicalPath = pathForView(id);
-  if (window.location.pathname !== canonicalPath) window.history.replaceState({ view: id }, "", canonicalPath);
+  if (window.location.pathname !== canonicalPath) window.history.replaceState({ view: id }, "", `${canonicalPath}${window.location.search}`);
 }
 window.addEventListener("popstate", openPathView);
 

@@ -29,6 +29,7 @@ import mini_frank
 from memory_inspector import HindsightClient, MemoryInspector, create_blueprint as create_memory_blueprint
 from project_store import ProjectStore, ProjectStoreError
 import vault_broker
+import control_plane_view
 from graph.provider import (
     ReadOnlyProvider,
     ProviderUnavailable,
@@ -1500,6 +1501,66 @@ def ad_studio_implementation_activity():
     return jsonify({"available": True, "source": "agenttrail", "read_only": True, "board": board})
 
 
+# AgentTrail remains the Live authority.  The board is proxied through the
+# authenticated Window origin so its native fleet/repository selectors keep
+# working without making the observer port public.  Mutation paths are denied
+# before prefix stripping; this is intentionally an edge boundary, not an
+# AgentTrail replacement or a second control surface.
+_AGENTTRAIL_READ_PATHS = {"", "/", "/world", "/suggest", "/tree-of", "/summary", "/fleet", "/model", "/events"}
+_AGENTTRAIL_MUTATION_PATHS = {"/setup", "/setup-board", "/spawn", "/hook", "/nudge"}
+
+
+@app.route("/agenttrail", defaults={"agenttrail_path": ""}, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
+@app.route("/agenttrail/", defaults={"agenttrail_path": ""}, methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
+@app.route("/agenttrail/<path:agenttrail_path>", methods=["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"])
+def agenttrail_proxy(agenttrail_path: str):
+    path = "/" + str(agenttrail_path or "").strip("/")
+    if request.method not in {"GET", "HEAD"} or path in _AGENTTRAIL_MUTATION_PATHS:
+        abort(403, description="AgentTrail mutation routes are not available through Frank")
+    if path not in _AGENTTRAIL_READ_PATHS:
+        abort(404)
+    if not AGENTTRAIL_URL:
+        abort(503, description="AgentTrail observer is not configured")
+    target = f"{AGENTTRAIL_URL}{path}"
+    if request.query_string:
+        target += "?" + request.query_string.decode("latin-1")
+    try:
+        upstream = urllib.request.urlopen(urllib.request.Request(target, headers={"Accept": request.headers.get("Accept", "*/*")} ), timeout=5)
+    except urllib.error.HTTPError as error:
+        return Response(error.read(64 * 1024), status=error.code, mimetype="text/plain")
+    except (OSError, urllib.error.URLError):
+        abort(503, description="AgentTrail observer is unavailable")
+    content_type = upstream.headers.get("Content-Type", "text/plain").split(";", 1)[0]
+    if request.method == "HEAD":
+        upstream.close()
+        return Response(status=200, content_type=content_type)
+    if path == "/events":
+        def _events():
+            try:
+                while True:
+                    chunk = upstream.read(64 * 1024)
+                    if not chunk:
+                        break
+                    yield chunk
+            finally:
+                upstream.close()
+        return Response(stream_with_context(_events()), content_type="text/event-stream", headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"})
+    body = upstream.read(4 * 1024 * 1024 + 1)
+    upstream.close()
+    if len(body) > 4 * 1024 * 1024:
+        abort(502, description="AgentTrail response exceeded the Window bound")
+    if path in {"/", ""} and content_type == "text/html":
+        text_body = body.decode("utf-8", errors="replace")
+        # Keep the pinned board same-origin regardless of quote style used by
+        # its bundled JavaScript.  Restrict this to root-relative observer
+        # calls; external URLs and mutation routes are never rewritten into a
+        # more privileged path.
+        text_body = re.sub(r"(fetch\(\s*[\"'])/(?!agenttrail/)", r"\1/agenttrail/", text_body)
+        text_body = re.sub(r"(EventSource\(\s*[\"'])/(?!agenttrail/)", r"\1/agenttrail/", text_body)
+        body = text_body.encode("utf-8")
+    return Response(body, status=200, content_type=content_type, headers={"Cache-Control": "no-store"})
+
+
 def _ad_studio_source(attachment: dict) -> dict:
     target = _upload_target(attachment["id"])
     if target is None or not target.is_file():
@@ -1757,6 +1818,7 @@ home_platform.configure(
 )
 app.register_blueprint(home_platform.api)
 app.register_blueprint(create_graph_blueprint(_graph_provider))
+app.register_blueprint(control_plane_view.api)
 app.register_blueprint(vault_broker.api)
 app.register_blueprint(create_memory_blueprint(MemoryInspector(
     _project_store.get_project,
