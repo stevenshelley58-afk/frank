@@ -20,10 +20,15 @@ from graph.control_inventory import (
     extract_record,
     inventory,
     load_exclusions,
+    _git_head,
 )
 
 
 class ControlInventoryTests(unittest.TestCase):
+    def test_inaccessible_git_marker_is_an_unavailable_revision(self):
+        with patch.object(Path, "exists", side_effect=PermissionError("denied")):
+            self.assertIsNone(_git_head(Path("/root/.claude")))
+
     def test_all_required_kinds_and_metadata_are_deterministic(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp) / "sources"

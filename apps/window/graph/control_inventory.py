@@ -667,9 +667,9 @@ def inventory(
 
 
 def _git_head(root: Path) -> str | None:
-    if not (root / ".git").exists():
-        return None
     try:
+        if not (root / ".git").exists():
+            return None
         result = subprocess.run(("git", "-C", str(root), "rev-parse", "HEAD"), capture_output=True, text=True, timeout=2, check=True)
     except (OSError, subprocess.SubprocessError):
         return None
