@@ -402,7 +402,7 @@ function renderRunDetail(run) {
   renderEventViews();
 }
 
-const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "final-review.started", "final-review.completed", "template.imported"];
+const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "builder.escalated", "final-review.started", "final-review.completed", "template.imported"];
 
 const SAFE_TOOL_LABELS = {
   terminal: "Builder action",
@@ -423,6 +423,28 @@ function redactOperatorText(value) {
     .slice(0, 240);
 }
 
+function safeBuilderEscalationData(event) {
+  const data = event?.data && typeof event.data === "object" ? event.data : {};
+  const value = (field) => Object.prototype.hasOwnProperty.call(data, field) ? data[field] : event?.[field];
+  return {
+    iteration: firstNumber(value("iteration")),
+    from_provider: redactOperatorText(value("from_provider")),
+    from_model: redactOperatorText(value("from_model")),
+    to_provider: redactOperatorText(value("to_provider")),
+    to_model: redactOperatorText(value("to_model")),
+    reason: redactOperatorText(value("reason")),
+    previous_score: firstNumber(value("previous_score")),
+    score: firstNumber(value("score")),
+  };
+}
+
+function builderLabel(provider, model, fallback) {
+  const leaf = clean(model || provider).split("/").pop();
+  if (!leaf) return fallback;
+  const named = leaf.match(/(?:^|[-_.])(luna|sol)$/i);
+  return named ? named[1][0].toUpperCase() + named[1].slice(1).toLowerCase() : leaf.replace(/[-_.]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function safeEventData(event) {
   const data = event?.data || {};
   if (event.kind === "stage.started") return { summary: `Started ${String(event.node_id || "pipeline stage").replaceAll("-", " ")}` };
@@ -431,6 +453,7 @@ function safeEventData(event) {
     iteration: firstNumber(data.iteration), score: firstNumber(data.score),
     reason: redactOperatorText(data.reason), decision: clean(data.decision),
   };
+  if (event.kind === "builder.escalated") return safeBuilderEscalationData(event);
   if (event.kind === "final-review.completed") return { decision: clean(data.decision), reviewer_count: data.reviewer_count };
   if (event.kind === "run.failed") return { error: redactOperatorText(data.error) || "Run failed; diagnostics remain in Hermes." };
   if (event.kind === "template.imported") return { status: "ready" };
@@ -442,6 +465,15 @@ function safeEventSummary(event) {
   if (event.kind === "tool.started" || event.kind === "tool.completed") return data.tool;
   if (event.kind === "stage.started") return data.summary;
   if (event.kind === "iteration.compared" || event.kind === "iteration.revised") return "Iteration " + (data.iteration || "?") + " - " + formatScore(data.score) + " - " + (data.decision || "revise") + (data.reason ? " - " + data.reason : "");
+  if (event.kind === "builder.escalated") {
+    const from = builderLabel(data.from_provider, data.from_model, "previous builder");
+    const to = builderLabel(data.to_provider, data.to_model, "stronger builder");
+    const reason = data.reason === "regression" ? "quality regressed"
+      : data.reason === "insufficient_improvement" ? "two consecutive gains below 0.5"
+        : data.reason.replace(/[_-]+/g, " ");
+    const scores = data.previous_score !== null && data.score !== null ? ` (${formatScore(data.previous_score)} → ${formatScore(data.score)})` : "";
+    return `Builder escalated: ${from} → ${to}${reason ? ` — ${reason}` : ""}${scores}`;
+  }
   if (event.kind === "final-review.completed") return "Two final reviewers - " + (data.decision || "recorded");
   if (event.kind === "run.failed") return data.error;
   if (event.kind === "template.imported") return "Template imported";

@@ -198,7 +198,7 @@
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
               <h3>One source. A live template run.</h3>
-              <ol><li><strong>Read the design</strong><span>Hermes analyses the source design.</span></li><li><strong>Build editable layers</strong><span>The builder creates separate Feed and Story documents.</span></li><li><strong>Render, score, improve</strong><span>One comparator runs per iteration. A score below 9.5 triggers another revision.</span></li><li><strong>Finish automatically</strong><span>After the comparator passes, two final reviewers run automatically.</span></li></ol>
+              <ol><li><strong>Read the design</strong><span>Hermes analyses the source design.</span></li><li><strong>Build editable layers</strong><span>The builder starts cheap, creates separate Feed and Story documents, and switches automatically to the stronger builder after a regression or two consecutive gains below 0.5.</span></li><li><strong>Render, score, improve</strong><span>One comparator runs per iteration. A score below 9.5 triggers another revision.</span></li><li><strong>Finish automatically</strong><span>After the comparator passes, two final reviewers run automatically.</span></li></ol>
               <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
             </aside>
           </div>
@@ -441,6 +441,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260822-background-runs"></script>
+<script type="module" src="/js/app.js?v=20260830-builder-escalation-v1"></script>
 </body>
 </html>
