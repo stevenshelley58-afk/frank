@@ -1,0 +1,38 @@
+# Step 4B isolated definition; disabled until Step 5 promotion and auth proof.
+# Beszel v0.18.8 (source 467f1767132b8b4e68ae6652b3763e3cbf609586) is pinned
+# to the reviewed release; no Frank route is changed here. The profile must be
+# explicitly selected for a controlled test target.
+x-step4b-budget: "hub+agent <= 1 vCPU / 256 MB; retained history <= 1 GB"
+services:
+  beszel:
+    profiles: [step4b-isolated]
+    image: henrygd/beszel:0.18.8@sha256:4c51486968efa0b0a702c1b0967966a2e06fb250b7418f3072d2488faea27c51
+    restart: "no"
+    expose:
+      - "8090"
+    mem_limit: 192m
+    cpus: 0.75
+    read_only: true
+    cap_drop: [ALL]
+    volumes:
+      - beszel_data:/data
+    networks: [beszel_internal]
+  beszel-agent:
+    profiles: [step4b-isolated]
+    image: henrygd/beszel-agent:0.18.8@sha256:3b1939746690e423072b4a99bf4c4af6dd9562a68978a33738a3c4a4cc000c39
+    restart: "no"
+    environment:
+      LISTEN: "45876"
+    expose:
+      - "45876"
+    mem_limit: 64m
+    cpus: 0.25
+    read_only: true
+    cap_drop: [ALL]
+    networks: [beszel_internal]
+volumes:
+  beszel_data:
+    name: frank_step4b_beszel_data
+networks:
+  beszel_internal:
+    internal: true

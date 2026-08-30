@@ -17,3 +17,11 @@ projections:
 manifest_contract:
   required_fields: [projection_id, graph_revision, generation_id, source_revisions, deployed_revisions, generated_at, coverage, exclusions, archify_version, archify_hash, validation_receipt_id, artifact_hash, prior_passing_manifest, freshness, stale_reason]
   conditional_fields: [status, missing_evidence]
+
+archify_contract:
+  executable_path: apps/window/vendor/archify/archify/bin/archify.mjs
+  version: v2.15.0-39-gb36d79f
+  sha256: sha256:86aa44dd70ddcfb81def18bea9ae5e44a6cd04293d80f92792ed1b165a113b67
+  quality_profile: showcase
+  commands: [validate, deliver, visual-check]
+  showcase_checks: [single_svg, finite_svg, orthogonal_arrows, label_route_clearance, relationship_crossings, relationship_corridors, container_border_runs, route_rhythm, legend_clearance]
