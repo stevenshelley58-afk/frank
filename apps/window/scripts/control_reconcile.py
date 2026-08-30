@@ -845,7 +845,9 @@ class Collector:
         )
         root_data, root = _prepare_reconciliation_root(self.data_root)
         try:
-            os.chmod(root_data, 0o750)
+            # Keep the parent traversable for frank without exposing its
+            # contents; reconciliations themselves remain private.
+            os.chmod(root_data, 0o751)
             os.chmod(root, 0o750)
         except OSError:
             pass

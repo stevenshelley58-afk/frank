@@ -39,6 +39,7 @@ NODE_KINDS = frozenset({
     "plugin", "cli", "mcp", "app", "library", "template", "worker",
     "data_store", "volume", "artifact", "deployment", "release", "observer",
     "source", "evidence_receipt", "cleanup_finding", "change_proposal",
+    "gate", "hook", "policy", "runbook",
     "observed-only/unclassified",
 })
 DEFAULT_STATE = {
@@ -280,6 +281,8 @@ def _records(
         if "id" not in node:
             raise ControlContractError("graph node ID is required")
         node["id"] = _stable(node["id"])
+        if node.get("kind") == "ci_gate": node["kind"] = "gate"
+        elif node.get("kind") == "runtime_policy": node["kind"] = "policy"
         nodes.append(node)
     edges: list[dict[str, Any]] = []
     for raw in raw_edges:

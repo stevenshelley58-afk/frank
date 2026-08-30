@@ -37,7 +37,7 @@
       "required": ["id", "kind", "state_axes", "layer", "evidence_receipt_ids"],
       "properties": {
         "id": {"$ref": "#/$defs/stable_id"},
-        "kind": {"enum": ["host", "edge", "route", "service", "container", "systemd_unit", "repo", "checkout", "project", "component", "capability", "rule", "skill", "tool", "plugin", "cli", "mcp", "app", "library", "template", "worker", "data_store", "volume", "artifact", "deployment", "release", "observer", "source", "evidence_receipt", "cleanup_finding", "change_proposal", "observed-only/unclassified"]},
+        "kind": {"enum": ["host", "edge", "route", "service", "container", "systemd_unit", "repo", "checkout", "project", "component", "capability", "rule", "skill", "tool", "plugin", "cli", "mcp", "app", "library", "template", "worker", "data_store", "volume", "artifact", "deployment", "release", "observer", "source", "evidence_receipt", "cleanup_finding", "change_proposal", "gate", "hook", "policy", "runbook", "observed-only/unclassified"]},
         "state_axes": {"$ref": "#/$defs/state_axes"},
         "layer": {"enum": ["declared", "observed"]},
         "evidence_receipt_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/receipt_id"}}

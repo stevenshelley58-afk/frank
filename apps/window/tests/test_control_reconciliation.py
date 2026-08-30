@@ -1,4 +1,5 @@
 import json
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -34,6 +35,13 @@ class ControlReconciliationTests(unittest.TestCase):
         self.assertTrue(receipt.is_file())
         self.assertEqual(json.loads(receipt.read_text())["facts"]["identity"]["token"], "[REDACTED]")
         self.assertEqual(json.loads(receipt.read_text())["facts"]["systemd"]["instruction_body"], "[REDACTED_INSTRUCTION_BODY]")
+
+    @unittest.skipUnless(os.name != "nt", "POSIX directory mode semantics required")
+    def test_reconciliation_parent_preserves_traversal_without_listing(self):
+        result = Collector(self.root, sources=self.sources).run("fast")
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(os.stat(self.root).st_mode & 0o007, 0o001)
+        self.assertEqual(os.stat(self.root / "reconciliations").st_mode & 0o007, 0)
 
     def test_success_receipt_has_frozen_contract_and_schedule_freshness(self):
         result = Collector(self.root, sources=self.sources).run("fast")

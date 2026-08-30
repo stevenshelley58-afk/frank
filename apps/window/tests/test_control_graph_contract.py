@@ -32,6 +32,22 @@ RUNTIME_CATALOG = {
 }
 
 class ControlGraphContractTest(unittest.TestCase):
+    def test_inventory_kinds_normalize_to_schema_valid_graph_kinds(self):
+        observed = {
+            "nodes": [
+                {"id": "gate:verify", "kind": "ci_gate", "_accepted_classification": True},
+                {"id": "policy:runtime", "kind": "runtime_policy", "_accepted_classification": True},
+                {"id": "hook:deploy", "kind": "hook", "_accepted_classification": True},
+                {"id": "runbook:release", "kind": "runbook", "_accepted_classification": True},
+            ],
+            "relationships": [],
+        }
+        graph, _, _ = materialize_control_graph(DECLARED, observed)
+        kinds = {node["id"]: node["kind"] for node in graph["nodes"]}
+        self.assertEqual(kinds["gate:verify"], "gate")
+        self.assertEqual(kinds["policy:runtime"], "policy")
+        self.assertEqual(kinds["hook:deploy"], "hook")
+        self.assertEqual(kinds["runbook:release"], "runbook")
     def test_shallow_image_path_does_not_crash_repository_resolution(self):
         with tempfile.TemporaryDirectory() as tmp:
             shallow = Path(tmp) / "app" / "graph" / "control_contract.py"
@@ -68,6 +84,17 @@ class ControlGraphContractTest(unittest.TestCase):
             self.assertEqual(ControlProvider(store).snapshot()["status"], "ready")
             (Path(tmp) / "graph" / "current.json").unlink()
             self.assertEqual(ControlProvider(store).snapshot()["status"], "empty")
+
+    @unittest.skipUnless(os.name != "nt", "POSIX directory mode semantics required")
+    def test_store_parent_is_traversable_but_graph_is_not_listable(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "control-graph"
+            store = ControlGraphStore(root)
+            schedules = root / "schedules"
+            schedules.mkdir(mode=0o750)
+            self.assertEqual(os.stat(root).st_mode & 0o007, 0o001)
+            self.assertEqual(os.stat(store.graph_root).st_mode & 0o007, 0)
+            self.assertEqual(os.stat(schedules).st_mode & 0o007, 0)
 
     def test_map_generator_resolves_only_a_hash_verified_store_pointer(self):
         with tempfile.TemporaryDirectory() as tmp:

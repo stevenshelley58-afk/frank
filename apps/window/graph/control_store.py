@@ -28,7 +28,9 @@ class ControlGraphStore:
         self.graph_root = self.root / "graph"
         self._ensure_directory(self.root)
         self._ensure_directory(self.graph_root)
-        os.chmod(self.root, 0o750)
+        # The parent is traversable by the locked report-job account, while
+        # graph generations remain private and non-listable.
+        os.chmod(self.root, 0o751)
         os.chmod(self.graph_root, 0o750)
 
     @staticmethod
