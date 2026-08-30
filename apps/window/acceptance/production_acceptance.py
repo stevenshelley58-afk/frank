@@ -165,11 +165,40 @@ def _static_checks(root: Path, report: AcceptanceReport) -> None:
          "competing persistent service names found in Window compose" if local_stack else "Window compose contains no competing control-plane stack")
 
 
-def _evidence_checks(evidence: dict[str, Any] | None, root: Path, report: AcceptanceReport, require_live: bool) -> None:
+def _canonical_hash(value: Any) -> str:
+    """Hash the canonical JSON representation used by release records."""
+    return "sha256:" + hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+def _regular_beneath(root: Path, raw: Any) -> Path | None:
+    """Resolve an evidence component without allowing a symlink escape."""
+    if not isinstance(raw, str) or not raw or Path(raw).is_absolute() or root.is_symlink():
+        return None
+    candidate = root / raw
+    try:
+        candidate.relative_to(root)
+        relative = candidate.relative_to(root)
+    except ValueError:
+        return None
+    cursor = root
+    for part in relative.parts:
+        cursor = cursor / part
+        if cursor.is_symlink():
+            return None
+    try:
+        resolved = candidate.resolve(strict=True)
+        resolved.relative_to(root.resolve(strict=True))
+    except (OSError, ValueError):
+        return None
+    return resolved if resolved.is_file() and not resolved.is_symlink() else None
+
+
+def _evidence_checks(evidence: dict[str, Any] | None, root: Path, report: AcceptanceReport, require_live: bool, evidence_root: Path | None = None) -> None:
     if not evidence:
         _add(report, "production.evidence", "fail" if require_live else "pending", "provide a real Step 8 release receipt; no live evidence fabricated")
         return
-    required = {"source_sha", "image_digest", "deployed_sha", "graph_revision", "projection_manifests", "tests", "runtime_health", "browser_review", "screenshot_hashes", "reviewer", "rollback_target", "feature_flag_hash", "timestamp", "acceptance_checklist"}
+    evidence_root = evidence_root or root
+    required = {"source_sha", "image_digest", "deployed_sha", "graph_revision", "projection_manifests", "tests", "runtime_health", "browser_review", "screenshot_hashes", "reviewer", "rollback_target", "feature_flag_hash", "feature_flags", "timestamp", "acceptance_checklist"}
     missing = sorted(required - set(evidence))
     hashes_ok = all(isinstance(evidence.get(key), str) and SHA256.fullmatch(evidence[key]) for key in ("image_digest", "graph_revision", "feature_flag_hash") if key in evidence)
     revisions_ok = all(isinstance(evidence.get(key), str) and SHA.fullmatch(evidence[key]) for key in ("source_sha", "deployed_sha") if key in evidence)
@@ -178,8 +207,8 @@ def _evidence_checks(evidence: dict[str, Any] | None, root: Path, report: Accept
         if not isinstance(item, dict) or not item.get("path") or not SHA256.fullmatch(str(item.get("sha256", ""))):
             manifest_errors.append("path/hash")
             continue
-        manifest = root / item["path"]
-        if manifest.exists() and _hash(manifest) != item["sha256"]:
+        manifest = _regular_beneath(root, item["path"])
+        if manifest is None or _hash(manifest) != item["sha256"]:
             manifest_errors.append(item["path"])
     browser = evidence.get("browser_review", {})
     browser_errors = []
@@ -190,28 +219,26 @@ def _evidence_checks(evidence: dict[str, Any] | None, root: Path, report: Accept
             browser_errors.append("stale browser receipt")
     except ValueError:
         browser_errors.append("browser timestamp")
-    if not isinstance(browser, dict) or browser.get("schema") != "frank.browser-journey/v1":
+    if not isinstance(browser, dict) or browser.get("schema") != "frank.browser-journey/v2" or browser.get("status") != "pass":
         browser_errors.append("browser receipt missing or wrong schema")
     else:
-        if not browser.get("browser_version") or not isinstance(browser.get("viewport"), dict): browser_errors.append("browser metadata")
-        if browser.get("reduced_motion") is not True or browser.get("keyboard") is not True or browser.get("authenticated_context") is not True or browser.get("agenttrail_mutation_denied") is not True or browser.get("csp_verified") is not True: browser_errors.append("interaction/security checks")
-        shots = browser.get("screenshots", {})
+        if not browser.get("browser_version") or browser.get("authenticated_context") is not True: browser_errors.append("browser metadata")
+        journeys = browser.get("journeys")
+        if not isinstance(journeys, dict) or set(journeys) != {"desktop", "mobile"}: browser_errors.append("both viewports missing")
         required_surfaces = {"/", "/mini-frank", "/live", "/map", "/control", "/agenttrail/"}
-        if set(shots) != required_surfaces: browser_errors.append("required surfaces missing")
-        seen = set()
-        if not isinstance(shots, dict) or len(shots) != len(set(shots)):
-            browser_errors.append("duplicate/missing screenshots")
-        else:
+        expected_outcomes = {"csp", "keyboard", "reduced_motion", "mini_frank_preserved", "live_navigation", "map_navigation", "map_artifact", "control_navigation", "records", "runtime_summary", "export", "import_preview", "agenttrail_mutation_denied", "no_overflow"}
+        for name in ("desktop", "mobile"):
+            journey = journeys.get(name, {}) if isinstance(journeys, dict) else {}
+            if not isinstance(journey, dict) or journey.get("viewport") != ({"width": 1280, "height": 800} if name == "desktop" else {"width": 390, "height": 844}): browser_errors.append(f"{name} viewport")
+            outcomes = journey.get("outcomes", {}) if isinstance(journey, dict) else {}
+            if not isinstance(outcomes, dict) or set(outcomes) != expected_outcomes or not all(value is True for value in outcomes.values()): browser_errors.append(f"{name} outcomes")
+            shots = journey.get("screenshots", {}) if isinstance(journey, dict) else {}
+            if not isinstance(shots, dict) or set(shots) != required_surfaces: browser_errors.append(f"{name} screenshots"); continue
             for item in shots.values():
-                if not isinstance(item, dict) or item.get("path") in seen: browser_errors.append("duplicate screenshot"); continue
-                raw_path = item.get("path", "")
-                path = Path(raw_path)
-                if path.is_absolute(): browser_errors.append("screenshot path escapes evidence root"); continue
-                path = (root / path).resolve()
-                try: path.relative_to(root.resolve())
-                except (ValueError, TypeError): browser_errors.append("screenshot path escapes evidence root"); continue
-                seen.add(raw_path)
-                if not path.is_file() or _hash(path) != item.get("sha256"): browser_errors.append("screenshot hash/file mismatch")
+                if not isinstance(item, dict): browser_errors.append("invalid screenshot"); continue
+                path = _regular_beneath(evidence_root, item.get("path"))
+                if path is None or not SHA256.fullmatch(str(item.get("sha256", ""))) or _hash(path) != item.get("sha256"):
+                    browser_errors.append("screenshot hash/file mismatch")
     nonempty_lists = all(isinstance(evidence.get(key), list) and bool(evidence[key]) for key in (
         "projection_manifests", "tests", "runtime_health", "screenshot_hashes"))
     checklist = evidence.get("acceptance_checklist", {})
@@ -226,13 +253,14 @@ def _evidence_checks(evidence: dict[str, Any] | None, root: Path, report: Accept
     flags = _load(root / "governance" / "control-plane" / "feature-flags.yaml").get("defaults", {})
     supplied_flags = evidence.get("feature_flags", {})
     expected = {key: True for key in flags}
-    flags_ok = supplied_flags == expected
+    flags_ok = supplied_flags == expected and evidence.get("feature_flag_hash") == _canonical_hash(expected)
     restore = evidence.get("restore_drill", {})
     restore_ok = isinstance(restore, dict) and restore.get("status") == "passed" and restore.get("receipt_id")
     _add(report, "production.all-flags-bound", "pass" if flags_ok else "fail", "exact all-true Step 8 flag set is bound" if flags_ok else "feature_flags must explicitly contain every declared flag=true")
-    receipt_hashes = {v.get("sha256") for v in browser.get("screenshots", {}).values()} if isinstance(browser, dict) else set()
-    supplied_hashes = set(evidence.get("screenshot_hashes", []))
-    _add(report, "production.screenshot-hash-binding", "pass" if receipt_hashes == supplied_hashes else "fail", "top-level screenshot hashes match browser receipt" if receipt_hashes == supplied_hashes else "screenshot hashes do not match browser receipt")
+    receipt_hashes = sorted(item.get("sha256") for journey in browser.get("journeys", {}).values() for item in journey.get("screenshots", {}).values()) if isinstance(browser, dict) else []
+    supplied_hashes = evidence.get("screenshot_hashes", [])
+    hashes_bound = isinstance(supplied_hashes, list) and receipt_hashes == sorted(supplied_hashes) and len(supplied_hashes) == len(set(supplied_hashes))
+    _add(report, "production.screenshot-hash-binding", "pass" if hashes_bound else "fail", "top-level screenshot hashes exactly match browser receipt" if hashes_bound else "screenshot hashes do not exactly match browser receipt")
     _add(report, "production.restore-drill", "pass" if restore_ok else "fail", "restore drill receipt is bound" if restore_ok else "restore_drill.status=passed and receipt_id are required before enabling retention_restore_drills")
     checklist_ok = checklist_shape and all(value is True for value in checklist.values())
     _add(report, "production.acceptance-checklist", "pass" if checklist_ok else "fail", "all final acceptance items explicitly passed" if checklist_ok else "acceptance_checklist must explicitly record true for every final item")
@@ -242,7 +270,7 @@ def run_acceptance(root: Path, evidence_path: Path | None = None, require_live: 
     report = AcceptanceReport()
     _static_checks(root, report)
     evidence = _load(evidence_path) if evidence_path else None
-    _evidence_checks(evidence, root, report, require_live)
+    _evidence_checks(evidence, root, report, require_live, evidence_path.parent if evidence_path else None)
     return report
 
 

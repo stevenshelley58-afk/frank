@@ -7,6 +7,22 @@ No step publishes the private ingress or weakens public Caddy header policy.
 
 ## Complete production release
 
+### Browser acceptance setup
+
+Run this from `apps/window` in a disposable virtual environment before the
+release gate. The browser harness refuses synthetic evidence and requires an
+operator-supplied Playwright storage-state file:
+
+```sh
+python -m pip install -r requirements-acceptance.txt
+python -m playwright install chromium
+FRANK_STORAGE_STATE=/secure/frank-storage-state.json \
+  python acceptance/browser_journey.py --url https://frank.fail --output /secure/frank-browser-receipt.json
+```
+
+The storage-state file is never committed or printed. The receipt contains
+both desktop and mobile journeys and must be reviewed by the release gate.
+
 Activate private Infisical and the Hermes Connections bundle before the Window
 deploy. The activation generates dedicated keys on the VPS, bootstraps a
 fixed-scope Universal Auth identity, enables the opt-in Hermes plugin, starts

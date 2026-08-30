@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -49,5 +50,19 @@ class ReleaseStateTests(unittest.TestCase):
             s.create_release('rel-1','step5',ev); s.advance_current('rel-1')
             (Path(d)/'releases'/'rel-1.json').write_text('{}')
             with self.assertRaises(ReleaseEvidenceError): s.read_current()
+
+    @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
+    def test_symlinked_current_pointer_is_rejected(self):
+        with tempfile.TemporaryDirectory() as d:
+            s = ReleaseStateStore(Path(d)); ev = dict(BASE, feature_flags={k: FLAGS[k] for k in list(FLAGS)[:5]})
+            s.create_release('rel-1', 'step5', ev); s.advance_current('rel-1')
+            current = Path(d) / 'current.json'; saved = Path(d) / 'saved-current.json'
+            current.replace(saved)
+            try:
+                os.symlink(saved, current)
+            except OSError:
+                self.skipTest("symlink creation unavailable")
+            with self.assertRaises(ReleaseEvidenceError):
+                s.read_current()
 
 if __name__ == '__main__': unittest.main()

@@ -1,0 +1,3 @@
+# Optional, operator-run production acceptance dependency. Keep separate from
+# the Window image: acceptance owns the browser and its local Chromium install.
+playwright==1.62.0
