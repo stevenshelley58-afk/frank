@@ -9,8 +9,10 @@ applies_when: [catalog and evidence reconciliation]
 does_not_apply_when: [arbitrary shell execution]
 scope_ids: [project:frank, vps:dedicated]
 source_locator: governance/control-plane/catalog.yaml
-source_revision: 366f4bacad6294261a57751289121193ac162b08
-content_hash: sha256:6f6a854395541a27303cc4ca5e7f827180790bf81cccb28f18b05d5f1a58bffc
+# The catalog is this release candidate's declaration, so validation must use
+# the checked-in candidate bytes rather than the frozen Step 0 snapshot.
+source_revision: release-candidate-29e7026f59a4eed11892bf17a5dfd275f2ab7a6b
+content_hash: sha256:c4ae2db0423acf522ec236f307a2c2943b75666cb727883d4a3fde2a1c26dd23
 authority_tier: repo
 enforcement: ci
 state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: read_only}

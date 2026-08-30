@@ -1,5 +1,8 @@
 schema_version: 1
-revision: rev_366f4bacad6294261a57751289121193ac162b08
+# This is a source declaration for the Mini Frank release candidate.  Its
+# production state stays explicitly disabled until the VPS deploy receipt is
+# captured; do not let a source change masquerade as a deployed route.
+revision: rev_29e7026f59a4eed11892bf17a5dfd275f2ab7a6b
 
 nodes:
   - id: vps:dedicated
@@ -92,6 +95,26 @@ nodes:
     title: Frank loopback route
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+  - id: route:mini-frank-public
+    kind: route
+    title: Mini Frank public product route
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
+    evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]
+  - id: route:mini-frank-owner-artifacts
+    kind: route
+    title: Mini Frank owner artifact route
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
+    evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]
+  - id: route:mini-frank-shared-artifacts
+    kind: route
+    title: Mini Frank shared artifact route
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
+    evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]
+  - id: route:mini-frank-published-artifacts
+    kind: route
+    title: Mini Frank published artifact route
+    state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
+    evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]
   - id: route:blockwise-health
     kind: route
     title: Blockwise public health route
@@ -231,8 +254,14 @@ relationships:
   - {id: edge:frank/repo-owns-checkout, type: owns, from: repo:frank, to: repo:frank-production-checkout, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:window/exposes-public-route, type: exposes, from: service:frank-window, to: route:frank-public, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:window/exposes-loopback-route, type: exposes, from: service:frank-window, to: route:frank-loopback, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:window/exposes-mini-frank-public, type: exposes, from: service:frank-window, to: route:mini-frank-public, evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]}
+  - {id: edge:window/exposes-mini-frank-owner-artifacts, type: exposes, from: service:frank-window, to: route:mini-frank-owner-artifacts, evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]}
+  - {id: edge:window/exposes-mini-frank-shared-artifacts, type: exposes, from: service:frank-window, to: route:mini-frank-shared-artifacts, evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]}
+  - {id: edge:window/exposes-mini-frank-published-artifacts, type: exposes, from: service:frank-window, to: route:mini-frank-published-artifacts, evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]}
   - {id: edge:blockwise/exposes-health-route, type: exposes, from: service:blockwise-app, to: route:blockwise-health, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:window/writes-data, type: writes, from: service:frank-window, to: store:frank-window-data, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
+  - {id: edge:window/writes-mini-frank-projects, type: writes, from: service:frank-window, to: store:mini-frank-projects, evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]}
+  - {id: edge:mini-frank/uses-window, type: uses, from: project:mini-frank, to: service:frank-window, evidence_receipt_ids: [receipt:mini-frank/surface-source-20260830-001]}
   - {id: edge:mini-frank/owns-project-store, type: owns, from: project:mini-frank, to: store:mini-frank-projects, evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]}
   - {id: edge:blockwise/app-reads-db, type: reads, from: service:blockwise-app, to: store:blockwise-db, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}
   - {id: edge:blockwise/rest-reads-db, type: reads, from: service:blockwise-rest, to: store:blockwise-db, evidence_receipt_ids: [receipt:inventory/step-2-vps-20260830-001]}

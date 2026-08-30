@@ -121,6 +121,24 @@ evidence_status:
   graph_authority_tree: governance/control-plane
   competing_vps_graph_tree: absent
 
+# Source verification for the Mini release candidate is deliberately separate
+# from the frozen Step 0/1 VPS receipts.  It declares the routes and the one
+# Window owner without claiming that this revision is already deployed.
+mini_frank_surface_release_candidate:
+  status: source_verified_pending_deploy
+  source_revision: 29e7026f59a4eed11892bf17a5dfd275f2ab7a6b
+  catalog_revision: rev_29e7026f59a4eed11892bf17a5dfd275f2ab7a6b
+  deployment_state: not_deployed
+  receipt_id: receipt:mini-frank/surface-source-20260830-001
+  receipt_path: governance/control-plane/evidence/mini-frank-surface-source-20260830-001.yaml
+  receipt_manifest_path: governance/control-plane/evidence/mini-frank-surface-source-20260830-001.sha256
+  receipt_sha256: 7468edc56b5a87113a07ddff605bcb1b003dc9402427ee2eb65bca4b28209f19
+  routes:
+    - route:mini-frank-public
+    - route:mini-frank-owner-artifacts
+    - route:mini-frank-shared-artifacts
+    - route:mini-frank-published-artifacts
+
 feature_flags:
   active_release_contract: step_1_contract_accepted
   expected_declared_defaults: all_false

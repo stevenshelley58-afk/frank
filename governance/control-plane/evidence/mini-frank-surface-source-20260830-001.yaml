@@ -1,0 +1,25 @@
+id: receipt:mini-frank/surface-source-20260830-001
+kind: source_contract
+subject_ids:
+  - project:mini-frank
+  - service:frank-window
+  - route:mini-frank-public
+  - route:mini-frank-owner-artifacts
+  - route:mini-frank-shared-artifacts
+  - route:mini-frank-published-artifacts
+producer: codex-mini-frank-build
+source_revision_set:
+  project:frank: 29e7026f59a4eed11892bf17a5dfd275f2ab7a6b
+  catalog: rev_29e7026f59a4eed11892bf17a5dfd275f2ab7a6b
+deployed_revision_set: {}
+captured_at: "2026-08-30T11:35:12Z"
+fresh_until: null
+outcome: pass
+evidence_uris:
+  - source:apps/window/Caddyfile
+  - source:apps/window/server.py
+  - source:apps/window/mini_frank.py
+  - test:apps/window/tests/test_public_routes.py
+  - test:apps/window/tests/test_mini_product_backend.py
+  - test:apps/window/tests/view_routing.test.mjs
+redaction: secret_filtered

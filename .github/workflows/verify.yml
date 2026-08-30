@@ -48,7 +48,7 @@ jobs:
           while IFS= read -r -d '' file; do
             node --check "$file"
           done < <(find apps/window/web/mini -type f \( -name '*.js' -o -name '*.mjs' \) -print0)
-          node --test apps/window/tests/mini_*.test.mjs
+          node --test apps/window/tests/mini_*.test.mjs apps/window/tests/view_routing.test.mjs
       - name: Container build
         run: docker build -f apps/window/Dockerfile -t frank-window:verify .
 
