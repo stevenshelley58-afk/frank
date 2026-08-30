@@ -81,14 +81,23 @@ class EstateProjectionTests(unittest.TestCase):
 
     def test_exact_mapping_requires_source_and_active_runtime_evidence(self):
         graph = self.graph()
-        graph["nodes"].append(node("project:ad-template-builder", "project", "Ad Template Builder"))
-        graph["edges"].append(edge("edge:proved-consumes", "project:ad-template-builder", "project:blockwise", "consumes"))
-        mapping = {"id": "mapping:ad-template-builder/blockwise", "canonical_id": "project:ad-template-builder", "destination_id_or_path": "project:blockwise", "status": "verified", "confidence": "high", "evidence_receipt_id": "receipt:mapping/primary-001", "source_revision": "a" * 40}
+        graph["nodes"].append(node("component:frank/ad-template-builder/live", "component", "Live stage"))
+        graph["edges"].append(edge("edge:proved-consumes", "component:frank/ad-template-builder/live", "project:blockwise", "consumes"))
+        mapping = {"id": "mapping:ad-template-builder/blockwise", "canonical_id": "capability:frank/ad-template-builder", "destination_id_or_path": "project:blockwise", "status": "verified", "confidence": "high", "evidence_receipt_id": "receipt:mapping/primary-001", "source_revision": "a" * 40}
         evidence = {"source_contract": {"receipt_id": "receipt:mapping/source-contract-001"}, "active_runtime": {"receipt_id": "receipt:mapping/runtime-001"}}
         result = build_projection(graph, "projection:ad-template-builder/architecture", mappings=[mapping], evidence=evidence)
         consumes = [item for item in result["relationships"] if item.get("relationship") == "consumes"]
         self.assertEqual(len(consumes), 1)
         self.assertEqual(result["mappings"][0]["evidence_receipt_ids"], ["receipt:mapping/primary-001", "receipt:mapping/runtime-001", "receipt:mapping/source-contract-001"])
+
+    def test_verified_mapping_does_not_authorize_an_unrelated_ad_consumer(self):
+        graph = self.graph()
+        graph["nodes"].append(node("component:frank/ad-template-builder/source", "component", "Source stage"))
+        graph["edges"].append(edge("edge:wrong-consumes", "component:frank/ad-template-builder/source", "project:blockwise", "consumes"))
+        mapping = {"id": "mapping:ad-template-builder/blockwise", "canonical_id": "capability:frank/ad-template-builder", "destination_id_or_path": "project:blockwise", "status": "verified", "confidence": "high", "evidence_receipt_id": "receipt:mapping/primary-001", "source_revision": "a" * 40}
+        evidence = {"source_contract": {"receipt_id": "receipt:mapping/source-contract-001"}, "active_runtime": {"receipt_id": "receipt:mapping/runtime-001"}}
+        result = build_projection(graph, "projection:ad-template-builder/architecture", mappings=[mapping], evidence=evidence)
+        self.assertFalse(any(item.get("relationship") == "consumes" for item in result["relationships"]))
 
     def test_conditional_data_flow_is_not_generated_without_mapping_proof(self):
         result = build_projection(self.graph(), "projection:ad-template-builder/data-flow")

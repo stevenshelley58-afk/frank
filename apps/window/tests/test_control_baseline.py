@@ -76,7 +76,13 @@ class ControlBaselineContractTests(unittest.TestCase):
         self.assertIn("id: runtime:hermes-default", self.context)
         self.assertIn("final_state: disabled_and_inactive", self.hermes)
         self.assertIn("active_turn_leases_at_cutover: 0", self.hermes)
-        self.assertIn("ad_template_builder_blockwise_runtime_consumption: unknown", self.context)
+        self.assertIn("ad_template_builder_blockwise_runtime_consumption: verified", self.context)
+        self.assertIn(
+            "ad_template_builder_runtime_consumption_receipt: "
+            "receipt:ad-template-builder/runtime-consumption-20260831-001",
+            self.context,
+        )
+        self.assertIn("runtime_consumption_status: unknown", self.baseline)
         self.assertIn("custom_grill_skill_sources: unknown_after_bounded_search", self.context)
         self.assertIn("status: unavailable", self.context)
 

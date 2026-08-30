@@ -61,7 +61,7 @@ _AD_IDENTITIES = frozenset({
 _AD_WORKFLOW_IDENTITIES = frozenset({"release:frank"})
 _AD_EDGE_RELATIONSHIPS = frozenset({
     "contains", "owns", "uses", "executes", "produces", "validates",
-    "deploys", "depends_on", "consumes",
+    "deploys", "depends_on", "consumes", "routes_to", "replaces",
 })
 _AD_SECONDARY_KINDS = frozenset({
     "artifact", "capability", "cli", "component", "gate", "library",
@@ -399,7 +399,10 @@ def _select(graph: Mapping[str, Any], projection_id: str) -> tuple[list[Mapping[
     selected = [by_id[key] for key in sorted(by_id)]
     selected_ids = set(by_id)
     selected_edges = []
-    workflow_relationships = frozenset({"contains", "owns", "uses", "executes", "produces", "validates", "deploys", "consumes"})
+    workflow_relationships = frozenset({
+        "contains", "owns", "uses", "executes", "produces", "validates",
+        "deploys", "consumes", "routes_to", "replaces",
+    })
     for edge in edges:
         source, target = _edge_endpoints(edge)
         if source in selected_ids and target in selected_ids:
@@ -495,10 +498,11 @@ def build_projection(
             blockwise_endpoints = {"project:blockwise", "service:blockwise-app"}
             if relationship == "consumes" and ({source, target} & blockwise_endpoints):
                 matching_mapping = any(
-                    str(item.get("canonical_id", "")).lower() == source
+                    str(item.get("canonical_id", "")).lower()
+                    == "capability:frank/ad-template-builder"
                     and str(item.get("destination_id_or_path", "")).lower() == target
                     for item in mapping_proof
-                )
+                ) and source == "component:frank/ad-template-builder/live"
                 if not matching_mapping:
                     continue
             safe_edges.append(edge)

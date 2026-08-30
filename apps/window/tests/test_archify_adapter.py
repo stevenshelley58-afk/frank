@@ -176,7 +176,7 @@ class ArchifyAdapterTest(unittest.TestCase):
                 {"id": "edge:window/loopback", "from": "service:frank-window", "to": "route:frank-loopback", "relationship": "exposes"},
             ],
         }
-        diagram, metadata = graph_to_archify(graph, "projection:vps/world")
+        diagram, metadata = graph_to_archify(graph, "projection:ad-template-builder/architecture")
         self.assertEqual(len(diagram["connections"]), 2)
         self.assertEqual({item["label"] for item in diagram["connections"]}, {"exposes"})
         window = next(item for item in diagram["components"] if item["label"] == "Frank Window")
@@ -201,7 +201,7 @@ class ArchifyAdapterTest(unittest.TestCase):
             ],
             "edges": [{"id": "edge:frank/contains-window", "from": "project:frank", "to": "service:frank-window", "relationship": "contains"}],
         }
-        diagram, _ = graph_to_archify(graph, "projection:vps/world")
+        diagram, _ = graph_to_archify(graph, "projection:ad-template-builder/architecture")
         self.assertEqual(diagram["boundaries"][0]["wraps"], [next(item["id"] for item in diagram["components"] if item["label"] == "Frank Window")])
         self.assertGreaterEqual(len(diagram["meta"]["views"]), 1)
         self.assertTrue(diagram["cards"])

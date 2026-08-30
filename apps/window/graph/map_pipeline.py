@@ -293,6 +293,9 @@ def generate_maps(
                 coverage = list(coverage.get("present", ()))
             if not isinstance(coverage, list):
                 raise MapPipelineError("map coverage is invalid")
+            projection_metadata = projection.get("metadata", {})
+            if not isinstance(projection_metadata, Mapping):
+                projection_metadata = {}
             manifest = {
                 "projection_id": projection_id,
                 "graph_revision": graph_revision,
@@ -309,14 +312,29 @@ def generate_maps(
                 "missing_coverage": missing_coverage,
                 "exclusions": projection.get("exclusions", graph_snapshot.get("exclusions", [])),
                 "findings": projection.get("findings", []),
-                "stable_id_map": copy.deepcopy(projection.get("metadata", {}).get("stable_id_map", {})) if isinstance(projection.get("metadata"), Mapping) else {},
-                "relationship_count": int(projection.get("metadata", {}).get("relationship_count", 0)) if isinstance(projection.get("metadata"), Mapping) else 0,
-                "rendered_relationship_count": int(projection.get("metadata", {}).get("rendered_relationship_count", 0)) if isinstance(projection.get("metadata"), Mapping) else 0,
+                "stable_id_map": copy.deepcopy(projection_metadata.get("stable_id_map", {})),
+                "relationship_count": int(projection_metadata.get("relationship_count", 0)),
+                "rendered_relationship_count": int(projection_metadata.get("rendered_relationship_count", 0)),
                 "status": "generated",
                 "preview_only": True,
                 "freshness": "fresh",
                 "stale_reason": None,
             }
+            # Preserve adapter-owned presentation/evidence metadata in the
+            # durable manifest.  These fields explain intentionally compact
+            # diagrams without changing the canonical graph itself.
+            for field in (
+                "supporting_stable_id_map",
+                "supporting_identity_count",
+                "supporting_relationship_count",
+                "rendered_relationship_ids",
+                "represented_relationship_ids",
+                "presentation_groups",
+                "presentation_relationship_groups",
+                "coverage_scope",
+            ):
+                if field in projection_metadata:
+                    manifest[field] = copy.deepcopy(projection_metadata[field])
             manifests[projection_id] = manifest
             _store_call(artifact_store, ("write_generation", "commit_generation"), projection_id, generation_id, manifest, artifact, root=staging)
         _store_call(artifact_store, ("publish_preview", "advance_preview"), run_key, manifests)

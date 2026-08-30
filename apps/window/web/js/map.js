@@ -20,18 +20,23 @@ function mapSummary(row) {
     : 0;
   const relationshipCount = Number.isInteger(manifest.relationship_count) ? manifest.relationship_count : null;
   const renderedRelationshipCount = Number.isInteger(manifest.rendered_relationship_count) ? manifest.rendered_relationship_count : null;
+  const supportingIdentityCount = Number.isInteger(manifest.supporting_identity_count) ? manifest.supporting_identity_count : 0;
+  const supportingRelationshipCount = Number.isInteger(manifest.supporting_relationship_count) ? manifest.supporting_relationship_count : 0;
   const details = [];
-  if (nodeCount) details.push(`${nodeCount} mapped ${nodeCount === 1 ? "record" : "records"}`);
+  if (nodeCount) details.push(supportingIdentityCount ? `${nodeCount} core components` : `${nodeCount} mapped ${nodeCount === 1 ? "record" : "records"}`);
   if (relationshipCount !== null) {
-    details.push(renderedRelationshipCount !== null && renderedRelationshipCount !== relationshipCount
+    details.push(supportingRelationshipCount && renderedRelationshipCount !== null
+      ? `${renderedRelationshipCount} core connections`
+      : renderedRelationshipCount !== null && renderedRelationshipCount !== relationshipCount
       ? `${renderedRelationshipCount} of ${relationshipCount} relationships shown`
       : `${relationshipCount} ${relationshipCount === 1 ? "relationship" : "relationships"}`);
   } else if (Array.isArray(manifest.exclusions) && manifest.exclusions.includes("relationships_render_in_control_graph")) {
     details.push("Relationships are listed in Control");
   }
+  if (supportingIdentityCount || supportingRelationshipCount) details.push(`${supportingIdentityCount + supportingRelationshipCount} supporting evidence facts in Control`);
   details.push(projectionType(row));
   const missing = Array.isArray(manifest.missing_coverage) ? manifest.missing_coverage : [];
-  if (missing.length) details.push(`coverage gaps: ${missing.join(", ")}`);
+  if (missing.length) details.push(`Coverage gaps: ${missing.join(", ")}`);
   const findings = Array.isArray(manifest.findings) ? manifest.findings : [];
   const finding = findings.find((item) => item?.message);
   if (finding) details.push(String(finding.message));

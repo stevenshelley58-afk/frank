@@ -33,6 +33,8 @@ class AdTemplateTopologyContractTests(unittest.TestCase):
             self.assertIn(f"component:frank/ad-template-builder/{stage}", nodes)
         self.assertEqual(edges["edge:ad-studio/routes-tool-runs"]["to"], "route:hermes-tool-runs")
         self.assertEqual(edges["edge:hermes-tool-runs/routes-hermes"]["to"], "runtime:hermes-default")
+        self.assertEqual(edges["edge:ad-template-generator/executes-source"]["from"], "tool:ad-template-generator")
+        self.assertEqual(edges["edge:ad-template-builder/compare-revises-render"]["to"], "component:frank/ad-template-builder/render")
 
     def test_declared_source_files_contain_the_boundaries_the_graph_names(self):
         studio = (ROOT / "apps" / "window" / "web" / "js" / "ad-studio.js").read_text(encoding="utf-8")
@@ -49,8 +51,9 @@ class AdTemplateTopologyContractTests(unittest.TestCase):
         stage_edges = [item for item in edges if item["id"].startswith("edge:ad-template-builder/") and "-to-" in item["id"]]
         self.assertEqual(
             [(item["from"].rsplit("/", 1)[-1], item["to"].rsplit("/", 1)[-1]) for item in stage_edges],
-            [(STAGES[index], STAGES[index - 1]) for index in range(1, len(STAGES))],
+            list(zip(STAGES, STAGES[1:])),
         )
+        self.assertTrue(all(item["type"] == "produces" for item in stage_edges))
         imported = next(item for item in edges if item["id"] == "edge:ad-template-builder/live-consumes-blockwise")
         self.assertEqual(imported["to"], "project:blockwise")
         self.assertEqual(imported["evidence_receipt_ids"], [RECEIPT_ID])
@@ -66,11 +69,29 @@ class AdTemplateTopologyContractTests(unittest.TestCase):
         for item in self.catalog["relationships"]:
             edges.append({"id": item["id"], "from": item["from"], "to": item["to"], "relationship": item["type"]})
         graph = {"graph_revision": "g_" + "a" * 64, "nodes": nodes, "edges": edges}
-        projection = build_projection(graph, "projection:ad-template-builder/architecture")
+        unproved = build_projection(graph, "projection:ad-template-builder/architecture")
+        self.assertFalse(any(item["relationship"] == "consumes" for item in unproved["relationships"]))
+        self.assertTrue(any("No verified Blockwise connection" in item["message"] for item in unproved["findings"]))
+        mapping = next(
+            item
+            for item in yaml.safe_load((CONTROL / "aliases.yaml").read_text(encoding="utf-8"))["external_mappings"]
+            if item["id"] == "mapping:ad-template-builder/blockwise"
+        )
+        evidence = {
+            "source_contract": {"receipt_id": "receipt:baseline/frank-vps-20260830-001"},
+            "active_runtime": {"receipt_id": RECEIPT_ID},
+        }
+        projection = build_projection(
+            graph,
+            "projection:ad-template-builder/architecture",
+            mappings=[mapping],
+            evidence=evidence,
+        )
         selected = {item["id"] for item in projection["nodes"]}
         self.assertTrue({f"component:frank/ad-template-builder/{stage}" for stage in STAGES} <= selected)
         self.assertIn("gate:frank/ad-template-final-review", selected)
-        self.assertFalse(any(item["relationship"] == "consumes" for item in projection["relationships"]))
+        self.assertTrue(any(item["relationship"] == "consumes" for item in projection["relationships"]))
+        self.assertEqual(projection["mappings"][0]["destination_id_or_path"], "project:blockwise")
 
     def test_runtime_receipt_is_schema_valid_and_checksum_bound(self):
         schema = json.loads((CONTROL / "schema" / "receipt.schema.json").read_text(encoding="utf-8"))
