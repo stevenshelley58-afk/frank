@@ -173,31 +173,75 @@ window.addEventListener("frank:new-project-chat", (event) => {
 });
 
 window.addEventListener("frank:ad-studio-run", (event) => {
-    const detail = event.detail || {};
-    void (async () => {
-      const sources = Array.isArray(detail.sources) ? detail.sources : [];
-      const files = sources.filter((source) => source?.kind === "local" && source.file instanceof File).map((source) => source.file);
-      const projectId = String(detail.projectId || "").trim();
-      if (files.length !== 1) throw new Error("Choose exactly one source image from this device.");
+  const detail = event.detail || {};
+  void (async () => {
+    const sources = Array.isArray(detail.sources) ? detail.sources : [];
+    const localSources = sources.filter((source) => source?.kind === "local" && source.file instanceof File);
+    const projectId = String(detail.projectId || "").trim();
+    const settled = new Set();
+    const progress = (source, status, options = {}) => {
+      if (["started", "error"].includes(status)) settled.add(source.key);
+      detail.onProgress?.({ key: source.key, name: source.name, status, ...options });
+    };
+    try {
+      if (localSources.length < 1 || localSources.length > 20 || localSources.length !== sources.length) {
+        throw new Error("Choose between 1 and 20 source images from this device.");
+      }
       if (!projectId) throw new Error("Choose a project.");
-      const fallbackName = String(sources[0]?.name || "source image").replace(/\.[^.]+$/, "");
+      const fallbackName = String(localSources[0]?.name || "source image").replace(/\.[^.]+$/, "");
       const jobName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
-      const uploaded = await uploadFiles(files.map((file) => ({ file, path: file.name })));
-      if (uploaded.length !== 1) throw new Error("The source image was not accepted.");
-    const response = await fetch("/api/ad-studio/runs", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        project_id: projectId,
-        name: jobName,
-        brief: String(detail.brief || "").trim(),
-        attachments: uploaded.map(attachmentPayload),
-      }),
-    });
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok || !data.run?.id) throw new Error(data.error || "Hermes did not start the background job.");
-    detail.resolve?.({ run: data.run, runs: data.runs || [data.run], batchId: data.batch_id });
-  })().catch((error) => detail.reject?.(error));
+      localSources.forEach((source) => progress(source, "uploading"));
+      const uploaded = await uploadFiles(localSources.map((source) => ({ file: source.file, path: source.file.name })));
+      if (uploaded.length !== localSources.length) throw new Error("One or more source images were not accepted.");
+      localSources.forEach((source) => progress(source, "starting"));
+      const response = await fetch("/api/ad-studio/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          name: jobName,
+          brief: String(detail.brief || "").trim(),
+          attachments: uploaded.map(attachmentPayload),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok && !Array.isArray(data.results)) throw new Error(data.error || "Hermes did not start the background jobs.");
+      const runs = Array.isArray(data.runs) ? data.runs.filter((run) => run?.id) : (data.run?.id ? [data.run] : []);
+      const orderedResults = Array.isArray(data.results) ? data.results : [];
+      const failures = [];
+      const usedRuns = new Set();
+      localSources.forEach((source, index) => {
+        const result = orderedResults[index] || {};
+        const accepted = result.status === "accepted";
+        const run = result.run?.id ? result.run : ((accepted || !orderedResults.length) ? runs.find((item) => !usedRuns.has(item.id)) : null);
+        if (run?.id) {
+          usedRuns.add(run.id);
+          progress(source, "started", { run });
+          return;
+        }
+        const errorCode = String(result.error?.code || "");
+        const error = ({
+          source_missing: "This image is no longer available. Add it again.",
+          empty_file: "This image is empty. Choose another file.",
+          unsupported_type: "This file is not a supported image.",
+          type_mismatch: "This file is not a supported image.",
+          invalid_image: "This file does not appear to be a valid image.",
+          file_too_large: "This image is too large.",
+          batch_too_large: "These images are too large to start together.",
+          hermes_rejected: "This image could not be started. Try again.",
+          hermes_unavailable: "This image could not be started just now. Try again.",
+          invalid_hermes_response: "This image could not be started. Try again.",
+        })[errorCode] || (String(result.error?.message || result.error || "").startsWith("[object") ? "" : String(result.error?.message || result.error || "")) || "This image could not be started. Try again.";
+        failures.push({ name: source.name, error });
+        progress(source, "error", { error });
+      });
+      if (!runs.length && !failures.length) throw new Error(data.error || "Hermes did not start the background jobs.");
+      detail.resolve?.({ run: runs[0], runs, failures, results: orderedResults, batchId: data.batch_id });
+    } catch (error) {
+      localSources.filter((source) => !settled.has(source.key)).forEach((source) => progress(source, "error", { error: error.message || "This image could not be started." }));
+      detail.reject?.(error);
+    }
+  })();
 });
 
 function escapeHtml(s) {

@@ -12,12 +12,20 @@ let selectedRunId = "";
 let selectedStage = null;
 let graphHandle = null;
 let selectedFiles = [];
-let sourcePreviewExpanded = false;
+let batchStarting = false;
 const localRunInputs = new Map();
 const previewUrls = new Set();
 let runEvents = [];
 let eventStream = null;
-const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"]);
+const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "tif", "tiff", "webp"]);
+const MAX_BATCH_SOURCES = 20;
+const SOURCE_STATUS = {
+  queued: "Ready",
+  uploading: "Uploading…",
+  starting: "Starting…",
+  started: "Job started",
+  error: "Needs attention",
+};
 
 const clean = (value) => String(value || "").trim();
 const escapeHtml = (value) => clean(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
@@ -87,46 +95,129 @@ function renderSourcePreview() {
   const host = $("#ad-source-preview");
   host.replaceChildren();
   host.classList.toggle("has-items", selectedFiles.length > 0);
-  $("#ad-run-mode").textContent = selectedFiles.length ? "Source selected" : "Awaiting source";
-  sourcePreviewExpanded = false;
-  const visibleSources = selectedFiles.slice(0, 1);
-  visibleSources.forEach((source) => {
+  const runnable = selectedFiles.filter((source) => ["queued", "error"].includes(source.status)).length;
+  $("#ad-run-mode").textContent = selectedFiles.length ? `${selectedFiles.length} image${selectedFiles.length === 1 ? "" : "s"}` : "No images";
+  selectedFiles.forEach((source) => {
     const item = document.createElement("div");
     item.className = "ad-source-item";
+    item.dataset.status = source.status;
     const image = document.createElement("img");
     image.src = source.previewUrl;
     image.alt = source.name;
-    const label = document.createElement("span");
+    const copy = document.createElement("div");
+    copy.className = "ad-source-item-copy";
+    const label = document.createElement("strong");
     label.textContent = source.name;
+    label.title = source.name;
+    const state = document.createElement("span");
+    state.textContent = source.error || SOURCE_STATUS[source.status] || SOURCE_STATUS.queued;
+    state.title = source.error || "";
+    copy.append(label, state);
     const remove = document.createElement("button");
     remove.type = "button";
+    remove.className = "ad-source-remove";
     remove.setAttribute("aria-label", `Remove ${source.name}`);
     remove.textContent = "×";
+    remove.disabled = ["uploading", "starting"].includes(source.status);
     remove.addEventListener("click", () => {
-      selectedFiles = selectedFiles.filter((item) => item.key !== source.key);
-      if (source.kind === "local") {
-        URL.revokeObjectURL(source.previewUrl);
-        previewUrls.delete(source.previewUrl);
-      }
+      removeSource(source.key);
       renderSourcePreview();
     });
-    item.append(image, label, remove);
+    item.append(image, copy, remove);
     host.append(item);
   });
-
+  if (selectedFiles.length) {
+    const summary = document.createElement("div");
+    summary.className = "ad-source-summary";
+    const count = document.createElement("span");
+    count.textContent = batchStarting ? "Starting jobs…" : `${runnable} image${runnable === 1 ? "" : "s"} ready to run`;
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "ad-source-clear";
+    clear.textContent = "Clear queue";
+    clear.disabled = selectedFiles.some((source) => ["uploading", "starting"].includes(source.status));
+    clear.addEventListener("click", () => {
+      clearSourceQueue();
+      renderSourcePreview();
+    });
+    summary.append(count, clear);
+    host.append(summary);
+  }
+  updateRunControls();
 }
 
 function addLocalFiles(files) {
-  const additions = Array.from(files || []).filter((file) => String(file.type || "").startsWith("image/")).map((file) => {
+  const offered = Array.from(files || []);
+  const images = offered.filter((file) => {
+    const extension = String(file.name || "").toLowerCase().split(".").pop();
+    return IMAGE_EXTENSIONS.has(extension);
+  });
+  const existing = new Set(selectedFiles.map((source) => source.key));
+  const additions = images.map((file) => {
+    const key = `local:${file.name}:${file.size}:${file.lastModified}`;
+    if (existing.has(key)) return null;
+    existing.add(key);
     const previewUrl = URL.createObjectURL(file);
     previewUrls.add(previewUrl);
-    return { kind: "local", key: `local:${file.name}:${file.size}:${file.lastModified}`, name: file.name, size: file.size, type: file.type, file, previewUrl };
+    return { kind: "local", key, name: file.name, size: file.size, type: file.type, file, previewUrl, status: "queued", error: "" };
+  }).filter(Boolean);
+  const capacity = Math.max(0, MAX_BATCH_SOURCES - selectedFiles.length);
+  const accepted = additions.slice(0, capacity);
+  additions.slice(capacity).forEach((source) => {
+    URL.revokeObjectURL(source.previewUrl);
+    previewUrls.delete(source.previewUrl);
   });
-  const keep = additions[0];
-  if (!keep) return;
-  for (const source of additions.slice(1)) { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); }
-  selectedFiles.filter((source) => source.kind === "local").forEach((source) => { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); });
-  selectedFiles = [keep];
+  selectedFiles.push(...accepted);
+  const ignored = offered.length - images.length;
+  const duplicates = images.length - additions.length;
+  const overflow = additions.length - accepted.length;
+  const notes = [];
+  if (accepted.length) notes.push(`${accepted.length} image${accepted.length === 1 ? "" : "s"} added.`);
+  if (duplicates) notes.push(`${duplicates} duplicate${duplicates === 1 ? " was" : "s were"} already in the queue.`);
+  if (ignored) notes.push(`${ignored} non-image file${ignored === 1 ? " was" : "s were"} skipped.`);
+  if (overflow) notes.push(`A batch can contain up to ${MAX_BATCH_SOURCES} images.`);
+  const status = $("#ad-run-status");
+  status.classList.toggle("is-error", !accepted.length && (ignored > 0 || overflow > 0));
+  if (notes.length) status.textContent = notes.join(" ");
+  renderSourcePreview();
+}
+
+function removeSource(key) {
+  const source = selectedFiles.find((item) => item.key === key);
+  selectedFiles = selectedFiles.filter((item) => item.key !== key);
+  if (source?.kind === "local") {
+    URL.revokeObjectURL(source.previewUrl);
+    previewUrls.delete(source.previewUrl);
+  }
+}
+
+function clearSourceQueue() {
+  selectedFiles.forEach((source) => {
+    if (source.kind === "local") {
+      URL.revokeObjectURL(source.previewUrl);
+      previewUrls.delete(source.previewUrl);
+    }
+  });
+  selectedFiles = [];
+  const status = $("#ad-run-status");
+  status.classList.remove("is-error");
+  status.textContent = "Add one or more images. Each image becomes its own background job.";
+}
+
+function updateRunControls() {
+  const submit = $("#ad-run-submit");
+  if (!submit) return;
+  const runnable = selectedFiles.filter((source) => ["queued", "error"].includes(source.status)).length;
+  submit.disabled = batchStarting || runnable === 0;
+  submit.textContent = batchStarting ? "Starting…" : runnable ? `Run ${runnable} job${runnable === 1 ? "" : "s"}` : "Run jobs";
+}
+
+function updateSourceStatus(key, status, options = {}) {
+  const source = selectedFiles.find((item) => item.key === key);
+  if (!source) return;
+  source.status = status;
+  source.error = clean(options.error);
+  if (options.run?.id) source.run = options.run;
   renderSourcePreview();
 }
 
@@ -654,12 +745,8 @@ function setupRunForm() {
   input.addEventListener("change", () => {
     addLocalFiles(input.files);
     input.value = "";
-    $("#ad-source-dialog").close();
   });
-  drop.addEventListener("click", openSourceDialog);
-  $("#ad-source-device").addEventListener("click", () => input.click());
-  $("#ad-source-close").addEventListener("click", () => $("#ad-source-dialog").close());
-  $("#ad-source-cancel").addEventListener("click", () => $("#ad-source-dialog").close());
+  drop.addEventListener("click", () => input.click());
   $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); });
   for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.add("is-drag"); });
   for (const type of ["dragleave", "drop"]) drop.addEventListener(type, (event) => {
@@ -670,35 +757,45 @@ function setupRunForm() {
   $("#ad-run-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const status = $("#ad-run-status");
-    const submit = $("#ad-run-submit");
     status.classList.remove("is-error");
-    if (!selectedFiles.length) {
-      status.textContent = "Choose one source image.";
+    const sources = selectedFiles.filter((source) => ["queued", "error"].includes(source.status));
+    if (!sources.length) {
+      status.textContent = selectedFiles.length ? "These images have already started. Clear the queue or add more." : "Add at least one source image.";
       status.classList.add("is-error");
       return;
     }
-    submit.disabled = true;
-    submit.textContent = "Starting…";
-    status.textContent = "Uploading source and starting Hermes…";
+    batchStarting = true;
+    sources.forEach((source) => { source.status = "uploading"; source.error = ""; });
+    renderSourcePreview();
+    status.textContent = `Uploading ${sources.length} image${sources.length === 1 ? "" : "s"}…`;
     try {
       const result = await requestEvent("frank:ad-studio-run", {
-        sources: selectedFiles.slice(0, 1), projectId: $("#ad-run-project").value,
+        sources, projectId: $("#ad-run-project").value,
         name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value),
+        onProgress: ({ key, status: nextStatus, run, error }) => updateSourceStatus(key, nextStatus, { run, error }),
       });
-      const run = result.run;
-      const first = selectedFiles[0];
-      localRunInputs.set(run.id, { url: first.previewUrl, name: first.name });
-      selectedRunId = run.id;
-      status.textContent = `${result.runs.length} background job${result.runs.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
+      const started = Array.isArray(result.runs) ? result.runs : [];
+      const failed = Array.isArray(result.failures) ? result.failures : [];
+      for (const source of sources) {
+        if (!source.run?.id) continue;
+        localRunInputs.set(source.run.id, { url: source.previewUrl, name: source.name });
+      }
+      status.textContent = failed.length
+        ? `${started.length} job${started.length === 1 ? "" : "s"} started. ${failed.length} image${failed.length === 1 ? " needs" : "s need"} attention.`
+        : `${started.length} background job${started.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
+      status.classList.toggle("is-error", failed.length > 0);
       await refreshRunsSafe();
-      activate("runs");
-      await selectRun(run.id);
+      if (started.length) {
+        selectedRunId = started[0].id;
+        activate("runs");
+        if (started.length === 1) await selectRun(started[0].id);
+      }
     } catch (error) {
       status.textContent = error.message || "The job could not be started.";
       status.classList.add("is-error");
     } finally {
-      submit.disabled = false;
-      submit.textContent = "Run job";
+      batchStarting = false;
+      renderSourcePreview();
     }
   });
 }
