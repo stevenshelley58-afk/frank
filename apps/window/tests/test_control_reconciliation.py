@@ -305,7 +305,17 @@ class ControlReconciliationTests(unittest.TestCase):
             "frank-window", "unexpected",
         ))
         self.assertEqual(rejected["status"], "unavailable")
-        self.assertEqual(len(calls), 2)
+        git_blob = source._command((
+            "git", "-C", str(source.ROOT), "show",
+            "b" * 40 + ":governance/control-plane/catalog.yaml",
+        ))
+        self.assertEqual(git_blob["status"], "ready")
+        split_git_blob = source._command((
+            "git", "-C", str(source.ROOT), "show", "b" * 40,
+            "governance/control-plane/catalog.yaml",
+        ))
+        self.assertEqual(split_git_blob["status"], "unavailable")
+        self.assertEqual(len(calls), 3)
 
     def test_discovery_commands_are_fixed_bounded_and_names_are_allowlisted(self):
         source = HostFactSource(runner=lambda argv: SimpleNamespace(returncode=0, stdout=""))

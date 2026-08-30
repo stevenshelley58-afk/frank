@@ -211,12 +211,12 @@ class HostFactSource:
         pipeline_ok = a == ("docker", "exec", "frank-window", "python", "-m", "graph.control_pipeline")
         git_ok = a == ("git", "-C", str(self.ROOT), "rev-parse", "--verify", "HEAD")
         git_blob_ok = (
-            len(a) == 6 and a[:4] == ("git", "-C", str(self.ROOT), "show")
-            and re.fullmatch(r"[0-9a-f]{40}", a[4])
-            and a[5] in {
-                "governance/control-plane/catalog.yaml",
-                "governance/control-plane/schema/catalog.schema.json",
-            }
+            len(a) == 5 and a[:4] == ("git", "-C", str(self.ROOT), "show")
+            and re.fullmatch(
+                r"[0-9a-f]{40}:(?:governance/control-plane/catalog\.yaml|"
+                r"governance/control-plane/schema/catalog\.schema\.json)",
+                a[4],
+            )
         )
         allowed = (docker_ok or docker_discovery_ok or volume_discovery_ok or systemd_ok
                    or systemd_discovery_ok or git_ok or git_blob_ok or pipeline_ok)
@@ -796,8 +796,8 @@ class Collector:
         if not isinstance(approved_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", approved_sha):
             return None
         catalog_command = (
-            "git", "-C", str(self.host_source.ROOT), "show", approved_sha,
-            "governance/control-plane/catalog.yaml",
+            "git", "-C", str(self.host_source.ROOT), "show",
+            f"{approved_sha}:governance/control-plane/catalog.yaml",
         )
         try:
             catalog_result = self.host_source._command(catalog_command)
@@ -810,8 +810,8 @@ class Collector:
             if not isinstance(value, Mapping) or Draft202012Validator is None:
                 return None
             schema_result = self.host_source._command((
-                "git", "-C", str(self.host_source.ROOT), "show", approved_sha,
-                "governance/control-plane/schema/catalog.schema.json",
+                "git", "-C", str(self.host_source.ROOT), "show",
+                f"{approved_sha}:governance/control-plane/schema/catalog.schema.json",
             ))
             if schema_result.get("status") != "ready":
                 return None
