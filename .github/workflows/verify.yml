@@ -12,6 +12,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Baseline provenance tests verify an accepted deployed commit that may
+          # predate HEAD. Keep the commit graph available instead of weakening
+          # that evidence gate for CI's default one-commit checkout.
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
