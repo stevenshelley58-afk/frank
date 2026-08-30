@@ -54,9 +54,24 @@ RUNTIME_PREDICATE = re.compile(
     re.I,
 )
 SAFE_SCOPE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
-_REPOSITORY_ROOT = Path(
-    os.environ.get("FRANK_REPOSITORY_ROOT", str(Path(__file__).resolve().parents[3]))
-).resolve()
+
+
+def _resolve_repository_root(module_path: Path, configured: str | None = None) -> Path:
+    """Resolve the schema root without eagerly indexing shallow image paths."""
+    if configured:
+        return Path(configured).resolve()
+    module = module_path.resolve()
+    for parent in module.parents:
+        if (parent / "governance" / "control-plane" / "schema").is_dir():
+            return parent
+    # Schema loading below remains fail-closed, while imports stay safe in a
+    # minimal image layout such as /app/graph/control_contract.py.
+    return module.parent
+
+
+_REPOSITORY_ROOT = _resolve_repository_root(
+    Path(__file__), os.environ.get("FRANK_REPOSITORY_ROOT")
+)
 _GRAPH_SCHEMA = _REPOSITORY_ROOT / "governance" / "control-plane" / "schema" / "graph.schema.json"
 _CATALOG_SCHEMA = _REPOSITORY_ROOT / "governance" / "control-plane" / "schema" / "catalog.schema.json"
 _SENSITIVE_FIELD = re.compile(

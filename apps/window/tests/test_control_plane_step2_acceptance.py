@@ -180,6 +180,7 @@ class Step2AcceptanceTests(unittest.TestCase):
         self.assertNotRegex(compose, r"(?m)^\s*-\s*/projects:\s*")
         self.assertIn("context: ../..", compose)
         self.assertIn("COPY governance/control-plane/schema ./governance/control-plane/schema", dockerfile)
+        self.assertGreaterEqual(dockerfile.count("COPY apps/window/scripts ./scripts"), 2)
         self.assertIn("ENV FRANK_REPOSITORY_ROOT=/app", dockerfile)
 
 

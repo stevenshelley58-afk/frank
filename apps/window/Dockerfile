@@ -40,6 +40,7 @@ COPY apps/window/vault_broker.py .
 COPY apps/window/tool_apps ./tool_apps
 COPY apps/window/tools ./tools
 COPY apps/window/graph ./graph
+COPY apps/window/scripts ./scripts
 COPY apps/window/web /web
 COPY governance/control-plane/schema ./governance/control-plane/schema
 COPY --from=graph-build /build/web/dashboard /web/dashboard
