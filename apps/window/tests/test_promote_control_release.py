@@ -31,7 +31,7 @@ class PromoteTests(unittest.TestCase):
             "source_sha": sha,
             "deployed_sha": sha,
             "image_digest": "sha256:" + "b" * 64,
-            "graph_revision": "sha256:" + "c" * 64,
+            "graph_revision": "g_" + "c" * 64,
             "projection_manifests": [1],
             "tests": [1],
             "runtime_evidence": [1],

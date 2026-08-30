@@ -278,6 +278,12 @@ does not invent settings, events, traces, costs, or status.
 
 ### Adapter output: `schema://frank.graph/v1`
 
+This is a disposable tool-renderer projection. Its `sha256:`
+`graph_revision` is a content digest for this response only; it is deliberately
+distinct from the canonical ControlGraphStore `g_<64 hex>` revision used by
+estate maps and release evidence. It must never be promoted as control-graph
+authority.
+
 ```json
 {
   "schema": "schema://frank.graph/v1",

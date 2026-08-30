@@ -77,6 +77,14 @@ off until the Hermes plugin, broker, and vault checks below are live.
    builds the Window image, imports the runtime modules
    inside the container, waits for the healthcheck, and runs the API health
    canary. Preserve `/srv/frank/data/window`, including chat data and uploads.
+   The feature-flag file is a Compose `env_file` and is read only when the
+   Window container is created. After `promote_control_release.py` changes a
+   release flag set, rerun this exact deploy (or its fixed
+   `docker compose up -d --force-recreate frank-window` step), wait for health,
+   and verify `/api/control/overview` reports the exact promoted flags. A flag
+   promotion without that recreation and canary is incomplete. Rollback must
+   restore the prior release record and flags, then recreate and canary Window
+   the same way.
 
 7. **Run the end-to-end private canary.** Exercise authenticated Hermes inspect
    and the vault health route through Frank. Then run the provider-receipt
