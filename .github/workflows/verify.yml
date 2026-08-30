@@ -17,6 +17,9 @@ jobs:
           # predate HEAD. Keep the commit graph available instead of weakening
           # that evidence gate for CI's default one-commit checkout.
           fetch-depth: 0
+          # The image builds pinned Archify and AgentTrail sources from the
+          # repository's submodules; an empty gitlink cannot be a build input.
+          submodules: recursive
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
