@@ -98,7 +98,8 @@ class AdTemplateTopologyContractTests(unittest.TestCase):
         self.assertEqual(list(Draft202012Validator(schema).iter_errors(self.receipt)), [])
         receipt_path = CONTROL / "evidence" / "ad-template-builder-runtime-consumption-20260831-001.yaml"
         checksum = (CONTROL / "evidence" / "ad-template-builder-runtime-consumption-20260831-001.sha256").read_text(encoding="utf-8").split()[0]
-        self.assertEqual(hashlib.sha256(receipt_path.read_bytes()).hexdigest(), checksum)
+        receipt_bytes = receipt_path.read_bytes().replace(b"\r\n", b"\n").replace(b"\r", b"\n")
+        self.assertEqual(hashlib.sha256(receipt_bytes).hexdigest(), checksum)
 
 
 if __name__ == "__main__":
