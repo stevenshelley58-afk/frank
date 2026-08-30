@@ -1581,7 +1581,10 @@ class MiniFrankTest(unittest.TestCase):
     def test_global_storage_reservation_is_atomic_across_parallel_owners(self):
         payload = self.pdf_bytes(b"C" * 70_000)
         self.client = self.make_client(
-            storage_cap_bytes=len(payload) + (16 * 1024),
+            # Leave enough room for filesystem allocation blocks consumed by
+            # the two intake/ledger records while keeping two payloads over
+            # the aggregate cap on every supported platform.
+            storage_cap_bytes=len(payload) + (64 * 1024),
             storage_min_free_bytes=0,
         )
         owners = [
