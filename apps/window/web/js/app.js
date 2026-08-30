@@ -3,6 +3,7 @@ import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
 import { mountAdStudio } from "./ad-studio.js?v=20260830-builder-escalation-v1";
+import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -23,7 +24,12 @@ const TITLES = {
 
 let projects = { projects: [] };
 
-function show(id) {
+function syncViewLocation(id) {
+  const target = pathForView(id);
+  if (window.location.pathname !== target) window.history.pushState({ view: id }, "", target);
+}
+
+function show(id, { syncHistory = true } = {}) {
   const editorWasOpen = closeHomeEditors({ restoreFocus: false });
   if (id !== "project" && id !== "entity-home") clearHomeActions();
   const [title, sub] = TITLES[id] || TITLES.hub;
@@ -31,11 +37,12 @@ function show(id) {
   $("#view-sub").textContent = id === "hub"
     ? (chatSessions.find((chat) => chat.id === currentChatId)?.title || "")
     : sub;
-  const railView = ["accounts", "entity-home", "widget-builder", "connections", "ad-studio"].includes(id) ? "tools" : id;
+  const railView = ["accounts", "entity-home", "widget-builder", "connections"].includes(id) ? "tools" : id;
   $$(".rail-item[data-view]").forEach((b) => b.classList.toggle("is-on", b.dataset.view === railView));
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
+  if (syncHistory) syncViewLocation(id);
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
@@ -77,6 +84,7 @@ $$(".rail-item[data-view]").forEach((b) =>
       $("#view-sub").textContent = chatSessions.find((chat) => chat.id === currentChatId)?.title || "";
       chatScrollBottom();
     }
+    else if (v === "ad-studio") { show(v); mountAdStudio(); }
     else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); }
   })
 );
@@ -124,6 +132,15 @@ window.addEventListener("frank:ad-studio", () => {
   show("ad-studio");
   mountAdStudio();
 });
+
+function openPathView() {
+  const id = viewForPath(window.location.pathname);
+  show(id, { syncHistory: false });
+  if (id === "ad-studio") mountAdStudio();
+  const canonicalPath = pathForView(id);
+  if (window.location.pathname !== canonicalPath) window.history.replaceState({ view: id }, "", canonicalPath);
+}
+window.addEventListener("popstate", openPathView);
 
 window.addEventListener("frank:connections", (event) => {
   show("connections");
@@ -1785,5 +1802,5 @@ setupHomePlatform();
 setupProjects();
 
 fetchProjects()
-  .then(() => show("hub"))
-  .catch(() => show("hub"));
+  .then(openPathView)
+  .catch(openPathView);

@@ -24,6 +24,27 @@ class AdStudioMonitorTest(unittest.TestCase):
             "/api/ad-studio/runs/trun-example/artifacts/source.png",
         )
         self.assertEqual(projected["output"]["import"]["status"], "replayed")
+        self.assertEqual(projected["output"]["import"]["template_id"], "template-1")
+        self.assertEqual(
+            projected["output"]["import"]["template_url"],
+            "https://blockwise.sale/ad-studio/templates/template-1",
+        )
+
+    def test_import_projection_rejects_unsafe_or_mismatched_destinations(self):
+        unsafe = server._public_ad_studio_import({
+            "status": "imported",
+            "template_id": "../admin",
+            "template_url": "https://evil.example/ad-studio/templates/template-1",
+            "internal_receipt": {"secret": "never public"},
+        })
+        self.assertEqual(unsafe, {"status": "imported"})
+
+        mismatched = server._public_ad_studio_import({
+            "status": "ready",
+            "template_id": "template-1",
+            "template_url": "https://blockwise.sale/ad-studio/templates/template-2",
+        })
+        self.assertEqual(mismatched, {"status": "ready"})
 
     def test_archify_receipt_is_bound_to_spec_artifact_and_validator(self):
         previous = (

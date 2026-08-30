@@ -1,4 +1,5 @@
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
+import { blockwiseTemplateUrl } from "./view-routing.js?v=20260830-ad-studio-route-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -368,11 +369,19 @@ function renderRunDetail(run) {
   detail.append(overview);
   renderPersistedSource(run, detail);
   renderPhaseTimeline(run, detail);
-  if (run.status === "completed" && ["imported", "replayed", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase())) {
+  const importReady = run.status === "completed" && ["imported", "replayed", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase());
+  if (importReady) {
     const readySection = document.createElement("section"); readySection.className = "ad-template-ready";
+    const copy = document.createElement("div");
     const title = document.createElement("strong"); title.textContent = "Template ready";
     const evidence = document.createElement("p"); evidence.textContent = "Feed and Story are live in Blockwise.";
-    readySection.append(title, evidence); detail.append(readySection);
+    copy.append(title, evidence); readySection.append(copy);
+    const editorUrl = blockwiseTemplateUrl(run.output?.import);
+    if (editorUrl) {
+      const open = document.createElement("a"); open.className = "ad-primary"; open.href = editorUrl;
+      open.target = "_blank"; open.rel = "noopener noreferrer"; open.textContent = "Open in Blockwise"; readySection.append(open);
+    }
+    detail.append(readySection);
   }
 
   if (run.attention || run.error) {

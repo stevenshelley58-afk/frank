@@ -1333,6 +1333,50 @@ def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]
     return public
 
 
+def _public_ad_studio_import(value: object) -> dict:
+    """Project only a verified Blockwise template destination from Hermes output."""
+    if not isinstance(value, dict):
+        return {}
+    public = {}
+    status = str(value.get("status") or "").strip().lower()
+    if re.fullmatch(r"[a-z0-9_-]{1,32}", status):
+        public["status"] = status
+
+    raw_template_id = str(value.get("template_id") or "").strip()
+    template_id = raw_template_id if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}", raw_template_id) else ""
+    raw_url = str(value.get("template_url") or value.get("url") or "").strip()
+    url_template_id = ""
+    if raw_url:
+        try:
+            parsed = urllib.parse.urlsplit(raw_url)
+            prefix = "/ad-studio/templates/"
+            if (
+                parsed.scheme == "https"
+                and parsed.netloc == "blockwise.sale"
+                and parsed.path.startswith(prefix)
+                and not parsed.query
+                and not parsed.fragment
+            ):
+                candidate = urllib.parse.unquote(parsed.path[len(prefix):])
+                if "/" not in candidate and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}", candidate):
+                    url_template_id = candidate
+        except ValueError:
+            url_template_id = ""
+
+    if raw_url and not url_template_id:
+        return public
+    if template_id and url_template_id and template_id != url_template_id:
+        return public
+    verified_id = template_id or url_template_id
+    if verified_id:
+        public["template_id"] = verified_id
+        public["template_url"] = (
+            "https://blockwise.sale/ad-studio/templates/"
+            + urllib.parse.quote(verified_id, safe="")
+        )
+    return public
+
+
 def _ad_studio_source_url(run_id: str, name: str) -> str | None:
     suffix = Path(str(name or "")).suffix.lower()
     if suffix not in {".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}:
@@ -1350,8 +1394,11 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     safe_output = {key: output.get(key) for key in (
-        "iterations", "final_review", "import", "process",
+        "iterations", "final_review", "process",
     ) if key in output}
+    public_import = _public_ad_studio_import(output.get("import"))
+    if public_import:
+        safe_output["import"] = public_import
     previews = []
     for item in output.get("previews") if isinstance(output.get("previews"), list) else []:
         if not isinstance(item, dict):
