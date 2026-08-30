@@ -13,7 +13,16 @@
     "summary": {"type": "string", "minLength": 1, "maxLength": 500},
     "reconciliation_result": {"enum": ["match", "missing_runtime", "undeclared_runtime", "revision_mismatch", "config_hash_mismatch", "route_mismatch", "unit_mismatch", "unparseable", "inaccessible", "stale"]},
     "confidence": {"enum": ["high", "medium", "low", "none"]},
-    "evidence_receipt_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/receipt_id"}}
+    "evidence_receipt_ids": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"$ref": "#/$defs/receipt_id"}},
+    "review": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "usage_reference_evidence": {}, "replacement": {}, "owner": {},
+        "source_sha": {"type": "string", "minLength": 1},
+        "estimated_value": {}, "safe_retirement_path": {"type": "string", "minLength": 1},
+        "reporter": {"type": ["string", "null"]}
+      }
+    }
   },
   "$defs": {
     "stable_id": {"type": "string", "pattern": "^(vps|project|repo|runtime|service|component|worker|store|route|capability|rule|skill|tool|plugin|cli|mcp|app|template|library|hook|gate|policy|runbook|eval|observer|source|release|projection|generation|receipt|proposal|finding|mapping|run|edge):[a-z0-9]+(?:-[a-z0-9]+)*(?:/[a-z0-9]+(?:-[a-z0-9]+)*)*$"},

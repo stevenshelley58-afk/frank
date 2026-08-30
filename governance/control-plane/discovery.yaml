@@ -1,0 +1,43 @@
+schema_version: 1
+status: candidate_only
+feature_flag: discovery_jobs
+schedule:
+  cadence: daily
+  timeout_seconds: 1200
+  stale_after_hours: 48
+  dedupe_key: item-and-version-hash
+  rollback: set discovery_jobs false and disable saved searches
+limits:
+  max_pages: 3
+  max_items: 100
+  max_response_bytes: 512000
+  request_timeout_seconds: 10
+sources:
+  - id: github-search
+    kind: github_repository_search
+    base_url: https://api.github.com/search/repositories
+    allowlist: [api.github.com]
+  - id: github-metadata
+    kind: github_repository_metadata
+    base_url: https://api.github.com/repos
+    allowlist: [api.github.com]
+  - id: mcp-registry
+    kind: mcp_registry
+    base_url: https://registry.modelcontextprotocol.io
+    allowlist: [registry.modelcontextprotocol.io]
+  - id: hermes-skills
+    kind: hermes_skills_reference
+    base_url: https://hermes-agent.nousresearch.com/docs/skills
+    allowlist: [hermes-agent.nousresearch.com]
+  - id: deps-dev
+    kind: dependency_metadata
+    base_url: https://api.deps.dev
+    allowlist: [api.deps.dev]
+  - id: scorecard
+    kind: scorecard_evidence
+    base_url: https://api.scorecard.dev
+    allowlist: [api.scorecard.dev]
+  - id: osv
+    kind: vulnerability_evidence
+    base_url: https://api.osv.dev
+    allowlist: [api.osv.dev]

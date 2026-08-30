@@ -1,0 +1,10 @@
+[Unit]
+Description=Weekly Frank cleanup report
+
+[Timer]
+OnCalendar=Sun *-*-* 03:40:00 UTC
+Persistent=true
+Unit=frank-cleanup-report.service
+
+[Install]
+WantedBy=timers.target
