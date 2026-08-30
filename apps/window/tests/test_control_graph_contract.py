@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from graph.control_contract import ControlContractError, _resolve_repository_root, derive_graph_revision, graph_from_collector_receipt, materialize_control_graph, reconcile_assertions
 from graph.control_store import ControlGraphStore
 from graph.control_provider import ControlProvider
-from scripts.generate_control_maps import MAX_RECEIPT_BYTES, _resolve_graph, _write_receipt
+from scripts.generate_control_maps import MAX_RECEIPT_BYTES, _default_run_key, _resolve_graph, _write_receipt
 
 DECLARED = {"nodes": [{"id": "service:frank-window", "kind": "service", "version": "1"}], "relationships": []}
 OBSERVED = {"nodes": [{"id": "service:frank-window", "kind": "service", "version": "2"}, {"name": "mystery"}], "relationships": []}
@@ -110,6 +110,14 @@ class ControlGraphContractTest(unittest.TestCase):
             pointer.write_text(json.dumps(tampered), encoding="utf-8")
             with self.assertRaises(RuntimeError):
                 _resolve_graph(pointer)
+
+    def test_map_generator_default_run_key_is_deterministic_and_canonical(self):
+        revision = "g_" + "a" * 64
+        first = _default_run_key(revision)
+        self.assertEqual(first, "run:graph-g-" + "a" * 64)
+        self.assertEqual(first, _default_run_key(revision))
+        from graph.map_pipeline import _RUN_KEY_RE
+        self.assertRegex(first, _RUN_KEY_RE)
 
     def test_map_generator_writes_a_bounded_private_atomic_receipt(self):
         with tempfile.TemporaryDirectory() as tmp:

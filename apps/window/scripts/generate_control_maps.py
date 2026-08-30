@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -14,6 +15,12 @@ from typing import Any, Mapping, Sequence
 
 
 MAX_RECEIPT_BYTES = 1024 * 1024
+
+
+def _default_run_key(graph_revision: Any) -> str:
+    """Derive a deterministic stable ID when the operator omits ``--run-key``."""
+    token = re.sub(r"[^a-z0-9]+", "-", str(graph_revision).lower()).strip("-")
+    return f"run:graph-{token or 'unknown'}"
 
 
 class BoundedRunner:
@@ -143,7 +150,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
         graph = _resolve_graph(args.graph)
         graph_revision = graph.get("graph_revision", graph.get("revision", "unknown"))
-        run_key = args.run_key or f"run:graph-{str(graph_revision).replace(':', '-')}-{int(time.time())}"
+        run_key = args.run_key or _default_run_key(graph_revision)
         adapter = ArchifyAdapter()
         store = MapArtifactStore(args.preview_root)
         result = generate_maps(
