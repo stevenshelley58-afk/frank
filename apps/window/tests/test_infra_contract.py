@@ -136,7 +136,7 @@ class InfraContractTest(unittest.TestCase):
             "(frank_mini_published_artifact_response_headers) {", 1
         )[1].split("}\n", 1)[0]
         for policy in (private_policy, published_policy):
-            self.assertIn("-X-Frame-Options", policy)
+            self.assertIn('X-Frame-Options "SAMEORIGIN"', policy)
             self.assertIn("sandbox allow-same-origin allow-downloads", policy)
             self.assertIn("script-src 'none'", policy)
             self.assertIn("form-action 'none'", policy)
@@ -178,10 +178,21 @@ class InfraContractTest(unittest.TestCase):
         policy = caddyfile.split("(frank_map_artifact_response_headers) {", 1)[1].split("}\n", 1)[0]
         self.assertIn("import frank_map_artifact_response_headers", route)
         self.assertIn("basic_auth", route)
-        self.assertIn("-X-Frame-Options", policy)
+        self.assertIn('X-Frame-Options "SAMEORIGIN"', policy)
         self.assertIn("frame-ancestors 'self'", policy)
         self.assertIn("script-src 'self' 'unsafe-inline'", policy)
         self.assertLess(matcher, fallback)
+
+    def test_frame_policy_is_scoped_per_surface(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        common = caddyfile.split("(frank_common_security_headers) {", 1)[1].split("}\n", 1)[0]
+        private = caddyfile.split("(frank_private_response_headers) {", 1)[1].split("}\n", 1)[0]
+        agenttrail = caddyfile.split("(frank_agenttrail_response_headers) {", 1)[1].split("}\n", 1)[0]
+        self.assertNotIn("X-Frame-Options", common)
+        self.assertIn('X-Frame-Options "DENY"', private)
+        self.assertIn('X-Frame-Options "SAMEORIGIN"', agenttrail)
+        blockwise = caddyfile.split("blockwise.sale {", 1)[1].split("preview.frank.fail {", 1)[0]
+        self.assertIn('header X-Frame-Options "DENY"', blockwise)
 
     def test_retired_template_release_surface_is_absent(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
