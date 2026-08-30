@@ -701,15 +701,12 @@ def matrix_from_declarations(declaration_path: Path, repository_root: Path, fixe
             candidate = Path(value)
             # Reject before resolve so a symlink cannot smuggle an external
             # tree into the fixed-root map.
-            if candidate.is_symlink():
-                raise InventoryError(f"fixed root {canonical} is a symlink")
+            try:
+                if candidate.is_symlink():
+                    raise InventoryError(f"fixed root {canonical} is a symlink")
+            except OSError as exc:
+                raise InventoryError(f"fixed root {canonical} is inaccessible") from exc
             fixed[canonical] = candidate
-    for canonical, candidate in fixed.items():
-        try:
-            if candidate.is_symlink():
-                raise InventoryError(f"fixed root {canonical} is a symlink")
-        except OSError as exc:
-            raise InventoryError(f"fixed root {canonical} is inaccessible") from exc
     for item in data.get("adapters", []):
         if not isinstance(item, dict) or not isinstance(item.get("id"), str):
             raise InventoryError("each adapter must be a mapping with an id")
