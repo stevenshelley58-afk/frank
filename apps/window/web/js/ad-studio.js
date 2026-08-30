@@ -13,6 +13,7 @@ let selectedStage = null;
 let graphHandle = null;
 let selectedFiles = [];
 let batchStarting = false;
+let runRefreshPending = false;
 const localRunInputs = new Map();
 const previewUrls = new Set();
 let runEvents = [];
@@ -266,8 +267,9 @@ function renderRuns() {
 
 async function refreshRuns() {
   const projectId = clean($("#ad-run-project")?.value || $("#ad-pipeline-project")?.value);
-  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
-  const response = await fetch(`/api/ad-studio/runs${query}`);
+  const query = new URLSearchParams({ limit: "30" });
+  if (projectId) query.set("project_id", projectId);
+  const response = await fetch(`/api/ad-studio/runs?${query}`);
   if (!response.ok) throw new Error("Hermes job history is unavailable");
   const data = await response.json();
   runs = (Array.isArray(data.runs) ? data.runs : []).sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
@@ -275,11 +277,15 @@ async function refreshRuns() {
 }
 
 async function refreshRunsSafe() {
+  if (runRefreshPending) return;
+  runRefreshPending = true;
   try {
     await refreshRuns();
   } catch {
     const host = $("#ad-runs-list");
     if (host && !host.children.length) host.innerHTML = '<div class="ad-empty"><strong>Jobs unavailable</strong><span>Frank cannot reach Hermes right now.</span></div>';
+  } finally {
+    runRefreshPending = false;
   }
 }
 
@@ -788,7 +794,7 @@ function setupRunForm() {
       if (started.length) {
         selectedRunId = started[0].id;
         activate("runs");
-        if (started.length === 1) await selectRun(started[0].id);
+        await selectRun(started[0].id);
       }
     } catch (error) {
       status.textContent = error.message || "The job could not be started.";
@@ -832,4 +838,7 @@ export function mountAdStudio() {
   });
   window.addEventListener("beforeunload", () => previewUrls.forEach((url) => URL.revokeObjectURL(url)), { once: true });
   window.addEventListener("online", () => void refreshRunsSafe());
+  window.setInterval(() => {
+    if (!document.hidden) void refreshRunsSafe();
+  }, 5_000);
 }
