@@ -1148,7 +1148,7 @@ def main(argv: list[str] | None = None) -> int:
         trigger_reason="post_deploy" if args.mode == "post_deploy" else None)
     if result.get("status") in ("success", "already_running"):
         # The only host-to-container execution permitted by the control plane.
-        pipeline = HostFactSource()._command(
+        pipeline = HostFactSource(timeout=60.0)._command(
             ("docker", "exec", "frank-window", "python", "-m", "graph.control_pipeline")
         )
         if pipeline.get("status") != "ready":
