@@ -10,6 +10,7 @@ services:
     restart: unless-stopped
     env_file:
       - ${FRANK_WINDOW_ENV_FILE:-/srv/frank/secrets/window.env}
+      - /var/lib/frank/release/feature-flags.env
     environment:
       FRANK_WEB: /web
       CHAT_STORE_DIR: /data
