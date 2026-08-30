@@ -133,6 +133,36 @@ test("a submitted intake restore opens only server-issued job access or starts a
   assert.doesNotMatch(submitted, /finishDraftRestore\(|attachResume\(/);
 });
 
+test("an incomplete restored guide stays saved and retryable instead of inventing a start decision", async () => {
+  const script = await source("mini.js");
+  const recovery = script.split("function incompleteGuideRecovery(intake)", 2)[1].split("function finishDraftRestore", 2)[0];
+  assert.match(recovery, /lastSavedMessage\.role !== "user"/);
+  assert.match(recovery, /intake\.guide_status/);
+  assert.match(recovery, /intake\.guide_resumable/);
+  assert.match(recovery, /status === "complete" && lastSavedMessage && lastSavedMessage\.role === "assistant"[\s\S]*state\.phase = "decision"/);
+  assert.match(recovery, /status === "working"[\s\S]*Your message is saved\. I don’t have a finished reply yet/);
+  assert.match(recovery, /resumable \|\| \["unavailable", "failed", "aborted"\][\s\S]*Your message is saved, but I couldn’t finish the reply\. Try again when you’re ready\./);
+  const restore = script.split("async function restoreConversation(draft)", 2)[1].split("function handleSubmit()", 2)[0];
+  assert.match(restore, /finishDraftRestore\(incompleteGuideRecovery\(serverIntake\)\);/);
+  const finish = script.split('function finishDraftRestore(recovery = "")', 2)[1].split("async function restoreConversation", 2)[0];
+  assert.match(finish, /if \(recovery\) \{[\s\S]*Try again in your own words…[\s\S]*\} else if \(state\.phase === "decision" && lastAssistant\) \{[\s\S]*attachResume\(lastAssistant\);/);
+  assert.doesNotMatch(finish, /I have enough to start solving this|lastAssistant \|\| addMessage/);
+});
+
+test("a complete server guide overrides a stale local guiding phase", async () => {
+  const script = await source("mini.js");
+  const recovery = script.split("function incompleteGuideRecovery(intake)", 2)[1].split("function finishDraftRestore", 2)[0];
+  assert.match(recovery, /status === "complete" && lastSavedMessage && lastSavedMessage\.role === "assistant"[\s\S]*state\.phase = "decision"[\s\S]*return ""/);
+  const finish = script.split('function finishDraftRestore(recovery = "")', 2)[1].split("async function restoreConversation", 2)[0];
+  assert.match(finish, /state\.phase === "decision" && lastAssistant[\s\S]*attachResume\(lastAssistant\)/);
+});
+
+test("the live guide canary never resets a browser with an unfinished reply", async () => {
+  const canary = await readFile(path.resolve(path.dirname(fileURLToPath(import.meta.url)), "mini_browser_canary.js"), "utf8");
+  assert.match(canary, /submittedJob:[\s\S]*\/api\/mini\/intakes\/[\s\S]*endsWith\("\/submit"\)[\s\S]*\/api\/mini\/jobs/);
+  assert.match(canary, /guideRuns\.push\([\s\S]*if \(!checkpoints\.complete\) \{[\s\S]*throw new Error\(`Guide run \$\{run\} did not complete before the next browser reset`\);/);
+});
+
 test("the free conversation shows only complete replies and keeps every decision in plain business language", async () => {
   const script = await source("mini.js");
   assert.match(script, /BUFFER_GUIDE_REPLIES_UNTIL_COMPLETE = true/);

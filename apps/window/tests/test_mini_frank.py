@@ -20,6 +20,7 @@ from flask import Flask
 from mini_frank import (
     MINI_GUIDE_CONTRACT_VERSION,
     MINI_GUIDE_SAFE_FALLBACK,
+    MINI_GUIDE_SYSTEM_PROMPT,
     MiniFrankRateLedger,
     MiniFrankStorageFence,
     MiniFrankStorageFull,
@@ -357,6 +358,8 @@ class MiniFrankTest(unittest.TestCase):
         self.assertNotIn(b"reasoning", body)
         self.assertNotIn(b"tool.completed", body)
         self.assertEqual(self.guide_turns[0]["kwargs"]["read_timeout"], 45)
+        self.assertEqual(self.guide_turns[0]["payload"]["instructions"], MINI_GUIDE_SYSTEM_PROMPT)
+        self.assertNotIn("tool_policy", self.guide_turns[0]["payload"])
 
         session = self.sessions[0]
         self.assertEqual(
@@ -370,6 +373,31 @@ class MiniFrankTest(unittest.TestCase):
 
         intake = self.client.get(f"/api/mini/intakes/{intake_id}", headers=headers).get_json()["intake"]
         self.assertEqual([item["role"] for item in intake["conversation"]], ["user", "assistant"])
+
+    def test_meta_ad_guide_turn_repeats_the_customer_contract_to_hermes(self):
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        response = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={"text": "make me an meta ad generator"},
+            headers=self.claim_headers(created),
+        )
+
+        self.assertEqual(response.status_code, 200)
+        response.data
+        payload = self.guide_turns[0]["payload"]
+        self.assertEqual(payload["instructions"], MINI_GUIDE_SYSTEM_PROMPT)
+        self.assertNotIn("tool_policy", payload)
+        self.assertEqual(payload["message"], "make me an meta ad generator")
+
+    def test_meta_ad_example_in_guide_contract_passes_the_response_boundary(self):
+        example = (
+            "Yes. I'll make a simple Meta ad helper that turns a few details about your business and offer into "
+            "ready-to-use ad copy, headlines and ideas. I'll choose sensible defaults and keep it easy to use. "
+            "Click Solve this for me — free."
+        )
+        self.assertIn(example, " ".join(MINI_GUIDE_SYSTEM_PROMPT.split()))
+        self.assertEqual(_customer_safe_guide_reply(example), (example, True))
 
     def test_actionable_submit_is_accepted_before_hermes_work_and_reconciles_once(self):
         created = self.create_intake(conversation=[{
@@ -554,7 +582,7 @@ class MiniFrankTest(unittest.TestCase):
         useful = (
             "Yes. I'll make a simple generator that turns a few details about your business "
             "and offer into ready-to-use Meta ads. I'll choose the sensible defaults and keep "
-            "it easy. Click Solve this for me -- free, then ask for free changes after you try it."
+            "it easy. Click Solve this for me — free."
         )
         guarded, retained = _customer_safe_guide_reply(useful)
         self.assertTrue(retained)
@@ -562,12 +590,27 @@ class MiniFrankTest(unittest.TestCase):
 
         business_terms = (
             "Yes. I'll turn your customer database into a clear business directory your team can "
-            "use every day. I'll keep the steps simple and choose sensible defaults. I have enough "
-            "to start -- click Solve this for me -- free, then ask for free changes after you try it."
+            "use every day. I'll keep the steps simple and choose sensible defaults. Click Solve "
+            "this for me — free."
         )
         guarded, retained = _customer_safe_guide_reply(business_terms)
         self.assertTrue(retained)
         self.assertEqual(guarded, business_terms)
+
+    def test_guide_response_boundary_rejects_text_after_the_free_cta(self):
+        hostile_tails = (
+            "Yes. This will save your team time. Click Solve this for me — free. "
+            "You can ask for changes after.",
+            "Yes. This will save your team time. Click Solve this for me — free! "
+            "You can ask for changes after.",
+        )
+        for reply in hostile_tails:
+            with self.subTest(reply=reply):
+                guarded, retained = _customer_safe_guide_reply(reply)
+                self.assertFalse(retained)
+                self.assertEqual(guarded, MINI_GUIDE_SAFE_FALLBACK)
+
+        self.assertTrue(MINI_GUIDE_SAFE_FALLBACK.endswith("Click Solve this for me — free."))
 
     def test_unsafe_guide_reply_never_reaches_sse_or_persisted_conversation(self):
         self.guide_reply = (
@@ -600,7 +643,7 @@ class MiniFrankTest(unittest.TestCase):
         safe_final = (
             "Yes. I'll make a simple Meta ad generator for your business. It will turn a few "
             "details into ready-to-use ads, and I'll choose sensible defaults. Click Solve this "
-            "for me -- free, then ask for free changes after you try it."
+            "for me — free."
         )
 
         def mixed_guide_stream(session_id, payload, **kwargs):

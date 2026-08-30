@@ -2618,15 +2618,42 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     }
   }
 
-  function finishDraftRestore() {
+  function incompleteGuideRecovery(intake) {
+    const lastSavedMessage = state.transcript[state.transcript.length - 1];
+    // A local phase can say "decision" after a tab closes mid-reply. The
+    // server transcript is authoritative: until it ends with Frank's finished
+    // reply, there is nothing honest to approve or start.
+    const status = cleanText(intake && intake.guide_status, 80).toLowerCase();
+    const resumable = Boolean(intake && intake.guide_resumable);
+    // The inverse race is possible too: a tab saved its old guiding phase,
+    // but the server has since completed Frank's reply. Restore the completed
+    // server state, including its normal free action.
+    if (status === "complete" && lastSavedMessage && lastSavedMessage.role === "assistant") {
+      state.phase = "decision";
+      return "";
+    }
+    if (!lastSavedMessage || lastSavedMessage.role !== "user") return "";
+    state.phase = "guiding";
+    if (status === "working") {
+      return "Your message is saved. I don’t have a finished reply yet. Give it a moment, then try again if you need to.";
+    }
+    if (resumable || ["unavailable", "failed", "aborted"].includes(status)) {
+      return "Your message is saved, but I couldn’t finish the reply. Try again when you’re ready.";
+    }
+    return "Your message is saved. I don’t have a reply yet. Try again when you’re ready.";
+  }
+
+  function finishDraftRestore(recovery = "") {
     messages.replaceChildren();
     state.transcript.forEach((item) => addMessage(item.role, item.text, { files: item.files, record: false }));
     renderAttachmentList();
     const assistantMessages = messages.querySelectorAll(".message-assistant");
     const lastAssistant = assistantMessages[assistantMessages.length - 1];
-    if (state.phase === "decision") {
-      const decisionMessage = lastAssistant || addMessage("assistant", "I have enough to start solving this.", { record: false });
-      attachResume(decisionMessage);
+    if (recovery) {
+      addMessage("assistant", recovery, { record: false });
+      setComposer({ placeholder: "Try again in your own words…", hint: "Your saved message is still here.", attachments: true });
+    } else if (state.phase === "decision" && lastAssistant) {
+      attachResume(lastAssistant);
     } else setComposer({ placeholder: state.phase === "problem" ? "Tell me what’s not working…" : "Type your answer…", hint: state.phase === "problem" ? "No tech words needed." : "A rough answer is fine.", attachments: true });
     if (state.transcript.length) {
       hideWelcome();
@@ -2647,11 +2674,12 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     setComposer({ locked: true, hint: "Opening your conversation…", attachments: false });
     setBusy(true);
     const generation = state.generation;
+    let serverIntake = null;
     try {
       const body = await api.readIntake(state.intake);
       if (generation !== state.generation) return;
       updateIntake(body);
-      const serverIntake = body && body.intake ? body.intake : body;
+      serverIntake = body && body.intake ? body.intake : body;
       if (cleanText(serverIntake && serverIntake.status, 80).toLowerCase() === "submitted") {
         const linked = linkedJobAccess(body);
         clearDraft();
@@ -2685,7 +2713,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       }
       notify("We couldn’t reopen this conversation just now. What you typed is still here.");
     }
-    finishDraftRestore();
+    finishDraftRestore(incompleteGuideRecovery(serverIntake));
   }
 
   function handleSubmit() {
