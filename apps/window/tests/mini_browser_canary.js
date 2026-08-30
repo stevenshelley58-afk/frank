@@ -13,12 +13,16 @@ const EXERCISE_SUBMIT = process.env.FRANK_BROWSER_EXERCISE_SUBMIT === "1";
 // Keep the ordinary visual canary fast. Release checks can supply the real
 // customer wording here and repeat it against fresh browser drafts without
 // ever submitting a project for a full build.
-const CUSTOMER_PROMPT = process.env.FRANK_BROWSER_TEST_PROMPT || "Create a simple booking page for my customers.";
+const META_REGRESSION_PROMPT = "make me an meta ad generator";
+const CUSTOMER_PROMPT = process.env.FRANK_BROWSER_TEST_PROMPT || META_REGRESSION_PROMPT;
+const IS_META_REGRESSION = CUSTOMER_PROMPT.trim().toLowerCase() === META_REGRESSION_PROMPT;
 const CONSECUTIVE_RUNS = Number(process.env.FRANK_BROWSER_CONSECUTIVE_RUNS || 1);
 // A real guide reply currently takes about 32 seconds in production. Keep the
 // optional end-to-end check useful without making the normal visual canary wait.
 const RESPONSE_BUDGET_MS = Number(process.env.FRANK_BROWSER_RESPONSE_BUDGET_MS || 45000);
 const COMPOSER_READY_BUDGET_MS = Number(process.env.FRANK_BROWSER_COMPOSER_READY_BUDGET_MS || 10000);
+const REQUIRE_GUIDED_FLOW = process.env.FRANK_BROWSER_REQUIRE_GUIDED_FLOW !== "0";
+const MAX_GUIDE_STEPS = Number(process.env.FRANK_BROWSER_MAX_GUIDE_STEPS || 6);
 const [WIDTH, HEIGHT] = WINDOW_SIZE.split(",").map(Number);
 
 if (!Number.isInteger(CONSECUTIVE_RUNS) || CONSECUTIVE_RUNS < 1 || CONSECUTIVE_RUNS > 10) {
@@ -26,6 +30,9 @@ if (!Number.isInteger(CONSECUTIVE_RUNS) || CONSECUTIVE_RUNS < 1 || CONSECUTIVE_R
 }
 if (CONSECUTIVE_RUNS > 1 && !EXERCISE_SUBMIT) {
   throw new Error("FRANK_BROWSER_CONSECUTIVE_RUNS requires FRANK_BROWSER_EXERCISE_SUBMIT=1");
+}
+if (!Number.isInteger(MAX_GUIDE_STEPS) || MAX_GUIDE_STEPS < 1 || MAX_GUIDE_STEPS > 10) {
+  throw new Error("FRANK_BROWSER_MAX_GUIDE_STEPS must be a whole number from 1 to 10");
 }
 
 function wait(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
@@ -185,21 +192,105 @@ async function main() {
         })()`);
         if (!submissionStarted) throw new Error(`Composer was no longer ready when guide run ${run} began`);
 
-        const deadline = responseStarted + RESPONSE_BUDGET_MS;
+        // Each Hermes turn gets the same bounded response window. The complete
+        // guide intentionally spans several turns, so one wall-clock deadline
+        // for the whole conversation would fail healthy production runs.
+        let turnDeadline = responseStarted + RESPONSE_BUDGET_MS;
         checkpoints.accepted = await waitForEvaluation(browser, `(() => {
           const userMessage = document.querySelector(".message-user .message-text");
           const conversation = document.querySelector("#conversation");
-          const completed = document.querySelector('.message-assistant [data-action="resume"]');
+          const latest = [...document.querySelectorAll(".message-assistant")].at(-1);
+          const completed = latest?.querySelector('.guide-decision-card, [data-action="resume"]');
           return Boolean(userMessage && (
             conversation?.getAttribute("aria-busy") === "true" || completed
           ));
-        })()`, deadline);
+        })()`, turnDeadline);
         if (checkpoints.accepted) checkpoints.acceptedMs = Date.now() - responseStarted;
 
-        checkpoints.complete = checkpoints.accepted && await waitForEvaluation(browser,
-          `Boolean(document.querySelector('.message-assistant [data-action="resume"]'))`,
-          deadline,
-        );
+        const guideSteps = [];
+        const guideReplies = [];
+        let reachedConfirmation = false;
+        for (let step = 1; checkpoints.accepted && step <= MAX_GUIDE_STEPS; step += 1) {
+          turnDeadline = Date.now() + RESPONSE_BUDGET_MS;
+          const settled = await waitForEvaluation(browser, `(() => {
+            const latest = [...document.querySelectorAll(".message-assistant")].at(-1);
+            if (!latest || latest.querySelector(".thinking")) return false;
+            return Boolean(latest.querySelector('.guide-decision-card, [data-action="resume"]'));
+          })()`, turnDeadline);
+          if (!settled) break;
+
+          const snapshot = await browser.evaluate(`(() => {
+            const assistants = [...document.querySelectorAll(".message-assistant")];
+            const latest = assistants.at(-1);
+            const card = latest?.querySelector(".guide-decision-card");
+            const message = latest?.querySelector(".message-text");
+            const bounds = message?.getBoundingClientRect();
+            const style = message ? getComputedStyle(message) : null;
+            const understanding = card ? [...card.querySelectorAll(".guide-understanding [data-guide-fact]")].map((item) => item.textContent.trim()) : [];
+            const optionButtons = card ? [...card.querySelectorAll("[data-guide-choice]")] : [];
+            const previews = card ? [...card.querySelectorAll(".guide-mini-preview")].map((item) => ({
+              kind: [...item.classList].find((name) => name.startsWith("guide-mini-preview-") && name !== "guide-mini-preview")?.replace("guide-mini-preview-", "") || "",
+              text: item.textContent.replace(/\s+/g, " ").trim(),
+            })) : [];
+            return {
+              assistantCount: assistants.length,
+              response: message?.textContent?.trim() || "",
+              responseVisible: Boolean(message && bounds && bounds.width > 0 && bounds.height > 0 && style?.visibility !== "hidden" && style?.display !== "none"),
+              cardId: card?.dataset.guideCardId || "",
+              kind: card?.dataset.guideKind || (latest?.querySelector('[data-action="resume"]') ? "confirm" : ""),
+              question: card?.querySelector(".guide-decision-question")?.textContent?.trim() || "",
+              options: optionButtons.map((item) => item.textContent.trim()),
+              previewCount: card?.querySelectorAll(".guide-mini-preview").length || 0,
+              previews,
+              understanding,
+              chooseForMe: Boolean(card?.querySelector('[data-action="guide-choose-for-me"]')),
+              other: Boolean(card?.querySelector('[data-action="guide-other"]')),
+              resumeAction: Boolean(latest?.querySelector('[data-action="resume"]')),
+            };
+          })()`);
+          guideReplies.push(snapshot.response);
+          guideSteps.push({
+            step,
+            kind: snapshot.kind,
+            cardId: snapshot.cardId,
+            question: snapshot.question,
+            options: snapshot.options,
+            previewCount: snapshot.previewCount,
+            previews: snapshot.previews,
+            understanding: snapshot.understanding,
+            chooseForMe: snapshot.chooseForMe,
+            other: snapshot.other,
+            responseVisible: snapshot.responseVisible,
+          });
+
+          if (snapshot.resumeAction) {
+            reachedConfirmation = true;
+            break;
+          }
+          if (!["question", "preview"].includes(snapshot.kind) || snapshot.options.length < 2 || !snapshot.chooseForMe || !snapshot.other) break;
+
+          const advanced = await browser.evaluate(`(() => {
+            const latest = [...document.querySelectorAll(".message-assistant")].at(-1);
+            const card = latest?.querySelector(".guide-decision-card");
+            if (!card || card.dataset.guideCardId !== ${JSON.stringify(snapshot.cardId)}) return false;
+            const choices = [...card.querySelectorAll("[data-guide-choice]:not(:disabled)")];
+            const choice = choices.find((item) => item.dataset.recommended === "true") || choices[0];
+            if (!choice) return false;
+            choice.click();
+            return true;
+          })()`);
+          if (!advanced) break;
+          turnDeadline = Date.now() + RESPONSE_BUDGET_MS;
+          const moved = await waitForEvaluation(browser, `(() => {
+            const assistants = [...document.querySelectorAll(".message-assistant")];
+            const latest = assistants.at(-1);
+            if (assistants.length <= ${snapshot.assistantCount} || !latest || latest.querySelector(".thinking")) return false;
+            return Boolean(latest.querySelector('.guide-decision-card, [data-action="resume"]'));
+          })()`, turnDeadline);
+          if (!moved) break;
+        }
+
+        checkpoints.complete = reachedConfirmation;
         if (checkpoints.complete) checkpoints.completeMs = Date.now() - responseStarted;
         const conversation = await browser.evaluate(`(() => {
           const message = [...document.querySelectorAll(".message-assistant .message-text")].at(-1);
@@ -217,11 +308,30 @@ async function main() {
               catch { return false; }
             }),
             resumeAction: Boolean(document.querySelector('.message-assistant [data-action="resume"]')),
+            enabledResumeActions: document.querySelectorAll('.message-assistant [data-action="resume"]:not(:disabled)').length,
             response: message?.textContent?.trim() || "",
             responseVisible: Boolean(message && bounds && bounds.width > 0 && bounds.height > 0 && style?.visibility !== "hidden" && style?.display !== "none"),
           };
         })()`);
-        const violations = guideReplyViolations(conversation.response);
+        const violations = [...new Set(guideReplies.flatMap((reply) => guideReplyViolations(reply)))];
+        const hadQuestion = guideSteps.some((item) => item.kind === "question");
+        const hadPreview = guideSteps.some((item) => item.kind === "preview" && item.previewCount >= 2);
+        const questionSteps = guideSteps.filter((item) => item.kind === "question");
+        const firstQuestion = questionSteps[0]?.question || "";
+        const adPreviewStep = guideSteps.find((item) => (
+          item.kind === "preview"
+          && item.previews.length >= 2
+          && item.previews.every((preview) => preview.kind === "ad" && preview.text.length > 0)
+          && new Set(item.previews.map((preview) => preview.text.toLowerCase())).size >= 2
+        ));
+        const metaRegressionPassed = !IS_META_REGRESSION || Boolean(
+          guideSteps[0]?.kind === "question"
+          && /(?:ad|people|customer)/i.test(firstQuestion)
+          && /(?:do|happen|action|result|achieve|after|see|book|buy|contact|enquir)/i.test(firstQuestion)
+          && adPreviewStep
+          && questionSteps.length <= 3
+          && conversation.enabledResumeActions === 1
+        );
         guideRuns.push({
           run,
           response: conversation.response,
@@ -232,7 +342,10 @@ async function main() {
           resumeAction: conversation.resumeAction,
           bypassedFullBuild: !conversation.statusCard && !conversation.submittedJob,
           submittedJob: conversation.submittedJob,
+          enabledResumeActions: conversation.enabledResumeActions,
           guideViolations: violations,
+          guidedFlow: { hadQuestion, hadPreview, steps: guideSteps },
+          metaRegressionPassed,
           checkpoints,
         });
         // Do not clear/reload a browser while a guide response is still in
@@ -254,6 +367,8 @@ async function main() {
     console.log(JSON.stringify(result));
     const failedGuideRun = result.guideRuns?.find((run) => (
       !run.withinBudget || !run.hasResponse || !run.responseVisible || !run.resumeAction || !run.bypassedFullBuild || run.guideViolations.length
+      || (REQUIRE_GUIDED_FLOW && (!run.guidedFlow.hadQuestion || !run.guidedFlow.hadPreview))
+      || !run.metaRegressionPassed
     ));
     if (result.canonicalPath !== "/mini-frank/" || result.hasLegacyPublicPath || result.scrollWidth > result.viewport.width || result.hasLegacyCopy || result.heading.right > result.viewport.width || result.composer.right > result.viewport.width || !result.sendEnabled || failedGuideRun) process.exitCode = 1;
   } finally {

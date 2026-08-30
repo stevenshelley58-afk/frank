@@ -139,7 +139,7 @@ test("an incomplete restored guide stays saved and retryable instead of inventin
   assert.match(recovery, /lastSavedMessage\.role !== "user"/);
   assert.match(recovery, /intake\.guide_status/);
   assert.match(recovery, /intake\.guide_resumable/);
-  assert.match(recovery, /status === "complete" && lastSavedMessage && lastSavedMessage\.role === "assistant"[\s\S]*state\.phase = "decision"/);
+  assert.match(recovery, /status === "complete" && lastSavedMessage && lastSavedMessage\.role === "assistant"[\s\S]*state\.phase = state\.guideCard && state\.guideCard\.next\.kind !== "confirm" \? "guiding" : "decision"/);
   assert.match(recovery, /status === "working"[\s\S]*Your message is saved\. I don’t have a finished reply yet/);
   assert.match(recovery, /resumable \|\| \["unavailable", "failed", "aborted"\][\s\S]*Your message is saved, but I couldn’t finish the reply\. Try again when you’re ready\./);
   const restore = script.split("async function restoreConversation(draft)", 2)[1].split("function handleSubmit()", 2)[0];
@@ -152,7 +152,7 @@ test("an incomplete restored guide stays saved and retryable instead of inventin
 test("a complete server guide overrides a stale local guiding phase", async () => {
   const script = await source("mini.js");
   const recovery = script.split("function incompleteGuideRecovery(intake)", 2)[1].split("function finishDraftRestore", 2)[0];
-  assert.match(recovery, /status === "complete" && lastSavedMessage && lastSavedMessage\.role === "assistant"[\s\S]*state\.phase = "decision"[\s\S]*return ""/);
+  assert.match(recovery, /status === "complete" && lastSavedMessage && lastSavedMessage\.role === "assistant"[\s\S]*state\.phase = state\.guideCard && state\.guideCard\.next\.kind !== "confirm" \? "guiding" : "decision"[\s\S]*return ""/);
   const finish = script.split('function finishDraftRestore(recovery = "")', 2)[1].split("async function restoreConversation", 2)[0];
   assert.match(finish, /state\.phase === "decision" && lastAssistant[\s\S]*attachResume\(lastAssistant\)/);
 });
@@ -172,11 +172,123 @@ test("the free conversation shows only complete replies and keeps every decision
   assert.match(script, /placeholder: "Answer in your own words…"[\s\S]*hint: "A rough answer is enough\. You can also solve it now with what you’ve shared\."/);
   assert.match(script, /if \(options\.hint\) \{[\s\S]*composerStatus\.textContent = options\.hint;[\s\S]*composerStatus\.hidden = false;/);
   assert.doesNotMatch(script, />Start build<|>Try build again<|>Open build notes</);
-  const guide = script.split("async function guideAfter(text, files)", 2)[1].split("async function submitProblemOrAnswer()", 2)[0];
+  const guide = script.split("async function guideAfter(", 2)[1].split("async function submitProblemOrAnswer(", 2)[0];
   const recovery = guide.split("if (!reply)", 2)[1].split("let assistantMessage", 2)[0];
   assert.match(recovery, /const recovery = addMessage\([\s\S]*attachResume\(recovery\);/);
   const submit = script.split("async function submitIntake(options = {})", 2)[1].split("async function startFreeWork", 2)[0];
   assert.doesNotMatch(submit, /conversation\s*:/);
+});
+
+test("adaptive guide cards stay inside the conversation and preserve the free default", async () => {
+  const [script, css] = await Promise.all([source("mini.js"), source("mini.css")]);
+  assert.match(script, /from "\.\/mini_guide\.mjs"/);
+  assert.match(script, /class="guide-decision-card" data-guide-kind="\$\{esc\(next\.kind\)\}" data-guide-card-id="\$\{esc\(next\.id\)\}"/);
+  assert.match(script, /class="guide-decision-question"/);
+  assert.match(script, /class="guide-understanding"/);
+  assert.match(script, /data-guide-choice="\$\{esc\(option\.id\)\}" data-recommended="\$\{String\(option\.recommended\)\}"/);
+  assert.match(script, /data-action="guide-choose-for-me"/);
+  assert.match(script, /data-action="guide-other"/);
+  assert.match(script, /class="guide-mini-preview guide-mini-preview-\$\{esc\(preview\.kind\)\}"/);
+  assert.doesNotMatch(script, /class="guide-mini-preview[^>]*aria-hidden="true"/);
+  const outcome = script.split("function attachGuideOutcome", 2)[1].split("function visibleGuideDecision", 2)[0];
+  assert.match(outcome, /if \(!card\)[\s\S]*visibleReply\.endsWith\("\?"\)[\s\S]*state\.phase = "guiding"[\s\S]*return null;[\s\S]*attachResume\(message, options\)/);
+  assert.match(outcome, /if \(card\.next\.kind === "confirm"\) attachResume\(message, options\)/);
+  assert.doesNotMatch(outcome, /card\.next\.kind !== "confirm"[\s\S]*attachResume/);
+  assert.match(script, /guideChoiceAnswer\(state\.guideCard, guideChoice\.dataset\.guideChoice\)/);
+  assert.match(script, /guideChooseForMeAnswer\(state\.guideCard\)/);
+  assert.match(css, /\.guide-choice\s*\{[\s\S]*min-height:\s*76px/);
+  assert.match(css, /@media \(max-width: 360px\)[\s\S]*\.guide-choice-grid\s*\{\s*grid-template-columns:\s*1fr/);
+  assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.guide-decision-card, \.guide-choice\s*\{\s*transition:\s*none/);
+});
+
+test("the active guide card is draft-restored only after server reconciliation", async () => {
+  const script = await source("mini.js");
+  assert.match(script, /guideCard:\s*null/);
+  assert.match(script, /guideCard:\s*normalizeGuideCard\(state\.guideCard\)/);
+  assert.match(script, /guideCard:\s*normalizeGuideCard\(value\.guideCard\)/);
+  const restore = script.split("async function restoreConversation(draft)", 2)[1].split("function handleSubmit()", 2)[0];
+  assert.match(restore, /state\.guideCard = normalizeGuideCard\(draft\.guideCard\)/);
+  assert.match(restore, /state\.guideCard = normalizeGuideCard\(serverIntake && serverIntake\.guide_card\)/);
+  assert.match(restore, /finishDraftRestore\(incompleteGuideRecovery\(serverIntake\)\)/);
+  const finish = script.split('function finishDraftRestore(recovery = "")', 2)[1].split("async function restoreConversation", 2)[0];
+  assert.match(finish, /lastAssistant && state\.guideCard[\s\S]*attachGuideOutcome\(lastAssistant, state\.guideCard, \{ focus: false, scroll: false \}\)/);
+  const understanding = script.split("function guideUnderstandingMarkup", 2)[1].split("function guidePreviewMarkup", 2)[0];
+  assert.match(understanding, /card\.understanding\.map\(\(fact\) =>/);
+  assert.doesNotMatch(understanding, /\.slice\(/);
+});
+
+test("structured guide state is captured only from the terminal assistant event", async () => {
+  const script = await source("mini.js");
+  const send = script.split("async function sendGuideTurn", 2)[1].split("async function guideAfter", 2)[0];
+  assert.match(send, /if \(isAssistantCompleted\(item\.event, item\.data\)\) \{[\s\S]*guideCard = normalizeGuideCard\(item\.data && \(item\.data\.guide \|\| item\.data\.guide_card\)\)/);
+  assert.doesNotMatch(send.split("const apply =", 2)[0], /guideCard = normalizeGuideCard\(item\.data/);
+  assert.match(send, /return \{ text: cleanText\(answer, 12000\), guideCard, guideVersion \}/);
+});
+
+test("guide answers bind to the current server card and reconcile stale tabs", async () => {
+  const script = await source("mini.js");
+  const send = script.split("async function sendGuideTurn", 2)[1].split("async function guideAfter", 2)[0];
+  assert.match(send, /const expectedCardId = cleanText\(binding && binding\.cardId, 64\)/);
+  assert.match(send, /const requestBody = \{[\s\S]*guide_intent: normalizeGuideIntent\(binding && binding\.intent\)[\s\S]*\};[\s\S]*if \(expectedCardId\) \{[\s\S]*requestBody\.expected_guide_version = cleanGuideVersion\(binding && binding\.version\);[\s\S]*requestBody\.expected_card_id = expectedCardId;/);
+  assert.match(send, /guideVersion = cleanGuideVersion\(item\.data && item\.data\.guide_version, guideVersion\)/);
+  const guideAfter = script.split("async function guideAfter", 2)[1].split("async function submitProblemOrAnswer", 2)[0];
+  assert.match(guideAfter, /error && error\.status === 409 && error\.intake[\s\S]*conflictIntake = error\.intake/);
+  assert.match(guideAfter, /if \(conflictIntake\) \{[\s\S]*reconcileGuideConflict\(conflictIntake\);[\s\S]*return;/);
+  const reconcile = script.split("function reconcileGuideConflict", 2)[1].split("function incompleteGuideRecovery", 2)[0];
+  assert.match(reconcile, /state\.guideVersion = cleanGuideVersion\(intake\.guide_version, state\.guideVersion\)/);
+  assert.match(reconcile, /state\.guideCard = normalizeGuideCard\(intake\.guide_card\)/);
+  assert.match(reconcile, /finishDraftRestore\(incompleteGuideRecovery\(intake\)\)/);
+});
+
+test("every guide path sends a bounded intent and consumes older solve actions", async () => {
+  const script = await source("mini.js");
+  const submit = script.split("async function submitProblemOrAnswer", 2)[1].split("function resumeDraft", 2)[0];
+  assert.match(submit, /const defaultIntent = activeCard[\s\S]*activeCard\.next\.kind === "confirm" \? "change" : "other"[\s\S]*: "choice"/);
+  assert.doesNotMatch(submit, /text\.length < 10|Add \$\{10 - text\.length\} more character/);
+  assert.match(submit, /intent: normalizeGuideIntent\(intentValue \|\| state\.guideIntent \|\| defaultIntent\)/);
+  assert.match(submit, /disablePriorGuideResumeActions\(\);[\s\S]*state\.guideCard = null/);
+  assert.match(script, /function sendGuideCardAnswer\(answer, button, choiceId = "", intentValue = "choice"\)/);
+  assert.match(script, /guide-choose-for-me"\) \{[\s\S]*sendGuideCardAnswer\(guideChooseForMeAnswer\(state\.guideCard\), button, "", "choose_for_me"\)/);
+  assert.match(script, /action === "guide-other"[\s\S]*state\.guideIntent = "other"/);
+  assert.match(script, /action === "guide-change"[\s\S]*state\.guideIntent = "change"/);
+  assert.match(script, /action === "guide-change-fact"[\s\S]*state\.guideIntent = "change"/);
+  const disable = script.split("function disablePriorGuideResumeActions", 2)[1].split("function attachGuideOutcome", 2)[0];
+  assert.match(disable, /querySelectorAll\('\[data-action="resume"\]:not\(:disabled\)'\)[\s\S]*button\.disabled = true/);
+  const settle = script.split("function settleGuideDecision", 2)[1].split("function sendGuideCardAnswer", 2)[0];
+  assert.match(settle, /\[data-action=\\"guide-change\\"\], \[data-action=\\"guide-change-fact\\"\][\s\S]*button\.disabled = true/);
+  const change = script.split('action === "guide-change"', 2)[1].split('action === "guide-change-fact"', 2)[0];
+  assert.match(change, /decision\.dataset\.guideCardId !== card\.next\.id \|\| decision\.dataset\.guideAnswered[\s\S]*That detail has already moved on/);
+});
+
+test("understood facts are targeted, editable and use unique accessible card headings", async () => {
+  const script = await source("mini.js");
+  assert.match(script, /data-guide-fact="\$\{esc\(fact\.key\)\}"/);
+  assert.match(script, /data-action="guide-change-fact" data-guide-fact-key="\$\{esc\(fact\.key\)\}" data-guide-fact-label="\$\{esc\(fact\.label\)\}" data-guide-fact-value="\$\{esc\(fact\.value\)\}"/);
+  assert.match(script, /placeholder: `Change “\$\{label\}: \$\{value\}”…`/);
+  assert.match(script, /state\.guideFact = \{ key: fact\.key, label: fact\.label, value: fact\.value \}/);
+  assert.match(script, /const pendingFact = activeCard && state\.guideFact[\s\S]*fact\.key === state\.guideFact\.key/);
+  assert.match(script, /const correction = pendingFact && text[\s\S]*`Change \$\{pendingFact\.label\}: \$\{text\}/);
+  assert.match(script, /decision\.dataset\.guideCardId !== card\.next\.id \|\| decision\.dataset\.guideAnswered/);
+  assert.match(script, /let guideDomSequence = 0/);
+  assert.match(script, /const headingId = `guide-decision-\$\{next\.id\}-\$\{domSuffix\}`/);
+  assert.match(script, /guideDomSequence \+= 1;[\s\S]*guideDecisionMarkup\(card, guideDomSequence\)/);
+});
+
+test("guide previews remain readable and quiet delivery preserves the reader position", async () => {
+  const [script, css] = await Promise.all([source("mini.js"), source("mini.css")]);
+  assert.match(css, /\.guide-mini-preview \{[\s\S]*min-height:\s*210px;[\s\S]*height:\s*auto/);
+  assert.match(css, /\.guide-preview-copy strong \{[^}]*font-size:\s*13px/);
+  assert.match(css, /\.guide-preview-copy small \{[^}]*font-size:\s*11px/);
+  assert.match(css, /\.guide-preview-items span \{[^}]*font-size:\s*11px;[^}]*overflow-wrap:\s*anywhere/);
+  assert.match(css, /\.guide-preview-action \{[^}]*font-size:\s*11px/);
+  assert.match(css, /\.guide-fact-change \{[^}]*font-size:\s*11px/);
+  assert.match(css, /\.guide-best-guess, \.guide-recommended \{[^}]*font-size:\s*11px/);
+  assert.match(css, /\.guide-choice-copy small \{[^}]*font-size:\s*11px/);
+  assert.doesNotMatch(css, /\.guide-preview-(?:copy|items|action)[^{]*\{[^}]*(?:font-size:\s*(?:6\.5|7)px)/);
+  const render = script.split("function renderGuideDecision", 2)[1].split("function disablePriorGuideResumeActions", 2)[0];
+  assert.match(render, /if \(options\.quietStream\) \{[\s\S]*if \(options\.followAtEnd\) scrollStreamToEnd\(\)/);
+  assert.doesNotMatch(render, /scrollToEnd\(true\)/);
+  assert.match(render, /heading\.focus\(\{ preventScroll: true \}\)/);
 });
 
 test("customer-facing recovery, status and result copy never expose internal failures or mechanics", async () => {

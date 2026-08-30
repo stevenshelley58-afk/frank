@@ -2,6 +2,13 @@ import { isAssistantCompleted, parseSseBlock, streamPiece } from "./mini_stream.
 import { MiniApiError, createMiniApi } from "./mini_api.mjs";
 import { normalizeResultGuidance, resultGuidanceMarkup, selfHostGuideMarkup } from "./mini_result.mjs";
 import { createReplayKeyTracker } from "./mini_retry.mjs";
+import {
+  guideChoiceAnswer,
+  guideChooseForMeAnswer,
+  guideOtherPrompt,
+  normalizeGuideCard,
+  normalizeGuideIntent,
+} from "./mini_guide.mjs";
 
 (function () {
   "use strict";
@@ -24,6 +31,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
   const BUFFER_GUIDE_REPLIES_UNTIL_COMPLETE = true;
   // A reader must return to the actual end before reply delivery follows again.
   const STREAM_END_TOLERANCE_PX = 4;
+  const GUIDE_CHOICE_PRESS_MS = 120;
   const DEFAULT_LIMITS = {
     max_count: 10,
     max_file_bytes: 20 * 1024 * 1024,
@@ -90,6 +98,8 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
   let uploadChain = Promise.resolve();
   let guideController = null;
   let guideAbortReason = "";
+  let guideChoiceTimer = null;
+  let guideDomSequence = 0;
   let mutationController = null;
   let mutationAbortReason = "";
   let pendingMutation = null;
@@ -102,6 +112,10 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     intake: null,
     attachments: [],
     transcript: [],
+    guideCard: null,
+    guideVersion: 0,
+    guideIntent: "",
+    guideFact: null,
     problem: "",
     pendingChange: "",
     userTurns: 0,
@@ -631,6 +645,8 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       refining: state.refining,
       attachments: state.attachments.filter((item) => item.status === "ready").map(({ id, name, type, size }) => ({ id, name, type, size })),
       transcript: cleanTranscript(state.transcript),
+      guideCard: normalizeGuideCard(state.guideCard),
+      guideVersion: state.guideVersion,
     };
     try { localStorage.setItem(DRAFT_STORE, JSON.stringify(value)); }
     catch (_error) { /* The visible conversation remains available in this browser session. */ }
@@ -656,13 +672,19 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
         refining: Boolean(value.refining),
         attachments: cleanFiles(value.attachments),
         transcript,
+        guideCard: normalizeGuideCard(value.guideCard),
+        guideVersion: cleanGuideVersion(value.guideVersion),
       };
     } catch (_error) {
       return null;
     }
   }
 
-  function intakeFrom(body, claimFallback = "") {
+  function cleanGuideVersion(value, fallback = 0) {
+    return Number.isSafeInteger(value) && value >= 0 ? value : fallback;
+  }
+
+  function intakeFrom(body, claimFallback = "", versionFallback = 0) {
     const item = body && body.intake && typeof body.intake === "object" ? body.intake : body || {};
     const claim = cleanText(body && (body.claim_token || body.claim), 300) || claimFallback;
     if (!validId(item.id) || !validClaim(claim)) throw new Error("Couldn’t start that conversation.");
@@ -671,12 +693,14 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       claim,
       status: item.status || "draft",
       attachments: cleanFiles(item.attachments),
+      guideVersion: cleanGuideVersion(item.guide_version, versionFallback),
     };
   }
 
   function updateIntake(body) {
     if (!state.intake || !body || !body.intake) return;
-    state.intake = intakeFrom(body, state.intake.claim);
+    state.intake = intakeFrom(body, state.intake.claim, state.guideVersion);
+    state.guideVersion = state.intake.guideVersion;
   }
 
   // A submitted intake is no longer a draft.  The server only includes this
@@ -713,6 +737,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
         throw error;
       }
       state.intake = intake;
+      state.guideVersion = intake.guideVersion;
       setDraftDeleteVisibility();
       saveDraft();
       return intake;
@@ -939,6 +964,187 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     body.append(actions);
     if (options.scroll !== false) scrollToEnd(options.forceScroll !== false);
     return actions;
+  }
+
+  function guideUnderstandingMarkup(card) {
+    const facts = card.understanding.length
+      ? `<dl>${card.understanding.map((fact) => `<div data-guide-fact="${esc(fact.key)}"><dt>${esc(fact.label)}</dt><dd><span>${esc(fact.value)}${fact.assumed ? '<span class="guide-best-guess">Best guess</span>' : ""}</span><button class="guide-fact-change" type="button" data-action="guide-change-fact" data-guide-fact-key="${esc(fact.key)}" data-guide-fact-label="${esc(fact.label)}" data-guide-fact-value="${esc(fact.value)}">Change ${esc(fact.label)}</button></dd></div>`).join("")}</dl>`
+      : '<p class="guide-understanding-empty">I’ll use sensible defaults until you tell me otherwise.</p>';
+    return `<section class="guide-understanding" aria-label="What Frank understands">
+      <div class="guide-understanding-head"><strong>What I understand</strong><button class="guide-change-button" type="button" data-action="guide-change">Change something</button></div>
+      ${facts}
+    </section>`;
+  }
+
+  function guidePreviewMarkup(preview) {
+    const items = preview.items.map((item) => `<span>${esc(item)}</span>`).join("");
+    return `<div class="guide-mini-preview guide-mini-preview-${esc(preview.kind)}">
+      <div class="guide-preview-bar"><i></i><i></i><i></i></div>
+      <div class="guide-preview-copy"><strong>${esc(preview.title)}</strong>${preview.subtitle ? `<small>${esc(preview.subtitle)}</small>` : ""}</div>
+      <div class="guide-preview-items">${items}</div>
+      ${preview.action ? `<span class="guide-preview-action">${esc(preview.action)}</span>` : ""}
+    </div>`;
+  }
+
+  function guideOptionMarkup(option, kind) {
+    const recommended = option.recommended ? '<span class="guide-recommended">Frank’s pick</span>' : "";
+    if (kind === "preview") {
+      return `<button class="guide-choice guide-preview-choice" type="button" data-guide-choice="${esc(option.id)}" data-recommended="${String(option.recommended)}">
+        ${guidePreviewMarkup(option.preview)}
+        <span class="guide-choice-copy"><strong>${esc(option.label)}</strong>${recommended}${option.detail ? `<small>${esc(option.detail)}</small>` : ""}</span>
+      </button>`;
+    }
+    return `<button class="guide-choice" type="button" data-guide-choice="${esc(option.id)}" data-recommended="${String(option.recommended)}">
+      <span class="guide-choice-copy"><strong>${esc(option.label)}</strong>${recommended}${option.detail ? `<small>${esc(option.detail)}</small>` : ""}</span>
+    </button>`;
+  }
+
+  function guideDecisionMarkup(card, domSuffix) {
+    const next = card.next;
+    const headingId = `guide-decision-${next.id}-${domSuffix}`;
+    const whyId = next.why ? `guide-why-${next.id}-${domSuffix}` : "";
+    let decision = "";
+    if (next.kind === "confirm") {
+      decision = `<div class="guide-confirm"><p>${esc(next.why || "Everything important is captured. You can still change anything in your own words.")}</p></div>`;
+    } else {
+      decision = `<div class="guide-choice-grid guide-choice-grid-${esc(next.kind)}">${next.options.map((option) => guideOptionMarkup(option, next.kind)).join("")}</div>
+        ${(next.allow_choose_for_me || next.allow_other) ? `<div class="guide-choice-secondary">${next.allow_choose_for_me ? '<button type="button" data-action="guide-choose-for-me">I’m not sure — choose for me</button>' : ""}${next.allow_other ? '<button type="button" data-action="guide-other">Something else</button>' : ""}</div>` : ""}`;
+    }
+    const title = next.question || "Ready to make it real?";
+    return `<section class="guide-decision-card" data-guide-kind="${esc(next.kind)}" data-guide-card-id="${esc(next.id)}" aria-labelledby="${esc(headingId)}">
+      ${guideUnderstandingMarkup(card)}
+      <div class="guide-next-decision">
+        <h3 class="guide-decision-question" id="${esc(headingId)}" tabindex="-1"${whyId ? ` aria-describedby="${esc(whyId)}"` : ""}>${esc(title)}</h3>
+        ${next.why && next.kind !== "confirm" ? `<p class="guide-decision-why" id="${esc(whyId)}">${esc(next.why)}</p>` : ""}
+        ${decision}
+      </div>
+    </section>`;
+  }
+
+  function renderGuideDecision(message, cardValue, options = {}) {
+    const card = normalizeGuideCard(cardValue);
+    const body = message && message.querySelector(".message-body");
+    if (!card || !body) return null;
+    const existing = body.querySelector(".guide-decision-card");
+    if (existing) existing.remove();
+    const holder = document.createElement("div");
+    guideDomSequence += 1;
+    holder.innerHTML = guideDecisionMarkup(card, guideDomSequence);
+    const decision = holder.firstElementChild;
+    const actions = body.querySelector(".message-actions");
+    body.insertBefore(decision, actions || null);
+    state.guideCard = card;
+    state.guideIntent = "";
+    state.guideFact = null;
+    state.phase = card.next.kind === "confirm" ? "decision" : "guiding";
+    if (card.next.kind !== "confirm") {
+      setComposer({
+        placeholder: "Answer in your own words…",
+        hint: "Choose what feels closest, or type your own answer.",
+        attachments: true,
+      });
+    }
+    saveDraft();
+    if (options.scroll !== false) {
+      if (options.quietStream) {
+        if (options.followAtEnd) scrollStreamToEnd();
+      } else scrollToEnd(options.forceScroll !== false);
+    }
+    const shouldFocus = options.focus !== false && (!options.quietStream || options.followAtEnd);
+    if (shouldFocus) {
+      window.requestAnimationFrame(() => {
+        const heading = decision.querySelector(".guide-decision-question");
+        if (heading && decision.isConnected) heading.focus({ preventScroll: true });
+      });
+    }
+    return decision;
+  }
+
+  function disablePriorGuideResumeActions() {
+    messages.querySelectorAll('[data-action="resume"]:not(:disabled)').forEach((button) => {
+      button.disabled = true;
+      button.setAttribute("aria-label", "A newer answer is available below");
+    });
+  }
+
+  function attachGuideOutcome(message, cardValue, options = {}) {
+    disablePriorGuideResumeActions();
+    const card = normalizeGuideCard(cardValue);
+    if (!card) {
+      state.guideCard = null;
+      state.guideIntent = "";
+      state.guideFact = null;
+      const visibleReply = cleanText(message && message.querySelector(".message-text")?.textContent, 12000);
+      if (visibleReply.endsWith("?")) {
+        state.phase = "guiding";
+        setComposer({
+          placeholder: "Answer in your own words…",
+          hint: "A rough answer is fine.",
+          attachments: true,
+        });
+        saveDraft();
+        return null;
+      }
+      attachResume(message, options);
+      return null;
+    }
+    const decision = renderGuideDecision(message, card, options);
+    if (card.next.kind === "confirm") attachResume(message, options);
+    return decision;
+  }
+
+  function visibleGuideDecision(cardId = "") {
+    const cards = [...messages.querySelectorAll(".guide-decision-card:not([data-guide-answered])")];
+    if (!cardId) return cards[cards.length - 1] || null;
+    return cards.reverse().find((item) => item.dataset.guideCardId === cardId) || null;
+  }
+
+  function settleGuideDecision(cardElement, label = "Answered in your own words", choiceId = "") {
+    if (!cardElement || cardElement.dataset.guideAnswered) return;
+    cardElement.dataset.guideAnswered = "true";
+    cardElement.classList.add("is-answered");
+    cardElement.querySelectorAll("[data-guide-choice], [data-action=\"guide-choose-for-me\"], [data-action=\"guide-other\"], [data-action=\"guide-change\"], [data-action=\"guide-change-fact\"]").forEach((button) => {
+      button.disabled = true;
+      if (choiceId && button.dataset.guideChoice === choiceId) {
+        button.classList.add("is-selected");
+        button.setAttribute("aria-pressed", "true");
+      }
+    });
+    const next = cardElement.querySelector(".guide-next-decision");
+    if (next && !next.querySelector(".guide-answer-receipt")) {
+      const receipt = document.createElement("p");
+      receipt.className = "guide-answer-receipt";
+      receipt.textContent = `Your answer: ${label}`;
+      next.prepend(receipt);
+    }
+  }
+
+  function sendGuideCardAnswer(answer, button, choiceId = "", intentValue = "choice") {
+    const card = normalizeGuideCard(state.guideCard);
+    if (!answer || !card || state.busy || guideChoiceTimer) return;
+    const decision = button && button.closest(".guide-decision-card");
+    if (!decision || decision.dataset.guideCardId !== card.next.id || decision.dataset.guideAnswered) {
+      notify("That question has already moved on. Use the newest one below.");
+      return;
+    }
+    if (messageInput.value.trim()) {
+      notify("Your own answer is still in the box. Send it or clear it before choosing.");
+      messageInput.focus();
+      return;
+    }
+    button.classList.add("is-pressed");
+    const guideIntent = normalizeGuideIntent(intentValue);
+    state.guideFact = null;
+    decision.classList.add("is-transitioning");
+    decision.querySelectorAll("[data-guide-choice], [data-action=\"guide-choose-for-me\"], [data-action=\"guide-other\"]").forEach((item) => { item.disabled = true; });
+    guideChoiceTimer = window.setTimeout(() => {
+      guideChoiceTimer = null;
+      settleGuideDecision(decision, answer.label, choiceId);
+      decision.classList.remove("is-transitioning");
+      messageInput.value = answer.text;
+      resizeComposer();
+      submitProblemOrAnswer(guideIntent);
+    }, GUIDE_CHOICE_PRESS_MS);
   }
 
   function attachResume(message, options = {}) {
@@ -1183,9 +1389,18 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     );
   }
 
-  async function sendGuideTurn(text, onUpdate, signal, onActivity) {
+  async function sendGuideTurn(text, binding, onUpdate, signal, onActivity) {
     const intake = await ensureIntake();
     onActivity();
+    const expectedCardId = cleanText(binding && binding.cardId, 64);
+    const requestBody = {
+      text,
+      guide_intent: normalizeGuideIntent(binding && binding.intent),
+    };
+    if (expectedCardId) {
+      requestBody.expected_guide_version = cleanGuideVersion(binding && binding.version);
+      requestBody.expected_card_id = expectedCardId;
+    }
     const response = await fetch(`/api/mini/intakes/${encodeURIComponent(intake.id)}/chat`, {
       method: "POST",
       cache: "no-store",
@@ -1197,7 +1412,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
         Authorization: `Bearer ${intake.claim}`,
         "Idempotency-Key": `mini-guide-${intake.id}-${Date.now()}`,
       },
-      body: JSON.stringify({ text }),
+      body: JSON.stringify(requestBody),
       signal,
     });
     onActivity();
@@ -1206,22 +1421,39 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       try { body = await response.json(); } catch (_error) { body = {}; }
       const error = new Error("Guide request unavailable");
       error.status = response.status;
+      error.intake = body && body.intake;
       throw error;
     }
     const contentType = String(response.headers.get("content-type") || "");
-    if (contentType.includes("application/json")) return extractReply(await response.json());
-    if (!response.body) return "";
+    if (contentType.includes("application/json")) {
+      const body = await response.json();
+      const guideCard = normalizeGuideCard(body && (body.guide || body.guide_card || (body.intake && body.intake.guide_card)));
+      const conversation = cleanTranscript(body && body.intake && body.intake.conversation);
+      const latestAssistant = [...conversation].reverse().find((item) => item.role === "assistant");
+      return {
+        text: extractReply(body) || cleanText(latestAssistant && latestAssistant.text, 12000) || cleanText(guideCard && guideCard.message, 12000),
+        guideCard,
+        guideVersion: cleanGuideVersion(body && (body.guide_version ?? (body.intake && body.intake.guide_version)), state.guideVersion),
+      };
+    }
+    if (!response.body) return { text: "", guideCard: null, guideVersion: state.guideVersion };
 
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
     let answer = "";
+    let guideCard = null;
+    let guideVersion = state.guideVersion;
     let completed = false;
     const apply = (block) => {
       const item = parseSseBlock(block);
       if (!item) return;
       const piece = streamPiece(item.event, item.data);
-      if (isAssistantCompleted(item.event, item.data)) completed = true;
+      if (isAssistantCompleted(item.event, item.data)) {
+        completed = true;
+        guideCard = normalizeGuideCard(item.data && (item.data.guide || item.data.guide_card));
+        guideVersion = cleanGuideVersion(item.data && item.data.guide_version, guideVersion);
+      }
       if (!piece.text) return;
       if (piece.mode === "append") answer += piece.text;
       else if (!answer || piece.text.length >= answer.length) answer = piece.text;
@@ -1242,16 +1474,19 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     buffer += decoder.decode();
     if (buffer.trim()) apply(buffer);
     if (answer && !completed) throw new Error("The reply ended before it was complete.");
-    return cleanText(answer, 12000);
+    return { text: cleanText(answer, 12000), guideCard, guideVersion };
   }
 
-  async function guideAfter(text, files) {
+  async function guideAfter(text, files, binding = {}) {
     const generation = state.generation;
     setBusy(true);
     const thinking = addThinking();
     let streamMessage = null;
     let pendingStreamText = "";
     let reply = "";
+    let guideCard = null;
+    let guideVersion = state.guideVersion;
+    let conflictIntake = null;
     const controller = new AbortController();
     guideController = controller;
     guideAbortReason = "";
@@ -1320,9 +1555,13 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     updateSendButton();
     touch();
     try {
-      reply = await sendGuideTurn(text, queueStreamText, controller.signal, touch);
-    } catch (_error) {
-      reply = "";
+      const outcome = await sendGuideTurn(text, binding, queueStreamText, controller.signal, touch);
+      reply = cleanText(outcome && outcome.text, 12000);
+      guideCard = normalizeGuideCard(outcome && outcome.guideCard);
+      guideVersion = cleanGuideVersion(outcome && outcome.guideVersion, state.guideVersion);
+    } catch (error) {
+      if (error && error.status === 409 && error.intake) conflictIntake = error.intake;
+      else reply = "";
     } finally {
       clearTimeout(idleTimer);
       if (guideController === controller) guideController = null;
@@ -1331,8 +1570,13 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     cancelStreamFrame();
     pendingStreamText = "";
     thinking.remove();
+    if (conflictIntake) {
+      reconcileGuideConflict(conflictIntake);
+      return;
+    }
     if (!reply) {
       if (streamMessage) streamMessage.remove();
+      state.guideCard = null;
       const recoveryMessage = guideAbortReason === "user"
         ? "Stopped waiting. Your message and files are still in this conversation. I won’t send them again automatically."
         : "I couldn’t finish that reply just now. Your message and files are still here — try again in a moment.";
@@ -1362,20 +1606,18 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     const finalFollowAtEnd = ENABLE_QUIET_STREAM_DELIVERY && state.followingLatest && streamAtEnd();
     if (ENABLE_QUIET_STREAM_DELIVERY && !finalFollowAtEnd) setLatestPending(true);
     recordAssistant(reply);
-    attachResume(assistantMessage, { quietStream: ENABLE_QUIET_STREAM_DELIVERY, followAtEnd: finalFollowAtEnd });
+    state.guideVersion = guideVersion;
+    attachGuideOutcome(assistantMessage, guideCard, { quietStream: ENABLE_QUIET_STREAM_DELIVERY, followAtEnd: finalFollowAtEnd });
     setBusy(false);
     saveDraft();
   }
 
-  async function submitProblemOrAnswer() {
+  async function submitProblemOrAnswer(intentValue = "") {
     if (state.busy) return;
     const text = cleanText(messageInput.value);
     const files = state.attachments.filter((item) => item.status === "ready");
+    const activeCard = normalizeGuideCard(state.guideCard);
     if (!text && !files.length) return;
-    if (text && text.length < 10) {
-      setComposerRecovery(`Add ${10 - text.length} more character${10 - text.length === 1 ? "" : "s"} so Frank has enough to work from.`, { invalid: true, focus: true });
-      return;
-    }
     setBusy(true);
     try {
       await ensureIntake();
@@ -1388,8 +1630,29 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       }
       return;
     }
+    const activeDecision = visibleGuideDecision(activeCard && activeCard.next.id);
+    const defaultIntent = activeCard
+      ? activeCard.next.kind === "confirm" ? "change" : "other"
+      : "choice";
+    const guideBinding = {
+      version: state.guideVersion,
+      cardId: activeCard ? activeCard.next.id : "",
+      intent: normalizeGuideIntent(intentValue || state.guideIntent || defaultIntent),
+    };
+    const pendingFact = activeCard && state.guideFact
+      ? activeCard.understanding.find((fact) => fact.key === state.guideFact.key) || null
+      : null;
+    disablePriorGuideResumeActions();
+    if (activeDecision) settleGuideDecision(activeDecision);
+    state.guideCard = null;
+    state.guideIntent = "";
+    state.guideFact = null;
+    state.phase = "guiding";
     clearComposerRecovery();
-    const spokenText = text || (files.length === 1 ? "I need help with this file." : "I need help with these files.");
+    const correction = pendingFact && text
+      ? `Change ${pendingFact.label}: ${text}${/[.!?]$/.test(text) ? "" : "."}`
+      : "";
+    const spokenText = correction || text || (files.length === 1 ? "I need help with this file." : "I need help with these files.");
     addMessage("user", spokenText, { files, forceScroll: true });
     setReplyAnnouncement("Message sent. Frank is replying.");
     if (!state.problem) state.problem = spokenText;
@@ -1398,7 +1661,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     renderAttachmentList();
     resetComposerValue();
     setBusy(false);
-    await guideAfter(spokenText, files);
+    await guideAfter(spokenText, files, guideBinding);
   }
 
   function resumeDraft(button) {
@@ -2393,12 +2656,18 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     if (guideController) guideController.abort();
     guideController = null;
     guideAbortReason = "";
+    if (guideChoiceTimer) window.clearTimeout(guideChoiceTimer);
+    guideChoiceTimer = null;
     intakePromise = null;
     state.generation += 1;
     state.phase = "problem";
     state.intake = null;
     state.attachments = [];
     state.transcript = [];
+    state.guideCard = null;
+    state.guideVersion = 0;
+    state.guideIntent = "";
+    state.guideFact = null;
     state.problem = "";
     state.pendingChange = "";
     state.userTurns = 0;
@@ -2618,6 +2887,21 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     }
   }
 
+  function reconcileGuideConflict(intake) {
+    if (!intake || typeof intake !== "object") return;
+    updateIntake({ intake });
+    state.guideCard = normalizeGuideCard(intake.guide_card);
+    state.guideVersion = cleanGuideVersion(intake.guide_version, state.guideVersion);
+    state.transcript = cleanTranscript(intake.conversation);
+    state.attachments = cleanFiles(intake.attachments);
+    const firstProblem = state.transcript.find((item) => item.role === "user" && item.text);
+    state.problem = firstProblem ? firstProblem.text : state.problem;
+    state.phase = state.guideCard && state.guideCard.next.kind !== "confirm" ? "guiding" : "decision";
+    finishDraftRestore(incompleteGuideRecovery(intake));
+    setReplyAnnouncement("The latest question is ready.");
+    notify("That answer was for an older question. Here’s the latest one.");
+  }
+
   function incompleteGuideRecovery(intake) {
     const lastSavedMessage = state.transcript[state.transcript.length - 1];
     // A local phase can say "decision" after a tab closes mid-reply. The
@@ -2629,7 +2913,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     // but the server has since completed Frank's reply. Restore the completed
     // server state, including its normal free action.
     if (status === "complete" && lastSavedMessage && lastSavedMessage.role === "assistant") {
-      state.phase = "decision";
+      state.phase = state.guideCard && state.guideCard.next.kind !== "confirm" ? "guiding" : "decision";
       return "";
     }
     if (!lastSavedMessage || lastSavedMessage.role !== "user") return "";
@@ -2652,6 +2936,8 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     if (recovery) {
       addMessage("assistant", recovery, { record: false });
       setComposer({ placeholder: "Try again in your own words…", hint: "Your saved message is still here.", attachments: true });
+    } else if (lastAssistant && state.guideCard) {
+      attachGuideOutcome(lastAssistant, state.guideCard, { focus: false, scroll: false });
     } else if (state.phase === "decision" && lastAssistant) {
       attachResume(lastAssistant);
     } else setComposer({ placeholder: state.phase === "problem" ? "Tell me what’s not working…" : "Type your answer…", hint: state.phase === "problem" ? "No tech words needed." : "A rough answer is fine.", attachments: true });
@@ -2671,6 +2957,8 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     state.refining = draft.refining;
     state.attachments = draft.attachments;
     state.transcript = draft.transcript;
+    state.guideCard = normalizeGuideCard(draft.guideCard);
+    state.guideVersion = cleanGuideVersion(draft.guideVersion);
     setComposer({ locked: true, hint: "Opening your conversation…", attachments: false });
     setBusy(true);
     const generation = state.generation;
@@ -2680,6 +2968,8 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       if (generation !== state.generation) return;
       updateIntake(body);
       serverIntake = body && body.intake ? body.intake : body;
+      state.guideCard = normalizeGuideCard(serverIntake && serverIntake.guide_card);
+      state.guideVersion = cleanGuideVersion(serverIntake && serverIntake.guide_version, state.guideVersion);
       if (cleanText(serverIntake && serverIntake.status, 80).toLowerCase() === "submitted") {
         const linked = linkedJobAccess(body);
         clearDraft();
@@ -2758,6 +3048,12 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       }
       return;
     }
+    const guideChoice = event.target.closest("[data-guide-choice]");
+    if (guideChoice) {
+      const answer = guideChoiceAnswer(state.guideCard, guideChoice.dataset.guideChoice);
+      sendGuideCardAnswer(answer, guideChoice, guideChoice.dataset.guideChoice);
+      return;
+    }
     const guidancePrompt = event.target.closest("[data-guidance-prompt]");
     if (guidancePrompt) {
       useGuidancePrompt(guidancePrompt);
@@ -2811,6 +3107,49 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       guideAbortReason = "user";
       button.disabled = true;
       guideController.abort();
+    }
+    else if (action === "guide-choose-for-me") {
+      sendGuideCardAnswer(guideChooseForMeAnswer(state.guideCard), button, "", "choose_for_me");
+    }
+    else if (action === "guide-other") {
+      const decision = button.closest(".guide-decision-card");
+      const card = normalizeGuideCard(state.guideCard);
+      if (!card || !decision || decision.dataset.guideCardId !== card.next.id) {
+        notify("That question has already moved on. Use the newest one below.");
+      } else {
+        state.guideIntent = "other";
+        state.guideFact = null;
+        setComposer({ placeholder: guideOtherPrompt(card), hint: "Use your own words. A rough answer is fine.", attachments: true });
+        messageInput.focus();
+      }
+    }
+    else if (action === "guide-change") {
+      const decision = button.closest(".guide-decision-card");
+      const card = normalizeGuideCard(state.guideCard);
+      if (!card || !decision || decision.dataset.guideCardId !== card.next.id || decision.dataset.guideAnswered) {
+        notify("That detail has already moved on. Use the newest card below.");
+      } else {
+        state.guideIntent = "change";
+        state.guideFact = null;
+        setComposer({ placeholder: "Tell me what I got wrong or what has changed…", hint: "Plain words are perfect.", attachments: true });
+        messageInput.focus();
+      }
+    }
+    else if (action === "guide-change-fact") {
+      const decision = button.closest(".guide-decision-card");
+      const card = normalizeGuideCard(state.guideCard);
+      const key = cleanText(button.dataset.guideFactKey, 80);
+      const label = cleanText(button.dataset.guideFactLabel, 80);
+      const value = cleanText(button.dataset.guideFactValue, 500);
+      const fact = card && card.understanding.find((item) => item.key === key && item.label === label && item.value === value);
+      if (!fact || !decision || decision.dataset.guideCardId !== card.next.id || decision.dataset.guideAnswered) {
+        notify("That detail has already moved on. Use the newest card below.");
+      } else {
+        state.guideIntent = "change";
+        state.guideFact = { key: fact.key, label: fact.label, value: fact.value };
+        setComposer({ placeholder: `Change “${label}: ${value}”…`, hint: "Tell me the correct version in your own words.", attachments: true });
+        messageInput.focus();
+      }
     }
     else if (action === "cancel-mutation") {
       button.disabled = true;

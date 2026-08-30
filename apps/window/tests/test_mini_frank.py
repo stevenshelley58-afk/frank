@@ -20,6 +20,7 @@ from flask import Flask
 from mini_frank import (
     MINI_GUIDE_CONTRACT_VERSION,
     MINI_GUIDE_SAFE_FALLBACK,
+    MINI_GUIDE_SCHEMA,
     MINI_GUIDE_SYSTEM_PROMPT,
     MiniFrankRateLedger,
     MiniFrankStorageFence,
@@ -339,6 +340,91 @@ class MiniFrankTest(unittest.TestCase):
     def pdf_bytes(extra=b""):
         return b"%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n" + extra + b"\n%%EOF\n"
 
+    @staticmethod
+    def typed_guide_card(kind="question", *, include_assumption=False, card_id=None):
+        understanding = [
+            {"key": "problem", "label": "What needs fixing", "value": "Turn ad interest into booked appointments.", "assumed": False},
+            {"key": "outcome", "label": "Good result", "value": "More suitable customers book an appointment.", "assumed": False},
+            {"key": "current_way", "label": "What happens now", "value": "People send messages and wait for a reply.", "assumed": False},
+            {"key": "success", "label": "How success looks", "value": "Staff spend less time chasing incomplete enquiries.", "assumed": False},
+            {"key": "direction", "label": "Chosen direction", "value": "Lead with one clear offer and a booking step.", "assumed": False},
+        ]
+        if include_assumption:
+            understanding.append({
+                "key": "assumption", "label": "What I am assuming",
+                "value": "Use a calm and friendly tone.", "assumed": True,
+            })
+        else:
+            understanding.append({
+                "key": "people", "label": "Who it helps",
+                "value": "Local customers looking for an appointment.", "assumed": False,
+            })
+        card = {
+            "schema": MINI_GUIDE_SCHEMA,
+            "message": "I can shape this around the result that matters most to your business.",
+            "understanding": understanding,
+            "next": {
+                "kind": "question",
+                "id": "desired_action",
+                "question": "What should people do after they see the ad?",
+                "why": "This helps every ad lead to the right result.",
+                "options": [
+                    {"id": "send_enquiry", "label": "Send an enquiry", "detail": "Collect their details so the business can follow up.", "recommended": True},
+                    {"id": "book_now", "label": "Book now", "detail": "Take people straight to a booking step.", "recommended": False},
+                ],
+                "allow_other": True,
+                "allow_choose_for_me": True,
+            },
+        }
+        if kind == "confirm":
+            card["message"] = (
+                "I understand the useful first version and the result it should create. "
+                "Click Solve this for me — free."
+            )
+            card["next"] = {
+                "kind": "confirm", "id": "solve_free", "question": "", "why": "",
+                "options": [], "allow_other": True, "allow_choose_for_me": False,
+            }
+        elif kind == "preview":
+            card["message"] = "Here are two useful directions based on what you told me."
+            card["next"] = {
+                "kind": "preview",
+                "id": card_id or "ad_direction",
+                "question": "Which direction feels closest to your business?",
+                "why": "Both aim for bookings but lead with different reasons to act.",
+                "options": [
+                    {
+                        "id": "quick_offer",
+                        "label": "Quick and clear",
+                        "detail": "Lead with the offer and one clear booking step.",
+                        "recommended": True,
+                        "preview": {
+                            "kind": "ad",
+                            "title": "Book your next visit",
+                            "subtitle": "A clear offer for local customers.",
+                            "items": ["Main customer benefit", "Reason to act today"],
+                            "action": "Book now",
+                        },
+                    },
+                    {
+                        "id": "trust_first",
+                        "label": "Trust first",
+                        "detail": "Lead with reassurance before the booking offer.",
+                        "recommended": False,
+                        "preview": {
+                            "kind": "ad",
+                            "title": "Feel looked after",
+                            "subtitle": "A calm reason to choose this business.",
+                            "items": ["Customer promise", "Simple proof"],
+                            "action": "See available times",
+                        },
+                    },
+                ],
+                "allow_other": True,
+                "allow_choose_for_me": True,
+            }
+        return card
+
     def test_guide_is_tool_free_sanitizes_stream_and_persists_only_completed_reply(self):
         created = self.create_intake()
         intake_id = created["intake"]["id"]
@@ -358,7 +444,8 @@ class MiniFrankTest(unittest.TestCase):
         self.assertNotIn(b"reasoning", body)
         self.assertNotIn(b"tool.completed", body)
         self.assertEqual(self.guide_turns[0]["kwargs"]["read_timeout"], 45)
-        self.assertEqual(self.guide_turns[0]["payload"]["instructions"], MINI_GUIDE_SYSTEM_PROMPT)
+        self.assertTrue(self.guide_turns[0]["payload"]["instructions"].startswith(MINI_GUIDE_SYSTEM_PROMPT))
+        self.assertIn("Question cards remaining: 3", self.guide_turns[0]["payload"]["instructions"])
         self.assertNotIn("tool_policy", self.guide_turns[0]["payload"])
 
         session = self.sessions[0]
@@ -386,18 +473,241 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         response.data
         payload = self.guide_turns[0]["payload"]
-        self.assertEqual(payload["instructions"], MINI_GUIDE_SYSTEM_PROMPT)
+        self.assertTrue(payload["instructions"].startswith(MINI_GUIDE_SYSTEM_PROMPT))
+        self.assertIn("Question cards remaining: 3", payload["instructions"])
         self.assertNotIn("tool_policy", payload)
         self.assertEqual(payload["message"], "make me an meta ad generator")
 
-    def test_meta_ad_example_in_guide_contract_passes_the_response_boundary(self):
-        example = (
-            "Yes. I'll make a simple Meta ad helper that turns a few details about your business and offer into "
-            "ready-to-use ad copy, headlines and ideas. I'll choose sensible defaults and keep it easy to use. "
-            "Click Solve this for me — free."
+    def test_meta_ad_example_asks_one_plain_business_choice(self):
+        compact = " ".join(MINI_GUIDE_SYSTEM_PROMPT.split())
+        self.assertIn("What should people do after they see the ad?", compact)
+        self.assertIn('"schema":"mini-guide-v1"', compact)
+        self.assertIn('"id":"send_enquiry"', compact)
+        self.assertNotIn("short plain explanation", compact)
+        self.assertNotIn("plain business fact", compact)
+        self.assertIn("ready-to-use Meta ads without the fiddly setup", compact)
+        self.assertIn("allow_other is true, allow_choose_for_me is false", compact)
+        self.assertIn("turn after the material business question", compact)
+        self.assertIn("compare two actual ad or generator directions", compact)
+
+    def test_typed_guide_card_is_persisted_restored_and_sent_only_after_validation(self):
+        card = self.typed_guide_card()
+        self.guide_reply = json.dumps(card)
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+
+        response = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={"text": "Make Meta ads that bring in more bookings."},
+            headers=headers,
         )
-        self.assertIn(example, " ".join(MINI_GUIDE_SYSTEM_PROMPT.split()))
-        self.assertEqual(_customer_safe_guide_reply(example), (example, True))
+
+        self.assertEqual(response.status_code, 200)
+        stream = response.data.decode()
+        self.assertIn("event: assistant.completed", stream)
+        self.assertIn('"guide": {', stream)
+        self.assertIn('"kind": "question"', stream)
+        self.assertIn('"guide_version": 1', stream)
+        self.assertNotIn('"delta": "{\\"schema\\"', stream)
+
+        restored = self.client.get(
+            f"/api/mini/intakes/{intake_id}", headers=headers
+        ).get_json()["intake"]
+        self.assertEqual(restored["guide_card"]["next"]["id"], "desired_action")
+        self.assertEqual(restored["guide_card"]["next"]["kind"], "question")
+        self.assertEqual(
+            {item["key"]: item for item in restored["guide_understanding"]},
+            {item["key"]: item for item in card["understanding"]},
+        )
+        self.assertEqual(restored["guide_questions_asked"], 1)
+        self.assertEqual(restored["guide_version"], 1)
+        self.assertEqual(restored["guide_preview_count"], 0)
+        self.assertFalse(restored["guide_preview_shown"])
+        self.assertEqual(restored["conversation"][-1]["text"], card["message"])
+
+        stored = json.loads(
+            (self.data_root / "mini" / "intakes.json").read_text(encoding="utf-8")
+        )[intake_id]
+        self.assertEqual(stored["conversation"][-1]["text"], card["message"])
+        self.assertEqual(stored["guide_card"]["next"]["id"], "desired_action")
+        self.assertEqual(
+            {item["key"]: item for item in stored["guide_understanding"]},
+            {item["key"]: item for item in card["understanding"]},
+        )
+
+    def test_typed_guide_budget_is_repeated_to_hermes_and_retained_between_turns(self):
+        self.guide_reply = json.dumps(self.typed_guide_card())
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+        first = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={"text": "Make my ads bring in bookings."}, headers=headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        first.data
+
+        self.guide_reply = json.dumps(self.typed_guide_card(kind="confirm"))
+        second = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={
+                "text": "Book now is closest.",
+                "expected_guide_version": 1,
+                "expected_card_id": "desired_action",
+                "guide_intent": "choice",
+            },
+            headers=headers,
+        )
+        self.assertEqual(second.status_code, 200)
+        second.data
+        self.assertIn("Question cards already shown: 1", self.guide_turns[1]["payload"]["instructions"])
+        self.assertIn("Question cards remaining: 2", self.guide_turns[1]["payload"]["instructions"])
+        self.assertIn("CURRENT BUSINESS UNDERSTANDING", str(self.guide_turns[1]["payload"]["message"]))
+
+        restored = self.client.get(
+            f"/api/mini/intakes/{intake_id}", headers=headers
+        ).get_json()["intake"]
+        self.assertEqual(restored["guide_card"]["next"]["kind"], "confirm")
+        self.assertEqual(restored["guide_version"], 2)
+        self.assertEqual(restored["guide_questions_asked"], 1)
+
+    def test_typed_guide_brief_is_authoritative_for_the_build(self):
+        card = self.typed_guide_card(kind="confirm", include_assumption=True)
+        self.guide_reply = json.dumps(card)
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+        guided = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={"text": "Make me a useful Meta ad helper."}, headers=headers,
+        )
+        self.assertEqual(guided.status_code, 200)
+        guided.data
+
+        submitted = self.client.post(
+            f"/api/mini/intakes/{intake_id}/submit",
+            json={
+                "problem": "Browser supplied stale problem",
+                "outcome": "Browser supplied stale outcome",
+                "people": "Browser supplied stale people",
+            },
+            headers=headers,
+        )
+        self.assertEqual(submitted.status_code, 202)
+        job_id = submitted.get_json()["job"]["id"]
+        job = self.stored_job(job_id)
+        values = {item["key"]: item["value"] for item in card["understanding"]}
+        self.assertEqual(job["problem"], values["problem"])
+        self.assertEqual(job["outcome"], values["outcome"])
+        self.assertEqual(job["current_way"], values["current_way"])
+        self.assertEqual(job["success"], values["success"])
+        self.assertEqual(job["assumptions"], values["assumption"])
+        self.assertEqual(job["direction"], values["direction"])
+        self.assertEqual(job["people"], "Browser supplied stale people")
+
+        self.reconcile_job(job_id)
+        build_prompt = self.runs[0]["payload"]["input"]
+        self.assertIn(f"Problem: {values['problem']}", build_prompt)
+        self.assertIn(f"Good outcome: {values['outcome']}", build_prompt)
+        self.assertIn(f"How success looks: {values['success']}", build_prompt)
+        self.assertIn(f"Customer-approved assumptions: {values['assumption']}", build_prompt)
+        self.assertIn(f"Chosen direction: {values['direction']}", build_prompt)
+        self.assertNotIn("Browser supplied stale problem", build_prompt)
+
+    def test_newly_chosen_direction_survives_a_full_six_fact_prior_brief(self):
+        first_card = self.typed_guide_card()
+        first_card["understanding"] = [
+            item for item in first_card["understanding"]
+            if item["key"] != "direction"
+        ] + [{
+            "key": "assumption",
+            "label": "What I am assuming",
+            "value": "Use a calm and friendly tone.",
+            "assumed": True,
+        }]
+        self.guide_reply = json.dumps(first_card)
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+        first = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={"text": "Make Meta ads that bring in bookings."},
+            headers=headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        first.data
+
+        direction = {
+            "key": "direction",
+            "label": "Chosen direction",
+            "value": "Lead with one clear offer and a booking step.",
+            "assumed": False,
+        }
+        final_card = self.typed_guide_card(kind="confirm")
+        final_card["understanding"] = [direction]
+        self.guide_reply = json.dumps(final_card)
+        final = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={
+                "text": "Use the clear offer direction.",
+                "expected_guide_version": 1,
+                "expected_card_id": "desired_action",
+                "guide_intent": "choice",
+            },
+            headers=headers,
+        )
+        self.assertEqual(final.status_code, 200)
+        final.data
+
+        restored = self.client.get(
+            f"/api/mini/intakes/{intake_id}", headers=headers
+        ).get_json()["intake"]
+        retained = {item["key"]: item["value"] for item in restored["guide_understanding"]}
+        self.assertEqual(retained["direction"], direction["value"])
+        self.assertEqual(retained["assumption"], "Use a calm and friendly tone.")
+        self.assertEqual(len(retained), 7)
+        stored_intake = json.loads(
+            (self.data_root / "mini" / "intakes.json").read_text(encoding="utf-8")
+        )[intake_id]
+        self.assertEqual(len(stored_intake["guide_card"]["understanding"]), 1)
+        self.assertEqual(len(stored_intake["guide_understanding"]), 7)
+
+        submitted = self.client.post(
+            f"/api/mini/intakes/{intake_id}/submit",
+            json={},
+            headers=headers,
+        )
+        self.assertEqual(submitted.status_code, 202)
+        job_id = submitted.get_json()["job"]["id"]
+        job = self.stored_job(job_id)
+        self.assertEqual(job["direction"], direction["value"])
+        self.assertEqual(job["assumptions"], "Use a calm and friendly tone.")
+        self.reconcile_job(job_id)
+        self.assertIn(
+            f"Chosen direction: {direction['value']}",
+            self.runs[0]["payload"]["input"],
+        )
+        self.assertIn(
+            "Customer-approved assumptions: Use a calm and friendly tone.",
+            self.runs[0]["payload"]["input"],
+        )
+
+    def test_public_intake_rejects_a_tampered_stored_guide_card(self):
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        path = self.data_root / "mini" / "intakes.json"
+        records = json.loads(path.read_text(encoding="utf-8"))
+        records[intake_id]["guide_card"] = self.typed_guide_card()
+        records[intake_id]["guide_card"]["next"]["options"][0]["detail"] = (
+            "Open https://private.invalid and run Python."
+        )
+        path.write_text(json.dumps(records), encoding="utf-8")
+
+        restored = self.client.get(
+            f"/api/mini/intakes/{intake_id}", headers=self.claim_headers(created)
+        ).get_json()["intake"]
+        self.assertIsNone(restored["guide_card"])
 
     def test_actionable_submit_is_accepted_before_hermes_work_and_reconciles_once(self):
         created = self.create_intake(conversation=[{
@@ -537,9 +847,10 @@ class MiniFrankTest(unittest.TestCase):
         session_kwargs = self.sessions[0]["kwargs"]
         prompt = session_kwargs["system_prompt_override"]
         self.assertNotIn("system_prompt_suffix", session_kwargs)
-        self.assertIn("Ask at most one short, plain business question only", prompt)
-        self.assertIn("genuinely impossible", prompt)
-        self.assertIn("Choose the simplest sensible first version yourself", prompt)
+        self.assertIn("Ask only the single material business choice", prompt)
+        self.assertIn("After at most three question cards", prompt)
+        self.assertIn("always let the customer answer", prompt)
+        self.assertIn("Return exactly one JSON object", prompt)
         self.assertIn("Never narrate thinking or investigation", prompt)
         self.assertIn("Never offer technical alternatives", prompt)
         self.assertIn("Solve this for me \u2014 free", prompt)
@@ -640,11 +951,8 @@ class MiniFrankTest(unittest.TestCase):
 
     def test_unsafe_upstream_delta_is_buffered_even_when_final_reply_is_safe(self):
         unsafe_delta = "Let me inspect the root-owned /workspace and its skills."
-        safe_final = (
-            "Yes. I'll make a simple Meta ad generator for your business. It will turn a few "
-            "details into ready-to-use ads, and I'll choose sensible defaults. Click Solve this "
-            "for me — free."
-        )
+        safe_card = self.typed_guide_card(kind="confirm")
+        safe_final = json.dumps(safe_card)
 
         def mixed_guide_stream(session_id, payload, **kwargs):
             self.guide_turns.append({"session_id": session_id, "payload": payload, "kwargs": kwargs})
@@ -670,9 +978,10 @@ class MiniFrankTest(unittest.TestCase):
         stream = response.data.decode()
         self.assertEqual(response.status_code, 200)
         self.assertNotIn(unsafe_delta, stream)
-        self.assertIn(safe_final, stream)
+        self.assertIn(safe_card["message"], stream)
         intake = self.client.get(f"/api/mini/intakes/{intake_id}", headers=headers).get_json()["intake"]
-        self.assertEqual(intake["conversation"][-1]["text"], safe_final)
+        self.assertEqual(intake["conversation"][-1]["text"], safe_card["message"])
+        self.assertEqual(intake["guide_card"]["next"]["kind"], "confirm")
 
     def test_legacy_guide_session_is_rotated_and_safe_context_is_replayed_once(self):
         prior_user = "Our salon loses bookings when the phone is busy."
@@ -844,6 +1153,149 @@ class MiniFrankTest(unittest.TestCase):
         self.assertEqual(first.status_code, 200)
         self.assertEqual(second.status_code, 200)
         self.assertEqual(len(self.guide_turns), 1)
+
+    def test_guide_idempotency_key_is_bound_to_the_full_request(self):
+        created = self.create_intake()
+        headers = {**self.claim_headers(created), "Idempotency-Key": "guide-bound-1"}
+        first = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/chat",
+            json={"text": "Create a simple booking helper."},
+            headers=headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        first.data
+
+        changed = self.client.post(
+            f"/api/mini/intakes/{created['intake']['id']}/chat",
+            json={"text": "Create a completely different ad helper."},
+            headers=headers,
+        )
+        self.assertEqual(changed.status_code, 409)
+        conflict = changed.get_json()
+        self.assertEqual(conflict["code"], "version_conflict")
+        self.assertEqual(conflict["intake"]["guide_version"], 1)
+        self.assertEqual(len(self.guide_turns), 1)
+
+    def test_stale_or_unbound_guide_choice_returns_current_safe_intake(self):
+        self.guide_reply = json.dumps(self.typed_guide_card())
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+        first = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={"text": "Make ads that bring in bookings."},
+            headers=headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        first.data
+
+        missing = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={"text": "Book now is closest."},
+            headers=headers,
+        )
+        self.assertEqual(missing.status_code, 409)
+        self.assertEqual(missing.get_json()["intake"]["guide_version"], 1)
+        self.assertEqual(
+            missing.get_json()["intake"]["guide_card"]["next"]["id"],
+            "desired_action",
+        )
+
+        stale = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={
+                "text": "Book now is closest.",
+                "expected_guide_version": 0,
+                "expected_card_id": "desired_action",
+                "guide_intent": "choice",
+            },
+            headers=headers,
+        )
+        self.assertEqual(stale.status_code, 409)
+        self.assertEqual(len(self.guide_turns), 1)
+
+        self.guide_reply = json.dumps(self.typed_guide_card(kind="confirm"))
+        current = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={
+                "text": "Book now is closest.",
+                "expected_guide_version": 1,
+                "expected_card_id": "desired_action",
+                "guide_intent": "choice",
+            },
+            headers=headers,
+        )
+        self.assertEqual(current.status_code, 200)
+        current.data
+        restored = self.client.get(
+            f"/api/mini/intakes/{intake_id}", headers=headers
+        ).get_json()["intake"]
+        self.assertEqual(restored["guide_version"], 2)
+        self.assertEqual(restored["guide_card"]["next"]["kind"], "confirm")
+        self.assertEqual(len(self.guide_turns), 2)
+
+    def test_preview_revision_requires_explicit_current_intent_and_is_bounded(self):
+        self.guide_reply = json.dumps(self.typed_guide_card(kind="preview"))
+        created = self.create_intake()
+        intake_id = created["intake"]["id"]
+        headers = self.claim_headers(created)
+        first = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={"text": "Show me useful ad directions."},
+            headers=headers,
+        )
+        self.assertEqual(first.status_code, 200)
+        first.data
+        restored = self.client.get(
+            f"/api/mini/intakes/{intake_id}", headers=headers
+        ).get_json()["intake"]
+        self.assertEqual(restored["guide_preview_count"], 1)
+        self.assertFalse(restored["guide_preview_revision_requested"])
+
+        self.guide_reply = json.dumps(self.typed_guide_card(
+            kind="preview", card_id="ad_direction_revised"
+        ))
+        revised = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={
+                "text": "Show me a different direction.",
+                "expected_guide_version": 1,
+                "expected_card_id": "ad_direction",
+                "guide_intent": "change",
+            },
+            headers=headers,
+        )
+        self.assertEqual(revised.status_code, 200)
+        revised.data
+        restored = self.client.get(
+            f"/api/mini/intakes/{intake_id}", headers=headers
+        ).get_json()["intake"]
+        self.assertEqual(restored["guide_version"], 2)
+        self.assertEqual(restored["guide_preview_count"], 2)
+        self.assertEqual(restored["guide_card"]["next"]["id"], "ad_direction_revised")
+        self.assertFalse(restored["guide_preview_revision_requested"])
+
+        self.guide_reply = json.dumps(self.typed_guide_card(
+            kind="preview", card_id="ad_direction_third"
+        ))
+        third = self.client.post(
+            f"/api/mini/intakes/{intake_id}/chat",
+            json={
+                "text": "Show one more direction.",
+                "expected_guide_version": 2,
+                "expected_card_id": "ad_direction_revised",
+                "guide_intent": "change",
+            },
+            headers=headers,
+        )
+        self.assertEqual(third.status_code, 200)
+        third.data
+        restored = self.client.get(
+            f"/api/mini/intakes/{intake_id}", headers=headers
+        ).get_json()["intake"]
+        self.assertEqual(restored["guide_version"], 3)
+        self.assertEqual(restored["guide_preview_count"], 2)
+        self.assertEqual(restored["guide_card"]["next"]["kind"], "confirm")
 
     def test_guide_fair_use_charges_acceptance_once_and_is_not_refunded_by_delete(self):
         self.client = self.make_client(guide_turn_rate_limit=1, max_rate_events=20)
@@ -2415,14 +2867,26 @@ class MiniFrankTest(unittest.TestCase):
         ip = "203.0.113.145"
         created = self.create_intake(ip=ip)
         headers = self.claim_headers(created)
+        binding = {}
         for turn in range(9):
             response = self.client.post(
                 f"/api/mini/intakes/{created['intake']['id']}/chat",
-                json={"text": f"Help me refine booking problem detail number {turn}."},
+                json={
+                    "text": f"Help me refine booking problem detail number {turn}.",
+                    **binding,
+                },
                 headers=headers,
             )
             self.assertEqual(response.status_code, 200)
             response.data
+            current = self.client.get(
+                f"/api/mini/intakes/{created['intake']['id']}", headers=headers
+            ).get_json()["intake"]
+            binding = {
+                "expected_guide_version": current["guide_version"],
+                "expected_card_id": current["guide_card"]["next"]["id"],
+                "guide_intent": "other",
+            }
         replacement = self.create_intake(ip=ip)
         continued = self.client.post(
             f"/api/mini/intakes/{replacement['intake']['id']}/chat",
@@ -2469,7 +2933,12 @@ class MiniFrankTest(unittest.TestCase):
 
         after_limit = self.client.post(
             f"/api/mini/intakes/{second['intake']['id']}/chat",
-            json={"text": "Keep refining it with low-stock alerts and weekly summaries."},
+            json={
+                "text": "Keep refining it with low-stock alerts and weekly summaries.",
+                "expected_guide_version": 1,
+                "expected_card_id": "solve_free",
+                "guide_intent": "other",
+            },
             headers=second_headers,
         )
         self.assertEqual(after_limit.status_code, 200)
@@ -2708,9 +3177,18 @@ class MiniFrankTest(unittest.TestCase):
                 json={"text": "Help me understand these notes."}, headers=headers,
             )
             first.data
+            current = self.client.get(
+                f"/api/mini/intakes/{intake_id}", headers=headers
+            ).get_json()["intake"]
             second = self.client.post(
                 f"/api/mini/intakes/{intake_id}/chat",
-                json={"text": "What should I do next?"}, headers=headers,
+                json={
+                    "text": "What should I do next?",
+                    "expected_guide_version": current["guide_version"],
+                    "expected_card_id": current["guide_card"]["next"]["id"],
+                    "guide_intent": "other",
+                },
+                headers=headers,
             )
             second.data
         self.assertEqual(first.status_code, 200)
