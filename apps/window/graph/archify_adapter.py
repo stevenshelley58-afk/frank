@@ -167,29 +167,36 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     # Archify's showcase renderer cannot safely route a large estate graph in
     # one SVG: the production graph has hundreds of cards and enough crossing
     # relationships to overflow its diagnostic channel.  Keep the overview
-    # bounded to five columns (the desktop readability limit) and leave those
+    # bounded to a compact twelve-column index and leave those
     # relationships in the canonical Control graph.  Full stable identities
     # remain attached to every visible card, so the overview never invents or
     # drops systems and the operator can deep-link to the complete topology.
     overview_only = projection_id == "projection:vps/world" and len(nodes) > 90
-    cols = 5 if overview_only else 1
+    cols = 12 if overview_only else 1
+    origin = (40, 44) if overview_only else (80, 90)
+    step = (108, 34) if overview_only else (260, 130)
+    component_size = (98, 26) if overview_only else (210, 76)
     positions: dict[str, tuple[int, int]] = {}
     for index, node in enumerate(nodes):
         stable_id = str(node["id"])
         label, sublabel = _display_label(node, stable_id, index)
+        if overview_only:
+            label = f"{stable_id.split(':', 1)[0][:3]} {index + 1:03d}"
+            sublabel = ""
         display_labels[stable_id] = {"label": label, "sublabel": sublabel, "archify_id": id_map[stable_id]}
         column, row = index % cols, index // cols
-        x, y = 80 + column * 260, 90 + row * 130
+        x, y = origin[0] + column * step[0], origin[1] + row * step[1]
         positions[stable_id] = (x, y)
         component: dict[str, Any] = {
             "id": id_map[stable_id],
             "type": _node_type(node.get("kind")),
             "label": label,
-            "sublabel": sublabel,
-            "tag": str(node.get("layer", "declared"))[:48],
             "pos": [x, y],
-            "size": [210, 76],
+            "size": list(component_size),
         }
+        if not overview_only:
+            component["sublabel"] = sublabel
+            component["tag"] = str(node.get("layer", "declared"))[:48]
         components.append(component)
     edges: list[Mapping[str, Any]] = []
     for edge in graph.get("edges", graph.get("relationships", ())):
@@ -231,7 +238,11 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
         "schema_version": 1,
         "diagram_type": "architecture",
         "meta": {"title": title, "quality_profile": "showcase"},
-        "layout": {"mode": "grid", "origin": [80, 90], "cols": cols, "gapX": 50, "gapY": 54, "cellW": 210, "cellH": 76},
+        "layout": {
+            "mode": "grid", "origin": list(origin), "cols": cols,
+            "gapX": step[0] - component_size[0], "gapY": step[1] - component_size[1],
+            "cellW": component_size[0], "cellH": component_size[1],
+        },
         "components": components or [{"id": "n_empty", "type": "external", "label": "No verified graph components", "pos": [80, 90], "size": [210, 76]}],
         "connections": connections,
     }
