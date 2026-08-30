@@ -163,6 +163,49 @@ class ArchifyAdapterTest(unittest.TestCase):
         self.assertEqual(showcase_check_results(receipt), {name: True for name in SHOWCASE_CHECKS})
         self.assertFalse(all(showcase_check_results({"checks": []}).values()))
 
+    def test_architecture_keeps_parallel_connections_and_hydrated_copy(self):
+        graph = {
+            "graph_revision": GRAPH["graph_revision"],
+            "nodes": [
+                {"id": "service:frank-window", "kind": "service", "title": "Frank Window", "sublabel": "UI + run monitor"},
+                {"id": "route:frank-public", "kind": "route", "title": "Authenticated public route"},
+                {"id": "route:frank-loopback", "kind": "route", "title": "Loopback route"},
+            ],
+            "edges": [
+                {"id": "edge:window/public", "from": "service:frank-window", "to": "route:frank-public", "relationship": "exposes"},
+                {"id": "edge:window/loopback", "from": "service:frank-window", "to": "route:frank-loopback", "relationship": "exposes"},
+            ],
+        }
+        diagram, metadata = graph_to_archify(graph, "projection:vps/world")
+        self.assertEqual(len(diagram["connections"]), 2)
+        self.assertEqual({item["label"] for item in diagram["connections"]}, {"exposes"})
+        window = next(item for item in diagram["components"] if item["label"] == "Frank Window")
+        self.assertEqual(window["sublabel"], "UI + run monitor")
+        self.assertEqual(metadata["relationship_count"], metadata["rendered_relationship_count"])
+
+    def test_workflow_projection_uses_pinned_workflow_shape(self):
+        diagram, metadata = graph_to_archify(GRAPH, "projection:ad-template-builder/workflow")
+        self.assertEqual(diagram["diagram_type"], "workflow")
+        self.assertTrue(diagram["lanes"])
+        self.assertTrue(diagram["phases"])
+        self.assertEqual(len(diagram["edges"]), len(GRAPH["edges"]))
+        self.assertGreaterEqual(len(diagram["mainPath"]), 2)
+        self.assertEqual(metadata["relationship_count"], len(GRAPH["edges"]))
+
+    def test_architecture_adds_truthful_boundaries_views_and_cards(self):
+        graph = {
+            "graph_revision": GRAPH["graph_revision"],
+            "nodes": [
+                {"id": "project:frank", "kind": "project", "title": "Frank"},
+                {"id": "service:frank-window", "kind": "service", "title": "Frank Window"},
+            ],
+            "edges": [{"id": "edge:frank/contains-window", "from": "project:frank", "to": "service:frank-window", "relationship": "contains"}],
+        }
+        diagram, _ = graph_to_archify(graph, "projection:vps/world")
+        self.assertEqual(diagram["boundaries"][0]["wraps"], [next(item["id"] for item in diagram["components"] if item["label"] == "Frank Window")])
+        self.assertGreaterEqual(len(diagram["meta"]["views"]), 1)
+        self.assertTrue(diagram["cards"])
+
 
 if __name__ == "__main__":
     unittest.main()

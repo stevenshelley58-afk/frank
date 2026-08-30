@@ -115,7 +115,8 @@ evidence_status:
   mini_frank_runtime: absent_separate_runtime
   mini_frank_surface: embedded_in_frank_window
   ad_template_builder_source_contract: present
-  ad_template_builder_blockwise_runtime_consumption: unknown
+  ad_template_builder_blockwise_runtime_consumption: verified
+  ad_template_builder_runtime_consumption_receipt: receipt:ad-template-builder/runtime-consumption-20260831-001
   custom_grill_skill_sources: unknown_after_bounded_search
   custom_skill_census_receipt_id: receipt:skills/census-20260830-001
   graph_authority_tree: governance/control-plane

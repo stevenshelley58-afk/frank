@@ -129,6 +129,33 @@ class EstateProjectionTests(unittest.TestCase):
         self.assertEqual(result["status"], "not_generated")
         self.assertIn("verified_data", result["missing_evidence"])
 
+    def test_ad_selection_uses_canonical_ids_and_keeps_verified_artifact_topology(self):
+        graph = self.graph()
+        graph["nodes"].extend([
+            node("component:ad-template-builder-decoy", "component", "Ad Template Builder unrelated note"),
+            node("release:frank", "release", "Frank release"),
+        ])
+        graph["edges"].append(edge("edge:decoy", "component:ad-template-builder-decoy", "project:frank", "depends_on"))
+        architecture = build_projection(graph, "projection:ad-template-builder/architecture")
+        workflow = build_projection(graph, "projection:ad-template-builder/workflow")
+        architecture_ids = {item["id"] for item in architecture["nodes"]}
+        workflow_ids = {item["id"] for item in workflow["nodes"]}
+        self.assertIn("component:ad-template-output", architecture_ids)
+        self.assertNotIn("component:ad-template-builder-decoy", architecture_ids)
+        self.assertNotIn("release:frank", architecture_ids)
+        self.assertIn("release:frank", workflow_ids)
+
+    def test_ad_coverage_is_driven_by_governance_must_show(self):
+        graph = self.graph()
+        graph["nodes"].append(node("project:frank", "project", "Frank"))
+        governance = {"projections": [{
+            "id": "projection:ad-template-builder/architecture",
+            "must_show": ["owner", "consumers"],
+        }]}
+        result = build_projection(graph, "projection:ad-template-builder/architecture", governance=governance)
+        self.assertEqual(result["coverage"]["required"], ["consumers", "owner"])
+        self.assertEqual(result["coverage"]["present"], ["owner"])
+
 
 if __name__ == "__main__":
     unittest.main()

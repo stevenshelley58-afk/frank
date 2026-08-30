@@ -120,6 +120,133 @@ def _display_label(node: Mapping[str, Any], stable_id: str, index: int) -> tuple
     return title or kind, f"{kind} #{index + 1:03d}"[:24]
 
 
+def _assertion_index(graph: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Index hydrated graph assertions without making them part of Archify.
+
+    Materialized control graphs intentionally keep presentation text in the
+    assertion bundle.  Accepting that bundle here means the adapter can show a
+    hydrated title/description while still treating the graph as read-only.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    assertions = graph.get("assertions", ())
+    if not isinstance(assertions, Iterable) or isinstance(assertions, (str, bytes, Mapping)):
+        return result
+    for item in assertions:
+        if not isinstance(item, Mapping):
+            continue
+        subject = item.get("subject_id")
+        predicate = item.get("predicate")
+        if isinstance(subject, str) and isinstance(predicate, str) and "value" in item:
+            result.setdefault(subject, {})[predicate] = item.get("value")
+    return result
+
+
+def _node_title(node: Mapping[str, Any], stable_id: str, assertions: Mapping[str, Mapping[str, Any]]) -> str:
+    direct = _title(node, "")
+    if direct:
+        return direct
+    values = assertions.get(stable_id, {})
+    for key in ("title", "label", "name"):
+        value = values.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return _title({}, stable_id)
+
+
+def _node_sublabel(node: Mapping[str, Any], stable_id: str, assertions: Mapping[str, Mapping[str, Any]]) -> str:
+    values = assertions.get(stable_id, {})
+    for key in ("sublabel", "description", "summary", "role", "responsibility", "source_locator"):
+        value = node.get(key, values.get(key))
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    kind = str(node.get("kind", values.get("kind", "node"))).strip() or "node"
+    layer = str(node.get("layer", values.get("layer", ""))).strip()
+    return f"{kind}{' · ' + layer if layer else ''}"
+
+
+def _edge_records(graph: Mapping[str, Any], stable_ids: set[str]) -> list[Mapping[str, Any]]:
+    raw_edges = graph.get("edges")
+    if not isinstance(raw_edges, list):
+        raw_edges = graph.get("relationships", ())
+    result: list[Mapping[str, Any]] = []
+    for edge in raw_edges if isinstance(raw_edges, Iterable) and not isinstance(raw_edges, (str, bytes, Mapping)) else ():
+        if not isinstance(edge, Mapping):
+            continue
+        source, target = edge.get("from"), edge.get("to")
+        if source in stable_ids and target in stable_ids:
+            result.append(edge)
+    return sorted(result, key=lambda item: (
+        str(item.get("id", "")), str(item.get("from", "")), str(item.get("to", "")),
+        str(item.get("relationship", item.get("type", "depends_on"))),
+    ))
+
+
+_PATH_RELATIONSHIP_RANK = {
+    "routes_to": 0, "exposes": 1, "runs": 2, "executes": 3, "uses": 4,
+    "produces": 5, "validates": 6, "reads": 7, "writes": 8, "consumes": 9,
+    "depends_on": 10, "owns": 11, "contains": 12, "observes": 13, "declares": 14,
+}
+
+
+def _primary_path(node_ids: Iterable[str], edges: Iterable[Mapping[str, Any]]) -> list[str]:
+    """Choose a stable, truthful path from existing edges for presentation."""
+    ids = sorted(set(node_ids))
+    adjacency: dict[str, list[tuple[str, Mapping[str, Any]]]] = {item: [] for item in ids}
+    indegree = {item: 0 for item in ids}
+    for edge in edges:
+        source, target = str(edge.get("from")), str(edge.get("to"))
+        if source not in adjacency or target not in adjacency or source == target:
+            continue
+        adjacency[source].append((target, edge))
+        indegree[target] += 1
+    for source in adjacency:
+        adjacency[source].sort(key=lambda pair: (
+            _PATH_RELATIONSHIP_RANK.get(str(pair[1].get("relationship", pair[1].get("type", "depends_on"))), 99),
+            pair[0], str(pair[1].get("id", "")),
+        ))
+
+    best: list[str] = []
+    best_score: tuple[int, int, tuple[str, ...]] = (-1, 0, ())
+    visit_budget = [0]
+
+    def walk(current: str, path: list[str], score: int) -> None:
+        nonlocal best, best_score
+        visit_budget[0] += 1
+        if visit_budget[0] > 10000:
+            return
+        rank = len(path)
+        candidate_score = (rank, -score, tuple(path))
+        if candidate_score[0] > best_score[0] or (candidate_score[0] == best_score[0] and candidate_score[2] < best_score[2]):
+            best, best_score = list(path), candidate_score
+        for target, edge in adjacency[current]:
+            if target not in path:
+                relationship = str(edge.get("relationship", edge.get("type", "depends_on")))
+                walk(target, path + [target], score + _PATH_RELATIONSHIP_RANK.get(relationship, 99))
+
+    starts = sorted((item for item in ids if indegree[item] == 0)) or ids
+    for start in starts:
+        walk(start, [start], 0)
+    if len(best) < 2:
+        for edge in sorted(edges, key=lambda item: (str(item.get("from")), str(item.get("to")), str(item.get("id", "")))):
+            source, target = str(edge.get("from")), str(edge.get("to"))
+            if source in adjacency and target in adjacency and source != target:
+                return [source, target]
+    return best
+
+
+def _connection_id(edge: Mapping[str, Any], ordinal: int) -> str:
+    value = edge.get("id")
+    if isinstance(value, str) and value:
+        return _safe_archify_id(value)
+    digest = hashlib.sha256(canonical_bytes(dict(edge))).hexdigest()[:16]
+    return _safe_archify_id(f"edge:{digest}:{ordinal}")
+
+
+def _label_width(label: str, minimum: float = 92, maximum: float = 280) -> float:
+    """Give Archify enough authored width for a truthful, untruncated label."""
+    return min(maximum, max(minimum, len(label) * 7 + 36))
+
+
 def _projection_nodes(graph: Mapping[str, Any], projection_id: str) -> list[Mapping[str, Any]]:
     nodes = [item for item in graph.get("nodes", ()) if isinstance(item, Mapping) and isinstance(item.get("id"), str)]
     # File inventory and reconciliation findings remain fully available in
@@ -363,6 +490,172 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
         "runtime_health_claims": False,
         "showcase_checks": list(SHOWCASE_CHECKS),
     }
+    return diagram, metadata
+
+
+def _workflow_lane(node: Mapping[str, Any]) -> str:
+    kind = str(node.get("kind", "")).casefold()
+    if kind in {"route", "source", "repo", "checkout", "project"}:
+        return "intake"
+    if kind in {"gate", "rule", "policy", "observer", "eval"}:
+        return "checks"
+    if kind in {"template", "artifact", "release", "data_store", "volume", "store"}:
+        return "outputs"
+    if kind in {"capability", "tool", "plugin", "cli", "mcp", "library"}:
+        return "build"
+    return "execution"
+
+
+def _workflow_diagram(title: str, nodes: list[Mapping[str, Any]], edges: list[Mapping[str, Any]], id_map: Mapping[str, str], assertions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """Build the pinned vendor's workflow IR, retaining every selected edge."""
+    path = _primary_path((str(node["id"]) for node in nodes), edges)
+    if len(path) < 2:
+        for edge in edges:
+            source, target = str(edge.get("from")), str(edge.get("to"))
+            if source != target and source in id_map and target in id_map:
+                path = [source, target]
+                break
+    lane_ids = ["intake", "build", "execution", "checks", "outputs"]
+    lane_labels = {"intake": "Request + sources", "build": "Build process", "execution": "Generation stages", "checks": "Validation + review", "outputs": "Artifacts + release"}
+    lane_nodes: dict[str, list[str]] = {lane: [] for lane in lane_ids}
+    for node in nodes:
+        lane_nodes[_workflow_lane(node)].append(str(node["id"]))
+    lane_nodes = {lane: values for lane, values in lane_nodes.items() if values}
+    if not lane_nodes:
+        lane_nodes = {"intake": ["n_empty"]}
+    path_position = {node_id: index for index, node_id in enumerate(path)}
+    node_columns: dict[str, int] = {}
+    for node_id in path:
+        node_columns[node_id] = round(path_position[node_id] * 5 / max(len(path) - 1, 1))
+    for index, node in enumerate(nodes):
+        node_id = str(node["id"])
+        node_columns.setdefault(node_id, min(5, round(index * 5 / max(len(nodes) - 1, 1))))
+    for node in nodes:
+        node_id = str(node["id"])
+        label_width = _label_width(_node_title(node, node_id, assertions), maximum=260)
+        if label_width > 180 and node_columns[node_id] == 0:
+            node_columns[node_id] = 1
+        elif label_width > 180 and node_columns[node_id] == 5:
+            node_columns[node_id] = 4
+    lane_order: dict[str, list[str]] = {}
+    for node in nodes:
+        node_id = str(node["id"])
+        lane_order.setdefault(_workflow_lane(node), []).append(node_id)
+    lane_offsets = {node_id: index * 72 for values in lane_order.values() for index, node_id in enumerate(values)}
+    workflow_nodes: list[dict[str, Any]] = []
+    for node in nodes:
+        node_id = str(node["id"])
+        label = _node_title(node, node_id, assertions)
+        workflow_nodes.append({"id": id_map[node_id], "lane": _workflow_lane(node), "col": node_columns[node_id], "type": _node_type(node.get("kind")), "label": label, "sublabel": _node_sublabel(node, node_id, assertions), "tag": str(node.get("layer", assertions.get(node_id, {}).get("layer", "declared"))), "width": _label_width(label, maximum=220), "yOffset": lane_offsets[node_id]})
+    workflow_edges: list[dict[str, Any]] = []
+    main_pairs = set(zip(path, path[1:]))
+    for ordinal, edge in enumerate(edges):
+        source, target = str(edge["from"]), str(edge["to"])
+        relationship = edge.get("label") or edge.get("relationship") or edge.get("type") or "depends_on"
+        item: dict[str, Any] = {"id": _connection_id(edge, ordinal), "from": id_map[source], "to": id_map[target], "label": str(relationship), "role": "main" if (source, target) in main_pairs else "branch"}
+        if str(relationship) in {"validates", "observes"}:
+            item["variant"] = "security" if str(relationship) == "validates" else "dashed"
+        workflow_edges.append(item)
+    phases = [{"id": "intake", "label": "Intake", "fromCol": 0, "toCol": 1}, {"id": "build", "label": "Build", "fromCol": 2, "toCol": 3, "variant": "emphasis"}, {"id": "release", "label": "Check + release", "fromCol": 4, "toCol": 5, "variant": "dashed"}]
+    groups = []
+    for lane, values in lane_nodes.items():
+        if len(values) > 1:
+            columns = [node_columns[value] for value in values]
+            groups.append({"id": f"group_{lane}", "label": lane_labels[lane], "lane": lane, "fromCol": min(columns), "toCol": max(columns), "variant": "emphasis" if lane == "build" else "dashed"})
+    focus_all = [id_map[str(node["id"])] for node in nodes]
+    views = []
+    if path:
+        views.append({"id": "main-path", "label": "Request to release", "focus": [id_map[node_id] for node_id in path], "note": "Follow the recorded connection path through the workflow."})
+    if focus_all:
+        views.append({"id": "checks-and-outputs", "label": "Checks and outputs", "focus": focus_all, "note": "Inspect validation, review, and output nodes alongside the main path."})
+    result = {"schema_version": 1, "diagram_type": "workflow", "meta": {"title": title, "quality_profile": "showcase", "views": views[:5]}, "lanes": [{"id": lane, "label": lane_labels[lane]} for lane in lane_ids if lane in lane_nodes], "phases": phases, "groups": groups, "mainPath": [id_map[node_id] for node_id in path], "nodes": workflow_nodes or [{"id": "n_empty", "lane": next(iter(lane_nodes), "intake"), "col": 0, "type": "external", "label": "No verified workflow nodes", "width": 180}], "edges": workflow_edges, "cards": [{"dot": "cyan", "title": "Workflow coverage", "items": [f"{len(nodes)} selected workflow nodes", f"{len(edges)} selected workflow connections"]}, {"dot": "rose", "title": "Checks remain visible", "items": ["Validation and review edges are preserved as recorded.", "The primary path is a presentation aid, not a new assertion."]}]}
+    if not path:
+        result.pop("mainPath")
+    return result
+
+
+def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_coverage: Iterable[str] = ()) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Convert a selected canonical graph to faithful Archify presentation IR."""
+    if not isinstance(graph, Mapping):
+        raise ControlContractError("graph must be an object")
+    if not isinstance(projection_id, str) or not projection_id.startswith("projection:"):
+        raise ControlContractError("projection_id is invalid")
+    nodes = sorted(_projection_nodes(graph, projection_id), key=lambda item: str(item["id"]))
+    stable_ids = {str(item["id"]) for item in nodes}
+    id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(stable_ids)}
+    assertions = _assertion_index(graph)
+    edges = _edge_records(graph, stable_ids)
+    titles = {"projection:vps/world": "VPS World", "projection:frank/architecture": "Frank Architecture", "projection:blockwise/runtime": "Blockwise Runtime", "projection:mini-frank/knowledge-flow": "Mini Frank Knowledge Flow", "projection:ad-template-builder/architecture": "Ad Template Builder Architecture", "projection:ad-template-builder/workflow": "Ad Template Builder Workflow"}
+    title = titles.get(projection_id, projection_id)
+    path = _primary_path(stable_ids, edges)
+    path_index = {value: index for index, value in enumerate(path)}
+    anchors: dict[str, int] = {}
+    for edge in edges:
+        source, target = str(edge["from"]), str(edge["to"])
+        if source in path_index:
+            anchors.setdefault(target, path_index[source])
+        if target in path_index:
+            anchors.setdefault(source, path_index[target])
+    for index, node in enumerate(nodes):
+        anchors.setdefault(str(node["id"]), index)
+    positions: dict[str, tuple[float, float]] = {}
+    side_rows: dict[int, int] = {}
+    side_row_cursor = 0
+    widths: dict[str, float] = {str(node["id"]): _label_width(_node_title(node, str(node["id"]), assertions), 180) for node in nodes}
+    path_x: dict[str, float] = {}
+    cursor_x = 80.0
+    for node_id in path:
+        path_x[node_id] = cursor_x
+        label = _node_title(next(node for node in nodes if str(node["id"]) == node_id), node_id, assertions)
+        cursor_x += _label_width(label, 180) + 50
+    components: list[dict[str, Any]] = []
+    for index, node in enumerate(nodes):
+        node_id = str(node["id"])
+        if node_id in path_index:
+            column, y = path_index[node_id], 280
+        else:
+            column = min(anchors[node_id], max(len(path) - 1, 0)) if path else index
+            row = side_rows.get(column, 0); side_rows[column] = row + 1
+            row = side_row_cursor; side_row_cursor += 1
+            y = 90 + row * 100
+        x = path_x.get(node_id, 80 + column * 230); positions[node_id] = (x, y)
+        label = _node_title(node, node_id, assertions)
+        components.append({"id": id_map[node_id], "type": _node_type(node.get("kind")), "label": label, "sublabel": _node_sublabel(node, node_id, assertions), "tag": str(node.get("layer", assertions.get(node_id, {}).get("layer", "declared"))), "pos": [x, y], "size": [widths[node_id], 64]})
+    connections = []
+    for ordinal, edge in enumerate(edges):
+        source, target = str(edge["from"]), str(edge["to"])
+        relationship = edge.get("label") or edge.get("relationship") or edge.get("type") or "depends_on"
+        connection = {"id": _connection_id(edge, ordinal), "from": id_map[source], "to": id_map[target], "label": str(relationship)}
+        if source != target:
+            sx, sy = positions[source]; tx, ty = positions[target]
+            dx = (tx + widths[target] / 2) - (sx + widths[source] / 2)
+            dy = (ty + 32) - (sy + 32)
+            if abs(dx) >= abs(dy):
+                connection.update({"fromSide": "right", "toSide": "left"} if dx > 0 else {"fromSide": "left", "toSide": "right"})
+            else:
+                connection.update({"fromSide": "bottom", "toSide": "top"} if dy > 0 else {"fromSide": "top", "toSide": "bottom"})
+        connections.append(connection)
+    boundaries = []
+    for node in nodes:
+        parent = str(node["id"])
+        if str(node.get("kind", "")).casefold() not in {"host", "project"}:
+            continue
+        wrapped = sorted({str(edge["to"]) for edge in edges if str(edge.get("from")) == parent and str(edge.get("relationship", edge.get("type", ""))) == "contains" and str(edge.get("to")) in id_map})
+        if wrapped:
+            boundaries.append({"kind": "region", "label": _node_title(node, parent, assertions), "wraps": [id_map[value] for value in wrapped], "pad": 18})
+    focus_all = [id_map[value] for value in sorted(stable_ids)]
+    views = []
+    if path:
+        views.append({"id": "primary-path", "label": "Primary connection path", "focus": [id_map[value] for value in path], "note": "Follow the deterministic path selected from recorded connections."})
+    if boundaries and focus_all:
+        views.append({"id": "boundaries", "label": "Declared boundaries", "focus": focus_all, "note": "Inspect selected nodes within their declared containment boundaries."})
+    if len(views) < 2 and focus_all:
+        views.append({"id": "all-connections", "label": "All selected connections", "focus": focus_all, "note": "Explore every selected node and recorded connection."})
+    diagram = {"schema_version": 1, "diagram_type": "architecture", "meta": {"title": title, "quality_profile": "showcase", "views": views[:5]}, "layout": {"mode": "grid", "origin": [80, 90], "cols": max(1, min(12, len(path) or len(nodes))), "gapX": 50, "gapY": 36, "cellW": 180, "cellH": 64}, "components": components or [{"id": "n_empty", "type": "external", "label": "No verified graph components", "pos": [80, 90], "size": [180, 64]}], "boundaries": boundaries, "connections": connections, "cards": [{"dot": "cyan", "title": "Selected topology", "items": [f"{len(nodes)} selected components", f"{len(edges)} selected connections"]}, {"dot": "emerald", "title": "Reading guide", "items": ["The primary path is a presentation aid derived from recorded connections.", "Full stable identities remain in Frank metadata."]}]}
+    if projection_id.endswith("/workflow"):
+        diagram = _workflow_diagram(title, nodes, edges, id_map, assertions)
+    coverage = _coverage(nodes, edges, required_coverage)
+    metadata = {"projection_id": projection_id, "graph_revision": graph.get("graph_revision"), "stable_id_map": id_map, "display_labels": {str(node["id"]): {"label": _node_title(node, str(node["id"]), assertions), "sublabel": _node_sublabel(node, str(node["id"]), assertions), "archify_id": id_map[str(node["id"])]} for node in nodes}, "coverage": coverage, "relationship_count": len(edges), "rendered_relationship_count": len(edges), "exclusions": [], "runtime_health_claims": False, "showcase_checks": list(SHOWCASE_CHECKS)}
     return diagram, metadata
 
 

@@ -17,6 +17,9 @@ class ControlNavigationTests(unittest.TestCase):
         mapping = (ROOT / "web" / "js" / "map.js").read_text(encoding="utf-8")
         self.assertIn("/agenttrail/", live)
         self.assertIn("/api/control/maps/artifact", mapping)
+        self.assertIn("mapSummary", mapping)
+        self.assertIn("Coverage gaps", mapping)
+        self.assertIn("validated", mapping)
         self.assertNotIn("setup-board", live)
         self.assertNotIn("spawn", live)
 
