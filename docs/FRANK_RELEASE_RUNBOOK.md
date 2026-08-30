@@ -117,6 +117,40 @@ again. A blank or guessed vault broker URL is always a release blocker.
 
 ## Production control maps
 
+### First-release Step 5 browser bootstrap
+
+On a fresh host, the read-only browser journey cannot exercise `/live`,
+`/map`, or `/control` while all flags are at their default `false` values.
+After the six-map preview has been promoted, bootstrap only the Step 5 flags
+with the fixed helper, then recreate Window and run the real desktop/mobile
+browser journey. The helper writes a separate private canary flag file, never
+touches the canonical release flag file or release `current.json`, and refuses
+to run if any release selector already exists:
+
+```sh
+sudo /usr/bin/python3 /projects/frank/apps/window/scripts/bootstrap_step5_canary.py apply
+FRANK_STORAGE_STATE=/secure/frank-storage-state.json \
+FRANK_BROWSER_BASIC_AUTH_USER="$FRANK_BASIC_AUTH_USER" \
+FRANK_BROWSER_BASIC_AUTH_PASSWORD="$FRANK_BASIC_AUTH_PASSWORD" \
+  python3 /projects/frank/apps/window/acceptance/browser_journey.py \
+  --url https://frank.fail --output /srv/frank/data/window/evidence/browser.json
+```
+
+Capture and promote the Step 5 release using that receipt. If the canary must
+be abandoned, restore the pre-canary state and recreate Window deterministically:
+
+```sh
+sudo /usr/bin/python3 /projects/frank/apps/window/scripts/bootstrap_step5_canary.py cleanup
+```
+
+Do not run cleanup after Step 5 promotion: the helper deliberately rejects a
+new release selector. Every later stage follows the same order: capture fixed
+inputs, promote exactly one stage, recreate Window, wait for health, and run
+the canary before proceeding. The required order is `step5 -> step6c ->
+step7c -> step8`; Step 8 additionally requires the passing restore-drill
+receipt. Promote maps before evidence capture because capture reads the
+production `maps/current.json` selector.
+
 Before enabling `retention_restore_drills`, run the fixed-input restore drill
 as root on the VPS. It archives the bounded control-graph tree, restores it
 under a new isolated backup directory, compares every file hash, and emits a
