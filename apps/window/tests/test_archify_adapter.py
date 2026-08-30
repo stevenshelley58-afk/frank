@@ -108,8 +108,8 @@ class ArchifyAdapterTest(unittest.TestCase):
             "projection:vps/world",
         )
         labels = metadata["display_labels"]
-        self.assertEqual(labels["capability:frank-search"]["label"], "Search the knowledge base")
-        self.assertEqual(labels["hook:window-submit"]["label"], "Submit to Frank Window")
+        self.assertTrue(labels["capability:frank-search"]["label"].startswith("Search the knowledg"))
+        self.assertTrue(labels["hook:window-submit"]["label"].startswith("Submit to Frank"))
         self.assertNotIn("cap 001", {item["label"] for item in labels.values()})
         self.assertEqual(metadata["display_labels"]["capability:frank-search"]["archify_id"], diagram["components"][0]["id"])
 
@@ -146,7 +146,9 @@ class ArchifyAdapterTest(unittest.TestCase):
         edges = [{"id": "edge:blockwise", "from": nodes[0]["id"], "to": nodes[-1]["id"]}]
         graph = {"graph_revision": GRAPH["graph_revision"], "nodes": nodes, "edges": edges}
         diagram, metadata = graph_to_archify(graph, "projection:blockwise/runtime")
-        self.assertEqual(diagram["layout"]["cols"], 4)
+        self.assertEqual(diagram["layout"]["cols"], 8)
+        self.assertEqual(diagram["components"][0]["size"], [155, 44])
+        self.assertLessEqual(max(component["pos"][1] for component in diagram["components"]), 550)
         self.assertEqual(len(diagram["connections"]), 1)
         self.assertEqual(metadata["exclusions"], [])
 

@@ -229,6 +229,7 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     relationship_rank = {name: index for index, name in enumerate(relationship_order)}
     rendered_edges: list[Mapping[str, Any]] = []
     used_endpoints: set[str] = set()
+    compact_medium = 12 < len(nodes) <= 48
     if not overview_only:
         for edge in sorted(
             edges,
@@ -242,10 +243,10 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
                 continue
             rendered_edges.append(edge)
             used_endpoints.update((source, target))
-            if len(rendered_edges) >= 12:
+            if len(rendered_edges) >= (9 if compact_medium else 12):
                 break
 
-    # Put each displayed relationship on its own clear row.  This deliberately
+    # Pack independent horizontal pairs into clear rows.  This deliberately
     # shows a truthful, representative matching instead of drawing an
     # unreadable hairball; the manifest reports the exact shown/total counts.
     node_by_id = {str(node["id"]): node for node in nodes}
@@ -265,11 +266,11 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     # relationship-free index only for genuinely huge graphs where rendering
     # every edge would make the Archify SVG unusable.
     unmatched_count = max(0, len(nodes) - len(rendered_edges) * 2)
-    unmatched_cols = min(6, max(1, math.ceil(math.sqrt(max(1, unmatched_count)))))
-    cols = 12 if overview_only else max(2 if rendered_edges else 1, unmatched_cols)
-    origin = (40, 44) if overview_only else (80, 90)
-    step = (108, 34) if overview_only else (230, 110)
-    component_size = (98, 26) if overview_only else (190, 64)
+    unmatched_cols = min(8, max(1, math.ceil(math.sqrt(max(1, unmatched_count)))))
+    cols = 12 if overview_only else (8 if compact_medium else max(2 if rendered_edges else 1, unmatched_cols))
+    origin = (40, 44) if overview_only else (20, 50) if compact_medium else (80, 90)
+    step = (108, 34) if overview_only else (165, 64) if compact_medium else (230, 110)
+    component_size = (98, 26) if overview_only else (155, 44) if compact_medium else (190, 64)
     for index, node in enumerate(nodes):
         stable_id = str(node["id"])
         label, sublabel = _display_label(node, stable_id, index)
@@ -284,15 +285,24 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
             # titles and keeps the overview searchable by meaning.
             label = label[:15].rstrip() + ("…" if len(label) > 15 else "")
             sublabel = sublabel[:24]
+        elif compact_medium:
+            label = label[:19].rstrip() + ("…" if len(label) > 19 else "")
+            sublabel = sublabel[:24]
         display_labels[stable_id] = {"label": label, "sublabel": sublabel, "archify_id": id_map[stable_id]}
         paired_count = len(rendered_edges) * 2
-        if not overview_only and index < paired_count:
+        if compact_medium and index < paired_count:
+            pair_index = index // 2
+            column, row = pair_index % 3, pair_index // 3
+            x = origin[0] + column * 420 + (index % 2) * 250
+            y = origin[1] + row * step[1]
+        elif not overview_only and index < paired_count:
             column, row = index % 2, index // 2
             x, y = origin[0] + column * 350, origin[1] + row * step[1]
         else:
             remaining_index = index if overview_only else index - paired_count
             column = remaining_index % cols
-            row = remaining_index // cols + (0 if overview_only else len(rendered_edges) + 1)
+            base_row = 0 if overview_only else (4 if compact_medium else len(rendered_edges) + 1)
+            row = remaining_index // cols + base_row
             x, y = origin[0] + column * step[0], origin[1] + row * step[1]
         component: dict[str, Any] = {
             "id": id_map[stable_id],
