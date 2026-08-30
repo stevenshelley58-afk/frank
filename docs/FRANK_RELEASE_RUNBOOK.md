@@ -143,10 +143,12 @@ be abandoned, restore the pre-canary state and recreate Window deterministically
 sudo /usr/bin/python3 /projects/frank/apps/window/scripts/bootstrap_step5_canary.py cleanup
 ```
 
-Do not run cleanup after Step 5 promotion: the helper deliberately rejects a
-new release selector. Every later stage follows the same order: capture fixed
-inputs, promote exactly one stage, recreate Window, wait for health, and run
-the canary before proceeding. The required order is `step5 -> step6c ->
+After Step 5 promotion, run cleanup once to complete the guarded handoff from
+the temporary canary flags to the validated canonical Step 5 release. The
+helper rejects a missing, invalid, or non-Step-5 release selector. Every later
+stage follows the same order: capture fixed inputs, promote exactly one stage,
+recreate Window, wait for health, and run the canary before proceeding. The
+required order is `step5 -> step6c ->
 step7c -> step8`; Step 8 additionally requires the passing restore-drill
 receipt. Promote maps before evidence capture because capture reads the
 production `maps/current.json` selector.

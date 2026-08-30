@@ -164,23 +164,30 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(stable_ids)}
     components: list[dict[str, Any]] = []
     display_labels: dict[str, dict[str, str]] = {}
-    # A single authored rail gives every relationship a deterministic clear
-    # corridor on the right.  Archify's showcase validator treats a dense
-    # multi-column grid as an authored topology and quite correctly rejects
-    # long edges crossing unrelated components; the canonical graph may be
-    # dense, so keep layout judgment in this seam rather than inventing edges.
-    cols = 1
+    # Archify's showcase renderer cannot safely route a large estate graph in
+    # one SVG: the production graph has hundreds of cards and enough crossing
+    # relationships to overflow its diagnostic channel.  Keep the overview
+    # bounded to five columns (the desktop readability limit) and leave those
+    # relationships in the canonical Control graph.  Full stable identities
+    # remain attached to every visible card, so the overview never invents or
+    # drops systems and the operator can deep-link to the complete topology.
+    overview_only = projection_id == "projection:vps/world" and len(nodes) > 90
+    cols = 5 if overview_only else 1
+    positions: dict[str, tuple[int, int]] = {}
     for index, node in enumerate(nodes):
         stable_id = str(node["id"])
         label, sublabel = _display_label(node, stable_id, index)
         display_labels[stable_id] = {"label": label, "sublabel": sublabel, "archify_id": id_map[stable_id]}
+        column, row = index % cols, index // cols
+        x, y = 80 + column * 260, 90 + row * 130
+        positions[stable_id] = (x, y)
         component: dict[str, Any] = {
             "id": id_map[stable_id],
             "type": _node_type(node.get("kind")),
             "label": label,
             "sublabel": sublabel,
             "tag": str(node.get("layer", "declared"))[:48],
-            "pos": [80, 90 + index * 130],
+            "pos": [x, y],
             "size": [210, 76],
         }
         components.append(component)
@@ -194,9 +201,12 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
             continue
         edges.append(edge)
     connections: list[dict[str, Any]] = []
-    for edge in sorted(edges, key=lambda item: (str(item.get("from")), str(item.get("to")), str(item.get("id", "")))):
+    rendered_edges = () if overview_only else edges
+    for edge in sorted(rendered_edges, key=lambda item: (str(item.get("from")), str(item.get("to")), str(item.get("id", "")))):
         relationship = edge.get("relationship", edge.get("type", "depends_on"))
         relationship = str(relationship)[:80]
+        from_x, from_y = positions[str(edge["from"])]
+        to_x, to_y = positions[str(edge["to"])]
         connection: dict[str, Any] = {
             "id": _safe_archify_id(str(edge.get("id", f"{edge.get('from')}->{edge.get('to')}"))),
             "from": id_map[str(edge["from"])],
@@ -205,7 +215,7 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
             "route": "orthogonal-h",
             "fromSide": "right",
             "toSide": "right",
-            "via": [[350, 90 + sorted(stable_ids).index(str(edge["from"])) * 130 + 38], [350, 90 + sorted(stable_ids).index(str(edge["to"])) * 130 + 38]],
+            "via": [[from_x + 250, from_y + 38], [to_x + 250, to_y + 38]],
         }
         connections.append(connection)
     titles = {
@@ -232,7 +242,9 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
         "stable_id_map": id_map,
         "display_labels": display_labels,
         "coverage": coverage,
-        "exclusions": [],
+        "exclusions": ["relationships_render_in_control_graph"] if overview_only and edges else [],
+        "relationship_count": len(edges),
+        "rendered_relationship_count": len(connections),
         "runtime_health_claims": False,
         "showcase_checks": list(SHOWCASE_CHECKS),
     }
@@ -280,7 +292,7 @@ def build_projection(graph: Mapping[str, Any], projection_id: str, *, source_rev
     diagram, metadata = graph_to_archify(graph, projection_id, required_coverage=required_coverage)
     metadata["source_revisions"] = dict(sorted(source_revisions.items()))
     metadata["deployed_revisions"] = dict(sorted(deployed_revisions.items()))
-    metadata["exclusions"] = sorted(set(exclusions))
+    metadata["exclusions"] = sorted(set(metadata.get("exclusions", ())) | set(exclusions))
     metadata["input_hash"] = "sha256:" + hashlib.sha256(canonical_bytes(diagram)).hexdigest()
     metadata["archify_version"] = ARCHIFY_VERSION
     metadata["archify_hash"] = "sha256:" + ARCHIFY_SHA256
