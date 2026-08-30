@@ -1667,9 +1667,9 @@ class MiniFrankTest(unittest.TestCase):
     def test_global_storage_reservation_is_atomic_across_parallel_owners(self):
         payload = self.pdf_bytes(b"C" * 70_000)
         self.client = self.make_client(
-            # Linux and other filesystems can allocate metadata blocks beyond
-            # logical JSON/file bytes. Two actual payloads still cannot fit,
-            # so this remains an atomic cross-owner admission check.
+            # Leave room for filesystem allocation blocks consumed by the
+            # intake/ledger records while mathematically keeping two actual
+            # payloads over the aggregate cap on every supported platform.
             storage_cap_bytes=(2 * len(payload)) - 1,
             storage_min_free_bytes=0,
         )
