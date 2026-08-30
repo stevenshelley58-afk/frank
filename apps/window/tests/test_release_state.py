@@ -7,7 +7,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from graph.release_state import ReleaseEvidenceError, ReleaseStateStore
 
 FLAGS = {k: True for k in ('live_view','map_view','control_read','reconciliation_schedules','runtime_monitoring','safe_actions','operational_actions','source_actions','cleanup_jobs','discovery_jobs','evaluation_jobs','chat_pattern_candidates','retention_restore_drills')}
-BASE = dict(source_sha='a'*40, deployed_sha='b'*40, image_digest='sha256:'+'c'*64, graph_revision='sha256:'+'d'*64, projection_manifests=['manifest'], tests=['tests'], runtime_evidence=['runtime'], browser_evidence=['browser'], rollback_target='e'*40, feature_flags=FLAGS, captured_at='2026-08-30T00:00:00Z')
+BASE = dict(source_sha='a'*40, deployed_sha='b'*40, image_digest='sha256:'+'c'*64, graph_revision='g_'+'d'*64, projection_manifests=['manifest'], tests=['tests'], runtime_evidence=['runtime'], browser_evidence=['browser'], rollback_target='e'*40, feature_flags=FLAGS, captured_at='2026-08-30T00:00:00Z')
 
 class ReleaseStateTests(unittest.TestCase):
     def test_rollback_selects_existing_hashed_release(self):
@@ -50,6 +50,12 @@ class ReleaseStateTests(unittest.TestCase):
             s.create_release('rel-1','step5',ev); s.advance_current('rel-1')
             (Path(d)/'releases'/'rel-1.json').write_text('{}')
             with self.assertRaises(ReleaseEvidenceError): s.read_current()
+
+    def test_graph_revision_uses_control_graph_key_not_content_digest(self):
+        with tempfile.TemporaryDirectory() as d:
+            evidence = dict(BASE, feature_flags={k: FLAGS[k] for k in list(FLAGS)[:5]}, graph_revision='sha256:' + 'd' * 64)
+            with self.assertRaisesRegex(ReleaseEvidenceError, "g_ graph revision"):
+                ReleaseStateStore(Path(d)).create_release('rel-1', 'step5', evidence)
 
     @unittest.skipUnless(hasattr(os, "symlink"), "symlinks unavailable")
     def test_symlinked_current_pointer_is_rejected(self):

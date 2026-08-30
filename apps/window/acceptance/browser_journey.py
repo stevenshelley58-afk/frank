@@ -35,7 +35,9 @@ def _storage_state() -> str:
 
 
 def _navigate(page: Any, base_url: str, surface: str) -> Any:
-    response = page.goto(base_url.rstrip("/") + surface, wait_until="networkidle", timeout=30000)
+    # AgentTrail's board intentionally keeps an EventSource open, so waiting
+    # for network-idle would make the real read-only route time out forever.
+    response = page.goto(base_url.rstrip("/") + surface, wait_until="domcontentloaded", timeout=30000)
     _response_ok(response, surface)
     if page.evaluate("document.documentElement.scrollWidth > document.documentElement.clientWidth"):
         raise RuntimeError(f"horizontal overflow: {surface}")
@@ -81,7 +83,9 @@ def _run_viewport(browser: Any, base_url: str, evidence_root: Path, name: str, v
             raise RuntimeError("control has no evidence-backed records")
         _click(page, ".control-row[data-record-id='service:frank-window']", "Frank runtime record")
         outcomes["records"] = bool(page.locator("#control-inspector").inner_text().strip())
-        outcomes["runtime_summary"] = page.locator(".runtime-fact").count() > 0
+        runtime_fact = page.locator(".runtime-fact")
+        runtime_fact.wait_for(timeout=10000)
+        outcomes["runtime_summary"] = runtime_fact.count() > 0
         export_href = page.locator("#control-export").get_attribute("href")
         export = page.request.get(base_url.rstrip("/") + str(export_href)) if export_href else None
         outcomes["export"] = export is not None and export.status < 400 and len(export.body()) > 0

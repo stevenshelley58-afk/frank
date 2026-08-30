@@ -20,7 +20,7 @@ class Step8AcceptanceHarnessTests(unittest.TestCase):
             path.write_text("""source_sha: 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa'
 image_digest: 'sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
 deployed_sha: 'cccccccccccccccccccccccccccccccccccccccc'
-graph_revision: 'sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
+graph_revision: 'g_dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd'
 projection_manifests: [real]
 tests: [real]
 runtime_health: [real]

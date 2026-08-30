@@ -24,6 +24,7 @@ class ReleaseEvidenceError(ControlContractError):
 
 _STAGES = ("step5", "step6c", "step7c", "step8")
 _SHA = re.compile(r"^[0-9a-f]{40,64}$")
+_GRAPH_REVISION = re.compile(r"^g_[0-9a-f]{64}$")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 _ISO_TIME = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$")
 _PLACEHOLDER = re.compile(r"(?:^|[-_ ])(?:todo|tbd|placeholder|example|changeme)(?:$|[-_ ])", re.I)
@@ -98,8 +99,8 @@ class ReleaseStateStore:
         if not _DIGEST.fullmatch(digest): raise ReleaseEvidenceError("image_digest must be a sha256 digest")
         for key in ("graph_revision", "rollback_target", "captured_at"):
             _clean(evidence[key], key)
-        if not _DIGEST.fullmatch(evidence["graph_revision"]):
-            raise ReleaseEvidenceError("graph_revision must be a sha256 digest")
+        if not _GRAPH_REVISION.fullmatch(evidence["graph_revision"]):
+            raise ReleaseEvidenceError("graph_revision must be a g_ graph revision")
         if not _SHA.fullmatch(evidence["rollback_target"]):
             raise ReleaseEvidenceError("rollback_target must be an exact git SHA")
         if not _ISO_TIME.fullmatch(evidence["captured_at"]):

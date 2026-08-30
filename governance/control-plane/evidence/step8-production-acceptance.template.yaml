@@ -3,7 +3,7 @@
 source_sha: ""
 image_digest: "sha256:<64 lowercase hex>"
 deployed_sha: ""
-graph_revision: "sha256:<64 lowercase hex>"
+graph_revision: "g_<64 lowercase hex>"
 projection_manifests: []
 tests: []
 runtime_health: []

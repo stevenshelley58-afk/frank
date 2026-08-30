@@ -1,4 +1,5 @@
 import hashlib
+import json
 import subprocess
 import sys
 import tempfile
@@ -30,9 +31,13 @@ class BrowserJourneyTests(unittest.TestCase):
                 shots[surface] = {"path": relative, "sha256": digest}
             journeys[name] = {"viewport": viewport, "outcomes": {key: True for key in OUTCOMES}, "screenshots": shots}
         flags = yaml.safe_load((ROOT / "governance/control-plane/feature-flags.yaml").read_text())["defaults"]
-        all_flags = {key: True for key in flags}; manifest = ROOT / "governance/control-plane/feature-flags.yaml"
-        return {"source_sha": "a" * 40, "image_digest": "sha256:" + "b" * 64, "deployed_sha": "c" * 40, "graph_revision": "sha256:" + "d" * 64,
-                "projection_manifests": [{"path": "governance/control-plane/feature-flags.yaml", "sha256": "sha256:" + hashlib.sha256(manifest.read_bytes()).hexdigest()}],
+        all_flags = {key: True for key in flags}; manifests = []
+        for index, projection_id in enumerate(sorted({"projection:vps/world", "projection:frank/architecture", "projection:blockwise/runtime", "projection:mini-frank/knowledge-flow", "projection:ad-template-builder/architecture", "projection:ad-template-builder/workflow"})):
+            manifest = folder / f"manifest-{index}.json"
+            manifest.write_text(json.dumps({"projection_id": projection_id, "graph_revision": "g_" + "d" * 64}), encoding="utf-8")
+            manifests.append({"projection_id": projection_id, "path": manifest.name, "sha256": "sha256:" + hashlib.sha256(manifest.read_bytes()).hexdigest()})
+        return {"source_sha": "a" * 40, "image_digest": "sha256:" + "b" * 64, "deployed_sha": "c" * 40, "graph_revision": "g_" + "d" * 64,
+                "projection_manifests": manifests,
                 "tests": ["real"], "runtime_health": ["real"], "reviewer": "reviewer", "rollback_target": "e" * 40,
                 "feature_flags": all_flags, "feature_flag_hash": _canonical_hash(all_flags),
                 "timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"), "acceptance_checklist": {key: True for key in REQUIRED_CHECKLIST},
@@ -110,6 +115,13 @@ class BrowserJourneyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             evidence = self._evidence(Path(tmp)); evidence["browser_review"]["captured_at"] = "2099-01-01T00:00:00Z"; evidence["screenshot_hashes"] = evidence["screenshot_hashes"][:-1]
             report = AcceptanceReport(); _evidence_checks(evidence, ROOT, report, True, Path(tmp)); self.assertTrue(report.failed)
+
+    def test_manifest_path_must_stay_inside_bundled_evidence_root(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp); evidence = self._evidence(folder)
+            evidence["projection_manifests"][0]["path"] = "../../outside/manifest.json"
+            report = AcceptanceReport(); _evidence_checks(evidence, ROOT, report, True, folder)
+            self.assertTrue(report.failed)
 
 
 if __name__ == "__main__":

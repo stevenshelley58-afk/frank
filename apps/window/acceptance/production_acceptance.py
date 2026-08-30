@@ -20,6 +20,7 @@ import yaml
 
 SHA256 = re.compile(r"^(?:sha256:)?[0-9a-f]{64}$")
 SHA = re.compile(r"^[0-9a-f]{40,64}$")
+GRAPH_REVISION = re.compile(r"^g_[0-9a-f]{64}$")
 MANDATORY_PROJECTIONS = {
     "projection:vps/world",
     "projection:frank/architecture",
@@ -200,16 +201,30 @@ def _evidence_checks(evidence: dict[str, Any] | None, root: Path, report: Accept
     evidence_root = evidence_root or root
     required = {"source_sha", "image_digest", "deployed_sha", "graph_revision", "projection_manifests", "tests", "runtime_health", "browser_review", "screenshot_hashes", "reviewer", "rollback_target", "feature_flag_hash", "feature_flags", "timestamp", "acceptance_checklist"}
     missing = sorted(required - set(evidence))
-    hashes_ok = all(isinstance(evidence.get(key), str) and SHA256.fullmatch(evidence[key]) for key in ("image_digest", "graph_revision", "feature_flag_hash") if key in evidence)
+    hashes_ok = all(isinstance(evidence.get(key), str) and SHA256.fullmatch(evidence[key]) for key in ("image_digest", "feature_flag_hash") if key in evidence)
+    graph_revision_ok = isinstance(evidence.get("graph_revision"), str) and GRAPH_REVISION.fullmatch(evidence["graph_revision"]) is not None
     revisions_ok = all(isinstance(evidence.get(key), str) and SHA.fullmatch(evidence[key]) for key in ("source_sha", "deployed_sha") if key in evidence)
     manifest_errors = []
+    manifest_ids: set[str] = set()
     for item in evidence.get("projection_manifests", []):
-        if not isinstance(item, dict) or not item.get("path") or not SHA256.fullmatch(str(item.get("sha256", ""))):
+        projection_id = item.get("projection_id") if isinstance(item, dict) else None
+        if not isinstance(item, dict) or projection_id not in MANDATORY_PROJECTIONS or projection_id in manifest_ids or not item.get("path") or not SHA256.fullmatch(str(item.get("sha256", ""))):
             manifest_errors.append("path/hash")
             continue
-        manifest = _regular_beneath(root, item["path"])
+        manifest_ids.add(projection_id)
+        manifest = _regular_beneath(evidence_root, item["path"])
         if manifest is None or _hash(manifest) != item["sha256"]:
             manifest_errors.append(item["path"])
+            continue
+        try:
+            manifest_value = json.loads(manifest.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, ValueError):
+            manifest_errors.append(item["path"])
+            continue
+        if not isinstance(manifest_value, dict) or manifest_value.get("projection_id") != projection_id or manifest_value.get("graph_revision") != evidence.get("graph_revision"):
+            manifest_errors.append(item["path"])
+    if manifest_ids != MANDATORY_PROJECTIONS:
+        manifest_errors.append("mandatory projection set")
     browser = evidence.get("browser_review", {})
     browser_errors = []
     try:
@@ -244,10 +259,10 @@ def _evidence_checks(evidence: dict[str, Any] | None, root: Path, report: Accept
     checklist = evidence.get("acceptance_checklist", {})
     checklist_shape = isinstance(checklist, dict) and set(checklist) == REQUIRED_CHECKLIST
     secret_free = not SECRET_MARKERS.search(json.dumps(evidence, sort_keys=True, default=str))
-    status = "fail" if (missing or not hashes_ok or not revisions_ok or manifest_errors or browser_errors
+    status = "fail" if (missing or not hashes_ok or not graph_revision_ok or not revisions_ok or manifest_errors or browser_errors
                          or not nonempty_lists or not checklist_shape or not secret_free) else "pass"
     _add(report, "production.receipt-binding", status,
-         f"missing={missing}; hashes={hashes_ok}; revisions={revisions_ok}; "
+         f"missing={missing}; hashes={hashes_ok}; graph_revision={graph_revision_ok}; revisions={revisions_ok}; "
          f"manifest_errors={manifest_errors}; browser_errors={browser_errors}; nonempty={nonempty_lists}; "
          f"checklist_shape={checklist_shape}; secret_free={secret_free}")
     flags = _load(root / "governance" / "control-plane" / "feature-flags.yaml").get("defaults", {})
