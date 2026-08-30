@@ -19,6 +19,9 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
   const STATUS_POLL_OFFLINE_MS = 60000;
   // Keep this client-only delivery change instantly reversible while it is evaluated.
   const ENABLE_QUIET_STREAM_DELIVERY = true;
+  // Guide replies are shown only when complete. This keeps drafting and tool activity
+  // out of a customer conversation while preserving the server's final answer.
+  const BUFFER_GUIDE_REPLIES_UNTIL_COMPLETE = true;
   // A reader must return to the actual end before reply delivery follows again.
   const STREAM_END_TOLERANCE_PX = 4;
   const DEFAULT_LIMITS = {
@@ -210,7 +213,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       return `<div class="guide-card"><h3>Choose by feel</h3><p>There is no design language to learn.</p><div class="look-options">${looks.map((look) => `<button class="look-option" type="button" aria-pressed="${guideAnswers.look === look}" data-guide-action="choose" data-guide-key="look" data-guide-value="${esc(look)}"><span class="look-swatch"></span><strong>${esc(look)}</strong></button>`).join("")}</div></div>`;
     }
     const previewUrl = sitePreviewUrl();
-    return `<div class="guide-card site-result"><div class="site-result-head"><div><h3>Your working page preview</h3><p>Try the sample form here, or open the same local preview in its own browser tab.</p></div><button class="secondary-button open-site-button" type="button" data-guide-action="open-site">Open preview</button></div><div class="site-preview-browser"><div class="browser-chrome"><span></span><span></span><span></span><strong>${esc(sitePreviewLabel())}</strong></div><iframe src="${esc(previewUrl)}" title="Working page preview for ${esc(guideAnswers.business)}"></iframe></div><p class="site-result-note">This local preview opens in the browser; it is not a screenshot.</p></div>`;
+    return `<div class="guide-card site-result"><div class="site-result-head"><div><h3>Your working page preview</h3><p>Try the sample form here, or open the same preview in a new tab.</p></div><button class="secondary-button open-site-button" type="button" data-guide-action="open-site">Open preview</button></div><div class="site-preview-browser"><div class="browser-chrome"><span></span><span></span><span></span><strong>${esc(sitePreviewLabel())}</strong></div><iframe src="${esc(previewUrl)}" title="Working page preview for ${esc(guideAnswers.business)}"></iframe></div><p class="site-result-note">This is a working preview, not a screenshot.</p></div>`;
   }
 
   function sitePreviewLabel() {
@@ -233,7 +236,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
 
   function openSitePreview() {
     const opened = window.open(sitePreviewUrl(), "_blank", "noopener,noreferrer");
-    if (!opened) notify("Your browser blocked the new tab. Allow pop-ups, then try again.");
+    if (!opened) notify("The preview didn’t open. Allow new tabs, then try again.");
   }
 
   function renderWorkedGuide() {
@@ -243,7 +246,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       ["Where do enquiries arrive now?", "Choose the answer closest to your day-to-day business.", "Frank can join the pieces later."],
       ["What should customers hear?", "A few plain words make the result feel like it belongs to your business.", "The examples are yours to edit."],
       ["Pick a look by feel.", "You do not need to know fonts, layouts or colour codes.", "It will stay readable on phones and computers."],
-      ["This is a local preview.", "Try the sample form here, then open the preview in a normal browser tab.", "Your answers become a starting brief that you can review before sending."],
+      ["This is a working preview.", "Try the sample form here, then open the preview in a new tab.", "Your answers become a starting point that you can review before sending."],
     ][workedGuideStep];
     guideCount.textContent = `Step ${workedGuideStep + 1} of 6`;
     guideProgressBar.dataset.step = String(workedGuideStep + 1);
@@ -308,13 +311,12 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
   }
 
   function jobNextAction(job) {
-    if (job && job.next_action) return cleanText(job.next_action, 180);
-    if (!job) return "Open this work to refresh its status.";
+    if (!job) return "Open this work to see where things are up to.";
     if (job.stage === "ready") return "Open the result or ask for a change.";
-    if (job.stage === "needs_attention") return job.retry_available ? "Review the update. Retry is available." : "Review the update.";
-    if (job.stage === "queued") return "The service last reported this work as waiting.";
-    if (job.stage === "checking") return "The service last reported that it is checking this work.";
-    if (job.stage === "working") return "The service last reported this work as in progress.";
+    if (job.stage === "needs_attention") return job.retry_available ? "There is one thing to try again." : "There is one thing to review.";
+    if (job.stage === "queued") return "Your solution is queued.";
+    if (job.stage === "checking") return "Giving it a final check.";
+    if (job.stage === "working") return "We’re putting it together.";
     return "Open this work to see what happens next.";
   }
 
@@ -440,7 +442,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     if (jobRenderPolicy("direct").focusReceipt || jobRenderPolicy("direct").scrollToEnd) failures.push("direct-focus-policy");
     if (jobRenderPolicy("poll").focusReceipt || jobRenderPolicy("poll").scrollToEnd) failures.push("poll-scroll-policy");
     if (!jobRenderPolicy("start").scrollToEnd) failures.push("start-scroll-policy");
-    const workLabels = { ready: "Ready", unavailable: "Could not refresh" };
+    const workLabels = { ready: "Ready", unavailable: "Couldn’t update just now" };
     const workName = workRowAccessibleName({
       title: "Quote follow-up",
       stage: "ready",
@@ -450,9 +452,9 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       next_action: "Open the result.",
     }, workLabels);
     if (!workName.includes("Quote follow-up") || !workName.includes("Ready since you last opened it") || !workName.includes("Open the result.")) failures.push("work-row-accessible-name");
-    if (jobNextAction({ stage: "queued" }) !== "The service last reported this work as waiting.") failures.push("queued-next-action");
-    if (jobNextAction({ stage: "working" }) !== "The service last reported this work as in progress.") failures.push("working-next-action");
-    if (jobNextAction({ stage: "needs_attention", retry_available: false }) !== "Review the update.") failures.push("attention-next-action");
+    if (jobNextAction({ stage: "queued" }) !== "Your solution is queued.") failures.push("queued-next-action");
+    if (jobNextAction({ stage: "working" }) !== "We’re putting it together.") failures.push("working-next-action");
+    if (jobNextAction({ stage: "needs_attention", retry_available: false }) !== "There is one thing to review.") failures.push("attention-next-action");
     return failures;
   }
 
@@ -609,7 +611,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       localStorage.setItem(PROJECT_STORE, JSON.stringify(list.slice(0, 50)));
       return true;
     } catch (_error) {
-      notify("This browser could not add the private link to Your work.");
+      notify("Your work is ready. Keep this page open so you can come back to it.");
       return false;
     }
   }
@@ -693,7 +695,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     // Do not abandon the submitted intake: it may already have created work.
     // This merely discards the unusable local draft and starts a distinct one.
     newConversation(false);
-    addMessage("assistant", "Your previous free project was already sent. I couldn’t safely reopen it from this browser, so I cleared that old draft. Tell me the next problem you want solved and I’ll start a new free project.", { record: false });
+    addMessage("assistant", "Your previous free solution is already under way. Tell me the next problem you want solved whenever you’re ready.", { record: false });
   }
 
   async function ensureIntake() {
@@ -941,10 +943,14 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
 
   function attachResume(message, options = {}) {
     if (!message || message.querySelector('[data-action="resume"]')) return;
-    actionsFor(message, '<button class="primary-button" type="button" data-action="resume">Start build</button>', { forceScroll: false, scroll: !options.quietStream });
+    actionsFor(message, '<button class="primary-button" type="button" data-action="resume">Solve this for me — free</button>', { forceScroll: false, scroll: !options.quietStream });
     if (options.quietStream && options.followAtEnd) scrollStreamToEnd();
     state.phase = "decision";
-    setComposer({ placeholder: "Add a detail or file (optional)…", attachments: true });
+    setComposer({
+      placeholder: "Answer in your own words…",
+      hint: "A rough answer is enough. You can also solve it now with what you’ve shared.",
+      attachments: true,
+    });
     saveDraft();
   }
 
@@ -993,7 +999,12 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     attachButton.hidden = !attachments;
     fileInput.disabled = !attachments;
     composer.classList.toggle("is-locked", locked);
-    if (!locked && messageInput.maxLength === CHANGE_MAX_LENGTH) showChangeLimit();
+    if (options.hint) {
+      composerStatus.textContent = options.hint;
+      composerStatus.hidden = false;
+      delete composerStatus.dataset.composerLimit;
+      messageInput.removeAttribute("aria-invalid");
+    } else if (!locked && messageInput.maxLength === CHANGE_MAX_LENGTH) showChangeLimit();
     else if (composerStatus.dataset.composerLimit === "change") clearComposerRecovery();
     updateSendButton();
   }
@@ -1119,11 +1130,11 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
         renderAttachmentList();
         if (!jobAccess) saveDraft();
         if (batch.some((item) => item.status === "error")) notify("One file could not be added. Remove it to continue.");
-      } catch (error) {
+      } catch (_error) {
         if (generation !== state.generation) return;
         batch.forEach((item) => { item.status = "error"; item.file = undefined; });
         renderAttachmentList();
-        notify(error.message || "Those files could not be added. Your message is still here.");
+        notify("That file didn’t come through. Your message is still here.");
       }
     });
   }
@@ -1149,11 +1160,11 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
           if (generation !== state.generation || !state.intake || state.intake.id !== intakeAccess.id || state.intake.claim !== intakeAccess.claim) return;
           updateIntake(body);
         }
-      } catch (error) {
+      } catch (_error) {
         if (generation !== state.generation) return;
         item.status = "ready";
         renderAttachmentList();
-        notify(error.message || "Couldn’t remove that file.");
+        notify("That file is still here. Try removing it again.");
         return;
       }
     }
@@ -1193,7 +1204,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     if (!response.ok) {
       let body = {};
       try { body = await response.json(); } catch (_error) { body = {}; }
-      const error = new Error(cleanText(body.error, 500) || "The guide is taking a moment.");
+      const error = new Error("Guide request unavailable");
       error.status = response.status;
       throw error;
     }
@@ -1241,7 +1252,6 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     let streamMessage = null;
     let pendingStreamText = "";
     let reply = "";
-    let failure = null;
     const controller = new AbortController();
     guideController = controller;
     guideAbortReason = "";
@@ -1287,6 +1297,10 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
 
     const queueStreamText = (partial) => {
       if (generation !== state.generation || !partial) return;
+      if (BUFFER_GUIDE_REPLIES_UNTIL_COMPLETE) {
+        pendingStreamText = partial;
+        return;
+      }
       thinking.remove();
       if (!streamMessage) {
         const followAtStart = streamAtEnd();
@@ -1307,8 +1321,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     touch();
     try {
       reply = await sendGuideTurn(text, queueStreamText, controller.signal, touch);
-    } catch (error) {
-      failure = error;
+    } catch (_error) {
       reply = "";
     } finally {
       clearTimeout(idleTimer);
@@ -1322,8 +1335,8 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       if (streamMessage) streamMessage.remove();
       const recoveryMessage = guideAbortReason === "user"
         ? "Stopped waiting. Your message and files are still in this conversation. I won’t send them again automatically."
-        : `${cleanText(failure && failure.message, 180) || "I couldn’t confirm a reply just now."} Your message and files are still in this conversation. I won’t send them again automatically.`;
-      addMessage(
+        : "I couldn’t finish that reply just now. Your message and files are still here — try again in a moment.";
+      const recovery = addMessage(
         "assistant",
         recoveryMessage,
         { record: false },
@@ -1331,8 +1344,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       setReplyAnnouncement(guideAbortReason === "user"
         ? "Reply stopped. Your message and files are still here."
         : "Frank couldn’t reply just now. Your message and files are still here.");
-      state.phase = "guiding";
-      setComposer({ placeholder: "Add a detail or ask another question…", hint: "Your earlier message is still shown above.", attachments: true });
+      attachResume(recovery);
       setBusy(false);
       saveDraft();
       return;
@@ -1419,7 +1431,6 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
   async function submitIntake(options = {}) {
     const payload = {
       ...intakeDraft(),
-      conversation: conversationPayload(),
     };
     return api.submitIntake(state.intake, payload, options);
   }
@@ -1456,7 +1467,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       thinking.remove();
       const job = body.job;
       const claim = context === "change" ? changeAccess.claim : cleanText(body.claim_token, 300);
-      if (!job || !validId(job.id) || !validClaim(claim)) throw new Error("Your work was accepted, but the private link was incomplete.");
+      if (!job || !validId(job.id) || !validClaim(claim)) throw new Error("Solution response incomplete");
       if (generation !== state.generation) {
         saveProject(job, claim, submittedTranscript);
         return;
@@ -1481,9 +1492,9 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       const cancelled = mutationAbortReason === "user" || error.code === "cancelled";
       const copy = cancelled
         ? "I stopped waiting. Your messages and files are still shown in this conversation."
-        : `${cleanText(error.message, 400) || "I couldn’t start that just yet."} I couldn’t confirm whether the build started. Your messages and files are still shown here.`;
+        : "I couldn’t confirm that started. Nothing has been lost. Try again when you’re ready.";
       const reply = addMessage("assistant", copy, { record: false });
-      actionsFor(reply, `<button class="primary-button" type="button" data-action="retry-mutation">${context === "change" ? "Retry" : "Try build again"}</button>`);
+      actionsFor(reply, `<button class="primary-button" type="button" data-action="retry-mutation">${context === "change" ? "Retry" : "Try again"}</button>`);
       state.phase = context === "change" ? "ready" : "decision";
       setComposer(context === "change" ? { placeholder: "Tell me what you want changed…", hint: "Plain words are perfect.", attachments: jobAttachmentsAvailable() } : { locked: true, hint: "Review the conversation, then try again when you are ready.", attachments: false });
     }
@@ -1523,7 +1534,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
   async function copyPrivateLink() {
     if (!state.current) return;
     await copyText(privateLink(state.current));
-    notify("Private link copied. Keep it somewhere safe.");
+    notify("Link copied. Keep it somewhere safe.");
   }
 
   function resultArtifacts(result) {
@@ -1549,14 +1560,14 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       : value && typeof value === "object" ? Object.entries(value).map(([name, status]) => `${name}: ${status}`) : [];
     const checkItems = values(result && result.checks);
     const limitationItems = values(result && result.limitations);
-    return `<details class="result-details"><summary>Checks and limitations</summary><div class="result-detail-grid">
-      <div><h4>Checks</h4>${checkItems.length ? `<ul>${checkItems.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : "<p>Not supplied with this result.</p>"}</div>
-      <div><h4>Limitations</h4>${limitationItems.length ? `<ul>${limitationItems.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : "<p>Not supplied with this result.</p>"}</div>
+    return `<details class="result-details"><summary>What to know</summary><div class="result-detail-grid">
+      <div><h4>What we checked</h4>${checkItems.length ? `<ul>${checkItems.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : "<p>No extra notes were supplied.</p>"}</div>
+      <div><h4>Things to know</h4>${limitationItems.length ? `<ul>${limitationItems.map((item) => `<li>${esc(item)}</li>`).join("")}</ul>` : "<p>No extra notes were supplied.</p>"}</div>
     </div></details>`;
   }
 
   function accessControls(job) {
-    return `<button class="quiet-button" type="button" data-action="copy-link">Copy private owner link</button>${jobCanRevoke(job) ? '<button class="quiet-button danger-button" type="button" data-action="revoke-access">Revoke owner link</button>' : ""}${jobCanDelete(job) ? '<button class="quiet-button danger-button" type="button" data-action="delete-work">Delete private work</button>' : ""}`;
+    return `<button class="quiet-button" type="button" data-action="copy-link">Copy my link</button>${jobCanRevoke(job) ? '<button class="quiet-button danger-button" type="button" data-action="revoke-access">Turn off this link</button>' : ""}${jobCanDelete(job) ? '<button class="quiet-button danger-button" type="button" data-action="delete-work">Delete this solution</button>' : ""}`;
   }
 
   function jobVersion(job) {
@@ -1603,13 +1614,13 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       <div class="artifact-content">
         <h3>${esc(result.title || job.title || "Your solution")}</h3>
         <p>${esc(result.summary || "Your working result is ready.")}</p>
-        ${preview ? `<div class="artifact-preview-wrap"><iframe class="artifact-preview" src="${esc(preview)}" title="Sandboxed preview of ${esc(result.title || job.title || "your result")}" sandbox loading="lazy"></iframe><p class="preview-note">This preview is static and sandboxed. Use the open or download action below for the full result.</p></div>` : ""}
+        ${preview ? `<div class="artifact-preview-wrap"><iframe class="artifact-preview" src="${esc(preview)}" title="Preview of ${esc(result.title || job.title || "your result")}" sandbox loading="lazy"></iframe><p class="preview-note">This is a quick look. Open or download it below to use the full version.</p></div>` : ""}
         <div class="result-primary-actions">${openActions}<button class="secondary-button result-action-step result-action-change" type="button" data-action="request-change">Change it — free</button><button class="secondary-button result-action-step result-action-share" type="button" data-action="share">Share</button></div>
-        <div class="result-download-actions">${downloadActions}${detailsUrl ? `<a class="artifact-link result-action-step result-action-download" href="${esc(detailsUrl)}" target="_blank" rel="noopener noreferrer">Open build notes</a>` : ""}</div>
+        <div class="result-download-actions">${downloadActions}${detailsUrl ? `<a class="artifact-link result-action-step result-action-download" href="${esc(detailsUrl)}" target="_blank" rel="noopener noreferrer">See what’s included</a>` : ""}</div>
         ${resultChecks(result)}
         ${resultGuidanceMarkup(guidance)}
-        <div class="artifact-meta"><span>${availableUntil ? `Available here until ${esc(availableUntil)}` : "Availability date not provided"}</span><span>Keep this private link if you want to return to this work.</span></div>
-        <details class="result-details owner-access-details"><summary>Private owner access and deletion</summary><div class="artifact-actions artifact-secondary-actions">${accessControls(job)}</div></details>
+        <div class="artifact-meta"><span>${availableUntil ? `Available here until ${esc(availableUntil)}` : "Saved here for you"}</span><span>Keep this link if you want to return to this work.</span></div>
+        <details class="result-details owner-access-details"><summary>Link and deletion</summary><div class="artifact-actions artifact-secondary-actions">${accessControls(job)}</div></details>
       </div>
     </div>`;
   }
@@ -1681,9 +1692,9 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       state.publicShare.commentVersion = Number(body.version) || 0;
       state.publicShare.comments = Array.isArray(body.comments) ? body.comments : [];
       renderSharedComments(state.publicShare.comments);
-    } catch (error) {
+    } catch (_error) {
       const mount = document.getElementById("shared-comments");
-      if (mount) mount.innerHTML = `<h3 id="shared-comments-title">Comments</h3><p class="dialog-status is-error">${esc(error.message || "Comments are unavailable.")}</p>`;
+      if (mount) mount.innerHTML = '<h3 id="shared-comments-title">Comments</h3><p class="dialog-status is-error">Comments are unavailable right now.</p>';
     }
   }
 
@@ -1708,9 +1719,9 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       form.reset();
       await loadSharedComments();
       notify(kind === "suggestion" ? "Suggestion added." : "Comment added.");
-    } catch (error) {
+    } catch (_error) {
       button.disabled = false;
-      setDialogStatus(status, error.message || "The comment was not posted.", true);
+      setDialogStatus(status, "That comment wasn’t posted. Try again in a moment.", true);
     }
   }
 
@@ -1842,9 +1853,9 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       const checkoutUrl = safeExternalUrl(intent.provider_url);
       if (!checkoutUrl) throw new MiniApiError("Frank did not return a secure tip destination.");
       window.location.assign(checkoutUrl);
-    } catch (error) {
+    } catch (_error) {
       tipSubmit.disabled = false;
-      setDialogStatus(tipStatus, error.message || "Tipping is unavailable right now. Everything remains free.", true);
+      setDialogStatus(tipStatus, "Tipping is unavailable right now. Everything remains free.", true);
     }
   }
 
@@ -1950,13 +1961,13 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       shareSubmit.disabled = !available;
       setDialogStatus(shareStatus, available
         ? "Sharing is ready. Nothing changes until you save it."
-        : cleanText(body && (body.message || body.reason), 300) || "Sharing is not configured for this project yet. Your work remains restricted.");
-    } catch (error) {
+        : "Sharing is not ready for this solution yet. Your work stays with you.");
+    } catch (_error) {
       state.shareCapability = "unavailable";
       state.shares = [];
       renderShares();
       shareSubmit.disabled = true;
-      setDialogStatus(shareStatus, error.message || "Sharing is unavailable. Your work remains restricted.", true);
+      setDialogStatus(shareStatus, "Sharing is unavailable right now. Your work stays with you.", true);
     }
   }
 
@@ -2001,9 +2012,9 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
         await copyText(copiedUrl);
         notify("Share link copied. Only the owner can execute work or approve payment.");
       }
-    } catch (error) {
+    } catch (_error) {
       shareSubmit.disabled = false;
-      setDialogStatus(shareStatus, error.message || "Access was not changed.", true);
+      setDialogStatus(shareStatus, "Sharing was not changed. Try again in a moment.", true);
     }
   }
 
@@ -2043,9 +2054,9 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
         await copyText(rotatedUrl);
         notify("New share link copied. The old link no longer works.");
       } else notify("Share revoked.");
-    } catch (error) {
+    } catch (_error) {
       button.disabled = false;
-      setDialogStatus(shareStatus, error.message || "Access was not changed.", true);
+      setDialogStatus(shareStatus, "Sharing was not changed. Try again in a moment.", true);
     }
   }
 
@@ -2076,7 +2087,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       priceStatus: cleanText(service.priceStatus, 80),
       modes: ["self_host_help", "managed_hosting", "video_call", "perth_visit", "custom_project", "not_now"],
       contactMethods: ["email", "phone", "whatsapp", "other"],
-      contactNotice: "Contact details are saved privately for operator review. Do not include passwords, access keys or other secrets.",
+      contactNotice: "Your contact details are used only for this request. Do not include passwords or access codes.",
       handoff: handoffParts.join("\n\n").slice(0, SERVICE_NOTE_MAX_LENGTH),
     };
   }
@@ -2099,11 +2110,11 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     return {
       ...fallback,
       status: status === "available" && modes.length ? "available" : "unavailable",
-      message: cleanText(body.message, 500) || fallback.message,
+      message: fallback.message,
       priceStatus: cleanText(body.price_status, 80) || fallback.priceStatus,
       modes: [...modes, "not_now"],
       contactMethods,
-      contactNotice: cleanText(contact.notice, 500) || fallback.contactNotice,
+      contactNotice: fallback.contactNotice,
     };
   }
 
@@ -2117,14 +2128,14 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     serviceContactMethod.querySelectorAll("option").forEach((option) => {
       option.disabled = Boolean(option.value) && !options.contactMethods.includes(option.value);
     });
-    serviceContactNotice.textContent = options.contactNotice || "Contact details are saved privately for operator review. Do not include secrets.";
+    serviceContactNotice.textContent = options.contactNotice || "Your contact details are used only for this request. Do not include passwords or access codes.";
     const available = state.serviceCapability === "available";
     const pricing = options.priceStatus === "scope_required"
       ? " Any price requires a reviewed scope first."
       : "";
     setDialogStatus(serviceStatus, available
-      ? `${options.message || "Review the handoff, then save it only if you want hands-on help."}${pricing}`
-      : options.message || "Hands-on service is not configured for this result. The free guide remains available.");
+      ? `${options.message || "Save this only if you would like hands-on help."}${pricing}`
+      : "Hands-on help is not available for this solution right now. The free guide is still here.");
     updateServiceForm();
   }
 
@@ -2193,15 +2204,13 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       serviceRequestReplay.confirm(signature);
       const request = body && body.request || {};
       const status = cleanText(request.status, 100);
-      const notified = body && body.notification_sent === true;
-      const started = body && body.execution_started === true;
       setDialogStatus(serviceStatus, status === "saved_for_review"
-        ? `Saved for review. ${notified ? "Frank has been notified." : "Frank hasn’t contacted you yet."} ${started ? "The response says implementation has started." : "No payment or implementation has been approved or started."}`
-        : "Your request is saved with this project. Nothing starts automatically and no payment was approved.");
+        ? "Your request is saved. We’ll be in touch if you asked for hands-on help."
+        : "Your request is saved with this solution. Nothing starts automatically.");
       serviceForm.querySelectorAll("input, textarea, select").forEach((field) => { field.disabled = true; });
-    } catch (error) {
+    } catch (_error) {
       serviceSubmit.disabled = false;
-      setDialogStatus(serviceStatus, error.message || "The request was not sent.", true);
+      setDialogStatus(serviceStatus, "That request wasn’t sent. Try again in a moment.", true);
     }
   }
 
@@ -2216,17 +2225,17 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
 
   async function deletePrivateWork(button) {
     if (!state.current || !jobCanDelete(state.current.job)) return;
-    if (!window.confirm("Delete this private work? Its conversation, files, and result will be removed if the server supports deletion.")) return;
+    if (!window.confirm("Delete this solution and its files? This can’t be undone.")) return;
     button.disabled = true;
     const access = { id: state.current.id, claim: state.current.claim };
     try {
       await api.deleteJob(access);
       forgetProject(access.id);
       newConversation(false);
-      notify("Your private work was deleted.");
-    } catch (error) {
+      notify("Your solution was deleted.");
+    } catch (_error) {
       button.disabled = false;
-      notify(error.message || "I could not delete this work. Nothing was changed.");
+      notify("That solution wasn’t deleted. Nothing changed.");
     }
   }
 
@@ -2237,15 +2246,15 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     try {
       await api.abandonIntake(access);
       newConversation(false);
-      notify("Your draft and uploaded files were deleted.");
-    } catch (error) {
-      notify(error.message || "I could not delete this draft. Nothing was changed.");
+      notify("Your conversation and files were deleted.");
+    } catch (_error) {
+      notify("That conversation wasn’t deleted. Nothing changed.");
     }
   }
 
   async function revokeAccess(button) {
     if (!state.current || !jobCanRevoke(state.current.job)) return;
-    if (!window.confirm("Revoke this private link? Anyone using the link will lose access.")) return;
+    if (!window.confirm("Turn off this link? Anyone using it will no longer be able to open this solution.")) return;
     button.disabled = true;
     const access = { id: state.current.id, claim: state.current.claim };
     try {
@@ -2253,37 +2262,37 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       forgetProject(access.id);
       newConversation(false);
       notify("Link access was revoked.");
-    } catch (error) {
+    } catch (_error) {
       button.disabled = false;
-      notify(error.message || "I could not revoke this link. Nothing was changed.");
+      notify("That link is still active. Nothing changed.");
     }
   }
 
   const stageCopy = {
-    queued: ["Waiting to start…", "The service last reported this work as waiting."],
-    working: ["Working on it…", "The service last reported this work as in progress."],
-    checking: ["Almost ready…", "The service last reported that it is checking this work."],
-    needs_attention: ["Needs another pass", "Review the work and choose Retry if it is offered."],
-    ready: ["Ready to review.", "Open the project details below."],
+    queued: ["Waiting to start…", "Your solution is queued."],
+    working: ["Working on it…", "We’re putting it together."],
+    checking: ["Almost ready…", "Giving it a final check."],
+    needs_attention: ["Needs another pass", "There is one thing to review."],
+    ready: ["Ready to review.", "Open your solution below."],
   };
 
   function statusCard(job) {
     const copy = stageCopy[job.stage] || stageCopy.queued;
     const canRetry = job.stage === "needs_attention" && Boolean(job.retry_available);
     const queuedCopy = job.stage === "queued" && job.automatic_retry_at
-      ? `Next retry time reported: ${formatDateTime(job.automatic_retry_at)}.`
+      ? `We’ll try again at ${formatDateTime(job.automatic_retry_at)}.`
       : copy[1];
-    const offlineCopy = navigator.onLine ? "" : " You’re offline; status checks resume when this browser is back online.";
+    const offlineCopy = navigator.onLine ? "" : " You’re offline. We’ll update this when you’re back.";
     return `<div class="status-card" role="status">
       <span class="status-light${job.stage === "needs_attention" ? " attention" : ""}" aria-hidden="true"></span>
-      <div class="status-copy"><strong>${esc(copy[0])}</strong><p>${esc(queuedCopy + offlineCopy)}</p><p class="status-retention">Keep this private link if you want to return to this work.</p>
+      <div class="status-copy"><strong>${esc(copy[0])}</strong><p>${esc(queuedCopy + offlineCopy)}</p><p class="status-retention">Keep this link if you want to return to this work.</p>
         <div class="message-actions">${canRetry ? '<button class="secondary-button" type="button" data-action="retry">Retry</button>' : ""}${accessControls(job)}</div>
       </div>
     </div>`;
   }
 
   function jobMessageText(job) {
-    if (job.stage === "ready") return "The service last reported this work as ready.";
+    if (job.stage === "ready") return "Your solution is ready.";
     return stageCopy[job.stage]?.[0] || stageCopy.queued[0];
   }
 
@@ -2316,7 +2325,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       setComposer({ placeholder: "Tell me what you want changed…", hint: "Plain words are perfect.", attachments: jobAttachmentsAvailable() });
     } else {
       state.phase = "job";
-      setComposer({ locked: true, hint: "Keep the private link if you want to return here.", attachments: false });
+      setComposer({ locked: true, hint: "Keep this link if you want to return here.", attachments: false });
       pollLater();
     }
     setBusy(false);
@@ -2359,7 +2368,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
           forgetProject(state.current.id);
           history.replaceState(null, "", location.pathname + location.search);
           newConversation(false);
-          addMessage("assistant", "I couldn’t open that private link. It may be incomplete or no longer available.");
+          addMessage("assistant", "I couldn’t open that link. It may no longer be available.");
         } else {
           state.pollFailures += 1;
           pollLaterWithDelay(null);
@@ -2493,7 +2502,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       if (error.status === 404 && (!savedAccess || savedAccess.claim === access.claim)) forgetProject(access.id);
       history.replaceState(null, "", location.pathname + location.search);
       state.current = null;
-      addMessage("assistant", error.status === 404 ? "I couldn’t open that private link. It may be incomplete or no longer available." : "I couldn’t open your work just now.");
+      addMessage("assistant", error.status === 404 ? "I couldn’t open that link. It may no longer be available." : "I couldn’t open your work just now.");
       setComposer({ placeholder: "Start with a new problem…", hint: "Your other work has not been changed.", attachments: true });
       state.phase = "problem";
     }
@@ -2509,10 +2518,10 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       const body = await api.retryJob(access);
       if (generation !== state.generation || !state.current || state.current.id !== access.id || state.current.claim !== access.claim) return;
       renderJobUpdate(body.job, true);
-    } catch (error) {
+    } catch (_error) {
       if (generation !== state.generation || !state.current || state.current.id !== access.id || state.current.claim !== access.claim) return;
       setBusy(false);
-      notify(error.message || "I couldn’t restart it just yet. Review this work before trying again.");
+      notify("I couldn’t restart that just yet. Try again in a moment.");
       renderJobUpdate(state.current.job, true);
     }
   }
@@ -2554,7 +2563,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
         const body = await api.readJob({ id: item.id, claim: item.claim });
         rememberAccountClaim(cleanText(body && body.account_claim_token, 300));
         const job = body && body.job;
-        if (!job) throw new MiniApiError("The server returned no work status.");
+        if (!job) throw new MiniApiError("Work update unavailable");
         const returnEvent = ownerReturnEvent(item, job);
         saveProject(job, item.claim, item.transcript);
         return { ...item, ...job, refresh_status: "live", refresh_error: "", next_action: jobNextAction(job), return_event: returnEvent };
@@ -2563,7 +2572,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
           forgetProject(item.id);
           return null;
         }
-        return { ...item, refresh_status: "unavailable", refresh_error: cleanText(error.message, 180) };
+        return { ...item, refresh_status: "unavailable", refresh_error: "Couldn’t update just now." };
       }
     }));
     return refreshed.filter(Boolean);
@@ -2577,14 +2586,14 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       ready: "Ready",
       needs_attention: "Needs attention",
       saved: "Saved",
-      unavailable: "Could not refresh",
+      unavailable: "Couldn’t update just now",
     };
     workList.innerHTML = list.length ? list.map((item) => `<button class="work-row" type="button" data-project-id="${esc(item.id)}" aria-label="${esc(workRowAccessibleName(item, labels))}">
       <strong>${esc(item.title || "Your solution")}</strong><small class="work-status${item.return_event ? " work-return-cue" : ""}">${esc(workStatusLabel(item, labels))}</small>
       <span>${esc(item.problem || "Private work")}</span>
-      <small class="work-meta">Updated ${esc(formatDateTime(item.updated_at || item.created_at))} · ${item.available_until ? `Available until ${esc(formatDate(item.available_until))}` : "Availability date not provided"}</small>
+      <small class="work-meta">Updated ${esc(formatDateTime(item.updated_at || item.created_at))}${item.available_until ? ` · Available until ${esc(formatDate(item.available_until))}` : ""}</small>
       <small class="work-next">Next: ${esc(workNextAction(item))}</small>
-    </button>`).join("") : `<div class="empty-work"><strong>Nothing here yet.</strong><p>Projects saved by this browser can appear here.</p></div>`;
+    </button>`).join("") : `<div class="empty-work"><strong>Nothing here yet.</strong><p>Saved work from here will appear here.</p></div>`;
   }
 
   async function openWork() {
@@ -2595,7 +2604,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       workButton.disabled = true;
       workButton.setAttribute("aria-busy", "true");
     }
-    workList.innerHTML = '<div class="empty-work" role="status"><strong>Refreshing your work…</strong><p>I’m checking each private link for its current status.</p></div>';
+    workList.innerHTML = '<div class="empty-work" role="status"><strong>Finding your saved work…</strong><p>Getting the latest updates.</p></div>';
     try {
       renderWorkList(await refreshProjects());
       if (typeof drawer.showModal === "function") drawer.showModal();
@@ -2616,7 +2625,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     const assistantMessages = messages.querySelectorAll(".message-assistant");
     const lastAssistant = assistantMessages[assistantMessages.length - 1];
     if (state.phase === "decision") {
-      const decisionMessage = lastAssistant || addMessage("assistant", "I have enough to build a useful first version.", { record: false });
+      const decisionMessage = lastAssistant || addMessage("assistant", "I have enough to start solving this.", { record: false });
       attachResume(decisionMessage);
     } else setComposer({ placeholder: state.phase === "problem" ? "Tell me what’s not working…" : "Type your answer…", hint: state.phase === "problem" ? "No tech words needed." : "A rough answer is fine.", attachments: true });
     if (state.transcript.length) {
@@ -2635,7 +2644,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
     state.refining = draft.refining;
     state.attachments = draft.attachments;
     state.transcript = draft.transcript;
-    setComposer({ locked: true, hint: "Opening your private conversation…", attachments: false });
+    setComposer({ locked: true, hint: "Opening your conversation…", attachments: false });
     setBusy(true);
     const generation = state.generation;
     try {
@@ -2662,7 +2671,7 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
         const firstProblem = state.transcript.find((item) => item.role === "user" && item.text);
         state.problem = firstProblem ? firstProblem.text : state.problem;
       } else if (state.transcript.length) {
-        notify("I couldn’t confirm a saved server copy yet. This device’s draft is still here.");
+        notify("We couldn’t reopen the saved copy just now. What you typed is still here.");
       }
       state.attachments = cleanFiles(serverIntake && serverIntake.attachments);
       saveDraft();
@@ -2671,10 +2680,10 @@ import { createReplayKeyTracker } from "./mini_retry.mjs";
       if (error.status === 404) {
         clearDraft();
         newConversation(false);
-        addMessage("assistant", "I couldn’t reopen that draft. Start again here.", { record: false });
+        addMessage("assistant", "That saved conversation is no longer available. Start again here.", { record: false });
         return;
       }
-      notify("I couldn’t check the saved copy just now. The copy on this device is still here.");
+      notify("We couldn’t reopen this conversation just now. What you typed is still here.");
     }
     finishDraftRestore();
   }
