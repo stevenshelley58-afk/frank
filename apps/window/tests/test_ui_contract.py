@@ -84,7 +84,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('const selectionCleared = Boolean(selectedRunId && !runs.some((run) => run.id === selectedRunId))', studio)
         self.assertIn('if (selectionCleared) clearRunSelection()', studio)
         self.assertIn('runListRenderSignature(runs) !== previousSignature', studio)
-        self.assertIn('/js/app.js?v=20260831-ad-studio-history-v1', html)
+        self.assertIn('/js/app.js?v=20260831-batch-live-history-v1', html)
         self.assertIn('./ad-studio.js?v=20260831-history-v1', app)
         self.assertNotIn('Approval is locked', studio)
         self.assertNotIn('pendingPolicyOverride', studio)
