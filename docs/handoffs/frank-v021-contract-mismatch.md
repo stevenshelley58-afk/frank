@@ -62,6 +62,25 @@ Repository `/projects/frank` @ `49d75ad` (main):
   runbook must record and narrow these before any writable launch.
 - `/root/.codex/config.toml` exists (contents intentionally not read/printed).
 
+## Session 1 preflight evidence received (codex/frank-v021-preflight @ 25f3772)
+
+`PRODUCTION_BASELINE.md` (redacted) confirms, read-only:
+
+- `origin/main` at capture `49d75ad` — same base this branch was cut from.
+- Live Hermes 0.20.1, checkout `/home/hermes/.hermes/hermes-agent` dirty;
+  live `/v1/tool-runs` diff recovered to branch
+  `codex/frank-v021-tool-runs-recovery` @ `ed1554a2fe` (separate worktree).
+- Hindsight production today: `local_embedded`, `bank_id steven-unassigned`,
+  template `steven-{workspace}`, `auto_recall: true` (sync, 2048 tokens),
+  **`auto_retain: true` every turn async** — the v0.21 contract's
+  `auto_retain:false` + supported-API admission adapter is a real cutover
+  change, not a no-op verification.
+- Access path: loopback-only API via `hindsight-frank-proxy` socket-proxyd
+  (upstream `127.0.0.1:9177`, Frank-network side `172.16.1.1:9178`).
+- Data roots that must survive deploys include `/srv/frank/data/window`
+  (chats, uploads, maps, control-graph, evidence) — the upload-snapshot
+  partitioning in Part A must respect this root.
+
 ## What Session 1 must publish
 
 1. `origin/codex/frank-v021-contract` with `INTERFACE_CONTRACT_STATUS: READY`
