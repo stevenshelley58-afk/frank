@@ -53,7 +53,7 @@ MAX_WIDGETS_PER_HOME = 25
 ENTITY_KINDS = {"project", "tool", "agent", "service"}
 WIDGET_SIZES = {"small", "medium", "wide"}
 CONNECTION_STATUSES = {"setup_needed", "connected", "verified", "error"}
-CONNECTION_PROVIDERS = {"resend", "stripe", "activepieces", "mcp", "api"}
+CONNECTION_PROVIDERS = {"resend", "stripe", "activepieces", "mcp", "api", "mautic", "chatwoot"}
 CONNECTION_SCOPES = {"global", *ENTITY_KINDS}
 CONNECTION_FIELDS = {
     "provider", "name", "scope_kind", "scope_id", "status", "connection_ref",
@@ -272,8 +272,24 @@ DEFAULT_WIDGET_IDS = {kind: list(widget_ids) for kind, widget_ids in home_defaul
 
 CONNECTION_CATALOG = [
     {
+        "provider": "mautic", "title": "Mautic", "description": "Open-source CRM and campaign automation.",
+        "capabilities": ["crm.contacts.read", "campaigns.read", "campaigns.manage"], "setup_mode": "provider",
+        "open_source": True, "license": "GPL-3.0-or-later",
+    },
+    {
+        "provider": "chatwoot", "title": "Chatwoot", "description": "Open-source customer enquiries and support.",
+        "capabilities": ["support.conversations.read", "support.conversations.status"], "setup_mode": "provider",
+        "open_source": True, "license": "MIT",
+    },
+    {
+        "provider": "stalwart", "title": "Stalwart", "description": "Open-source transactional email.",
+        "capabilities": ["email.send", "email.status"], "setup_mode": "provider", "open_source": True,
+        "license": "AGPL-3.0-or-later",
+    },
+    {
         "provider": "resend", "title": "Resend", "description": "Transactional email delivery.",
-        "capabilities": ["email.send", "email.status"], "setup_mode": "provider",
+        "capabilities": ["email.send", "email.status"], "setup_mode": "setup_needed",
+        "compatibility": True, "note": "Compatibility-only; Stalwart is the open-source production email path.",
     },
     {
         "provider": "stripe", "title": "Stripe", "description": "Billing and subscription provider.",
