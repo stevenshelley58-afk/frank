@@ -1,5 +1,6 @@
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260830-ad-studio-route-v1";
+import { mergeAdStudioRun, runListRenderSignature } from "./ad-studio-state.js?v=20260831-history-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -9,6 +10,8 @@ let mounted = false;
 let projects = [];
 let runs = [];
 let selectedRunId = "";
+let runSelectionRevision = 0;
+let runListRevision = 0;
 let selectedStage = null;
 let graphHandle = null;
 let selectedFiles = [];
@@ -228,7 +231,17 @@ function renderRunOptions() {
   select.replaceChildren(new Option("No run selected", ""));
   for (const run of runs) select.append(new Option(run.title || "Ad Studio job", run.id));
   if (runs.some((run) => run.id === previous)) select.value = previous;
-  selectedRunId = select.value;
+}
+
+function clearRunSelection() {
+  runSelectionRevision += 1;
+  selectedRunId = "";
+  eventStream?.close();
+  eventStream = null;
+  runEvents = [];
+  const detail = $("#ad-run-detail");
+  if (detail) detail.innerHTML = '<div class="ad-empty"><strong>Select a run</strong><span>Open a run to inspect every iteration, comparator score and final review.</span></div>';
+  updateEvidence();
 }
 
 function renderRuns() {
@@ -266,14 +279,22 @@ function renderRuns() {
 }
 
 async function refreshRuns() {
+  const refreshRevision = ++runListRevision;
   const projectId = clean($("#ad-run-project")?.value || $("#ad-pipeline-project")?.value);
   const query = new URLSearchParams({ limit: "30" });
   if (projectId) query.set("project_id", projectId);
   const response = await fetch(`/api/ad-studio/runs?${query}`);
   if (!response.ok) throw new Error("Hermes job history is unavailable");
   const data = await response.json();
-  runs = (Array.isArray(data.runs) ? data.runs : []).sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
-  renderRuns();
+  if (refreshRevision !== runListRevision) return;
+  const previousSignature = runListRenderSignature(runs);
+  const existing = new Map(runs.map((run) => [run.id, run]));
+  runs = (Array.isArray(data.runs) ? data.runs : [])
+    .map((run) => mergeAdStudioRun(existing.get(run.id), run))
+    .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
+  const selectionCleared = Boolean(selectedRunId && !runs.some((run) => run.id === selectedRunId));
+  if (selectionCleared) clearRunSelection();
+  if (selectionCleared || runListRenderSignature(runs) !== previousSignature) renderRuns();
 }
 
 async function refreshRunsSafe() {
@@ -290,6 +311,7 @@ async function refreshRunsSafe() {
 }
 
 async function selectRun(runId) {
+  const selectionRevision = ++runSelectionRevision;
   selectedRunId = runId;
   renderRuns();
   let run = runs.find((item) => item.id === runId);
@@ -298,11 +320,14 @@ async function selectRun(runId) {
     const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}`);
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.run) {
-      run = { ...run, ...data.run };
+      if (selectionRevision !== runSelectionRevision || selectedRunId !== runId) return;
+      run = mergeAdStudioRun(runs.find((item) => item.id === run.id), data.run);
       runs = runs.map((item) => item.id === run.id ? run : item);
       renderRuns();
     }
   } catch { /* keep the last visible status */ }
+  if (selectionRevision !== runSelectionRevision || selectedRunId !== runId) return;
+  run = runs.find((item) => item.id === runId) || run;
   renderRunDetail(run);
   connectRunEvents(run);
 }
@@ -635,15 +660,19 @@ function connectRunEvents(run) {
   eventStream = stream;
   const receive = (event) => {
     try {
+      if (eventStream !== stream || selectedRunId !== run.id) return;
       const item = JSON.parse(event.data);
       if (!runEvents.some((existing) => existing.sequence === item.sequence)) runEvents.push(item);
+      run = mergeAdStudioRun(runs.find((candidate) => candidate.id === run.id), run);
       if (["iteration.rendered", "iteration.compared"].includes(item.kind)) mergeIterationEvent(run, item);
       if (item.kind === "stage.started" && item.node_id) {
         run.stage = canonicalStage(item.node_id);
         run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(run.stage)) / PIPELINE_STAGES.length);
       }
+      runs = runs.map((candidate) => candidate.id === run.id ? run : candidate);
       renderRunDetail(run);
       if (["run.failed", "run.cancelled", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {
+        if (eventStream !== stream || selectedRunId !== run.id) return;
         const updated = runs.find((candidate) => candidate.id === run.id);
         if (updated) renderRunDetail(updated);
       });
@@ -808,7 +837,7 @@ function setupRunForm() {
 
 function setupPipelineForm() {
   $("#ad-pipeline-project").addEventListener("change", mountPipeline);
-  $("#ad-pipeline-run").addEventListener("change", (event) => { selectedRunId = event.target.value; if (selectedRunId) void selectRun(selectedRunId); else updateEvidence(); });
+  $("#ad-pipeline-run").addEventListener("change", (event) => { const runId = event.target.value; if (runId) void selectRun(runId); else clearRunSelection(); });
   $$('[data-ad-open-pipeline]').forEach((button) => button.addEventListener("click", () => activate("pipeline")));
 }
 

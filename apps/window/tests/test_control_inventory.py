@@ -105,7 +105,12 @@ class ControlInventoryTests(unittest.TestCase):
         second = inventory(matrix)
         self.assertGreater(first["record_count"], 0)
         self.assertEqual(canonical_inventory(first), canonical_inventory(second))
-        self.assertTrue(all(r["source_locator"].startswith("/projects/frank/") for r in first["records"]))
+        # Every record locator must live under one of the declared canonical
+        # roots; the canonical repository root must always be represented.
+        declared_roots = tuple(sorted({a.canonical_root for a in matrix.adapters if a.canonical_root}))
+        self.assertTrue(declared_roots)
+        self.assertTrue(all(r["source_locator"].startswith(declared_roots) for r in first["records"]))
+        self.assertTrue(any(r["source_locator"].startswith("/projects/frank/") for r in first["records"]))
 
     def test_records_are_catalog_capabilities(self):
         from graph.control_inventory import matrix_from_declarations
