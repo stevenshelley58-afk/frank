@@ -196,7 +196,10 @@ docker build \
   --tag frank-mini-builder:mini-v1 \
   --file "$app/infra/mini_builder/Dockerfile" \
   "$app/infra/mini_builder"
-docker compose build frank-window frank-agenttrail
+docker compose build \
+  --build-arg SOURCE_SHA="$(git -C "$app" rev-parse HEAD)" \
+  --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  frank-window frank-agenttrail
 docker compose config --quiet
 docker run --rm \
   --env-file "$caddy_secret_file" \

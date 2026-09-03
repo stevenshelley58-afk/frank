@@ -23,6 +23,13 @@ USER node
 CMD ["node", "/agenttrail/bin/agenttrail.mjs", "/workspace", "--port", "5340", "--no-open"]
 
 FROM python:3.12-slim
+# Release provenance (Phase E): injected at build time by deploy.sh from the
+# exact committed revision being built.
+ARG SOURCE_SHA=unknown
+ARG BUILD_TIME=unknown
+LABEL org.opencontainers.image.revision="${SOURCE_SHA}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
+      org.opencontainers.image.title="frank-window"
 WORKDIR /app
 COPY apps/window/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
