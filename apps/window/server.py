@@ -20,6 +20,7 @@ from copy import deepcopy
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, redirect, request, send_file, send_from_directory, stream_with_context
@@ -850,7 +851,7 @@ def accounts_delete(account_id: str):
 
 @app.get("/api/email-tools")
 def email_tools():
-    mautic_url = os.environ.get("MAUTIC_BASE_URL", "").strip() or os.environ.get("MAUTIC_URL", "").strip()
+    mautic_url = _safe_provider_url(_mautic_base_url())
     return jsonify({
         "stalwart": {
             "status": _connector_status("STALWART_CONNECTOR_STATUS"),
@@ -871,18 +872,29 @@ def email_tools():
 
 
 def _safe_provider_url(value: str) -> str:
-    """Return only an HTTPS origin; never echo credentials or provider paths."""
+    """Return one normalized HTTP(S) origin without credentials or paths."""
     parsed = urllib.parse.urlparse(str(value or "").strip())
-    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
         return ""
-    return f"https://{parsed.netloc}"
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.lower().rstrip(".")
+    suffix = f":{port}" if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)) else ""
+    return f"{scheme}://{host}{suffix}"
 
 
 def _safe_support_url(value: str) -> str:
     parsed = urllib.parse.urlparse(str(value or "").strip())
     if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
         return ""
-    return urllib.parse.urlunparse(("https", parsed.netloc, parsed.path, "", "", ""))
+    return f"{_safe_provider_url(value)}{parsed.path}"
+
+
+def _mautic_base_url() -> str:
+    return os.environ.get("MAUTIC_BASE_URL", "").strip() or os.environ.get("MAUTIC_URL", "").strip()
 
 
 @app.get("/api/providers/readiness")
@@ -901,7 +913,7 @@ def providers_readiness():
             "status": status,
             "configured": status in {"configured", "ready"},
             "verified": status == "ready",
-            "base_url": _safe_provider_url(os.environ.get(url_var, "")),
+            "base_url": _safe_provider_url(_mautic_base_url() if provider == "mautic" else os.environ.get(url_var, "")),
             "error": status == "error",
         })
     return jsonify({"schema": "schema://frank.provider-readiness/v1", "providers": items})
@@ -942,12 +954,17 @@ def _support_projection() -> list[dict]:
         if external_ref and not EXTERNAL_REFERENCE.fullmatch(external_ref):
             abort(503, "support conversation state is corrupt")
         updated_at = item.get("updated_at")
-        if updated_at is not None and (not isinstance(updated_at, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", updated_at)):
-            abort(503, "support conversation state is corrupt")
+        if updated_at is not None:
+            if not isinstance(updated_at, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", updated_at):
+                abort(503, "support conversation state is corrupt")
+            try:
+                datetime.fromisoformat(updated_at[:-1] + "+00:00")
+            except ValueError:
+                abort(503, "support conversation state is corrupt")
         chatwoot_ready = _connector_status("CHATWOOT_CONNECTOR_STATUS") == "ready"
         chatwoot_origin = _safe_provider_url(os.environ.get("CHATWOOT_BASE_URL", ""))
         parsed = urllib.parse.urlparse(item.get("url", "")) if isinstance(item.get("url", ""), str) else None
-        valid_origin = bool(parsed and f"https://{parsed.netloc}" == chatwoot_origin and not parsed.username and not parsed.password)
+        valid_origin = bool(parsed and _safe_provider_url(item.get("url", "")) == chatwoot_origin and not parsed.username and not parsed.password)
         url = _safe_support_url(item.get("url", "")) if chatwoot_ready and chatwoot_origin and valid_origin else ""
         output.append({
             "id": item["id"], "account_id": account_id_value,

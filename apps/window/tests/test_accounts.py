@@ -195,6 +195,21 @@ class AccountsApiTest(unittest.TestCase):
         with patch.dict(os.environ, {"CHATWOOT_BASE_URL": "https://chat.example.test", "CHATWOOT_CONNECTOR_STATUS": "configured"}):
             self.assertEqual(self.client.get("/api/support/conversations").get_json()["conversations"][0]["url"], "")
 
+    def test_support_projection_rejects_impossible_utc_timestamp(self):
+        server.SUPPORT_CONVERSATIONS_FILE.write_text(json.dumps({"version": 1, "conversations": [{
+            "id": "cw-1", "status": "open", "updated_at": "2026-99-99T25:61:61Z"
+        }]}), encoding="utf-8")
+        self.assertEqual(self.client.get("/api/support/conversations").status_code, 503)
+
+    def test_stalwart_connection_provider_is_accepted(self):
+        import home_platform
+        self.assertIn("stalwart", home_platform.CONNECTION_PROVIDERS)
+        cleaned = home_platform._clean_connection({
+            "provider": "stalwart", "name": "Transactional mail", "status": "setup_needed",
+            "capabilities": ["email.send"],
+        })
+        self.assertEqual(cleaned["provider"], "stalwart")
+
 
 if __name__ == "__main__":
     unittest.main()

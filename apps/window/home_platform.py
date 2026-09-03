@@ -53,7 +53,7 @@ MAX_WIDGETS_PER_HOME = 25
 ENTITY_KINDS = {"project", "tool", "agent", "service"}
 WIDGET_SIZES = {"small", "medium", "wide"}
 CONNECTION_STATUSES = {"setup_needed", "connected", "verified", "error"}
-CONNECTION_PROVIDERS = {"resend", "stripe", "activepieces", "mcp", "api", "mautic", "chatwoot"}
+CONNECTION_PROVIDERS = {"resend", "stripe", "activepieces", "mcp", "api", "mautic", "chatwoot", "stalwart"}
 CONNECTION_SCOPES = {"global", *ENTITY_KINDS}
 CONNECTION_FIELDS = {
     "provider", "name", "scope_kind", "scope_id", "status", "connection_ref",
