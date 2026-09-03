@@ -2,7 +2,7 @@ import { mount, mountAll } from "./registry.js";
 import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
-import { mountAdStudio } from "./ad-studio.js?v=20260831-batch-live-v1";
+import { mountAdStudio } from "./ad-studio.js?v=20260831-batch-live-history-v1";
 import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
