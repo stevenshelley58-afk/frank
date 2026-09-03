@@ -75,3 +75,16 @@ class ServeClient:
             raise ServeError("transcribe response is invalid", frank_code="hermes.invalid_response")
         # Silence is success: {"ok": true, "transcript": ""} (contract fixture).
         return {"ok": bool(result.get("ok")), "transcript": str(result.get("transcript") or ""), "provider": result.get("provider")}
+
+    def model_options(self, *, refresh: bool = False) -> dict[str, Any]:
+        """Authoritative provider/model picker payload from Hermes itself."""
+        path = "/api/model/options"
+        if refresh:
+            path += "?refresh=true"
+        try:
+            _, result = self._surface.request("GET", path, timeout=60.0)
+        except RestError as error:
+            raise ServeError(str(error), frank_code=error.frank_code) from error
+        if not isinstance(result, dict):
+            raise ServeError("model options response is invalid", frank_code="hermes.invalid_response")
+        return result
