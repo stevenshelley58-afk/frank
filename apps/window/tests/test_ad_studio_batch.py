@@ -10,6 +10,27 @@ import server
 
 PNG = b"\x89PNG\r\n\x1a\n" + (b"\x00" * 80)
 JPEG = b"\xff\xd8\xff\xe0" + (b"\x00" * 80)
+MODEL = {
+    "provider": "openai-codex", "model": "gpt-5.6-sol",
+    "capability_verified": True, "capabilities": ["vision_structured"],
+    "supports_vision": True, "supports_tools": True,
+}
+MODEL_POLICY = {
+    "schema": "schema://hermes.tool-model-policy/v1",
+    "tool_id": "ad-template-generator",
+    "name": "Test policy",
+    "preset": "test",
+    "seed_revision": 9,
+    "stages": {
+        role: {
+            "capability": "vision_structured", "primary": MODEL,
+            "fallbacks": [], "max_attempts": 1,
+            "timeout_seconds": 120, "max_cost_usd": 0.35,
+        }
+        for role in ("analyse", "compare", "final-review-a", "final-review-b", "quality-escalation")
+    },
+    "deterministic_stages": ["qa", "import"],
+}
 
 
 class AdStudioBatchApiTest(unittest.TestCase):
@@ -59,10 +80,14 @@ class AdStudioBatchApiTest(unittest.TestCase):
         with (
             mock.patch.object(server._project_store, "get_project", return_value=self.project),
             mock.patch.object(server, "hermes_request", side_effect=hermes),
+            mock.patch.object(server, "_validated_ad_studio_model_policy", return_value=MODEL_POLICY),
         ):
             return self.client.post(
                 "/api/ad-studio/runs",
-                json={"project_id": "ad-project", "name": "Campaign", "brief": "Match it", "attachments": attachments},
+                json={
+                    "project_id": "ad-project", "name": "Campaign", "brief": "Match it",
+                    "attachments": attachments, "model_policy_override": MODEL_POLICY,
+                },
             )
 
     def test_all_accepted_returns_202_with_one_run_per_image_and_unique_keys(self):
@@ -80,6 +105,8 @@ class AdStudioBatchApiTest(unittest.TestCase):
         self.assertEqual(len({item["request_id"] for item in calls}), 2)
         self.assertEqual(len({item["idempotency_key"] for item in calls}), 2)
         self.assertTrue(all(item["payload"]["placements"] == ["feed", "story"] for item in calls))
+        self.assertTrue(all(item["model_policy_override"] == MODEL_POLICY for item in calls))
+        self.assertIsNot(calls[0]["model_policy_override"], calls[1]["model_policy_override"])
         self.assertFalse(any(server.UPLOAD_DIR.rglob("*.*")))
 
     def test_mixed_hermes_result_returns_ordered_207_and_cleans_all_staging(self):

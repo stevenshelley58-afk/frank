@@ -18,6 +18,10 @@ const localRunInputs = new Map();
 const previewUrls = new Set();
 let runEvents = [];
 let eventStream = null;
+let adStudioModels = [];
+let adStudioModelPolicy = null;
+let adStudioModelsReady = false;
+let modelLoadSequence = 0;
 const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "tif", "tiff", "webp"]);
 const MAX_BATCH_SOURCES = 20;
 const SOURCE_STATUS = {
@@ -44,6 +48,128 @@ const canonicalStage = (stage) => {
   const value = clean(stage).toLowerCase().replaceAll("_", "-").replaceAll(" ", "-");
   return PIPELINE_STAGES.includes(value) ? value : (STAGE_ALIASES[value] || "source");
 };
+
+const MODEL_ROLE_FIELDS = {
+  analyse: "#ad-model-builder",
+  compare: "#ad-model-comparator",
+  "final-review-a": "#ad-model-reviewer-a",
+  "final-review-b": "#ad-model-reviewer-b",
+  "quality-escalation": "#ad-model-fallback",
+};
+
+function modelName(item) {
+  if (!item) return "Model unavailable";
+  return `${item.model} · ${item.provider}`;
+}
+
+function modelIndex(candidate) {
+  if (!candidate) return -1;
+  return adStudioModels.findIndex((item) => item.provider === candidate.provider && item.model === candidate.model);
+}
+
+function selectedModel(indexValue) {
+  const index = Number(indexValue);
+  return Number.isInteger(index) && index >= 0 ? adStudioModels[index] : null;
+}
+
+function modelCandidate(item) {
+  return {
+    provider: item.provider,
+    model: item.model,
+    capability_verified: true,
+    capabilities: ["vision_structured"],
+    supports_vision: true,
+    supports_tools: true,
+  };
+}
+
+function currentModelPolicy() {
+  if (!adStudioModelsReady || !adStudioModelPolicy) throw new Error("Wait for Hermes to load the Ad Studio models.");
+  const policy = structuredClone(adStudioModelPolicy);
+  for (const [stageId, selector] of Object.entries(MODEL_ROLE_FIELDS)) {
+    const select = $(selector);
+    const model = selectedModel(select?.value);
+    if (stageId === "quality-escalation" && !model) {
+      delete policy.stages[stageId];
+      continue;
+    }
+    if (!model || !model.available || !model.credential_ready) {
+      throw new Error(`Choose an available ${stageId.replaceAll("-", " ")} model.`);
+    }
+    policy.stages[stageId].primary = modelCandidate(model);
+  }
+  const first = policy.stages["final-review-a"].primary;
+  const second = policy.stages["final-review-b"].primary;
+  if (first.provider === second.provider && first.model === second.model) {
+    throw new Error("Completion reviewers A and B must use different model routes.");
+  }
+  return policy;
+}
+
+function validateModelControls() {
+  const status = $("#ad-model-status");
+  if (!adStudioModelsReady) return false;
+  try {
+    currentModelPolicy();
+    status.textContent = "This model setup will be locked to every job in the batch. Hub chat model changes do not affect it.";
+    status.classList.remove("is-error");
+    return true;
+  } catch (error) {
+    status.textContent = error.message || "Choose a valid Ad Studio model setup.";
+    status.classList.add("is-error");
+    return false;
+  }
+}
+
+function populateModelControls(policy) {
+  const stages = policy?.stages || {};
+  for (const [stageId, selector] of Object.entries(MODEL_ROLE_FIELDS)) {
+    const select = $(selector);
+    select.replaceChildren();
+    if (stageId === "quality-escalation") select.append(new Option("Off", "-1"));
+    adStudioModels.forEach((item, index) => {
+      const option = new Option(modelName(item), String(index));
+      option.disabled = !item.available || !item.credential_ready;
+      select.append(option);
+    });
+    const selected = modelIndex(stages[stageId]?.primary);
+    select.value = selected >= 0 ? String(selected) : (stageId === "quality-escalation" ? "-1" : "");
+    select.disabled = false;
+  }
+  validateModelControls();
+  updateRunControls();
+}
+
+async function loadAdStudioModels() {
+  const sequence = ++modelLoadSequence;
+  const status = $("#ad-model-status");
+  adStudioModelsReady = false;
+  status.textContent = "Reading verified vision models from Hermes…";
+  status.classList.remove("is-error");
+  updateRunControls();
+  const projectId = clean($("#ad-run-project")?.value);
+  const query = new URLSearchParams();
+  if (projectId) query.set("project_id", projectId);
+  try {
+    const response = await fetch(`/api/ad-studio/models${query.size ? `?${query}` : ""}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Hermes model catalogue is unavailable.");
+    if (sequence !== modelLoadSequence) return;
+    adStudioModels = Array.isArray(data.models) ? data.models : [];
+    adStudioModelPolicy = data.policy && typeof data.policy === "object" ? data.policy : null;
+    if (!adStudioModels.length || !adStudioModelPolicy) throw new Error("Hermes has no verified Ad Studio models available.");
+    adStudioModelsReady = true;
+    populateModelControls(adStudioModelPolicy);
+  } catch (error) {
+    if (sequence !== modelLoadSequence) return;
+    adStudioModels = [];
+    adStudioModelPolicy = null;
+    status.textContent = error.message || "Hermes model catalogue is unavailable.";
+    status.classList.add("is-error");
+    Object.values(MODEL_ROLE_FIELDS).forEach((selector) => { $(selector).disabled = true; });
+    updateRunControls();
+  }
+}
 
 
 function runStatusLabel(status) {
@@ -209,7 +335,8 @@ function updateRunControls() {
   const submit = $("#ad-run-submit");
   if (!submit) return;
   const runnable = selectedFiles.filter((source) => ["queued", "error"].includes(source.status)).length;
-  submit.disabled = batchStarting || runnable === 0;
+  const modelsValid = adStudioModelsReady && validateModelControls();
+  submit.disabled = batchStarting || runnable === 0 || !modelsValid;
   submit.textContent = batchStarting ? "Starting…" : runnable ? `Run ${runnable} job${runnable === 1 ? "" : "s"}` : "Run jobs";
 }
 
@@ -435,6 +562,67 @@ function renderGenerationHistory(run, parent) {
 }
 
 
+function splitRoute(value) {
+  const route = clean(value);
+  const slash = route.indexOf("/");
+  return slash > 0 ? { provider: route.slice(0, slash), model: route.slice(slash + 1) } : null;
+}
+
+function effectiveModelProfile(run) {
+  const selected = run.model_profile && typeof run.model_profile === "object" ? structuredClone(run.model_profile) : {};
+  const effective = structuredClone(selected);
+  const finalRoutes = [];
+  for (const event of runEvents) {
+    const data = event?.data && typeof event.data === "object" ? event.data : {};
+    if (event.kind === "builder.escalated" && data.to_provider && data.to_model) {
+      effective.builder = { provider: clean(data.to_provider), model: clean(data.to_model) };
+    }
+    if (event.kind === "provider.attempt" && data.provider && data.model) {
+      const role = ({ analyse: "builder", compare: "comparator", "final-review-a": "final_review_a", "final-review-b": "final_review_b", "quality-escalation": "quality_fallback" })[clean(event.node_id)];
+      if (role) effective[role] = { provider: clean(data.provider), model: clean(data.model) };
+    }
+    if (event.kind === "final-review.started") {
+      const route = splitRoute(data.route);
+      if (route) finalRoutes.push(route);
+    }
+  }
+  if (finalRoutes[0]) effective.final_review_a = finalRoutes[0];
+  if (finalRoutes[1]) effective.final_review_b = finalRoutes[1];
+  return { selected, effective };
+}
+
+function renderRunModels(run, parent) {
+  if (!run.model_profile || typeof run.model_profile !== "object") return;
+  const section = document.createElement("section");
+  section.className = "ad-run-models";
+  const heading = document.createElement("div");
+  heading.className = "ad-inline-heading";
+  const revision = Number.isInteger(run.model_policy_revision) ? `Policy revision ${run.model_policy_revision}` : "Run-locked policy";
+  heading.innerHTML = `<strong>Models for this run</strong><span>${escapeHtml(revision)} · independent of Hub chat</span>`;
+  section.append(heading);
+  const grid = document.createElement("div");
+  grid.className = "ad-run-model-grid";
+  const profiles = effectiveModelProfile(run);
+  const roles = [
+    ["builder", "Generation"], ["comparator", "Comparator"],
+    ["final_review_a", "Reviewer A"], ["final_review_b", "Reviewer B"],
+    ["quality_fallback", "Quality fallback"],
+  ];
+  for (const [role, label] of roles) {
+    const chosen = profiles.effective[role] || profiles.selected[role];
+    if (!chosen?.model) continue;
+    const original = profiles.selected[role];
+    const changed = original?.model && (original.model !== chosen.model || original.provider !== chosen.provider);
+    const row = document.createElement("div");
+    const title = document.createElement("span"); title.textContent = label;
+    const value = document.createElement("strong"); value.textContent = modelName(chosen);
+    const state = document.createElement("small"); state.textContent = changed ? "effective route" : "selected route";
+    row.append(title, value, state); grid.append(row);
+  }
+  section.append(grid); parent.append(section);
+}
+
+
 function renderRunDetail(run) {
   const detail = $("#ad-run-detail");
   detail.replaceChildren();
@@ -464,6 +652,7 @@ function renderRunDetail(run) {
     item.append(term, description); overview.append(item);
   }
   detail.append(overview);
+  renderRunModels(run, detail);
   renderPersistedSource(run, detail);
   renderPhaseTimeline(run, detail);
   const importReady = run.status === "completed" && ["imported", "replayed", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase());
@@ -508,7 +697,7 @@ function renderRunDetail(run) {
   renderEventViews();
 }
 
-const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "builder.escalated", "final-review.started", "final-review.completed", "template.imported"];
+const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "provider.attempt", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "builder.escalated", "final-review.started", "final-review.completed", "template.imported"];
 
 const SAFE_TOOL_LABELS = {
   terminal: "Builder action",
@@ -753,7 +942,10 @@ function setupRunForm() {
     input.value = "";
   });
   drop.addEventListener("click", () => input.click());
-  $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); });
+  $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); void loadAdStudioModels(); });
+  Object.values(MODEL_ROLE_FIELDS).forEach((selector) => {
+    $(selector).addEventListener("change", () => { validateModelControls(); updateRunControls(); });
+  });
   for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.add("is-drag"); });
   for (const type of ["dragleave", "drop"]) drop.addEventListener(type, (event) => {
     event.preventDefault();
@@ -775,9 +967,11 @@ function setupRunForm() {
     renderSourcePreview();
     status.textContent = `Uploading ${sources.length} image${sources.length === 1 ? "" : "s"}…`;
     try {
+      const modelPolicyOverride = currentModelPolicy();
       const result = await requestEvent("frank:ad-studio-run", {
         sources, projectId: $("#ad-run-project").value,
         name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value),
+        modelPolicyOverride,
         onProgress: ({ key, status: nextStatus, run, error }) => updateSourceStatus(key, nextStatus, { run, error }),
       });
       const started = Array.isArray(result.runs) ? result.runs : [];
@@ -830,6 +1024,7 @@ export function mountAdStudio() {
   setupRunForm();
   setupPipelineForm();
   void loadProjects().then(async () => {
+    await loadAdStudioModels();
     await refreshRunsSafe();
     if ($("[data-ad-panel=\"pipeline\"]").classList.contains("is-on")) mountPipeline();
   }).catch((error) => {
