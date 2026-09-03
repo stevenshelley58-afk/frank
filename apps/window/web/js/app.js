@@ -208,6 +208,7 @@ window.addEventListener("frank:ad-studio-run", (event) => {
           name: jobName,
           brief: String(detail.brief || "").trim(),
           attachments: uploaded.map(attachmentPayload),
+          model_policy_override: detail.modelPolicyOverride,
         }),
       });
       const data = await response.json().catch(() => ({}));
