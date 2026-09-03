@@ -2492,6 +2492,40 @@ if os.environ.get("FRANK_V021_FOUNDATION", "").lower() in ("1", "true", "yes"):
         )
         app.register_blueprint(_work_api.api)
 
+        import hmac as _hmac
+        from infra.workspace.lease_blueprint import create_lease_blueprint as _create_lease_blueprint
+        app.register_blueprint(_create_lease_blueprint(_ws_leases))
+
+        @app.post("/internal/workspaces/resolve")
+        def _internal_workspace_resolve():
+            """Private server-to-server resolve (codex launcher contract).
+
+            Same runtime-only credential and constant-time compare as the
+            lease endpoints; only active workspaces resolve, and only to the
+            canonical host path — never to the browser.
+            """
+            presented = request.headers.get("Authorization", "")
+            expected = os.environ.get("FRANK_LEASE_CREDENTIAL", "")
+            if not expected:
+                abort(503, "lease credential is not configured")
+            prefix = "Bearer "
+            if not presented.startswith(prefix) or not _hmac.compare_digest(presented[len(prefix):], expected):
+                abort(403)
+            body = request.get_json(silent=True) or {}
+            workspace_id = str(body.get("workspace_id") or "")
+            if not workspace_id:
+                abort(400, "workspace_id is required")
+            record = _ws_registry.get(workspace_id)
+            if record is None or record.status != "active" or not record.host_path:
+                abort(404)
+            return jsonify({
+                "ok": True,
+                "workspace_id": workspace_id,
+                "host_path": record.host_path,
+                "hermes_path": record.hermes_path,
+                "root_kind": record.root_kind,
+            })
+
 
 def _binding_workspace(binding_id: str) -> str:
     """Board bindings map 1:1 to their project workspace in this migration."""
