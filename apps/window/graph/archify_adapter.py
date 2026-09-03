@@ -120,6 +120,133 @@ def _display_label(node: Mapping[str, Any], stable_id: str, index: int) -> tuple
     return title or kind, f"{kind} #{index + 1:03d}"[:24]
 
 
+def _assertion_index(graph: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
+    """Index hydrated graph assertions without making them part of Archify.
+
+    Materialized control graphs intentionally keep presentation text in the
+    assertion bundle.  Accepting that bundle here means the adapter can show a
+    hydrated title/description while still treating the graph as read-only.
+    """
+    result: dict[str, dict[str, Any]] = {}
+    assertions = graph.get("assertions", ())
+    if not isinstance(assertions, Iterable) or isinstance(assertions, (str, bytes, Mapping)):
+        return result
+    for item in assertions:
+        if not isinstance(item, Mapping):
+            continue
+        subject = item.get("subject_id")
+        predicate = item.get("predicate")
+        if isinstance(subject, str) and isinstance(predicate, str) and "value" in item:
+            result.setdefault(subject, {})[predicate] = item.get("value")
+    return result
+
+
+def _node_title(node: Mapping[str, Any], stable_id: str, assertions: Mapping[str, Mapping[str, Any]]) -> str:
+    direct = _title(node, "")
+    if direct:
+        return direct
+    values = assertions.get(stable_id, {})
+    for key in ("title", "label", "name"):
+        value = values.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return _title({}, stable_id)
+
+
+def _node_sublabel(node: Mapping[str, Any], stable_id: str, assertions: Mapping[str, Mapping[str, Any]]) -> str:
+    values = assertions.get(stable_id, {})
+    for key in ("sublabel", "description", "summary", "role", "responsibility", "source_locator"):
+        value = node.get(key, values.get(key))
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    kind = str(node.get("kind", values.get("kind", "node"))).strip() or "node"
+    layer = str(node.get("layer", values.get("layer", ""))).strip()
+    return f"{kind}{' · ' + layer if layer else ''}"
+
+
+def _edge_records(graph: Mapping[str, Any], stable_ids: set[str]) -> list[Mapping[str, Any]]:
+    raw_edges = graph.get("edges")
+    if not isinstance(raw_edges, list):
+        raw_edges = graph.get("relationships", ())
+    result: list[Mapping[str, Any]] = []
+    for edge in raw_edges if isinstance(raw_edges, Iterable) and not isinstance(raw_edges, (str, bytes, Mapping)) else ():
+        if not isinstance(edge, Mapping):
+            continue
+        source, target = edge.get("from"), edge.get("to")
+        if source in stable_ids and target in stable_ids:
+            result.append(edge)
+    return sorted(result, key=lambda item: (
+        str(item.get("id", "")), str(item.get("from", "")), str(item.get("to", "")),
+        str(item.get("relationship", item.get("type", "depends_on"))),
+    ))
+
+
+_PATH_RELATIONSHIP_RANK = {
+    "routes_to": 0, "exposes": 1, "runs": 2, "executes": 3, "uses": 4,
+    "produces": 5, "validates": 6, "reads": 7, "writes": 8, "consumes": 9,
+    "depends_on": 10, "owns": 11, "contains": 12, "observes": 13, "declares": 14,
+}
+
+
+def _primary_path(node_ids: Iterable[str], edges: Iterable[Mapping[str, Any]]) -> list[str]:
+    """Choose a stable, truthful path from existing edges for presentation."""
+    ids = sorted(set(node_ids))
+    adjacency: dict[str, list[tuple[str, Mapping[str, Any]]]] = {item: [] for item in ids}
+    indegree = {item: 0 for item in ids}
+    for edge in edges:
+        source, target = str(edge.get("from")), str(edge.get("to"))
+        if source not in adjacency or target not in adjacency or source == target:
+            continue
+        adjacency[source].append((target, edge))
+        indegree[target] += 1
+    for source in adjacency:
+        adjacency[source].sort(key=lambda pair: (
+            _PATH_RELATIONSHIP_RANK.get(str(pair[1].get("relationship", pair[1].get("type", "depends_on"))), 99),
+            pair[0], str(pair[1].get("id", "")),
+        ))
+
+    best: list[str] = []
+    best_score: tuple[int, int, tuple[str, ...]] = (-1, 0, ())
+    visit_budget = [0]
+
+    def walk(current: str, path: list[str], score: int) -> None:
+        nonlocal best, best_score
+        visit_budget[0] += 1
+        if visit_budget[0] > 10000:
+            return
+        rank = len(path)
+        candidate_score = (rank, -score, tuple(path))
+        if candidate_score[0] > best_score[0] or (candidate_score[0] == best_score[0] and candidate_score[2] < best_score[2]):
+            best, best_score = list(path), candidate_score
+        for target, edge in adjacency[current]:
+            if target not in path:
+                relationship = str(edge.get("relationship", edge.get("type", "depends_on")))
+                walk(target, path + [target], score + _PATH_RELATIONSHIP_RANK.get(relationship, 99))
+
+    starts = sorted((item for item in ids if indegree[item] == 0)) or ids
+    for start in starts:
+        walk(start, [start], 0)
+    if len(best) < 2:
+        for edge in sorted(edges, key=lambda item: (str(item.get("from")), str(item.get("to")), str(item.get("id", "")))):
+            source, target = str(edge.get("from")), str(edge.get("to"))
+            if source in adjacency and target in adjacency and source != target:
+                return [source, target]
+    return best
+
+
+def _connection_id(edge: Mapping[str, Any], ordinal: int) -> str:
+    value = edge.get("id")
+    if isinstance(value, str) and value:
+        return _safe_archify_id(value)
+    digest = hashlib.sha256(canonical_bytes(dict(edge))).hexdigest()[:16]
+    return _safe_archify_id(f"edge:{digest}:{ordinal}")
+
+
+def _label_width(label: str, minimum: float = 92, maximum: float = 280) -> float:
+    """Give Archify enough authored width for a truthful, untruncated label."""
+    return min(maximum, max(minimum, len(label) * 7 + 36))
+
+
 def _projection_nodes(graph: Mapping[str, Any], projection_id: str) -> list[Mapping[str, Any]]:
     nodes = [item for item in graph.get("nodes", ()) if isinstance(item, Mapping) and isinstance(item.get("id"), str)]
     # File inventory and reconciliation findings remain fully available in
@@ -192,7 +319,271 @@ def _coverage(nodes: Iterable[Mapping[str, Any]], edges: Iterable[Mapping[str, A
     return {"required": sorted(set(required)), "present": sorted(present), "missing": missing}
 
 
-def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_coverage: Iterable[str] = ()) -> tuple[dict[str, Any], dict[str, Any]]:
+_CURATED_ARCHITECTURES: dict[str, dict[str, Any]] = {
+    "projection:vps/world": {
+        "title": "VPS World",
+        "subtitle": "Canonical host, product, service, route, and store topology",
+        "viewBox": [1240, 620],
+        "nodes": (
+            ("vps:dedicated", "Dedicated VPS", 560, 30),
+            ("component:platform", "OS Platform", 40, 30),
+            ("project:frank", "Frank", 120, 170),
+            ("project:mini-frank", "Mini Frank", 560, 170),
+            ("project:blockwise", "Blockwise", 980, 170),
+            ("service:frank-caddy", "Frank Edge", 0, 320),
+            ("service:frank-window", "Frank Window", 170, 320),
+            ("runtime:hermes-default", "Hermes", 340, 320),
+            ("service:infisical", "Infisical", 510, 320),
+            ("store:mini-frank-projects", "Mini Projects", 680, 320),
+            ("service:blockwise-app", "Blockwise App", 890, 320),
+            ("service:blockwise-auth", "Blockwise Auth", 1060, 320),
+            ("route:frank-public", "Public Route", 170, 470),
+            ("service:hindsight", "Hindsight", 340, 470),
+            ("store:blockwise-db", "Blockwise DB", 890, 470),
+        ),
+        "edges": (
+            "edge:vps/contains-platform",
+            "edge:vps/contains-frank",
+            "edge:vps/contains-mini-frank",
+            "edge:vps/contains-blockwise",
+            "edge:frank/contains-caddy",
+            "edge:frank/contains-window",
+            "edge:frank/contains-hermes",
+            "edge:frank/contains-infisical",
+            "edge:window/exposes-public-route",
+            "edge:hermes/uses-hindsight",
+            "edge:mini-frank/owns-project-store",
+            "edge:blockwise/contains-app",
+            "edge:blockwise/contains-auth",
+            "edge:blockwise/app-reads-db",
+        ),
+        "type_overrides": {"component:platform": "cloud"},
+    },
+    "projection:frank/architecture": {
+        "title": "Frank Architecture",
+        "subtitle": "Canonical ingress, Window, Hermes, secrets, and owned capability topology",
+        "viewBox": [1240, 620],
+        "nodes": (
+            ("vps:dedicated", "Dedicated VPS", 510, 20),
+            ("project:frank", "Frank", 510, 145),
+            ("service:frank-caddy", "Frank Edge", 0, 300),
+            ("service:frank-window", "Frank Window", 170, 300),
+            ("component:frank/ad-studio", "Ad Studio", 340, 300),
+            ("runtime:hermes-default", "Hermes", 510, 300),
+            ("service:infisical", "Infisical", 680, 300),
+            ("capability:frank/ad-template-builder", "Ad Builder", 850, 300),
+            ("route:frank-public", "Public Route", 80, 455),
+            ("store:frank-window-data", "Window Data", 250, 455),
+            ("route:hermes-tool-runs", "Tool-run API", 430, 455),
+            ("service:hindsight", "Hindsight", 600, 455),
+            ("store:infisical-db", "Infisical DB", 770, 455),
+            ("tool:archify", "Archify", 940, 455),
+        ),
+        "edges": (
+            "edge:vps/contains-frank",
+            "edge:frank/contains-caddy",
+            "edge:frank/contains-window",
+            "edge:frank/contains-ad-studio",
+            "edge:frank/contains-hermes",
+            "edge:frank/contains-infisical",
+            "edge:frank/contains-ad-template-builder",
+            "edge:window/exposes-public-route",
+            "edge:window/writes-data",
+            "edge:ad-studio/routes-tool-runs",
+            "edge:hermes-tool-runs/routes-hermes",
+            "edge:hermes/uses-hindsight",
+            "edge:infisical/writes-db",
+            "edge:ad-template-builder/uses-archify",
+        ),
+    },
+    "projection:blockwise/runtime": {
+        "title": "Blockwise Runtime",
+        "subtitle": "Canonical Blockwise services, stores, and Frank runtime links",
+        "viewBox": [1240, 700],
+        "nodes": (
+            ("vps:dedicated", "Dedicated VPS", 510, 20),
+            ("project:frank", "Frank", 120, 155),
+            ("project:blockwise", "Blockwise", 720, 155),
+            ("store:blockwise-research-db", "Research DB", 1080, 155),
+            ("service:frank-window", "Frank Window", 20, 310),
+            ("runtime:hermes-default", "Hermes", 200, 310),
+            ("service:blockwise-caddy", "Blockwise Edge", 400, 310),
+            ("service:blockwise-app", "Blockwise App", 580, 310),
+            ("service:blockwise-auth", "Blockwise Auth", 760, 310),
+            ("service:blockwise-rest", "Database REST", 940, 310),
+            ("route:blockwise-health", "Health Route", 400, 470),
+            ("store:blockwise-db", "Product DB", 940, 470),
+            ("store:blockwise-storage", "Object Storage", 580, 540),
+        ),
+        "edges": (
+            "edge:vps/contains-frank",
+            "edge:vps/contains-blockwise",
+            "edge:frank/contains-window",
+            "edge:frank/contains-hermes",
+            "edge:blockwise/owns-research-db",
+            "edge:blockwise/contains-caddy",
+            "edge:blockwise/contains-app",
+            "edge:blockwise/contains-auth",
+            "edge:blockwise/contains-rest",
+            "edge:blockwise/exposes-health-route",
+            "edge:blockwise/app-reads-db",
+            "edge:blockwise/app-writes-storage",
+            "edge:blockwise/rest-reads-db",
+        ),
+    },
+    "projection:mini-frank/knowledge-flow": {
+        "title": "Mini Frank Knowledge Flow",
+        "subtitle": "Canonical Window routes and project artifact storage",
+        "viewBox": [1240, 700],
+        "nodes": (
+            ("project:frank", "Frank", 0, 40),
+            ("project:mini-frank", "Mini Frank", 0, 300),
+            ("service:frank-window", "Frank Window", 300, 170),
+            ("route:mini-frank-public", "Public Product", 650, 0),
+            ("route:mini-frank-owner-artifacts", "Owner Artifacts", 700, 130),
+            ("route:mini-frank-shared-artifacts", "Shared Artifacts", 700, 290),
+            ("route:mini-frank-published-artifacts", "Published Artifacts", 900, 430),
+            ("store:mini-frank-projects", "Project Store", 250, 440),
+        ),
+        "edges": (
+            "edge:frank/contains-window",
+            "edge:mini-frank/uses-window",
+            "edge:mini-frank/owns-project-store",
+            "edge:window/exposes-mini-frank-public",
+            "edge:window/exposes-mini-frank-owner-artifacts",
+            "edge:window/exposes-mini-frank-shared-artifacts",
+            "edge:window/exposes-mini-frank-published-artifacts",
+            "edge:window/writes-mini-frank-projects",
+        ),
+    },
+}
+
+
+def _curated_connection_geometry(
+    edge_id: str, source_pos: tuple[float, float], target_pos: tuple[float, float],
+) -> dict[str, Any]:
+    """Return the validated side-aware route for one curated real edge."""
+    if edge_id == "edge:window/exposes-mini-frank-published-artifacts":
+        return {
+            "fromSide": "bottom", "toSide": "top",
+            "via": [[375, 385], [975, 385]],
+        }
+    source_x, source_y = source_pos
+    target_x, target_y = target_pos
+    component_width, component_height = 150, 54
+    vertical_overlap = (
+        min(source_y + component_height, target_y + component_height)
+        - max(source_y, target_y)
+    ) > 0
+    if vertical_overlap:
+        target_is_right = target_x > source_x
+        return {
+            "fromSide": "right" if target_is_right else "left",
+            "toSide": "left" if target_is_right else "right",
+            "route": "orthogonal-h",
+        }
+    target_is_below = target_y > source_y
+    return {
+        "fromSide": "bottom" if target_is_below else "top",
+        "toSide": "top" if target_is_below else "bottom",
+        "route": "orthogonal-v",
+    }
+
+
+def _curated_architecture_projection(
+    graph: Mapping[str, Any], projection_id: str, nodes: list[Mapping[str, Any]],
+    edges: list[Mapping[str, Any]], *, required_coverage: Iterable[str],
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    """Build a bounded view only when every authored identity and edge exists."""
+    specification = _CURATED_ARCHITECTURES.get(projection_id)
+    if specification is None:
+        return None
+    nodes_by_id = {str(node["id"]): node for node in nodes}
+    edges_by_id = {str(edge.get("id")): edge for edge in edges if edge.get("id")}
+    visible_ids = [str(item[0]) for item in specification["nodes"]]
+    rendered_edge_ids = [str(edge_id) for edge_id in specification["edges"]]
+    if any(stable_id not in nodes_by_id for stable_id in visible_ids):
+        return None
+    if any(edge_id not in edges_by_id for edge_id in rendered_edge_ids):
+        return None
+    id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(visible_ids)}
+    positions = {
+        str(stable_id): (float(x), float(y))
+        for stable_id, _label, x, y in specification["nodes"]
+    }
+    type_overrides = specification.get("type_overrides", {})
+    components = []
+    display_labels: dict[str, dict[str, str]] = {}
+    for stable_id, label, x, y in specification["nodes"]:
+        node = nodes_by_id[str(stable_id)]
+        sublabel = str(node.get("kind", "component")).replace("_", " ")[:24]
+        components.append({
+            "id": id_map[str(stable_id)],
+            "type": str(type_overrides.get(stable_id, _node_type(node.get("kind")))),
+            "label": str(label),
+            "sublabel": sublabel,
+            "pos": [x, y],
+            "size": [150, 54],
+        })
+        display_labels[str(stable_id)] = {
+            "label": str(label), "sublabel": sublabel,
+            "archify_id": id_map[str(stable_id)],
+        }
+    connections = []
+    for edge_id in rendered_edge_ids:
+        edge = edges_by_id[edge_id]
+        source, target = str(edge["from"]), str(edge["to"])
+        connection: dict[str, Any] = {
+            "id": _safe_archify_id(edge_id),
+            "from": id_map[source],
+            "to": id_map[target],
+            **_curated_connection_geometry(edge_id, positions[source], positions[target]),
+        }
+        relationship = str(edge.get("relationship", edge.get("type", "")))
+        if relationship in {"exposes", "routes_to"}:
+            connection["variant"] = "emphasis"
+        elif relationship in {"reads", "writes", "uses", "owns"}:
+            connection["variant"] = "dashed"
+        connections.append(connection)
+    diagram = {
+        "schema_version": 1,
+        "diagram_type": "architecture",
+        "meta": {
+            "title": specification["title"],
+            "subtitle": specification["subtitle"],
+            "quality_profile": "showcase",
+            "viewBox": list(specification["viewBox"]),
+        },
+        "components": components,
+        "connections": connections,
+    }
+    all_ids = {str(node["id"]) for node in nodes}
+    supporting_ids = sorted(all_ids - set(visible_ids))
+    coverage = _coverage(nodes, edges, required_coverage)
+    metadata = {
+        "projection_id": projection_id,
+        "graph_revision": graph.get("graph_revision"),
+        "stable_id_map": id_map,
+        "supporting_stable_id_map": {
+            stable_id: _safe_archify_id(stable_id) for stable_id in supporting_ids
+        },
+        "display_labels": display_labels,
+        "coverage": coverage,
+        "coverage_scope": "projection_with_supporting_evidence",
+        "exclusions": ["supporting_topology_in_control"] if supporting_ids or len(edges) > len(connections) else [],
+        "relationship_count": len(edges),
+        "rendered_relationship_count": len(connections),
+        "supporting_identity_count": len(supporting_ids),
+        "supporting_relationship_count": max(0, len(edges) - len(connections)),
+        "rendered_relationship_ids": [connection["id"] for connection in connections],
+        "represented_relationship_ids": rendered_edge_ids,
+        "runtime_health_claims": False,
+        "showcase_checks": list(SHOWCASE_CHECKS),
+    }
+    return diagram, metadata
+
+
+def _overview_graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_coverage: Iterable[str] = ()) -> tuple[dict[str, Any], dict[str, Any]]:
     """Convert one canonical graph into an Archify architecture document.
 
     The second return value is the Frank-owned cross-link/coverage envelope;
@@ -214,6 +605,12 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
         if source not in stable_ids or target not in stable_ids or source == target:
             continue
         edges.append(edge)
+
+    curated = _curated_architecture_projection(
+        graph, projection_id, nodes, edges, required_coverage=required_coverage,
+    )
+    if curated is not None:
+        return curated
 
     overview_only = len(nodes) > 48
     relationship_orders = {
@@ -366,6 +763,529 @@ def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_c
     return diagram, metadata
 
 
+def _workflow_lane(node: Mapping[str, Any]) -> str:
+    kind = str(node.get("kind", "")).casefold()
+    if kind in {"route", "source", "repo", "checkout", "project"}:
+        return "intake"
+    if kind in {"gate", "rule", "policy", "observer", "eval"}:
+        return "checks"
+    if kind in {"template", "artifact", "release", "data_store", "volume", "store"}:
+        return "outputs"
+    if kind in {"capability", "tool", "plugin", "cli", "mcp", "library"}:
+        return "build"
+    return "execution"
+
+
+def _workflow_diagram(title: str, nodes: list[Mapping[str, Any]], edges: list[Mapping[str, Any]], id_map: Mapping[str, str], assertions: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
+    """Build the pinned vendor's workflow IR, retaining every selected edge."""
+    path = _primary_path((str(node["id"]) for node in nodes), edges)
+    if len(path) < 2:
+        for edge in edges:
+            source, target = str(edge.get("from")), str(edge.get("to"))
+            if source != target and source in id_map and target in id_map:
+                path = [source, target]
+                break
+    lane_ids = ["intake", "build", "execution", "checks", "outputs"]
+    lane_labels = {"intake": "Request + sources", "build": "Build process", "execution": "Generation stages", "checks": "Validation + review", "outputs": "Artifacts + release"}
+    lane_nodes: dict[str, list[str]] = {lane: [] for lane in lane_ids}
+    for node in nodes:
+        lane_nodes[_workflow_lane(node)].append(str(node["id"]))
+    lane_nodes = {lane: values for lane, values in lane_nodes.items() if values}
+    if not lane_nodes:
+        lane_nodes = {"intake": ["n_empty"]}
+    path_position = {node_id: index for index, node_id in enumerate(path)}
+    node_columns: dict[str, int] = {}
+    for node_id in path:
+        node_columns[node_id] = round(path_position[node_id] * 5 / max(len(path) - 1, 1))
+    for index, node in enumerate(nodes):
+        node_id = str(node["id"])
+        node_columns.setdefault(node_id, min(5, round(index * 5 / max(len(nodes) - 1, 1))))
+    for node in nodes:
+        node_id = str(node["id"])
+        label_width = _label_width(_node_title(node, node_id, assertions), maximum=260)
+        if label_width > 180 and node_columns[node_id] == 0:
+            node_columns[node_id] = 1
+        elif label_width > 180 and node_columns[node_id] == 5:
+            node_columns[node_id] = 4
+    lane_order: dict[str, list[str]] = {}
+    for node in nodes:
+        node_id = str(node["id"])
+        lane_order.setdefault(_workflow_lane(node), []).append(node_id)
+    lane_offsets = {node_id: index * 72 for values in lane_order.values() for index, node_id in enumerate(values)}
+    workflow_nodes: list[dict[str, Any]] = []
+    for node in nodes:
+        node_id = str(node["id"])
+        label = _node_title(node, node_id, assertions)
+        workflow_nodes.append({"id": id_map[node_id], "lane": _workflow_lane(node), "col": node_columns[node_id], "type": _node_type(node.get("kind")), "label": label, "sublabel": _node_sublabel(node, node_id, assertions), "tag": str(node.get("layer", assertions.get(node_id, {}).get("layer", "declared"))), "width": _label_width(label, maximum=220), "yOffset": lane_offsets[node_id]})
+    workflow_edges: list[dict[str, Any]] = []
+    main_pairs = set(zip(path, path[1:]))
+    for ordinal, edge in enumerate(edges):
+        source, target = str(edge["from"]), str(edge["to"])
+        relationship = edge.get("label") or edge.get("relationship") or edge.get("type") or "depends_on"
+        item: dict[str, Any] = {"id": _connection_id(edge, ordinal), "from": id_map[source], "to": id_map[target], "label": str(relationship), "role": "main" if (source, target) in main_pairs else "branch"}
+        if str(relationship) in {"validates", "observes"}:
+            item["variant"] = "security" if str(relationship) == "validates" else "dashed"
+        workflow_edges.append(item)
+    phases = [{"id": "intake", "label": "Intake", "fromCol": 0, "toCol": 1}, {"id": "build", "label": "Build", "fromCol": 2, "toCol": 3, "variant": "emphasis"}, {"id": "release", "label": "Check + release", "fromCol": 4, "toCol": 5, "variant": "dashed"}]
+    groups = []
+    for lane, values in lane_nodes.items():
+        if len(values) > 1:
+            columns = [node_columns[value] for value in values]
+            groups.append({"id": f"group_{lane}", "label": lane_labels[lane], "lane": lane, "fromCol": min(columns), "toCol": max(columns), "variant": "emphasis" if lane == "build" else "dashed"})
+    focus_all = [id_map[str(node["id"])] for node in nodes]
+    views = []
+    if path:
+        views.append({"id": "main-path", "label": "Request to release", "focus": [id_map[node_id] for node_id in path], "note": "Follow the recorded connection path through the workflow."})
+    if focus_all:
+        views.append({"id": "checks-and-outputs", "label": "Checks and outputs", "focus": focus_all, "note": "Inspect validation, review, and output nodes alongside the main path."})
+    result = {"schema_version": 1, "diagram_type": "workflow", "meta": {"title": title, "quality_profile": "showcase", "views": views[:5]}, "lanes": [{"id": lane, "label": lane_labels[lane]} for lane in lane_ids if lane in lane_nodes], "phases": phases, "groups": groups, "mainPath": [id_map[node_id] for node_id in path], "nodes": workflow_nodes or [{"id": "n_empty", "lane": next(iter(lane_nodes), "intake"), "col": 0, "type": "external", "label": "No verified workflow nodes", "width": 180}], "edges": workflow_edges, "cards": [{"dot": "cyan", "title": "Workflow coverage", "items": [f"{len(nodes)} selected workflow nodes", f"{len(edges)} selected workflow connections"]}, {"dot": "rose", "title": "Checks remain visible", "items": ["Validation and review edges are preserved as recorded.", "The primary path is a presentation aid, not a new assertion."]}]}
+    if not path:
+        result.pop("mainPath")
+    return result
+
+
+_AD_PATH_IDS = (
+    "component:frank/ad-studio",
+    "route:hermes-tool-runs",
+    "runtime:hermes-default",
+    "tool:ad-template-generator",
+    "component:frank/ad-template-builder/source",
+    "component:frank/ad-template-builder/build",
+    "component:frank/ad-template-builder/render",
+    "component:frank/ad-template-builder/compare",
+    "component:frank/ad-template-builder/final-check",
+    "component:frank/ad-template-builder/live",
+)
+_AD_CONSUMER_ID = "project:blockwise"
+_AD_GATE_ID = "gate:frank/ad-template-final-review"
+_AD_PATH_EDGE_IDS = (
+    "edge:ad-studio/routes-tool-runs",
+    "edge:hermes-tool-runs/routes-hermes",
+    "edge:hermes/executes-ad-template-tool",
+    "edge:ad-template-generator/executes-source",
+    "edge:ad-template-builder/source-to-build",
+    "edge:ad-template-builder/build-to-render",
+    "edge:ad-template-builder/render-to-compare",
+    "edge:ad-template-builder/compare-to-final-check",
+    "edge:ad-template-builder/final-check-to-live",
+)
+_AD_GATE_EDGE_ID = "edge:ad-template-builder/final-review-gate"
+_AD_REVISION_EDGE_ID = "edge:ad-template-builder/compare-revises-render"
+_AD_CONSUMER_EDGE_ID = "edge:ad-template-builder/live-consumes-blockwise"
+_AD_PRESENTATION = {
+    "component:frank/ad-studio": ("Ad Studio", "request + run monitor", "frontend", "FRANK"),
+    "route:hermes-tool-runs": ("Tool-run API", "typed command + events", "security", "BOUNDARY"),
+    "runtime:hermes-default": ("Hermes", "production authority", "backend", "HERMES"),
+    "tool:ad-template-generator": ("Generator", "ad-template-generator", "backend", "TOOL"),
+    "component:frank/ad-template-builder/source": ("Source", "verify image + brief", "external", "STAGE 1"),
+    "component:frank/ad-template-builder/build": ("Layered Build", "analyze + compose", "backend", "STAGE 2"),
+    "component:frank/ad-template-builder/render": ("Feed + Story", "editable layouts", "frontend", "STAGE 3"),
+    "component:frank/ad-template-builder/compare": ("Compare", "score + revise", "security", "STAGE 4"),
+    "component:frank/ad-template-builder/final-check": ("Release Checks", "deterministic + human", "security", "STAGE 5"),
+    "component:frank/ad-template-builder/live": ("Live + Import", "completed live stage", "messagebus", "STAGE 6"),
+    "gate:frank/ad-template-final-review": ("Final Review", "accepted before import", "security", "GATE"),
+    "project:blockwise": ("Blockwise", "verified consumer", "backend", "CONSUMER"),
+}
+
+
+def _ad_core_model(
+    nodes: list[Mapping[str, Any]], edges: list[Mapping[str, Any]],
+) -> tuple[list[str], list[str], dict[str, Mapping[str, Any]], dict[str, Mapping[str, Any]]] | None:
+    """Return the evidence-backed product path, leaving governance detail off-canvas."""
+    nodes_by_id = {str(node["id"]): node for node in nodes}
+    edges_by_id = {str(edge.get("id")): edge for edge in edges if edge.get("id")}
+    if any(stable_id not in nodes_by_id for stable_id in _AD_PATH_IDS):
+        return None
+    path_ids = list(_AD_PATH_IDS)
+    path_edge_ids = list(_AD_PATH_EDGE_IDS)
+    if _AD_CONSUMER_ID in nodes_by_id and _AD_CONSUMER_EDGE_ID in edges_by_id:
+        path_ids.append(_AD_CONSUMER_ID)
+        path_edge_ids.append(_AD_CONSUMER_EDGE_ID)
+    if any(edge_id not in edges_by_id for edge_id in path_edge_ids):
+        return None
+    core_ids = list(path_ids)
+    if _AD_GATE_ID in nodes_by_id and _AD_GATE_EDGE_ID in edges_by_id:
+        core_ids.append(_AD_GATE_ID)
+    return core_ids, path_edge_ids, nodes_by_id, edges_by_id
+
+
+def _ad_component(stable_id: str, id_map: Mapping[str, str], pos: tuple[float, float]) -> dict[str, Any]:
+    label, sublabel, component_type, tag = _AD_PRESENTATION[stable_id]
+    return {
+        "id": id_map[stable_id],
+        "type": component_type,
+        "label": label,
+        "sublabel": sublabel,
+        "tag": tag,
+        "pos": [pos[0], pos[1]],
+        "size": [178, 64],
+    }
+
+
+def _ad_architecture_diagram(
+    title: str, core_ids: list[str], path_edge_ids: list[str],
+    edges_by_id: Mapping[str, Mapping[str, Any]], id_map: Mapping[str, str],
+) -> tuple[dict[str, Any], list[str]]:
+    path_ids = [stable_id for stable_id in _AD_PATH_IDS if stable_id in core_ids]
+    if _AD_CONSUMER_ID in core_ids:
+        path_ids.append(_AD_CONSUMER_ID)
+    top_ids = path_ids[:6]
+    bottom_ids = path_ids[6:]
+    x_by_id = {stable_id: 38 + index * 206 for index, stable_id in enumerate(top_ids)}
+    for index, stable_id in enumerate(bottom_ids):
+        x_by_id[stable_id] = 38 if stable_id == _AD_CONSUMER_ID else x_by_id[top_ids[-1]] - index * 206
+    components = [
+        _ad_component(stable_id, id_map, (x_by_id[stable_id], 170 if stable_id in top_ids else 350))
+        for stable_id in path_ids
+    ]
+    if _AD_GATE_ID in core_ids:
+        components.append(_ad_component(_AD_GATE_ID, id_map, (x_by_id["component:frank/ad-template-builder/final-check"], 510)))
+
+    connections: list[dict[str, Any]] = []
+    rendered_edge_ids: list[str] = []
+    for edge_id in path_edge_ids:
+        edge = edges_by_id[edge_id]
+        connection: dict[str, Any] = {
+            "id": _safe_archify_id(edge_id),
+            "from": id_map[str(edge["from"])],
+            "to": id_map[str(edge["to"])],
+            "route": "straight",
+        }
+        if edge_id in {"edge:ad-studio/routes-tool-runs", "edge:hermes/executes-ad-template-tool", _AD_CONSUMER_EDGE_ID}:
+            connection["variant"] = "emphasis"
+        connections.append(connection)
+        rendered_edge_ids.append(edge_id)
+    if _AD_GATE_ID in core_ids:
+        gate_edge = edges_by_id[_AD_GATE_EDGE_ID]
+        connections.append({
+            "id": _safe_archify_id(_AD_GATE_EDGE_ID),
+            "from": id_map[str(gate_edge["from"])],
+            "to": id_map[str(gate_edge["to"])],
+            "variant": "security",
+            "fromSide": "top",
+            "toSide": "bottom",
+            "route": "straight",
+        })
+        rendered_edge_ids.append(_AD_GATE_EDGE_ID)
+
+    hermes_ids = [stable_id for stable_id in path_ids[2:] if stable_id != _AD_CONSUMER_ID]
+    if _AD_GATE_ID in core_ids:
+        hermes_ids.append(_AD_GATE_ID)
+    views = [
+        {"id": "request-authority", "label": "Request + authority", "focus": [id_map[value] for value in path_ids[:4]], "note": "Frank submits one typed tool run; Hermes owns execution."},
+        {"id": "build-review", "label": "Build + review loop", "focus": [id_map[value] for value in path_ids[4:9]] + ([id_map[_AD_GATE_ID]] if _AD_GATE_ID in core_ids else []), "note": "Follow source analysis, layered build, previews, comparison, revision, and release checks."},
+        {"id": "release-consumer", "label": "Release + consumer", "focus": [id_map[value] for value in path_ids[-3:]], "note": "Accepted review reaches the verified Blockwise import."},
+    ]
+    diagram = {
+        "schema_version": 1,
+        "diagram_type": "architecture",
+        "meta": {
+            "title": title,
+            "subtitle": "Evidence-backed Frank → Hermes → Blockwise template path",
+            "quality_profile": "showcase",
+            "views": views,
+        },
+        "components": components,
+        "boundaries": [{"kind": "security-group", "label": "Hermes production execution boundary", "wraps": [id_map[value] for value in hermes_ids], "pad": 20}],
+        "connections": connections,
+        "cards": [
+            {"dot": "cyan", "title": "Runtime Contract", "items": ["Ad Studio submits a typed Hermes tool-run command", "Hermes is the production execution authority", "ad-template-generator owns the build stages"]},
+            {"dot": "amber", "title": "Iterative Production", "items": ["Source is analyzed into a layered composition", "Feed and Story render as separate editable layouts", "Comparison can return the design for revision"]},
+            {"dot": "emerald", "title": "Release Evidence", "items": ["Final review must be accepted", "Deterministic checks protect subject invariance", "A completed live run was imported by Blockwise"]},
+        ],
+    }
+    return diagram, rendered_edge_ids
+
+
+def _ad_workflow_diagram(
+    title: str, core_ids: list[str], path_edge_ids: list[str],
+    edges_by_id: Mapping[str, Mapping[str, Any]], id_map: Mapping[str, str],
+) -> tuple[dict[str, Any], list[str]]:
+    path_ids = [stable_id for stable_id in _AD_PATH_IDS if stable_id in core_ids]
+    if _AD_CONSUMER_ID in core_ids:
+        path_ids.append(_AD_CONSUMER_ID)
+    placement = {
+        "component:frank/ad-studio": ("surfaces", 0, 92),
+        "project:blockwise": ("surfaces", 5, 72),
+        "route:hermes-tool-runs": ("hermes", 0, 88),
+        "runtime:hermes-default": ("hermes", 1, 64),
+        "tool:ad-template-generator": ("hermes", 2, 72),
+        "component:frank/ad-template-builder/source": ("builder", 2, 56),
+        "component:frank/ad-template-builder/build": ("builder", 3, 40),
+        "component:frank/ad-template-builder/render": ("builder", 4, 40),
+        "component:frank/ad-template-builder/live": ("builder", 5, 48),
+        "gate:frank/ad-template-final-review": ("review", 2, 96),
+        "component:frank/ad-template-builder/compare": ("review", 4, 64),
+        "component:frank/ad-template-builder/final-check": ("review", 5, 56),
+    }
+    workflow_copy = {
+        "component:frank/ad-studio": ("Ad Studio", "frontend"),
+        "project:blockwise": ("Blockwise", "backend"),
+        "route:hermes-tool-runs": ("Tool-run API", "security"),
+        "runtime:hermes-default": ("Hermes", "backend"),
+        "tool:ad-template-generator": ("Generator", "backend"),
+        "component:frank/ad-template-builder/source": ("Source", "external"),
+        "component:frank/ad-template-builder/build": ("Build", "backend"),
+        "component:frank/ad-template-builder/render": ("Render", "frontend"),
+        "component:frank/ad-template-builder/live": ("Live", "messagebus"),
+        "gate:frank/ad-template-final-review": ("Final Review", "security"),
+        "component:frank/ad-template-builder/compare": ("Compare", "security"),
+        "component:frank/ad-template-builder/final-check": ("Checks", "security"),
+    }
+    workflow_nodes: list[dict[str, Any]] = []
+    visible_ids = list(path_ids)
+    if _AD_GATE_ID in core_ids:
+        visible_ids.append(_AD_GATE_ID)
+    for stable_id in visible_ids:
+        lane, col, width = placement[stable_id]
+        label, component_type = workflow_copy[stable_id]
+        workflow_nodes.append({
+            "id": id_map[stable_id],
+            "lane": lane,
+            "col": col,
+            "type": component_type,
+            "label": label,
+            "width": width,
+        })
+
+    edge_options: dict[str, dict[str, Any]] = {
+        "edge:ad-studio/routes-tool-runs": {
+            "label": "submit", "route": "drop", "fromSide": "bottom",
+            "toSide": "top", "variant": "emphasis",
+        },
+        "edge:hermes/executes-ad-template-tool": {
+            "route": "bottom-channel", "fromSide": "bottom", "toSide": "bottom",
+        },
+        "edge:ad-template-generator/executes-source": {
+            "route": "drop", "fromSide": "bottom", "toSide": "top",
+        },
+        "edge:ad-template-builder/render-to-compare": {
+            "route": "drop", "fromSide": "bottom", "toSide": "top",
+        },
+        "edge:ad-template-builder/final-check-to-live": {
+            "route": "straight", "fromSide": "top", "toSide": "bottom",
+            "variant": "security",
+        },
+        _AD_CONSUMER_EDGE_ID: {
+            "label": "import", "route": "straight", "fromSide": "top",
+            "toSide": "bottom", "variant": "emphasis",
+        },
+        _AD_GATE_EDGE_ID: {
+            "label": "accepted", "route": "bottom-channel", "fromSide": "bottom",
+            "toSide": "bottom", "variant": "security",
+        },
+        _AD_REVISION_EDGE_ID: {
+            "route": "straight", "fromSide": "top", "toSide": "bottom",
+            "variant": "dashed",
+        },
+    }
+    visual_edges = [(edge_id, "main") for edge_id in path_edge_ids]
+    if _AD_GATE_ID in core_ids:
+        visual_edges.append((_AD_GATE_EDGE_ID, "branch"))
+    if _AD_REVISION_EDGE_ID in edges_by_id:
+        visual_edges.append((_AD_REVISION_EDGE_ID, "branch"))
+    workflow_edges = []
+    rendered_edge_ids = []
+    for edge_id, role in visual_edges:
+        edge = edges_by_id[edge_id]
+        workflow_edges.append({
+            "id": _safe_archify_id(edge_id),
+            "from": id_map[str(edge["from"])],
+            "to": id_map[str(edge["to"])],
+            "role": role,
+            **edge_options.get(edge_id, {}),
+        })
+        rendered_edge_ids.append(edge_id)
+
+    diagram = {
+        "schema_version": 1,
+        "diagram_type": "workflow",
+        "meta": {
+            "title": title,
+            "subtitle": (
+                "Evidence-backed request to verified Blockwise import"
+                if _AD_CONSUMER_ID in core_ids
+                else "Evidence-backed request, review, and live-stage flow"
+            ),
+            "quality_profile": "showcase",
+            "viewBox": [950, 610],
+        },
+        "lanes": [
+            {"id": "surfaces", "label": "Product Surfaces"},
+            {"id": "hermes", "label": "Hermes Authority"},
+            {"id": "builder", "label": "Template Builder"},
+            {"id": "review", "label": "Review + Delivery"},
+        ],
+        "phases": [
+            {"id": "request", "label": "Request + authority", "fromCol": 0, "toCol": 1},
+            {"id": "production", "label": "Build + compare", "fromCol": 2, "toCol": 3, "variant": "emphasis"},
+            {"id": "release", "label": "Approve + import", "fromCol": 4, "toCol": 5, "variant": "dashed"},
+        ],
+        "groups": [],
+        "mainPath": [id_map[value] for value in path_ids],
+        "nodes": workflow_nodes,
+        "edges": workflow_edges,
+        "cards": [],
+    }
+    return diagram, rendered_edge_ids
+
+
+def _ad_authored_projection(
+    graph: Mapping[str, Any], projection_id: str, nodes: list[Mapping[str, Any]],
+    edges: list[Mapping[str, Any]], *, required_coverage: Iterable[str], title: str,
+) -> tuple[dict[str, Any], dict[str, Any]] | None:
+    model = _ad_core_model(nodes, edges)
+    if model is None:
+        return None
+    core_ids, path_edge_ids, _nodes_by_id, edges_by_id = model
+    if projection_id.endswith("/workflow"):
+        visible_core_ids = core_ids
+        id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(visible_core_ids)}
+        diagram, rendered_edge_ids = _ad_workflow_diagram(title, visible_core_ids, path_edge_ids, edges_by_id, id_map)
+    else:
+        visible_core_ids = core_ids
+        id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(visible_core_ids)}
+        diagram, rendered_edge_ids = _ad_architecture_diagram(title, visible_core_ids, path_edge_ids, edges_by_id, id_map)
+    all_ids = {str(node["id"]) for node in nodes}
+    supporting_ids = sorted(all_ids - set(visible_core_ids))
+    diagram_nodes = diagram.get("components", diagram.get("nodes", ()))
+    diagram_relationships = diagram.get("connections", diagram.get("edges", ()))
+    diagram_labels = {
+        str(node.get("id")): (str(node.get("label", "")), str(node.get("sublabel", "")))
+        for node in diagram_nodes if isinstance(node, Mapping)
+    }
+    display_labels = {}
+    for stable_id in visible_core_ids:
+        label, sublabel = diagram_labels.get(
+            id_map[stable_id],
+            (_AD_PRESENTATION[stable_id][0], _AD_PRESENTATION[stable_id][1]),
+        )
+        display_labels[stable_id] = {"label": label, "sublabel": sublabel, "archify_id": id_map[stable_id]}
+    metadata = {
+        "projection_id": projection_id,
+        "graph_revision": graph.get("graph_revision"),
+        "stable_id_map": id_map,
+        "supporting_stable_id_map": {stable_id: _safe_archify_id(stable_id) for stable_id in supporting_ids},
+        "display_labels": display_labels,
+        "coverage": _coverage(nodes, edges, required_coverage),
+        "relationship_count": len(edges),
+        "rendered_relationship_count": len(diagram_relationships),
+        "supporting_identity_count": len(supporting_ids),
+        "supporting_relationship_count": max(0, len(edges) - len(rendered_edge_ids)),
+        "rendered_relationship_ids": [
+            str(item["id"])
+            for item in diagram_relationships
+            if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+        ],
+        "represented_relationship_ids": rendered_edge_ids,
+        "coverage_scope": "projection_with_supporting_evidence",
+        "exclusions": ["supporting_topology_in_control"] if supporting_ids or len(edges) > len(rendered_edge_ids) else [],
+        "runtime_health_claims": False,
+        "showcase_checks": list(SHOWCASE_CHECKS),
+    }
+    return diagram, metadata
+
+
+def graph_to_archify(graph: Mapping[str, Any], projection_id: str, *, required_coverage: Iterable[str] = ()) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Convert a selected canonical graph to faithful Archify presentation IR."""
+    if projection_id not in {
+        "projection:ad-template-builder/architecture",
+        "projection:ad-template-builder/workflow",
+    }:
+        return _overview_graph_to_archify(
+            graph,
+            projection_id,
+            required_coverage=required_coverage,
+        )
+    if not isinstance(graph, Mapping):
+        raise ControlContractError("graph must be an object")
+    if not isinstance(projection_id, str) or not projection_id.startswith("projection:"):
+        raise ControlContractError("projection_id is invalid")
+    nodes = sorted(_projection_nodes(graph, projection_id), key=lambda item: str(item["id"]))
+    stable_ids = {str(item["id"]) for item in nodes}
+    id_map = {stable_id: _safe_archify_id(stable_id) for stable_id in sorted(stable_ids)}
+    assertions = _assertion_index(graph)
+    edges = _edge_records(graph, stable_ids)
+    titles = {"projection:vps/world": "VPS World", "projection:frank/architecture": "Frank Architecture", "projection:blockwise/runtime": "Blockwise Runtime", "projection:mini-frank/knowledge-flow": "Mini Frank Knowledge Flow", "projection:ad-template-builder/architecture": "Ad Template Builder Architecture", "projection:ad-template-builder/workflow": "Ad Template Builder Workflow"}
+    title = titles.get(projection_id, projection_id)
+    authored = _ad_authored_projection(
+        graph, projection_id, nodes, edges,
+        required_coverage=required_coverage, title=title,
+    )
+    if authored is not None:
+        return authored
+    path = _primary_path(stable_ids, edges)
+    path_index = {value: index for index, value in enumerate(path)}
+    anchors: dict[str, int] = {}
+    for edge in edges:
+        source, target = str(edge["from"]), str(edge["to"])
+        if source in path_index:
+            anchors.setdefault(target, path_index[source])
+        if target in path_index:
+            anchors.setdefault(source, path_index[target])
+    for index, node in enumerate(nodes):
+        anchors.setdefault(str(node["id"]), index)
+    positions: dict[str, tuple[float, float]] = {}
+    side_rows: dict[int, int] = {}
+    side_row_cursor = 0
+    widths: dict[str, float] = {str(node["id"]): _label_width(_node_title(node, str(node["id"]), assertions), 180) for node in nodes}
+    path_x: dict[str, float] = {}
+    cursor_x = 80.0
+    for node_id in path:
+        path_x[node_id] = cursor_x
+        label = _node_title(next(node for node in nodes if str(node["id"]) == node_id), node_id, assertions)
+        cursor_x += _label_width(label, 180) + 50
+    components: list[dict[str, Any]] = []
+    for index, node in enumerate(nodes):
+        node_id = str(node["id"])
+        if node_id in path_index:
+            column, y = path_index[node_id], 280
+        else:
+            column = min(anchors[node_id], max(len(path) - 1, 0)) if path else index
+            row = side_rows.get(column, 0); side_rows[column] = row + 1
+            row = side_row_cursor; side_row_cursor += 1
+            y = 90 + row * 100
+        x = path_x.get(node_id, 80 + column * 230); positions[node_id] = (x, y)
+        label = _node_title(node, node_id, assertions)
+        components.append({"id": id_map[node_id], "type": _node_type(node.get("kind")), "label": label, "sublabel": _node_sublabel(node, node_id, assertions), "tag": str(node.get("layer", assertions.get(node_id, {}).get("layer", "declared"))), "pos": [x, y], "size": [widths[node_id], 64]})
+    connections = []
+    for ordinal, edge in enumerate(edges):
+        source, target = str(edge["from"]), str(edge["to"])
+        relationship = edge.get("label") or edge.get("relationship") or edge.get("type") or "depends_on"
+        connection = {"id": _connection_id(edge, ordinal), "from": id_map[source], "to": id_map[target], "label": str(relationship)}
+        if source != target:
+            sx, sy = positions[source]; tx, ty = positions[target]
+            dx = (tx + widths[target] / 2) - (sx + widths[source] / 2)
+            dy = (ty + 32) - (sy + 32)
+            if abs(dx) >= abs(dy):
+                connection.update({"fromSide": "right", "toSide": "left"} if dx > 0 else {"fromSide": "left", "toSide": "right"})
+            else:
+                connection.update({"fromSide": "bottom", "toSide": "top"} if dy > 0 else {"fromSide": "top", "toSide": "bottom"})
+        connections.append(connection)
+    boundaries = []
+    for node in nodes:
+        parent = str(node["id"])
+        if str(node.get("kind", "")).casefold() not in {"host", "project"}:
+            continue
+        wrapped = sorted({str(edge["to"]) for edge in edges if str(edge.get("from")) == parent and str(edge.get("relationship", edge.get("type", ""))) == "contains" and str(edge.get("to")) in id_map})
+        if wrapped:
+            boundaries.append({"kind": "region", "label": _node_title(node, parent, assertions), "wraps": [id_map[value] for value in wrapped], "pad": 18})
+    focus_all = [id_map[value] for value in sorted(stable_ids)]
+    views = []
+    if path:
+        views.append({"id": "primary-path", "label": "Primary connection path", "focus": [id_map[value] for value in path], "note": "Follow the deterministic path selected from recorded connections."})
+    if boundaries and focus_all:
+        views.append({"id": "boundaries", "label": "Declared boundaries", "focus": focus_all, "note": "Inspect selected nodes within their declared containment boundaries."})
+    if len(views) < 2 and focus_all:
+        views.append({"id": "all-connections", "label": "All selected connections", "focus": focus_all, "note": "Explore every selected node and recorded connection."})
+    diagram = {"schema_version": 1, "diagram_type": "architecture", "meta": {"title": title, "quality_profile": "showcase", "views": views[:5]}, "layout": {"mode": "grid", "origin": [80, 90], "cols": max(1, min(12, len(path) or len(nodes))), "gapX": 50, "gapY": 36, "cellW": 180, "cellH": 64}, "components": components or [{"id": "n_empty", "type": "external", "label": "No verified graph components", "pos": [80, 90], "size": [180, 64]}], "boundaries": boundaries, "connections": connections, "cards": [{"dot": "cyan", "title": "Selected topology", "items": [f"{len(nodes)} selected components", f"{len(edges)} selected connections"]}, {"dot": "emerald", "title": "Reading guide", "items": ["The primary path is a presentation aid derived from recorded connections.", "Full stable identities remain in Frank metadata."]}]}
+    if projection_id.endswith("/workflow"):
+        diagram = _workflow_diagram(title, nodes, edges, id_map, assertions)
+    coverage = _coverage(nodes, edges, required_coverage)
+    metadata = {"projection_id": projection_id, "graph_revision": graph.get("graph_revision"), "stable_id_map": id_map, "display_labels": {str(node["id"]): {"label": _node_title(node, str(node["id"]), assertions), "sublabel": _node_sublabel(node, str(node["id"]), assertions), "archify_id": id_map[str(node["id"])]} for node in nodes}, "coverage": coverage, "relationship_count": len(edges), "rendered_relationship_count": len(edges), "exclusions": [], "runtime_health_claims": False, "showcase_checks": list(SHOWCASE_CHECKS)}
+    return diagram, metadata
+
+
 def showcase_check_results(receipt: Mapping[str, Any]) -> dict[str, bool]:
     """Normalize Archify's JSON receipt to the nine named acceptance checks."""
     checks = receipt.get("checks", ()) if isinstance(receipt, Mapping) else ()
@@ -420,7 +1340,12 @@ class ArchifyAdapter:
     def project(self, graph: Mapping[str, Any], *, projection_id: str) -> dict[str, Any]:
         estate_metadata: Mapping[str, Any] | None = None
         if projection_id in ESTATE_PROJECTION_IDS:
-            estate = build_estate_projection(graph, projection_id)
+            estate = build_estate_projection(
+                graph,
+                projection_id,
+                mappings=graph.get("projection_mappings", ()),
+                evidence=graph.get("projection_evidence"),
+            )
             # Convert only the typed, evidence-preserving projection.  The
             # estate seam remains authoritative for findings/exclusions and
             # conditional-flow decisions.

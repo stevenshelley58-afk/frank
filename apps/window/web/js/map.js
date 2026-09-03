@@ -5,6 +5,13 @@ function mapLabel(row) {
   return String(label).replace(/^Vps\b/, "VPS");
 }
 
+function projectionType(row) {
+  const declared = row.type || row.manifest?.projection_type;
+  if (declared === "workflow_data_flow") return "workflow + data flow";
+  if (declared) return String(declared).replaceAll("_", " ");
+  return String(row.projection_id || "").endsWith("/workflow") ? "workflow" : "architecture";
+}
+
 function mapSummary(row) {
   if (!row?.available) return "This projection does not have a current validated map.";
   const manifest = row.manifest && typeof row.manifest === "object" ? row.manifest : {};
@@ -13,15 +20,26 @@ function mapSummary(row) {
     : 0;
   const relationshipCount = Number.isInteger(manifest.relationship_count) ? manifest.relationship_count : null;
   const renderedRelationshipCount = Number.isInteger(manifest.rendered_relationship_count) ? manifest.rendered_relationship_count : null;
+  const supportingIdentityCount = Number.isInteger(manifest.supporting_identity_count) ? manifest.supporting_identity_count : 0;
+  const supportingRelationshipCount = Number.isInteger(manifest.supporting_relationship_count) ? manifest.supporting_relationship_count : 0;
   const details = [];
-  if (nodeCount) details.push(`${nodeCount} mapped ${nodeCount === 1 ? "record" : "records"}`);
+  if (nodeCount) details.push(supportingIdentityCount ? `${nodeCount} core components` : `${nodeCount} mapped ${nodeCount === 1 ? "record" : "records"}`);
   if (relationshipCount !== null) {
-    details.push(renderedRelationshipCount !== null && renderedRelationshipCount !== relationshipCount
+    details.push(supportingRelationshipCount && renderedRelationshipCount !== null
+      ? `${renderedRelationshipCount} core connections`
+      : renderedRelationshipCount !== null && renderedRelationshipCount !== relationshipCount
       ? `${renderedRelationshipCount} of ${relationshipCount} relationships shown`
       : `${relationshipCount} ${relationshipCount === 1 ? "relationship" : "relationships"}`);
   } else if (Array.isArray(manifest.exclusions) && manifest.exclusions.includes("relationships_render_in_control_graph")) {
     details.push("Relationships are listed in Control");
   }
+  if (supportingIdentityCount || supportingRelationshipCount) details.push(`${supportingIdentityCount + supportingRelationshipCount} supporting evidence facts in Control`);
+  details.push(projectionType(row));
+  const missing = Array.isArray(manifest.missing_coverage) ? manifest.missing_coverage : [];
+  if (missing.length) details.push(`Coverage gaps: ${missing.join(", ")}`);
+  const findings = Array.isArray(manifest.findings) ? manifest.findings : [];
+  const finding = findings.find((item) => item?.message);
+  if (finding) details.push(String(finding.message));
   const freshness = String(manifest.freshness || row.freshness || "").trim();
   if (freshness) details.push(`${freshness[0].toUpperCase()}${freshness.slice(1)} validated evidence`);
   return details.length ? details.join(" · ") : "A validated projection of the canonical graph.";
@@ -40,22 +58,28 @@ export async function mountMap(root) {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || "Map is disabled");
     const rows = Array.isArray(data.projections) ? data.projections : [];
-    state.textContent = rows.some((row) => row.available) ? "Validated source" : "No current projection";
-    list.innerHTML = rows.length ? rows.map((row, index) => `<button type="button" class="map-row${index === 0 ? " is-selected" : ""}" data-projection="${esc(row.projection_id)}"><span>${esc(mapLabel(row))}</span><small>${esc(row.available ? (row.manifest?.freshness || "current") : (row.declared_status || "unknown"))}</small></button>`).join("") : `<div class="map-list-empty">No projections are available.</div>`;
-    const select = async (projectionId, button, { updateUrl = true } = {}) => {
-      const row = rows.find((item) => item.projection_id === projectionId);
-      if (!row?.available) return;
+    const available = rows.filter((row) => row.available);
+    state.textContent = available.length ? `${available.length} of ${rows.length} validated` : "No current projection";
+    const requested = new URLSearchParams(window.location.search).get("projection_id");
+    const preferred = available.find((row) => row.projection_id === "projection:frank/architecture");
+    const initial = rows.find((row) => row.projection_id === requested && row.available) || preferred || available[0];
+    list.innerHTML = rows.length ? rows.map((row) => `<button type="button" class="map-row${row.available && initial === row ? " is-selected" : ""}" data-projection="${esc(row.projection_id)}"${row.available ? "" : " disabled"} title="${esc(row.available ? mapLabel(row) : "No current validated artifact")}"><span>${esc(mapLabel(row))}</span><small>${esc(row.available ? (row.manifest?.freshness || "current") : (row.declared_status || "unknown"))}</small></button>`).join("") : `<div class="map-list-empty">No projections are available.</div>`;
+    const select = async (projectionId, button, row, { updateUrl = true } = {}) => {
       list.querySelectorAll(".map-row").forEach((item) => item.classList.toggle("is-selected", item === button));
       heading.textContent = mapLabel(row);
       summary.textContent = mapSummary(row);
       if (updateUrl) window.history.pushState({ view: "map", projectionId }, "", `/map?projection_id=${encodeURIComponent(projectionId)}`);
       viewer.innerHTML = `<iframe class="map-frame" title="${esc(mapLabel(row))} Archify projection" src="/api/control/maps/artifact?projection_id=${encodeURIComponent(projectionId)}"></iframe>`;
     };
-    list.querySelectorAll(".map-row").forEach((button) => button.addEventListener("click", () => select(button.dataset.projection, button)));
-    const requested = new URLSearchParams(window.location.search).get("projection_id");
-    const first = ([...list.querySelectorAll(".map-row")].find((button) => button.dataset.projection === requested)) || list.querySelector(".map-row");
-    if (first && rows.find((row) => row.projection_id === first.dataset.projection)?.available) await select(first.dataset.projection, first, { updateUrl: !requested });
+    list.querySelectorAll(".map-row:not([disabled])").forEach((button) => button.addEventListener("click", () => select(button.dataset.projection, button, rows.find((row) => row.projection_id === button.dataset.projection))));
+    const first = [...list.querySelectorAll(".map-row:not([disabled])")].find((button) => button.dataset.projection === initial?.projection_id);
+    if (first) await select(first.dataset.projection, first, rows.find((row) => row.projection_id === first.dataset.projection), { updateUrl: !requested });
     else viewer.innerHTML = `<div class="operate-empty"><strong>The last validated map is not available.</strong><span>Generation failures preserve the prior passing map; this preview has no current pointer.</span></div>`;
+    window.addEventListener("popstate", () => {
+      const projectionId = new URLSearchParams(window.location.search).get("projection_id");
+      const button = [...list.querySelectorAll(".map-row:not([disabled])")].find((item) => item.dataset.projection === projectionId);
+      if (button) select(projectionId, button, rows.find((row) => row.projection_id === projectionId), { updateUrl: false });
+    });
   } catch {
     state.textContent = "Disabled by release flag";
     list.innerHTML = "";

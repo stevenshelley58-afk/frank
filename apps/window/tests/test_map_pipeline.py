@@ -22,6 +22,14 @@ class FakeAdapter:
                 "stable_id_map": {"service:frank-window": "n_aaaaaaaaaaaaaaaa"},
                 "relationship_count": 3,
                 "rendered_relationship_count": 2,
+                "supporting_stable_id_map": {"tool:archify": "n_bbbbbbbbbbbbbbbb"},
+                "supporting_identity_count": 1,
+                "supporting_relationship_count": 1,
+                "rendered_relationship_ids": ["edge:visible"],
+                "represented_relationship_ids": ["edge:visible", "edge:supporting"],
+                "presentation_groups": {"n_aaaaaaaaaaaaaaaa": ["service:frank-window"]},
+                "presentation_relationship_groups": {"edge:visible": ["edge:visible", "edge:supporting"]},
+                "coverage_scope": "projection_with_supporting_evidence",
             },
         }
 
@@ -112,6 +120,14 @@ class MapPipelineTests(unittest.TestCase):
             self.assertTrue(all(m[2]["preview_only"] for m in store.generations))
             self.assertTrue(all(m[2]["relationship_count"] == 3 for m in store.generations))
             self.assertTrue(all(m[2]["rendered_relationship_count"] == 2 for m in store.generations))
+            self.assertTrue(all(m[2]["supporting_stable_id_map"] == {"tool:archify": "n_bbbbbbbbbbbbbbbb"} for m in store.generations))
+            self.assertTrue(all(m[2]["supporting_identity_count"] == 1 for m in store.generations))
+            self.assertTrue(all(m[2]["supporting_relationship_count"] == 1 for m in store.generations))
+            self.assertTrue(all(m[2]["rendered_relationship_ids"] == ["edge:visible"] for m in store.generations))
+            self.assertTrue(all(m[2]["represented_relationship_ids"] == ["edge:visible", "edge:supporting"] for m in store.generations))
+            self.assertTrue(all(m[2]["presentation_groups"] == {"n_aaaaaaaaaaaaaaaa": ["service:frank-window"]} for m in store.generations))
+            self.assertTrue(all(m[2]["presentation_relationship_groups"] == {"edge:visible": ["edge:visible", "edge:supporting"]} for m in store.generations))
+            self.assertTrue(all(m[2]["coverage_scope"] == "projection_with_supporting_evidence" for m in store.generations))
             self.assertTrue(all(call[3] is False for call in runner.calls))
             self.assertTrue(all(call[0][3] == "architecture" for call in runner.calls if call[0][2] in {"validate", "deliver"}))
 

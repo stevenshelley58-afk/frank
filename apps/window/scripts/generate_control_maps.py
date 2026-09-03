@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import yaml
+
 
 MAX_RECEIPT_BYTES = 1024 * 1024
 
@@ -138,6 +140,46 @@ def _resolve_graph(path: Path) -> Mapping[str, Any]:
     return _with_assertion_titles(graph, assertions)
 
 
+def _projection_proof(repository_root: Path) -> tuple[list[Mapping[str, Any]], Mapping[str, Any]]:
+    """Load the checked-in, receipt-bound Ad consumer proof for map projection."""
+    control = repository_root / "governance" / "control-plane"
+    aliases_path = control / "aliases.yaml"
+    context_path = control / "build-context.yaml"
+    if any(path.is_symlink() or not path.is_file() for path in (aliases_path, context_path)):
+        raise RuntimeError("projection evidence declarations are unavailable")
+    try:
+        aliases = yaml.safe_load(aliases_path.read_text(encoding="utf-8"))
+        context = yaml.safe_load(context_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as error:
+        raise RuntimeError("projection evidence declarations are malformed") from error
+    mappings = aliases.get("external_mappings", ()) if isinstance(aliases, Mapping) else ()
+    status = context.get("evidence_status", {}) if isinstance(context, Mapping) else {}
+    mapping = next(
+        (
+            item for item in mappings
+            if isinstance(item, Mapping)
+            and item.get("id") == "mapping:ad-template-builder/blockwise"
+            and item.get("status") == "verified"
+        ),
+        None,
+    )
+    source_receipt = status.get("ad_template_builder_source_contract_receipt")
+    runtime_receipt = status.get("ad_template_builder_runtime_consumption_receipt")
+    if (
+        mapping is None
+        or status.get("ad_template_builder_source_contract") != "present"
+        or status.get("ad_template_builder_blockwise_runtime_consumption") != "verified"
+        or not isinstance(source_receipt, str)
+        or not isinstance(runtime_receipt, str)
+        or mapping.get("evidence_receipt_id") != runtime_receipt
+    ):
+        return [], {}
+    return [dict(mapping)], {
+        "source_contract": {"receipt_id": source_receipt},
+        "active_runtime": {"receipt_id": runtime_receipt},
+    }
+
+
 def _write_receipt(path: Path, rendered: str) -> None:
     """Atomically persist one private, bounded receipt without following links."""
     data = (rendered + "\n").encode("utf-8")
@@ -191,6 +233,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         from graph.map_pipeline import generate_maps
 
         graph = _resolve_graph(args.graph)
+        mappings, evidence = _projection_proof(root)
+        graph = dict(graph, projection_mappings=mappings, projection_evidence=evidence)
         graph_revision = graph.get("graph_revision", graph.get("revision", "unknown"))
         run_key = args.run_key or _default_run_key(graph_revision)
         adapter = ArchifyAdapter()

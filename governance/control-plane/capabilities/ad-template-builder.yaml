@@ -4,18 +4,18 @@ title: Ad Template Builder
 eli5: Builds validated ad templates from approved inputs.
 why_it_exists: Canonical Frank-owned workflow for repeatable ad artifacts.
 benefits: [repeatable builds, validation receipts]
-tradeoffs: [runtime consumer evidence is incomplete]
+tradeoffs: [data stores and retention are not yet verified]
 applies_when: [approved template request]
 does_not_apply_when: [private customer material, unapproved source]
 scope_ids: [project:frank]
-source_locator: apps/window/archify/ad-template-process.json
+source_locator: apps/window/web/js/ad-studio.js
 source_revision: 366f4bacad6294261a57751289121193ac162b08
-content_hash: sha256:53815818f4b5416d97aee413e172cab2cfc4f5cce292f7ab5ef4a0b0d34267a6
+content_hash: sha256:98c555fa2d9bda484b49cd97886d937347e6f22cbaa8b740a44b8c9c1099b1ae
 authority_tier: repo
 enforcement: ci
 state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
 retirement_assessment: retain
 replacement_ids: []
 consolidation_group: ad-template
-evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001, receipt:ad-template-builder/runtime-consumption-20260831-001]
 oss_decision_id: receipt:oss-decision/custom-adapters
