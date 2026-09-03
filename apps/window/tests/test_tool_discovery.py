@@ -66,14 +66,19 @@ class DiscoveryAdapterTest(unittest.TestCase):
 
     def test_duplicate_ids_quarantined(self):
         # The directory-name==id rule normally makes duplicates impossible;
-        # the dedupe guard is exercised with the name check neutralized so a
-        # future relaxation cannot reintroduce silent same-id merges.
+        # the dedupe guard is exercised with per-package validation
+        # neutralized so a future relaxation cannot reintroduce silent
+        # same-id merges.
         _make_package(self.root, "alpha", dict(VALID_HOME, id="fixture-tool"))
         _make_package(self.root, "beta", dict(VALID_HOME, id="fixture-tool"))
         from unittest import mock
-        with mock.patch("tool_apps.discovery_adapter.validate_home_manifest", lambda manifest: manifest):
+        with mock.patch(
+            "tool_apps.discovery_adapter._validated_home",
+            lambda directory, root: json.loads((directory / "home.json").read_text(encoding="utf-8")),
+        ):
             catalogue = discover_catalogue(self.root)
         self.assertEqual(len(catalogue["widgets"]), 1)
+        self.assertEqual(catalogue["widgets"][0]["id"], "fixture-tool")
         self.assertTrue(catalogue["quarantined"][0]["reason"].startswith("duplicate widget id"))
 
     def test_symlink_and_escape_attempts_are_quarantined(self):

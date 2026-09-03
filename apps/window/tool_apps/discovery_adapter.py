@@ -24,6 +24,19 @@ def _manifest_checksum(home_file: Path) -> str:
     return hashlib.sha256(home_file.read_bytes()).hexdigest()[:32]
 
 
+def _validated_home(directory: Path, root: Path) -> dict[str, Any]:
+    """Per-package fail-closed validation: escape, symlink, schema, name match."""
+    home_file = directory / "home.json"
+    resolved_directory = directory.resolve(strict=True)
+    resolved_directory.relative_to(root)
+    if (directory / "manifest.json").is_symlink() or home_file.is_symlink():
+        raise ContractError("tool manifest cannot be a symlink")
+    home = validate_home_manifest(json.loads(home_file.read_text(encoding="utf-8")))
+    if home["id"] != directory.name:
+        raise ContractError("tool home id does not match directory")
+    return home
+
+
 def discover_catalogue(tools_root: str | Path) -> dict[str, Any]:
     """Discover manifests from the one approved tools root; quarantine bad ones.
 
@@ -49,13 +62,7 @@ def discover_catalogue(tools_root: str | Path) -> dict[str, Any]:
         if not home_file.is_file():
             continue  # packages without home manifests are not widget sources
         try:
-            resolved_directory = directory.resolve(strict=True)
-            resolved_directory.relative_to(root)
-            if (directory / "manifest.json").is_symlink() or home_file.is_symlink():
-                raise ContractError("tool manifest cannot be a symlink")
-            home = validate_home_manifest(json.loads(home_file.read_text(encoding="utf-8")))
-            if home["id"] != directory.name:
-                raise ContractError("tool home id does not match directory")
+            home = _validated_home(directory, root)
         except (OSError, ValueError, json.JSONDecodeError, ContractError) as exc:
             quarantined.append({"id": directory.name, "reason": str(exc)})
             continue
