@@ -2432,6 +2432,10 @@ if os.environ.get("FRANK_V021_FOUNDATION", "").lower() in ("1", "true", "yes"):
             if not project_id:
                 continue
             root = str(project.get("root") or "").strip()
+            if root and not root.startswith("/"):
+                # Legacy project roots are relative names; the canonical host
+                # location is /projects/<name> (resolver's canonical prefix).
+                root = f"/projects/{root.lstrip('/')}"
             slug = re.sub(r"[^a-z0-9-]+", "-", project_id.lower()).strip("-") or "project"
             candidates.append({
                 "project_id": project_id,
