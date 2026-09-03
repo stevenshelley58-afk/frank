@@ -54,3 +54,22 @@ Session 5's full shared-estate branch (11 commits: labeled foundation checkpoint
 `docs/evidence/frank-v021/` (committed) + `/secure/frank-v021/` (raw, root-owned):
 PRODUCTION_BASELINE, ASSET_MANIFEST, WORKSPACE_INVENTORY, BACKUP_AND_ROLLBACK,
 HERMES_V021_PROBES, MIGRATION_REHEARSAL, deploy logs, key/secret material (never committed).
+
+## AUDIT — plan vs delivered (2026-09-03T15:00Z, Session 1)
+
+Verified against the full build plan, on the live VPS at SHA e3ebdb1. Headline: **production is upgraded, healthy and proven for the paths that are wired (chat via gateway/turn, Ad Studio /v1/runs, release provenance, backups/rollback) — but the plan's full acceptance bar was NOT met, and RELEASE_STATUS must be recorded as DEPLOYED-WITH-GAPS, not READY.**
+
+Verified matching the plan: provenance repair (8b2c8b drift reconciled; label/manifest/health/approved-sha all equal e3ebdb1); hardened deploy.sh refusals + atomic approved-sha; clean pinned Hermes v0.21.0 (29112bef), both units active; official upstream /v1/runs replacing the dirty v0.20 fork behavior; immutable contract v1.0.0 @ 2139353; foundation/adapter-base/integration branch lineage with all four feature branches merged; 953 tests green; 20G backup + restore drill + rollback matrix + immutable rollback image; migration rehearsal on restored clone; live chat smoke completed with sentinel after provider top-up; one Gunicorn worker preserved.
+
+Deviations/gaps verified live:
+1. CRITICAL — central feature wiring absent: server.py never registered /api/chat/stop, /api/chat/respond, /api/chat/events (replay), /api/chat/attachments/vps, /api/audio/transcribe, work_api (/api/work/*), lease service, discovery adapter, hub read tools, codex launcher, memory admission. Merged frontend (app.js imports chat/* modules) calls several of these, so stop, blocking-input respond, replay, VPS attach and dictation are broken in the live Hub; work widgets get SPA fallback HTML. Tests stayed green because they exercise modules, not the wiring.
+2. HIGH — model catalogue still Frank hard-coded (CURATED_MODELS via /api/models) instead of Hermes model options (plan §2). Per-session model set route exists.
+3. HIGH — hermes serve binds 100.78.126.112:9119 (Tailscale), not host loopback; the contracted path-aware bridge does not exist. Mitigation observed: REST 401 without session token (incl. as codex user), but loopback-only + OS isolation are unmet.
+4. MEDIUM — live Hermes config_version 34 (latest 39): the rehearsed 34→39 migration was never applied to the live root; v0.21 runs the old config.
+5. MEDIUM — kanban.auto_decompose/auto_subscribe_on_create freeze flags absent from live Hermes config.
+6. MEDIUM — /srv/skills cutover not executed (0 SKILL.md); scripts shipped only.
+7. MEDIUM — .frank-attachments per-project read-only binds not created; uploads/projects root absent; lease flag FRANK_V021_FOUNDATION unset (foundation dormant); memory auto_retain:false present in repo config but live Hindsight state unverified; admission adapter unwired.
+8. MEDIUM — Codex shared-estate live canary never run (per S5 handoff); Codex ACL/least-privilege host changes not applied.
+9. Recorded earlier and still true: Hermes-domain owner attestation absent; browser visual-freeze receipts not regenerated.
+
+Smallest unblock path: (a) apply the central wiring patch + flip FRANK_V021_FOUNDATION, restart, re-run full suite + browser journeys; (b) bind serve to 127.0.0.1 and deploy the path-aware bridge; (c) replace CURATED_MODELS with Hermes model options; (d) run the rehearsed 34→39 migration + set Kanban freeze flags on the live root; (e) execute skills cutover, .frank-attachments binds, Codex ACL host steps from the S5 handoff scripts; (f) rerun the affected acceptance rows and both attestations.
