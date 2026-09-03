@@ -133,23 +133,35 @@ def inventory_root(source_root: Path, *, production_active_names: set[str] | Non
     skills: list[SkillRecord] = []
     if not source_root.is_dir():
         return {"schema": SKILL_INVENTORY_SCHEMA, "root": str(source_root), "skills": [], "checked_at": _now()}
-    for skill_dir in sorted(source_root.iterdir(), key=lambda item: item.name):
-        if not skill_dir.is_dir() or skill_dir.is_symlink():
+    # Discover skill directories at any depth (category folders such as
+    # ``github/github-issues`` hold real skills). The outermost directory
+    # containing SKILL.md wins; its descendants are never re-inventoried.
+    discovered: list[Path] = []
+    for skill_md in sorted(source_root.rglob("SKILL.md"), key=lambda item: item.as_posix()):
+        skill_dir = skill_md.parent
+        if skill_md.is_symlink() or skill_dir.is_symlink():
             continue
+        if any(skill_dir == kept or kept in skill_dir.parents for kept in discovered):
+            continue
+        discovered.append(skill_dir)
+    for skill_dir in discovered:
+        relative = skill_dir.relative_to(source_root)
         skill_md = skill_dir / "SKILL.md"
-        if not skill_md.is_file() or skill_md.is_symlink():
-            continue
         try:
             frontmatter = skill_md.read_text(encoding="utf-8", errors="replace")[:4000]
         except OSError:
             continue
-        classification = "runtime-owned" if skill_dir.name.startswith(".system") else "operator"
+        classification = (
+            "runtime-owned"
+            if any(part.startswith(".system") for part in relative.parts)
+            else "operator"
+        )
         name_match = _FRONTMATTER_NAME.search(frontmatter)
         desc_match = _FRONTMATTER_DESC.search(frontmatter)
         record = SkillRecord(
-            name=name_match.group(1).strip() if name_match else skill_dir.name,
+            name=name_match.group(1).strip() if name_match else relative.name,
             source_root=str(source_root),
-            path=skill_dir.name,
+            path=relative.as_posix(),
             classification=classification,
             description=desc_match.group(1).strip() if desc_match else "",
             checksum=_hash_dir(skill_dir),

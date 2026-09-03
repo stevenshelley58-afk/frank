@@ -1,5 +1,6 @@
 """Skills inventory, staging, and provider tests (isolated roots only)."""
 import json
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -78,6 +79,20 @@ class InventoryTest(unittest.TestCase):
         result = inventory_root(self.root)
         self.assertEqual([s["path"] for s in result["skills"]], ["real"])
 
+    def test_nested_skill_directories_discovered(self):
+        _make_skill(self.root, "github/github-issues", "github-issues")
+        _make_skill(self.root, "research/deep/arxiv", "arxiv")
+        result = inventory_root(self.root)
+        by_name = {s["name"]: s for s in result["skills"]}
+        self.assertEqual(by_name["github-issues"]["path"], "github/github-issues")
+        self.assertEqual(by_name["github-issues"]["validation"], "valid")
+        self.assertEqual(by_name["arxiv"]["path"], "research/deep/arxiv")
+
+    def test_runtime_owned_category_excluded_at_any_depth(self):
+        _make_skill(self.root, ".system/packaged", "packaged-internal")
+        result = inventory_root(self.root)
+        self.assertEqual(result["skills"][0]["classification"], "runtime-owned")
+
     def test_empty_root_reports_empty_inventory(self):
         self.root.mkdir(parents=True)
         result = inventory_root(self.root)
@@ -145,6 +160,7 @@ class StagingTest(unittest.TestCase):
             script = scripts_dir / name
             self.assertTrue(script.is_file())
             self.assertIn("set -euo pipefail", script.read_text())
+            subprocess.run(["bash", "-n", str(script)], check=True)
         self.assertIn("/srv/skills", (scripts_dir / "promote_skills_cutover.sh").read_text())
         self.assertIn("rollback", (scripts_dir / "rollback_skills_cutover.sh").read_text())
         self.assertIn("parity", (scripts_dir / "check_checksum_parity.sh").read_text())
