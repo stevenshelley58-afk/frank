@@ -200,6 +200,8 @@ docker compose build \
   --build-arg SOURCE_SHA="$(git -C "$app" rev-parse HEAD)" \
   --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   frank-window frank-agenttrail
+export SOURCE_SHA="$(git -C "$app" rev-parse HEAD)"
+export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 # Phase E: refuse a revision that is not pushed, and verify the freshly
 # built image carries the exact source SHA before anything is replaced.
 head_sha="$(git -C "$repo" rev-parse HEAD)"
