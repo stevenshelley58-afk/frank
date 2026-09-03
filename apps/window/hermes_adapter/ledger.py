@@ -167,6 +167,20 @@ class OperationLedger:
         self._fsync_write(self._path(op_id), record)
         return record
 
+    def mark_failed(self, op_id: str, *, evidence: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Definitive, unambiguous failure (e.g. upstream 4xx) — never a retry candidate."""
+        record = self._read(op_id)
+        if record is None:
+            raise LedgerError(f"unknown operation: {op_id}")
+        if record["state"] not in ("prepared", "sending", "uncertain"):
+            raise LedgerError(f"operation {op_id} in state {record['state']} cannot fail")
+        record = self._transition(record, "resolved")
+        record["resolved_outcome"] = "failed"
+        record["evidence"] = _safe_metadata(evidence or {})
+        record["history"].append({"state": "resolved", "at": time.time(), "outcome": "failed"})
+        self._fsync_write(self._path(op_id), record)
+        return record
+
     def resolve(self, op_id: str, outcome: str, *, evidence: dict[str, Any] | None = None) -> dict[str, Any]:
         """Resolve an uncertain operation from authoritative evidence only."""
         if outcome not in ("acknowledged", "failed"):
