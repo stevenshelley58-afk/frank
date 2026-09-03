@@ -82,3 +82,18 @@ All canaries: fresh HERMES_HOME (no copied jobs), credentials isolated per
 instance, loopback binds only. Unique test namespaces (banks `steven-v021canary-*`,
 Hermes session prefixes `v021canary-*`, boards prefixed `v021canary-`) to keep
 canary artifacts disjoint from production state.
+
+## 5. UPDATE 2026-09-03T14:00Z — billing blocker RESOLVED
+
+Operator changed the default chat model (`qwen3.8-27b` @ provider
+`concentrate`, `CONCENTRATE_API_KEY` live). Canary re-probed (config
+refreshed from live, key isolated into canary env):
+
+- Plain run: `run_ac01993846c24e27b9c72ba6490a0584` → `completed`, no error.
+- **Tool-executing run**: `run_5e54d39cdc0e4c34a6be0fa4057de72d` →
+  `completed`; terminal tool executed; sentinel
+  `frank-v021-canary-toolproof` present verbatim in run output.
+
+Live tool-execution acceptance on clean v0.21 is now PROVEN. The
+`supports_tools:false` override question is moot for the new default
+(tool-capable model); S2 sign-off remains for the legacy non-tool model only.
