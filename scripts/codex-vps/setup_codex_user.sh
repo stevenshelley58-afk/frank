@@ -30,12 +30,20 @@ for root in "${roots[@]}"; do
   slug="$(basename "$root")"
   getent group "frank-proj-${slug}" >/dev/null || groupadd "frank-proj-${slug}"
   usermod -aG "frank-proj-${slug}" codex
-  chgrp -R "frank-proj-${slug}" "$root"
-  chmod -R g+rwX "$root"
-  find "$root" -type d -exec chmod g+s {} +
+  # Grant the project group rwX via POSIX ACLs instead of chgrp: recursive
+  # chgrp would strip the running Hermes processes' group access to roots
+  # owned root:hermes until a restart. ACLs leave owner/group untouched.
+  command -v setfacl >/dev/null || { echo "setfacl missing (install acl)"; exit 1; }
+  # Skip .frank-attachments: read-only bind mount (setfacl cannot traverse
+  # it; the bound content is owned and written by the container runtime).
+  find "$root" -name .frank-attachments -prune -o -type d -print0 \
+    | xargs -0 -r -n 200 setfacl -m "g:frank-proj-${slug}:rwX" -d -m "g:frank-proj-${slug}:rwX"
+  find "$root" -name .frank-attachments -prune -o -type f -print0 \
+    | xargs -0 -r -n 500 setfacl -m "g:frank-proj-${slug}:rwX"
+  find "$root" -name .frank-attachments -prune -o -type d -exec chmod g+s {} +
   # Git ownership for the codex user (run as codex).
   sudo -u codex git -C "$root" config --global --add safe.directory "$root" 2>/dev/null || true
-  echo "project ${slug}: group + setgid + safe.directory applied"
+  echo "project ${slug}: group ACL + setgid + safe.directory applied"
 done
 
 # 4. Shared skills visibility: codex reads /srv/skills through its supported
