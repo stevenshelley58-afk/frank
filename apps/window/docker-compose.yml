@@ -15,7 +15,6 @@ services:
       # reads the single promoted maps/current.json selector. Explicit preview
       # runs may provide it through a separate isolated environment.
     environment:
-      FRANK_V021_FOUNDATION: ${FRANK_V021_FOUNDATION:-0}
       FRANK_WEB: /web
       CHAT_STORE_DIR: /data
       SOURCE_SHA: ${SOURCE_SHA:-unknown}
