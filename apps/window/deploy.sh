@@ -200,6 +200,20 @@ docker compose build \
   --build-arg SOURCE_SHA="$(git -C "$app" rev-parse HEAD)" \
   --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
   frank-window frank-agenttrail
+# Phase E: refuse a revision that is not pushed, and verify the freshly
+# built image carries the exact source SHA before anything is replaced.
+head_sha="$(git -C "$repo" rev-parse HEAD)"
+git -C "$repo" fetch --quiet origin
+git -C "$repo" merge-base --is-ancestor "$head_sha" origin/main || {
+  echo "refusing to deploy an unpushed Frank revision: $head_sha" >&2
+  exit 1
+}
+image_sha="$(docker image inspect frank-window:current \
+  --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
+[[ "$image_sha" == "$head_sha" ]] || {
+  echo "refusing deploy: image label $image_sha != built revision $head_sha" >&2
+  exit 1
+}
 docker compose config --quiet
 docker run --rm \
   --env-file "$caddy_secret_file" \

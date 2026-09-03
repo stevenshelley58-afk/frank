@@ -69,6 +69,10 @@ COPY --from=graph-build /build/vendor/archify/archify ./vendor/archify/archify
 ENV FRANK_WEB=/web
 ENV FRANK_REPOSITORY_ROOT=/app
 ENV PORT=8080
+# Phase E: critical-file hash manifest baked into the image; deploy.sh and
+# /api/health read it as release-identity proof.
+RUN find /app /web -type f \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.css' -o -name '*.html' -o -name '*.json' \) 2>/dev/null \
+    | sort | xargs sha256sum > /app/CRITICAL_MANIFEST.sha256 || true
 EXPOSE 8080
 # Frank's JSON stores use process-local locks; keep one worker and use threads.
 CMD ["gunicorn", "-b", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "0", "server:app"]

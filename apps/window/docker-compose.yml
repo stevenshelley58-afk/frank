@@ -17,6 +17,9 @@ services:
     environment:
       FRANK_WEB: /web
       CHAT_STORE_DIR: /data
+      SOURCE_SHA: ${SOURCE_SHA:-unknown}
+      FRANK_SOURCE_SHA: ${SOURCE_SHA:-unknown}
+      FRANK_BUILD_TIME: ${BUILD_TIME:-unknown}
       PROJECTS_STORE_FILE: /data/projects.json
       PROJECT_KNOWLEDGE_ROOT: /data/knowledge
       HERMES_SHARED_UPLOAD_ROOT: /srv/frank/data/window/uploads

@@ -548,7 +548,14 @@ def hermes_session_summaries() -> dict:
 @app.get("/api/health")
 def health():
     brain = hermes_reachable()
-    return jsonify({"ok": True, "service": "frank-window", "hermes": brain})
+    # Release identity only (Phase E): safe fields, no paths or secrets.
+    identity = {
+        "source_sha": os.environ.get("FRANK_SOURCE_SHA", "unknown"),
+        "build_id": os.environ.get("FRANK_BUILD_TIME", "unknown"),
+        "schema_version": "frank.release-identity/v1",
+    }
+    return jsonify({"ok": True, "service": "frank-window", "hermes": brain,
+                    "release": identity})
 
 
 @app.errorhandler(ProjectStoreError)
