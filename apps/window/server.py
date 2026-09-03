@@ -2496,7 +2496,7 @@ if os.environ.get("FRANK_V021_FOUNDATION", "").lower() in ("1", "true", "yes"):
         from infra.workspace.lease_blueprint import create_lease_blueprint as _create_lease_blueprint
         app.register_blueprint(_create_lease_blueprint(_ws_leases))
 
-        @app.post("/internal/workspaces/resolve")
+        @app.post("/internal/workspaces")
         def _internal_workspace_resolve():
             """Private server-to-server resolve (codex launcher contract).
 
