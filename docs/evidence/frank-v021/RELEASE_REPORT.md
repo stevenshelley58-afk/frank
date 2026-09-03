@@ -35,6 +35,13 @@ Deployed: 2026-09-03T14:20–14:30Z · Status: **LIVE**
 Frank: recreate container from `frank-window:rollback-783f322a-20260903`; data volume untouched.
 Hermes: remove the two `v021.conf` drop-ins, `daemon-reload`, restart (old binary @ `ed1554a2fe` only against the pre-migration state preserved by the 14:05 backup + config rollback files).
 
+## ADDENDUM — Release r2 (`e3ebdb1`, deployed 2026-09-03T14:41Z)
+
+Session 5's full shared-estate branch (11 commits: labeled foundation checkpoint, workspace estate/attachments/skills/memory-admission/maps-receipts/tool-discovery/hub-read-tools/Codex-launcher modules + 105 tests + handoffs) was merged into `codex/frank-v021-integration-r2`, promoted to `main` (fast-forward `cc11d86..e3ebdb1`, operator-approved) and deployed via the hardened pipeline. Merge clean, central wiring unchanged; new modules are additive and self-tested.
+
+- Gates: 953/953 unittest green (+105 from S5), all `node --check` clean, py_compile clean; deploy provenance gates passed; `approved-sha`/image label/`/api/health` = `e3ebdb1`; post-deploy reconciliation `outcome: pass`; `/mini-frank` + Caddy verified.
+- **Chat execution blocked (external, pre-existing)**: after ~14:30 ALL four providers (concentrate, venice, orcarouter, aoru) return `HTTP 402 Insufficient Balance` — balances exhausted (r1 smoke at 14:21 had succeeded on the then-funded concentrate default). Run submission, auth, and terminal semantics still proven live (`run_8bb629…` failed with a clean provider-402 `run.failed` event, not an infra error). Unblocks the moment any one provider is topped up; no code change needed.
+
 ## Honest limitations
 
 1. **Hermes-domain-owner attestation absent**: session 02 was stopped by the operator before sign-off; the operator elected to proceed. Frank-owner attestation (S1) over candidate `cc11d86` stands. Recorded as a deviation, not silently dropped.
