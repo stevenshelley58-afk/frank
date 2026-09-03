@@ -48,6 +48,17 @@ COPY apps/window/mini ./mini
 COPY apps/window/connections_agent.py .
 COPY apps/window/provider_adapters.py .
 COPY apps/window/vault_broker.py .
+COPY apps/window/workspace_foundation.py .
+COPY apps/window/work_api.py .
+COPY apps/window/work_cron.py .
+COPY apps/window/work_providers.py .
+COPY apps/window/work_routines.py .
+COPY apps/window/work_service.py .
+COPY apps/window/work_state.py .
+COPY apps/window/work_tools.py .
+COPY apps/window/kanban_bridge_port.py .
+COPY apps/window/hermes_adapter ./hermes_adapter
+COPY apps/window/infra ./infra
 COPY apps/window/tool_apps ./tool_apps
 COPY apps/window/tools ./tools
 COPY apps/window/graph ./graph
