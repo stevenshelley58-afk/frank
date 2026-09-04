@@ -50,7 +50,7 @@ class OpsArchitectureTest(unittest.TestCase):
                 "schema": "schema://frank.ops.customer-summary/v1", "version": 1,
                 "projection": "customers", "project_id": "blockwise",
                 "workspace_ids": receipt["workspace_ids"],
-                "source_scope": {"project_id": "blockwise", "workspace_ids": receipt["workspace_ids"]},
+                "source_scope": {"project_id": "blockwise", "workspace_ids": receipt["workspace_ids"], "system": "customers"},
                 "source_revision": "hermes-test", "source_receipt_ids": receipt["source_receipt_ids"],
                 "publication_receipt_id": "receipt:ops/test",
                 "published_at": "2026-09-04T00:00:00Z", "fresh_until": "2099-01-01T00:00:00Z",
