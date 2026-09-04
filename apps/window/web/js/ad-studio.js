@@ -1,6 +1,6 @@
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260830-ad-studio-route-v1";
-import { mergeAdStudioRun, mergeAdStudioRunList, runListRenderSignature } from "./ad-studio-state.js?v=20260904-history-models-v1";
+import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, runListRenderSignature, runTimestamp } from "./ad-studio-state.js?v=20260904-run-history-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -50,13 +50,14 @@ const canonicalStage = (stage) => {
 
 
 function runStatusLabel(status) {
-  return ({ queued: "Queued", started: "Starting", running: "Running", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Starting";
+  return ({ queued: "Running", started: "Running", running: "Running", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Running";
 }
 
-function dateLabel(seconds) {
-  if (!seconds) return "";
+function dateLabel(value) {
+  const timestamp = runTimestamp(value);
+  if (!timestamp) return "";
   try {
-    return new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(seconds * 1000));
+    return new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(timestamp));
   } catch { return ""; }
 }
 
@@ -227,9 +228,20 @@ function updateSourceStatus(key, status, options = {}) {
 
 function renderRunOptions() {
   const select = $("#ad-pipeline-run");
+  if (!select) return;
   const previous = selectedRunId || select.value;
   select.replaceChildren(new Option("No run selected", ""));
-  for (const run of runs) select.append(new Option(run.title || "Ad Studio job", run.id));
+  for (const group of groupAdStudioRuns(runs)) {
+    const options = document.createElement("optgroup");
+    options.label = [group.sourceLabel, group.templateLabel].filter(Boolean).join(" · ");
+    const supersededIds = new Set(group.superseded.map((run) => run.id));
+    group.attempts.forEach((run, index) => {
+      const historyState = index === 0 ? "Current" : (supersededIds.has(run.id) ? "Superseded" : "Previous");
+      const date = dateLabel(run.updated_at || run.created_at);
+      options.append(new Option([historyState, runStatusLabel(run.status), date].filter(Boolean).join(" · "), run.id));
+    });
+    select.append(options);
+  }
   if (runs.some((run) => run.id === previous)) select.value = previous;
 }
 
@@ -244,6 +256,29 @@ function clearRunSelection() {
   updateEvidence();
 }
 
+function createRunRow(run, { current = false, superseded = false } = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `ad-run-row${run.id === selectedRunId ? " is-on" : ""}`;
+  button.dataset.status = clean(run.status).toLowerCase();
+  button.dataset.historyState = current ? "current" : (superseded ? "superseded" : "previous");
+  const dot = document.createElement("i");
+  dot.setAttribute("aria-hidden", "true");
+  const copy = document.createElement("span");
+  copy.className = "ad-run-row-copy";
+  const title = document.createElement("strong");
+  title.textContent = String(run.title || "Ad Studio job").replace(/^Ad Studio\s*[·|-]?\s*/, "") || "Job";
+  const meta = document.createElement("span");
+  const project = projects.find((item) => item.id === run.project_id);
+  meta.textContent = [project?.name || run.project_id || "Workspace", runStatusLabel(run.status), current ? "Current" : ""].filter(Boolean).join(" · ");
+  copy.append(title, meta);
+  const time = document.createElement("time");
+  time.textContent = dateLabel(run.updated_at || run.created_at);
+  button.append(dot, copy, time);
+  button.addEventListener("click", () => void selectRun(run.id));
+  return button;
+}
+
 function renderRuns() {
   const host = $("#ad-runs-list");
   host.replaceChildren();
@@ -255,25 +290,33 @@ function renderRuns() {
     renderRunOptions();
     return;
   }
-  for (const run of runs) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `ad-run-row${run.id === selectedRunId ? " is-on" : ""}`;
-    const dot = document.createElement("i");
-    dot.setAttribute("aria-hidden", "true");
-    const copy = document.createElement("span");
-    copy.className = "ad-run-row-copy";
-    const title = document.createElement("strong");
-    title.textContent = String(run.title || "Ad Studio job").replace(/^Ad Studio\s*[·|-]?\s*/, "") || "Job";
-    const meta = document.createElement("span");
-    const project = projects.find((item) => item.id === run.project_id);
-    meta.textContent = `${project?.name || run.project_id || "Workspace"} · ${runStatusLabel(run.status)}`;
-    copy.append(title, meta);
-    const time = document.createElement("time");
-    time.textContent = dateLabel(run.updated_at);
-    button.append(dot, copy, time);
-    button.addEventListener("click", () => void selectRun(run.id));
-    host.append(button);
+  for (const group of groupAdStudioRuns(runs)) {
+    const section = document.createElement("section");
+    section.className = "ad-run-group";
+    const heading = document.createElement("div");
+    heading.className = "ad-run-group-heading";
+    const source = document.createElement("strong");
+    source.textContent = group.sourceLabel;
+    source.title = group.sourceLabel;
+    const context = document.createElement("span");
+    const attempts = `${group.attempts.length} attempt${group.attempts.length === 1 ? "" : "s"}`;
+    context.textContent = [attempts, group.templateLabel].filter(Boolean).join(" · ");
+    heading.append(source, context);
+    section.append(heading, createRunRow(group.primary, { current: true }));
+    group.history.forEach((run) => section.append(createRunRow(run)));
+    if (group.superseded.length) {
+      const disclosure = document.createElement("details");
+      disclosure.className = "ad-run-superseded";
+      disclosure.open = group.superseded.some((run) => run.id === selectedRunId);
+      const summary = document.createElement("summary");
+      summary.textContent = `Superseded attempts (${group.superseded.length})`;
+      const attemptsList = document.createElement("div");
+      attemptsList.className = "ad-run-superseded-list";
+      group.superseded.forEach((run) => attemptsList.append(createRunRow(run, { superseded: true })));
+      disclosure.append(summary, attemptsList);
+      section.append(disclosure);
+    }
+    host.append(section);
   }
   renderRunOptions();
 }
@@ -700,7 +743,10 @@ function connectRunEvents(run) {
     try {
       if (eventStream !== stream || selectedRunId !== run.id) return;
       const item = JSON.parse(event.data);
-      if (!runEvents.some((existing) => existing.sequence === item.sequence)) runEvents.push(item);
+      if (!runEvents.some((existing) => existing.sequence === item.sequence)) {
+        runEvents.push(item);
+        runEvents.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
+      }
       run = mergeAdStudioRun(runs.find((candidate) => candidate.id === run.id), run);
       if (["iteration.rendered", "iteration.compared"].includes(item.kind)) mergeIterationEvent(run, item);
       if (item.kind === "stage.started" && item.node_id) {
