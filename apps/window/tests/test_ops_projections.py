@@ -71,18 +71,18 @@ class OpsProjectionApiTest(unittest.TestCase):
         response = self.client.get("/api/ops/projections/customers")
         self.assertEqual(response.get_json()["status"], "error")
         stale = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
-        self.write("customers", [{"id": "cust_1", "workspace_id": WORKSPACE, "display_name": "A Customer", "email": "a@example.test", "notes": "must reject"}], fresh_until=stale)
+        self.write("customers", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "A Customer", "email": "a@example.test", "notes": "must reject"}], fresh_until=stale)
         self.assertEqual(self.client.get("/api/ops/projections/customers").get_json()["status"], "error")
-        self.write("customers", [{"id": "cust_1", "workspace_id": WORKSPACE, "display_name": "A Customer", "email": "a@example.test"}], fresh_until=stale)
+        self.write("customers", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "A Customer", "email": "a@example.test"}], fresh_until=stale)
         self.assertEqual(self.client.get("/api/ops/projections/customers").get_json()["status"], "stale")
 
     def test_customer_detail_correlates_safe_sections(self):
-        self.write("customers", [{"id": "cust_1", "workspace_id": WORKSPACE, "display_name": "A Customer", "email": "a@example.test"}])
-        self.write("email", [{"id": "mail_1", "customer_id": "cust_1", "workspace_id": WORKSPACE, "status": "delivered", "subject": "Welcome"}])
-        self.write("billing", [{"id": "sub_1", "customer_id": "cust_1", "workspace_id": WORKSPACE, "status": "active", "billing_access_state": "active"}])
-        self.store.record_action_receipt({"receipt_id": "receipt:ops/customer", "status": "completed", "target_id": "workspace:" + "cust_1"})
+        self.write("customers", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "A Customer", "email": "a@example.test"}])
+        self.write("email", [{"id": "mail_1", "customer_id": WORKSPACE, "workspace_id": WORKSPACE, "status": "delivered", "subject": "Welcome"}])
+        self.write("billing", [{"id": "sub_1", "customer_id": WORKSPACE, "workspace_id": WORKSPACE, "status": "active", "billing_access_state": "active"}])
+        self.store.record_action_receipt({"receipt_id": "receipt:ops/customer", "status": "completed", "target_id": "workspace:" + WORKSPACE})
         self.store.record_action_receipt({"receipt_id": "receipt:ops/other", "status": "completed", "target_id": "workspace:other"})
-        response = self.client.get("/api/ops/customers/cust_1")
+        response = self.client.get("/api/ops/customers/" + WORKSPACE)
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
         self.assertEqual(body["customer"]["email"], "a@example.test")
@@ -115,7 +115,7 @@ class OpsProjectionApiTest(unittest.TestCase):
         receipt = publish_bundle({
             "project_id": "blockwise", "workspace_ids": [WORKSPACE],
             "source_revision": "hermes-revision-1", "source_receipt_ids": ["receipt:ops/source-test"],
-            "projections": {**{name: [] for name in PROJECTION_SPECS}, "customers": [{"id": "cust-1", "workspace_id": WORKSPACE, "display_name": "Safe customer"}], "mautic": [{"id": "m-1", "customer_id": "cust-1", "workspace_id": WORKSPACE, "stage": "open"}]},
+            "projections": {**{name: [] for name in PROJECTION_SPECS}, "customers": [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "Safe customer"}], "mautic": [{"id": "m-1", "customer_id": WORKSPACE, "workspace_id": WORKSPACE, "stage": "open"}]},
         }, self.root, now=1_800_000_000, freshness_seconds=900)
         self.assertTrue(receipt.startswith("receipt:ops/"))
         self.assertTrue((self.root / "current.json").is_file())
@@ -154,6 +154,15 @@ class OpsProjectionApiTest(unittest.TestCase):
         }
         with self.assertRaisesRegex(ProjectionError, "source scope"):
             publish_bundle(bundle, self.root)
+
+    def test_store_rejects_rows_with_mismatched_identity_fields(self):
+        projections = {name: [] for name in PROJECTION_SPECS}
+        projections["customers"] = [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "Safe"}]
+        projections["email"] = [{"id": "mail-1", "workspace_id": WORKSPACE, "customer_id": "other-customer", "status": "delivered"}]
+        with self.assertRaisesRegex(ProjectionError, "failed projection validation"):
+            publish_bundle({"project_id": BLOCKWISE_PROJECT_ID, "workspace_ids": [WORKSPACE],
+                            "source_revision": "hermes-test-1", "source_receipt_ids": ["receipt:ops/source-test"],
+                            "projections": projections}, self.root, now=1_800_000_000)
 
     def test_safe_value_preserves_bounded_tags_and_segments_lists(self):
         self.assertEqual(_safe_value({"tags": ["trial", "priority"], "segments": ["au"]}), {"tags": ["trial", "priority"], "segments": ["au"]})
@@ -390,12 +399,12 @@ class OpsProjectionApiTest(unittest.TestCase):
         self.assertEqual(store.load("customers").status, "stale")
 
     def test_global_enquiry_queue_is_separate_and_never_correlates(self):
-        self.write("customers", [{"id": "cust-1", "workspace_id": WORKSPACE, "display_name": "Customer"}])
+        self.write("customers", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "Customer"}])
         self.write("enquiries", [{"id": "global-1", "workspace_id": None, "status": "new"},
-                                  {"id": "assigned-1", "workspace_id": WORKSPACE, "customer_id": "cust-1", "status": "open"}])
+                                  {"id": "assigned-1", "workspace_id": WORKSPACE, "customer_id": WORKSPACE, "status": "open"}])
         body = self.client.get("/api/ops/enquiries/unassigned").get_json()
         self.assertEqual(body["status"], "ready")
         self.assertEqual([row["id"] for row in body["enquiries"]], ["global-1"])
-        self.assertEqual(self.client.get("/api/ops/customers/cust-1").get_json()["sections"]["enquiries"][0]["id"], "assigned-1")
+        self.assertEqual(self.client.get("/api/ops/customers/" + WORKSPACE).get_json()["sections"]["enquiries"][0]["id"], "assigned-1")
 if __name__ == "__main__":
     unittest.main()

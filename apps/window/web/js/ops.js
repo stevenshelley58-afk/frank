@@ -23,10 +23,24 @@ function emptyState(title, message, className = "") {
   return `<div class="ops-empty ${className}"><strong>${esc(title)}</strong><span>${esc(message)}</span></div>`;
 }
 
+const ARRAY_FIELDS = new Set(["tags", "segments", "preferences", "suppressions", "email_preferences", "email_suppressions", "source_receipt_ids"]);
+const SCALAR_STATE_FIELDS = new Set(["consent_state", "suppression_state", "email_consent_state", "email_suppression_state"]);
+function displayFieldValue(key, value) {
+  if (ARRAY_FIELDS.has(key) && Array.isArray(value)) {
+    return value.slice(0, 20).map((item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean" ? String(item) : "").filter(Boolean).join(", ") || "None recorded";
+  }
+  if (SCALAR_STATE_FIELDS.has(key) && value && typeof value === "object" && !Array.isArray(value)) {
+    return Object.entries(value).slice(0, 8).map(([name, item]) => `${name}: ${typeof item === "string" || typeof item === "number" || typeof item === "boolean" ? item : "—"}`).join(" · ") || "None recorded";
+  }
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
+  return null;
+}
+
 function fields(row) {
   const skip = new Set(["id", "customer_id"]);
-  return Object.entries(row || {}).filter(([key, value]) => !skip.has(key) && value !== null && value !== "" && typeof value !== "object")
-    .slice(0, 8).map(([key, value]) => `<div><dt>${esc(label(key))}</dt><dd>${esc(value)}</dd></div>`).join("");
+  return Object.entries(row || {}).map(([key, value]) => [key, displayFieldValue(key, value)])
+    .filter(([key, value]) => !skip.has(key) && value !== null && value !== "")
+    .slice(0, 12).map(([key, value]) => `<div><dt>${esc(label(key))}</dt><dd>${esc(value)}</dd></div>`).join("");
 }
 
 function sectionRows(rows, name, state = "ready") {

@@ -765,6 +765,8 @@ class OpsProjectionStore:
                     continue
                 if not isinstance(item_workspace, str) or not _UUID.fullmatch(item_workspace) or item_workspace not in workspace_ids:
                     raise ProjectionError("projection row is outside the configured workspace")
+                if "customer_id" in item and item.get("customer_id") is not None and item.get("customer_id") != item_workspace:
+                    raise ProjectionError("projection row customer_id does not match workspace_id")
             if name == "customers":
                 if len({item.get("id") for item in safe_items}) != len(safe_items):
                     raise ProjectionError("customers contains a duplicate customer")
