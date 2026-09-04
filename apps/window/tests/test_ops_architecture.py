@@ -55,7 +55,7 @@ class OpsArchitectureTest(unittest.TestCase):
         compose = (ROOT / "docker-compose.yml").read_text(encoding="utf-8")
         deploy = (ROOT / "deploy.sh").read_text(encoding="utf-8")
         installer = (ROOT / "infra" / "control_plane" / "install.sh").read_text(encoding="utf-8")
-        self.assertIn("/ops-projections:ro", compose)
+        self.assertIn("/srv/frank/data/ops-projections:/ops-projections:ro", compose)
         self.assertNotIn("BLOCKWISE_OPS_BASE_URL", compose + deploy + installer)
         self.assertNotIn("BLOCKWISE_INTERNAL_AUTH_SECRET_FILE", compose + deploy + installer)
         self.assertNotIn("frank-ops-projections", compose + deploy + installer)

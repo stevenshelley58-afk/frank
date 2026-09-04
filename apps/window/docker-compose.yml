@@ -45,7 +45,9 @@ services:
       - "127.0.0.1:18080:8080"
     volumes:
       - /srv/frank/data/window:/data
-      - /srv/frank/data/window/ops-projections:/ops-projections:ro
+      # Keep the source outside Frank's writable /data bind: the Window
+      # process cannot reach the Hermes-owned bundle through another path.
+      - /srv/frank/data/ops-projections:/ops-projections:ro
       - /srv/frank/secrets/hermes-api-key:/srv/frank/secrets/hermes-api-key:ro
       - /srv/frank/previews/mini:/previews/mini
       - /projects/mini-frank/customer-projects:/legacy-mini-projects
