@@ -32,6 +32,7 @@ from memory_inspector import HindsightClient, MemoryInspector, create_blueprint 
 from project_store import ProjectStore, ProjectStoreError
 import vault_broker
 import control_plane_view
+import ops_projections
 from graph.provider import (
     ReadOnlyProvider,
     ProviderUnavailable,
@@ -105,7 +106,9 @@ AD_STUDIO_MAX_BATCH_BYTES = min(
     max(AD_STUDIO_MAX_SOURCE_BYTES, int(os.environ.get("AD_STUDIO_MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
 )
 AD_STUDIO_MAX_BRIEF_CHARACTERS = 4000
-HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
+# HERMES_ENDPOINT is the canonical dispatcher contract; retain the legacy
+# variable only as an explicit compatibility fallback for older deployments.
+HERMES_URL = os.environ.get("HERMES_ENDPOINT", os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642")).rstrip("/")
 HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
 HINDSIGHT_URL = os.environ.get("HINDSIGHT_API_URL", "http://172.16.1.1:9178").rstrip("/")
@@ -2777,6 +2780,7 @@ home_platform.configure(
 app.register_blueprint(home_platform.api)
 app.register_blueprint(create_graph_blueprint(_graph_provider))
 app.register_blueprint(control_plane_view.api)
+app.register_blueprint(ops_projections.create_blueprint())
 app.register_blueprint(vault_broker.api)
 app.register_blueprint(create_memory_blueprint(MemoryInspector(
     _project_store.get_project,

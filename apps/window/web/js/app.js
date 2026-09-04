@@ -14,6 +14,7 @@ import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
+import { mountOps } from "./ops.js?v=20260904-ops-v1";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -33,6 +34,7 @@ const TITLES = {
   live: ["Live", "Pinned AgentTrail activity"],
   map: ["Map", "Validated Archify projections"],
   control: ["Control", "Evidence-backed read-only records"],
+  ops: ["Customer Ops", "Blockwise customer signal · Hermes projections"],
 };
 
 let projects = { projects: [] };
@@ -60,6 +62,7 @@ function show(id, { syncHistory = true } = {}) {
   if (id === "live") void mountLive($("#operate-live"));
   if (id === "map") void mountMap($("#operate-map"));
   if (id === "control") void mountControl($("#operate-control"));
+  if (id === "ops") void mountOps($("#operate-ops"));
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
@@ -104,7 +107,7 @@ $$(".rail-item[data-view]").forEach((b) =>
       chatScrollBottom();
     }
     else if (v === "ad-studio") { show(v); mountAdStudio(); }
-    else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); }
+    else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); if (v === "ops") void mountOps($("#operate-ops")); }
   })
 );
 
