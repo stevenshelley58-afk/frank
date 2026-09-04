@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260831-ad-studio-batch">
+<link rel="stylesheet" href="/app.css?v=20260904-run-history-v1">
 </head>
 <body>
 <div class="app">
@@ -210,7 +210,20 @@
 
           <div class="ad-studio-panel" id="ad-panel-runs" role="tabpanel" aria-labelledby="ad-tab-runs" data-ad-panel="runs" hidden>
             <div class="ad-runs-layout">
-              <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><h3>Run history</h3><p>Durable jobs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div><div class="ad-runs-list" id="ad-runs-list"></div></section>
+              <section class="ad-runs-list-panel">
+                <div class="ad-section-heading"><div><h3>Run history</h3><p>Durable jobs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div>
+                <details class="ad-run-status-guide">
+                  <summary>What the statuses mean</summary>
+                  <dl>
+                    <div><dt>Running</dt><dd>Hermes is building or reviewing the current run.</dd></div>
+                    <div><dt>Complete</dt><dd>The run finished and its artifacts remain available.</dd></div>
+                    <div><dt>Failed</dt><dd>The run stopped before completion; open it for the recorded failure.</dd></div>
+                    <div><dt>Cancelled</dt><dd>The run was deliberately stopped and its evidence was retained.</dd></div>
+                    <div><dt>Superseded</dt><dd>An older failed or cancelled attempt kept after a newer attempt became current.</dd></div>
+                  </dl>
+                </details>
+                <div class="ad-runs-list" id="ad-runs-list"></div>
+              </section>
               <section class="ad-run-detail" id="ad-run-detail"><div class="ad-empty"><strong>Select a run</strong><span>Open a run to inspect every iteration, comparator score and final review.</span></div></section>
             </div>
           </div>
@@ -443,6 +456,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260904-history-models-v1"></script>
+<script type="module" src="/js/app.js?v=20260904-run-history-v1"></script>
 </body>
 </html>
