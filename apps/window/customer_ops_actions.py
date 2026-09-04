@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from flask import Blueprint, jsonify, request
+from werkzeug.exceptions import RequestEntityTooLarge
 
 from ops_projections import OpsProjectionStore, ProjectionError, _UUID
 
@@ -47,7 +48,13 @@ TARGET_TYPES = {
 }
 IDEMPOTENCY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/-]{7,255}$")
 CORRELATION = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
-ACTION_STATUSES = frozenset({"queued", "processing", "succeeded", "permanent_failed", "retryable", "unavailable", "accepted", "completed", "failed"})
+CONTROL_STATUSES = frozenset({"pending", "processing", "completed", "failed", "expired", "superseded", "rejected", "queued", "succeeded", "permanent_failed", "retryable", "unavailable", "accepted"})
+STATUS_MAP = {
+    "pending": "queued", "queued": "queued", "processing": "processing",
+    "completed": "succeeded", "succeeded": "succeeded", "failed": "permanent_failed",
+    "expired": "permanent_failed", "superseded": "permanent_failed", "rejected": "permanent_failed",
+    "permanent_failed": "permanent_failed", "retryable": "retryable", "unavailable": "unavailable", "accepted": "accepted",
+}
 ROLE = frozenset({"owner", "support"})
 
 
@@ -98,6 +105,14 @@ def _safe_file(path_text: str, *, name: str, max_bytes: int = 4096) -> str:
             # or control, while remaining portable to CI and root-run images.
             if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
                 raise CustomerOpsActionError(f"{name} file owner is invalid")
+            parent = path.parent
+            parent_info = parent.stat()
+            if not stat.S_ISDIR(parent_info.st_mode) or parent.is_symlink():
+                raise CustomerOpsActionError(f"{name} parent directory is invalid")
+            if parent_info.st_mode & 0o077:
+                raise CustomerOpsActionError(f"{name} parent directory permissions are too broad")
+            if hasattr(os, "geteuid") and parent_info.st_uid != os.geteuid():
+                raise CustomerOpsActionError(f"{name} parent directory owner is invalid")
         value = path.read_text(encoding="utf-8").strip()
     except CustomerOpsActionError:
         raise
@@ -128,6 +143,11 @@ def _operator() -> tuple[str, str]:
 
 
 def _json_body(response: Any) -> Mapping[str, Any]:
+    headers = getattr(response, "headers", None)
+    if headers is not None:
+        content_type = str(headers.get("Content-Type", "")).split(";", 1)[0].strip().lower()
+        if content_type != "application/json" and not content_type.endswith("+json"):
+            raise CustomerOpsActionError("control edge returned an invalid content type")
     raw = response.read(CONTROL_MAX_BODY + 1)
     if len(raw) > CONTROL_MAX_BODY:
         raise CustomerOpsActionError("control edge response exceeded its bound")
@@ -166,12 +186,22 @@ class CustomerOpsControlClient:
         req = urllib.request.Request(origin + path, data=body.encode("utf-8") if method.upper() != "GET" else None, method=method.upper(), headers=headers)
         try:
             with self.opener(req, timeout=15) as response:
-                status = int(getattr(response, "status", 200))
+                try:
+                    status = int(getattr(response, "status", 200))
+                except (TypeError, ValueError) as status_error:
+                    raise CustomerOpsActionError("control edge returned an invalid HTTP status") from status_error
                 payload = _json_body(response)
                 final_url = response.geturl() if hasattr(response, "geturl") else origin + path
-            parsed = urllib.parse.urlsplit(final_url)
-            if urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", "")) != origin or parsed.path != path.split("?", 1)[0]:
+            if not _final_url_is_same_origin(origin, path, final_url):
                 raise CustomerOpsActionError("control edge redirect is invalid")
+        except urllib.error.HTTPError as error:
+            if not _final_url_is_same_origin(origin, path, error.geturl()):
+                raise CustomerOpsActionError("control edge redirect is invalid")
+            try:
+                payload = _json_body(error)
+            except (CustomerOpsActionError, OSError, urllib.error.URLError, TimeoutError) as body_error:
+                raise CustomerOpsActionError("control edge returned an invalid error") from body_error
+            return int(error.code), payload
         except CustomerOpsActionError:
             raise
         except (OSError, urllib.error.URLError, TimeoutError) as error:
@@ -182,41 +212,85 @@ class CustomerOpsControlClient:
         status, body = self._request("POST", "/v1/control/actions", json.dumps(envelope, separators=(",", ":"), ensure_ascii=False), "ops.write")
         if status == 501:
             raise CustomerOpsActionError("this action is unavailable", 501)
-        if status < 200 or status >= 300:
-            raise CustomerOpsActionError("action was not accepted by the control edge", 409 if status == 409 else 503)
+        if status != 202:
+            raise CustomerOpsActionError("action was not accepted by the control edge", _error_status(status))
+        if set(body) != {"schema", "actionId", "status", "capability", "correlationId"} or body.get("schema") != ACTION_SCHEMA:
+            raise CustomerOpsActionError("control edge returned an invalid action receipt")
         action_id = body.get("actionId")
         if not isinstance(action_id, str) or not _UUID.fullmatch(action_id):
             raise CustomerOpsActionError("control edge returned an invalid action receipt")
-        return {"schema": RECEIPT_SCHEMA, "action_id": action_id.lower(), "status": str(body.get("status") or "queued"), "correlation_id": _clean_correlation(body.get("correlationId"))}
+        raw_status = body.get("status")
+        if not isinstance(raw_status, str) or raw_status not in CONTROL_STATUSES:
+            raise CustomerOpsActionError("control edge returned an invalid action status")
+        if body.get("capability") != "available":
+            raise CustomerOpsActionError("this action is unavailable", 501)
+        correlation_id = _clean_correlation(body.get("correlationId"))
+        if correlation_id is None:
+            raise CustomerOpsActionError("control edge returned an invalid correlation")
+        return {"schema": RECEIPT_SCHEMA, "action_id": action_id.lower(), "status": STATUS_MAP[raw_status], "correlation_id": correlation_id}
 
     def status(self, action_id: str, workspace_id: str) -> Mapping[str, Any]:
         path = f"/v1/control/actions/{action_id}"
         code, body = self._request("GET", path, "", "ops.read", workspace_id=workspace_id)
         if code == 404:
             raise CustomerOpsActionError("action receipt was not found", 404)
-        if code < 200 or code >= 300:
-            raise CustomerOpsActionError("action receipt is unavailable", 503)
-        if body.get("actionId") != action_id or body.get("workspaceId") not in {None, workspace_id}:
+        if code != 200:
+            raise CustomerOpsActionError("action receipt is unavailable", _error_status(code))
+        expected_keys = {"actionId", "workspaceId", "status", "receiptIds", "latestReceipt", "correlationId"}
+        if set(body) != expected_keys:
+            raise CustomerOpsActionError("control edge returned an invalid action receipt")
+        if _uuid(body.get("actionId"), "action_id") != action_id or _uuid(body.get("workspaceId"), "workspace_id") != workspace_id:
             raise CustomerOpsActionError("action receipt scope is invalid")
-        status = str(body.get("status") or "unavailable")
-        if status not in ACTION_STATUSES:
-            status = "unavailable"
+        raw_status = body.get("status")
+        if not isinstance(raw_status, str) or raw_status not in CONTROL_STATUSES:
+            raise CustomerOpsActionError("control edge returned an invalid action status")
+        status = STATUS_MAP[raw_status]
+        receipt_ids = body.get("receiptIds")
+        if not isinstance(receipt_ids, list) or len(receipt_ids) > 50 or any(not isinstance(value, str) or not _UUID.fullmatch(value) for value in receipt_ids):
+            raise CustomerOpsActionError("control edge returned invalid receipt ids")
         latest = body.get("latestReceipt")
         safe_latest = None
         if isinstance(latest, Mapping):
             # Receipt detail is provider-owned and may contain customer PII or
             # raw error payloads.  Frank only needs the bounded transition
             # metadata to render a truthful status and retry affordance.
-            safe_latest = {
-                key: latest[key]
-                for key in ("receipt_id", "status", "transition_seq", "created_at")
-                if key in latest and isinstance(latest[key], (str, int, float, bool, type(None)))
-            }
-        return {"schema": RECEIPT_SCHEMA, "action_id": action_id, "workspace_id": workspace_id, "status": status, "receipt_ids": [value for value in body.get("receiptIds", []) if isinstance(value, str)][:50], "latest_receipt": safe_latest, "correlation_id": _clean_correlation(body.get("correlationId"))}
+            if set(latest) - {"receipt_id", "status", "transition_seq", "created_at", "safe_result", "safe_error"}:
+                raise CustomerOpsActionError("control edge returned an invalid receipt")
+            receipt_id = latest.get("receipt_id")
+            receipt_status = latest.get("status")
+            transition_seq = latest.get("transition_seq")
+            created_at = latest.get("created_at")
+            if not isinstance(receipt_id, str) or not _UUID.fullmatch(receipt_id) or not isinstance(receipt_status, str) or receipt_status not in CONTROL_STATUSES or isinstance(transition_seq, bool) or not isinstance(transition_seq, int) or transition_seq < 1 or transition_seq > 2**63 - 1 or not isinstance(created_at, str) or len(created_at) > 128:
+                raise CustomerOpsActionError("control edge returned an invalid receipt")
+            safe_latest = {"receipt_id": receipt_id, "status": STATUS_MAP[receipt_status], "transition_seq": transition_seq, "created_at": created_at}
+        elif latest is not None:
+            raise CustomerOpsActionError("control edge returned an invalid receipt")
+        correlation_id = _clean_correlation(body.get("correlationId"))
+        if correlation_id is None:
+            raise CustomerOpsActionError("control edge returned an invalid correlation")
+        return {"schema": RECEIPT_SCHEMA, "action_id": action_id, "workspace_id": workspace_id, "status": status, "receipt_ids": receipt_ids, "latest_receipt": safe_latest, "correlation_id": correlation_id}
 
 
 def _clean_correlation(value: Any) -> str | None:
     return value if isinstance(value, str) and CORRELATION.fullmatch(value) else None
+
+
+def _final_url_is_same_origin(origin: str, path: str, final_url: str) -> bool:
+    if not isinstance(final_url, str):
+        return False
+    parsed = urllib.parse.urlsplit(final_url)
+    expected = urllib.parse.urlsplit("https://control.invalid" + path)
+    return urllib.parse.urlunsplit((parsed.scheme, parsed.netloc, "", "", "")) == origin and parsed.path == expected.path and parsed.query == expected.query and not parsed.fragment
+
+
+def _error_status(status: int) -> int:
+    if status == 501:
+        return 501
+    if status == 409:
+        return 409
+    if status in {400, 401, 403, 404, 422}:
+        return status
+    return 503
 
 
 def _uuid(value: Any, label: str) -> str:
@@ -279,26 +353,38 @@ def _make_envelope(body: Mapping[str, Any], *, operator_id: str, role: str, stor
     customer = next((row for row in snapshot["customers"].items if row.get("id") == customer_id), None)
     if customer is None:
         raise CustomerOpsActionError("customer is not in the current projection", 404)
+    if action == "team_invite" and customer.get("ops_version") != version:
+        raise CustomerOpsActionError("customer workspace version is stale", 409)
     if action == "enquiry_assign":
         enquiry = next((row for row in snapshot["enquiries"].items if row.get("id") == target_id), None)
-        if not enquiry or enquiry.get("workspace_id") is not None:
+        if not enquiry or enquiry.get("workspace_id") is not None or enquiry.get("ops_version") != version:
             raise CustomerOpsActionError("only an exact unassigned enquiry can be associated", 409)
         if payload["assigneeProfileId"] is not None and not any(row.get("profile_id") == payload["assigneeProfileId"] and row.get("workspace_id") == workspace_id for row in snapshot["members"].items):
             raise CustomerOpsActionError("assignee is not a member of the selected workspace", 409)
     elif action == "billing_reconcile":
-        if not any(row.get("id") == target_id and row.get("customer_id") == customer_id for row in snapshot["billing"].items):
-            raise CustomerOpsActionError("billing target is not in the selected workspace", 409)
+        if target_id != customer_id or not any(
+            row.get("id") == customer_id
+            and row.get("workspace_id") == customer_id
+            and row.get("customer_id") == customer_id
+            and row.get("ops_version") == version
+            for row in snapshot["billing"].items
+        ):
+            raise CustomerOpsActionError("billing target is not the authoritative workspace state", 409)
     elif action in {"team_resend", "team_cancel"}:
-        if not any(row.get("id") == target_id and row.get("customer_id") == customer_id and str(row.get("status", "")).lower() in {"invited", "pending"} for row in snapshot["members"].items):
+        if not any(row.get("id") == target_id and row.get("customer_id") == customer_id and row.get("ops_version") == version and str(row.get("status", "")).lower() in {"invited", "pending"} for row in snapshot["members"].items):
             raise CustomerOpsActionError("invitation target is not pending in the current projection", 409)
     elif action == "session_revoke":
+        # Blockwise's executor revokes sessions by profile id. Audit/activity
+        # rows are evidence only and must never be treated as session targets.
         if not any(
-            row.get("id") == target_id
+            row.get("profile_id") == target_id
+            and row.get("workspace_id") == workspace_id
             and row.get("customer_id") == customer_id
-            and str(row.get("kind", "")).lower() == "session"
-            for row in snapshot["activity"].items
+            and row.get("ops_version") == version
+            and str(row.get("status", "active")).lower() not in {"revoked", "removed"}
+            for row in snapshot["members"].items
         ):
-            raise CustomerOpsActionError("session target is not in the current customer activity", 409)
+            raise CustomerOpsActionError("session target is not an active workspace member", 409)
     envelope = {
         "schema": ACTION_SCHEMA, "actionId": str(uuid.uuid4()), "idempotencyKey": str(body.get("idempotency_key") or "ops:" + secrets.token_urlsafe(18)),
         "workspaceId": workspace_id, "customerId": customer_id,
@@ -323,8 +409,15 @@ def create_blueprint(*, store: OpsProjectionStore | None = None, client_factory=
 
     @api.post("/api/ops/customer-actions")
     def enqueue_action():
-        if request.mimetype != "application/json" or request.content_length and request.content_length > REQUEST_MAX_BODY:
-            return jsonify({"schema": RECEIPT_SCHEMA, "status": "unavailable", "error": "application_json_and_bounded_body_required"}), 415
+        request._max_content_length = REQUEST_MAX_BODY
+        try:
+            raw = request.get_data(cache=True, as_text=False)
+        except RequestEntityTooLarge:
+            return jsonify({"schema": RECEIPT_SCHEMA, "status": "unavailable", "error": "request_body_too_large"}), 413
+        if len(raw) > REQUEST_MAX_BODY:
+            return jsonify({"schema": RECEIPT_SCHEMA, "status": "unavailable", "error": "request_body_too_large"}), 413
+        if request.mimetype != "application/json":
+            return jsonify({"schema": RECEIPT_SCHEMA, "status": "unavailable", "error": "application_json_required"}), 415
         # The app is normally behind Caddy's authenticated operator route,
         # but this mutation endpoint also enforces same-origin semantics so a
         # cross-site browser can never turn an operator session into an action.

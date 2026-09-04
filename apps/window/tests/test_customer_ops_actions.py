@@ -4,12 +4,15 @@ import json
 import os
 import tempfile
 import unittest
+import urllib.error
+from io import BytesIO
+from email.message import Message
 from pathlib import Path
 from unittest.mock import patch
 
 from flask import Flask
 
-from customer_ops_actions import CustomerOpsControlClient, create_blueprint
+from customer_ops_actions import CustomerOpsActionError, CustomerOpsControlClient, _secret, create_blueprint
 from ops_projections import ProjectionSnapshot
 
 WORKSPACE = "123e4567-e89b-12d3-a456-426614174000"
@@ -21,7 +24,7 @@ class FakeStore:
     def __init__(self):
         self.snapshots = {name: ProjectionSnapshot(name, "ready", []) for name in ("customers", "email", "flows", "mautic", "enquiries", "bookings", "billing", "activity", "members")}
         self.snapshots["customers"] = ProjectionSnapshot("customers", "ready", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "ops_version": 7}])
-        self.snapshots["billing"] = ProjectionSnapshot("billing", "ready", [{"id": "123e4567-e89b-12d3-a456-426614174003", "workspace_id": WORKSPACE, "customer_id": WORKSPACE, "ops_version": 2}])
+        self.snapshots["billing"] = ProjectionSnapshot("billing", "ready", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "customer_id": WORKSPACE, "ops_version": 2}])
 
     def all(self):
         return self.snapshots
@@ -39,8 +42,10 @@ class FakeClient:
 class Response:
     status = 200
 
-    def __init__(self, body, url="https://control.example/v1/control/actions"):
-        self.body, self.url = body, url
+    def __init__(self, body, url="https://control.example/v1/control/actions", status=200):
+        self.body, self.url, self.status = body, url, status
+        self.headers = Message()
+        self.headers["Content-Type"] = "application/json"
 
     def __enter__(self):
         return self
@@ -84,7 +89,7 @@ class CustomerOpsActionsTest(unittest.TestCase):
     def test_action_is_typed_scoped_and_operator_fields_are_server_derived(self):
         response = self.client.post("/api/ops/customer-actions", json={
             "action": "billing_reconcile", "workspace_id": WORKSPACE, "customer_id": WORKSPACE,
-            "target_type": "billing", "target_id": "123e4567-e89b-12d3-a456-426614174003",
+            "target_type": "billing", "target_id": WORKSPACE,
             "expected_version": 2, "reason": "Review failed invoice state", "payload": {},
         })
         self.assertEqual(response.status_code, 202)
@@ -124,8 +129,8 @@ class CustomerOpsActionsTest(unittest.TestCase):
         def opener(req, timeout):
             return Response(json.dumps({
                 "actionId": ACTION, "workspaceId": WORKSPACE, "status": "succeeded",
-                "receiptIds": ["receipt-1"], "correlationId": "corr-12345678",
-                "latestReceipt": {"receipt_id": "receipt-1", "status": "succeeded", "transition_seq": 2,
+                "receiptIds": [ACTION], "correlationId": "corr-12345678",
+                "latestReceipt": {"receipt_id": ACTION, "status": "succeeded", "transition_seq": 2,
                                    "created_at": "2026-09-05T00:00:00Z", "safe_result": {"email": "pii@example.test"},
                                    "safe_error": {"provider": "secret"}},
             }).encode(), url=f"https://control.example/v1/control/actions/{ACTION}")
@@ -140,7 +145,10 @@ class CustomerOpsActionsTest(unittest.TestCase):
 
         def opener(req, timeout):
             seen.append(req)
-            return Response(b'{"actionId":"' + ACTION.encode() + b'","status":"queued"}')
+            return Response(json.dumps({
+                "schema": "blockwise.ops.action.v1", "actionId": ACTION,
+                "status": "pending", "capability": "available", "correlationId": "corr-12345678",
+            }).encode(), status=202)
 
         now = 1_800_000_000
         with patch.dict(os.environ, {"FRANK_OPS_CONTROL_URL": "https://control.example"}):
@@ -152,6 +160,57 @@ class CustomerOpsActionsTest(unittest.TestCase):
         canonical = "\n".join(("v1", req.get_header("X-blockwise-timestamp"), req.get_header("X-blockwise-nonce"), "ops.write", "POST", "/v1/control/actions", hashlib.sha256(body.encode()).hexdigest()))
         secret = "s" * 48
         self.assertEqual(req.get_header("X-blockwise-signature"), hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest())
+
+    def test_http_error_status_is_preserved_and_detail_is_not_exposed(self):
+        headers = Message()
+        headers["Content-Type"] = "application/json"
+
+        def opener(req, timeout):
+            raise urllib.error.HTTPError(req.full_url, 409, "conflict", headers, BytesIO(b'{"error":"stale"}'))
+
+        with patch.dict(os.environ, {"FRANK_OPS_CONTROL_URL": "https://control.example"}):
+            with self.assertRaisesRegex(Exception, "action was not accepted") as caught:
+                CustomerOpsControlClient(opener=opener, clock=lambda: 1_800_000_000).enqueue({})
+        self.assertEqual(caught.exception.status, 409)
+        self.assertNotIn("stale", str(caught.exception))
+
+    def test_success_requires_json_contract_and_exact_http_status(self):
+        def opener(req, timeout):
+            return Response(b'{"schema":"blockwise.ops.action.v1"}', status=200)
+
+        with patch.dict(os.environ, {"FRANK_OPS_CONTROL_URL": "https://control.example"}):
+            with self.assertRaises(CustomerOpsActionError):
+                CustomerOpsControlClient(opener=opener, clock=lambda: 1_800_000_000).enqueue({})
+
+        def wrong_content_type(req, timeout):
+            response = Response(b'{}', status=202)
+            response.headers["Content-Type"] = "text/plain"
+            return response
+
+        with patch.dict(os.environ, {"FRANK_OPS_CONTROL_URL": "https://control.example"}):
+            with self.assertRaises(CustomerOpsActionError):
+                CustomerOpsControlClient(opener=wrong_content_type, clock=lambda: 1_800_000_000).enqueue({})
+
+    def test_oversized_json_is_413_even_without_content_length(self):
+        app = Flask(__name__)
+        app.register_blueprint(create_blueprint(store=FakeStore(), client_factory=lambda: self.client_boundary))
+        response = app.test_client().post(
+            "/api/ops/customer-actions", data=b"{" + b"a" * 32768 + b"}", content_type="text/plain"
+        )
+        self.assertEqual(response.status_code, 413)
+
+    @unittest.skipIf(os.name == "nt", "POSIX file metadata is not portable to Windows")
+    def test_secret_parent_directory_is_owned_and_private(self):
+        # The fixture's secret parent is the TemporaryDirectory root.  A
+        # world-readable mount must fail closed even when the file itself is
+        # mode 0600 and owned by the runtime.
+        secret_path = Path(os.environ["FRANK_OPS_CONTROL_SECRET_FILE"])
+        secret_path.parent.chmod(0o755)
+        try:
+            with self.assertRaises(CustomerOpsActionError):
+                _secret()
+        finally:
+            secret_path.parent.chmod(0o700)
 
 
 if __name__ == "__main__":

@@ -51,7 +51,7 @@ they are not fetched by Frank.
 - `GET /api/ops/customers/<id>` — correlated customer sections
 - `GET /api/ops/enquiries/unassigned` — global/unassigned enquiries, never correlated to a customer
 - `GET /api/ops/activity?customer_id=<id>` — unified activity and receipt correlation
-- `POST /api/ops/actions` — forwards a typed request through the existing Hermes control/action boundary; it never calls a provider locally
+- `POST /api/ops/customer-actions` — forwards a typed request through the private Blockwise Control Edge; it never calls a provider locally
 
 ## Operator actions
 
@@ -64,11 +64,13 @@ used by the customer-ops controls.
 
 The available controls are deliberately narrow and optimistic-concurrency
 safe: invite, resend or cancel a pending teammate invitation; revoke an exact
-customer session; assign an exact global unassigned enquiry to a workspace
-member; and request billing reconciliation. Every action requires an explicit
-reason and the current projection version. Receipts are shown as queued,
-processing, succeeded, retryable, permanently failed, or unavailable; Frank
-does not present a local mutation as successful.
+customer session by the member's `profile_id`; assign an exact global
+unassigned enquiry to a workspace member; and request billing reconciliation
+against the authoritative workspace billing row. Every action requires an
+explicit reason, a target-specific `ops_version`, and an idempotency key. The
+Control Edge's `pending`/`completed`/failure states are mapped to Frank's
+queued/processing/succeeded/retryable/permanently failed/unavailable receipt
+states; Frank does not present a local mutation as successful.
 
 Replying to or closing enquiries, changing consent or roles, rescheduling or
 canceling bookings, and opening a billing portal are not exposed until the
@@ -80,8 +82,9 @@ operation request only; payment state remains provider-owned.
 Set `FRANK_OPS_CONTROL_URL`, `FRANK_OPS_OPERATOR_ROLE=support` or `owner`, and
 `FRANK_OPS_OPERATOR_AAL=aal2`. Mount two separate root-owned mode-0600 regular
 files at `FRANK_OPS_CONTROL_SECRET_FILE` and
-`FRANK_OPS_OPERATOR_ID_FILE`; symlinked paths and broad permissions are rejected
-at request time. The Control Edge must allow the Frank host's `ops.write` and
+`FRANK_OPS_OPERATOR_ID_FILE`; symlinked paths, non-owned parent directories,
+and broad file or parent-directory permissions are rejected at request time.
+The Control Edge must allow the Frank host's `ops.write` and
 `ops.read` HMAC scopes and expose the `blockwise.ops.action.v1` receipt API.
 Do not put secret values in `.env`, the browser bundle, projection files, or
 source control.
