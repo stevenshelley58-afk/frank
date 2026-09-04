@@ -200,7 +200,7 @@ class OpsProjectionApiTest(unittest.TestCase):
         self.assertEqual(bundle["workspace_ids"], [WORKSPACE, workspace_b])
         self.assertEqual(len(bundle["projections"]["customers"]), 2)
         self.assertEqual(bundle["projections"]["customers"][0]["email"], "owner@example.test")
-        self.assertEqual(bundle["projections"]["email"][0]["status"], "delivered")
+        self.assertEqual(next(row for row in bundle["projections"]["email"] if row.get("status") == "delivered")["status"], "delivered")
         self.assertTrue(bundle["projections"]["members"][0]["id"].startswith("member:"))
         self.assertIsNone(bundle["projections"]["flows"])
         self.assertNotIn("customer_id", bundle["projections"]["enquiries"][-1])
@@ -231,7 +231,8 @@ class OpsProjectionApiTest(unittest.TestCase):
         client = BlockwiseOpsClient("https://blockwise.example", "x" * 40, opener=opener, page_size=1)
         bundle = client.fetch_bundle()
         self.assertEqual(bundle["source_revision"], "blockwise-ops-read-v1")
-        self.assertIsNone(bundle["projections"]["email"])
+        self.assertEqual(bundle["projections"]["email"][0]["status"], "delivered")
+        self.assertEqual(bundle["projections"]["email"][1]["preferences"], ["transactional"])
         self.assertIsNone(bundle["projections"]["mautic"])
 
     def test_client_rejects_expired_source_and_non_string_cursor(self):
@@ -316,5 +317,85 @@ class OpsProjectionApiTest(unittest.TestCase):
         response = self.client.get("/api/ops/customers/cust-1")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["sections"]["enquiries"], [])
+
+    def test_client_preserves_detail_email_activation_and_projection_state(self):
+        now = datetime(2026, 9, 4, tzinfo=timezone.utc)
+        def env(data, receipt):
+            return {"schema": "blockwise.ops.read.v1", "project_id": BLOCKWISE_PROJECT_ID,
+                    "generated_at": now.isoformat().replace("+00:00", "Z"),
+                    "fresh_until": "2026-09-04T00:05:00Z", "source_revision": "rev-source",
+                    "source_receipt_ids": [receipt], "data": data}
+        detail = {"workspace": {"id": WORKSPACE, "name": "Fixture"}, "members": [], "profiles": [],
+                  "activation": {"stage": "active", "activation_completed_at": "2026-09-03T00:00:00Z"},
+                  "bookings": [], "enquiries": [], "billing": None,
+                  "email": {"preferences": ["transactional"], "suppressions": ["marketing"],
+                            "deliveries": [{"id": "delivery-1", "status": "delivered"}]},
+                  "projections": [{"name": "email", "status": "ready", "source_revision": "rev-source",
+                                   "source_receipt_ids": ["receipt:ops/detail"], "fresh_until": "2026-09-04T00:05:00Z"}],
+                  "activity": []}
+        class Response:
+            status = 200
+            def __init__(self, body): self.body = body
+            def __enter__(self): return self
+            def __exit__(self, *args): return None
+            def read(self, _): return json.dumps(self.body).encode()
+        def opener(request, timeout):
+            path = request.full_url.split("?", 1)[0]
+            if path.endswith("/customers"):
+                return Response(env({"limit": 1, "total": 1, "nextCursor": None,
+                                     "rows": [{"id": WORKSPACE, "name": "Fixture"}]}, "receipt:ops/list"))
+            if path.endswith("/enquiries"):
+                return Response(env({"limit": 1, "total": 0, "nextCursor": None, "rows": []}, "receipt:ops/global"))
+            return Response(env(detail, "receipt:ops/detail"))
+        bundle = BlockwiseOpsClient("https://blockwise.example", "x" * 40, opener=opener,
+                                    clock=lambda: now.timestamp(), page_size=1).fetch_bundle()
+        customer = bundle["projections"]["customers"][0]
+        self.assertEqual(customer["activation_stage"], "active")
+        self.assertEqual(customer["email_preferences"], ["transactional"])
+        self.assertEqual(customer["email_suppressions"], ["marketing"])
+        self.assertTrue(any(row.get("id") == "delivery-1" for row in bundle["projections"]["email"]))
+        self.assertEqual(bundle["projections"]["activity"][0]["projection_name"], "email")
+
+    def test_client_rejects_detail_workspace_customer_mismatch_before_normalization(self):
+        now = datetime.now(timezone.utc)
+        def env(data):
+            return {"schema": "blockwise.ops.read.v1", "project_id": BLOCKWISE_PROJECT_ID,
+                    "generated_at": now.isoformat().replace("+00:00", "Z"),
+                    "fresh_until": (now + timedelta(minutes=5)).isoformat().replace("+00:00", "Z"),
+                    "source_revision": "rev-source", "source_receipt_ids": ["receipt:ops/source"], "data": data}
+        class Response:
+            status = 200
+            def __init__(self, body): self.body = body
+            def __enter__(self): return self
+            def __exit__(self, *args): return None
+            def read(self, _): return json.dumps(self.body).encode()
+        def opener(request, timeout):
+            path = request.full_url.split("?", 1)[0]
+            if path.endswith("/customers"):
+                return Response(env({"limit": 1, "total": 1, "nextCursor": None, "rows": [{"id": WORKSPACE}]}))
+            if path.endswith("/enquiries"):
+                return Response(env({"limit": 1, "total": 0, "nextCursor": None, "rows": []}))
+            return Response(env({"workspace": {"id": WORKSPACE}, "members": [{"workspace_id": "123e4567-e89b-12d3-a456-426614174001"}],
+                                 "profiles": [], "activation": None, "bookings": [], "enquiries": [], "billing": None,
+                                 "email": {"deliveries": []}, "projections": [], "activity": []}))
+        with self.assertRaisesRegex(ProjectionError, "workspace"):
+            BlockwiseOpsClient("https://blockwise.example", "x" * 40, opener=opener,
+                               clock=lambda: now.timestamp(), page_size=1).fetch_bundle()
+
+    def test_fresh_until_equal_clock_is_stale(self):
+        clock = 1_800_000_000
+        store = OpsProjectionStore(self.root, clock=lambda: clock)
+        fresh = datetime.fromtimestamp(clock, timezone.utc).isoformat().replace("+00:00", "Z")
+        self.write_raw("customers", envelope("customers", [{"id": "cust-1", "workspace_id": WORKSPACE}], fresh_until=fresh))
+        self.assertEqual(store.load("customers").status, "stale")
+
+    def test_global_enquiry_queue_is_separate_and_never_correlates(self):
+        self.write("customers", [{"id": "cust-1", "workspace_id": WORKSPACE, "display_name": "Customer"}])
+        self.write("enquiries", [{"id": "global-1", "workspace_id": None, "status": "new"},
+                                  {"id": "assigned-1", "workspace_id": WORKSPACE, "customer_id": "cust-1", "status": "open"}])
+        body = self.client.get("/api/ops/enquiries/unassigned").get_json()
+        self.assertEqual(body["status"], "ready")
+        self.assertEqual([row["id"] for row in body["enquiries"]], ["global-1"])
+        self.assertEqual(self.client.get("/api/ops/customers/cust-1").get_json()["sections"]["enquiries"][0]["id"], "assigned-1")
 if __name__ == "__main__":
     unittest.main()

@@ -47,15 +47,24 @@ async function getJson(url) {
 
 export async function mountOps(root) {
   if (!root) return;
-  root.innerHTML = `<div class="ops-surface"><header class="ops-heading"><div><span class="ops-kicker">Blockwise · customer operations</span><h2>Customer signal</h2><p>Read-only projections from Hermes. Provider credentials and direct mutations stay outside Frank.</p></div><div class="ops-heading-actions"><span id="ops-overall" class="${statusClass("setup_needed")}">Checking source…</span><button id="ops-refresh" class="ops-button ops-button-primary" type="button" disabled title="No reviewed Hermes ops-refresh action is configured">Refresh unavailable</button></div></header><div id="ops-notice" class="ops-notice" aria-live="polite"></div><div class="ops-layout"><aside class="ops-customers"><div class="ops-list-heading"><strong>Customers</strong><span id="ops-count"></span></div><label class="ops-search"><span class="sr-only">Search customers</span><input id="ops-search" type="search" placeholder="Search name or email"></label><div id="ops-customer-list"></div></aside><main class="ops-detail" id="ops-detail" aria-live="polite">${emptyState("Select a customer", "Customer details, provider status, and receipts appear here.")}</main></div></div>`;
+  root.innerHTML = `<div class="ops-surface"><header class="ops-heading"><div><span class="ops-kicker">Blockwise · customer operations</span><h2>Customer signal</h2><p>Read-only projections from Hermes. Provider credentials and direct mutations stay outside Frank.</p></div><div class="ops-heading-actions"><span id="ops-overall" class="${statusClass("setup_needed")}">Checking source…</span><button id="ops-refresh" class="ops-button ops-button-primary" type="button" disabled title="No reviewed Hermes ops-refresh action is configured">Refresh unavailable</button></div></header><div id="ops-notice" class="ops-notice" aria-live="polite"></div><section class="ops-unassigned" aria-labelledby="ops-unassigned-title"><div class="ops-list-heading"><h3 id="ops-unassigned-title">Unassigned enquiries</h3><span id="ops-unassigned-count"></span></div><div id="ops-unassigned-list">${emptyState("Checking queue", "Reading the Hermes-published enquiry queue…")}</div></section><div class="ops-layout"><aside class="ops-customers"><div class="ops-list-heading"><strong>Customers</strong><span id="ops-count"></span></div><label class="ops-search"><span class="sr-only">Search customers</span><input id="ops-search" type="search" placeholder="Search name or email"></label><div id="ops-customer-list"></div></aside><main class="ops-detail" id="ops-detail" aria-live="polite">${emptyState("Select a customer", "Customer details, provider status, and receipts appear here.")}</main></div></div>`;
   const overall = root.querySelector("#ops-overall");
   const notice = root.querySelector("#ops-notice");
   const list = root.querySelector("#ops-customer-list");
   const detail = root.querySelector("#ops-detail");
   const count = root.querySelector("#ops-count");
+  const unassignedList = root.querySelector("#ops-unassigned-list");
+  const unassignedCount = root.querySelector("#ops-unassigned-count");
   const search = root.querySelector("#ops-search");
   let customers = [];
   let selectedId = "";
+
+  function renderUnassigned(body) {
+    const state = body?.status || "setup_needed";
+    const rows = Array.isArray(body?.enquiries) ? body.enquiries : [];
+    unassignedCount.textContent = state === "ready" || state === "stale" ? `${rows.length} queue` : "";
+    unassignedList.innerHTML = sectionRows(rows, "unassigned enquiries", state);
+  }
 
   function renderList() {
     const query = search.value.trim().toLowerCase();
@@ -102,7 +111,8 @@ export async function mountOps(root) {
     overall.textContent = "Checking source…";
     overall.className = statusClass("setup_needed");
     try {
-      const body = await getJson("/api/ops/overview");
+      const [body, queue] = await Promise.all([getJson("/api/ops/overview"), getJson("/api/ops/enquiries/unassigned")]);
+      renderUnassigned(queue);
       customers = Array.isArray(body.customers) ? body.customers : [];
       overall.textContent = label(body.status || "setup_needed");
       overall.className = statusClass(body.status || "setup_needed");
@@ -111,6 +121,7 @@ export async function mountOps(root) {
       if (selectedId && customers.some((row) => row.id === selectedId)) await select(selectedId);
     } catch (error) {
       customers = [];
+      renderUnassigned({ status: "error", enquiries: [], message: error.message || "The enquiry queue is unavailable." });
       overall.textContent = "Error";
       overall.className = statusClass("error");
       notice.textContent = error.message || "The projection source is unavailable.";
