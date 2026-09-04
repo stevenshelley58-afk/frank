@@ -284,9 +284,10 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   editorText.style.marginTop = "10px";
   const editorActions = element("div", "connection-row-actions");
   const saveButton = control("Save correction", () => {}, "home-action home-action-primary");
+  const promoteButton = control("Remember everywhere", () => {}, "home-inline-button");
   const forgetButton = control("Forget source", () => {}, "home-inline-button danger-text");
   const closeButton = control("Close source", () => { editorSection.hidden = true; }, "home-inline-button");
-  editorActions.append(saveButton, forgetButton, closeButton);
+  editorActions.append(saveButton, promoteButton, forgetButton, closeButton);
   editorSection.append(editorHeading, editorStatus, editorText, editorActions);
 
   const activitySection = element("section", "connections-section");
@@ -410,6 +411,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     editorStatus.textContent = "Loading retained source…";
     editorText.value = "";
     saveButton.disabled = true;
+    promoteButton.disabled = true;
     forgetButton.disabled = true;
     try {
       const value = await requestJson(`/api/projects/${projectId}/memory/documents/${encodeURIComponent(source.id)}`, { signal: controller.signal });
@@ -417,6 +419,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
       editorText.value = value.document?.content || "";
       editorStatus.textContent = `${source.memory_count} derived facts · source ${source.id}`;
       saveButton.disabled = false;
+      promoteButton.disabled = false;
       forgetButton.disabled = false;
       saveButton.onclick = async () => {
         saveButton.disabled = true;
@@ -430,6 +433,22 @@ export function mountMemoryInspector({ host, project, setStatus }) {
         } catch (error) {
           editorStatus.textContent = error.message || "Correction failed.";
         } finally { saveButton.disabled = false; }
+      };
+      promoteButton.onclick = async () => {
+        const destination = "the global operator scope (remembered in every project)";
+        if (!window.confirm(`Remember this source everywhere? Its content and provenance (source ${source.id}) will be promoted to ${destination}. You can forget it later.`)) return;
+        promoteButton.disabled = true;
+        editorStatus.textContent = "Promoting to the global scope…";
+        try {
+          const idempotencyKey = `${projectId}-${source.id}-${Date.now()}`;
+          const result = await requestJson(`/api/projects/${projectId}/memory/documents/${encodeURIComponent(source.id)}/promote-global`, {
+            method: "POST",
+            body: JSON.stringify({ confirmation: `PROMOTE ${source.id}`, idempotency_key: idempotencyKey }),
+          });
+          editorStatus.textContent = `Promoted to ${result.global_bank_id} (from ${result.origin_bank} · ${result.origin_document}). Hindsight re-extracted it globally.`;
+        } catch (error) {
+          editorStatus.textContent = error.message || "Promotion failed.";
+        } finally { promoteButton.disabled = false; }
       };
       forgetButton.onclick = async () => {
         if (!window.confirm(`Forget this retained source and its ${source.memory_count} derived facts? This cannot be undone.`)) return;

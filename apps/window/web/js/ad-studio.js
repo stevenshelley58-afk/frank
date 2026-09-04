@@ -1,5 +1,6 @@
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260830-ad-studio-route-v1";
+import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, runListRenderSignature, runTimestamp } from "./ad-studio-state.js?v=20260904-run-history-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -9,15 +10,26 @@ let mounted = false;
 let projects = [];
 let runs = [];
 let selectedRunId = "";
+let runSelectionRevision = 0;
+let runListRevision = 0;
 let selectedStage = null;
 let graphHandle = null;
 let selectedFiles = [];
-let sourcePreviewExpanded = false;
+let batchStarting = false;
+let runRefreshPending = false;
 const localRunInputs = new Map();
 const previewUrls = new Set();
 let runEvents = [];
 let eventStream = null;
-const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "svg", "tif", "tiff", "webp"]);
+const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "tif", "tiff", "webp"]);
+const MAX_BATCH_SOURCES = 20;
+const SOURCE_STATUS = {
+  queued: "Ready",
+  uploading: "Uploading…",
+  starting: "Starting…",
+  started: "Job started",
+  error: "Needs attention",
+};
 
 const clean = (value) => String(value || "").trim();
 const escapeHtml = (value) => clean(value).replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" })[character]);
@@ -38,13 +50,14 @@ const canonicalStage = (stage) => {
 
 
 function runStatusLabel(status) {
-  return ({ queued: "Queued", started: "Starting", running: "Running", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Starting";
+  return ({ queued: "Running", started: "Running", running: "Running", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Running";
 }
 
-function dateLabel(seconds) {
-  if (!seconds) return "";
+function dateLabel(value) {
+  const timestamp = runTimestamp(value);
+  if (!timestamp) return "";
   try {
-    return new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(seconds * 1000));
+    return new Intl.DateTimeFormat("en-AU", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }).format(new Date(timestamp));
   } catch { return ""; }
 }
 
@@ -87,56 +100,183 @@ function renderSourcePreview() {
   const host = $("#ad-source-preview");
   host.replaceChildren();
   host.classList.toggle("has-items", selectedFiles.length > 0);
-  $("#ad-run-mode").textContent = selectedFiles.length ? "Source selected" : "Awaiting source";
-  sourcePreviewExpanded = false;
-  const visibleSources = selectedFiles.slice(0, 1);
-  visibleSources.forEach((source) => {
+  const runnable = selectedFiles.filter((source) => ["queued", "error"].includes(source.status)).length;
+  $("#ad-run-mode").textContent = selectedFiles.length ? `${selectedFiles.length} image${selectedFiles.length === 1 ? "" : "s"}` : "No images";
+  selectedFiles.forEach((source) => {
     const item = document.createElement("div");
     item.className = "ad-source-item";
+    item.dataset.status = source.status;
     const image = document.createElement("img");
     image.src = source.previewUrl;
     image.alt = source.name;
-    const label = document.createElement("span");
+    const copy = document.createElement("div");
+    copy.className = "ad-source-item-copy";
+    const label = document.createElement("strong");
     label.textContent = source.name;
+    label.title = source.name;
+    const state = document.createElement("span");
+    state.textContent = source.error || SOURCE_STATUS[source.status] || SOURCE_STATUS.queued;
+    state.title = source.error || "";
+    copy.append(label, state);
     const remove = document.createElement("button");
     remove.type = "button";
+    remove.className = "ad-source-remove";
     remove.setAttribute("aria-label", `Remove ${source.name}`);
     remove.textContent = "×";
+    remove.disabled = ["uploading", "starting"].includes(source.status);
     remove.addEventListener("click", () => {
-      selectedFiles = selectedFiles.filter((item) => item.key !== source.key);
-      if (source.kind === "local") {
-        URL.revokeObjectURL(source.previewUrl);
-        previewUrls.delete(source.previewUrl);
-      }
+      removeSource(source.key);
       renderSourcePreview();
     });
-    item.append(image, label, remove);
+    item.append(image, copy, remove);
     host.append(item);
   });
-
+  if (selectedFiles.length) {
+    const summary = document.createElement("div");
+    summary.className = "ad-source-summary";
+    const count = document.createElement("span");
+    count.textContent = batchStarting ? "Starting jobs…" : `${runnable} image${runnable === 1 ? "" : "s"} ready to run`;
+    const clear = document.createElement("button");
+    clear.type = "button";
+    clear.className = "ad-source-clear";
+    clear.textContent = "Clear queue";
+    clear.disabled = selectedFiles.some((source) => ["uploading", "starting"].includes(source.status));
+    clear.addEventListener("click", () => {
+      clearSourceQueue();
+      renderSourcePreview();
+    });
+    summary.append(count, clear);
+    host.append(summary);
+  }
+  updateRunControls();
 }
 
 function addLocalFiles(files) {
-  const additions = Array.from(files || []).filter((file) => String(file.type || "").startsWith("image/")).map((file) => {
+  const offered = Array.from(files || []);
+  const images = offered.filter((file) => {
+    const extension = String(file.name || "").toLowerCase().split(".").pop();
+    return IMAGE_EXTENSIONS.has(extension);
+  });
+  const existing = new Set(selectedFiles.map((source) => source.key));
+  const additions = images.map((file) => {
+    const key = `local:${file.name}:${file.size}:${file.lastModified}`;
+    if (existing.has(key)) return null;
+    existing.add(key);
     const previewUrl = URL.createObjectURL(file);
     previewUrls.add(previewUrl);
-    return { kind: "local", key: `local:${file.name}:${file.size}:${file.lastModified}`, name: file.name, size: file.size, type: file.type, file, previewUrl };
+    return { kind: "local", key, name: file.name, size: file.size, type: file.type, file, previewUrl, status: "queued", error: "" };
+  }).filter(Boolean);
+  const capacity = Math.max(0, MAX_BATCH_SOURCES - selectedFiles.length);
+  const accepted = additions.slice(0, capacity);
+  additions.slice(capacity).forEach((source) => {
+    URL.revokeObjectURL(source.previewUrl);
+    previewUrls.delete(source.previewUrl);
   });
-  const keep = additions[0];
-  if (!keep) return;
-  for (const source of additions.slice(1)) { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); }
-  selectedFiles.filter((source) => source.kind === "local").forEach((source) => { URL.revokeObjectURL(source.previewUrl); previewUrls.delete(source.previewUrl); });
-  selectedFiles = [keep];
+  selectedFiles.push(...accepted);
+  const ignored = offered.length - images.length;
+  const duplicates = images.length - additions.length;
+  const overflow = additions.length - accepted.length;
+  const notes = [];
+  if (accepted.length) notes.push(`${accepted.length} image${accepted.length === 1 ? "" : "s"} added.`);
+  if (duplicates) notes.push(`${duplicates} duplicate${duplicates === 1 ? " was" : "s were"} already in the queue.`);
+  if (ignored) notes.push(`${ignored} non-image file${ignored === 1 ? " was" : "s were"} skipped.`);
+  if (overflow) notes.push(`A batch can contain up to ${MAX_BATCH_SOURCES} images.`);
+  const status = $("#ad-run-status");
+  status.classList.toggle("is-error", !accepted.length && (ignored > 0 || overflow > 0));
+  if (notes.length) status.textContent = notes.join(" ");
+  renderSourcePreview();
+}
+
+function removeSource(key) {
+  const source = selectedFiles.find((item) => item.key === key);
+  selectedFiles = selectedFiles.filter((item) => item.key !== key);
+  if (source?.kind === "local") {
+    URL.revokeObjectURL(source.previewUrl);
+    previewUrls.delete(source.previewUrl);
+  }
+}
+
+function clearSourceQueue() {
+  selectedFiles.forEach((source) => {
+    if (source.kind === "local") {
+      URL.revokeObjectURL(source.previewUrl);
+      previewUrls.delete(source.previewUrl);
+    }
+  });
+  selectedFiles = [];
+  const status = $("#ad-run-status");
+  status.classList.remove("is-error");
+  status.textContent = "Add one or more images. Each image becomes its own background job.";
+}
+
+function updateRunControls() {
+  const submit = $("#ad-run-submit");
+  if (!submit) return;
+  const runnable = selectedFiles.filter((source) => ["queued", "error"].includes(source.status)).length;
+  submit.disabled = batchStarting || runnable === 0;
+  submit.textContent = batchStarting ? "Starting…" : runnable ? `Run ${runnable} job${runnable === 1 ? "" : "s"}` : "Run jobs";
+}
+
+function updateSourceStatus(key, status, options = {}) {
+  const source = selectedFiles.find((item) => item.key === key);
+  if (!source) return;
+  source.status = status;
+  source.error = clean(options.error);
+  if (options.run?.id) source.run = options.run;
   renderSourcePreview();
 }
 
 function renderRunOptions() {
   const select = $("#ad-pipeline-run");
+  if (!select) return;
   const previous = selectedRunId || select.value;
   select.replaceChildren(new Option("No run selected", ""));
-  for (const run of runs) select.append(new Option(run.title || "Ad Studio job", run.id));
+  for (const group of groupAdStudioRuns(runs)) {
+    const options = document.createElement("optgroup");
+    options.label = [group.sourceLabel, group.templateLabel].filter(Boolean).join(" · ");
+    const supersededIds = new Set(group.superseded.map((run) => run.id));
+    group.attempts.forEach((run, index) => {
+      const historyState = index === 0 ? "Current" : (supersededIds.has(run.id) ? "Superseded" : "Previous");
+      const date = dateLabel(run.updated_at || run.created_at);
+      options.append(new Option([historyState, runStatusLabel(run.status), date].filter(Boolean).join(" · "), run.id));
+    });
+    select.append(options);
+  }
   if (runs.some((run) => run.id === previous)) select.value = previous;
-  selectedRunId = select.value;
+}
+
+function clearRunSelection() {
+  runSelectionRevision += 1;
+  selectedRunId = "";
+  eventStream?.close();
+  eventStream = null;
+  runEvents = [];
+  const detail = $("#ad-run-detail");
+  if (detail) detail.innerHTML = '<div class="ad-empty"><strong>Select a run</strong><span>Open a run to inspect every iteration, comparator score and final review.</span></div>';
+  updateEvidence();
+}
+
+function createRunRow(run, { current = false, superseded = false } = {}) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.className = `ad-run-row${run.id === selectedRunId ? " is-on" : ""}`;
+  button.dataset.status = clean(run.status).toLowerCase();
+  button.dataset.historyState = current ? "current" : (superseded ? "superseded" : "previous");
+  const dot = document.createElement("i");
+  dot.setAttribute("aria-hidden", "true");
+  const copy = document.createElement("span");
+  copy.className = "ad-run-row-copy";
+  const title = document.createElement("strong");
+  title.textContent = String(run.title || "Ad Studio job").replace(/^Ad Studio\s*[·|-]?\s*/, "") || "Job";
+  const meta = document.createElement("span");
+  const project = projects.find((item) => item.id === run.project_id);
+  meta.textContent = [project?.name || run.project_id || "Workspace", runStatusLabel(run.status), current ? "Current" : ""].filter(Boolean).join(" · ");
+  copy.append(title, meta);
+  const time = document.createElement("time");
+  time.textContent = dateLabel(run.updated_at || run.created_at);
+  button.append(dot, copy, time);
+  button.addEventListener("click", () => void selectRun(run.id));
+  return button;
 }
 
 function renderRuns() {
@@ -150,49 +290,66 @@ function renderRuns() {
     renderRunOptions();
     return;
   }
-  for (const run of runs) {
-    const button = document.createElement("button");
-    button.type = "button";
-    button.className = `ad-run-row${run.id === selectedRunId ? " is-on" : ""}`;
-    const dot = document.createElement("i");
-    dot.setAttribute("aria-hidden", "true");
-    const copy = document.createElement("span");
-    copy.className = "ad-run-row-copy";
-    const title = document.createElement("strong");
-    title.textContent = String(run.title || "Ad Studio job").replace(/^Ad Studio\s*[·|-]?\s*/, "") || "Job";
-    const meta = document.createElement("span");
-    const project = projects.find((item) => item.id === run.project_id);
-    meta.textContent = `${project?.name || run.project_id || "Workspace"} · ${runStatusLabel(run.status)}`;
-    copy.append(title, meta);
-    const time = document.createElement("time");
-    time.textContent = dateLabel(run.updated_at);
-    button.append(dot, copy, time);
-    button.addEventListener("click", () => void selectRun(run.id));
-    host.append(button);
+  for (const group of groupAdStudioRuns(runs)) {
+    const section = document.createElement("section");
+    section.className = "ad-run-group";
+    const heading = document.createElement("div");
+    heading.className = "ad-run-group-heading";
+    const source = document.createElement("strong");
+    source.textContent = group.sourceLabel;
+    source.title = group.sourceLabel;
+    const context = document.createElement("span");
+    const attempts = `${group.attempts.length} attempt${group.attempts.length === 1 ? "" : "s"}`;
+    context.textContent = [attempts, group.templateLabel].filter(Boolean).join(" · ");
+    heading.append(source, context);
+    section.append(heading, createRunRow(group.primary, { current: true }));
+    group.history.forEach((run) => section.append(createRunRow(run)));
+    if (group.superseded.length) {
+      const disclosure = document.createElement("details");
+      disclosure.className = "ad-run-superseded";
+      disclosure.open = group.superseded.some((run) => run.id === selectedRunId);
+      const summary = document.createElement("summary");
+      summary.textContent = `Superseded attempts (${group.superseded.length})`;
+      const attemptsList = document.createElement("div");
+      attemptsList.className = "ad-run-superseded-list";
+      group.superseded.forEach((run) => attemptsList.append(createRunRow(run, { superseded: true })));
+      disclosure.append(summary, attemptsList);
+      section.append(disclosure);
+    }
+    host.append(section);
   }
   renderRunOptions();
 }
 
 async function refreshRuns() {
+  const refreshRevision = ++runListRevision;
   const projectId = clean($("#ad-run-project")?.value || $("#ad-pipeline-project")?.value);
-  const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : "";
-  const response = await fetch(`/api/ad-studio/runs${query}`);
+  const query = new URLSearchParams({ limit: "100" });
+  if (projectId) query.set("project_id", projectId);
+  const response = await fetch(`/api/ad-studio/runs?${query}`);
   if (!response.ok) throw new Error("Hermes job history is unavailable");
   const data = await response.json();
-  runs = (Array.isArray(data.runs) ? data.runs : []).sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
-  renderRuns();
+  if (refreshRevision !== runListRevision) return;
+  const previousSignature = runListRenderSignature(runs);
+  runs = mergeAdStudioRunList(runs, data.runs);
+  if (runListRenderSignature(runs) !== previousSignature) renderRuns();
 }
 
 async function refreshRunsSafe() {
+  if (runRefreshPending) return;
+  runRefreshPending = true;
   try {
     await refreshRuns();
   } catch {
     const host = $("#ad-runs-list");
     if (host && !host.children.length) host.innerHTML = '<div class="ad-empty"><strong>Jobs unavailable</strong><span>Frank cannot reach Hermes right now.</span></div>';
+  } finally {
+    runRefreshPending = false;
   }
 }
 
 async function selectRun(runId) {
+  const selectionRevision = ++runSelectionRevision;
   selectedRunId = runId;
   renderRuns();
   let run = runs.find((item) => item.id === runId);
@@ -201,18 +358,23 @@ async function selectRun(runId) {
     const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}`);
     const data = await response.json().catch(() => ({}));
     if (response.ok && data.run) {
-      run = { ...run, ...data.run };
+      if (selectionRevision !== runSelectionRevision || selectedRunId !== runId) return;
+      run = mergeAdStudioRun(runs.find((item) => item.id === run.id), data.run);
       runs = runs.map((item) => item.id === run.id ? run : item);
       renderRuns();
     }
   } catch { /* keep the last visible status */ }
+  if (selectionRevision !== runSelectionRevision || selectedRunId !== runId) return;
+  run = runs.find((item) => item.id === runId) || run;
   renderRunDetail(run);
   connectRunEvents(run);
 }
 
 function formatCost(run) {
-  const cost = run.cost ?? run.usage?.cost_usd ?? run.output?.cost?.actual_usd ?? run.output?.cost?.reported_usd;
-  return Number.isFinite(Number(cost)) ? `$${Number(cost).toFixed(3)}` : "Cost pending";
+  const reported = firstNumber(run.cost, run.usage?.reported_cost_usd, run.output?.cost?.actual_usd, run.output?.cost?.reported_usd);
+  if (reported !== null) return `$${reported.toFixed(3)} reported`;
+  const estimated = firstNumber(run.usage?.estimated_cost_usd);
+  return estimated !== null ? `$${estimated.toFixed(3)} estimated` : "Cost not reported";
 }
 
 function firstNumber(...values) {
@@ -337,6 +499,46 @@ function renderGenerationHistory(run, parent) {
   section.append(list); parent.append(section);
 }
 
+function renderModelProfile(run, parent) {
+  const profile = run.model_profile && typeof run.model_profile === "object" ? run.model_profile : {};
+  const roles = Array.isArray(profile.roles) ? profile.roles : [];
+  const usage = run.usage && typeof run.usage === "object" ? run.usage : {};
+  if (!roles.length && !usage.source) return;
+  const section = document.createElement("section");
+  section.className = "ad-model-profile";
+  const heading = document.createElement("div");
+  heading.className = "ad-inline-heading";
+  const title = document.createElement("strong");
+  title.textContent = "Models and usage";
+  const source = document.createElement("span");
+  source.textContent = `${profile.source || usage.source || "Hermes run ledger"}${profile.revision ? ` · revision ${profile.revision}` : ""}`;
+  heading.append(title, source);
+  section.append(heading);
+  if (roles.length) {
+    const grid = document.createElement("div");
+    grid.className = "ad-model-role-grid";
+    roles.forEach((role) => {
+      const item = document.createElement("div");
+      const label = document.createElement("span");
+      label.textContent = role.label || role.role || "Model role";
+      const model = document.createElement("strong");
+      model.textContent = role.model || "Not recorded";
+      const provider = document.createElement("small");
+      provider.textContent = role.provider || "Provider not recorded";
+      item.append(label, model, provider);
+      grid.append(item);
+    });
+    section.append(grid);
+  }
+  const usageLine = document.createElement("p");
+  usageLine.className = "ad-usage-source";
+  const tokens = firstNumber(usage.total_tokens);
+  const tokenLabel = tokens === null ? "Tokens not reported" : `${Math.round(tokens).toLocaleString()} tokens`;
+  usageLine.textContent = `${tokenLabel} · ${formatCost(run)} · ${usage.billing || "Billing source not reported"}`;
+  section.append(usageLine);
+  parent.append(section);
+}
+
 
 function renderRunDetail(run) {
   const detail = $("#ad-run-detail");
@@ -367,6 +569,7 @@ function renderRunDetail(run) {
     item.append(term, description); overview.append(item);
   }
   detail.append(overview);
+  renderModelProfile(run, detail);
   renderPersistedSource(run, detail);
   renderPhaseTimeline(run, detail);
   const importReady = run.status === "completed" && ["imported", "replayed", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase());
@@ -538,15 +741,22 @@ function connectRunEvents(run) {
   eventStream = stream;
   const receive = (event) => {
     try {
+      if (eventStream !== stream || selectedRunId !== run.id) return;
       const item = JSON.parse(event.data);
-      if (!runEvents.some((existing) => existing.sequence === item.sequence)) runEvents.push(item);
+      if (!runEvents.some((existing) => existing.sequence === item.sequence)) {
+        runEvents.push(item);
+        runEvents.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
+      }
+      run = mergeAdStudioRun(runs.find((candidate) => candidate.id === run.id), run);
       if (["iteration.rendered", "iteration.compared"].includes(item.kind)) mergeIterationEvent(run, item);
       if (item.kind === "stage.started" && item.node_id) {
         run.stage = canonicalStage(item.node_id);
         run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(run.stage)) / PIPELINE_STAGES.length);
       }
+      runs = runs.map((candidate) => candidate.id === run.id ? run : candidate);
       renderRunDetail(run);
       if (["run.failed", "run.cancelled", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {
+        if (eventStream !== stream || selectedRunId !== run.id) return;
         const updated = runs.find((candidate) => candidate.id === run.id);
         if (updated) renderRunDetail(updated);
       });
@@ -654,12 +864,8 @@ function setupRunForm() {
   input.addEventListener("change", () => {
     addLocalFiles(input.files);
     input.value = "";
-    $("#ad-source-dialog").close();
   });
-  drop.addEventListener("click", openSourceDialog);
-  $("#ad-source-device").addEventListener("click", () => input.click());
-  $("#ad-source-close").addEventListener("click", () => $("#ad-source-dialog").close());
-  $("#ad-source-cancel").addEventListener("click", () => $("#ad-source-dialog").close());
+  drop.addEventListener("click", () => input.click());
   $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); });
   for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.add("is-drag"); });
   for (const type of ["dragleave", "drop"]) drop.addEventListener(type, (event) => {
@@ -670,42 +876,52 @@ function setupRunForm() {
   $("#ad-run-form").addEventListener("submit", async (event) => {
     event.preventDefault();
     const status = $("#ad-run-status");
-    const submit = $("#ad-run-submit");
     status.classList.remove("is-error");
-    if (!selectedFiles.length) {
-      status.textContent = "Choose one source image.";
+    const sources = selectedFiles.filter((source) => ["queued", "error"].includes(source.status));
+    if (!sources.length) {
+      status.textContent = selectedFiles.length ? "These images have already started. Clear the queue or add more." : "Add at least one source image.";
       status.classList.add("is-error");
       return;
     }
-    submit.disabled = true;
-    submit.textContent = "Starting…";
-    status.textContent = "Uploading source and starting Hermes…";
+    batchStarting = true;
+    sources.forEach((source) => { source.status = "uploading"; source.error = ""; });
+    renderSourcePreview();
+    status.textContent = `Uploading ${sources.length} image${sources.length === 1 ? "" : "s"}…`;
     try {
       const result = await requestEvent("frank:ad-studio-run", {
-        sources: selectedFiles.slice(0, 1), projectId: $("#ad-run-project").value,
+        sources, projectId: $("#ad-run-project").value,
         name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value),
+        onProgress: ({ key, status: nextStatus, run, error }) => updateSourceStatus(key, nextStatus, { run, error }),
       });
-      const run = result.run;
-      const first = selectedFiles[0];
-      localRunInputs.set(run.id, { url: first.previewUrl, name: first.name });
-      selectedRunId = run.id;
-      status.textContent = `${result.runs.length} background job${result.runs.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
+      const started = Array.isArray(result.runs) ? result.runs : [];
+      const failed = Array.isArray(result.failures) ? result.failures : [];
+      for (const source of sources) {
+        if (!source.run?.id) continue;
+        localRunInputs.set(source.run.id, { url: source.previewUrl, name: source.name });
+      }
+      status.textContent = failed.length
+        ? `${started.length} job${started.length === 1 ? "" : "s"} started. ${failed.length} image${failed.length === 1 ? " needs" : "s need"} attention.`
+        : `${started.length} background job${started.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
+      status.classList.toggle("is-error", failed.length > 0);
       await refreshRunsSafe();
-      activate("runs");
-      await selectRun(run.id);
+      if (started.length) {
+        selectedRunId = started[0].id;
+        activate("runs");
+        await selectRun(started[0].id);
+      }
     } catch (error) {
       status.textContent = error.message || "The job could not be started.";
       status.classList.add("is-error");
     } finally {
-      submit.disabled = false;
-      submit.textContent = "Run job";
+      batchStarting = false;
+      renderSourcePreview();
     }
   });
 }
 
 function setupPipelineForm() {
   $("#ad-pipeline-project").addEventListener("change", mountPipeline);
-  $("#ad-pipeline-run").addEventListener("change", (event) => { selectedRunId = event.target.value; if (selectedRunId) void selectRun(selectedRunId); else updateEvidence(); });
+  $("#ad-pipeline-run").addEventListener("change", (event) => { const runId = event.target.value; if (runId) void selectRun(runId); else clearRunSelection(); });
   $$('[data-ad-open-pipeline]').forEach((button) => button.addEventListener("click", () => activate("pipeline")));
 }
 
@@ -735,4 +951,7 @@ export function mountAdStudio() {
   });
   window.addEventListener("beforeunload", () => previewUrls.forEach((url) => URL.revokeObjectURL(url)), { once: true });
   window.addEventListener("online", () => void refreshRunsSafe());
+  window.setInterval(() => {
+    if (!document.hidden) void refreshRunsSafe();
+  }, 5_000);
 }

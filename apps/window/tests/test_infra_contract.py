@@ -65,7 +65,10 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("/projects/only-process-hermes}:/workspace:ro", sidecar)
         self.assertIn("agenttrail_state:/home/node/.agenttrail", sidecar)
         self.assertNotIn("ports:", sidecar)
-        self.assertIn("docker compose build frank-window frank-agenttrail", deploy)
+        self.assertIn("frank-window frank-agenttrail", deploy)
+        # Release provenance (Phase E): the build injects the exact revision.
+        self.assertIn("SOURCE_SHA=", deploy)
+        self.assertIn("org.opencontainers.image.revision", dockerfile)
         self.assertIn("docker rm -f frank-agenttrail", deploy)
 
     def test_caddy_receives_only_derived_basic_auth_env(self):

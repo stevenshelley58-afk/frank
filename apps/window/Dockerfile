@@ -23,6 +23,13 @@ USER node
 CMD ["node", "/agenttrail/bin/agenttrail.mjs", "/workspace", "--port", "5340", "--no-open"]
 
 FROM python:3.12-slim
+# Release provenance (Phase E): injected at build time by deploy.sh from the
+# exact committed revision being built.
+ARG SOURCE_SHA=unknown
+ARG BUILD_TIME=unknown
+LABEL org.opencontainers.image.revision="${SOURCE_SHA}" \
+      org.opencontainers.image.created="${BUILD_TIME}" \
+      org.opencontainers.image.title="frank-window"
 WORKDIR /app
 COPY apps/window/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
@@ -42,6 +49,17 @@ COPY apps/window/mini ./mini
 COPY apps/window/connections_agent.py .
 COPY apps/window/provider_adapters.py .
 COPY apps/window/vault_broker.py .
+COPY apps/window/workspace_foundation.py .
+COPY apps/window/work_api.py .
+COPY apps/window/work_cron.py .
+COPY apps/window/work_providers.py .
+COPY apps/window/work_routines.py .
+COPY apps/window/work_service.py .
+COPY apps/window/work_state.py .
+COPY apps/window/work_tools.py .
+COPY apps/window/kanban_bridge_port.py .
+COPY apps/window/hermes_adapter ./hermes_adapter
+COPY apps/window/infra ./infra
 COPY apps/window/tool_apps ./tool_apps
 COPY apps/window/tools ./tools
 COPY apps/window/graph ./graph
@@ -63,6 +81,10 @@ COPY --from=graph-build /build/vendor/archify/archify ./vendor/archify/archify
 ENV FRANK_WEB=/web
 ENV FRANK_REPOSITORY_ROOT=/app
 ENV PORT=8080
+# Phase E: critical-file hash manifest baked into the image; deploy.sh and
+# /api/health read it as release-identity proof.
+RUN find /app /web -type f \( -name '*.py' -o -name '*.js' -o -name '*.mjs' -o -name '*.css' -o -name '*.html' -o -name '*.json' \) 2>/dev/null \
+    | sort | xargs sha256sum > /app/CRITICAL_MANIFEST.sha256 || true
 EXPOSE 8080
 # Frank's JSON stores use process-local locks; keep one worker and use threads.
 CMD ["gunicorn", "-b", "0.0.0.0:8080", "--workers", "1", "--threads", "4", "--timeout", "0", "server:app"]

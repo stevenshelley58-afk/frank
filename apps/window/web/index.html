@@ -8,8 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260830-ad-studio">
-<link rel="stylesheet" href="/ad-studio-picker.css?v=20260830-source-dialog">
+<link rel="stylesheet" href="/app.css?v=20260904-run-history-v1">
 </head>
 <body>
 <div class="app">
@@ -188,23 +187,23 @@
 
           <div class="ad-studio-panel is-on" id="ad-panel-run" role="tabpanel" aria-labelledby="ad-tab-run" data-ad-panel="run">
             <form class="ad-run-form" id="ad-run-form">
-              <div class="ad-section-heading"><div><h3>Source image → ad template</h3><p>Choose a source image for a live Hermes run.</p></div><span id="ad-run-mode">Single</span></div>
-              <input type="file" id="ad-source-files" accept="image/*" hidden>
+              <div class="ad-section-heading"><div><h3>Source images → ad templates</h3><p>Add up to 20 images, then start them together.</p></div><span id="ad-run-mode">No images</span></div>
+              <input type="file" id="ad-source-files" accept="image/*" multiple hidden>
               <button type="button" class="ad-drop" id="ad-drop">
                 <span class="ad-drop-mark" aria-hidden="true">+</span>
-                <strong>Choose a source image</strong>
-                <small>Choose from this device, or drop an image here.</small>
+                <strong>Choose source images</strong>
+                <small>Click to browse, or drop up to 20 images here.</small>
               </button>
-              <div class="ad-source-preview" id="ad-source-preview" aria-live="polite"></div>
+              <div class="ad-source-preview" id="ad-source-preview" aria-live="polite" aria-label="Source image queue"></div>
               <div class="ad-form-pair">
                 <label>Project<select id="ad-run-project" required><option value="">Loading projects…</option></select></label>
                 <label>Job name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
               </div>
               <label>Brief <span>optional</span><textarea id="ad-run-brief" maxlength="800" rows="4" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea></label>
-              <div class="ad-submit-row"><p id="ad-run-status" role="status">Hermes will run this as a background job. It will not open or interrupt a Hub chat.</p><button type="submit" class="ad-primary" id="ad-run-submit">Run job</button></div>
+              <div class="ad-submit-row"><p id="ad-run-status" role="status">Add one or more images. Each image becomes its own background job.</p><button type="submit" class="ad-primary" id="ad-run-submit" disabled>Run jobs</button></div>
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
-              <h3>One source. A live template run.</h3>
+              <h3>Your images. Separate live template runs.</h3>
               <ol><li><strong>Read the design</strong><span>Hermes analyses the source design.</span></li><li><strong>Build editable layers</strong><span>The builder starts cheap, creates separate Feed and Story documents, and switches automatically to the stronger builder after a regression or two consecutive gains below 0.5.</span></li><li><strong>Render, score, improve</strong><span>One comparator runs per iteration. A score below 9.5 triggers another revision.</span></li><li><strong>Finish automatically</strong><span>After the comparator passes, two final reviewers run automatically.</span></li></ol>
               <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
             </aside>
@@ -212,7 +211,20 @@
 
           <div class="ad-studio-panel" id="ad-panel-runs" role="tabpanel" aria-labelledby="ad-tab-runs" data-ad-panel="runs" hidden>
             <div class="ad-runs-layout">
-              <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><h3>Run history</h3><p>Durable jobs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div><div class="ad-runs-list" id="ad-runs-list"></div></section>
+              <section class="ad-runs-list-panel">
+                <div class="ad-section-heading"><div><h3>Run history</h3><p>Durable jobs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div>
+                <details class="ad-run-status-guide">
+                  <summary>What the statuses mean</summary>
+                  <dl>
+                    <div><dt>Running</dt><dd>Hermes is building or reviewing the current run.</dd></div>
+                    <div><dt>Complete</dt><dd>The run finished and its artifacts remain available.</dd></div>
+                    <div><dt>Failed</dt><dd>The run stopped before completion; open it for the recorded failure.</dd></div>
+                    <div><dt>Cancelled</dt><dd>The run was deliberately stopped and its evidence was retained.</dd></div>
+                    <div><dt>Superseded</dt><dd>An older failed or cancelled attempt kept after a newer attempt became current.</dd></div>
+                  </dl>
+                </details>
+                <div class="ad-runs-list" id="ad-runs-list"></div>
+              </section>
               <section class="ad-run-detail" id="ad-run-detail"><div class="ad-empty"><strong>Select a run</strong><span>Open a run to inspect every iteration, comparator score and final review.</span></div></section>
             </div>
           </div>
@@ -251,13 +263,6 @@
         </div>
       </section>
 
-      <dialog class="ad-source-dialog" id="ad-source-dialog" aria-labelledby="ad-source-dialog-title">
-        <div class="ad-source-dialog-shell">
-          <header><div><h2 id="ad-source-dialog-title">Choose one source image</h2></div><button type="button" class="ad-source-close" id="ad-source-close" aria-label="Close">&times;</button></header>
-          <section class="ad-source-local"><div><strong>This device</strong><span>Select the source image to turn into Feed + Story.</span></div><button type="button" class="ad-source-device" id="ad-source-device">Choose image</button></section>
-          <footer><button type="button" class="ad-source-cancel" id="ad-source-cancel">Cancel</button></footer>
-        </div>
-      </dialog>
       <section class="view" data-view="entity-home">
         <div class="home-surface">
           <div class="entity-home-heading"><div><span class="home-kicker" id="entity-home-kind">Tool</span><h2 id="entity-home-name">Home</h2></div><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
@@ -441,6 +446,7 @@
   <button type="button" data-act="preview">Preview</button>
   <button type="button" data-act="download">Download</button>
   <button type="button" data-act="copy">Copy path</button>
+  <button type="button" data-act="attach">Attach to chat</button>
   <button type="button" data-act="pin" id="ctx-pin">Pin</button>
   <button type="button" data-act="refresh">Refresh</button>
 </div>
@@ -452,6 +458,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260830-ad-studio-route-v2"></script>
+<script type="module" src="/js/app.js?v=20260904-run-history-v1"></script>
 </body>
 </html>

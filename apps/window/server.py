@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import base64
+from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import math
 import mimetypes
@@ -19,6 +20,7 @@ from copy import deepcopy
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, redirect, request, send_file, send_from_directory, stream_with_context
@@ -63,6 +65,7 @@ LEGACY_MINI_ASSETS = {
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 UPLOAD_DIR = CHAT_DIR / "uploads"
 ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accounts.json")))
+SUPPORT_CONVERSATIONS_FILE = Path(os.environ.get("SUPPORT_CONVERSATIONS_FILE", str(CHAT_DIR / "support-conversations.json")))
 PROJECTS_FILE = Path(os.environ.get("PROJECTS_STORE_FILE", str(CHAT_DIR / "projects.json")))
 DATA_DIR = CHAT_DIR
 
@@ -93,6 +96,15 @@ def _mini_legacy_root() -> Path | None:
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
+AD_STUDIO_MAX_SOURCES = min(50, max(1, int(os.environ.get("AD_STUDIO_MAX_SOURCES", "20"))))
+AD_STUDIO_MAX_SOURCE_BYTES = min(
+    MAX_UPLOAD_BYTES,
+    max(1, int(os.environ.get("AD_STUDIO_MAX_SOURCE_BYTES", str(25 * 1024 * 1024)))),
+)
+AD_STUDIO_MAX_BATCH_BYTES = min(
+    MAX_UPLOAD_BYTES,
+    max(AD_STUDIO_MAX_SOURCE_BYTES, int(os.environ.get("AD_STUDIO_MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
+)
 # HERMES_ENDPOINT is the canonical dispatcher contract; retain the legacy
 # variable only as an explicit compatibility fallback for older deployments.
 HERMES_URL = os.environ.get("HERMES_ENDPOINT", os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642")).rstrip("/")
@@ -112,18 +124,26 @@ ROOTS = {
     "vps": Path(os.environ.get("VPS_ROOT", "/vps")),
 }
 SKIP = {".git", "node_modules", ".next", "__pycache__", ".turbo", "dist"}
-CURATED_MODELS = [
-    {"id": "qwen3.8-max", "provider": "custom", "note": "default"},
-    {"id": "deepseek-v4-flash", "provider": "deepseek", "note": "fast · cheap"},
-    {"id": "deepseek-v4-pro", "provider": "deepseek", "note": "stronger"},
-    {"id": "grok-4.6", "provider": "xai", "note": "escalate"},
-    {"id": "gpt-5.6-sol", "provider": "custom", "note": "escalate"},
-    {"id": "claude-fable-5", "provider": "custom", "note": "escalate"},
-]
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 _accounts_lock = threading.RLock()
+
+# v0.21 workspace foundation (contract §4/§5): flag-gated; default off keeps
+# the legacy path byte-identical. Singleton wiring is Session-1-owned.
+import os as _os
+
+if _os.getenv("FRANK_V021_FOUNDATION", "").lower() in ("1", "true", "yes"):
+    import workspace_foundation as _wsf
+
+    _WS_REGISTRY_PATH = _os.environ.get(
+        "FRANK_WS_REGISTRY_PATH", "/srv/frank/data/window/workspace-registry.json"
+    )
+    _ws_registry = _wsf.WorkspaceRegistry(_WS_REGISTRY_PATH)
+    _ws_lease = _wsf.ExecutionLease(_WS_REGISTRY_PATH + ".leases")
+else:
+    _ws_registry = None
+    _ws_lease = None
 
 _authorized_tool_manifests = MappingProxyType({
     item["id"]: deepcopy(item)
@@ -177,6 +197,7 @@ SECRET_VALUE_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"),
 )
 CONNECTOR_STATUSES = {"unconfigured", "configured", "ready", "error"}
+SUPPORT_CONVERSATION_STATUSES = {"open", "pending", "snoozed", "resolved", "closed"}
 EXTERNAL_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,239}$")
 DEFAULT_PROJECTS = [
     {
@@ -525,7 +546,14 @@ def hermes_session_summaries() -> dict:
 @app.get("/api/health")
 def health():
     brain = hermes_reachable()
-    return jsonify({"ok": True, "service": "frank-window", "hermes": brain})
+    # Release identity only (Phase E): safe fields, no paths or secrets.
+    identity = {
+        "source_sha": os.environ.get("FRANK_SOURCE_SHA", "unknown"),
+        "build_id": os.environ.get("FRANK_BUILD_TIME", "unknown"),
+        "schema_version": "frank.release-identity/v1",
+    }
+    return jsonify({"ok": True, "service": "frank-window", "hermes": brain,
+                    "release": identity})
 
 
 @app.errorhandler(ProjectStoreError)
@@ -841,19 +869,139 @@ def accounts_delete(account_id: str):
 
 @app.get("/api/email-tools")
 def email_tools():
-    mautic_url = os.environ.get("MAUTIC_URL", "").strip()
-    mautic_fallback = "configured" if mautic_url else "unconfigured"
+    mautic_url = _safe_provider_url(_mautic_base_url())
     return jsonify({
+        "stalwart": {
+            "status": _connector_status("STALWART_CONNECTOR_STATUS"),
+            "url": _safe_provider_url(os.environ.get("STALWART_BASE_URL", "")),
+        },
         "resend": {
+            "role": "compatibility",
             "status": _connector_status("RESEND_CONNECTOR_STATUS"),
             "mcp_status": _connector_status("RESEND_MCP_STATUS"),
             "url": "https://resend.com/emails",
         },
         "mautic": {
-            "status": _connector_status("MAUTIC_CONNECTOR_STATUS", mautic_fallback),
+            # A URL is configuration metadata, not proof that Hermes verified it.
+            "status": _connector_status("MAUTIC_CONNECTOR_STATUS"),
             "url": mautic_url,
         },
     })
+
+
+def _safe_provider_url(value: str) -> str:
+    """Return one normalized HTTP(S) origin without credentials or paths."""
+    parsed = urllib.parse.urlparse(str(value or "").strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        return ""
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.lower().rstrip(".")
+    suffix = f":{port}" if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)) else ""
+    return f"{scheme}://{host}{suffix}"
+
+
+def _safe_support_url(value: str) -> str:
+    parsed = urllib.parse.urlparse(str(value or "").strip())
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        return ""
+    return f"{_safe_provider_url(value)}{parsed.path}"
+
+
+def _mautic_base_url() -> str:
+    return os.environ.get("MAUTIC_BASE_URL", "").strip() or os.environ.get("MAUTIC_URL", "").strip()
+
+
+@app.get("/api/providers/readiness")
+def providers_readiness():
+    """Provider-neutral readiness projection; verification remains Hermes-owned."""
+    providers = {
+        "stalwart": ("STALWART_CONNECTOR_STATUS", "STALWART_BASE_URL"),
+        "mautic": ("MAUTIC_CONNECTOR_STATUS", "MAUTIC_BASE_URL"),
+        "chatwoot": ("CHATWOOT_CONNECTOR_STATUS", "CHATWOOT_BASE_URL"),
+    }
+    items = []
+    for provider, (status_var, url_var) in providers.items():
+        status = _connector_status(status_var)
+        items.append({
+            "provider": provider,
+            "status": status,
+            "configured": status in {"configured", "ready"},
+            "verified": status == "ready",
+            "base_url": _safe_provider_url(_mautic_base_url() if provider == "mautic" else os.environ.get(url_var, "")),
+            "error": status == "error",
+        })
+    return jsonify({"schema": "schema://frank.provider-readiness/v1", "providers": items})
+
+
+def _support_projection() -> list[dict]:
+    if not SUPPORT_CONVERSATIONS_FILE.exists():
+        return []
+    try:
+        data = json.loads(SUPPORT_CONVERSATIONS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        abort(503, "support conversation state is unavailable")
+    if not isinstance(data, dict) or set(data) != {"version", "conversations"} or data.get("version") != 1:
+        abort(503, "support conversation state is corrupt")
+    records = data.get("conversations")
+    if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+        abort(503, "support conversation state is corrupt")
+    allowed = {"id", "account_id", "project_id", "status", "subject", "updated_at", "external_ref", "url"}
+    output = []
+    for item in records:
+        if set(item) - allowed or not isinstance(item.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", item["id"]):
+            abort(503, "support conversation state is corrupt")
+        if not isinstance(item.get("status", "open"), str):
+            abort(503, "support conversation state is corrupt")
+        status = item.get("status", "open").lower()
+        if status not in SUPPORT_CONVERSATION_STATUSES:
+            abort(503, "support conversation state is corrupt")
+        for field in ("account_id", "project_id", "subject", "external_ref", "url"):
+            if field in item and not isinstance(item[field], str):
+                abort(503, "support conversation state is corrupt")
+        account_id_value = item.get("account_id", "")
+        project_id_value = item.get("project_id", "main")
+        if account_id_value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}", account_id_value):
+            abort(503, "support conversation state is corrupt")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", project_id_value):
+            abort(503, "support conversation state is corrupt")
+        external_ref = item.get("external_ref", "")
+        if external_ref and not EXTERNAL_REFERENCE.fullmatch(external_ref):
+            abort(503, "support conversation state is corrupt")
+        updated_at = item.get("updated_at")
+        if updated_at is not None:
+            if not isinstance(updated_at, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", updated_at):
+                abort(503, "support conversation state is corrupt")
+            try:
+                datetime.fromisoformat(updated_at[:-1] + "+00:00")
+            except ValueError:
+                abort(503, "support conversation state is corrupt")
+        chatwoot_ready = _connector_status("CHATWOOT_CONNECTOR_STATUS") == "ready"
+        chatwoot_origin = _safe_provider_url(os.environ.get("CHATWOOT_BASE_URL", ""))
+        parsed = urllib.parse.urlparse(item.get("url", "")) if isinstance(item.get("url", ""), str) else None
+        valid_origin = bool(parsed and _safe_provider_url(item.get("url", "")) == chatwoot_origin and not parsed.username and not parsed.password)
+        url = _safe_support_url(item.get("url", "")) if chatwoot_ready and chatwoot_origin and valid_origin else ""
+        output.append({
+            "id": item["id"], "account_id": account_id_value,
+            "project_id": project_id_value, "status": status,
+            "subject": item.get("subject", ""), "updated_at": updated_at,
+            "external_ref": external_ref, "url": url,
+        })
+    return output
+
+
+@app.get("/api/support/conversations")
+def support_conversations():
+    account_id = str(request.args.get("account_id", "")).strip()
+    if account_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}", account_id):
+        abort(400, "invalid account id")
+    items = _support_projection()
+    if account_id:
+        items = [item for item in items if item["account_id"] == account_id]
+    return jsonify({"schema": "schema://frank.support-conversations/v1", "conversations": items})
 
 
 @app.get("/api/roots")
@@ -990,11 +1138,68 @@ def file_get():
     return jsonify({"ok": True, "root": root, "path": rel, "text": text})
 
 
+def _hermes_model_rows(payload: dict) -> list[dict]:
+    """Normalize Hermes's authoritative picker payload into browser rows.
+
+    Live v0.21 shape: per-provider rows carry `models` (strings or dicts),
+    `capabilities` ({model: {fast, reasoning}}) and an `authenticated` flag.
+    Only authenticated providers are selectable; nothing is inferred.
+    """
+    rows: list[dict] = []
+    options = payload.get("options") if isinstance(payload, dict) else None
+    if isinstance(options, list):
+        for entry in options:
+            if isinstance(entry, dict) and entry.get("id"):
+                rows.append({
+                    "id": str(entry.get("id")),
+                    "provider": entry.get("provider"),
+                    "note": entry.get("note"),
+                    "reasoning": entry.get("reasoning"),
+                })
+        return rows
+    if not isinstance(payload, dict):
+        return rows
+    for row in payload.get("providers", []) or []:
+        if not isinstance(row, dict) or not row.get("authenticated"):
+            continue
+        provider = str(row.get("slug") or row.get("id") or "")
+        capabilities = row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {}
+        for entry in row.get("models", []) or []:
+            if isinstance(entry, dict) and entry.get("id"):
+                model_id = str(entry.get("id"))
+                note = entry.get("note")
+            elif isinstance(entry, str) and entry.strip():
+                model_id = entry.strip()
+                note = None
+            else:
+                continue
+            cap = capabilities.get(model_id)
+            rows.append({
+                "id": model_id,
+                "provider": provider,
+                "note": note or row.get("name"),
+                "reasoning": bool(cap.get("reasoning")) if isinstance(cap, dict) else None,
+            })
+    return rows
+
+
 @app.get("/api/models")
 def models():
-    items = list(CURATED_MODELS)
-    hermes = hermes_reachable()
-    return jsonify({"models": items, "profile": HERMES_PROFILE, "hermes": hermes})
+    """Model truth lives in Hermes.  No Frank catalogue; failures are visible."""
+    if _serve_client is None:
+        abort(503, description="hermes serve bridge is not configured; model options unavailable")
+    try:
+        payload = _serve_client().model_options()
+    except Exception as err:
+        return jsonify({
+            "error": {"type": "hermes.model_unavailable", "message": f"Hermes model options are unavailable: {err}"}
+        }), 503
+    rows = _hermes_model_rows(payload)
+    if not rows:
+        return jsonify({
+            "error": {"type": "hermes.model_unavailable", "message": "Hermes returned no selectable models."}
+        }), 503
+    return jsonify({"models": rows, "profile": HERMES_PROFILE, "hermes": hermes_reachable()})
 
 
 @app.get("/api/chat/sessions")
@@ -1403,6 +1608,38 @@ def _ad_studio_source_url(run_id: str, name: str) -> str | None:
     return f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(artifact, safe='')}"
 
 
+def _public_ad_studio_model_profile(run: dict) -> dict:
+    """Expose only the immutable provider/model choices frozen for this run."""
+    policy = run.get("model_policy") if isinstance(run.get("model_policy"), dict) else {}
+    stages = policy.get("stages") if isinstance(policy.get("stages"), dict) else {}
+    role_specs = (
+        ("builder", "Builder & analysis", ("analyse", "build")),
+        ("comparator", "Comparator", ("compare",)),
+        ("quality-escalation", "Quality escalation", ("quality-escalation",)),
+        ("final-review-a", "Final review A", ("final-review-a",)),
+        ("final-review-b", "Final review B", ("final-review-b",)),
+    )
+    roles = []
+    for role, label, stage_names in role_specs:
+        stage = next((stages.get(name) for name in stage_names if isinstance(stages.get(name), dict)), {})
+        primary = stage.get("primary") if isinstance(stage.get("primary"), dict) else {}
+        provider = str(primary.get("provider") or "").strip()
+        model = str(primary.get("model") or "").strip()
+        if not (
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", provider)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", model)
+        ):
+            continue
+        roles.append({"role": role, "label": label, "provider": provider, "model": model})
+    revision = run.get("model_policy_revision")
+    return {
+        "source": "Hermes frozen run policy",
+        "immutable": True,
+        "roles": roles,
+        **({"revision": int(revision)} if isinstance(revision, int) and not isinstance(revision, bool) else {}),
+    } if roles else {}
+
+
 def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
     """Project Hermes state for Frank's internal operator monitor."""
     now = int(time.time())
@@ -1439,6 +1676,23 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     source_url = _ad_studio_source_url(run_id, source_public["name"])
     if source_url:
         source_public["url"] = source_url
+    model_profile = _public_ad_studio_model_profile(run)
+    raw_usage = output.get("usage") if isinstance(output.get("usage"), dict) else {}
+    raw_cost = output.get("cost") if isinstance(output.get("cost"), dict) else {}
+    usage = {}
+    for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd"):
+        number = _number_from(raw_usage.get(key))
+        if number is not None and number >= 0:
+            usage[key] = number
+    reported_cost = _number_from(raw_cost.get("reported_usd"), raw_usage.get("reported_cost_usd"))
+    if reported_cost is not None and reported_cost >= 0:
+        usage["reported_cost_usd"] = reported_cost
+    providers = {str(role.get("provider") or "") for role in model_profile.get("roles", [])}
+    usage.update({
+        "source": "Hermes run ledger",
+        "status": "reported" if any(key in usage for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd", "reported_cost_usd")) else "not_reported",
+        "billing": "ChatGPT/Codex OAuth — not OpenAI API dashboard" if providers == {"openai-codex"} else "Provider account",
+    })
     return {
         "id": run_id,
         "request_id": str(run.get("request_id") or ""),
@@ -1450,8 +1704,9 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "updated_at": run.get("updated_at") or run.get("created_at") or now,
         "source": source_public,
         "output": safe_output,
-        "cost": (output.get("cost") or {}).get("reported_usd") if isinstance(output.get("cost"), dict) else None,
-        "usage": {key: output.get("usage", {}).get(key) for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd") if isinstance(output.get("usage"), dict) and output.get("usage", {}).get(key) is not None},
+        "cost": reported_cost,
+        "usage": usage,
+        "model_profile": model_profile,
         "title": title or str(run.get("title") or payload.get("job_name") or "Ad template"),
         "project_id": project_id or str(scope.get("project_id") or payload.get("project_id") or ""),
         **({"error": str(run.get("error"))[:1200]} if run.get("error") else {}),
@@ -1598,6 +1853,173 @@ def _ad_studio_source(attachment: dict) -> dict:
     }
 
 
+_AD_STUDIO_IMAGE_EXTENSIONS = MappingProxyType({
+    ".avif": "image/avif",
+    ".bmp": "image/bmp",
+    ".gif": "image/gif",
+    ".heic": "image/heic",
+    ".heif": "image/heif",
+    ".jpeg": "image/jpeg",
+    ".jpg": "image/jpeg",
+    ".png": "image/png",
+    ".tif": "image/tiff",
+    ".tiff": "image/tiff",
+    ".webp": "image/webp",
+})
+
+
+class _AdStudioSourceError(ValueError):
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
+
+
+def _ad_studio_safe_filename(raw: object, index: int) -> str:
+    """Return one display-safe basename; staging prefixes prevent collisions."""
+    basename = Path(str(raw or "").replace("\\", "/")).name.strip()
+    if not basename or basename in {".", ".."}:
+        basename = f"source-{index + 1}.bin"
+    suffix = Path(basename).suffix.lower()
+    stem = Path(basename).stem
+    stem = re.sub(r"[^A-Za-z0-9._ -]", "_", stem).strip(" ._") or f"source-{index + 1}"
+    return f"{stem[:96]}{suffix[:12]}"
+
+
+def _ad_studio_signature_matches(media_type: str, header: bytes) -> bool:
+    if media_type == "image/png":
+        return header.startswith(b"\x89PNG\r\n\x1a\n")
+    if media_type == "image/jpeg":
+        return header.startswith(b"\xff\xd8\xff")
+    if media_type == "image/gif":
+        return header.startswith((b"GIF87a", b"GIF89a"))
+    if media_type == "image/webp":
+        return len(header) >= 12 and header[:4] == b"RIFF" and header[8:12] == b"WEBP"
+    if media_type == "image/bmp":
+        return header.startswith(b"BM")
+    if media_type == "image/tiff":
+        return header.startswith((b"II*\x00", b"MM\x00*"))
+    if media_type in {"image/avif", "image/heic", "image/heif"}:
+        if len(header) < 12 or header[4:8] != b"ftyp":
+            return False
+        brands = {header[8:12]}
+        brands.update(header[offset:offset + 4] for offset in range(16, min(len(header), 64), 4))
+        if media_type == "image/avif":
+            return bool(brands & {b"avif", b"avis"})
+        return bool(brands & {b"heic", b"heix", b"hevc", b"hevx", b"heim", b"heis", b"mif1", b"msf1"})
+    return False
+
+
+def _validate_ad_studio_attachment(attachment: dict) -> dict:
+    target = _upload_target(str(attachment.get("id") or ""))
+    if target is None or not target.is_file():
+        raise _AdStudioSourceError("source_missing", "source image is no longer available")
+    size = target.stat().st_size
+    if size <= 0:
+        raise _AdStudioSourceError("empty_file", "source image is empty")
+    if size > AD_STUDIO_MAX_SOURCE_BYTES:
+        raise _AdStudioSourceError("file_too_large", "source image exceeds the per-file size limit")
+    suffix = target.suffix.lower()
+    media_type = _AD_STUDIO_IMAGE_EXTENSIONS.get(suffix)
+    if not media_type:
+        raise _AdStudioSourceError("unsupported_type", "source must use a supported image file type")
+    declared_type = str(attachment.get("type") or "").lower().split(";", 1)[0].strip()
+    if declared_type and declared_type not in {media_type, "application/octet-stream"}:
+        raise _AdStudioSourceError("type_mismatch", "source image type does not match its filename")
+    try:
+        with target.open("rb") as source_file:
+            header = source_file.read(64)
+    except OSError as error:
+        raise _AdStudioSourceError("source_unreadable", "source image could not be read") from error
+    if not _ad_studio_signature_matches(media_type, header):
+        raise _AdStudioSourceError("invalid_image", "source image content does not match its file type")
+    clean = dict(attachment)
+    clean.update({"name": target.name, "size": size, "type": media_type})
+    return clean
+
+
+def _remove_ad_studio_staging(attachment: dict) -> None:
+    target = _upload_target(str(attachment.get("id") or ""))
+    if target is None:
+        return
+    try:
+        target.unlink(missing_ok=True)
+    except OSError:
+        return
+    upload_root = UPLOAD_DIR.resolve()
+    parent = target.parent
+    while parent != upload_root:
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+        parent = parent.parent
+
+
+def _remove_raw_ad_studio_attachments(raw_attachments: list) -> None:
+    for raw_attachment in raw_attachments:
+        if not isinstance(raw_attachment, dict):
+            continue
+        cleaned = _clean_atts([raw_attachment])
+        if cleaned:
+            _remove_ad_studio_staging(cleaned[0])
+
+
+def _start_ad_studio_source_run(
+    source_item: dict,
+    *,
+    total_items: int,
+    common_name: str,
+    brief: str,
+    project_id: str,
+    project: dict,
+) -> tuple[dict | None, dict]:
+    index = source_item["index"]
+    attachment = source_item["attachment"]
+    source_name = re.sub(r"\.[^.]+$", "", attachment["name"])
+    name = common_name if total_items == 1 else (
+        f"{common_name} · {source_name}"[:60] if common_name else source_name[:60]
+    )
+    command_payload = {
+        "job_name": name,
+        "brief": brief,
+        "placements": ["feed", "story"],
+        "sources": [_ad_studio_source(attachment)],
+        "project_context": _project_context(project),
+    }
+    request_payload = {
+        "schema": "schema://hermes.tool-run-command/v1",
+        "request_id": f"req_{secrets.token_hex(16)}",
+        "tool_id": "ad-template-generator",
+        "action": "build-template",
+        "scope": {"project_id": project_id},
+        "payload": command_payload,
+        "idempotency_key": f"ad-template:{secrets.token_hex(16)}",
+    }
+    try:
+        data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=8)
+        run_data = data.get("run") if isinstance(data.get("run"), dict) else data
+        run_id = str(run_data.get("id") or run_data.get("run_id") or "")
+        if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+            raise _AdStudioSourceError("invalid_hermes_response", "Hermes did not return a valid Tool run id")
+        run = _public_ad_studio_run(run_data, title=f"Ad Studio · {name}", project_id=project_id)
+        return run, {"index": index, "name": attachment["name"], "status": "accepted", "run": run}
+    except _AdStudioSourceError as error:
+        return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": error.code, "message": str(error)}}
+    except urllib.error.HTTPError as error:
+        detail = error.read().decode("utf-8", errors="replace")[:1200]
+        message = f"Hermes returned HTTP {error.code}."
+        try:
+            parsed = json.loads(detail)
+            message = parsed.get("error", {}).get("message") or parsed.get("message") or message
+        except (json.JSONDecodeError, AttributeError):
+            pass
+        return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": "hermes_rejected", "message": str(message)[:240]}}
+    except Exception as error:
+        return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": "hermes_unavailable", "message": f"Could not reach Hermes: {str(error).split(chr(10))[0][:180]}"}}
+    finally:
+        _remove_ad_studio_staging(attachment)
+
+
 def _tool_run_path(run_id: str, suffix: str = "") -> str:
     if not AD_STUDIO_RUN_ID.fullmatch(run_id):
         abort(404)
@@ -1606,48 +2028,87 @@ def _tool_run_path(run_id: str, suffix: str = "") -> str:
 
 @app.post("/api/ad-studio/runs")
 def ad_studio_run_create():
-    """Start exactly one canonical Feed + Story run in Hermes."""
+    """Start one durable canonical Feed + Story Hermes run per source image."""
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict):
         abort(400, "request body must be an object")
+    raw_attachments = body.get("attachments")
+    if not isinstance(raw_attachments, list) or not raw_attachments:
+        abort(400, "choose at least one source image")
+    if len(raw_attachments) > AD_STUDIO_MAX_SOURCES:
+        _remove_raw_ad_studio_attachments(raw_attachments)
+        abort(413, f"choose no more than {AD_STUDIO_MAX_SOURCES} source images")
+
     project_id = _clean_project_id(body.get("project_id")) if body.get("project_id") else ""
     project = _project_store.get_project(project_id) if project_id else None
     if not project:
+        _remove_raw_ad_studio_attachments(raw_attachments)
         abort(404, "project not found")
-    raw_attachments = body.get("attachments")
-    if not isinstance(raw_attachments, list) or len(raw_attachments) != 1:
-        abort(400, "choose exactly one source image")
-    attachments = _clean_atts(raw_attachments)
-    if len(attachments) != 1 or not attachments[0]["type"].startswith("image/"):
-        abort(400, "Ad Studio accepts exactly one image source")
-    attachment = attachments[0]
-    name = _clean_project_text(body.get("name"), 60) or re.sub(r"\.[^.]+$", "", attachment["name"])
+
+    sources = []
+    results = []
+    total_size = 0
+    for index, raw_attachment in enumerate(raw_attachments):
+        name = _ad_studio_safe_filename(raw_attachment.get("name") if isinstance(raw_attachment, dict) else "", index)
+        cleaned = _clean_atts([raw_attachment]) if isinstance(raw_attachment, dict) else []
+        attachment = cleaned[0] if cleaned else None
+        try:
+            if attachment is None:
+                raise _AdStudioSourceError("source_missing", "source image is no longer available")
+            attachment = _validate_ad_studio_attachment(attachment)
+            total_size += attachment["size"]
+            if total_size > AD_STUDIO_MAX_BATCH_BYTES:
+                raise _AdStudioSourceError("batch_too_large", "source images exceed the batch size limit")
+            sources.append({"index": index, "attachment": attachment})
+        except _AdStudioSourceError as error:
+            if attachment is not None:
+                _remove_ad_studio_staging(attachment)
+            results.append({"index": index, "name": name, "status": "rejected", "error": {"code": error.code, "message": str(error)}})
+
     brief = _clean_project_text(body.get("brief"), 800)
-    command_payload = {
-        "job_name": name, "brief": brief, "placements": ["feed", "story"],
-        "sources": [_ad_studio_source(attachment)], "project_context": _project_context(project),
+    common_name = _clean_project_text(body.get("name"), 60)
+    runs = []
+    if sources:
+        total_items = len(sources) + len(results)
+        worker_count = min(4, len(sources))
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ad-studio-start") as executor:
+            outcomes = executor.map(
+                lambda source_item: _start_ad_studio_source_run(
+                    source_item,
+                    total_items=total_items,
+                    common_name=common_name,
+                    brief=brief,
+                    project_id=project_id,
+                    project=project,
+                ),
+                sources,
+            )
+            for run, result in outcomes:
+                if run is not None:
+                    runs.append(run)
+                results.append(result)
+
+    results.sort(key=lambda item: item["index"])
+    failed = len(results) - len(runs)
+    response = {
+        "ok": bool(runs),
+        "partial": bool(runs and failed),
+        "accepted": len(runs),
+        "failed": failed,
+        "runs": runs,
+        "results": results,
     }
-    request_payload = {
-        "schema": "schema://hermes.tool-run-command/v1",
-        "request_id": f"req_{secrets.token_hex(16)}",
-        "tool_id": "ad-template-generator", "action": "build-template",
-        "scope": {"project_id": project_id}, "payload": command_payload,
-        "idempotency_key": f"ad-template:{secrets.token_hex(16)}",
-    }
-    try:
-        data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=15)
-        run_data = data.get("run") if isinstance(data.get("run"), dict) else data
-        run_id = str(run_data.get("id") or run_data.get("run_id") or "")
-        if not AD_STUDIO_RUN_ID.fullmatch(run_id):
-            return jsonify({"error": "Hermes did not return a valid Tool run id"}), 502
-        result = _public_ad_studio_run(run_data, title=f"Ad Studio · {name}", project_id=project_id)
-        staging_target = _upload_target(attachment["id"])
-        if staging_target is not None:
-            try: staging_target.unlink(missing_ok=True)
-            except OSError: pass
-        return jsonify({"ok": True, "run": result, "runs": [result]}), 202
-    except Exception as error:
-        return _hermes_error(error)
+    if len(results) == 1 and len(runs) == 1:
+        response["run"] = runs[0]
+    if runs and not failed:
+        status = 202
+    elif runs:
+        status = 207
+    elif any(item["status"] == "failed" for item in results):
+        status = 502
+    else:
+        status = 422
+    return jsonify(response), status
 
 
 @app.get("/api/ad-studio/runs")
@@ -1817,7 +2278,7 @@ def chat_turn():
     if provider:
         payload["provider"] = provider
     return Response(
-        stream_with_context(_hermes_chat_stream(chat_id, payload)),
+        stream_with_context(_project_chat_stream(chat_id, payload)),
         mimetype="text/event-stream",
         headers=_sse_headers(),
     )
@@ -1829,6 +2290,445 @@ def _sse_headers():
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
     }
+
+
+# ============================================================================
+# v0.21 central wiring (Session 1; contract v1.0.0 §2–§8)
+# ============================================================================
+
+from urllib.parse import urlsplit as _urlsplit
+from hermes_adapter.http import RestSurface as _RestSurface, RestError as _RestError
+from hermes_adapter.serve import ServeClient as _ServeClient, ServeError as _ServeError
+from hermes_adapter.projection import EventProjection as _EventProjection
+from hermes_adapter.events import derived_label as _derived_label
+
+_HERMES_SERVE_URL = os.environ.get("HERMES_SERVE_URL", "")
+_HERMES_SERVE_TOKEN = os.environ.get("HERMES_SERVE_TOKEN", "")
+
+# Terminal run events used to release the active-run binding.
+_RUN_TERMINAL = frozenset({
+    "run.completed", "run.cancelled", "run.stopped", "run.failed",
+    "run.expired", "error", "done",
+})
+
+
+def _serve_client():
+    if not (_HERMES_SERVE_URL and _HERMES_SERVE_TOKEN):
+        return None
+    return _ServeClient(_RestSurface(
+        "serve", _HERMES_SERVE_URL, lambda: {"X-Hermes-Session-Token": _HERMES_SERVE_TOKEN}))
+
+
+def _same_origin_guard():
+    """Strict same-origin mutation guard for browser state changes."""
+    sec_site = request.headers.get("Sec-Fetch-Site")
+    if sec_site not in (None, "same-origin", "same-site", "none"):
+        abort(403, description="cross-site mutation rejected")
+    origin = request.headers.get("Origin", "")
+    if origin:
+        netloc = _urlsplit(origin).netloc
+        if netloc and netloc != request.host:
+            abort(403, description="cross-origin mutation rejected")
+    if request.content_type and "application/json" not in request.content_type:
+        abort(415, description="expected application/json")
+
+
+# --- one redacted event projection under the Window data root ---------------
+_EVENT_PROJECTION = _EventProjection(Path(os.environ.get(
+    "FRANK_EVENT_PROJECTION_ROOT", str(Path(os.environ.get("CHAT_STORE_DIR", "/data")) / "events-projection"))))
+_active_runs_lock = threading.Lock()
+_ACTIVE_RUNS: dict[str, str] = {}
+
+
+def _projection_key(chat_id: str) -> str:
+    return _EventProjection.scope_key("operator", "frank", chat_id)
+
+
+def _record_projected_event(chat_id: str, native_event: str, data_text: str) -> None:
+    data = None
+    try:
+        data = json.loads(data_text) if data_text else {}
+    except json.JSONDecodeError:
+        data = {"raw": data_text[:2000]}
+    if not isinstance(data, dict):
+        data = {"raw": str(data)[:2000]}
+    run_id = str(data.get("run_id") or "")
+    if run_id:
+        with _active_runs_lock:
+            _ACTIVE_RUNS[chat_id] = run_id
+        if native_event in _RUN_TERMINAL:
+            with _active_runs_lock:
+                if _ACTIVE_RUNS.get(chat_id) == run_id:
+                    _ACTIVE_RUNS.pop(chat_id, None)
+    envelope = {
+        "native_event": native_event or "message",
+        "derived_label": _derived_label(native_event or "message"),
+        "payload": data,
+        "run_id": run_id,
+    }
+    try:
+        _EVENT_PROJECTION.append(_projection_key(chat_id), envelope, run_id=run_id)
+    except Exception:
+        # Projection failure must never corrupt the live turn stream.
+        pass
+
+
+def _project_chat_stream(chat_id: str, payload: dict):
+    """Pass the authoritative turn through unchanged while persisting a
+    redacted, sequence-stamped projection for replay (contract §5)."""
+    event_name = "message"
+    data_buf: list[str] = []
+
+    def _flush() -> None:
+        nonlocal event_name
+        if data_buf:
+            _record_projected_event(chat_id, event_name, "\n".join(data_buf))
+            event_name = "message"
+            data_buf.clear()
+
+    try:
+        for raw_line in _hermes_chat_stream(chat_id, payload):
+            yield raw_line
+            text = raw_line.decode("utf-8", errors="replace")
+            for line in text.splitlines():
+                if line.startswith("event:"):
+                    _flush()
+                    event_name = line[6:].strip() or "message"
+                elif line.startswith("data:"):
+                    data_buf.append(line[5:].strip())
+                elif not line.strip():
+                    _flush()
+        _flush()
+    finally:
+        with _active_runs_lock:
+            _ACTIVE_RUNS.pop(chat_id, None)
+
+
+@app.post("/api/chat/stop")
+def chat_stop():
+    _same_origin_guard()
+    body = request.get_json(silent=True) or {}
+    chat_id = str(body.get("chat_id", "")).strip()
+    if not chat_id:
+        abort(400, "chat_id required")
+    with _active_runs_lock:
+        run_id = str(body.get("run_id", "")).strip() or _ACTIVE_RUNS.get(chat_id, "")
+    if not run_id:
+        return jsonify({"error": {"type": "no_active_run",
+                                  "message": "No active Hermes run to stop for this chat."}}), 409
+    try:
+        result = hermes_request(f"/v1/runs/{run_id}/stop",
+                                {"reason": str(body.get("reason", "user stop"))[:200]})
+    except Exception as err:
+        return _hermes_error(err)
+    _record_projected_event(chat_id, "run.stopped", json.dumps(
+        {"type": "run.stopped", "run_id": run_id, "frank_origin": True}))
+    return jsonify(result)
+
+
+@app.post("/api/chat/respond")
+def chat_respond():
+    """Resolve one blocking input against the exact native request."""
+    _same_origin_guard()
+    body = request.get_json(silent=True) or {}
+    chat_id = str(body.get("chat_id", "")).strip()
+    kind = str(body.get("kind", "approval")).strip().lower()
+    value = body.get("value")
+    request_id = str(body.get("request_id", "")).strip()
+    with _active_runs_lock:
+        run_id = str(body.get("run_id", "")).strip() or _ACTIVE_RUNS.get(chat_id, "")
+    if not chat_id:
+        abort(400, "chat_id required")
+    if not run_id:
+        return jsonify({"error": {"type": "no_active_run",
+                                  "message": "No active Hermes run is waiting on this chat."}}), 409
+    if kind == "clarify":
+        answer = str(value or "").strip()
+        if not answer:
+            abort(400, "clarification answer required")
+        try:
+            result = hermes_request(f"/v1/runs/{run_id}/steer", {"input": answer[:8000]})
+        except Exception as err:
+            return _hermes_error(err)
+    elif kind in ("approval", "sudo"):
+        choice = str(value or "once").strip().lower()
+        choice = {"approve": "once", "approved": "once", "allow": "once", "yes": "once",
+                  "deny": "deny", "no": "deny"}.get(choice, choice)
+        if choice not in ("once", "session", "always", "deny"):
+            abort(400, "invalid approval choice")
+        payload: dict = {"choice": choice}
+        if request_id:
+            payload["request_id"] = request_id
+        try:
+            result = hermes_request(f"/v1/runs/{run_id}/approval", payload)
+        except Exception as err:
+            return _hermes_error(err)
+    elif kind == "secret":
+        return jsonify({"error": {"type": "unsupported",
+                                  "message": "Secret input is not exposed by the pinned run-mode gateway."}}), 501
+    else:
+        abort(400, "unknown blocking-input kind")
+    _record_projected_event(chat_id, f"input.resolved", json.dumps(
+        {"type": "input.resolved", "run_id": run_id, "kind": kind, "frank_origin": True}))
+    return jsonify(result)
+
+
+@app.post("/api/chat/steer")
+def chat_steer():
+    _same_origin_guard()
+    body = request.get_json(silent=True) or {}
+    chat_id = str(body.get("chat_id", "")).strip()
+    instruction = str(body.get("instruction", "")).strip()
+    with _active_runs_lock:
+        run_id = str(body.get("run_id", "")).strip() or _ACTIVE_RUNS.get(chat_id, "")
+    if not chat_id or not instruction:
+        abort(400, "chat_id and instruction required")
+    if not run_id:
+        return jsonify({"error": {"type": "no_active_run",
+                                  "message": "No active Hermes run to steer."}}), 409
+    try:
+        result = hermes_request(f"/v1/runs/{run_id}/steer", {"input": instruction[:8000]})
+    except Exception as err:
+        return _hermes_error(err)
+    _record_projected_event(chat_id, "run.steered", json.dumps(
+        {"type": "run.steered", "run_id": run_id, "frank_origin": True}))
+    return jsonify(result)
+
+
+@app.get("/api/chat/events")
+def chat_events():
+    """Replay the redacted projection after a browser reload/disconnect."""
+    chat_id = request.args.get("session_id", "").strip()
+    if not chat_id:
+        abort(400, "session_id required")
+    try:
+        after = int(request.args.get("after", "-1"))
+    except ValueError:
+        abort(400, "after must be an integer")
+    events = list(_EVENT_PROJECTION.iter_events(_projection_key(chat_id), after_frank_sequence=after))
+    return jsonify({"events": events, "session_id": chat_id})
+
+
+@app.post("/api/audio/transcribe")
+def audio_transcribe():
+    """Server-side STT via the pinned Hermes endpoint (contract §6)."""
+    _same_origin_guard()
+    client = _serve_client()
+    if client is None:
+        abort(503, description="hermes serve bridge is not configured")
+    body = request.get_json(silent=True) or {}
+    data_url = str(body.get("data_url", ""))
+    mime_type = str(body.get("mime_type")) if body.get("mime_type") else None
+    try:
+        result = client.transcribe(data_url, mime_type=mime_type)
+    except _ServeError as err:
+        status = 413 if err.frank_code == "hermes.payload_too_large" else (
+            400 if err.frank_code == "hermes.invalid_params" else 503)
+        return jsonify({"error": {"type": err.frank_code, "message": str(err)}}), status
+    return jsonify(result)
+
+
+@app.post("/api/chat/attachments/vps")
+def chat_attachments_vps():
+    """Attach one allowlisted VPS file/folder to the current chat."""
+    _same_origin_guard()
+    if _ws_catalog is None:
+        abort(503, description="workspace estate is not configured")
+    body = request.get_json(silent=True) or {}
+    root_id = str(body.get("root", "")).strip()
+    rel = str(body.get("path", "")).strip()
+    kind = str(body.get("kind", "file")).strip()
+    chat_id = str(body.get("chat_id", "")).strip()
+    if not chat_id:
+        abort(400, "chat_id required")
+    if kind not in ("file", "folder"):
+        abort(400, "kind must be file or folder")
+    workspace = _chat_workspace(chat_id)
+    if workspace is None:
+        return jsonify({"error": {"type": "outside_workspace",
+                                  "message": "This chat has no registered project workspace; VPS folders cannot be attached live. Start the chat from a project, or upload a local snapshot."}}), 403
+    contract = None
+    for candidate in _ws_catalog.roots_for(workspace.workspace_id):
+        if candidate.kind != "live-reference":
+            continue
+        # The Explorer presents one tree under the "vps" root id; per-workspace
+        # live roots are also accepted by their registered id.
+        if root_id in ("vps", candidate.root_id):
+            contract = candidate
+            break
+    if contract is None:
+        abort(403, "root is not permitted for this chat's workspace")
+    try:
+        manifest = _build_manifest(Path(contract.container_path), rel)
+    except Exception as err:
+        return jsonify({"error": {"type": "path_rejected", "message": str(err)}}), 400
+    chip = {
+        "id": f"vps-{manifest.get('attachment_id') or _uuid.uuid4().hex}",
+        "name": manifest.get("display_name") or rel.rsplit("/", 1)[-1],
+        "relative_path": rel,
+        "type": manifest.get("media_type") or ("inode/directory" if kind == "folder" else "application/octet-stream"),
+        "size": manifest.get("total_bytes"),
+        "source": "vps",
+        "file_count": manifest.get("file_count"),
+    }
+    return jsonify(chip)
+
+
+# --- workspace estate foundation (flag-gated) ------------------------------
+_ws_registry = None
+_ws_catalog = None
+_ws_leases = None
+_ws_resolver = None
+_build_manifest = None
+import uuid as _uuid
+
+if os.environ.get("FRANK_V021_FOUNDATION", "").lower() in ("1", "true", "yes"):
+    from infra.workspace.resolver import WorkspaceRegistry as _WSRegistry
+    from infra.workspace.roots import RootCatalog as _WSCatalog
+    from infra.workspace.manifest import build_manifest as _ws_build_manifest
+    from infra.workspace.lease import WorkspaceLease as _WSLease
+    import work_api as _work_api
+    import work_cron as _work_cron
+    from kanban_bridge_port import BridgeKanbanPort as _BridgeKanbanPort
+
+    def _legacy_bank_for(project: dict) -> str:
+        try:
+            from memory_inspector import _bank_id as _legacy_bank_id
+            return _legacy_bank_id(project)
+        except Exception:
+            return ""
+
+    def _seed_registry(registry: _WSRegistry) -> dict:
+        """Backward-compatible migration through Session 5's own migration
+        API. Every registered project becomes an opaque workspace whose
+        immutable memory_scope is the exact legacy root-derived bank."""
+        candidates = []
+        for project in _project_store.list_projects() or []:
+            project_id = str(project.get("id") or "").strip()
+            if not project_id:
+                continue
+            root = str(project.get("root") or "").strip()
+            if root and not root.startswith("/"):
+                # Legacy project roots are relative names; the canonical host
+                # location is /projects/<name> (resolver's canonical prefix).
+                root = f"/projects/{root.lstrip('/')}"
+            slug = re.sub(r"[^a-z0-9-]+", "-", project_id.lower()).strip("-") or "project"
+            candidates.append({
+                "project_id": project_id,
+                "slug": slug,
+                "host_path": root,
+                "hermes_path": root,
+                "container_path": f"/vps/projects/{slug}" if root else "",
+                "root_kind": "live-reference" if root else "upload-staging",
+                "legacy_memory_scope": _legacy_bank_for(project) or f"steven-{slug}",
+            })
+        return registry.migrate_registry(candidates)
+
+    _ws_registry = _WSRegistry(Path(os.environ.get(
+        "FRANK_WORKSPACE_REGISTRY", str(Path(os.environ.get("CHAT_STORE_DIR", "/data")) / "workspace-registry.json"))))
+    try:
+        _seed_registry(_ws_registry)
+    except Exception:
+        # Registry corruption must not stop Frank; estate features fail closed.
+        _ws_registry = None
+    if _ws_registry is not None:
+        _ws_catalog = _WSCatalog(_ws_registry)
+        _ws_leases = _WSLease(Path(os.environ.get(
+            "FRANK_WORKSPACE_LEASES", str(Path(os.environ.get("CHAT_STORE_DIR", "/data")) / "workspace-leases.json"))))
+        _build_manifest = _ws_build_manifest
+
+        class _ResolverShim:
+            """The minimal resolver view work_api consumes."""
+            def __init__(self, registry):
+                self._registry = registry
+            def get(self, workspace_id):
+                return self._registry.get(workspace_id)
+            def get_active(self, workspace_id):
+                return self._registry.get_active(workspace_id)
+            def hermes_path(self, workspace_id):
+                record = self._registry.get(workspace_id)
+                return record.hermes_path if record else ""
+
+        _ws_resolver = _ResolverShim(_ws_registry)
+        _kanban_port = _BridgeKanbanPort(
+            base_url=os.environ.get("FRANK_KANBAN_BRIDGE_URL", ""),
+            key_provider=lambda: os.environ.get("FRANK_KANBAN_BRIDGE_KEY", ""),
+            slug_for=lambda binding: (
+                _ws_registry.get_active(_binding_workspace(binding)).board_slug_private
+                if _ws_registry.get(_binding_workspace(binding)) else None),
+        )
+        _cron_client = _work_cron.CronClient(
+            _HERMES_SERVE_URL, lambda: _HERMES_SERVE_TOKEN)
+        _work_api.configure(
+            project_loader=_project_store.get_project,
+            kanban=_kanban_port,
+            resolver=_ws_resolver,
+            leases=_ws_leases,
+            cron_client=_cron_client,
+        )
+        app.register_blueprint(_work_api.api)
+
+        import hmac as _hmac
+        from infra.workspace.lease_blueprint import create_lease_blueprint as _create_lease_blueprint
+        app.register_blueprint(_create_lease_blueprint(_ws_leases))
+
+        @app.post("/internal/workspaces")
+        def _internal_workspace_resolve():
+            """Private server-to-server resolve (codex launcher contract).
+
+            Same runtime-only credential and constant-time compare as the
+            lease endpoints; only active workspaces resolve, and only to the
+            canonical host path — never to the browser.
+            """
+            presented = request.headers.get("Authorization", "")
+            expected = os.environ.get("FRANK_LEASE_CREDENTIAL", "")
+            if not expected:
+                abort(503, "lease credential is not configured")
+            prefix = "Bearer "
+            if not presented.startswith(prefix) or not _hmac.compare_digest(presented[len(prefix):], expected):
+                abort(403)
+            body = request.get_json(silent=True) or {}
+            workspace_id = str(body.get("workspace_id") or "")
+            if not workspace_id:
+                abort(400, "workspace_id is required")
+            record = _ws_registry.get(workspace_id)
+            if record is None or record.status != "active" or not record.host_path:
+                abort(404)
+            return jsonify({
+                "ok": True,
+                "workspace_id": workspace_id,
+                "host_path": record.host_path,
+                "hermes_path": record.hermes_path,
+                "root_kind": record.root_kind,
+            })
+
+
+def _binding_workspace(binding_id: str) -> str:
+    """Board bindings map 1:1 to their project workspace in this migration."""
+    return binding_id[3:] if binding_id.startswith("bb-") else binding_id
+
+
+def _chat_workspace(chat_id: str):
+    """Resolve the chat's bound project to its opaque workspace record."""
+    if _ws_registry is None:
+        return None
+    project_id = ""
+    try:
+        if hasattr(_project_store, "project_id_for_session"):
+            project_id = str(_project_store.project_id_for_session(chat_id) or "")
+    except Exception:
+        project_id = ""
+    if not project_id and hasattr(_project_store, "session_bindings"):
+        try:
+            project_id = str(_project_store.session_bindings().get(chat_id) or "")
+        except Exception:
+            project_id = ""
+    if not project_id:
+        return None
+    try:
+        return _ws_registry.get_active(project_id)
+    except Exception:
+        return None
 
 
 home_platform.configure(
@@ -1849,6 +2749,7 @@ app.register_blueprint(create_memory_blueprint(MemoryInspector(
     _project_store.get_project,
     HindsightClient(HINDSIGHT_URL),
     Path(os.environ.get("PROJECT_KNOWLEDGE_ROOT", "/data/knowledge")),
+    global_bank_id=os.environ.get("FRANK_GLOBAL_MEMORY_BANK", "steven-global"),
 )))
 
 

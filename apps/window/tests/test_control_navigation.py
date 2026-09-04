@@ -17,6 +17,9 @@ class ControlNavigationTests(unittest.TestCase):
         mapping = (ROOT / "web" / "js" / "map.js").read_text(encoding="utf-8")
         self.assertIn("/agenttrail/", live)
         self.assertIn("/api/control/maps/artifact", mapping)
+        self.assertIn("mapSummary", mapping)
+        self.assertIn("Coverage gaps", mapping)
+        self.assertIn("validated", mapping)
         self.assertNotIn("setup-board", live)
         self.assertNotIn("spawn", live)
 
@@ -29,6 +32,13 @@ class ControlNavigationTests(unittest.TestCase):
         self.assertIn("stable_id_map", mapping)
         self.assertIn("Relationships are listed in Control", mapping)
         self.assertNotIn("<h2>VPS World</h2>", mapping)
+
+    def test_map_defaults_to_frank_architecture_and_honors_history(self):
+        mapping = (ROOT / "web" / "js" / "map.js").read_text(encoding="utf-8")
+        self.assertIn('projection:frank/architecture', mapping)
+        self.assertIn('const initial = rows.find((row) => row.projection_id === requested && row.available) || preferred || available[0]', mapping)
+        self.assertIn('window.addEventListener("popstate"', mapping)
+        self.assertIn('{ updateUrl: false }', mapping)
 
 
 if __name__ == "__main__":
