@@ -1,6 +1,7 @@
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260830-ad-studio-route-v1";
 import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, runListRenderSignature, runTimestamp } from "./ad-studio-state.js?v=20260904-run-history-v1";
+import { AD_STUDIO_BRIEF_MAX_CHARACTERS, adStudioBriefValidation } from "./ad-studio-brief.js?v=20260904-brief-roundtrip-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -861,6 +862,17 @@ function requestEvent(name, detail) {
 function setupRunForm() {
   const input = $("#ad-source-files");
   const drop = $("#ad-drop");
+  const briefInput = $("#ad-run-brief");
+  const briefLimit = $("#ad-run-brief-limit");
+  const updateBriefLimit = () => {
+    const validation = adStudioBriefValidation(briefInput.value);
+    briefLimit.textContent = validation.valid
+      ? `Up to ${AD_STUDIO_BRIEF_MAX_CHARACTERS.toLocaleString("en-AU")} characters · ${validation.length.toLocaleString("en-AU")} used`
+      : validation.message;
+    briefLimit.classList.toggle("is-error", !validation.valid);
+  };
+  briefInput.addEventListener("input", updateBriefLimit);
+  updateBriefLimit();
   input.addEventListener("change", () => {
     addLocalFiles(input.files);
     input.value = "";
@@ -877,6 +889,14 @@ function setupRunForm() {
     event.preventDefault();
     const status = $("#ad-run-status");
     status.classList.remove("is-error");
+    const brief = briefInput.value;
+    const briefValidation = adStudioBriefValidation(brief);
+    if (!briefValidation.valid) {
+      status.textContent = briefValidation.message;
+      status.classList.add("is-error");
+      briefInput.focus();
+      return;
+    }
     const sources = selectedFiles.filter((source) => ["queued", "error"].includes(source.status));
     if (!sources.length) {
       status.textContent = selectedFiles.length ? "These images have already started. Clear the queue or add more." : "Add at least one source image.";
@@ -890,7 +910,7 @@ function setupRunForm() {
     try {
       const result = await requestEvent("frank:ad-studio-run", {
         sources, projectId: $("#ad-run-project").value,
-        name: clean($("#ad-run-name").value), brief: clean($("#ad-run-brief").value),
+        name: clean($("#ad-run-name").value), brief,
         onProgress: ({ key, status: nextStatus, run, error }) => updateSourceStatus(key, nextStatus, { run, error }),
       });
       const started = Array.isArray(result.runs) ? result.runs : [];

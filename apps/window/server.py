@@ -104,6 +104,7 @@ AD_STUDIO_MAX_BATCH_BYTES = min(
     MAX_UPLOAD_BYTES,
     max(AD_STUDIO_MAX_SOURCE_BYTES, int(os.environ.get("AD_STUDIO_MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
 )
+AD_STUDIO_MAX_BRIEF_CHARACTERS = 4000
 HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
 HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
@@ -1871,6 +1872,32 @@ class _AdStudioSourceError(ValueError):
         self.code = code
 
 
+class _AdStudioBriefError(ValueError):
+    def __init__(self, code: str, message: str, status: int = 400):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
+def _ad_studio_brief(raw: object) -> str:
+    """Validate without rewriting the immutable UTF-8 generator brief."""
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        raise _AdStudioBriefError("brief_invalid", "The generator brief must be text.")
+    if len(raw) > AD_STUDIO_MAX_BRIEF_CHARACTERS:
+        raise _AdStudioBriefError(
+            "brief_too_long",
+            f"Brief is {len(raw):,} characters. Keep it to {AD_STUDIO_MAX_BRIEF_CHARACTERS:,} or fewer; Frank did not shorten it.",
+            413,
+        )
+    try:
+        raw.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise _AdStudioBriefError("brief_invalid_utf8", "The generator brief must be valid UTF-8 text.") from error
+    return raw
+
+
 def _ad_studio_safe_filename(raw: object, index: int) -> str:
     """Return one display-safe basename; staging prefixes prevent collisions."""
     basename = Path(str(raw or "").replace("\\", "/")).name.strip()
@@ -1979,6 +2006,7 @@ def _start_ad_studio_source_run(
     command_payload = {
         "job_name": name,
         "brief": brief,
+        "brief_sha256": hashlib.sha256(brief.encode("utf-8")).hexdigest(),
         "placements": ["feed", "story"],
         "sources": [_ad_studio_source(attachment)],
         "project_context": _project_context(project),
@@ -2036,6 +2064,16 @@ def ad_studio_run_create():
         _remove_raw_ad_studio_attachments(raw_attachments)
         abort(413, f"choose no more than {AD_STUDIO_MAX_SOURCES} source images")
 
+    try:
+        brief = _ad_studio_brief(body.get("brief"))
+    except _AdStudioBriefError as error:
+        _remove_raw_ad_studio_attachments(raw_attachments)
+        return jsonify({
+            "ok": False,
+            "error": {"code": error.code, "message": str(error)},
+            "limit": AD_STUDIO_MAX_BRIEF_CHARACTERS,
+        }), error.status
+
     project_id = _clean_project_id(body.get("project_id")) if body.get("project_id") else ""
     project = _project_store.get_project(project_id) if project_id else None
     if not project:
@@ -2062,7 +2100,6 @@ def ad_studio_run_create():
                 _remove_ad_studio_staging(attachment)
             results.append({"index": index, "name": name, "status": "rejected", "error": {"code": error.code, "message": str(error)}})
 
-    brief = _clean_project_text(body.get("brief"), 800)
     common_name = _clean_project_text(body.get("name"), 60)
     runs = []
     if sources:

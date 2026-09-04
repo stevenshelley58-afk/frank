@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260904-run-history-v1">
+<link rel="stylesheet" href="/app.css?v=20260904-brief-roundtrip-v1">
 </head>
 <body>
 <div class="app">
@@ -198,7 +198,7 @@
                 <label>Project<select id="ad-run-project" required><option value="">Loading projects…</option></select></label>
                 <label>Job name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
               </div>
-              <label>Brief <span>optional</span><textarea id="ad-run-brief" maxlength="800" rows="4" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea></label>
+              <label>Brief <span>optional</span><textarea id="ad-run-brief" rows="4" aria-describedby="ad-run-brief-limit" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea><small class="ad-brief-limit" id="ad-run-brief-limit">Up to 4,000 characters · 0 used</small></label>
               <div class="ad-submit-row"><p id="ad-run-status" role="status">Add one or more images. Each image becomes its own background job.</p><button type="submit" class="ad-primary" id="ad-run-submit" disabled>Run jobs</button></div>
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
@@ -456,6 +456,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260904-run-history-v1"></script>
+<script type="module" src="/js/app.js?v=20260904-brief-roundtrip-v1"></script>
 </body>
 </html>
