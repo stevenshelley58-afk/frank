@@ -35,7 +35,7 @@ The publisher entrypoint is
 `apps/window/scripts/publish_ops_projections.py` (run from the repository root
 as `PYTHONPATH=.:$PWD/apps/window python -m apps.window.scripts.publish_ops_projections`).
 When `BLOCKWISE_OPS_BASE_URL` is configured it is a signed, bounded HTTP client
-for Blockwise's service-only `GET /api/internal/ops/customers` read contract and its
+for the Hermes-published Blockwise service-only `GET /api/internal/ops/customers` read contract and its
 workspace detail endpoint; otherwise it consumes a Hermes-owned
 bundle (`project_id`, `workspace_ids`, `source_revision`,
 `source_receipt_ids`, and a `projections` object), validates every known field,
@@ -63,5 +63,6 @@ Blockwise envelope/list/detail fixtures are retained under
 - `GET /api/ops/projections/<name>` — one validated projection
 - `GET /api/ops/customers` — bounded searchable customer list
 - `GET /api/ops/customers/<id>` — correlated customer sections
+- `GET /api/ops/enquiries/unassigned` — global/unassigned enquiries, never correlated to a customer
 - `GET /api/ops/activity?customer_id=<id>` — unified activity and receipt correlation
 - `POST /api/ops/actions` — forwards a typed request through the existing Hermes control/action boundary; it never calls a provider locally

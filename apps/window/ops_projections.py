@@ -40,7 +40,13 @@ PROJECTION_SPECS: dict[str, dict[str, Any]] = {
         "fields": {
             "id", "workspace_id", "display_name", "name", "email", "email_masked", "company",
             "status", "lifecycle", "plan", "mode", "region", "country_code", "managed_service_enabled", "billing_access_state", "stripe_subscription_status", "stripe_latest_invoice_status", "created_at", "updated_at", "last_seen_at",
-            "source_revision", "tags",
+            "source_revision", "tags", "activation_stage", "activation_status",
+            "activation_updated_at", "activation_completed_at", "email_preferences",
+            "email_suppressions", "email_consent_state", "email_suppression_state",
+            "email_verified_at", "country_confirmed_at", "website_submitted_at",
+            "brand_pack_approved_at", "first_ad_pack_generated_at", "meta_connected_at",
+            "checkout_completed_at", "first_campaign_live_at", "intro_invoice_paid_at",
+            "onboarding_booked_at", "onboarding_completed_at",
         },
     },
     "email": {
@@ -52,6 +58,7 @@ PROJECTION_SPECS: dict[str, dict[str, Any]] = {
             "delivered_at", "sent_at", "created_at", "failure_code", "failure_reason",
             "provider", "updated_at",
             "delivery_status", "provider_record_suffix", "snapshot_kind", "source_event_id", "source_version",
+            "kind", "preferences", "suppressions", "consent_state", "suppression_state",
         },
     },
     "flows": {
@@ -82,7 +89,7 @@ PROJECTION_SPECS: dict[str, dict[str, Any]] = {
             "id", "customer_id", "subject", "status", "priority",
             "assignee", "last_message_at", "created_at", "updated_at", "channel", "summary",
             "workspace_id", "source_system", "enquiry_type", "requester_email", "requester_name",
-            "snapshot_kind", "delivery_status", "provider_record_suffix", "source_event_id", "source_version",
+            "snapshot_kind", "delivery_status", "source_event_id", "source_version",
         },
     },
     "bookings": {
@@ -117,7 +124,8 @@ PROJECTION_SPECS: dict[str, dict[str, Any]] = {
         "fields": {
             "id", "customer_id", "occurred_at", "kind", "title", "summary", "source",
             "provider", "status", "receipt_id", "correlation_id", "entity_ref", "updated_at",
-            "created_at",
+            "created_at", "projection_name", "source_revision", "source_receipt_ids", "publication_receipt_id",
+            "fresh_until",
         },
     },
     "members": {
@@ -153,9 +161,11 @@ _GLOBAL_ENQUIRY_ASSOCIATION = frozenset({
     "customer_workspace_id", "workspace_customer_id",
 })
 _ACTION_STATUSES = frozenset({"accepted", "queued", "completed", "recorded", "preview", "error", "failed"})
-_STATUS = frozenset({"active", "inactive", "pending", "invited", "suspended", "closed", "sent", "delivered", "failed", "bounced", "opened", "clicked", "draft", "paused", "archived", "enrolled", "open", "new", "resolved", "snoozed", "scheduled", "confirmed", "completed", "canceled", "cancelled", "trial", "past_due", "unpaid", "setup_needed", "recorded"})
+_STATUS = frozenset({"active", "inactive", "pending", "invited", "suspended", "closed", "sent", "delivered", "failed", "bounced", "opened", "clicked", "draft", "paused", "archived", "enrolled", "open", "new", "resolved", "snoozed", "scheduled", "confirmed", "completed", "complete", "canceled", "cancelled", "trial", "past_due", "unpaid", "setup_needed", "ready", "stale", "error", "recorded"})
 _ENUMS = {
     "lifecycle": frozenset({"email_pending", "brand_setup", "brand_review", "first_value", "meta_setup", "conversion", "activated", "active", "lead", "prospect", "trial", "customer", "retention", "churn_risk", "churned", "unknown"}),
+    "activation_stage": frozenset({"email_pending", "brand_setup", "brand_review", "first_value", "meta_setup", "conversion", "activated", "active", "lead", "prospect", "trial", "customer", "retention", "churn_risk", "churned", "unknown"}),
+    "activation_status": _STATUS,
     "stage": frozenset({"lead", "mql", "sql", "trial", "active", "customer", "retention", "churn_risk", "churned", "open", "closed"}),
     "type": frozenset({"transactional", "campaign", "automation", "sequence"}),
     "priority": frozenset({"low", "normal", "high", "urgent"}),
@@ -163,7 +173,7 @@ _ENUMS = {
     "channel": frozenset({"email", "chat", "phone", "web", "sms", "other"}),
     "role": frozenset({"owner", "admin", "member", "viewer", "operator"}),
 }
-_TIME_KEYS = frozenset({"created_at", "updated_at", "last_seen_at", "delivered_at", "sent_at", "enrolled_at", "last_activity_at", "next_step_at", "last_message_at", "start_at", "end_at", "current_period_end", "past_due_since", "occurred_at", "joined_at", "scheduled_start_at", "scheduled_end_at", "booked_at", "cancelled_at", "completed_at", "stripe_current_period_start", "stripe_current_period_end", "accepted_at", "email_verified_at", "country_confirmed_at", "website_submitted_at", "brand_pack_approved_at", "first_ad_pack_generated_at", "meta_connected_at", "checkout_completed_at", "first_campaign_live_at", "intro_invoice_paid_at", "onboarding_booked_at", "onboarding_completed_at", "activation_completed_at", "run_after"})
+_TIME_KEYS = frozenset({"created_at", "updated_at", "last_seen_at", "delivered_at", "sent_at", "enrolled_at", "last_activity_at", "next_step_at", "last_message_at", "start_at", "end_at", "current_period_end", "past_due_since", "occurred_at", "joined_at", "scheduled_start_at", "scheduled_end_at", "booked_at", "cancelled_at", "completed_at", "stripe_current_period_start", "stripe_current_period_end", "accepted_at", "email_verified_at", "country_confirmed_at", "website_submitted_at", "brand_pack_approved_at", "first_ad_pack_generated_at", "meta_connected_at", "checkout_completed_at", "first_campaign_live_at", "intro_invoice_paid_at", "onboarding_booked_at", "onboarding_completed_at", "activation_completed_at", "activation_updated_at", "run_after"})
 _ENVELOPE_FIELDS = frozenset({"schema", "version", "projection", "project_id", "workspace_ids", "source_scope", "source_revision", "source_receipt_ids", "publication_receipt_id", "published_at", "fresh_until", "items"})
 
 
@@ -195,6 +205,13 @@ class ProjectionError(ValueError):
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
+
+
+def _assert_customer_scope(value: Mapping[str, Any], customer_id: str) -> None:
+    """Reject an upstream ownership claim before any normalization/copying."""
+    for key in ("workspace_id", "customer_id"):
+        if key in value and value[key] != customer_id:
+            raise ProjectionError(f"Blockwise {key} does not match customer workspace")
 
 
 class BlockwiseOpsClient:
@@ -297,6 +314,10 @@ class BlockwiseOpsClient:
             for row in page_rows:
                 if not isinstance(row, Mapping) or not isinstance(row.get("id"), str) or not _UUID.fullmatch(row["id"]):
                     raise ProjectionError("Blockwise customer lacks workspace UUID")
+                if "workspace_id" in row and row["workspace_id"] != row["id"]:
+                    raise ProjectionError("Blockwise customer workspace does not match its id")
+                if "customer_id" in row and row["customer_id"] != row["id"]:
+                    raise ProjectionError("Blockwise customer id does not match its workspace")
                 normalized = {"id": row["id"], "workspace_id": row["id"]}
                 for key in ("name", "mode", "region", "country_code", "created_at", "updated_at", "billing_access_state", "stripe_subscription_status", "stripe_latest_invoice_status"):
                     if key in row: normalized[key] = row[key]
@@ -335,6 +356,8 @@ class BlockwiseOpsClient:
             profiles = detail["profiles"]
             if not isinstance(profiles, list) or any(not isinstance(value, Mapping) for value in profiles):
                 raise ProjectionError("Blockwise profiles section is invalid")
+            for profile in profiles:
+                _assert_customer_scope(profile, customer_id)
             profile_by_id = {value.get("id"): value for value in profiles if isinstance(value.get("id"), str)}
             for source_name, projection_name in (("members", "members"), ("bookings", "bookings"), ("enquiries", "enquiries"), ("activity", "activity")):
                 values = detail[source_name]
@@ -353,6 +376,58 @@ class BlockwiseOpsClient:
                     projections[projection_name] = (projections[projection_name] or []) + normalized_values
             email = detail["email"]
             if not isinstance(email, Mapping): raise ProjectionError("Blockwise email section is invalid")
+            _assert_customer_scope(email, customer_id)
+            deliveries = email.get("deliveries")
+            if not isinstance(deliveries, list) or any(not isinstance(value, Mapping) for value in deliveries):
+                raise ProjectionError("Blockwise email deliveries are invalid")
+            for delivery in deliveries:
+                projections["email"] = (projections["email"] or []) + [self._normalize_item(dict(delivery), "email", customer_id)]
+            # Consent and suppression state is provider-neutral source data.
+            # Keep it as one bounded, safe email-state record so operators can
+            # see the source without exposing an address or provider object.
+            email_state = {"id": "email-state:" + customer_id, "customer_id": customer_id,
+                           "workspace_id": customer_id, "kind": "consent"}
+            for source_key, target_key in (("preferences", "preferences"), ("suppressions", "suppressions"),
+                                           ("consent_state", "consent_state"), ("suppression_state", "suppression_state")):
+                if source_key in email:
+                    email_state[target_key] = email[source_key]
+            if len(email_state) > 3:
+                projections["email"] = (projections["email"] or []) + [self._normalize_item(email_state, "email", customer_id)]
+                for source_key, target_key in (("preferences", "email_preferences"), ("suppressions", "email_suppressions"),
+                                               ("consent_state", "email_consent_state"), ("suppression_state", "email_suppression_state")):
+                    if source_key in email:
+                        customer = next(item for item in rows if item["id"] == customer_id)
+                        customer[target_key] = email[source_key]
+
+            activation = detail["activation"]
+            if activation is not None:
+                if not isinstance(activation, Mapping):
+                    raise ProjectionError("Blockwise activation section is invalid")
+                _assert_customer_scope(activation, customer_id)
+                customer = next(item for item in rows if item["id"] == customer_id)
+                for source_key, target_key in (("stage", "activation_stage"), ("current_stage", "activation_stage"),
+                                               ("status", "activation_status"), ("updated_at", "activation_updated_at"),
+                                               ("activation_completed_at", "activation_completed_at")):
+                    if source_key in activation:
+                        customer[target_key] = activation[source_key]
+                for key in ("email_verified_at", "country_confirmed_at", "website_submitted_at",
+                            "brand_pack_approved_at", "first_ad_pack_generated_at", "meta_connected_at",
+                            "checkout_completed_at", "first_campaign_live_at", "intro_invoice_paid_at",
+                            "onboarding_booked_at", "onboarding_completed_at"):
+                    if key in activation:
+                        customer[key] = activation[key]
+            detail_projections = detail["projections"]
+            if not isinstance(detail_projections, list) or any(not isinstance(value, Mapping) for value in detail_projections):
+                raise ProjectionError("Blockwise projection state is invalid")
+            for state in detail_projections:
+                _assert_customer_scope(state, customer_id)
+                item = dict(state)
+                projection_name = item.pop("projection", item.pop("name", "unknown"))
+                if not isinstance(projection_name, str) or not projection_name or len(projection_name) > 64:
+                    raise ProjectionError("Blockwise projection state name is invalid")
+                item["projection_name"] = projection_name
+                item.setdefault("id", "projection:" + customer_id + ":" + projection_name)
+                projections["activity"] = (projections["activity"] or []) + [self._normalize_item(item, "activity", customer_id)]
             if "providerSnapshots" in detail:
                 values = detail["providerSnapshots"]
                 if not isinstance(values, list) or any(not isinstance(value, Mapping) for value in values): raise ProjectionError("Blockwise provider snapshots are invalid")
@@ -369,7 +444,8 @@ class BlockwiseOpsClient:
                     snapshot.pop("aggregate_type", None)
                     snapshot.pop("aggregate_id", None)
                     snapshot.pop("snapshot_kind", None)
-                    snapshot.setdefault("provider_record_suffix", _masked_suffix(aggregate_id))
+                    if target != "enquiries":
+                        snapshot.setdefault("provider_record_suffix", _masked_suffix(aggregate_id))
                     projections[target].append(self._normalize_item(snapshot, target, customer_id))
             billing = detail["billing"]
             if billing is not None:
@@ -438,6 +514,16 @@ class BlockwiseOpsClient:
 
     @staticmethod
     def _normalize_item(value: dict[str, Any], projection_name: str, customer_id: str | None) -> dict[str, Any]:
+        if not isinstance(value, dict):
+            raise ProjectionError("Blockwise normalized section item is not an object")
+        # Check caller-provided ownership before adding Frank's canonical
+        # association.  setdefault would silently retain a forged cross-
+        # workspace/customer value.
+        if customer_id is not None:
+            if "workspace_id" in value and value["workspace_id"] != customer_id:
+                raise ProjectionError("Blockwise row workspace does not match customer")
+            if "customer_id" in value and value["customer_id"] != customer_id:
+                raise ProjectionError("Blockwise row customer does not match workspace")
         # Provider identifiers never cross the Frank projection boundary. Keep
         # only a short, non-reversible display suffix where the operator needs
         # correlation context.
@@ -448,7 +534,10 @@ class BlockwiseOpsClient:
         if projection_name == "enquiries":
             for key in ("conversation_id", "external_id", "source_id"):
                 if key in value:
-                    value["provider_record_suffix"] = _masked_suffix(value.pop(key))
+                    # Enquiries intentionally retain no provider-derived
+                    # correlation suffix; only Blockwise's internal id and
+                    # source event reference may cross this boundary.
+                    value.pop(key)
         if projection_name == "activity":
             value.pop("metadata", None)
             if "action" in value: value.setdefault("title", value.pop("action"))
@@ -564,6 +653,10 @@ def _safe_item(name: str, item: Any) -> dict[str, Any]:
     for key in ("customer_id", "receipt_id", "correlation_id"):
         if key in output and output[key] is not None and (not isinstance(output[key], str) or len(output[key]) > 256):
             raise ProjectionError(f"{name} contains an invalid reference")
+    if "publication_receipt_id" in output and (not isinstance(output["publication_receipt_id"], str) or not _RECEIPT.fullmatch(output["publication_receipt_id"])):
+        raise ProjectionError(f"{name} contains an invalid publication receipt")
+    if "source_receipt_ids" in output and (not isinstance(output["source_receipt_ids"], list) or not output["source_receipt_ids"] or any(not isinstance(item, str) or not _RECEIPT.fullmatch(item) for item in output["source_receipt_ids"])):
+        raise ProjectionError(f"{name} contains invalid source receipts")
     for key, value in output.items():
         if key == "provider_record_suffix":
             _validate_masked_suffix(value)
@@ -695,7 +788,7 @@ class OpsProjectionStore:
                 raise ProjectionError("publication receipt is required")
             if publication_receipt != generation_receipt["publication_receipt_id"]:
                 raise ProjectionError("projection receipt does not match generation")
-            status = "stale" if fresh_until and datetime.fromisoformat(fresh_until.replace("Z", "+00:00")).timestamp() < self.clock() else "ready"
+            status = "stale" if fresh_until and datetime.fromisoformat(fresh_until.replace("Z", "+00:00")).timestamp() <= self.clock() else "ready"
             return ProjectionSnapshot(name, status, safe_items, published_at, fresh_until, source_revision,
                                       list(source_receipts), publication_receipt,
                                       "Hermes projection is stale." if status == "stale" else None)
@@ -1010,6 +1103,27 @@ def create_blueprint(*, store: OpsProjectionStore | None = None, dispatcher_fact
             rows = [row for row in rows if _customer_id(row) == customer_id]
         receipts = projection_store.action_receipts(customer_id or None)
         return jsonify({"schema": OPS_SCHEMA, "version": OPS_SCHEMA_VERSION, "status": snapshot.status, "activity": rows[:200], "action_receipts": receipts, "message": snapshot.message})
+
+    @api.get("/api/ops/enquiries/unassigned")
+    def unassigned_enquiries():
+        """Return the global queue without ever making a customer association."""
+        snapshot = projection_store.load("enquiries")
+        rows: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        if snapshot.status in {"ready", "stale"}:
+            try:
+                for row in snapshot.items:
+                    if row.get("workspace_id") is not None:
+                        continue
+                    _validate_unassigned_enquiry(row)
+                    item_id = row.get("id")
+                    if isinstance(item_id, str) and item_id not in seen:
+                        seen.add(item_id)
+                        rows.append(row)
+            except ProjectionError as error:
+                return jsonify({"schema": OPS_SCHEMA, "version": OPS_SCHEMA_VERSION, "status": "error", "enquiries": [], "message": str(error)})
+        return jsonify({"schema": OPS_SCHEMA, "version": OPS_SCHEMA_VERSION, "status": snapshot.status,
+                        "enquiries": rows[:200], "message": snapshot.message})
 
     @api.post("/api/ops/actions")
     def dispatch_ops_action():

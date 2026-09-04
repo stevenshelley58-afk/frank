@@ -16,7 +16,7 @@
     "bookings": [],
     "enquiries": [],
     "billing": null,
-    "email": {"address": null, "preferences": [], "suppressions": [], "deliveries": []},
+    "email": {"address": null, "preferences": ["transactional"], "suppressions": [], "deliveries": [{"id": "delivery-1", "status": "delivered", "subject": "Welcome"}]},
     "projections": [],
     "activity": []
   }
