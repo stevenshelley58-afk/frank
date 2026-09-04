@@ -7,7 +7,7 @@ from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ops_projections import BLOCKWISE_PROJECT_ID, OPS_SCHEMA, OPS_SCHEMA_VERSION, BlockwiseOpsClient, OpsProjectionStore, PROJECTION_SPECS, ProjectionError, _masked_suffix, _safe_value, create_blueprint, publish_bundle
+from ops_projections import BLOCKWISE_PROJECT_ID, OPS_SCHEMA, OPS_SCHEMA_VERSION, BlockwiseOpsClient, OpsProjectionStore, PROJECTION_SPECS, ProjectionError, _customer_id, _masked_suffix, _safe_value, create_blueprint, publish_bundle
 import control_plane_view
 from flask import Flask
 
@@ -293,5 +293,28 @@ class OpsProjectionApiTest(unittest.TestCase):
         )
         with self.assertRaisesRegex(ProjectionError, "customer association"):
             client.fetch_bundle()
+
+    def test_local_global_enquiry_cannot_publish_load_or_correlate(self):
+        projections = {name: [] for name in PROJECTION_SPECS}
+        projections["customers"] = [{"id": "cust-1", "workspace_id": WORKSPACE, "display_name": "Safe customer"}]
+        projections["enquiries"] = [{
+            "id": "enquiry-global-1", "workspace_id": None, "customer_id": "cust-1", "status": "new",
+        }]
+        with self.assertRaisesRegex(ProjectionError, "failed projection validation"):
+            publish_bundle({
+                "project_id": BLOCKWISE_PROJECT_ID, "workspace_ids": [WORKSPACE],
+                "source_revision": "hermes-test-1", "source_receipt_ids": ["receipt:ops/source-test"],
+                "projections": projections,
+            }, self.root, now=1_800_000_000)
+
+        # A forged local envelope must fail closed on load and cannot leak into
+        # a customer's detail response through the generic correlation helper.
+        self.write("customers", projections["customers"])
+        self.write("enquiries", projections["enquiries"])
+        self.assertEqual(self.store.load("enquiries").status, "error")
+        self.assertIsNone(_customer_id(projections["enquiries"][0]))
+        response = self.client.get("/api/ops/customers/cust-1")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["sections"]["enquiries"], [])
 if __name__ == "__main__":
     unittest.main()
