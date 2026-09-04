@@ -1,0 +1,26 @@
+[Unit]
+Description=Frank Blockwise Hermes ops projection publisher
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=hermes
+Group=hermes
+UMask=0027
+WorkingDirectory=/projects/frank
+Environment=PYTHONPATH=/projects/frank:/projects/frank/apps/window
+Environment=HERMES_OPS_PUBLISH_INPUT=/srv/frank/data/window/ops-source/bundle.json
+Environment=HERMES_OPS_PROJECTION_ROOT=/srv/frank/data/window/ops-projections
+Environment=BLOCKWISE_OPS_BASE_URL=https://blockwise.sale
+Environment=BLOCKWISE_INTERNAL_AUTH_SECRET_FILE=/srv/frank/secrets/blockwise-internal-auth.secret
+ExecStart=/usr/bin/python3 -m apps.window.scripts.publish_ops_projections
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/srv/frank/data/window/ops-projections
+ReadOnlyPaths=/srv/frank/data/window/ops-source
+ReadOnlyPaths=/srv/frank/secrets/blockwise-internal-auth.secret
+
+[Install]
+WantedBy=multi-user.target

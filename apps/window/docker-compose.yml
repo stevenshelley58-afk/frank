@@ -20,7 +20,8 @@ services:
       PROJECTS_STORE_FILE: /data/projects.json
       PROJECT_KNOWLEDGE_ROOT: /data/knowledge
       HERMES_SHARED_UPLOAD_ROOT: /srv/frank/data/window/uploads
-      HERMES_API_URL: http://172.16.1.1:8642
+      HERMES_ENDPOINT: http://172.16.1.1:8642
+      HERMES_API_KEY_FILE: /srv/frank/secrets/hermes-api-key
       HERMES_PROFILE: default
       MINI_PREVIEW_ROOT: /previews/mini
       MINI_LEGACY_PROJECT_ROOT: /legacy-mini-projects
@@ -31,6 +32,9 @@ services:
       CONNECTIONS_STORE_FILE: /data/connections.json
       CONNECTION_ACTIONS_FILE: /data/connection-actions.jsonl
       CONNECTION_PLANS_FILE: /data/connection-plans.json
+      # Hermes publishes the bounded Blockwise bundle on the shared data
+      # mount; Frank only reads these validated files.
+      HERMES_OPS_PROJECTION_ROOT: /data/ops-projections
       VAULT_METADATA_FILE: /data/vault-metadata.json
       VPS_ROOT: /vps
       PORT: "8080"
@@ -38,6 +42,7 @@ services:
       - "127.0.0.1:18080:8080"
     volumes:
       - /srv/frank/data/window:/data
+      - /srv/frank/secrets/hermes-api-key:/srv/frank/secrets/hermes-api-key:ro
       - /srv/frank/previews/mini:/previews/mini
       - /projects/mini-frank/customer-projects:/legacy-mini-projects
       # Project browsing is limited to named product roots. Host-wide

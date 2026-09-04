@@ -5,6 +5,8 @@ repo="${FRANK_REPO:-/projects/frank}"
 app="$repo/apps/window"
 secret_dir="/srv/frank/secrets"
 secret_file="$secret_dir/window.env"
+blockwise_ops_secret_file="$secret_dir/blockwise-internal-auth.secret"
+hermes_api_key_file="$secret_dir/hermes-api-key"
 caddy_secret_file="$secret_dir/caddy.env"
 data_dir="/srv/frank/data/window"
 control_graph_dir="$data_dir/control-graph"
@@ -25,6 +27,14 @@ git -C "$repo" diff --quiet HEAD -- || {
 }
 
 install -d -m 0700 -- "$secret_dir"
+if [[ -e "$blockwise_ops_secret_file" || -L "$blockwise_ops_secret_file" ]]; then
+  [[ -f "$blockwise_ops_secret_file" && ! -L "$blockwise_ops_secret_file" ]] || { echo "refusing non-regular Blockwise internal auth secret file" >&2; exit 1; }
+  [[ "$(stat -c '%a' -- "$blockwise_ops_secret_file")" == "640" ]] || { echo "Blockwise internal auth secret must be mode 0640" >&2; exit 1; }
+  [[ "$(stat -c '%U:%G' -- "$blockwise_ops_secret_file")" == "root:hermes" ]] || { echo "Blockwise internal auth secret must be root:hermes" >&2; exit 1; }
+else
+  echo "missing $blockwise_ops_secret_file; install the shared Blockwise internal auth secret before enabling ops publication" >&2
+  exit 1
+fi
 # Frank writes short-lived upload staging here and Hermes ingests it directly
 # on the host. Keep the directory private to root + the existing Hermes group;
 # setgid preserves that boundary for newly-created staging directories.
@@ -146,6 +156,22 @@ for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH; do
   }
 done
 
+# The dispatcher reads Hermes credentials through a dedicated file inside the
+# Window container. Derive it atomically from the existing root-only secret
+# source; never print or pass the credential as a command argument.
+if [[ -e "$hermes_api_key_file" || -L "$hermes_api_key_file" ]]; then
+  [[ -f "$hermes_api_key_file" && ! -L "$hermes_api_key_file" ]] || { echo "refusing non-regular Hermes API key file" >&2; exit 1; }
+  [[ "$(stat -c '%a' -- "$hermes_api_key_file")" == "600" ]] || { echo "Hermes API key file must be mode 0600" >&2; exit 1; }
+else
+  hermes_api_key="$(grep -m1 -E '^HERMES_API_KEY=' "$secret_file" | cut -d= -f2- || true)"
+  [[ -n "$hermes_api_key" ]] || { echo "missing Hermes API key for dedicated credential file" >&2; exit 1; }
+  hermes_tmp="$(mktemp "$secret_dir/.hermes-api-key.XXXXXX")"
+  printf '%s\n' "$hermes_api_key" > "$hermes_tmp"
+  unset hermes_api_key
+  chmod 0600 "$hermes_tmp"
+  mv -f -- "$hermes_tmp" "$hermes_api_key_file"
+fi
+
 if ! grep -q -E '^HERMES_CONNECTIONS_AGENT_KEY=[^[:space:]]' "$secret_file"; then
   echo "Connections Agent ingress is not configured; authenticated agent routes remain disabled." >&2
 fi
@@ -190,6 +216,7 @@ migrate_volume frank_frank_caddy_config frank_caddy_config
 
 cd "$app"
 bash "$app/infra/control_plane/install.sh" --preserve-active-release
+bash "$app/infra/ops/install.sh"
 # Public Mini builds are deliberately networkless at runtime. Bake their
 # document, spreadsheet, PDF, image, and headless-browser tools ahead of time.
 docker build \
