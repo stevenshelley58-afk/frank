@@ -90,8 +90,14 @@ def _safe_file(path_text: str, *, name: str, max_bytes: int = 4096) -> str:
         info = path.stat()
         if info.st_size > max_bytes or stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
             raise CustomerOpsActionError(f"{name} file is unavailable")
-        if os.name != "nt" and info.st_mode & 0o077:
-            raise CustomerOpsActionError(f"{name} file permissions are too broad")
+        if os.name != "nt":
+            if info.st_mode & 0o077:
+                raise CustomerOpsActionError(f"{name} file permissions are too broad")
+            # The runtime process must own the mounted file. This avoids
+            # accepting a mode-0600 file that another local account can swap
+            # or control, while remaining portable to CI and root-run images.
+            if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
+                raise CustomerOpsActionError(f"{name} file owner is invalid")
         value = path.read_text(encoding="utf-8").strip()
     except CustomerOpsActionError:
         raise
