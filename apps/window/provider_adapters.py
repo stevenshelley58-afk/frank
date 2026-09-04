@@ -63,7 +63,40 @@ MAUTIC_SMTP = ProviderAdapter(
     secret_keys=("SMTP_HOST", "SMTP_PORT", "SMTP_USERNAME", "SMTP_PASSWORD"),
     transport="smtp",
     setup_mode="setup_needed",
-    setup_note="SMTP adapter is not available yet; no SMTP credential is accepted by this broker.",
+    setup_note="Legacy SMTP metadata only; Mautic is not Frank's transactional email provider.",
+)
+
+MAUTIC = ProviderAdapter(
+    provider="mautic",
+    title="Mautic",
+    consumer="hermes-mautic",
+    capabilities=("crm.contacts.read", "campaigns.read", "campaigns.manage"),
+    secret_keys=("MAUTIC_BASE_URL", "MAUTIC_CLIENT_ID", "MAUTIC_CLIENT_SECRET"),
+    transport="hermes-provider",
+    setup_mode="provider",
+    setup_note="Open-source Mautic is the CRM and campaign authority; Frank stores only opaque references.",
+)
+
+CHATWOOT = ProviderAdapter(
+    provider="chatwoot",
+    title="Chatwoot",
+    consumer="hermes-chatwoot",
+    capabilities=("support.conversations.read", "support.conversations.status"),
+    secret_keys=("CHATWOOT_BASE_URL", "CHATWOOT_ACCESS_TOKEN"),
+    transport="hermes-provider",
+    setup_mode="provider",
+    setup_note="Open-source Chatwoot is the customer-support authority; Frank renders safe conversation links and status.",
+)
+
+STALWART = ProviderAdapter(
+    provider="stalwart",
+    title="Stalwart",
+    consumer="hermes-stalwart",
+    capabilities=("email.send", "email.status"),
+    secret_keys=("STALWART_BASE_URL", "STALWART_USERNAME", "STALWART_PASSWORD"),
+    transport="hermes-provider",
+    setup_mode="provider",
+    setup_note="Open-source Stalwart is the transactional email authority; Hermes owns verification and delivery.",
 )
 
 ACTIVEPIECES = ProviderAdapter(
@@ -78,7 +111,7 @@ ACTIVEPIECES = ProviderAdapter(
 )
 
 
-ADAPTERS = {item.provider: item for item in (RESEND, MAUTIC_SMTP, ACTIVEPIECES)}
+ADAPTERS = {item.provider: item for item in (STALWART, MAUTIC, CHATWOOT, MAUTIC_SMTP, RESEND, ACTIVEPIECES)}
 
 
 def get_adapter(provider: str) -> ProviderAdapter:

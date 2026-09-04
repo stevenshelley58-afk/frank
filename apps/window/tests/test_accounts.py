@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -12,10 +13,13 @@ class AccountsApiTest(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory()
         self.original_file = server.ACCOUNTS_FILE
         server.ACCOUNTS_FILE = Path(self.temp.name) / "accounts.json"
+        self.original_support_file = server.SUPPORT_CONVERSATIONS_FILE
+        server.SUPPORT_CONVERSATIONS_FILE = Path(self.temp.name) / "support-conversations.json"
         self.client = server.app.test_client()
 
     def tearDown(self):
         server.ACCOUNTS_FILE = self.original_file
+        server.SUPPORT_CONVERSATIONS_FILE = self.original_support_file
         self.temp.cleanup()
 
     def test_account_lifecycle_persists_only_safe_metadata(self):
@@ -144,8 +148,67 @@ class AccountsApiTest(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["resend"]["status"], "unconfigured")
         self.assertEqual(payload["resend"]["mcp_status"], "configured")
-        self.assertEqual(payload["mautic"]["status"], "configured")
+        self.assertEqual(payload["mautic"]["status"], "unconfigured")
         self.assertNotIn("re_secret", response.get_data(as_text=True))
+
+    def test_provider_readiness_never_infers_verification_from_url(self):
+        with patch.dict(os.environ, {
+            "MAUTIC_BASE_URL": "https://mautic.example.test",
+            "CHATWOOT_BASE_URL": "https://chat.example.test",
+            "MAUTIC_CONNECTOR_STATUS": "configured",
+            "CHATWOOT_CONNECTOR_STATUS": "ready",
+        }, clear=False):
+            payload = self.client.get("/api/providers/readiness").get_json()
+        by_provider = {item["provider"]: item for item in payload["providers"]}
+        self.assertFalse(by_provider["mautic"]["verified"])
+        self.assertTrue(by_provider["chatwoot"]["verified"])
+        self.assertEqual(by_provider["mautic"]["base_url"], "https://mautic.example.test")
+
+    def test_support_projection_filters_account_and_rejects_unsafe_links(self):
+        server.SUPPORT_CONVERSATIONS_FILE.write_text(json.dumps({"conversations": [{
+            "id": "cw-1", "account_id": "acct-1", "status": "open", "subject": "Help",
+            "url": "https://chat.example.test/app/accounts/1/conversations/2?view=full",
+        }, {
+            "id": "cw-2", "account_id": "acct-2", "status": "resolved",
+            "url": "https://user:password@chat.example.test/private",
+        }], "version": 1}), encoding="utf-8")
+        with patch.dict(os.environ, {"CHATWOOT_BASE_URL": "https://chat.example.test", "CHATWOOT_CONNECTOR_STATUS": "ready"}):
+            response = self.client.get("/api/support/conversations?account_id=acct-1")
+        self.assertEqual(response.status_code, 200)
+        items = response.get_json()["conversations"]
+        self.assertEqual(len(items), 1)
+        self.assertEqual(items[0]["url"], "https://chat.example.test/app/accounts/1/conversations/2")
+
+    def test_support_projection_fails_closed_on_unknown_status(self):
+        server.SUPPORT_CONVERSATIONS_FILE.write_text(json.dumps({"version": 1, "conversations": [{"id": "x", "status": "unknown"}]}), encoding="utf-8")
+        self.assertEqual(self.client.get("/api/support/conversations").status_code, 503)
+
+    def test_support_projection_rejects_version_and_types(self):
+        for payload in ({"version": 2, "conversations": []}, {"version": 1, "conversations": [{"id": {}, "status": "open"}]}):
+            server.SUPPORT_CONVERSATIONS_FILE.write_text(json.dumps(payload), encoding="utf-8")
+            self.assertEqual(self.client.get("/api/support/conversations").status_code, 503)
+
+    def test_support_links_are_empty_when_unready_or_cross_origin(self):
+        server.SUPPORT_CONVERSATIONS_FILE.write_text(json.dumps({"version": 1, "conversations": [{
+            "id": "cw-1", "status": "open", "url": "https://evil.example.test/conversation?token=secret"
+        }]}), encoding="utf-8")
+        with patch.dict(os.environ, {"CHATWOOT_BASE_URL": "https://chat.example.test", "CHATWOOT_CONNECTOR_STATUS": "configured"}):
+            self.assertEqual(self.client.get("/api/support/conversations").get_json()["conversations"][0]["url"], "")
+
+    def test_support_projection_rejects_impossible_utc_timestamp(self):
+        server.SUPPORT_CONVERSATIONS_FILE.write_text(json.dumps({"version": 1, "conversations": [{
+            "id": "cw-1", "status": "open", "updated_at": "2026-99-99T25:61:61Z"
+        }]}), encoding="utf-8")
+        self.assertEqual(self.client.get("/api/support/conversations").status_code, 503)
+
+    def test_stalwart_connection_provider_is_accepted(self):
+        import home_platform
+        self.assertIn("stalwart", home_platform.CONNECTION_PROVIDERS)
+        cleaned = home_platform._clean_connection({
+            "provider": "stalwart", "name": "Transactional mail", "status": "setup_needed",
+            "capabilities": ["email.send"],
+        })
+        self.assertEqual(cleaned["provider"], "stalwart")
 
 
 if __name__ == "__main__":
