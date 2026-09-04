@@ -147,6 +147,9 @@ PROJECTION_NAMES = tuple(PROJECTION_SPECS)
 # and makes cross-workspace correlation explicit without exposing providers.
 for _spec in PROJECTION_SPECS.values():
     _spec["fields"].add("workspace_id")
+    # Provider-neutral optimistic-concurrency version published by Blockwise.
+    # Frank never invents one when it is absent; action controls stay disabled.
+    _spec["fields"].add("ops_version")
 OPS_PROJECTION_SCHEMAS = {name: spec["schema"] for name, spec in PROJECTION_SPECS.items()}
 _POINTER_SCHEMA = "schema://frank.ops-pointer/v1"
 _UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
@@ -727,6 +730,7 @@ class OpsProjectionStore:
             receipt = self._publication_receipt(target)
             if receipt["publication_receipt_id"] != value["publication_receipt_id"]:
                 raise ProjectionError("ops pointer receipt does not match generation")
+            self._manifest(target, pointer_bytes=pointer.read_bytes(), pointer_receipt=value["publication_receipt_id"])
             return target
         except (OSError, UnicodeError, json.JSONDecodeError, ProjectionError, ValueError) as error:
             raise ProjectionError(str(error)) from error
@@ -738,6 +742,7 @@ class OpsProjectionStore:
         if not path.is_file() or path.is_symlink():
             return ProjectionSnapshot(name, "error", [], message="Projection source is not a regular file.")
         try:
+            self._manifest(generation_root)
             generation_receipt = self._publication_receipt(generation_root)
             if path.stat().st_size > 4 * 1024 * 1024:
                 raise ProjectionError("projection exceeds the Window size bound")
@@ -803,6 +808,63 @@ class OpsProjectionStore:
                                       "Hermes projection is stale." if status == "stale" else None)
         except (OSError, UnicodeError, json.JSONDecodeError, ProjectionError) as error:
             return ProjectionSnapshot(name, "error", [], message=str(error))
+
+    @staticmethod
+    def _manifest(generation_root: Path, *, pointer_bytes: bytes | None = None, pointer_receipt: str | None = None) -> Mapping[str, Any]:
+        """Verify Hermes' immutable generation manifest before reading data.
+
+        The worker records hashes for every projection and the publication
+        receipt, plus the hash of the root pointer. A complete directory is
+        required so an operator cannot accidentally read an ambiguous mix of
+        files from an incomplete or tampered generation.
+        """
+        path = generation_root / "manifest.json"
+        expected_order = [spec["filename"] for spec in PROJECTION_SPECS.values()] + ["publication-receipt.json"]
+        expected_files = set(expected_order)
+        if not path.is_file() or path.is_symlink():
+            raise ProjectionError("ops generation manifest is unavailable")
+        try:
+            value = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise ProjectionError("ops generation manifest is invalid") from error
+        required = {"schema", "version", "generation", "publication_receipt_id", "files", "pointer_sha256", "bundle_sha256"}
+        if not isinstance(value, Mapping) or set(value) != required or value.get("schema") != "schema://frank.ops-manifest/v1" or value.get("version") != OPS_SCHEMA_VERSION or value.get("generation") != generation_root.name:
+            raise ProjectionError("ops generation manifest metadata is invalid")
+        receipt_id = value.get("publication_receipt_id")
+        if not isinstance(receipt_id, str) or not _RECEIPT.fullmatch(receipt_id) or (pointer_receipt is not None and receipt_id != pointer_receipt):
+            raise ProjectionError("ops generation manifest receipt is invalid")
+        files = value.get("files")
+        if not isinstance(files, Mapping) or set(files) != expected_files:
+            raise ProjectionError("ops generation manifest file set is invalid")
+        hashes: dict[str, str] = {}
+        for filename in expected_order:
+            digest = files.get(filename)
+            if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+                raise ProjectionError("ops generation manifest checksum is invalid")
+            candidate = generation_root / filename
+            if candidate.name != filename or candidate.is_symlink() or not candidate.is_file():
+                raise ProjectionError("ops generation manifest file is unavailable")
+            actual = hashlib.sha256(candidate.read_bytes()).hexdigest()
+            if not hmac.compare_digest(actual, digest):
+                raise ProjectionError("ops generation manifest checksum mismatch")
+            hashes[filename] = digest
+        try:
+            names = {entry.name for entry in generation_root.iterdir()}
+        except OSError as error:
+            raise ProjectionError("ops generation directory is unavailable") from error
+        if names != expected_files | {"manifest.json"}:
+            raise ProjectionError("ops generation contains unexpected files")
+        pointer_hash = value.get("pointer_sha256")
+        if not isinstance(pointer_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", pointer_hash):
+            raise ProjectionError("ops generation pointer checksum is invalid")
+        if pointer_bytes is not None and not hmac.compare_digest(hashlib.sha256(pointer_bytes).hexdigest(), pointer_hash):
+            raise ProjectionError("ops current pointer checksum mismatch")
+        manifest_input = {"generation": value["generation"], "publication_receipt_id": receipt_id, "files": hashes, "pointer_sha256": pointer_hash}
+        bundle_hash = value.get("bundle_sha256")
+        expected_bundle = hashlib.sha256(json.dumps(manifest_input, ensure_ascii=False, separators=(",", ":")).encode("utf-8")).hexdigest()
+        if not isinstance(bundle_hash, str) or not re.fullmatch(r"[0-9a-f]{64}", bundle_hash) or not hmac.compare_digest(bundle_hash, expected_bundle):
+            raise ProjectionError("ops generation bundle checksum is invalid")
+        return value
 
     @staticmethod
     def _publication_receipt(generation_root: Path) -> Mapping[str, Any]:

@@ -2,149 +2,60 @@ const tabs = [
   ["account", "Account"], ["email", "Email"], ["flows", "Flows"], ["mautic", "CRM"], ["enquiries", "Enquiries"],
   ["bookings", "Bookings"], ["billing", "Billing"], ["activity", "Activity"],
 ];
-
+const supported = new Set(["team_invite", "team_resend", "team_cancel", "session_revoke", "enquiry_assign", "billing_reconcile"]);
+const targetTypes = { team_invite: "workspace", team_resend: "invitation", team_cancel: "invitation", session_revoke: "session", enquiry_assign: "enquiry", billing_reconcile: "billing" };
 const esc = (value) => String(value ?? "").replace(/[&<>\"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char]));
 const label = (value) => String(value ?? "").replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
-const formatTime = (value) => {
-  if (!value) return "—";
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
-};
-
-function statusClass(value) {
-  return `ops-status ops-status-${String(value || "unknown").replace(/[^a-z0-9_-]/gi, "-")}`;
-}
-
-function stateBadge(value) {
-  return `<span class="${statusClass(value)}">${esc(label(value || "unknown"))}</span>`;
-}
-
-function emptyState(title, message, className = "") {
-  return `<div class="ops-empty ${className}"><strong>${esc(title)}</strong><span>${esc(message)}</span></div>`;
-}
-
+const formatTime = (value) => { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.valueOf()) ? String(value) : date.toLocaleString([], { dateStyle: "medium", timeStyle: "short" }); };
+const isUuid = (value) => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(String(value || ""));
+const statusClass = (value) => `ops-status ops-status-${String(value || "unknown").replace(/[^a-z0-9_-]/gi, "-")}`;
+const stateBadge = (value) => `<span class="${statusClass(value)}">${esc(label(value || "unknown"))}</span>`;
+const emptyState = (title, message, className = "") => `<div class="ops-empty ${className}"><strong>${esc(title)}</strong><span>${esc(message)}</span></div>`;
 const ARRAY_FIELDS = new Set(["tags", "segments", "preferences", "suppressions", "email_preferences", "email_suppressions", "source_receipt_ids"]);
 const SCALAR_STATE_FIELDS = new Set(["consent_state", "suppression_state", "email_consent_state", "email_suppression_state"]);
-function displayFieldValue(key, value) {
-  if (ARRAY_FIELDS.has(key) && Array.isArray(value)) {
-    return value.slice(0, 20).map((item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean" ? String(item) : "").filter(Boolean).join(", ") || "None recorded";
-  }
-  if (SCALAR_STATE_FIELDS.has(key) && value && typeof value === "object" && !Array.isArray(value)) {
-    return Object.entries(value).slice(0, 8).map(([name, item]) => `${name}: ${typeof item === "string" || typeof item === "number" || typeof item === "boolean" ? item : "—"}`).join(" · ") || "None recorded";
-  }
+const displayFieldValue = (key, value) => {
+  if (ARRAY_FIELDS.has(key) && Array.isArray(value)) return value.slice(0, 20).map((item) => typeof item === "string" || typeof item === "number" || typeof item === "boolean" ? String(item) : "").filter(Boolean).join(", ") || "None recorded";
+  if (SCALAR_STATE_FIELDS.has(key) && value && typeof value === "object" && !Array.isArray(value)) return Object.entries(value).slice(0, 8).map(([name, item]) => `${name}: ${typeof item === "string" || typeof item === "number" || typeof item === "boolean" ? item : "—"}`).join(" · ") || "None recorded";
   if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
   return null;
-}
-
-function fields(row) {
-  const skip = new Set(["id", "customer_id"]);
-  return Object.entries(row || {}).map(([key, value]) => [key, displayFieldValue(key, value)])
-    .filter(([key, value]) => !skip.has(key) && value !== null && value !== "")
-    .slice(0, 12).map(([key, value]) => `<div><dt>${esc(label(key))}</dt><dd>${esc(value)}</dd></div>`).join("");
-}
-
-function sectionRows(rows, name, state = "ready") {
+};
+function fields(row) { const skip = new Set(["id", "customer_id"]); return Object.entries(row || {}).map(([key, value]) => [key, displayFieldValue(key, value)]).filter(([key, value]) => !skip.has(key) && value !== null && value !== "").slice(0, 12).map(([key, value]) => `<div><dt>${esc(label(key))}</dt><dd>${esc(value)}</dd></div>`).join(""); }
+function version(row) { const value = row?.ops_version ?? row?.version; return Number.isSafeInteger(value) && value > 0 ? value : null; }
+function actionButton(action, target, workspaceId, expectedVersion, text, disabled = false, extra = "") { const invalid = !isUuid(target) || !version({ ops_version: expectedVersion }); const title = !isUuid(target) ? "This provider target has no safe UUID" : !version({ ops_version: expectedVersion }) ? "Current version is not published" : "Unavailable while projections are not ready"; return `<button type="button" class="ops-button ops-action" data-action="${esc(action)}" data-target="${esc(target)}" data-workspace="${esc(workspaceId)}" data-version="${esc(expectedVersion || "")}" ${extra} ${disabled || invalid ? `disabled title="${esc(title)}"` : ""}>${esc(text)}</button>`; }
+function recordRows(rows, name, state = "ready", actionFactory = null) {
   if (state === "error") return emptyState(`${label(name)} is unavailable`, "Hermes published an invalid projection; Frank will not display it.", "ops-empty-error");
   if (state === "stale") return emptyState(`${label(name)} is stale`, "The last Hermes snapshot is outside its freshness window. Verify before acting.", "ops-empty-stale");
   if (state === "setup_needed") return emptyState(`${label(name)} needs setup`, "Hermes has not published this projection yet.", "ops-empty-setup");
   if (!Array.isArray(rows) || !rows.length) return emptyState(`No ${label(name)} recorded`, "Hermes has not published an item for this customer.");
-  return `<div class="ops-record-list">${rows.slice(0, 30).map((row) => `<article class="ops-record"><div class="ops-record-head"><strong>${esc(row.title || row.name || row.subject || row.service || row.id || label(name))}</strong>${stateBadge(row.status || row.stage || "recorded")}</div><dl>${fields(row)}</dl></article>`).join("")}</div>`;
+  return `<div class="ops-record-list">${rows.slice(0, 30).map((row) => `<article class="ops-record"><div class="ops-record-head"><strong>${esc(row.title || row.name || row.subject || row.service || row.id || label(name))}</strong>${stateBadge(row.status || row.stage || "recorded")}</div><dl>${fields(row)}</dl>${actionFactory ? `<div class="ops-record-actions">${actionFactory(row)}</div>` : ""}</article>`).join("")}</div>`;
 }
-
-async function getJson(url) {
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  let body = {};
-  try { body = await response.json(); } catch { /* the shell renders an error state */ }
-  if (!response.ok && !body.status) throw new Error(body.message || body.error || `Request failed (${response.status})`);
-  return body;
-}
+async function getJson(url, options = {}) { const response = await fetch(url, { ...options, headers: { Accept: "application/json", ...(options.headers || {}) } }); let body = {}; try { body = await response.json(); } catch { /* bounded error state */ } if (!response.ok) { const error = new Error(body.error || body.message || `Request failed (${response.status})`); error.status = response.status; throw error; } return body; }
+function randomKey() { const id = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(36).slice(2)}`; return `frank:${id}`; }
 
 export async function mountOps(root) {
   if (!root) return;
-  root.innerHTML = `<div class="ops-surface"><header class="ops-heading"><div><span class="ops-kicker">Blockwise · customer operations</span><h2>Customer signal</h2><p>Read-only projections from Hermes. Provider credentials and direct mutations stay outside Frank.</p></div><div class="ops-heading-actions"><span id="ops-overall" class="${statusClass("setup_needed")}">Checking source…</span><button id="ops-refresh" class="ops-button ops-button-primary" type="button" disabled title="No reviewed Hermes ops-refresh action is configured">Refresh unavailable</button></div></header><div id="ops-notice" class="ops-notice" aria-live="polite"></div><section class="ops-unassigned" aria-labelledby="ops-unassigned-title"><div class="ops-list-heading"><h3 id="ops-unassigned-title">Unassigned enquiries</h3><span id="ops-unassigned-count"></span></div><div id="ops-unassigned-list">${emptyState("Checking queue", "Reading the Hermes-published enquiry queue…")}</div></section><div class="ops-layout"><aside class="ops-customers"><div class="ops-list-heading"><strong>Customers</strong><span id="ops-count"></span></div><label class="ops-search"><span class="sr-only">Search customers</span><input id="ops-search" type="search" placeholder="Search name or email"></label><div id="ops-customer-list"></div></aside><main class="ops-detail" id="ops-detail" aria-live="polite">${emptyState("Select a customer", "Customer details, provider status, and receipts appear here.")}</main></div></div>`;
-  const overall = root.querySelector("#ops-overall");
-  const notice = root.querySelector("#ops-notice");
-  const list = root.querySelector("#ops-customer-list");
-  const detail = root.querySelector("#ops-detail");
-  const count = root.querySelector("#ops-count");
-  const unassignedList = root.querySelector("#ops-unassigned-list");
-  const unassignedCount = root.querySelector("#ops-unassigned-count");
-  const search = root.querySelector("#ops-search");
-  let customers = [];
-  let selectedId = "";
-
+  root.innerHTML = `<div class="ops-surface"><header class="ops-heading"><div><span class="ops-kicker">Blockwise · customer operations</span><h2>Customer signal</h2><p>Read-only projections from Hermes. Mutations go through the private, signed Control Edge.</p></div><div class="ops-heading-actions"><span id="ops-overall" class="${statusClass("setup_needed")}">Checking source…</span><button id="ops-refresh" class="ops-button ops-button-primary" type="button" disabled title="Snapshots are published by Hermes">Refresh unavailable</button></div></header><div id="ops-notice" class="ops-notice" aria-live="polite"></div><section class="ops-unassigned" aria-labelledby="ops-unassigned-title"><div class="ops-list-heading"><h3 id="ops-unassigned-title">Unassigned enquiries</h3><span id="ops-unassigned-count"></span></div><div id="ops-unassigned-list">${emptyState("Checking queue", "Reading the Hermes-published enquiry queue…")}</div></section><div class="ops-layout"><aside class="ops-customers"><div class="ops-list-heading"><strong>Customers</strong><span id="ops-count"></span></div><label class="ops-search"><span class="sr-only">Search customers</span><input id="ops-search" type="search" placeholder="Search name or email"></label><div id="ops-customer-list"></div></aside><main class="ops-detail" id="ops-detail" aria-live="polite">${emptyState("Select a customer", "Customer details, provider status, and receipts appear here.")}</main></div><dialog class="ops-action-dialog" id="ops-action-dialog" aria-labelledby="ops-action-title"><form method="dialog" id="ops-action-form"><h2 id="ops-action-title">Confirm customer action</h2><p id="ops-action-summary"></p><div id="ops-invite-fields" class="ops-invite-fields" hidden><label for="ops-invite-email">Invite email</label><input id="ops-invite-email" type="email" maxlength="320" autocomplete="email"><label for="ops-invite-role">Workspace role</label><select id="ops-invite-role"><option value="member">Member</option><option value="admin">Admin</option><option value="viewer">Viewer</option></select></div><label for="ops-action-reason">Reason <span aria-hidden="true">*</span></label><textarea id="ops-action-reason" maxlength="500" required rows="3" placeholder="Why is this change needed?"></textarea><p class="ops-dialog-help">This reason is recorded with the operator audit. No provider credentials or raw IDs are sent to the browser.</p><div class="ops-dialog-error" id="ops-dialog-error" role="alert"></div><div class="ops-dialog-actions"><button class="ops-button" value="cancel">Cancel</button><button class="ops-button ops-button-primary" id="ops-action-confirm" value="default">Confirm action</button></div></form></dialog></div>`;
+  const overall = root.querySelector("#ops-overall"); const notice = root.querySelector("#ops-notice"); const list = root.querySelector("#ops-customer-list"); const detail = root.querySelector("#ops-detail"); const count = root.querySelector("#ops-count"); const unassignedList = root.querySelector("#ops-unassigned-list"); const unassignedCount = root.querySelector("#ops-unassigned-count"); const search = root.querySelector("#ops-search"); const dialog = root.querySelector("#ops-action-dialog"); const form = root.querySelector("#ops-action-form"); const dialogTitle = root.querySelector("#ops-action-title"); const dialogSummary = root.querySelector("#ops-action-summary"); const dialogReason = root.querySelector("#ops-action-reason"); const dialogError = root.querySelector("#ops-dialog-error"); const confirm = root.querySelector("#ops-action-confirm"); const inviteFields = root.querySelector("#ops-invite-fields"); const inviteEmail = root.querySelector("#ops-invite-email"); const inviteRole = root.querySelector("#ops-invite-role");
+  let customers = []; let selectedId = ""; let sourceReady = false; let pending = null; const membersByCustomer = new Map();
+  function bindActionButtons(scope) { scope.querySelectorAll("[data-action]").forEach((button) => button.addEventListener("click", () => openAction({ action: button.dataset.action, target: button.dataset.target, workspace: button.dataset.workspace, customer: button.dataset.customer || button.dataset.workspace, version: Number(button.dataset.version), payload: button.dataset.action === "enquiry_assign" ? { assigneeProfileId: button.dataset.assignee || null } : button.dataset.action === "team_invite" ? {} : {}, label: button.textContent.trim() }))); }
   function renderUnassigned(body) {
-    const state = body?.status || "setup_needed";
-    const rows = Array.isArray(body?.enquiries) ? body.enquiries : [];
-    unassignedCount.textContent = state === "ready" || state === "stale" ? `${rows.length} queue` : "";
-    unassignedList.innerHTML = sectionRows(rows, "unassigned enquiries", state);
+    const state = body?.status || "setup_needed"; const rows = Array.isArray(body?.enquiries) ? body.enquiries : []; unassignedCount.textContent = state === "ready" || state === "stale" ? `${rows.length} queue` : "";
+    if (state !== "ready") { unassignedList.innerHTML = recordRows(rows, "unassigned enquiries", state); return; }
+    if (!rows.length) { unassignedList.innerHTML = emptyState("No unassigned enquiries", "New website and support enquiries will appear here."); return; }
+    unassignedList.innerHTML = `<div class="ops-record-list">${rows.slice(0, 50).map((row) => `<article class="ops-record ops-enquiry-record"><div class="ops-record-head"><strong>${esc(row.subject || row.requester_name || row.id)}</strong>${stateBadge(row.status || "open")}</div><dl>${fields(row)}</dl><div class="ops-assignment"><label>Associate with customer <select data-enquiry-customer="${esc(row.id)}"><option value="">Choose customer…</option>${customers.map((customer) => `<option value="${esc(customer.id)}">${esc(customer.display_name || customer.name || customer.id)}</option>`).join("")}</select></label><label>Assignee <select data-enquiry-assignee="${esc(row.id)}" disabled><option value="">Choose member…</option></select></label>${actionButton("enquiry_assign", row.id, "", version(row), "Assign enquiry", true)}</div></article>`).join("")}</div>`;
+    unassignedList.querySelectorAll("[data-enquiry-customer]").forEach((select) => select.addEventListener("change", async () => { const rowId = select.dataset.enquiryCustomer; const customerId = select.value; const assignee = [...unassignedList.querySelectorAll("[data-enquiry-assignee]")].find((item) => item.dataset.enquiryAssignee === rowId); const button = [...unassignedList.querySelectorAll("[data-action]")].find((item) => item.dataset.target === rowId); if (!customerId) { assignee.innerHTML = "<option value=\"\">Choose member…</option>"; assignee.disabled = true; button.disabled = true; return; } try { let body = membersByCustomer.get(customerId); if (!body) { body = await getJson(`/api/ops/customers/${encodeURIComponent(customerId)}`); membersByCustomer.set(customerId, body); } const members = Array.isArray(body.sections?.members) ? body.sections.members : []; assignee.innerHTML = `<option value="">Choose member…</option>${members.filter((member) => isUuid(member.profile_id)).map((member) => `<option value="${esc(member.profile_id)}">${esc(member.display_name || member.full_name || member.email_masked || member.profile_id)}</option>`).join("")}`; assignee.disabled = false; button.dataset.workspace = customerId; button.dataset.customer = customerId; button.dataset.assignee = assignee.value; button.disabled = false; assignee.addEventListener("change", () => { button.dataset.assignee = assignee.value; }); } catch { assignee.innerHTML = "<option value=\"\">Members unavailable</option>"; } })); bindActionButtons(unassignedList);
   }
-
-  function renderList() {
-    const query = search.value.trim().toLowerCase();
-    const shown = customers.filter((row) => !query || [row.display_name, row.name, row.email, row.company, row.id].some((value) => String(value || "").toLowerCase().includes(query)));
-    count.textContent = `${shown.length} of ${customers.length}`;
-    if (!shown.length) { list.innerHTML = customers.length ? emptyState("No matches", "Try a different customer name or email.") : emptyState("Customer data is not connected", "Hermes has not published the customer summary projection yet.", "ops-empty-setup"); return; }
-    list.innerHTML = shown.map((row) => `<button type="button" class="ops-customer ${row.id === selectedId ? "is-selected" : ""}" data-id="${esc(row.id)}"><span class="ops-avatar">${esc(String(row.display_name || row.name || "?").trim().slice(0, 1).toUpperCase())}</span><span class="ops-customer-copy"><strong>${esc(row.display_name || row.name || row.id)}</strong><small>${esc(row.email_masked || row.email || row.company || "Customer")}</small></span>${stateBadge(row.status || row.lifecycle || "recorded")}</button>`).join("");
-    list.querySelectorAll("[data-id]").forEach((button) => button.addEventListener("click", () => select(button.dataset.id)));
-  }
-
+  function renderList() { const query = search.value.trim().toLowerCase(); const shown = customers.filter((row) => !query || [row.display_name, row.name, row.email, row.company, row.id].some((value) => String(value || "").toLowerCase().includes(query))); count.textContent = `${shown.length} of ${customers.length}`; if (!shown.length) { list.innerHTML = customers.length ? emptyState("No matches", "Try a different customer name or email.") : emptyState("Customer data is not connected", "Hermes has not published the customer summary projection yet.", "ops-empty-setup"); return; } list.innerHTML = shown.map((row) => `<button type="button" class="ops-customer ${row.id === selectedId ? "is-selected" : ""}" data-id="${esc(row.id)}"><span class="ops-avatar">${esc(String(row.display_name || row.name || "?").trim().slice(0, 1).toUpperCase())}</span><span class="ops-customer-copy"><strong>${esc(row.display_name || row.name || row.id)}</strong><small>${esc(row.email_masked || row.email || row.company || "Customer")}</small></span>${stateBadge(row.status || row.lifecycle || "recorded")}</button>`).join(""); list.querySelectorAll("[data-id]").forEach((button) => button.addEventListener("click", () => select(button.dataset.id))); }
   function renderDetail(body) {
-    const customer = body.customer;
-    const sections = body.sections || {};
-    const projectionState = body.projections || {};
-    const retainedReceipts = [...(Array.isArray(body.action_receipts) ? body.action_receipts : [])]
-      .filter((receipt, index, values) => receipt && values.findIndex((candidate) => candidate?.receipt_id === receipt.receipt_id) === index);
-    detail.innerHTML = `<div class="ops-detail-heading"><div><span class="ops-kicker">Customer account</span><h2>${esc(customer.display_name || customer.name || customer.id)}</h2><p>${esc(customer.email_masked || customer.email || customer.company || "Safe customer summary")}</p></div><div>${stateBadge(customer.status || customer.lifecycle || "recorded")}</div></div><nav class="ops-tabs" role="tablist" aria-label="Customer operations sections">${tabs.map(([id, text], index) => `<button id="ops-tab-${id}" type="button" role="tab" tabindex="${index === 0 ? "0" : "-1"}" aria-selected="${index === 0}" aria-controls="ops-panel-${id}" class="ops-tab ${index === 0 ? "is-selected" : ""}" data-tab="${id}">${text}</button>`).join("")}</nav><div class="ops-tab-panels"><section id="ops-panel-account" class="ops-panel is-selected" role="tabpanel" tabindex="0" aria-labelledby="ops-tab-account" data-panel="account"><div class="ops-facts"><dl>${fields(customer)}</dl></div>${sectionRows(sections.members, "members", projectionState.members?.status || "setup_needed")}<div class="ops-receipt-note">Identity and access are directory metadata only. No password, token, card, or provider credential is displayed.</div></section>${tabs.slice(1).map(([id]) => `<section id="ops-panel-${id}" class="ops-panel" role="tabpanel" tabindex="0" aria-labelledby="ops-tab-${id}" data-panel="${id}">${sectionRows(sections[id], id, projectionState[id]?.status || "setup_needed")}${id === "activity" && retainedReceipts.length ? `<div class="ops-action-receipts"><strong>Frank action receipts</strong>${retainedReceipts.map((receipt) => `<div><code>${esc(receipt.receipt_id || "preview")}</code><span>${esc(receipt.status || "accepted")}</span></div>`).join("")}</div>` : ""}</section>`).join("")}</div>`;
-    const activate = (button, focus = false) => {
-      detail.querySelectorAll(".ops-tab").forEach((item) => item.classList.toggle("is-selected", item === button));
-      detail.querySelectorAll(".ops-panel").forEach((panel) => panel.classList.toggle("is-selected", panel.dataset.panel === button.dataset.tab));
-      detail.querySelectorAll(".ops-tab").forEach((item) => { const selected = item === button; item.setAttribute("aria-selected", String(selected)); item.tabIndex = selected ? 0 : -1; });
-      if (focus) button.focus();
-    };
-    detail.querySelectorAll(".ops-tab").forEach((button, index, buttons) => {
-      button.addEventListener("click", () => activate(button));
-      button.addEventListener("keydown", (event) => {
-        if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return;
-        event.preventDefault();
-        const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length;
-        activate(buttons[next], true);
-      });
-    });
+    const customer = body.customer; const sections = body.sections || {}; const projectionState = body.projections || {}; const retained = [...(Array.isArray(body.action_receipts) ? body.action_receipts : [])].filter((receipt, index, values) => receipt && values.findIndex((candidate) => candidate?.receipt_id === receipt.receipt_id) === index); const customerVersion = version(customer); const ready = sourceReady && body.status === "ready";
+    detail.innerHTML = `<div class="ops-detail-heading"><div><span class="ops-kicker">Customer account</span><h2>${esc(customer.display_name || customer.name || customer.id)}</h2><p>${esc(customer.email_masked || customer.email || customer.company || "Safe customer summary")}</p></div><div>${stateBadge(customer.status || customer.lifecycle || "recorded")}</div></div><div class="ops-action-toolbar"><strong>Supported actions</strong>${actionButton("team_invite", customer.id, customer.id, customerVersion, "Invite teammate", !ready)}</div><nav class="ops-tabs" role="tablist" aria-label="Customer operations sections">${tabs.map(([id, text], index) => `<button id="ops-tab-${id}" type="button" role="tab" tabindex="${index === 0 ? "0" : "-1"}" aria-selected="${index === 0}" aria-controls="ops-panel-${id}" class="ops-tab ${index === 0 ? "is-selected" : ""}" data-tab="${id}">${text}</button>`).join("")}</nav><div class="ops-tab-panels"><section id="ops-panel-account" class="ops-panel is-selected" role="tabpanel" tabindex="0" aria-labelledby="ops-tab-account" data-panel="account"><div class="ops-facts"><dl>${fields(customer)}</dl></div>${recordRows(sections.members, "members", projectionState.members?.status || "setup_needed", (row) => { const pendingInvite = ["invited", "pending"].includes(String(row.status || "").toLowerCase()); return pendingInvite ? `${actionButton("team_resend", row.id, customer.id, version(row), "Resend invite", !ready)}${actionButton("team_cancel", row.id, customer.id, version(row), "Cancel invite", !ready)}` : ""; })}<div class="ops-receipt-note">Identity and access are directory metadata only. No password, token, card, or provider credential is displayed.</div></section>${tabs.slice(1).map(([id]) => `<section id="ops-panel-${id}" class="ops-panel" role="tabpanel" tabindex="0" aria-labelledby="ops-tab-${id}" data-panel="${id}">${id === "billing" ? recordRows(sections[id], id, projectionState[id]?.status || "setup_needed", (row) => actionButton("billing_reconcile", row.id, customer.id, version(row), "Reconcile billing", !ready)) : id === "activity" ? recordRows(sections[id], id, projectionState[id]?.status || "setup_needed", (row) => String(row.kind || "").toLowerCase() === "session" ? actionButton("session_revoke", row.id, customer.id, version(row), "Revoke session", !ready) : "") : recordRows(sections[id], id, projectionState[id]?.status || "setup_needed")}${id === "activity" && retained.length ? `<div class="ops-action-receipts"><strong>Frank action receipts</strong>${retained.map((receipt) => `<div><code>${esc(receipt.receipt_id || "receipt")}</code><span>${esc(receipt.status || "recorded")}</span></div>`).join("")}</div>` : ""}</section>`).join("")}</div>`;
+    const activate = (button, focus = false) => { detail.querySelectorAll(".ops-tab").forEach((item) => item.classList.toggle("is-selected", item === button)); detail.querySelectorAll(".ops-panel").forEach((panel) => panel.classList.toggle("is-selected", panel.dataset.panel === button.dataset.tab)); detail.querySelectorAll(".ops-tab").forEach((item) => { const selected = item === button; item.setAttribute("aria-selected", String(selected)); item.tabIndex = selected ? 0 : -1; }); if (focus) button.focus(); };
+    detail.querySelectorAll(".ops-tab").forEach((button, index, buttons) => { button.addEventListener("click", () => activate(button)); button.addEventListener("keydown", (event) => { if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return; event.preventDefault(); const next = event.key === "Home" ? 0 : event.key === "End" ? buttons.length - 1 : (index + (event.key === "ArrowRight" ? 1 : -1) + buttons.length) % buttons.length; activate(buttons[next], true); }); }); bindActionButtons(detail);
   }
-
-  async function select(id) {
-    selectedId = id;
-    renderList();
-    detail.innerHTML = emptyState("Loading customer", "Reading Hermes projections…");
-    try { renderDetail(await getJson(`/api/ops/customers/${encodeURIComponent(id)}`)); }
-    catch (error) { detail.innerHTML = emptyState("Customer detail unavailable", error.message || "Try again shortly.", "ops-empty-error"); }
-  }
-
-  async function load() {
-    overall.textContent = "Checking source…";
-    overall.className = statusClass("setup_needed");
-    try {
-      const [body, queue] = await Promise.all([getJson("/api/ops/overview"), getJson("/api/ops/enquiries/unassigned")]);
-      renderUnassigned(queue);
-      customers = Array.isArray(body.customers) ? body.customers : [];
-      overall.textContent = label(body.status || "setup_needed");
-      overall.className = statusClass(body.status || "setup_needed");
-      notice.textContent = body.status === "ready" ? "Last published state is available." : (body.status === "stale" ? "Projection is stale; verify before acting." : "Setup is needed: Hermes has not published every projection yet.");
-      renderList();
-      if (selectedId && customers.some((row) => row.id === selectedId)) await select(selectedId);
-    } catch (error) {
-      customers = [];
-      renderUnassigned({ status: "error", enquiries: [], message: error.message || "The enquiry queue is unavailable." });
-      overall.textContent = "Error";
-      overall.className = statusClass("error");
-      notice.textContent = error.message || "The projection source is unavailable.";
-      renderList();
-      detail.innerHTML = emptyState("Ops source unavailable", "Frank will not invent customer state when Hermes cannot be reached.", "ops-empty-error");
-    }
-  }
-
-  search.addEventListener("input", renderList);
-  notice.textContent = "Ops refresh is unavailable until a reviewed Hermes action is configured.";
-  await load();
+  async function select(id) { selectedId = id; renderList(); detail.innerHTML = emptyState("Loading customer", "Reading Hermes projections…"); try { renderDetail(await getJson(`/api/ops/customers/${encodeURIComponent(id)}`)); } catch (error) { detail.innerHTML = emptyState("Customer detail unavailable", error.message || "Try again shortly.", "ops-empty-error"); } }
+  async function pollAction(actionId, workspace) { for (let attempt = 0; attempt < 8; attempt += 1) { try { const result = await getJson(`/api/ops/customer-actions/${encodeURIComponent(actionId)}?workspace_id=${encodeURIComponent(workspace)}`); const state = result.status || "unavailable"; notice.textContent = `Action ${label(state)} · ${attempt < 7 && ["queued", "processing", "retryable", "accepted"].includes(state) ? "checking again…" : "receipt settled"}`; if (!["queued", "processing", "retryable", "accepted"].includes(state)) return result; } catch (error) { notice.textContent = `Receipt check unavailable: ${error.message}`; return null; } await new Promise((resolve) => setTimeout(resolve, 1500)); } notice.textContent = "Receipt is still processing. Use the customer Activity tab to review the next published state."; return null; }
+  async function submitAction() { if (!pending) return; const reason = dialogReason.value.trim(); if (reason.length < 3) { dialogError.textContent = "Enter a concise reason before confirming."; dialogReason.focus(); return; } let payload = pending.payload || {}; if (pending.action === "team_invite") { if (!inviteEmail.checkValidity()) { dialogError.textContent = "Enter a valid invite email."; inviteEmail.focus(); return; } payload = { email: inviteEmail.value.trim().toLowerCase(), role: inviteRole.value }; } confirm.disabled = true; dialogError.textContent = "Submitting through the private Control Edge…"; try { const result = await getJson("/api/ops/customer-actions", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action: pending.action, workspace_id: pending.workspace, customer_id: pending.customer, target_type: targetTypes[pending.action], target_id: pending.target, expected_version: pending.version, reason, payload, idempotency_key: randomKey() }) }); dialog.close(); notice.textContent = `Action queued · ${label(pending.action)}`; await pollAction(result.action_id, pending.workspace); if (selectedId) await select(selectedId); } catch (error) { dialogError.textContent = error.message || "Action unavailable."; } finally { confirm.disabled = false; } }
+  function openAction(input) { if (!supported.has(input.action) || !input.workspace || !input.customer || !Number.isSafeInteger(input.version) || input.version < 1) { notice.textContent = "Action unavailable: the current workspace/version or operator capability is not published."; return; } pending = input; dialogTitle.textContent = `Confirm ${label(input.action)}`; dialogSummary.textContent = `${input.label}. This will be recorded for workspace ${input.workspace.slice(0, 8)}… and checked against projection version ${input.version}.`; inviteFields.hidden = input.action !== "team_invite"; inviteEmail.required = input.action === "team_invite"; inviteEmail.value = ""; inviteRole.value = "member"; dialogReason.value = ""; dialogError.textContent = ""; dialog.showModal(); (input.action === "team_invite" ? inviteEmail : dialogReason).focus(); }
+  form.addEventListener("submit", (event) => { if (event.submitter?.value === "default") { event.preventDefault(); void submitAction(); } else pending = null; }); search.addEventListener("input", renderList); notice.textContent = "Action controls stay disabled until a fresh, complete Hermes projection and AAL2 operator identity are available.";
+  try { const [body, queue] = await Promise.all([getJson("/api/ops/overview"), getJson("/api/ops/enquiries/unassigned")]); customers = Array.isArray(body.customers) ? body.customers : []; sourceReady = body.status === "ready"; renderUnassigned(queue); overall.textContent = label(body.status || "setup_needed"); overall.className = statusClass(body.status || "setup_needed"); notice.textContent = sourceReady ? "Fresh published state is available. Review the reason and receipt before every action." : "Setup is needed: Hermes has not published every projection yet."; renderList(); } catch (error) { customers = []; renderUnassigned({ status: "error", enquiries: [] }); overall.textContent = "Error"; overall.className = statusClass("error"); notice.textContent = error.message || "The projection source is unavailable."; renderList(); detail.innerHTML = emptyState("Ops source unavailable", "Frank will not invent customer state when Hermes cannot be reached.", "ops-empty-error"); }
 }

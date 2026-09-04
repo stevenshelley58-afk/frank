@@ -1,6 +1,7 @@
 """Architecture guardrails for Frank's read-only ops boundary."""
 
 import json
+import hashlib
 import tempfile
 import unittest
 from pathlib import Path
@@ -41,12 +42,15 @@ class OpsArchitectureTest(unittest.TestCase):
                 "published_at": "2026-09-04T00:00:00Z",
                 "projection_count": 9,
             }
-            (generation / "publication-receipt.json").write_text(json.dumps(receipt), encoding="utf-8")
-            (root / "current.json").write_text(json.dumps({
+            receipt_body = json.dumps(receipt) + "\n"
+            (generation / "publication-receipt.json").write_text(receipt_body, encoding="utf-8")
+            pointer = {
                 "schema": "schema://frank.ops-pointer/v1", "version": 1,
                 "generation": "gen-test", "publication_receipt_id": "receipt:ops/test",
-            }), encoding="utf-8")
-            (generation / "customers.json").write_text(json.dumps({
+            }
+            pointer_body = json.dumps(pointer) + "\n"
+            (root / "current.json").write_text(pointer_body, encoding="utf-8")
+            customer_envelope = {
                 "schema": "schema://frank.ops.customer-summary/v1", "version": 1,
                 "projection": "customers", "project_id": "blockwise",
                 "workspace_ids": receipt["workspace_ids"],
@@ -55,7 +59,18 @@ class OpsArchitectureTest(unittest.TestCase):
                 "publication_receipt_id": "receipt:ops/test",
                 "published_at": "2026-09-04T00:00:00Z", "fresh_until": "2099-01-01T00:00:00Z",
                 "items": [{"id": receipt["workspace_ids"][0], "workspace_id": receipt["workspace_ids"][0], "display_name": "Safe customer"}],
-            }), encoding="utf-8")
+            }
+            (generation / "customers.json").write_text(json.dumps(customer_envelope) + "\n", encoding="utf-8")
+            for name, spec in __import__("ops_projections").PROJECTION_SPECS.items():
+                target = generation / spec["filename"]
+                if not target.exists():
+                    empty = {**customer_envelope, "schema": spec["schema"], "projection": name, "source_scope": {"project_id": "blockwise", "workspace_ids": receipt["workspace_ids"], "system": name}, "items": []}
+                    target.write_text(json.dumps(empty) + "\n", encoding="utf-8")
+            files = {spec["filename"]: hashlib.sha256((generation / spec["filename"]).read_bytes()).hexdigest() for spec in __import__("ops_projections").PROJECTION_SPECS.values()}
+            files["publication-receipt.json"] = hashlib.sha256((generation / "publication-receipt.json").read_bytes()).hexdigest()
+            manifest_input = {"generation": "gen-test", "publication_receipt_id": "receipt:ops/test", "files": files, "pointer_sha256": hashlib.sha256((root / "current.json").read_bytes()).hexdigest()}
+            manifest = {"schema": "schema://frank.ops-manifest/v1", "version": 1, **manifest_input, "bundle_sha256": hashlib.sha256(json.dumps(manifest_input, separators=(",", ":")).encode()).hexdigest()}
+            (generation / "manifest.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
             before = (root / "current.json").read_bytes()
             snapshot = OpsProjectionStore(root).load("customers")
             self.assertEqual(snapshot.status, "ready")
