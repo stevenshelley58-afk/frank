@@ -174,6 +174,7 @@ class ActionIntentJournal:
             parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             if parent.is_symlink() or not parent.is_dir():
                 raise CustomerOpsActionError("customer operations intent journal is unavailable")
+            _validate_secret_ancestors(self.path, "customer operations intent journal")
             if os.name != "nt":
                 parent_info = parent.stat()
                 if parent_info.st_mode & 0o022 or (hasattr(os, "geteuid") and parent_info.st_uid not in {0, os.geteuid()}):
@@ -278,7 +279,10 @@ class ActionIntentJournal:
                     pass
 
     def _prune(self, records: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
-        return [item for item in records if now - float(item["updated_at"]) <= JOURNAL_RETENTION_SECONDS]
+        # An unresolved reservation must never age into a new action identity:
+        # a worker may have accepted it while Frank was offline. Only a
+        # terminal, authoritative outcome is eligible for retention pruning.
+        return [item for item in records if item["status"] not in JOURNAL_TERMINAL or now - float(item["updated_at"]) <= JOURNAL_RETENTION_SECONDS]
 
     def reserve(self, operator_id: str, fingerprint: str, envelope: Mapping[str, Any]) -> tuple[dict[str, Any], bool, bool]:
         now = float(self.clock())
@@ -667,7 +671,10 @@ def create_blueprint(*, store: OpsProjectionStore | None = None, client_factory=
             intent_journal.mark(envelope["actionId"], result.get("status", "queued"), result.get("correlation_id"))
             return jsonify(result), 202
         except CustomerOpsActionError as error:
-            if attempted_enqueue and error.status in {400, 401, 403, 404, 409, 422, 501}:
+            # A 409 can mean a quarantined side effect (for example
+            # invitation delivery reconciliation), so retain the durable
+            # reservation until a receipt/status endpoint settles it.
+            if attempted_enqueue and error.status in {400, 401, 403, 404, 422, 501}:
                 try:
                     intent_journal.mark(envelope["actionId"], "rejected")
                 except CustomerOpsActionError:

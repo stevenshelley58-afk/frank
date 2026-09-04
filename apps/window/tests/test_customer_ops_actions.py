@@ -286,6 +286,46 @@ class CustomerOpsActionsTest(unittest.TestCase):
         self.assertFalse(reused)
         self.assertFalse(terminal)
 
+    def test_unresolved_reservation_is_not_pruned_after_retention_window(self):
+        now = [0.0]
+        journal = ActionIntentJournal(Path(os.environ["FRANK_OPS_ACTION_JOURNAL_FILE"]), clock=lambda: now[0])
+        envelope = {"actionId": ACTION, "idempotencyKey": "frank:retention-key", "actor": {"operatorId": OPERATOR}, "action": "billing_reconcile", "workspaceId": WORKSPACE, "customerId": WORKSPACE, "target": {"type": "billing", "id": WORKSPACE}, "expectedVersion": 2, "reason": "Unresolved intent", "payload": {}}
+        journal.reserve(OPERATOR, "e" * 64, envelope)
+        now[0] = 30 * 24 * 60 * 60
+        _, reused, terminal = journal.reserve(OPERATOR, "e" * 64, dict(envelope, actionId="123e4567-e89b-12d3-a456-426614174004", idempotencyKey="frank:new-retention-key"))
+        self.assertTrue(reused)
+        self.assertFalse(terminal)
+
+    def test_ambiguous_http_409_reuses_identity_after_restart(self):
+        body = {
+            "action": "billing_reconcile", "workspace_id": WORKSPACE, "customer_id": WORKSPACE,
+            "target_type": "billing", "target_id": WORKSPACE, "expected_version": 2,
+            "reason": "Reconcile quarantined delivery", "payload": {},
+        }
+        first_calls = []
+
+        class ConflictClient:
+            def enqueue(self, envelope):
+                first_calls.append(envelope)
+                raise CustomerOpsActionError("action was not accepted by the control edge", 409)
+
+        app = Flask(__name__)
+        app.register_blueprint(create_blueprint(store=FakeStore(), client_factory=ConflictClient))
+        self.assertEqual(app.test_client().post("/api/ops/customer-actions", json=body).status_code, 409)
+
+        second_calls = []
+
+        class RecoveryClient:
+            def enqueue(self, envelope):
+                second_calls.append(envelope)
+                return {"schema": "schema://frank.ops-action-receipt/v1", "action_id": envelope["actionId"], "status": "queued", "correlation_id": "corr-12345678"}
+
+        restarted = Flask(__name__)
+        restarted.register_blueprint(create_blueprint(store=FakeStore(), client_factory=RecoveryClient))
+        self.assertEqual(restarted.test_client().post("/api/ops/customer-actions", json=body).status_code, 202)
+        self.assertEqual(second_calls[0]["actionId"], first_calls[0]["actionId"])
+        self.assertEqual(second_calls[0]["idempotencyKey"], first_calls[0]["idempotencyKey"])
+
 
 if __name__ == "__main__":
     unittest.main()
