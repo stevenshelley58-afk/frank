@@ -1482,6 +1482,38 @@ def _ad_studio_source_url(run_id: str, name: str) -> str | None:
     return f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(artifact, safe='')}"
 
 
+def _public_ad_studio_model_profile(run: dict) -> dict:
+    """Expose only the immutable provider/model choices frozen for this run."""
+    policy = run.get("model_policy") if isinstance(run.get("model_policy"), dict) else {}
+    stages = policy.get("stages") if isinstance(policy.get("stages"), dict) else {}
+    role_specs = (
+        ("builder", "Builder & analysis", ("analyse", "build")),
+        ("comparator", "Comparator", ("compare",)),
+        ("quality-escalation", "Quality escalation", ("quality-escalation",)),
+        ("final-review-a", "Final review A", ("final-review-a",)),
+        ("final-review-b", "Final review B", ("final-review-b",)),
+    )
+    roles = []
+    for role, label, stage_names in role_specs:
+        stage = next((stages.get(name) for name in stage_names if isinstance(stages.get(name), dict)), {})
+        primary = stage.get("primary") if isinstance(stage.get("primary"), dict) else {}
+        provider = str(primary.get("provider") or "").strip()
+        model = str(primary.get("model") or "").strip()
+        if not (
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", provider)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", model)
+        ):
+            continue
+        roles.append({"role": role, "label": label, "provider": provider, "model": model})
+    revision = run.get("model_policy_revision")
+    return {
+        "source": "Hermes frozen run policy",
+        "immutable": True,
+        "roles": roles,
+        **({"revision": int(revision)} if isinstance(revision, int) and not isinstance(revision, bool) else {}),
+    } if roles else {}
+
+
 def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
     """Project Hermes state for Frank's internal operator monitor."""
     now = int(time.time())
@@ -1518,6 +1550,23 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     source_url = _ad_studio_source_url(run_id, source_public["name"])
     if source_url:
         source_public["url"] = source_url
+    model_profile = _public_ad_studio_model_profile(run)
+    raw_usage = output.get("usage") if isinstance(output.get("usage"), dict) else {}
+    raw_cost = output.get("cost") if isinstance(output.get("cost"), dict) else {}
+    usage = {}
+    for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd"):
+        number = _number_from(raw_usage.get(key))
+        if number is not None and number >= 0:
+            usage[key] = number
+    reported_cost = _number_from(raw_cost.get("reported_usd"), raw_usage.get("reported_cost_usd"))
+    if reported_cost is not None and reported_cost >= 0:
+        usage["reported_cost_usd"] = reported_cost
+    providers = {str(role.get("provider") or "") for role in model_profile.get("roles", [])}
+    usage.update({
+        "source": "Hermes run ledger",
+        "status": "reported" if any(key in usage for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd", "reported_cost_usd")) else "not_reported",
+        "billing": "ChatGPT/Codex OAuth — not OpenAI API dashboard" if providers == {"openai-codex"} else "Provider account",
+    })
     return {
         "id": run_id,
         "request_id": str(run.get("request_id") or ""),
@@ -1529,8 +1578,9 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "updated_at": run.get("updated_at") or run.get("created_at") or now,
         "source": source_public,
         "output": safe_output,
-        "cost": (output.get("cost") or {}).get("reported_usd") if isinstance(output.get("cost"), dict) else None,
-        "usage": {key: output.get("usage", {}).get(key) for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd") if isinstance(output.get("usage"), dict) and output.get("usage", {}).get(key) is not None},
+        "cost": reported_cost,
+        "usage": usage,
+        "model_profile": model_profile,
         "title": title or str(run.get("title") or payload.get("job_name") or "Ad template"),
         "project_id": project_id or str(scope.get("project_id") or payload.get("project_id") or ""),
         **({"error": str(run.get("error"))[:1200]} if run.get("error") else {}),

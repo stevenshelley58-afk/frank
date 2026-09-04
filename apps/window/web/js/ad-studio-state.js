@@ -73,8 +73,21 @@ export function mergeAdStudioRun(previous, incoming) {
     ...topLevel,
     source: mergeRecordedObject(earlierSource, laterSource),
     usage: mergeRecordedObject(earlierUsage, laterUsage),
+    model_profile: mergeRecordedObject(current.model_profile, next.model_profile),
     output,
   };
+}
+
+export function mergeAdStudioRunList(previous, incoming) {
+  const before = Array.isArray(previous) ? previous.filter((run) => run?.id) : [];
+  const after = Array.isArray(incoming) ? incoming.filter((run) => run?.id) : [];
+  // A list response is a polling snapshot, not a deletion ledger. Hermes can
+  // briefly return an empty or truncated page while recovering, so only an
+  // explicit operator action may remove durable history from the UI session.
+  if (!after.length) return before;
+  const recorded = new Map(before.map((run) => [run.id, run]));
+  after.forEach((run) => recorded.set(run.id, mergeAdStudioRun(recorded.get(run.id), run)));
+  return [...recorded.values()].sort((left, right) => Number(right?.created_at || 0) - Number(left?.created_at || 0));
 }
 
 export function runListRenderSignature(runs) {

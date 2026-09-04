@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { mergeAdStudioRun, mergeIterationHistory, runListRenderSignature } from "../web/js/ad-studio-state.js";
+import { mergeAdStudioRun, mergeAdStudioRunList, mergeIterationHistory, runListRenderSignature } from "../web/js/ad-studio-state.js";
 
 test("a thin run-list refresh cannot erase populated iteration history", () => {
   const detailed = {
@@ -110,4 +110,36 @@ test("rich detail changes do not force an unchanged run-list DOM rebuild", () =>
   assert.equal(runListRenderSignature(after), runListRenderSignature(before));
   assert.notEqual(runListRenderSignature([{ ...after[0], status: "completed" }]), runListRenderSignature(before));
   assert.notEqual(runListRenderSignature([{ ...after[0], updated_at: 181 }]), runListRenderSignature(before));
+});
+
+test("an empty polling snapshot cannot erase durable run history", () => {
+  const before = [{ id: "trun-kept", status: "running", created_at: 20, output: { iterations: [{ iteration: 1 }] } }];
+
+  const merged = mergeAdStudioRunList(before, []);
+
+  assert.deepEqual(merged, before);
+});
+
+test("a truncated polling page updates returned runs without dropping an older selected run", () => {
+  const before = [
+    { id: "trun-new", status: "running", created_at: 20 },
+    { id: "trun-selected", status: "completed", created_at: 10, output: { iterations: [{ iteration: 1 }] } },
+  ];
+
+  const merged = mergeAdStudioRunList(before, [{ id: "trun-new", status: "completed", created_at: 20, updated_at: 30 }]);
+
+  assert.deepEqual(merged.map((run) => run.id), ["trun-new", "trun-selected"]);
+  assert.equal(merged[0].status, "completed");
+  assert.equal(merged[1].output.iterations.length, 1);
+});
+
+test("frozen model roles survive a thin refresh", () => {
+  const before = [{
+    id: "trun-models", status: "running", updated_at: 10,
+    model_profile: { source: "Hermes frozen run policy", roles: [{ role: "builder", provider: "openai-codex", model: "gpt-5.6-sol" }] },
+  }];
+
+  const [merged] = mergeAdStudioRunList(before, [{ id: "trun-models", status: "running", updated_at: 11 }]);
+
+  assert.equal(merged.model_profile.roles[0].model, "gpt-5.6-sol");
 });

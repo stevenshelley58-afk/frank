@@ -46,6 +46,54 @@ class AdStudioMonitorTest(unittest.TestCase):
         })
         self.assertEqual(mismatched, {"status": "ready"})
 
+    def test_run_projection_exposes_frozen_models_and_truthful_usage_source(self):
+        projected = server._public_ad_studio_run({
+            "run_id": "trun-model-profile",
+            "model_policy_revision": 35,
+            "model_policy": {
+                "name": "private policy detail must not leak",
+                "stages": {
+                    "analyse": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-sol", "secret": "never"}},
+                    "compare": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-luna"}},
+                    "quality-escalation": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-sol"}},
+                    "final-review-a": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-luna"}},
+                    "final-review-b": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-sol"}},
+                },
+            },
+            "output": {"usage": {"total_tokens": 1234, "estimated_cost_usd": 0.125}, "cost": {}},
+        })
+
+        self.assertEqual(projected["model_profile"]["source"], "Hermes frozen run policy")
+        self.assertEqual(projected["model_profile"]["revision"], 35)
+        self.assertEqual(
+            [(role["role"], role["provider"], role["model"]) for role in projected["model_profile"]["roles"]],
+            [
+                ("builder", "openai-codex", "gpt-5.6-sol"),
+                ("comparator", "openai-codex", "gpt-5.6-luna"),
+                ("quality-escalation", "openai-codex", "gpt-5.6-sol"),
+                ("final-review-a", "openai-codex", "gpt-5.6-luna"),
+                ("final-review-b", "openai-codex", "gpt-5.6-sol"),
+            ],
+        )
+        self.assertNotIn("secret", json.dumps(projected))
+        self.assertNotIn("private policy detail", json.dumps(projected))
+        self.assertEqual(projected["usage"]["source"], "Hermes run ledger")
+        self.assertEqual(projected["usage"]["status"], "reported")
+        self.assertEqual(projected["usage"]["billing"], "ChatGPT/Codex OAuth — not OpenAI API dashboard")
+        self.assertEqual(projected["usage"]["total_tokens"], 1234)
+        self.assertEqual(projected["usage"]["estimated_cost_usd"], 0.125)
+
+    def test_missing_usage_is_reported_as_missing_not_zero(self):
+        projected = server._public_ad_studio_run({
+            "run_id": "trun-no-usage",
+            "model_policy": {"stages": {"compare": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-luna"}}}},
+            "output": {},
+        })
+
+        self.assertEqual(projected["usage"]["status"], "not_reported")
+        self.assertNotIn("total_tokens", projected["usage"])
+        self.assertIsNone(projected["cost"])
+
     def test_archify_receipt_is_bound_to_spec_artifact_and_validator(self):
         previous = (
             server.ARCHIFY_ARTIFACT, server.ARCHIFY_SPEC,

@@ -1,6 +1,6 @@
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260830-ad-studio-route-v1";
-import { mergeAdStudioRun, runListRenderSignature } from "./ad-studio-state.js?v=20260831-history-v1";
+import { mergeAdStudioRun, mergeAdStudioRunList, runListRenderSignature } from "./ad-studio-state.js?v=20260904-history-models-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -281,20 +281,15 @@ function renderRuns() {
 async function refreshRuns() {
   const refreshRevision = ++runListRevision;
   const projectId = clean($("#ad-run-project")?.value || $("#ad-pipeline-project")?.value);
-  const query = new URLSearchParams({ limit: "30" });
+  const query = new URLSearchParams({ limit: "100" });
   if (projectId) query.set("project_id", projectId);
   const response = await fetch(`/api/ad-studio/runs?${query}`);
   if (!response.ok) throw new Error("Hermes job history is unavailable");
   const data = await response.json();
   if (refreshRevision !== runListRevision) return;
   const previousSignature = runListRenderSignature(runs);
-  const existing = new Map(runs.map((run) => [run.id, run]));
-  runs = (Array.isArray(data.runs) ? data.runs : [])
-    .map((run) => mergeAdStudioRun(existing.get(run.id), run))
-    .sort((a, b) => Number(b.created_at || 0) - Number(a.created_at || 0));
-  const selectionCleared = Boolean(selectedRunId && !runs.some((run) => run.id === selectedRunId));
-  if (selectionCleared) clearRunSelection();
-  if (selectionCleared || runListRenderSignature(runs) !== previousSignature) renderRuns();
+  runs = mergeAdStudioRunList(runs, data.runs);
+  if (runListRenderSignature(runs) !== previousSignature) renderRuns();
 }
 
 async function refreshRunsSafe() {
@@ -333,8 +328,10 @@ async function selectRun(runId) {
 }
 
 function formatCost(run) {
-  const cost = run.cost ?? run.usage?.cost_usd ?? run.output?.cost?.actual_usd ?? run.output?.cost?.reported_usd;
-  return Number.isFinite(Number(cost)) ? `$${Number(cost).toFixed(3)}` : "Cost pending";
+  const reported = firstNumber(run.cost, run.usage?.reported_cost_usd, run.output?.cost?.actual_usd, run.output?.cost?.reported_usd);
+  if (reported !== null) return `$${reported.toFixed(3)} reported`;
+  const estimated = firstNumber(run.usage?.estimated_cost_usd);
+  return estimated !== null ? `$${estimated.toFixed(3)} estimated` : "Cost not reported";
 }
 
 function firstNumber(...values) {
@@ -459,6 +456,46 @@ function renderGenerationHistory(run, parent) {
   section.append(list); parent.append(section);
 }
 
+function renderModelProfile(run, parent) {
+  const profile = run.model_profile && typeof run.model_profile === "object" ? run.model_profile : {};
+  const roles = Array.isArray(profile.roles) ? profile.roles : [];
+  const usage = run.usage && typeof run.usage === "object" ? run.usage : {};
+  if (!roles.length && !usage.source) return;
+  const section = document.createElement("section");
+  section.className = "ad-model-profile";
+  const heading = document.createElement("div");
+  heading.className = "ad-inline-heading";
+  const title = document.createElement("strong");
+  title.textContent = "Models and usage";
+  const source = document.createElement("span");
+  source.textContent = `${profile.source || usage.source || "Hermes run ledger"}${profile.revision ? ` · revision ${profile.revision}` : ""}`;
+  heading.append(title, source);
+  section.append(heading);
+  if (roles.length) {
+    const grid = document.createElement("div");
+    grid.className = "ad-model-role-grid";
+    roles.forEach((role) => {
+      const item = document.createElement("div");
+      const label = document.createElement("span");
+      label.textContent = role.label || role.role || "Model role";
+      const model = document.createElement("strong");
+      model.textContent = role.model || "Not recorded";
+      const provider = document.createElement("small");
+      provider.textContent = role.provider || "Provider not recorded";
+      item.append(label, model, provider);
+      grid.append(item);
+    });
+    section.append(grid);
+  }
+  const usageLine = document.createElement("p");
+  usageLine.className = "ad-usage-source";
+  const tokens = firstNumber(usage.total_tokens);
+  const tokenLabel = tokens === null ? "Tokens not reported" : `${Math.round(tokens).toLocaleString()} tokens`;
+  usageLine.textContent = `${tokenLabel} · ${formatCost(run)} · ${usage.billing || "Billing source not reported"}`;
+  section.append(usageLine);
+  parent.append(section);
+}
+
 
 function renderRunDetail(run) {
   const detail = $("#ad-run-detail");
@@ -489,6 +526,7 @@ function renderRunDetail(run) {
     item.append(term, description); overview.append(item);
   }
   detail.append(overview);
+  renderModelProfile(run, detail);
   renderPersistedSource(run, detail);
   renderPhaseTimeline(run, detail);
   const importReady = run.status === "completed" && ["imported", "replayed", "ready", "ok"].includes(String(run.output?.import?.status || "").toLowerCase());
