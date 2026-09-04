@@ -43,12 +43,15 @@ jobs:
       - name: JavaScript checks
         run: |
           node --check apps/window/web/js/app.js
+          node --check apps/window/web/js/ad-studio.js
+          node --check apps/window/web/js/ad-studio-brief.js
+          node --check apps/window/web/js/ad-studio-state.js
           node --check apps/window/web/js/registry.js
           node --check apps/window/web/js/widgets.js
           while IFS= read -r -d '' file; do
             node --check "$file"
           done < <(find apps/window/web/mini -type f \( -name '*.js' -o -name '*.mjs' \) -print0)
-          node --test apps/window/tests/mini_*.test.mjs apps/window/tests/view_routing.test.mjs
+          node --test apps/window/tests/ad_studio_*.test.mjs apps/window/tests/mini_*.test.mjs apps/window/tests/view_routing.test.mjs
       - name: Container build
         run: docker build -f apps/window/Dockerfile -t frank-window:verify .
 

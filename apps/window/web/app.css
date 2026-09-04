@@ -1546,6 +1546,8 @@ a { color: inherit; text-decoration: none; }
 @media (pointer: coarse) { .ad-source-remove { width: 44px; height: 44px; } }
 .ad-run-form label, .ad-stage-inspector form label, .ad-pipeline-controls label { display: grid; gap: 6px; color: var(--mute); font-size: 11px; }
 .ad-run-form label > span { color: var(--faint); }
+.ad-brief-limit { color: var(--faint); font-size: 10px; font-variant-numeric: tabular-nums; }
+.ad-brief-limit.is-error { color: var(--bad); }
 .ad-run-form input:not([type="checkbox"]), .ad-run-form select, .ad-run-form textarea,
 .ad-stage-inspector input, .ad-stage-inspector textarea, .ad-pipeline-controls select { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: #fff; font-size: 13px; }
 .ad-run-form input:not([type="checkbox"]), .ad-run-form select, .ad-stage-inspector input, .ad-pipeline-controls select { height: 40px; padding: 8px 10px; }
