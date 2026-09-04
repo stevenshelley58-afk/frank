@@ -1,8 +1,14 @@
 import { mount, mountAll } from "./registry.js";
 import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
-import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
-import { mountAdStudio } from "./ad-studio.js?v=20260831-batch-live-v1";
+import { SseEventParser } from "./chat-stream.js";
+import * as hubApi from "./chat/api.js";
+import { attachmentDTO, AttachmentController, VPS_DRAG_TYPE } from "./chat/attachment-controller.js";
+import { DictationController } from "./chat/dictation-controller.js";
+import { ModelSelector } from "./chat/model-selector.js";
+import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/turn-stream.js";
+import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
+import { mountAdStudio } from "./ad-studio.js?v=20260904-history-models-v1";
 import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
@@ -191,7 +197,7 @@ window.addEventListener("frank:ad-studio-run", (event) => {
       const fallbackName = String(localSources[0]?.name || "source image").replace(/\.[^.]+$/, "");
       const jobName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
       localSources.forEach((source) => progress(source, "uploading"));
-      const uploaded = await uploadFiles(localSources.map((source) => ({ file: source.file, path: source.file.name })));
+      const uploaded = await hubApi.uploadFiles(localSources.map((source) => ({ file: source.file, path: source.file.name })));
       if (uploaded.length !== localSources.length) throw new Error("One or more source images were not accepted.");
       localSources.forEach((source) => progress(source, "starting"));
       const response = await fetch("/api/ad-studio/runs", {
@@ -244,19 +250,22 @@ window.addEventListener("frank:ad-studio-run", (event) => {
   })();
 });
 
-function escapeHtml(s) {
-  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+/* ---------------- chat — window only, Hermes thinks ---------------- */
+
+let chatSessions = [];
+let currentChatId = localStorage.getItem("frank.chat") || "";
+let chatPinnedToBottom = true;
+let loadedChatVersion = "";
+let turnQueue = Promise.resolve();
+let turnStream = null;
+let attachments = null;
+let modelSelector = null;
+let dictation = null;
+let lastTurn = null;
+
+function chatVersion(chat) {
+  return chat ? `${chat.id}:${chat.updated_at || 0}:${chat.message_count || 0}` : "";
 }
-function fmtSize(n) {
-  if (n == null) return "";
-  if (n < 1024) return n + " B";
-  if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KB";
-  return (n / (1024 * 1024)).toFixed(1) + " MB";
-}
-const DT = new Intl.DateTimeFormat("en-AU", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" });
-function fmtDate(sec) { try { return DT.format(new Date(sec * 1000)); } catch { return ""; } }
-const TM = new Intl.DateTimeFormat("en-AU", { hour: "2-digit", minute: "2-digit" });
-function fmtTime(sec) { try { return TM.format(new Date(sec * 1000)); } catch { return ""; } }
 function typeLabel(e) {
   if (e.dir) return "File folder";
   if (!e.ext) return "File";
@@ -266,58 +275,6 @@ const ICON_FOLDER = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" 
 const ICON_FILE = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M6 3h8l4 4v14H6V3Z"/><path d="M14 3v4h4"/></svg>';
 const ICON_CHEV = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m9 6 6 6-6 6"/></svg>';
 const ICON_PIN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 17v5"/><path d="M9 3h6l-1 6 3 3H7l3-3-1-6Z"/></svg>';
-
-/* ---------------- chat — window only, Hermes thinks ---------------- */
-
-const FALLBACK_MODELS = [
-  { id: "qwen3.8-max", provider: "custom", note: "default" },
-  { id: "deepseek-v4-flash", provider: "deepseek", note: "fast · cheap" },
-  { id: "deepseek-v4-pro", provider: "deepseek", note: "stronger" },
-  { id: "grok-4.6", provider: "xai", note: "escalate" },
-  { id: "gpt-5.6-sol", provider: "custom", note: "escalate" },
-  { id: "claude-fable-5", provider: "custom", note: "escalate" },
-];
-let models = FALLBACK_MODELS;
-let chatModel = localStorage.getItem("frank.model") || "qwen3.8-max";
-let chatProvider = localStorage.getItem("frank.provider") || "custom";
-let currentChatId = localStorage.getItem("frank.chat") || "";
-let chatSessions = [];
-let chatAtts = [];
-let uploadsInFlight = 0;
-let turnAbort = null;
-let turnQueue = Promise.resolve();
-let chatPinnedToBottom = true;
-let loadedChatVersion = "";
-let modelUpdate = Promise.resolve();
-let renderModelPicker = () => {};
-
-function chatVersion(chat) {
-  return chat ? `${chat.id}:${chat.updated_at || 0}:${chat.message_count || 0}` : "";
-}
-function savedSessionModels() {
-  try {
-    const value = JSON.parse(localStorage.getItem("frank.session-models") || "{}");
-    return value && typeof value === "object" && !Array.isArray(value) ? value : {};
-  } catch { return {}; }
-}
-function rememberSessionModel(chatId, model, provider) {
-  if (!chatId) return;
-  const value = savedSessionModels();
-  value[chatId] = { model, provider };
-  localStorage.setItem("frank.session-models", JSON.stringify(value));
-}
-function applySessionModel(chat) {
-  if (!chat) return;
-  const saved = savedSessionModels()[chat.id] || {};
-  const id = saved.model || chat.model;
-  if (!id) return;
-  const hit = models.find((item) => item.id === id);
-  chatModel = id;
-  chatProvider = saved.provider || hit?.provider || chatProvider;
-  localStorage.setItem("frank.model", chatModel);
-  localStorage.setItem("frank.provider", chatProvider);
-  renderModelPicker();
-}
 
 function chatDate(sec) {
   if (!sec) return "";
@@ -337,15 +294,12 @@ function renderChatNav() {
     </button>`;
   }).join("");
   $$(".chat-nav-item", nav).forEach((button) => button.addEventListener("click", () => {
-    if (turnAbort) return;
+    if (turnStream?.active) return;
     void selectChat(button.dataset.chatId);
   }));
 }
 async function fetchChatSessions() {
-  const response = await fetch("/api/chat/sessions");
-  if (!response.ok) throw new Error("Could not load chats");
-  const data = await response.json();
-  chatSessions = Array.isArray(data.sessions) ? data.sessions : [];
+  chatSessions = await hubApi.fetchSessions();
   renderChatNav();
   return chatSessions;
 }
@@ -354,11 +308,9 @@ async function loadChatMessages(chatId) {
   const empty = $("#chat-empty");
   wrap.innerHTML = "";
   empty.classList.remove("is-hidden");
-  const response = await fetch(`/api/chat?session_id=${encodeURIComponent(chatId)}`);
-  if (!response.ok) throw new Error("Could not load this chat");
-  const data = await response.json();
-  for (const message of data.messages || []) addChatMsg(message);
-  if (!(data.messages || []).length) empty.classList.remove("is-hidden");
+  const data = await hubApi.fetchHistory(chatId);
+  for (const message of data.messages) addChatMsg(message);
+  if (!data.messages.length) empty.classList.remove("is-hidden");
   loadedChatVersion = chatVersion(chatSessions.find((chat) => chat.id === chatId));
   chatPinnedToBottom = true;
   chatScrollBottom(true);
@@ -366,25 +318,25 @@ async function loadChatMessages(chatId) {
 async function selectChat(chatId, { navigate = true } = {}) {
   if (!chatId) return;
   const switchingChats = chatId !== currentChatId;
-  if (switchingChats && chatAtts.length) void discardAttachments(chatAtts.slice(), true);
+  if (switchingChats && attachments?.items.length) void attachments.remove(attachments.items.slice());
   currentChatId = chatId;
   localStorage.setItem("frank.chat", chatId);
   renderChatNav();
   const selected = chatSessions.find((chat) => chat.id === chatId);
-  applySessionModel(selected);
+  modelSelector?.applySession(selected);
+  modelSelector && (modelSelector.activeChatId = chatId);
   if (navigate) show("hub");
   await loadChatMessages(chatId);
 }
 async function createChat(projectId = "", title = "New chat") {
-  if (turnAbort) return;
-  await modelUpdate.catch(() => {});
-  const response = await fetch("/api/chat/sessions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ title, model: chatModel, provider: chatProvider, project_id: projectId || undefined }),
+  if (turnStream?.active) return;
+  await modelSelector?.pendingRequest?.catch(() => {});
+  const data = await hubApi.createSession({
+    title,
+    model: modelSelector?.current.model || "",
+    provider: modelSelector?.current.provider || "",
+    projectId,
   });
-  if (!response.ok) throw new Error("Could not start a new chat");
-  const data = await response.json();
   await fetchChatSessions();
   await selectChat(data.session.id);
   $("#chat-input").focus();
@@ -431,8 +383,8 @@ function setupProjects() {
           blurb: $("#project-blurb").value,
           repository_url: $("#project-repository").value,
           live: $("#project-live").value,
-          model: chatModel,
-          provider: chatProvider,
+          model: modelSelector?.current.model || "",
+          provider: modelSelector?.current.provider || "",
         }),
       });
       const data = await response.json().catch(() => ({}));
@@ -441,7 +393,7 @@ function setupProjects() {
       await fetchProjects();
       await fetchChatSessions();
       await selectChat(data.session.id);
-      if (data.bootstrap_prompt) await sendTurn(data.bootstrap_prompt, []);
+      if (data.bootstrap_prompt) await enqueueTurn(data.bootstrap_prompt, []);
     } catch (reason) {
       error.textContent = reason.message || "Could not create this project.";
     } finally {
@@ -466,7 +418,7 @@ async function refreshChatSessions(reloadCurrent = false) {
     const selected = chatSessions.find((chat) => chat.id === currentChatId);
     if (selected) {
       $("#view-sub").textContent = selected.title || "";
-      if (reloadCurrent && !turnAbort && chatVersion(selected) !== loadedChatVersion) {
+      if (reloadCurrent && !turnStream?.active && chatVersion(selected) !== loadedChatVersion) {
         await loadChatMessages(selected.id);
       }
     }
@@ -476,85 +428,6 @@ async function refreshChatSessions(reloadCurrent = false) {
 function chatScrollBottom(force = false) {
   const sc = $("#chat-scroll");
   if (sc && (force || chatPinnedToBottom)) sc.scrollTop = sc.scrollHeight;
-}
-function safeUrl(raw) {
-  try {
-    const url = new URL(String(raw).trim(), location.href);
-    return ["http:", "https:", "mailto:"].includes(url.protocol) || url.origin === location.origin ? url.href : "";
-  } catch { return ""; }
-}
-function inlineMd(source) {
-  const tokens = [];
-  const hold = (html) => `\u0000${tokens.push(html) - 1}\u0000`;
-  let text = String(source)
-    .replace(/`([^`\n]+)`/g, (_, code) => hold(`<code>${escapeHtml(code)}</code>`))
-    .replace(/!\[([^\]]*)\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g, (_, alt, raw) => {
-      const url = safeUrl(raw);
-      return url ? hold(`<button type="button" class="md-image" data-preview-url="${escapeHtml(url)}" aria-label="Preview ${escapeHtml(alt || "image")}"><img src="${escapeHtml(url)}" alt="${escapeHtml(alt)}" loading="lazy"></button>`) : escapeHtml(alt);
-    })
-    .replace(/\[([^\]]+)\]\(([^\s)]+)(?:\s+"[^"]*")?\)/g, (_, label, raw) => {
-      const url = safeUrl(raw);
-      return url ? hold(`<a href="${escapeHtml(url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(label)}</a>`) : escapeHtml(label);
-    });
-  text = escapeHtml(text)
-    .replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>")
-    .replace(/__([^_]+)__/g, "<strong>$1</strong>")
-    .replace(/~~([^~]+)~~/g, "<del>$1</del>")
-    .replace(/(^|[^*])\*([^*\n]+)\*/g, "$1<em>$2</em>")
-    .replace(/(^|[^_])_([^_\n]+)_/g, "$1<em>$2</em>");
-  return text.replace(/\u0000(\d+)\u0000/g, (_, index) => tokens[Number(index)] || "");
-}
-function renderMd(source) {
-  const lines = String(source || "").replace(/\r\n?/g, "\n").split("\n");
-  const out = [];
-  for (let i = 0; i < lines.length;) {
-    const line = lines[i];
-    const fence = line.match(/^\s*```([^`]*)$/);
-    if (fence) {
-      const code = [];
-      i += 1;
-      while (i < lines.length && !/^\s*```\s*$/.test(lines[i])) code.push(lines[i++]);
-      if (i < lines.length) i += 1;
-      const language = fence[1].trim() || "code";
-      out.push(`<div class="code-block"><div class="code-head"><span>${escapeHtml(language)}</span><button type="button" data-copy-code>Copy</button></div><pre><code>${escapeHtml(code.join("\n"))}</code></pre></div>`);
-      continue;
-    }
-    const heading = line.match(/^(#{1,4})\s+(.+)$/);
-    if (heading) { const level = heading[1].length; out.push(`<h${level}>${inlineMd(heading[2])}</h${level}>`); i += 1; continue; }
-    if (/^\s*>\s?/.test(line)) {
-      const quote = [];
-      while (i < lines.length && /^\s*>\s?/.test(lines[i])) quote.push(lines[i++].replace(/^\s*>\s?/, ""));
-      out.push(`<blockquote>${inlineMd(quote.join("<br>"))}</blockquote>`);
-      continue;
-    }
-    if (/^\s*[-*+]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*[-*+]\s+/.test(lines[i])) items.push(`<li>${inlineMd(lines[i++].replace(/^\s*[-*+]\s+/, ""))}</li>`);
-      out.push(`<ul>${items.join("")}</ul>`);
-      continue;
-    }
-    if (/^\s*\d+[.)]\s+/.test(line)) {
-      const items = [];
-      while (i < lines.length && /^\s*\d+[.)]\s+/.test(lines[i])) items.push(`<li>${inlineMd(lines[i++].replace(/^\s*\d+[.)]\s+/, ""))}</li>`);
-      out.push(`<ol>${items.join("")}</ol>`);
-      continue;
-    }
-    if (line.includes("|") && i + 1 < lines.length && /^\s*\|?\s*:?-{3,}/.test(lines[i + 1])) {
-      const cells = (row) => row.trim().replace(/^\||\|$/g, "").split("|").map((cell) => cell.trim());
-      const head = cells(line);
-      i += 2;
-      const rows = [];
-      while (i < lines.length && lines[i].includes("|") && lines[i].trim()) rows.push(cells(lines[i++]));
-      out.push(`<div class="md-table"><table><thead><tr>${head.map((cell) => `<th>${inlineMd(cell)}</th>`).join("")}</tr></thead><tbody>${rows.map((row) => `<tr>${row.map((cell) => `<td>${inlineMd(cell)}</td>`).join("")}</tr>`).join("")}</tbody></table></div>`);
-      continue;
-    }
-    if (!line.trim()) { i += 1; continue; }
-    const paragraph = [line];
-    i += 1;
-    while (i < lines.length && lines[i].trim() && !/^\s*```|^#{1,4}\s|^\s*>\s?|^\s*[-*+]\s+|^\s*\d+[.)]\s+/.test(lines[i])) paragraph.push(lines[i++]);
-    out.push(`<p>${paragraph.map(inlineMd).join("<br>")}</p>`);
-  }
-  return out.join("");
 }
 function attachmentChip(a) {
   const url = safeUrl(a.url || "");
@@ -588,360 +461,99 @@ function addChatMsg(m) {
 function setBusy(on) {
   $("#send").classList.toggle("is-hidden", on);
   $("#stop").classList.toggle("is-hidden", !on);
-  $("#chat-input").disabled = on;
   $("#chat-nav").classList.toggle("is-busy", on);
   $("#new-chat").disabled = on;
 }
-function addChatAtt(f) {
-  return stageFiles([{ file: f, path: f.webkitRelativePath || f.name }]);
+function notify(text, error = false) {
+  addChatMsg({ role: "sys", text, error, ts: Date.now() / 1000 | 0 });
 }
-function releaseAttachmentPreview(attachment) {
-  if (attachment?.previewUrl?.startsWith("blob:")) URL.revokeObjectURL(attachment.previewUrl);
-}
+const TERMINAL_STATES = new Set([TURN_STATES.COMPLETE, TURN_STATES.CANCELLED, TURN_STATES.FAILED]);
+
+/* Ad Studio run payloads carry only server-side attachment fields. */
 function attachmentPayload(attachment) {
-  const { status, previewUrl, uploadPromise, uploadError, batchKey, discarded, ...payload } = attachment;
+  const { status, previewUrl, upload, uploadError, batchKey, discarded, file, ...payload } = attachment;
   return payload;
 }
-function pendingAttachment(attachment, index) {
-  const image = String(attachment.type || "").startsWith("image/");
-  if (image && attachment.previewUrl) {
-    const name = escapeHtml(attachment.name || "Image");
-    return `<span class="att-image-pending is-${escapeHtml(attachment.status || "ready")}">
-      <img src="${escapeHtml(attachment.previewUrl)}" alt="${name}">
-      ${attachment.status === "uploading" ? '<span class="att-uploading" aria-label="Uploading"></span>' : ""}
-      ${attachment.status === "error" ? '<span class="att-failed" title="Upload failed">!</span>' : ""}
-      <button type="button" class="att-x" data-i="${index}" aria-label="Remove ${name}">×</button>
-    </span>`;
-  }
-  const state = attachment.status === "uploading" ? " · uploading" : attachment.status === "error" ? " · failed" : "";
-  return `<span class="att-chip big ${attachment.status === "error" ? "is-error" : ""}">${escapeHtml(attachment.relative_path || attachment.name)} <em>${fmtSize(attachment.size)}${state}</em>
-    <button type="button" class="att-x" data-i="${index}" aria-label="Remove">×</button></span>`;
-}
-function composerFolderKey(attachment) {
-  const path = String(attachment.relative_path || "").replace(/\\/g, "/");
-  const slash = path.indexOf("/");
-  return slash > 0 ? encodeURIComponent(`${attachment.batchKey || "batch"}|${path.slice(0, slash)}`) : "";
-}
-function pendingFolder(group) {
-  const uploading = group.items.some((attachment) => attachment.status === "uploading");
-  const failed = group.items.some((attachment) => attachment.status === "error");
-  const state = failed ? "failed" : uploading ? "uploading" : "ready";
-  const detail = `${group.items.length} item${group.items.length === 1 ? "" : "s"}${uploading ? " · uploading" : failed ? " · some failed" : ""}`;
-  return `<span class="att-folder-pending is-${state}">
-    <span class="att-folder-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H10l2 2h6.5A2.5 2.5 0 0 1 21 9.5v7A2.5 2.5 0 0 1 18.5 19h-13A2.5 2.5 0 0 1 3 16.5v-9Z"/></svg></span>
-    <span class="att-folder-copy"><strong>${escapeHtml(group.name)}</strong><em>${detail}</em></span>
-    ${uploading ? '<span class="att-folder-spin" aria-label="Uploading folder"></span>' : ""}
-    <button type="button" class="att-x att-group-x" data-group-key="${escapeHtml(group.key)}" aria-label="Remove folder ${escapeHtml(group.name)}">×</button>
-  </span>`;
-}
-async function deleteUploadedAttachments(attachments) {
-  const ids = [...new Set(attachments.map((attachment) => attachment.id).filter(Boolean))];
-  if (!ids.length) return;
-  const response = await fetch("/api/chat/uploads", {
-    method: "DELETE",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ids }),
-  });
-  if (!response.ok) throw new Error(`Cleanup failed (HTTP ${response.status})`);
-}
-async function discardAttachments(attachments, silent = false) {
-  const removing = attachments.filter(Boolean);
-  if (!removing.length) return;
-  const removingSet = new Set(removing);
-  removing.forEach((attachment) => {
-    attachment.discarded = true;
-    releaseAttachmentPreview(attachment);
-  });
-  chatAtts = chatAtts.filter((attachment) => !removingSet.has(attachment));
-  renderAtts();
-  const waits = [...new Set(removing.map((attachment) => attachment.uploadPromise).filter(Boolean))];
-  await Promise.allSettled(waits);
-  try {
-    await deleteUploadedAttachments(removing);
-  } catch {
-    if (!silent) addChatMsg({ role: "sys", text: "Removed from the draft, but Frank could not clear the background upload.", ts: Date.now() / 1000 | 0 });
-  }
-}
-function renderAtts() {
-  const row = $("#att-row");
-  const rendered = [];
-  const folders = new Map();
-  chatAtts.forEach((attachment, index) => {
-    const key = composerFolderKey(attachment);
-    if (!key) {
-      rendered.push({ kind: "item", html: pendingAttachment(attachment, index) });
-      return;
-    }
-    let group = folders.get(key);
-    if (!group) {
-      const path = String(attachment.relative_path || "").replace(/\\/g, "/");
-      group = { kind: "folder", key, name: path.slice(0, path.indexOf("/")), items: [] };
-      folders.set(key, group);
-      rendered.push(group);
-    }
-    group.items.push(attachment);
-  });
-  row.innerHTML = rendered.map((entry) => entry.kind === "folder" ? pendingFolder(entry) : entry.html).join("");
-  row.classList.toggle("has-items", chatAtts.length > 0);
-  $$(".att-x", row).forEach((button) => button.addEventListener("click", () => {
-    if (button.dataset.groupKey) {
-      void discardAttachments(chatAtts.filter((attachment) => composerFolderKey(attachment) === button.dataset.groupKey));
-    } else {
-      void discardAttachments([chatAtts[Number(button.dataset.i)]]);
-    }
-  }));
-}
-async function uploadFiles(items) {
-  if (!items.length) return [];
-  const selected = items.slice(0, 500);
-  const form = new FormData();
-  for (const item of selected) {
-    form.append("files", item.file, item.file.name);
-    form.append("paths", item.path || item.file.webkitRelativePath || item.file.name);
-  }
-  const response = await fetch("/api/chat/uploads", { method: "POST", body: form });
-  if (!response.ok) throw new Error(`Upload failed (HTTP ${response.status})`);
-  const data = await response.json();
-  return Array.isArray(data.attachments) ? data.attachments : [];
-}
-async function stageFiles(items) {
-  const selected = items.slice(0, 500);
-  if (!selected.length) return;
-  const batchKey = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const staged = selected.map(({ file, path }) => ({
-    name: file.name,
-    relative_path: path || file.webkitRelativePath || file.name,
-    type: file.type || "application/octet-stream",
-    size: file.size,
-    status: "uploading",
-    previewUrl: String(file.type || "").startsWith("image/") ? URL.createObjectURL(file) : "",
-    uploadPromise: null,
-    batchKey,
-  }));
-  chatAtts.push(...staged);
-  uploadsInFlight += staged.length;
-  renderAtts();
-  const uploadPromise = uploadFiles(selected).then((uploaded) => {
-    staged.forEach((attachment, index) => {
-      if (uploaded[index]) Object.assign(attachment, uploaded[index], { status: "ready" });
-      else Object.assign(attachment, { status: "error", uploadError: "The file was not accepted." });
-    });
-  }).catch((error) => {
-    staged.forEach((attachment) => Object.assign(attachment, { status: "error", uploadError: error.message || "Upload failed" }));
-    addChatMsg({ role: "sys", text: error.message || "The files could not be uploaded.", ts: Date.now() / 1000 | 0 });
-  }).finally(() => {
-    uploadsInFlight = Math.max(0, uploadsInFlight - staged.length);
-    renderAtts();
-  });
-  staged.forEach((attachment) => { attachment.uploadPromise = uploadPromise; });
-  await uploadPromise;
-}
+
 function enqueueTurn(text, atts) {
   turnQueue = turnQueue.catch(() => {}).then(() => sendTurn(text, atts));
   return turnQueue;
 }
-function currentModel() {
-  return models.find((m) => m.id === chatModel) || { id: chatModel, provider: chatProvider, note: "" };
-}
-function setupModelPicker() {
-  const menu = $("#model-menu");
-  const paint = () => {
-    menu.innerHTML = models.map((m) =>
-      `<button type="button" class="model-opt ${m.id === chatModel ? "is-on" : ""}" data-id="${m.id}" data-provider="${m.provider || ""}" role="menuitem">
-        <span class="mo-name">${escapeHtml(m.id)}</span><span class="mo-note">${escapeHtml(m.note || m.provider || "")}</span>
-      </button>`).join("");
-    $("#model-name").textContent = chatModel;
-    $$(".model-opt", menu).forEach((o) =>
-      o.addEventListener("click", () => {
-        const previous = { model: chatModel, provider: chatProvider };
-        chatModel = o.dataset.id;
-        chatProvider = o.dataset.provider || "";
-        localStorage.setItem("frank.model", chatModel);
-        localStorage.setItem("frank.provider", chatProvider);
-        menu.classList.remove("is-open");
-        paint();
-        if (!currentChatId) return;
-        const selected = chatSessions.find((chat) => chat.id === currentChatId);
-        if (selected) selected.model = chatModel;
-        const requested = { model: chatModel, provider: chatProvider };
-        modelUpdate = fetch(`/api/chat/sessions/${encodeURIComponent(currentChatId)}/model`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(requested),
-        }).then(async (response) => {
-          if (!response.ok) {
-            const data = await response.json().catch(() => ({}));
-            throw new Error(data.error || "Hermes did not accept that model");
-          }
-          rememberSessionModel(currentChatId, requested.model, requested.provider);
-        }).catch((error) => {
-          chatModel = previous.model;
-          chatProvider = previous.provider;
-          if (selected) selected.model = previous.model;
-          localStorage.setItem("frank.model", chatModel);
-          localStorage.setItem("frank.provider", chatProvider);
-          paint();
-          addChatMsg({ role: "sys", text: error.message || "Could not change the Hermes model.", error: true, ts: Date.now() / 1000 | 0 });
-          return false;
-        });
-      })
-    );
-  };
-  renderModelPicker = paint;
-  paint();
-  $("#model-btn").addEventListener("click", (e) => { e.stopPropagation(); menu.classList.toggle("is-open"); });
-  document.addEventListener("click", (e) => { if (!e.target.closest("#model-pick")) menu.classList.remove("is-open"); });
-  fetch("/api/models").then((r) => r.json()).then((d) => {
-    if (Array.isArray(d.models) && d.models.length) models = d.models;
-    if (!models.some((m) => m.id === chatModel)) chatModel = models[0].id;
-    const hit = models.find((m) => m.id === chatModel);
-    if (hit) chatProvider = hit.provider || chatProvider;
-    paint();
-  }).catch(() => paint());
+
+function offerRetry(bubble, text, turnAttachments) {
+  const actions = document.createElement("div");
+  actions.className = "msg-actions";
+  const retry = document.createElement("button");
+  retry.type = "button";
+  retry.textContent = "Retry";
+  retry.addEventListener("click", () => {
+    actions.remove();
+    enqueueTurn(text, turnAttachments);
+  });
+  actions.append(retry);
+  bubble.append(actions);
 }
 
 async function sendTurn(text, atts) {
   if (!currentChatId) await createChat();
-  await modelUpdate.catch(() => {});
+  await modelSelector?.pendingRequest?.catch(() => {});
   const turnChatId = currentChatId;
+  const turnAttachments = (atts || []).map(attachmentDTO);
   chatPinnedToBottom = true;
-  addChatMsg({ role: "user", text, attachments: atts, model: chatModel, ts: Date.now() / 1000 | 0 });
-  const hubEl = addChatMsg({ role: "assistant", text: "", tools: [], ts: Date.now() / 1000 | 0 });
-  const content = hubEl.querySelector(".md") || (() => {
-    const n = document.createElement("div");
-    n.className = "md";
-    hubEl.querySelector(".bub").prepend(n);
-    return n;
-  })();
-  content.classList.add("is-stream");
-  content.textContent = "";
-  const thinking = document.createElement("details");
-  thinking.className = "thinking-stream";
-  thinking.hidden = true;
-  thinking.open = true;
-  thinking.innerHTML = '<summary><span>Thinking</span><span class="thinking-state">Working</span></summary><div class="thinking-copy md" aria-live="polite"></div>';
-  content.before(thinking);
-  const thinkingCopy = thinking.querySelector(".thinking-copy");
-  const thinkingState = thinking.querySelector(".thinking-state");
-  setBusy(true);
-  turnAbort = new AbortController();
-  let acc = "";
-  let reasoning = "";
-  let sawThinking = false;
-  const showThinking = (value, replace = false) => {
-    if (value) reasoning = replace ? value : reasoning + value;
-    if (!value && !reasoning) return;
-    sawThinking = true;
-    thinking.hidden = false;
-    thinking.open = true;
-    thinkingCopy.innerHTML = renderMd(reasoning);
-    chatScrollBottom();
-  };
-  const applyEvent = (event, data) => {
-    const item = classifyChatStreamEvent(event, data);
-    if (item.kind === "assistant.delta") {
-      acc += item.text;
-      content.innerHTML = renderMd(acc);
-      chatScrollBottom();
-    } else if (item.kind === "reasoning.delta") {
-      showThinking(item.text);
-    } else if (item.kind === "reasoning.replace") {
-      showThinking(item.text, true);
-    } else if (item.kind === "thinking.status") {
-      if (!item.text) return;
-      sawThinking = true;
-      thinking.hidden = false;
-      thinking.open = true;
-      thinkingState.textContent = item.text;
-      chatScrollBottom();
-    } else if (item.kind === "tool.started") {
-      const line = document.createElement("div");
-      line.className = "tool-line";
-      line.textContent = item.name;
-      content.after(line);
-    } else if (item.kind === "assistant.completed" && !acc && item.text) {
-      acc = item.text;
-      content.innerHTML = renderMd(acc);
-    } else if (item.kind === "error") {
-      acc = acc || item.text;
-      content.innerHTML = renderMd(acc);
-      content.classList.add("is-err");
-    }
-  };
-  try {
-    const res = await fetch("/api/chat/turn", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      signal: turnAbort.signal,
-      body: JSON.stringify({
-        text,
-        attachments: atts,
-        model: chatModel,
-        provider: currentModel().provider,
-        chat_id: turnChatId,
-      }),
+  addChatMsg({ role: "user", text, attachments: atts, model: modelSelector?.current.model || "", ts: Date.now() / 1000 | 0 });
+  const controller = new TurnStreamController({});
+  controller.mount($("#chat-msgs"));
+  $("#chat-empty").classList.add("is-hidden");
+  controller.onScroll = chatScrollBottom;
+  controller.onStateChange = (state) => setBusy(!TERMINAL_STATES.has(state));
+  controller.onBlocking = (descriptor) => {
+    const form = renderBlockingInput({
+      descriptor,
+      onSubmit: async (payload, formEl) => {
+        try {
+          await hubApi.respondInput({
+            chatId: turnChatId,
+            runId: controller.runId,
+            requestId: payload.requestId,
+            kind: payload.kind,
+            value: payload.value,
+          });
+          const question = formEl.querySelector(".input-question");
+          if (question) question.textContent = "Response sent.";
+          formEl.classList.add("is-sent");
+        } catch (error) {
+          const question = formEl.querySelector(".input-question");
+          if (question) question.textContent = error.message || "The response was not accepted.";
+        }
+      },
+      onCancel: (payload, formEl) => { formEl.remove(); },
     });
-    if (!res.ok || !res.body) throw new Error("Hub did not accept the turn");
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    const parser = new SseEventParser();
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      for (const item of parser.push(dec.decode(value, { stream: true }))) applyEvent(item.event, item.data);
-    }
-    for (const item of parser.finish(dec.decode())) applyEvent(item.event, item.data);
-    if (!acc) content.textContent = "No reply from hub.";
-  } catch (err) {
-    if (err.name === "AbortError") {
-      if (!acc) content.textContent = "Stopped.";
-    } else {
-      content.textContent = err.message || "Could not reach hub.";
-      content.classList.add("is-err");
-    }
-  } finally {
-    content.classList.remove("is-stream");
-    if (sawThinking) {
-      thinkingState.textContent = "Done";
-      thinking.open = false;
-    }
-    if (acc) {
-      const actions = document.createElement("div");
-      actions.className = "msg-actions";
-      actions.innerHTML = '<button type="button" data-copy-message>Copy response</button>';
-      hubEl.querySelector(".bub").append(actions);
-    }
-    setBusy(false);
-    turnAbort = null;
-    chatScrollBottom();
-    void refreshChatSessions(true);
+    controller.bubble.append(form);
+  };
+  turnStream = controller;
+  setBusy(true);
+  let finalState = await controller.run({
+    chatId: turnChatId,
+    text,
+    attachments: turnAttachments,
+    turnId: hubApi.newTurnId(),
+    model: modelSelector?.current.model || "",
+    provider: modelSelector?.current.provider || "",
+  });
+  if (finalState === TURN_STATES.INTERRUPTED) finalState = await controller.reconcile();
+  if (controller === turnStream) turnStream = null;
+  setBusy(false);
+  if (finalState === TURN_STATES.FAILED || finalState === TURN_STATES.CANCELLED) {
+    lastTurn = { text, attachments: turnAttachments };
+    offerRetry(controller.bubble, text, turnAttachments);
+  } else {
+    lastTurn = null;
   }
+  chatScrollBottom();
+  void refreshChatSessions(true);
+  return finalState;
 }
 
-function fileFromEntry(entry, parent = "") {
-  const path = parent ? `${parent}/${entry.name}` : entry.name;
-  if (entry.isFile) return new Promise((resolve, reject) => entry.file((file) => resolve([{ file, path }]), reject));
-  if (!entry.isDirectory) return Promise.resolve([]);
-  return new Promise((resolve, reject) => {
-    const reader = entry.createReader();
-    const children = [];
-    const read = () => reader.readEntries(async (batch) => {
-      if (!batch.length) {
-        try { resolve((await Promise.all(children.map((child) => fileFromEntry(child, path)))).flat()); }
-        catch (error) { reject(error); }
-        return;
-      }
-      children.push(...batch);
-      read();
-    }, reject);
-    read();
-  });
-}
-async function filesFromTransfer(transfer) {
-  const entries = Array.from(transfer.items || []).map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
-  if (entries.length) return (await Promise.all(entries.map((entry) => fileFromEntry(entry)))).flat();
-  return Array.from(transfer.files || []).map((file) => ({ file, path: file.webkitRelativePath || file.name }));
-}
 function setupChatActions() {
   const viewer = $("#media-viewer");
   const closeViewer = () => { viewer.hidden = true; $("#media-stage").innerHTML = ""; };
@@ -979,7 +591,6 @@ function setupChatActions() {
 }
 
 function setupChat() {
-  setupModelPicker();
   setupChatActions();
   const bar = $("#bar");
   const input = $("#chat-input");
@@ -987,8 +598,41 @@ function setupChat() {
   const composer = $("#chat-composer");
   const chatScroll = $("#chat-scroll");
 
+  attachments = new AttachmentController({
+    row: $("#att-row"),
+    fileInput: $("#file-input"),
+    folderInput: $("#folder-input"),
+    composer,
+    onNotice: (text) => notify(text),
+    onVpsEntry: (entry) => { void attachExplorerEntry(entry); },
+    canAccept: () => $(".view[data-view=hub]").classList.contains("is-on"),
+  });
+  attachments.mount();
+
+  modelSelector = new ModelSelector({
+    button: $("#model-btn"),
+    name: $("#model-name"),
+    menu: $("#model-menu"),
+  });
+  modelSelector.mount({ onNotice: (text) => notify(text) });
+
+  dictation = new DictationController({
+    button: mic,
+    onTranscript: (text) => {
+      const start = input.selectionStart ?? input.value.length;
+      const end = input.selectionEnd ?? start;
+      input.value = input.value.slice(0, start) + text + input.value.slice(end);
+      const cursor = start + text.length;
+      input.setSelectionRange(cursor, cursor);
+      input.dispatchEvent(new Event("input"));
+      input.focus();
+    },
+    onNotice: (text) => notify(text),
+  });
+  mic.addEventListener("click", () => dictation.toggle());
+
   $("#new-chat").addEventListener("click", () => {
-    void createChat().catch((error) => addChatMsg({ role: "sys", text: error.message || "Could not start a new chat.", ts: Date.now() / 1000 | 0 }));
+    void createChat().catch((error) => notify(error.message || "Could not start a new chat.", true));
   });
 
   chatScroll.addEventListener("scroll", () => {
@@ -1006,42 +650,34 @@ function setupChat() {
   document.addEventListener("click", (event) => { if (!event.target.closest("#attach-pick")) attachMenu.classList.remove("is-open"); });
   $("#pick-files").addEventListener("click", () => { attachMenu.classList.remove("is-open"); $("#file-input").click(); });
   $("#pick-folder").addEventListener("click", () => { attachMenu.classList.remove("is-open"); $("#folder-input").click(); });
-  $("#file-input").addEventListener("change", (event) => {
-    void stageFiles(Array.from(event.target.files || []).map((file) => ({ file, path: file.name })));
-    event.target.value = "";
-  });
-  $("#folder-input").addEventListener("change", (event) => {
-    void stageFiles(Array.from(event.target.files || []).map((file) => ({ file, path: file.webkitRelativePath || file.name })));
-    event.target.value = "";
-  });
 
   let preparingTurn = false;
   bar.addEventListener("submit", async (e) => {
     e.preventDefault();
-    if (preparingTurn) return;
+    if (preparingTurn || turnStream?.active) return;
     const text = input.value.trim();
-    if (!text && !chatAtts.length) return;
-    const selected = chatAtts.slice();
+    if (!text && !attachments.items.length) return;
+    const selected = attachments.items.slice();
     preparingTurn = true;
     bar.classList.add("is-preparing");
-    input.disabled = true;
     $("#send").disabled = true;
     try {
-      const waits = [...new Set(selected.map((attachment) => attachment.uploadPromise).filter(Boolean))];
+      const waits = [...new Set(selected.map((attachment) => attachment.upload).filter(Boolean))];
       await Promise.allSettled(waits);
-      const ready = selected.filter((attachment) => attachment.status === "ready");
-      if (!text && !ready.length) return;
-      const readySet = new Set(ready);
-      chatAtts = chatAtts.filter((attachment) => !readySet.has(attachment));
-      ready.forEach(releaseAttachmentPreview);
-      renderAtts();
+      const ready = selected.filter((attachment) => attachment.status === "ready" && !attachment.discarded);
+      if (!text && !ready.length) {
+        if (selected.some((attachment) => attachment.status === "error")) {
+          notify("A failed attachment was not sent. Remove it or upload it again.");
+        }
+        return;
+      }
+      const readyItems = attachments.takeReady().filter((attachment) => ready.includes(attachment));
       input.value = "";
       grow();
-      enqueueTurn(text, ready.map(attachmentPayload));
+      enqueueTurn(text, readyItems);
     } finally {
       preparingTurn = false;
       bar.classList.remove("is-preparing");
-      input.disabled = false;
       $("#send").disabled = false;
       input.focus();
     }
@@ -1050,66 +686,21 @@ function setupChat() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       bar.requestSubmit();
+    } else if (e.key === "Escape" && dictation?.state === "recording") {
+      e.preventDefault();
+      void dictation.cancel();
     }
   });
-  $("#stop").addEventListener("click", () => { if (turnAbort) turnAbort.abort(); });
-
-  ["dragenter", "dragover"].forEach((ev) =>
-    composer.addEventListener(ev, (e) => { e.preventDefault(); composer.classList.add("is-drag"); })
-  );
-  ["dragleave", "drop"].forEach((ev) =>
-    composer.addEventListener(ev, (e) => {
-      e.preventDefault();
-      if (ev === "dragleave" && composer.contains(e.relatedTarget)) return;
-      composer.classList.remove("is-drag");
-    })
-  );
-  document.addEventListener("dragover", (e) => { if (e.dataTransfer?.types?.includes("Files")) e.preventDefault(); });
-  document.addEventListener("drop", async (e) => {
-    if (!$(".view[data-view=hub]").classList.contains("is-on")) return;
-    if (!e.dataTransfer?.files?.length && !e.dataTransfer?.items?.length) return;
-    e.preventDefault();
-    composer.classList.remove("is-drag");
-    void stageFiles(await filesFromTransfer(e.dataTransfer));
-  });
-  document.addEventListener("paste", (event) => {
-    if (!$(".view[data-view=hub]").classList.contains("is-on")) return;
-    const files = Array.from(event.clipboardData?.files || []);
-    if (!files.length) return;
-    event.preventDefault();
-    void stageFiles(files.map((file) => ({ file, path: file.name })));
-  });
-
-  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (SR) {
-    const rec = new SR();
-    rec.lang = "en-AU";
-    rec.interimResults = true;
-    rec.onresult = (e) => {
-      let t = "";
-      for (let i = 0; i < e.results.length; i++) t += e.results[i][0].transcript;
-      input.value = t;
-      grow();
-      input.focus();
-    };
-    rec.onend = () => mic.classList.remove("is-listening");
-    rec.onerror = () => mic.classList.remove("is-listening");
-    mic.addEventListener("click", () => {
-      if (mic.classList.contains("is-listening")) { rec.stop(); mic.classList.remove("is-listening"); }
-      else { mic.classList.add("is-listening"); try { rec.start(); } catch { mic.classList.remove("is-listening"); } }
-    });
-  } else {
-    mic.style.display = "none";
-  }
+  $("#stop").addEventListener("click", () => { void turnStream?.stop(); });
 
   fetchChatSessions().then(async (sessions) => {
     const selected = sessions.find((chat) => chat.id === currentChatId) || sessions[0];
     if (selected) await selectChat(selected.id, { navigate: false });
   }).catch(() => {
-    addChatMsg({ role: "sys", text: "Chats could not be loaded.", ts: Date.now() / 1000 | 0 });
+    notify("Chats could not be loaded.", true);
   });
   window.setInterval(() => {
-    if (!turnAbort) void refreshChatSessions(true);
+    if (!turnStream?.active) void refreshChatSessions(true);
   }, 5000);
 }
 
@@ -1250,6 +841,14 @@ function renderList() {
   }
   $$(".exp-row", list).forEach((row) => {
     const path = row.dataset.path;
+    row.draggable = true;
+    row.addEventListener("dragstart", (event) => {
+      const e = exp.entries.find((item) => item.path === path);
+      if (!e) return;
+      /* Contracted typed payload: identity only, never a display string. */
+      event.dataTransfer.setData(VPS_DRAG_TYPE, JSON.stringify({ root: exp.root, path: e.path, kind: e.dir ? "folder" : "file", name: e.name }));
+      event.dataTransfer.effectAllowed = "copy";
+    });
     row.querySelector(".exp-pin")?.addEventListener("click", (event) => {
       event.stopPropagation();
       const entry = exp.entries.find((item) => item.path === path);
@@ -1440,6 +1039,55 @@ function downloadSelected() {
   a.click();
 }
 
+/* Attach a VPS Explorer selection to the current Hub chat. The server owns
+   path resolution and refusal; the browser renders only the safe DTO.
+   A VPS folder is a live reference inside the current project workspace. */
+async function attachExplorerEntry(entry) {
+  if (!entry) return;
+  if (!currentChatId) {
+    try {
+      await createChat();
+    } catch (error) {
+      notify(error.message || "Could not start a chat for this attachment.", true);
+      return;
+    }
+  }
+  try {
+    const attachment = await hubApi.attachVpsSelection({
+      root: exp.root,
+      path: entry.path,
+      kind: entry.dir ? "folder" : "file",
+      chatId: currentChatId,
+    });
+    if (attachments.items.some((item) => item.id === attachment.id)) return;
+    attachments.items.push({
+      id: attachment.id,
+      name: attachment.name || entry.name,
+      relative_path: attachment.project_ref || attachment.name || entry.name,
+      type: attachment.mime || attachment.type || (entry.dir ? "inode/directory" : "application/octet-stream"),
+      size: attachment.size ?? null,
+      url: attachment.url || "",
+      source: "vps",
+      status: "ready",
+      batchKey: "",
+      vps: true,
+      live: Boolean(attachment.live),
+    });
+    attachments.render();
+    attachments.onItemsChange();
+    notify(entry.dir
+      ? `Attached "${attachment.name || entry.name}" as a live VPS folder reference. Hermes receives a capped listing and can inspect deeper with tools.`
+      : `Attached "${attachment.name || entry.name}" from the VPS.`);
+  } catch (error) {
+    const message = String(error?.message || "");
+    if (error?.status === 404 || /not found|unknown route|404/i.test(message)) {
+      notify("Attaching from the Files explorer is not available yet: the attachment service is not wired on this Frank build.", true);
+    } else {
+      notify(message || "This selection cannot be attached.", true);
+    }
+  }
+}
+
 function openCtx(x, y) {
   const ctx = $("#ctx");
   const pin = $("#ctx-pin");
@@ -1519,6 +1167,9 @@ function setupExplorer() {
       exp.treeKids.clear(); exp.treeLoading.clear(); loadList(); renderTree();
     } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c" && exp.selected) {
       navigator.clipboard?.writeText("/" + exp.selected.path);
+    } else if (e.key.toLowerCase() === "a" && exp.selected && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      e.preventDefault();
+      void attachExplorerEntry(exp.selected);
     }
   });
 
@@ -1531,6 +1182,7 @@ function setupExplorer() {
     if (act === "preview" && sel) openFilePreview(sel);
     if (act === "download") downloadSelected();
     if (act === "copy" && sel) navigator.clipboard?.writeText("/" + sel.path);
+    if (act === "attach" && sel) void attachExplorerEntry(sel);
     if (act === "pin" && sel) togglePin(sel);
     if (act === "refresh") { exp.treeKids.clear(); exp.treeLoading.clear(); loadList(); renderTree(); }
     closeCtx();

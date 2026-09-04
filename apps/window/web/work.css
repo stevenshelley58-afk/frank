@@ -1,0 +1,214 @@
+/* Frank work widgets, task drawer, and routine controls.
+   Isolated stylesheet reserved for the work components (contract §6/§10).
+   Every selector lives beneath the `.work-root` component root, uses only
+   existing Frank tokens, and defines no global element, layout, or token
+   rules. Session 1 alone adds the central <link> import. */
+
+.work-root {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-2);
+  color: var(--ink);
+  font-family: var(--font);
+}
+
+.work-root .work-state {
+  color: var(--mute);
+  font-size: 0.875rem;
+}
+
+.work-root .work-state.is-error { color: var(--bad); }
+.work-root .work-state.is-empty { color: var(--faint); }
+
+.work-root .work-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.work-root .work-metric {
+  background: var(--chip);
+  border-radius: var(--r-pill);
+  padding: var(--s-1) var(--s-3);
+  font-size: 0.8125rem;
+  color: var(--mute);
+}
+
+.work-root .work-metric strong {
+  color: var(--ink);
+  font-weight: 500;
+  margin-right: var(--s-1);
+}
+
+.work-root .work-active {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: var(--s-2) var(--s-3);
+  font-size: 0.875rem;
+}
+
+.work-root .work-active .work-run-state {
+  color: var(--mute);
+  font-size: 0.75rem;
+  margin-left: var(--s-2);
+}
+
+.work-root .work-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+  font-size: 0.875rem;
+}
+
+.work-root .work-rows li {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s-2);
+  min-width: 0;
+}
+
+.work-root .work-rows .work-row-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.work-root .work-chip {
+  background: var(--chip);
+  border-radius: var(--r-pill);
+  color: var(--mute);
+  font-size: 0.6875rem;
+  letter-spacing: 0.02em;
+  padding: 2px var(--s-2);
+  text-transform: uppercase;
+  flex: none;
+}
+
+.work-root .work-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s-2);
+}
+
+.work-root .work-button {
+  background: var(--ink);
+  border: 0;
+  border-radius: var(--r-pill);
+  color: #fff;
+  cursor: pointer;
+  font-family: var(--font);
+  font-size: 0.8125rem;
+  padding: var(--s-2) var(--s-4);
+}
+
+.work-root .work-button.secondary {
+  background: var(--chip);
+  color: var(--ink);
+}
+
+.work-root .work-button.danger {
+  background: var(--bad);
+}
+
+.work-root .work-button[disabled] {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.work-root .work-note {
+  font-size: 0.8125rem;
+  color: var(--faint);
+}
+
+/* --- Task drawer ------------------------------------------------------- */
+
+.work-root .work-drawer {
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  box-shadow: 0 8px 24px rgba(17, 17, 17, 0.08);
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-3);
+  margin-top: var(--s-2);
+  max-height: 70vh;
+  overflow-y: auto;
+  padding: var(--s-4);
+}
+
+.work-root .work-drawer[hidden] { display: none; }
+
+.work-root .work-drawer h4 {
+  font-size: 1rem;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  margin: 0;
+}
+
+.work-root .work-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s-1);
+}
+
+.work-root .work-field > label {
+  color: var(--mute);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.work-root .work-field input,
+.work-root .work-field textarea,
+.work-root .work-field select {
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  font-family: var(--font);
+  font-size: 0.875rem;
+  padding: var(--s-2);
+}
+
+.work-root .work-detail-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: var(--s-1);
+  font-size: 0.8125rem;
+}
+
+.work-root .work-detail-list .work-detail-key {
+  color: var(--mute);
+  display: inline-block;
+  min-width: 96px;
+}
+
+.work-root .work-section-title {
+  color: var(--mute);
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  margin: var(--s-2) 0 0;
+  text-transform: uppercase;
+}
+
+.work-root .work-conflict {
+  border: 1px solid var(--bad);
+  border-radius: var(--r-sm);
+  color: var(--bad);
+  font-size: 0.8125rem;
+  padding: var(--s-2);
+}
+
+/* --- Responsive --------------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .work-root .work-drawer {
+    max-height: none;
+    padding: var(--s-3);
+  }
+  .work-root .work-actions { flex-direction: column; }
+  .work-root .work-button { width: 100%; }
+}
