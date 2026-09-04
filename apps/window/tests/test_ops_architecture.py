@@ -46,9 +46,20 @@ class OpsArchitectureTest(unittest.TestCase):
                 "schema": "schema://frank.ops-pointer/v1", "version": 1,
                 "generation": "gen-test", "publication_receipt_id": "receipt:ops/test",
             }), encoding="utf-8")
+            (generation / "customers.json").write_text(json.dumps({
+                "schema": "schema://frank.ops.customer-summary/v1", "version": 1,
+                "projection": "customers", "project_id": "blockwise",
+                "workspace_ids": receipt["workspace_ids"],
+                "source_scope": {"project_id": "blockwise", "workspace_ids": receipt["workspace_ids"]},
+                "source_revision": "hermes-test", "source_receipt_ids": receipt["source_receipt_ids"],
+                "publication_receipt_id": "receipt:ops/test",
+                "published_at": "2026-09-04T00:00:00Z", "fresh_until": "2099-01-01T00:00:00Z",
+                "items": [{"id": receipt["workspace_ids"][0], "workspace_id": receipt["workspace_ids"][0], "display_name": "Safe customer"}],
+            }), encoding="utf-8")
             before = (root / "current.json").read_bytes()
             snapshot = OpsProjectionStore(root).load("customers")
-            self.assertEqual(snapshot.status, "setup_needed")
+            self.assertEqual(snapshot.status, "ready")
+            self.assertEqual(snapshot.items[0]["display_name"], "Safe customer")
             self.assertEqual((root / "current.json").read_bytes(), before)
 
     def test_frank_deployment_has_no_blockwise_poller_or_secret_mount(self):
