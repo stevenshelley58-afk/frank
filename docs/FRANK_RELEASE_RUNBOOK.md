@@ -1,5 +1,16 @@
 # Frank release runbook
 
+## Mautic and Chatwoot operator contract
+
+Set `MAUTIC_BASE_URL` and `CHATWOOT_BASE_URL` only to HTTPS origins and leave
+both connector statuses `unconfigured` until the Hermes provider adapters have
+verified them. Use `configured` for credentials present but verification
+pending, `ready` only after Hermes/operator verification, and `error` when
+Hermes reports a safe failure category. Frank does not receive or print any
+provider secret. Hermes may refresh the redacted support projection at
+`SUPPORT_CONVERSATIONS_FILE`; validate it through
+`GET /api/support/conversations` before enabling a Blockwise support link.
+
 This is the Frank-owned release order for the Connections and private vault
 integration. It is executed only after the Frank revision, Hermes plugin
 contract, broker route/port, and Infisical bundle have been reviewed together.

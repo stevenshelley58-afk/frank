@@ -20,6 +20,7 @@ from copy import deepcopy
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, redirect, request, send_file, send_from_directory, stream_with_context
@@ -63,6 +64,7 @@ LEGACY_MINI_ASSETS = {
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 UPLOAD_DIR = CHAT_DIR / "uploads"
 ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accounts.json")))
+SUPPORT_CONVERSATIONS_FILE = Path(os.environ.get("SUPPORT_CONVERSATIONS_FILE", str(CHAT_DIR / "support-conversations.json")))
 PROJECTS_FILE = Path(os.environ.get("PROJECTS_STORE_FILE", str(CHAT_DIR / "projects.json")))
 DATA_DIR = CHAT_DIR
 
@@ -192,6 +194,7 @@ SECRET_VALUE_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"),
 )
 CONNECTOR_STATUSES = {"unconfigured", "configured", "ready", "error"}
+SUPPORT_CONVERSATION_STATUSES = {"open", "pending", "snoozed", "resolved", "closed"}
 EXTERNAL_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,239}$")
 DEFAULT_PROJECTS = [
     {
@@ -863,19 +866,139 @@ def accounts_delete(account_id: str):
 
 @app.get("/api/email-tools")
 def email_tools():
-    mautic_url = os.environ.get("MAUTIC_URL", "").strip()
-    mautic_fallback = "configured" if mautic_url else "unconfigured"
+    mautic_url = _safe_provider_url(_mautic_base_url())
     return jsonify({
+        "stalwart": {
+            "status": _connector_status("STALWART_CONNECTOR_STATUS"),
+            "url": _safe_provider_url(os.environ.get("STALWART_BASE_URL", "")),
+        },
         "resend": {
+            "role": "compatibility",
             "status": _connector_status("RESEND_CONNECTOR_STATUS"),
             "mcp_status": _connector_status("RESEND_MCP_STATUS"),
             "url": "https://resend.com/emails",
         },
         "mautic": {
-            "status": _connector_status("MAUTIC_CONNECTOR_STATUS", mautic_fallback),
+            # A URL is configuration metadata, not proof that Hermes verified it.
+            "status": _connector_status("MAUTIC_CONNECTOR_STATUS"),
             "url": mautic_url,
         },
     })
+
+
+def _safe_provider_url(value: str) -> str:
+    """Return one normalized HTTP(S) origin without credentials or paths."""
+    parsed = urllib.parse.urlparse(str(value or "").strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        return ""
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.lower().rstrip(".")
+    suffix = f":{port}" if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)) else ""
+    return f"{scheme}://{host}{suffix}"
+
+
+def _safe_support_url(value: str) -> str:
+    parsed = urllib.parse.urlparse(str(value or "").strip())
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        return ""
+    return f"{_safe_provider_url(value)}{parsed.path}"
+
+
+def _mautic_base_url() -> str:
+    return os.environ.get("MAUTIC_BASE_URL", "").strip() or os.environ.get("MAUTIC_URL", "").strip()
+
+
+@app.get("/api/providers/readiness")
+def providers_readiness():
+    """Provider-neutral readiness projection; verification remains Hermes-owned."""
+    providers = {
+        "stalwart": ("STALWART_CONNECTOR_STATUS", "STALWART_BASE_URL"),
+        "mautic": ("MAUTIC_CONNECTOR_STATUS", "MAUTIC_BASE_URL"),
+        "chatwoot": ("CHATWOOT_CONNECTOR_STATUS", "CHATWOOT_BASE_URL"),
+    }
+    items = []
+    for provider, (status_var, url_var) in providers.items():
+        status = _connector_status(status_var)
+        items.append({
+            "provider": provider,
+            "status": status,
+            "configured": status in {"configured", "ready"},
+            "verified": status == "ready",
+            "base_url": _safe_provider_url(_mautic_base_url() if provider == "mautic" else os.environ.get(url_var, "")),
+            "error": status == "error",
+        })
+    return jsonify({"schema": "schema://frank.provider-readiness/v1", "providers": items})
+
+
+def _support_projection() -> list[dict]:
+    if not SUPPORT_CONVERSATIONS_FILE.exists():
+        return []
+    try:
+        data = json.loads(SUPPORT_CONVERSATIONS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        abort(503, "support conversation state is unavailable")
+    if not isinstance(data, dict) or set(data) != {"version", "conversations"} or data.get("version") != 1:
+        abort(503, "support conversation state is corrupt")
+    records = data.get("conversations")
+    if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+        abort(503, "support conversation state is corrupt")
+    allowed = {"id", "account_id", "project_id", "status", "subject", "updated_at", "external_ref", "url"}
+    output = []
+    for item in records:
+        if set(item) - allowed or not isinstance(item.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", item["id"]):
+            abort(503, "support conversation state is corrupt")
+        if not isinstance(item.get("status", "open"), str):
+            abort(503, "support conversation state is corrupt")
+        status = item.get("status", "open").lower()
+        if status not in SUPPORT_CONVERSATION_STATUSES:
+            abort(503, "support conversation state is corrupt")
+        for field in ("account_id", "project_id", "subject", "external_ref", "url"):
+            if field in item and not isinstance(item[field], str):
+                abort(503, "support conversation state is corrupt")
+        account_id_value = item.get("account_id", "")
+        project_id_value = item.get("project_id", "main")
+        if account_id_value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}", account_id_value):
+            abort(503, "support conversation state is corrupt")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", project_id_value):
+            abort(503, "support conversation state is corrupt")
+        external_ref = item.get("external_ref", "")
+        if external_ref and not EXTERNAL_REFERENCE.fullmatch(external_ref):
+            abort(503, "support conversation state is corrupt")
+        updated_at = item.get("updated_at")
+        if updated_at is not None:
+            if not isinstance(updated_at, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", updated_at):
+                abort(503, "support conversation state is corrupt")
+            try:
+                datetime.fromisoformat(updated_at[:-1] + "+00:00")
+            except ValueError:
+                abort(503, "support conversation state is corrupt")
+        chatwoot_ready = _connector_status("CHATWOOT_CONNECTOR_STATUS") == "ready"
+        chatwoot_origin = _safe_provider_url(os.environ.get("CHATWOOT_BASE_URL", ""))
+        parsed = urllib.parse.urlparse(item.get("url", "")) if isinstance(item.get("url", ""), str) else None
+        valid_origin = bool(parsed and _safe_provider_url(item.get("url", "")) == chatwoot_origin and not parsed.username and not parsed.password)
+        url = _safe_support_url(item.get("url", "")) if chatwoot_ready and chatwoot_origin and valid_origin else ""
+        output.append({
+            "id": item["id"], "account_id": account_id_value,
+            "project_id": project_id_value, "status": status,
+            "subject": item.get("subject", ""), "updated_at": updated_at,
+            "external_ref": external_ref, "url": url,
+        })
+    return output
+
+
+@app.get("/api/support/conversations")
+def support_conversations():
+    account_id = str(request.args.get("account_id", "")).strip()
+    if account_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}", account_id):
+        abort(400, "invalid account id")
+    items = _support_projection()
+    if account_id:
+        items = [item for item in items if item["account_id"] == account_id]
+    return jsonify({"schema": "schema://frank.support-conversations/v1", "conversations": items})
 
 
 @app.get("/api/roots")
