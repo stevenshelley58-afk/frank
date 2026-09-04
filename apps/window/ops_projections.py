@@ -407,15 +407,7 @@ class BlockwiseOpsClient:
                 item = dict(value)
                 if "workspace_id" not in item or item.get("workspace_id") is not None:
                     raise ProjectionError("Blockwise global enquiry must have null workspace_id")
-                if any(not isinstance(key, str) for key in item):
-                    raise ProjectionError("Blockwise global enquiry fields are invalid")
-                if any(
-                    key in _GLOBAL_ENQUIRY_ASSOCIATION
-                    or key.startswith("customer_")
-                    or key.endswith("_customer_id")
-                    for key in item
-                ):
-                    raise ProjectionError("Blockwise global enquiry must not contain customer association")
+                _validate_unassigned_enquiry(item)
                 if not isinstance(item.get("id"), str) or not item["id"]:
                     raise ProjectionError("Blockwise enquiry lacks an internal id")
                 if item["id"] in global_enquiry_ids:
@@ -553,6 +545,8 @@ def _min_time(current: str | None, candidate: str) -> str:
 def _safe_item(name: str, item: Any) -> dict[str, Any]:
     if not isinstance(item, Mapping):
         raise ProjectionError(f"{name} contains a non-object item")
+    if name == "enquiries":
+        _validate_unassigned_enquiry(item)
     spec = PROJECTION_SPECS[name]
     output: dict[str, Any] = {}
     for key, value in item.items():
@@ -799,11 +793,31 @@ class OpsProjectionStore:
 
 
 def _customer_id(item: Mapping[str, Any]) -> str | None:
+    # An enquiry without a workspace is deliberately global. It must not be
+    # correlated into a customer detail even if an untrusted local bundle
+    # attempted to smuggle in a customer_id (or omitted workspace_id).
+    if item.get("workspace_id") is None:
+        return None
     value = item.get("customer_id")
     if isinstance(value, str) and value:
         return value
     value = item.get("id")
     return value if isinstance(value, str) else None
+
+
+def _validate_unassigned_enquiry(item: Mapping[str, Any]) -> None:
+    """Reject customer associations on global/unassigned enquiry rows."""
+    if item.get("workspace_id") is not None:
+        return
+    if any(not isinstance(key, str) for key in item):
+        raise ProjectionError("Blockwise global enquiry fields are invalid")
+    if any(
+        key in _GLOBAL_ENQUIRY_ASSOCIATION
+        or key.startswith("customer_")
+        or key.endswith("_customer_id")
+        for key in item
+    ):
+        raise ProjectionError("Blockwise global enquiry must not contain customer association")
 
 
 def _receipt_matches_customer(receipt: Mapping[str, Any], customer_id: str) -> bool:
