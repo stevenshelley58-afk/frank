@@ -147,6 +147,11 @@ _SENSITIVE_KEY = re.compile(
 )
 _SECRET_VALUE = re.compile(r"(?:sk|pk|rk|ghp|xox[baprs])_[A-Za-z0-9_-]{10,}|eyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}|(?:api[_ -]?key|secret|token|password)\s*[:=]\s*\S+", re.I)
 _RECEIPT = re.compile(r"receipt:[a-z0-9][a-z0-9/_-]{2,127}")
+_MASKED_PROVIDER_SUFFIX = re.compile(r"^(?=[A-Za-z0-9*_-]{1,12}$)[A-Za-z0-9*_-]*\*[A-Za-z0-9*_-]*$")
+_GLOBAL_ENQUIRY_ASSOCIATION = frozenset({
+    "customer", "customer_id", "customer_ref", "customer_uuid",
+    "customer_workspace_id", "workspace_customer_id",
+})
 _ACTION_STATUSES = frozenset({"accepted", "queued", "completed", "recorded", "preview", "error", "failed"})
 _STATUS = frozenset({"active", "inactive", "pending", "invited", "suspended", "closed", "sent", "delivered", "failed", "bounced", "opened", "clicked", "draft", "paused", "archived", "enrolled", "open", "new", "resolved", "snoozed", "scheduled", "confirmed", "completed", "canceled", "cancelled", "trial", "past_due", "unpaid", "setup_needed", "recorded"})
 _ENUMS = {
@@ -165,7 +170,22 @@ _ENVELOPE_FIELDS = frozenset({"schema", "version", "projection", "project_id", "
 def _masked_suffix(value: Any) -> str:
     if not isinstance(value, str) or not value or len(value) > 256:
         raise ProjectionError("provider reference is invalid")
-    return "…" + value[-8:]
+    # Blockwise's public snapshot contract uses four masking characters and a
+    # bounded safe suffix (the database contract permits only [A-Za-z0-9*_-]
+    # and at most twelve characters). Never copy punctuation or Unicode from a
+    # provider identifier into the Window projection.
+    safe = "".join(char for char in value if char.isascii() and (char.isalnum() or char in "_-"))
+    if not safe:
+        raise ProjectionError("provider reference has no safe suffix")
+    return "****" + safe[-4:]
+
+
+def _validate_masked_suffix(value: Any) -> str | None:
+    if value is None:
+        return value
+    if not isinstance(value, str) or not _MASKED_PROVIDER_SUFFIX.fullmatch(value):
+        raise ProjectionError("provider record suffix must be masked")
+    return value
 
 
 class ProjectionError(ValueError):
@@ -387,6 +407,15 @@ class BlockwiseOpsClient:
                 item = dict(value)
                 if "workspace_id" not in item or item.get("workspace_id") is not None:
                     raise ProjectionError("Blockwise global enquiry must have null workspace_id")
+                if any(not isinstance(key, str) for key in item):
+                    raise ProjectionError("Blockwise global enquiry fields are invalid")
+                if any(
+                    key in _GLOBAL_ENQUIRY_ASSOCIATION
+                    or key.startswith("customer_")
+                    or key.endswith("_customer_id")
+                    for key in item
+                ):
+                    raise ProjectionError("Blockwise global enquiry must not contain customer association")
                 if not isinstance(item.get("id"), str) or not item["id"]:
                     raise ProjectionError("Blockwise enquiry lacks an internal id")
                 if item["id"] in global_enquiry_ids:
@@ -542,6 +571,8 @@ def _safe_item(name: str, item: Any) -> dict[str, Any]:
         if key in output and output[key] is not None and (not isinstance(output[key], str) or len(output[key]) > 256):
             raise ProjectionError(f"{name} contains an invalid reference")
     for key, value in output.items():
+        if key == "provider_record_suffix":
+            _validate_masked_suffix(value)
         if key in _TIME_KEYS:
             _parse_time(value, key)
         if key in {"status", "lifecycle", "stage", "role"} and value is not None:

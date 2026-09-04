@@ -7,7 +7,7 @@ from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ops_projections import BLOCKWISE_PROJECT_ID, OPS_SCHEMA, OPS_SCHEMA_VERSION, BlockwiseOpsClient, OpsProjectionStore, PROJECTION_SPECS, ProjectionError, _safe_value, create_blueprint, publish_bundle
+from ops_projections import BLOCKWISE_PROJECT_ID, OPS_SCHEMA, OPS_SCHEMA_VERSION, BlockwiseOpsClient, OpsProjectionStore, PROJECTION_SPECS, ProjectionError, _masked_suffix, _safe_value, create_blueprint, publish_bundle
 import control_plane_view
 from flask import Flask
 
@@ -249,5 +249,49 @@ class OpsProjectionApiTest(unittest.TestCase):
         bad_cursor = {**public_list, "data": {**public_list["data"], "nextCursor": 0}}
         with self.assertRaisesRegex(ProjectionError, "cursor"):
             BlockwiseOpsClient("https://blockwise.example", "x" * 40, opener=lambda request, timeout: Response(bad_cursor), page_size=1).fetch_bundle()
+
+    def test_publisher_rejects_unmasked_provider_record_suffix(self):
+        projections = {name: [] for name in PROJECTION_SPECS}
+        projections["email"] = [{
+            "id": "mail-1", "customer_id": WORKSPACE, "workspace_id": WORKSPACE,
+            "status": "delivered", "provider_record_suffix": "chatwoot-provider-123",
+        }]
+        with self.assertRaisesRegex(ProjectionError, "failed projection validation"):
+            publish_bundle({
+                "project_id": BLOCKWISE_PROJECT_ID, "workspace_ids": [WORKSPACE],
+                "source_revision": "hermes-test-1", "source_receipt_ids": ["receipt:ops/source-test"],
+                "projections": projections,
+            }, self.root, now=1_800_000_000)
+        self.assertEqual(_masked_suffix("provider-message-1234"), "****1234")
+
+    def test_client_rejects_customer_association_on_global_enquiry(self):
+        now = datetime.now(timezone.utc)
+        fresh_until = (now + timedelta(minutes=15)).isoformat().replace("+00:00", "Z")
+        def envelope(data):
+            return {
+                "schema": "blockwise.ops.read.v1", "project_id": BLOCKWISE_PROJECT_ID,
+                "generated_at": now.isoformat().replace("+00:00", "Z"), "fresh_until": fresh_until,
+                "source_revision": "blockwise-test-revision", "source_receipt_ids": ["receipt:ops/source-test"],
+                "data": data,
+            }
+        class Response:
+            status = 200
+            def __init__(self, body): self.body = body
+            def __enter__(self): return self
+            def __exit__(self, *args): return None
+            def read(self, _): return json.dumps(self.body).encode()
+        def opener(request, timeout):
+            if request.full_url.split("?", 1)[0].endswith("/customers"):
+                return Response(envelope({"limit": 1, "total": 0, "nextCursor": None, "rows": []}))
+            return Response(envelope({
+                "limit": 1, "total": 1, "nextCursor": None,
+                "rows": [{"id": "enquiry-global-1", "workspace_id": None, "customer_id": WORKSPACE, "status": "new"}],
+            }))
+        client = BlockwiseOpsClient(
+            "https://blockwise.example", "x" * 40, opener=opener,
+            clock=lambda: now.timestamp(), page_size=1,
+        )
+        with self.assertRaisesRegex(ProjectionError, "customer association"):
+            client.fetch_bundle()
 if __name__ == "__main__":
     unittest.main()
