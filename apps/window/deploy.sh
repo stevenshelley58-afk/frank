@@ -5,7 +5,6 @@ repo="${FRANK_REPO:-/projects/frank}"
 app="$repo/apps/window"
 secret_dir="/srv/frank/secrets"
 secret_file="$secret_dir/window.env"
-blockwise_ops_secret_file="$secret_dir/blockwise-internal-auth.secret"
 hermes_api_key_file="$secret_dir/hermes-api-key"
 caddy_secret_file="$secret_dir/caddy.env"
 data_dir="/srv/frank/data/window"
@@ -27,14 +26,6 @@ git -C "$repo" diff --quiet HEAD -- || {
 }
 
 install -d -m 0700 -- "$secret_dir"
-if [[ -e "$blockwise_ops_secret_file" || -L "$blockwise_ops_secret_file" ]]; then
-  [[ -f "$blockwise_ops_secret_file" && ! -L "$blockwise_ops_secret_file" ]] || { echo "refusing non-regular Blockwise internal auth secret file" >&2; exit 1; }
-  [[ "$(stat -c '%a' -- "$blockwise_ops_secret_file")" == "640" ]] || { echo "Blockwise internal auth secret must be mode 0640" >&2; exit 1; }
-  [[ "$(stat -c '%U:%G' -- "$blockwise_ops_secret_file")" == "root:hermes" ]] || { echo "Blockwise internal auth secret must be root:hermes" >&2; exit 1; }
-else
-  echo "missing $blockwise_ops_secret_file; install the shared Blockwise internal auth secret before enabling ops publication" >&2
-  exit 1
-fi
 # Frank writes short-lived upload staging here and Hermes ingests it directly
 # on the host. Keep the directory private to root + the existing Hermes group;
 # setgid preserves that boundary for newly-created staging directories.
@@ -63,8 +54,8 @@ id hermes >/dev/null 2>&1 || {
   echo "Hermes user is required for project workspace provisioning" >&2
   exit 1
 }
-# Only trusted Frank publishing code writes customer-facing snapshots. Hermes
-# can write its private build workspace but has no access to this projection.
+# Hermes/provider workers stage customer-ops snapshots outside the Frank
+# runtime. Window consumes them through the dedicated read-only compose mount.
 install -d -o root -g root -m 0755 -- "$mini_preview_dir"
 install -d -o root -g hermes -m 2750 -- "$data_dir/mini-shared" "$mini_workspace_dir"
 install -d -o root -g hermes -m 2775 -- /projects
@@ -216,7 +207,6 @@ migrate_volume frank_frank_caddy_config frank_caddy_config
 
 cd "$app"
 bash "$app/infra/control_plane/install.sh" --preserve-active-release
-bash "$app/infra/ops/install.sh"
 # Public Mini builds are deliberately networkless at runtime. Bake their
 # document, spreadsheet, PDF, image, and headless-browser tools ahead of time.
 docker build \

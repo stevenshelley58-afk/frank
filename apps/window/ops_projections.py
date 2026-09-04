@@ -1,7 +1,10 @@
 """Read-only Blockwise customer operations projections for Frank.
 
-Hermes publishes the projection envelopes consumed here.  Frank never calls a
+Hermes publishes the projection envelopes consumed here. Frank never calls a
 provider and never treats a partial or unknown envelope as current state.
+The former upstream client and bundle publisher remain only as guarded
+compatibility traps for older imports; they cannot be instantiated or invoked
+by the Window runtime.
 """
 from __future__ import annotations
 
@@ -215,9 +218,10 @@ def _assert_customer_scope(value: Mapping[str, Any], customer_id: str) -> None:
 
 
 class BlockwiseOpsClient:
-    """Signed, bounded client for Blockwise's Hermes-published ops API."""
+    """Quarantined legacy client; Window never polls or authenticates upstream."""
 
     def __init__(self, base_url: str, secret: str, *, opener=None, clock=None, max_pages: int = 50, page_size: int = 100):
+        raise ProjectionError("Window does not poll Blockwise; consume a Hermes-staged bundle")
         parsed = urllib.parse.urlsplit(str(base_url).strip().rstrip("/"))
         if parsed.scheme not in {"http", "https"} or parsed.username or parsed.password or parsed.query or parsed.fragment or not parsed.netloc:
             raise ProjectionError("Blockwise ops base URL is invalid")
@@ -232,6 +236,7 @@ class BlockwiseOpsClient:
 
     @classmethod
     def from_env(cls, **kwargs):
+        raise ProjectionError("Window does not load Blockwise auth; Hermes stages the bundle")
         base_url = os.environ.get("BLOCKWISE_OPS_BASE_URL", "").strip()
         secret_path = os.environ.get("BLOCKWISE_INTERNAL_AUTH_SECRET_FILE", "").strip()
         if not base_url or not secret_path:
@@ -246,6 +251,7 @@ class BlockwiseOpsClient:
         return cls(base_url, secret, **kwargs)
 
     def _request(self, path: str, query: Mapping[str, str] | None = None) -> Mapping[str, Any]:
+        raise ProjectionError("Window does not poll Blockwise; consume a Hermes-staged bundle")
         if not path.startswith("/") or ".." in path or not re.fullmatch(r"/[A-Za-z0-9._~/-]+", path):
             raise ProjectionError("Blockwise ops path is invalid")
         query_text = urllib.parse.urlencode(sorted((query or {}).items()))
@@ -288,6 +294,7 @@ class BlockwiseOpsClient:
 
     def fetch_bundle(self) -> dict[str, Any]:
         """Fetch Blockwise's exact `{data}` list/detail contract."""
+        raise ProjectionError("Window does not poll Blockwise; consume a Hermes-staged bundle")
         rows: list[dict[str, Any]] = []
         receipts: list[str] = []
         source_revision = ""
@@ -937,11 +944,11 @@ def _overall_status(snapshots: Mapping[str, ProjectionSnapshot]) -> str:
 
 
 def publish_bundle(bundle: Mapping[str, Any], root: str | Path, *, now: float | None = None, freshness_seconds: int = 900) -> str:
-    """Validate and atomically publish a Hermes-safe bundle.
-
-    This is the hand-off used by the Hermes-side export job.  It accepts only
-    already-scoped, metadata-only rows; it never has provider credentials.
-    """
+    """Deprecated compatibility trap: Window cannot publish projection bundles."""
+    raise ProjectionError("Window does not publish ops bundles; Hermes stages them atomically")
+    # The historical implementation below is intentionally unreachable. It is
+    # retained temporarily for source compatibility while deployments migrate
+    # to the Hermes publisher; no Frank runtime path can invoke it.
     if not isinstance(bundle, Mapping) or bundle.get("project_id") != BLOCKWISE_PROJECT_ID:
         raise ProjectionError("publisher requires project_id=blockwise")
     if now is not None and (not isinstance(now, (int, float)) or isinstance(now, bool) or not math.isfinite(now)):
@@ -1183,4 +1190,4 @@ def _actions_path() -> Path:
     return control_plane_view.CONTROL_ROOT / "actions.yaml"
 
 
-__all__ = ["BLOCKWISE_PROJECT_ID", "OPS_SCHEMA", "OPS_SCHEMA_VERSION", "OPS_PROJECTION_SCHEMAS", "PROJECTION_NAMES", "PROJECTION_SPECS", "BlockwiseOpsClient", "OpsProjectionStore", "ProjectionError", "create_blueprint", "publish_bundle"]
+__all__ = ["BLOCKWISE_PROJECT_ID", "OPS_SCHEMA", "OPS_SCHEMA_VERSION", "OPS_PROJECTION_SCHEMAS", "PROJECTION_NAMES", "PROJECTION_SPECS", "OpsProjectionStore", "ProjectionError", "create_blueprint"]

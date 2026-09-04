@@ -5,7 +5,7 @@ only publisher of its data and the only executor of actions.
 
 ## Projection contract
 
-Hermes writes one JSON envelope per projection into
+Hermes writes one JSON envelope per projection into a complete generation under
 `HERMES_OPS_PROJECTION_ROOT` (default `/data/ops-projections`):
 
 ```json
@@ -31,31 +31,17 @@ timestamps, symlinks, and oversized files fail closed. Missing files are
 reported as `setup_needed`; expired `fresh_until` values are reported as
 `stale`. Unknown fields are never copied into the response.
 
-The publisher entrypoint is
-`apps/window/scripts/publish_ops_projections.py` (run from the repository root
-as `PYTHONPATH=.:$PWD/apps/window python -m apps.window.scripts.publish_ops_projections`).
-When `BLOCKWISE_OPS_BASE_URL` is configured it is a signed, bounded HTTP client
-for the Hermes-published Blockwise service-only `GET /api/internal/ops/customers` read contract and its
-workspace detail endpoint; otherwise it consumes a Hermes-owned
-bundle (`project_id`, `workspace_ids`, `source_revision`,
-`source_receipt_ids`, and a `projections` object), validates every known field,
-then publishes all projection files with atomic replacement and a publication
-receipt. `infra/ops/frank-ops-projections.service` and `.timer` are installed
-by the existing control-plane installer and use the production
-`/srv/frank/data/window/ops-source` and `ops-projections` mounts.
-The client reads the shared canonical secret only from
-`BLOCKWISE_INTERNAL_AUTH_SECRET_FILE` (production path
-`/srv/frank/secrets/blockwise-internal-auth.secret`); installers require an
-existing regular root:hermes mode-0640 file and never generate or print it.
-Requests use Blockwise's canonical raw-hex HMAC over
-`v1\ntimestamp\nnonce\nops.read\nMETHOD\npath?query\nsha256(body)` and send
-`x-blockwise-timestamp`, `x-blockwise-nonce`, and `x-blockwise-scope: ops.read`.
-Each successful read validates the top-level `blockwise.ops.read.v1` envelope
-(`schema`, `project_id`, `generated_at`, `fresh_until`, `source_revision`, and
-`source_receipt_ids`) before parsing its `{data}` list/detail shape. The public
-Blockwise envelope/list/detail fixtures are retained under
-`apps/window/tests/fixtures`; omitted provider-normalized sections remain
-`setup_needed` rather than becoming ready-empty projections.
+The Blockwise/Hermes provider worker owns upstream reads, normalization,
+publication, freshness, and provenance. Frank contains no Blockwise endpoint,
+signing key, poller, publisher, scheduler, or provider adapter. It only reads
+the Hermes-staged root, which production mounts at `/ops-projections:ro`.
+Readers pin the `current.json` generation pointer and validate its publication
+receipt, every envelope receipt/source revision, workspace scope, timestamps,
+and safe fields before exposing data. A missing section is `setup_needed`, an
+expired section is `stale`, and malformed or mismatched evidence is `error`.
+The provider-neutral `blockwise.ops.read.v1` envelope/list/detail fixtures are
+retained under `apps/window/tests/fixtures` as contract tests for the worker;
+they are not fetched by Frank.
 
 ## Routes
 

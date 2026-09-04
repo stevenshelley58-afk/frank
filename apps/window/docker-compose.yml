@@ -35,9 +35,9 @@ services:
       CONNECTIONS_STORE_FILE: /data/connections.json
       CONNECTION_ACTIONS_FILE: /data/connection-actions.jsonl
       CONNECTION_PLANS_FILE: /data/connection-plans.json
-      # Hermes publishes the bounded Blockwise bundle on the shared data
-      # mount; Frank only reads these validated files.
-      HERMES_OPS_PROJECTION_ROOT: /data/ops-projections
+      # Hermes publishes the bounded Blockwise bundle. Frank receives only a
+      # read-only mount of the staged root and never owns its source data.
+      HERMES_OPS_PROJECTION_ROOT: /ops-projections
       VAULT_METADATA_FILE: /data/vault-metadata.json
       VPS_ROOT: /vps
       PORT: "8080"
@@ -45,6 +45,7 @@ services:
       - "127.0.0.1:18080:8080"
     volumes:
       - /srv/frank/data/window:/data
+      - /srv/frank/data/window/ops-projections:/ops-projections:ro
       - /srv/frank/secrets/hermes-api-key:/srv/frank/secrets/hermes-api-key:ro
       - /srv/frank/previews/mini:/previews/mini
       - /projects/mini-frank/customer-projects:/legacy-mini-projects

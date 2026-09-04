@@ -22,12 +22,9 @@ fi
 }
 
 source_dir="/projects/frank/apps/window/infra/control_plane"
-ops_source_dir="/projects/frank/apps/window/infra/ops"
 unit_dir="/etc/systemd/system"
 data_dir="/srv/frank/data/window"
 control_graph_dir="/srv/frank/data/window/control-graph"
-ops_source_dir_data="/srv/frank/data/window/ops-source"
-ops_projection_dir="/srv/frank/data/window/ops-projections"
 schedule_dir="$control_graph_dir/schedules"
 backup_dir="/srv/frank/backups/control-plane"
 
@@ -60,14 +57,12 @@ units=(
   frank-control-reconcile-full.timer
 )
 install_units "$source_dir" "${units[@]}"
-install_units "$ops_source_dir" frank-ops-projections.service frank-ops-projections.timer
 install_units /projects/frank/apps/window/infra/cleanup frank-cleanup-report.service frank-cleanup-report.timer
 install_units /projects/frank/apps/window/infra/discovery frank-discovery-refresh.service frank-discovery-refresh.timer
 install_units /projects/frank/apps/window/infra/evaluations frank-chat-pattern.service frank-chat-pattern.timer frank-evaluation.service frank-evaluation.timer
 install_units /projects/frank/apps/window/infra/retention frank-restore-drill.service frank-restore-drill.timer
 
 install -d -o root -g hermes -m 0750 -- "$control_graph_dir"
-install -d -o root -g hermes -m 0750 -- "$ops_source_dir_data" "$ops_projection_dir"
 install -d -o frank -g frank -m 0750 -- "$schedule_dir"
 # The parent data directories remain root:hermes and expose traversal only;
 # the schedules directory itself is the sole location writable by frank.
@@ -103,7 +98,7 @@ else
     systemctl disable "$timer" >/dev/null 2>&1 || true
     systemctl stop "$timer" >/dev/null 2>&1 || true
   done
-  for timer in frank-cleanup-report.timer frank-discovery-refresh.timer frank-chat-pattern.timer frank-evaluation.timer frank-restore-drill.timer frank-ops-projections.timer; do
+  for timer in frank-cleanup-report.timer frank-discovery-refresh.timer frank-chat-pattern.timer frank-evaluation.timer frank-restore-drill.timer; do
     systemctl disable "$timer" >/dev/null 2>&1 || true
     systemctl stop "$timer" >/dev/null 2>&1 || true
   done
@@ -123,7 +118,5 @@ systemd-analyze verify \
   "$unit_dir/frank-chat-pattern.service" \
   "$unit_dir/frank-chat-pattern.timer" \
   "$unit_dir/frank-restore-drill.service" \
-  "$unit_dir/frank-restore-drill.timer" \
-  "$unit_dir/frank-ops-projections.service" \
-  "$unit_dir/frank-ops-projections.timer"
+  "$unit_dir/frank-restore-drill.timer"
 echo "installed Step 2 control-plane units"
