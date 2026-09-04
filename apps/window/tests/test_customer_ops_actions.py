@@ -61,6 +61,9 @@ class CustomerOpsActionsTest(unittest.TestCase):
         root = Path(self.temp.name)
         (root / "secret").write_text("s" * 48, encoding="utf-8")
         (root / "operator").write_text(OPERATOR, encoding="utf-8")
+        if os.name != "nt":
+            (root / "secret").chmod(0o600)
+            (root / "operator").chmod(0o600)
         self.env = patch.dict(os.environ, {
             "FRANK_OPS_CONTROL_URL": "https://control.example",
             "FRANK_OPS_CONTROL_SECRET_FILE": str(root / "secret"),
