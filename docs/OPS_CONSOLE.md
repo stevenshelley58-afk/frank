@@ -72,6 +72,13 @@ Control Edge's `pending`/`completed`/failure states are mapped to Frank's
 queued/processing/succeeded/retryable/permanently failed/unavailable receipt
 states; Frank does not present a local mutation as successful.
 
+Frank durably reserves each canonical operator intent in
+`FRANK_OPS_ACTION_JOURNAL_FILE` before the signed POST. The journal is bounded,
+append-safe, and atomically replaced; a timeout or lost response after a
+restart reuses the stored action and idempotency identities. Key/fingerprint
+conflicts fail closed, and a new identity is only available after a terminal
+receipt or a genuinely new intent.
+
 Replying to or closing enquiries, changing consent or roles, rescheduling or
 canceling bookings, and opening a billing portal are not exposed until the
 provider contract supplies those capabilities. Billing reconciliation is an
@@ -83,7 +90,10 @@ Set `FRANK_OPS_CONTROL_URL`, `FRANK_OPS_OPERATOR_ROLE=support` or `owner`, and
 `FRANK_OPS_OPERATOR_AAL=aal2`. Mount two separate root-owned mode-0600 regular
 files at `FRANK_OPS_CONTROL_SECRET_FILE` and
 `FRANK_OPS_OPERATOR_ID_FILE`; symlinked paths, non-owned parent directories,
-and broad file or parent-directory permissions are rejected at request time.
+and broad file or any-ancestor directory permissions are rejected at request
+time. Root-owned 0755 system ancestors (and the sticky root-owned `/tmp`
+staging root) are allowed; writable non-sticky or non-root-owned ancestors are
+not.
 The Control Edge must allow the Frank host's `ops.write` and
 `ops.read` HMAC scopes and expose the `blockwise.ops.action.v1` receipt API.
 Do not put secret values in `.env`, the browser bundle, projection files, or

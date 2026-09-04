@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 from flask import Flask
 
-from customer_ops_actions import CustomerOpsActionError, CustomerOpsControlClient, _secret, create_blueprint
+from customer_ops_actions import ActionIntentJournal, CustomerOpsActionError, CustomerOpsControlClient, _safe_file, _secret, create_blueprint
 from ops_projections import ProjectionSnapshot
 
 WORKSPACE = "123e4567-e89b-12d3-a456-426614174000"
@@ -36,7 +36,7 @@ class FakeClient:
 
     def enqueue(self, envelope):
         self.envelopes.append(envelope)
-        return {"schema": "schema://frank.ops-action-receipt/v1", "action_id": ACTION, "status": "queued", "correlation_id": None}
+        return {"schema": "schema://frank.ops-action-receipt/v1", "action_id": envelope["actionId"], "status": "queued", "correlation_id": "corr-12345678"}
 
 
 class Response:
@@ -73,6 +73,7 @@ class CustomerOpsActionsTest(unittest.TestCase):
             "FRANK_OPS_CONTROL_URL": "https://control.example",
             "FRANK_OPS_CONTROL_SECRET_FILE": str(root / "secret"),
             "FRANK_OPS_OPERATOR_ID_FILE": str(root / "operator"),
+            "FRANK_OPS_ACTION_JOURNAL_FILE": str(root / "journal.json"),
             "FRANK_OPS_OPERATOR_ROLE": "support",
             "FRANK_OPS_OPERATOR_AAL": "aal2",
         })
@@ -118,11 +119,12 @@ class CustomerOpsActionsTest(unittest.TestCase):
             "reason": "Invite the support operator", "payload": {"email": "new@example.test", "role": "member"},
         })
         self.assertEqual(invite.status_code, 422)
-        session = self.client.post("/api/ops/customer-actions", json={
-            "action": "session_revoke", "workspace_id": WORKSPACE, "customer_id": WORKSPACE,
-            "target_type": "session", "target_id": ACTION, "expected_version": 7,
-            "reason": "Revoke the stale session", "payload": {},
-        })
+        with patch.dict(os.environ, {"FRANK_OPS_OPERATOR_ROLE": "owner"}):
+            session = self.client.post("/api/ops/customer-actions", json={
+                "action": "session_revoke", "workspace_id": WORKSPACE, "customer_id": WORKSPACE,
+                "target_type": "session", "target_id": ACTION, "expected_version": 7,
+                "reason": "Revoke the stale session", "payload": {},
+            })
         self.assertEqual(session.status_code, 409)
 
     def test_status_receipt_drops_provider_result_and_error_payloads(self):
@@ -206,11 +208,83 @@ class CustomerOpsActionsTest(unittest.TestCase):
         # mode 0600 and owned by the runtime.
         secret_path = Path(os.environ["FRANK_OPS_CONTROL_SECRET_FILE"])
         secret_path.parent.chmod(0o755)
+        self.assertEqual(_secret(), "s" * 48)
+        secret_path.parent.chmod(0o777)
         try:
             with self.assertRaises(CustomerOpsActionError):
                 _secret()
         finally:
             secret_path.parent.chmod(0o700)
+
+    @unittest.skipIf(os.name == "nt", "POSIX file metadata is not portable to Windows")
+    def test_unsafe_ancestor_directory_is_rejected(self):
+        secret_path = Path(os.environ["FRANK_OPS_CONTROL_SECRET_FILE"])
+        nested = secret_path.parent / "nested"
+        nested.mkdir()
+        nested_secret = nested / "secret"
+        nested_secret.write_text("s" * 48, encoding="utf-8")
+        nested_secret.chmod(0o600)
+        secret_path.parent.chmod(0o777)
+        try:
+            with self.assertRaises(CustomerOpsActionError):
+                _safe_file(str(nested_secret), name="nested secret")
+        finally:
+            secret_path.parent.chmod(0o700)
+            nested_secret.unlink()
+            nested.rmdir()
+
+    def test_lost_post_response_reuses_durable_identity_after_frank_restart(self):
+        body = {
+            "action": "billing_reconcile", "workspace_id": WORKSPACE, "customer_id": WORKSPACE,
+            "target_type": "billing", "target_id": WORKSPACE, "expected_version": 2,
+            "reason": "Reconcile after a lost response", "payload": {},
+        }
+        first_calls = []
+
+        class LostResponseClient:
+            def enqueue(self, envelope):
+                first_calls.append(envelope)
+                raise CustomerOpsActionError("customer operations control edge is unavailable", 503)
+
+        app = Flask(__name__)
+        app.register_blueprint(create_blueprint(store=FakeStore(), client_factory=LostResponseClient))
+        self.assertEqual(app.test_client().post("/api/ops/customer-actions", json=body).status_code, 503)
+        self.assertEqual(len(first_calls), 1)
+
+        second_calls = []
+
+        class RecoveryClient:
+            def enqueue(self, envelope):
+                second_calls.append(envelope)
+                return {"schema": "schema://frank.ops-action-receipt/v1", "action_id": envelope["actionId"], "status": "queued", "correlation_id": "corr-12345678"}
+
+        restarted = Flask(__name__)
+        restarted.register_blueprint(create_blueprint(store=FakeStore(), client_factory=RecoveryClient))
+        self.assertEqual(restarted.test_client().post("/api/ops/customer-actions", json=body).status_code, 202)
+        self.assertEqual(len(second_calls), 1)
+        self.assertEqual(second_calls[0]["actionId"], first_calls[0]["actionId"])
+        self.assertEqual(second_calls[0]["idempotencyKey"], first_calls[0]["idempotencyKey"])
+
+    def test_durable_journal_rejects_key_fingerprint_conflicts(self):
+        journal = ActionIntentJournal(Path(os.environ["FRANK_OPS_ACTION_JOURNAL_FILE"]))
+        envelope = {"actionId": ACTION, "idempotencyKey": "frank:conflict-key", "actor": {"operatorId": OPERATOR}, "action": "billing_reconcile", "workspaceId": WORKSPACE, "customerId": WORKSPACE, "target": {"type": "billing", "id": WORKSPACE}, "expectedVersion": 2, "reason": "First intent", "payload": {}}
+        journal.reserve(OPERATOR, "a" * 64, envelope)
+        changed = dict(envelope, actionId="123e4567-e89b-12d3-a456-426614174004", reason="Different intent")
+        with self.assertRaisesRegex(CustomerOpsActionError, "idempotency key conflicts"):
+            journal.reserve(OPERATOR, "b" * 64, changed)
+
+    def test_terminal_receipt_allows_only_a_new_identity(self):
+        journal = ActionIntentJournal(Path(os.environ["FRANK_OPS_ACTION_JOURNAL_FILE"]))
+        envelope = {"actionId": ACTION, "idempotencyKey": "frank:terminal-key", "actor": {"operatorId": OPERATOR}, "action": "billing_reconcile", "workspaceId": WORKSPACE, "customerId": WORKSPACE, "target": {"type": "billing", "id": WORKSPACE}, "expectedVersion": 2, "reason": "Terminal intent", "payload": {}}
+        journal.reserve(OPERATOR, "c" * 64, envelope)
+        journal.mark(ACTION, "succeeded", "corr-12345678")
+        _, reused, terminal = journal.reserve(OPERATOR, "c" * 64, envelope)
+        self.assertTrue(reused)
+        self.assertTrue(terminal)
+        new_envelope = dict(envelope, actionId="123e4567-e89b-12d3-a456-426614174004", idempotencyKey="frank:new-terminal-key")
+        _, reused, terminal = journal.reserve(OPERATOR, "d" * 64, new_envelope)
+        self.assertFalse(reused)
+        self.assertFalse(terminal)
 
 
 if __name__ == "__main__":

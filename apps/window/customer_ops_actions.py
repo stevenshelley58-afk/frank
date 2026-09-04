@@ -14,7 +14,9 @@ import os
 import re
 import secrets
 import stat
+import threading
 import time
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -56,6 +58,15 @@ STATUS_MAP = {
     "permanent_failed": "permanent_failed", "retryable": "retryable", "unavailable": "unavailable", "accepted": "accepted",
 }
 ROLE = frozenset({"owner", "support"})
+JOURNAL_SCHEMA = "schema://frank.ops-action-intent-journal/v1"
+JOURNAL_MAX_RECORDS = 512
+JOURNAL_MAX_BYTES = 2 * 1024 * 1024
+JOURNAL_RETENTION_SECONDS = 7 * 24 * 60 * 60
+JOURNAL_TERMINAL = frozenset({"completed", "failed", "expired", "superseded", "succeeded", "permanent_failed", "rejected"})
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows has no fcntl.
+    fcntl = None
 
 
 class CustomerOpsActionError(ValueError):
@@ -87,13 +98,7 @@ def _safe_file(path_text: str, *, name: str, max_bytes: int = 4096) -> str:
         resolved = path.resolve(strict=True)
         if resolved != path or not path.is_file() or path.is_symlink():
             raise CustomerOpsActionError(f"{name} file is unavailable")
-        # Every directory component is checked so a trusted-looking leaf
-        # cannot be reached through a symlinked parent.
-        current = Path(path.anchor)
-        for part in path.parts[1:-1]:
-            current /= part
-            if current.is_symlink():
-                raise CustomerOpsActionError(f"{name} file is unavailable")
+        _validate_secret_ancestors(path, name)
         info = path.stat()
         if info.st_size > max_bytes or stat.S_ISLNK(info.st_mode) or not stat.S_ISREG(info.st_mode):
             raise CustomerOpsActionError(f"{name} file is unavailable")
@@ -105,14 +110,6 @@ def _safe_file(path_text: str, *, name: str, max_bytes: int = 4096) -> str:
             # or control, while remaining portable to CI and root-run images.
             if hasattr(os, "geteuid") and info.st_uid != os.geteuid():
                 raise CustomerOpsActionError(f"{name} file owner is invalid")
-            parent = path.parent
-            parent_info = parent.stat()
-            if not stat.S_ISDIR(parent_info.st_mode) or parent.is_symlink():
-                raise CustomerOpsActionError(f"{name} parent directory is invalid")
-            if parent_info.st_mode & 0o077:
-                raise CustomerOpsActionError(f"{name} parent directory permissions are too broad")
-            if hasattr(os, "geteuid") and parent_info.st_uid != os.geteuid():
-                raise CustomerOpsActionError(f"{name} parent directory owner is invalid")
         value = path.read_text(encoding="utf-8").strip()
     except CustomerOpsActionError:
         raise
@@ -121,6 +118,223 @@ def _safe_file(path_text: str, *, name: str, max_bytes: int = 4096) -> str:
     if not value or any(ord(char) < 33 or ord(char) > 126 for char in value):
         raise CustomerOpsActionError(f"{name} file is invalid")
     return value
+
+
+def _validate_secret_ancestors(path: Path, name: str) -> None:
+    """Validate every directory component, allowing root-owned 0755 roots."""
+    current = Path(path.anchor)
+    for part in path.parts[1:-1]:
+        current /= part
+        try:
+            info = current.stat()
+        except OSError as error:
+            raise CustomerOpsActionError(f"{name} file is unavailable") from error
+        if current.is_symlink() or not stat.S_ISDIR(info.st_mode):
+            raise CustomerOpsActionError(f"{name} file is unavailable")
+        if os.name == "nt":
+            continue
+        owner_ok = not hasattr(os, "geteuid") or info.st_uid in {0, os.geteuid()}
+        # A root-owned sticky system directory such as /tmp is a valid
+        # staging root; every non-sticky writable ancestor is rejected.
+        writable = bool(info.st_mode & 0o022)
+        sticky_root = info.st_uid == 0 and bool(info.st_mode & stat.S_ISVTX)
+        if not owner_ok or (writable and not sticky_root):
+            raise CustomerOpsActionError(f"{name} ancestor metadata is unsafe")
+
+
+class ActionIntentJournal:
+    """Durable, bounded reservation store for ambiguous Control Edge writes.
+
+    The journal is deliberately local to Frank and contains only the exact
+    envelope needed to replay an uncertain write.  A process lock plus a
+    POSIX advisory lock serializes multiple workers; replacement writes are
+    fsynced before publication so a restart cannot produce a second action
+    identity for the same operator intent.
+    """
+
+    def __init__(self, path: Path | None = None, *, clock=None):
+        configured_text = os.environ.get("FRANK_OPS_ACTION_JOURNAL_FILE", "")
+        if not configured_text:
+            runtime_root = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
+            if not runtime_root.is_absolute():
+                runtime_root = Path(tempfile.gettempdir())
+            configured_text = str(runtime_root / "ops-action-intents.json")
+        configured = path or Path(configured_text)
+        if not configured.is_absolute():
+            raise CustomerOpsActionError("customer operations intent journal path must be absolute")
+        self.path = configured
+        self.lock_path = configured.with_name(configured.name + ".lock")
+        self.clock = clock or time.time
+        self.lock = threading.RLock()
+        self._validate_paths()
+
+    def _validate_paths(self):
+        parent = self.path.parent
+        try:
+            parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if parent.is_symlink() or not parent.is_dir():
+                raise CustomerOpsActionError("customer operations intent journal is unavailable")
+            if os.name != "nt":
+                parent_info = parent.stat()
+                if parent_info.st_mode & 0o022 or (hasattr(os, "geteuid") and parent_info.st_uid not in {0, os.geteuid()}):
+                    raise CustomerOpsActionError("customer operations intent journal permissions are unsafe")
+            for candidate in (self.path, self.lock_path):
+                if candidate.exists():
+                    info = candidate.stat()
+                    if candidate.is_symlink() or not stat.S_ISREG(info.st_mode):
+                        raise CustomerOpsActionError("customer operations intent journal is unavailable")
+                    if os.name != "nt":
+                        if info.st_mode & 0o077 or (hasattr(os, "geteuid") and info.st_uid != os.geteuid()):
+                            raise CustomerOpsActionError("customer operations intent journal permissions are unsafe")
+        except CustomerOpsActionError:
+            raise
+        except OSError as error:
+            raise CustomerOpsActionError("customer operations intent journal is unavailable") from error
+
+    def _file_lock(self):
+        class Guard:
+            def __init__(guard_self, owner):
+                guard_self.owner = owner
+                guard_self.handle = None
+
+            def __enter__(guard_self):
+                guard_self.owner.lock.acquire()
+                try:
+                    guard_self.handle = guard_self.owner.lock_path.open("a+", encoding="utf-8")
+                    if os.name != "nt":
+                        os.chmod(guard_self.owner.lock_path, 0o600)
+                    if fcntl is not None:
+                        fcntl.flock(guard_self.handle.fileno(), fcntl.LOCK_EX)
+                    return guard_self
+                except Exception:
+                    guard_self.owner.lock.release()
+                    raise
+
+            def __exit__(guard_self, exc_type, exc, tb):
+                try:
+                    if fcntl is not None and guard_self.handle is not None:
+                        fcntl.flock(guard_self.handle.fileno(), fcntl.LOCK_UN)
+                    if guard_self.handle is not None:
+                        guard_self.handle.close()
+                finally:
+                    guard_self.owner.lock.release()
+
+        return Guard(self)
+
+    def _read(self) -> list[dict[str, Any]]:
+        if not self.path.exists():
+            return []
+        try:
+            if self.path.stat().st_size > JOURNAL_MAX_BYTES:
+                raise CustomerOpsActionError("customer operations intent journal is full")
+            data = json.loads(self.path.read_text(encoding="utf-8"))
+        except CustomerOpsActionError:
+            raise
+        except (OSError, UnicodeError, json.JSONDecodeError) as error:
+            raise CustomerOpsActionError("customer operations intent journal is corrupt") from error
+        if not isinstance(data, Mapping) or set(data) != {"schema", "records"} or data.get("schema") != JOURNAL_SCHEMA or not isinstance(data.get("records"), list) or len(data["records"]) > JOURNAL_MAX_RECORDS:
+            raise CustomerOpsActionError("customer operations intent journal is corrupt")
+        records = []
+        for item in data["records"]:
+            if not isinstance(item, Mapping) or set(item) != {"schema", "operator_id", "fingerprint", "action_id", "idempotency_key", "envelope", "status", "correlation_id", "created_at", "updated_at", "terminal_at"}:
+                raise CustomerOpsActionError("customer operations intent journal is corrupt")
+            envelope = item.get("envelope")
+            if item.get("schema") != JOURNAL_SCHEMA or not _UUID.fullmatch(str(item.get("operator_id"))) or not re.fullmatch(r"[0-9a-f]{64}", str(item.get("fingerprint"))) or not _UUID.fullmatch(str(item.get("action_id"))) or not IDEMPOTENCY.fullmatch(str(item.get("idempotency_key"))) or not isinstance(envelope, Mapping) or envelope.get("actionId") != item.get("action_id") or envelope.get("idempotencyKey") != item.get("idempotency_key") or item.get("status") not in CONTROL_STATUSES | JOURNAL_TERMINAL | {"reserved"} or not isinstance(item.get("created_at"), (int, float)) or not isinstance(item.get("updated_at"), (int, float)) or item.get("terminal_at") is not None and not isinstance(item.get("terminal_at"), (int, float)):
+                raise CustomerOpsActionError("customer operations intent journal is corrupt")
+            records.append(dict(item))
+        return records
+
+    def _write(self, records: list[dict[str, Any]]):
+        payload = json.dumps({"schema": JOURNAL_SCHEMA, "records": records}, ensure_ascii=False, separators=(",", ":"))
+        if len(payload.encode("utf-8")) > JOURNAL_MAX_BYTES:
+            raise CustomerOpsActionError("customer operations intent journal is full")
+        temporary = None
+        try:
+            fd, temporary = tempfile.mkstemp(prefix=".ops-action-intents-", dir=str(self.path.parent))
+            os.fchmod(fd, 0o600) if hasattr(os, "fchmod") else os.chmod(temporary, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(payload)
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, self.path)
+            temporary = None
+            if os.name != "nt":
+                os.chmod(self.path, 0o600)
+            try:
+                directory_fd = os.open(str(self.path.parent), os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError:
+                pass
+        except OSError as error:
+            raise CustomerOpsActionError("customer operations intent journal is unavailable") from error
+        finally:
+            if temporary:
+                try:
+                    os.unlink(temporary)
+                except OSError:
+                    pass
+
+    def _prune(self, records: list[dict[str, Any]], now: float) -> list[dict[str, Any]]:
+        return [item for item in records if now - float(item["updated_at"]) <= JOURNAL_RETENTION_SECONDS]
+
+    def reserve(self, operator_id: str, fingerprint: str, envelope: Mapping[str, Any]) -> tuple[dict[str, Any], bool, bool]:
+        now = float(self.clock())
+        candidate_key = str(envelope["idempotencyKey"])
+        candidate_action = str(envelope["actionId"])
+        with self._file_lock():
+            records = self._prune(self._read(), now)
+            for item in records:
+                if item["idempotency_key"] == candidate_key and (item["operator_id"] != operator_id or item["fingerprint"] != fingerprint):
+                    raise CustomerOpsActionError("idempotency key conflicts with another intent", 409)
+            matching = [item for item in records if item["operator_id"] == operator_id and item["fingerprint"] == fingerprint]
+            active = next((item for item in reversed(matching) if item["status"] not in JOURNAL_TERMINAL), None)
+            if active:
+                return json.loads(json.dumps(active["envelope"])), True, False
+            same_key = next((item for item in records if item["idempotency_key"] == candidate_key), None)
+            if same_key:
+                return json.loads(json.dumps(same_key["envelope"])), True, same_key["status"] in JOURNAL_TERMINAL
+            if len(records) >= JOURNAL_MAX_RECORDS:
+                raise CustomerOpsActionError("customer operations intent journal is full", 503)
+            records.append({
+                "schema": JOURNAL_SCHEMA, "operator_id": operator_id, "fingerprint": fingerprint,
+                "action_id": candidate_action, "idempotency_key": candidate_key,
+                "envelope": json.loads(json.dumps(envelope)), "status": "reserved", "correlation_id": None,
+                "created_at": now, "updated_at": now, "terminal_at": None,
+            })
+            self._write(records)
+            return json.loads(json.dumps(envelope)), False, False
+
+    def mark(self, action_id: str, status: str, correlation_id: str | None = None):
+        if status not in CONTROL_STATUSES | JOURNAL_TERMINAL:
+            raise CustomerOpsActionError("invalid customer operations intent status")
+        now = float(self.clock())
+        with self._file_lock():
+            records = self._prune(self._read(), now)
+            found = False
+            for item in records:
+                if item["action_id"] == action_id:
+                    item["status"] = status
+                    item["correlation_id"] = correlation_id or item.get("correlation_id")
+                    item["updated_at"] = now
+                    item["terminal_at"] = now if status in JOURNAL_TERMINAL else None
+                    found = True
+                    break
+            if not found:
+                raise CustomerOpsActionError("customer operations intent journal is corrupt")
+            self._write(records)
+
+
+def _intent_fingerprint(envelope: Mapping[str, Any]) -> str:
+    value = {
+        "operatorId": envelope["actor"]["operatorId"], "action": envelope["action"],
+        "workspaceId": envelope["workspaceId"], "customerId": envelope["customerId"],
+        "target": envelope["target"], "expectedVersion": envelope["expectedVersion"],
+        "reason": envelope["reason"], "payload": envelope["payload"],
+    }
+    return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def _secret() -> str:
@@ -333,6 +547,8 @@ def _make_envelope(body: Mapping[str, Any], *, operator_id: str, role: str, stor
     action = body.get("action")
     if action not in SUPPORTED:
         raise CustomerOpsActionError("this customer-ops action is unavailable", 403)
+    if action == "session_revoke" and role != "owner":
+        raise CustomerOpsActionError("owner role is required for session revocation", 403)
     workspace_id = _uuid(body.get("workspace_id"), "workspace_id")
     customer_id = _uuid(body.get("customer_id"), "customer_id")
     if workspace_id != customer_id:
@@ -400,9 +616,10 @@ def _make_envelope(body: Mapping[str, Any], *, operator_id: str, role: str, stor
     return envelope
 
 
-def create_blueprint(*, store: OpsProjectionStore | None = None, client_factory=None) -> Blueprint:
+def create_blueprint(*, store: OpsProjectionStore | None = None, client_factory=None, journal_factory=None) -> Blueprint:
     projection_store = store or OpsProjectionStore()
     api = Blueprint("customer_ops_actions", __name__)
+    intent_journal = journal_factory() if journal_factory else ActionIntentJournal()
 
     def client():
         return client_factory() if client_factory else CustomerOpsControlClient()
@@ -434,12 +651,27 @@ def create_blueprint(*, store: OpsProjectionStore | None = None, client_factory=
         body = request.get_json(silent=True)
         if not isinstance(body, Mapping):
             return jsonify({"schema": RECEIPT_SCHEMA, "status": "unavailable", "error": "typed_action_required"}), 422
+        attempted_enqueue = False
         try:
             operator_id, role = _operator()
             envelope = _make_envelope(body, operator_id=operator_id, role=role, store=projection_store)
+            fingerprint = _intent_fingerprint(envelope)
+            envelope, _, terminal = intent_journal.reserve(operator_id, fingerprint, envelope)
+            if terminal:
+                raise CustomerOpsActionError("this intent has already settled; start a new intent", 409)
+            attempted_enqueue = True
             result = client().enqueue(envelope)
+            if result.get("action_id") != envelope["actionId"]:
+                intent_journal.mark(envelope["actionId"], "rejected")
+                raise CustomerOpsActionError("control edge returned a mismatched action identity")
+            intent_journal.mark(envelope["actionId"], result.get("status", "queued"), result.get("correlation_id"))
             return jsonify(result), 202
         except CustomerOpsActionError as error:
+            if attempted_enqueue and error.status in {400, 401, 403, 404, 409, 422, 501}:
+                try:
+                    intent_journal.mark(envelope["actionId"], "rejected")
+                except CustomerOpsActionError:
+                    pass
             return jsonify({"schema": RECEIPT_SCHEMA, "status": "unavailable", "error": str(error)}), error.status
 
     @api.get("/api/ops/customer-actions/<action_id>")
@@ -448,6 +680,7 @@ def create_blueprint(*, store: OpsProjectionStore | None = None, client_factory=
             action_id = _uuid(action_id, "action_id")
             workspace_id = _uuid(request.args.get("workspace_id"), "workspace_id")
             result = client().status(action_id, workspace_id)
+            intent_journal.mark(result["action_id"], result["status"], result.get("correlation_id"))
             return jsonify(result)
         except CustomerOpsActionError as error:
             return jsonify({"schema": RECEIPT_SCHEMA, "status": "unavailable", "error": str(error)}), error.status
@@ -455,4 +688,4 @@ def create_blueprint(*, store: OpsProjectionStore | None = None, client_factory=
     return api
 
 
-__all__ = ["ACTION_SCHEMA", "CustomerOpsActionError", "CustomerOpsControlClient", "create_blueprint"]
+__all__ = ["ACTION_SCHEMA", "ActionIntentJournal", "CustomerOpsActionError", "CustomerOpsControlClient", "create_blueprint"]
