@@ -312,7 +312,7 @@ class OpsProjectionApiTest(unittest.TestCase):
         with self.assertRaisesRegex(ProjectionError, "customer association"):
             client.fetch_bundle()
 
-    def test_local_global_enquiry_cannot_publish_load_or_correlate(self):
+    def test_publisher_rejects_local_global_enquiry_association(self):
         self.skipTest("bundle publication belongs to Hermes, not Window")
         projections = {name: [] for name in PROJECTION_SPECS}
         projections["customers"] = [{"id": "cust-1", "workspace_id": WORKSPACE, "display_name": "Safe customer"}]
@@ -326,15 +326,17 @@ class OpsProjectionApiTest(unittest.TestCase):
                 "projections": projections,
             }, self.root, now=1_800_000_000)
 
-        # A forged local envelope must fail closed on load and cannot leak into
-        # a customer's detail response through the generic correlation helper.
-        self.write("customers", projections["customers"])
-        self.write("enquiries", projections["enquiries"])
-        self.assertEqual(self.store.load("enquiries").status, "error")
-        self.assertIsNone(_customer_id(projections["enquiries"][0]))
+    def test_staged_global_enquiry_is_ready_but_never_correlates(self):
+        self.write("customers", [{"id": "cust-1", "workspace_id": WORKSPACE, "display_name": "Safe customer"}])
+        self.write("enquiries", [{"id": "enquiry-global-1", "workspace_id": None, "status": "new"}])
+        self.assertEqual(self.store.load("enquiries").status, "ready")
+        self.assertIsNone(_customer_id({"id": "enquiry-global-1", "workspace_id": None}))
         response = self.client.get("/api/ops/customers/cust-1")
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.get_json()["sections"]["enquiries"], [])
+        queue = self.client.get("/api/ops/enquiries/unassigned")
+        self.assertEqual(queue.status_code, 200)
+        self.assertEqual([row["id"] for row in queue.get_json()["enquiries"]], ["enquiry-global-1"])
 
     def test_client_preserves_detail_email_activation_and_projection_state(self):
         self.skipTest("upstream polling belongs to Hermes, not Window")
