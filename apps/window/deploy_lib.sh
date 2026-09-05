@@ -34,6 +34,125 @@ frank_repo_dir() {
 frank_candidate_sha() {
   git -C "$(frank_repo_dir)" rev-parse HEAD
 }
+# Resolve an explicitly selected, immutable release revision. This deliberately
+# does not inspect the canonical worktree: --revision packages its inputs with
+# git archive instead.
+frank_resolve_immutable_revision() {
+  local repo="$1" revision="$2" candidate
+  [[ "$revision" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "refusing deploy: immutable revision must be a full 40-character SHA" >&2
+    return 1
+  }
+  candidate="$(git -C "$repo" rev-parse --verify --end-of-options "${revision}^{commit}")" || {
+    echo "refusing deploy: invalid immutable revision: $revision" >&2
+    return 1
+  }
+  git -C "$repo" fetch --quiet origin
+  git -C "$repo" merge-base --is-ancestor "$candidate" origin/main || {
+    echo "refusing to deploy an unpushed Frank revision: $candidate" >&2
+    return 1
+  }
+  printf '%s\n' "$candidate"
+}
+
+frank_verify_canonical_host_inputs() {
+  local repo="$1" candidate="$2" untracked required
+  local -a paths=(
+    apps/window/deploy.sh
+    apps/window/deploy_lib.sh
+    apps/window/Caddyfile
+    apps/window/infra/memory
+    apps/window/infra/control_plane
+    apps/window/infra/cleanup
+    apps/window/infra/discovery
+    apps/window/infra/evaluations
+    apps/window/infra/retention
+    apps/window/scripts
+    apps/window/graph
+    governance/control-plane
+  )
+  [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "refusing deploy: invalid immutable candidate SHA" >&2
+    return 1
+  }
+  git -C "$repo" diff --quiet "$candidate" -- "${paths[@]}" || {
+    echo "refusing deploy: canonical host-hook inputs differ from $candidate" >&2
+    return 1
+  }
+  untracked="$(git -C "$repo" ls-files --others --exclude-standard -- "${paths[@]}")" || return 1
+  [[ -z "$untracked" ]] || {
+    echo "refusing deploy: canonical host-hook inputs include untracked files" >&2
+    return 1
+  }
+  for required in \
+    apps/window/infra/memory/expose.sh \
+    apps/window/infra/control_plane/install.sh \
+    apps/window/infra/control_plane/post-deploy.sh; do
+    [[ -f "$repo/$required" && ! -L "$repo/$required" ]] || {
+      echo "refusing deploy: canonical host hook is not a regular file: $required" >&2
+      return 1
+    }
+  done
+}
+
+frank_immutable_package_base() {
+  printf '%s\n' "${FRANK_IMMUTABLE_PACKAGE_BASE:-/var/lib/frank/build-packages}"
+}
+
+# The archive is a private, short-lived build context, never a checkout. Every
+# deployment-time executable/config input must be a regular archived file.
+frank_verify_immutable_package_inputs() {
+  local package="$1" required
+  for required in \
+    apps/window/Dockerfile \
+    apps/window/docker-compose.yml \
+    apps/window/Caddyfile \
+    apps/window/infra/mini_builder/Dockerfile \
+    apps/window/infra/memory/expose.sh \
+    apps/window/infra/control_plane/install.sh \
+    apps/window/infra/control_plane/post-deploy.sh \
+    apps/window/scripts/generate_workspace_override.py; do
+    [[ -f "$package/$required" && ! -L "$package/$required" ]] || {
+      echo "refusing deploy: immutable package lacks tracked input $required" >&2
+      return 1
+    }
+  done
+}
+
+frank_create_immutable_package() {
+  local repo="$1" candidate="$2" base package
+  [[ "$candidate" =~ ^[0-9a-f]{40}$ ]] || {
+    echo "refusing deploy: invalid immutable candidate SHA" >&2
+    return 1
+  }
+  base="$(frank_immutable_package_base)"
+  install -d -m 0700 -- "$base" || return 1
+  package="$(mktemp -d "$base/.immutable-${candidate}.XXXXXX")" || return 1
+  if ! git -C "$repo" archive --format=tar "$candidate" | tar -xf - -C "$package"; then
+    frank_cleanup_immutable_package "$package"
+    echo "refusing deploy: could not create immutable source package" >&2
+    return 1
+  fi
+  if ! frank_verify_immutable_package_inputs "$package"; then
+    frank_cleanup_immutable_package "$package" || true
+    return 1
+  fi
+  printf '%s\n' "$package"
+}
+
+# Only delete a package under our private base with the exact generated name.
+frank_cleanup_immutable_package() {
+  local package="${1:-}" base name
+  [[ -n "$package" && -d "$package" ]] || return 0
+  base="$(realpath -e -- "$(frank_immutable_package_base)")" || return 1
+  package="$(realpath -e -- "$package")" || return 1
+  name="${package#"$base"/}"
+  [[ "$package" == "$base"/* && "$name" != */* && "$name" =~ ^\.immutable-[0-9a-f]{40}\.[A-Za-z0-9]+$ ]] || {
+    echo "refusing to clean unsafe immutable package path: $package" >&2
+    return 1
+  }
+  rm -rf -- "$package"
+}
 
 # (a) The candidate revision is exactly HEAD, committed, and pushed to origin.
 frank_verify_source_identity() {
