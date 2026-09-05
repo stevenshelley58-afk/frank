@@ -33,4 +33,3 @@ export const cancelAdStudioRun = (runId, reason = "") => runAction(runId, "cance
 export const approveAdStudioTemplate = (runId) => runAction(runId, "approve");
 export const requestAdStudioTemplateChanges = (runId, instructions) => runAction(runId, "request-changes", { instructions });
 export const discardAdStudioTemplate = (runId, reason = "") => runAction(runId, "discard", reason ? { reason } : {});
-
