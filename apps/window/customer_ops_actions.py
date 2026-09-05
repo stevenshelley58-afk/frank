@@ -48,7 +48,7 @@ SUPPORTED = frozenset({
 # setup/capability states by the operator UI rather than guessed into writes.
 CAPABILITY = {
     "team_invite": "available", "team_resend": "available", "team_cancel": "available",
-    "team_role_change": "capability_required", "team_suspend": "unsupported", "team_reactivate": "unsupported",
+    "team_role_change": "available", "team_suspend": "available", "team_reactivate": "available",
     "session_revoke": "available",
     "consent_grant": "capability_required", "consent_withdraw": "capability_required", "consent_unsubscribe": "capability_required",
     "suppression_add": "capability_required", "suppression_remove": "capability_required",
