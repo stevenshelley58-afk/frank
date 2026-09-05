@@ -268,6 +268,17 @@ class UiContractTest(unittest.TestCase):
         self.assertIn("value.slice(0, 20)", ops)
         self.assertIn("Object.entries(value).slice(0, 8)", ops)
 
+    def test_ops_actions_use_authoritative_targets_and_retry_idempotently(self):
+        ops = (WEB / "js" / "ops.js").read_text(encoding="utf-8")
+        self.assertIn("row.profile_id", ops)
+        self.assertIn('actionButton("session_revoke", profileId, customer.id, version(row)', ops)
+        self.assertIn("billingTarget(row, customer.id)", ops)
+        self.assertIn("row?.workspace_id === customerId", ops)
+        self.assertIn("pending.intentFingerprint !== intent", ops)
+        self.assertIn("pending.idempotencyKey = randomKey()", ops)
+        self.assertIn("idempotency_key: pending.idempotencyKey", ops)
+        self.assertNotIn('actionButton("session_revoke", row.id', ops)
+
     def test_entity_homes_add_tools_without_changing_the_live_rail(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")

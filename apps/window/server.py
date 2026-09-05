@@ -34,6 +34,7 @@ from project_store import ProjectStore, ProjectStoreError
 import vault_broker
 import control_plane_view
 import ops_projections
+import customer_ops_actions
 from graph.provider import (
     ReadOnlyProvider,
     ProviderUnavailable,
@@ -3651,6 +3652,7 @@ app.register_blueprint(home_platform.api)
 app.register_blueprint(create_graph_blueprint(_graph_provider))
 app.register_blueprint(control_plane_view.api)
 app.register_blueprint(ops_projections.create_blueprint())
+app.register_blueprint(customer_ops_actions.create_blueprint())
 app.register_blueprint(vault_broker.api)
 app.register_blueprint(create_memory_blueprint(MemoryInspector(
     _project_store.get_project,

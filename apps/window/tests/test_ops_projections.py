@@ -7,7 +7,7 @@ from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ops_projections import BLOCKWISE_PROJECT_ID, OPS_SCHEMA, OPS_SCHEMA_VERSION, BlockwiseOpsClient, OpsProjectionStore, PROJECTION_SPECS, ProjectionError, _customer_id, _masked_suffix, _safe_value, create_blueprint, publish_bundle
+from ops_projections import ACTION_CAPABILITY_FILENAME, ACTION_CAPABILITY_NAMES, ACTION_CAPABILITY_SCHEMA, BLOCKWISE_PROJECT_ID, OPS_SCHEMA, OPS_SCHEMA_VERSION, BlockwiseOpsClient, OpsProjectionStore, PROJECTION_SPECS, ProjectionError, _customer_id, _masked_suffix, _safe_value, create_blueprint, publish_bundle
 import control_plane_view
 from flask import Flask
 
@@ -53,9 +53,25 @@ class OpsProjectionApiTest(unittest.TestCase):
     def write_raw(self, name, value):
         generation = self.root / "generations" / "gen-test"
         generation.mkdir(parents=True, exist_ok=True)
-        (generation / "publication-receipt.json").write_text(json.dumps({"schema": "schema://frank.ops-publication-receipt/v1", "project_id": "blockwise", "workspace_ids": [WORKSPACE], "publication_receipt_id": "receipt:ops/test", "source_revision": "hermes-test-1", "source_receipt_ids": ["receipt:ops/source-test"], "published_at": "2026-09-04T00:00:00Z", "projection_count": len(PROJECTION_SPECS)}), encoding="utf-8")
+        publication = {"schema": "schema://frank.ops-publication-receipt/v1", "project_id": "blockwise", "workspace_ids": [WORKSPACE], "publication_receipt_id": "receipt:ops/test", "source_revision": "hermes-test-1", "source_receipt_ids": ["receipt:ops/source-test"], "published_at": "2026-09-04T00:00:00Z", "projection_count": len(PROJECTION_SPECS) + 1}
+        receipt_body = json.dumps(publication) + "\n"
+        (generation / "publication-receipt.json").write_text(receipt_body, encoding="utf-8")
         (generation / PROJECTION_SPECS[name]["filename"]).write_text(json.dumps(value), encoding="utf-8")
-        (self.root / "current.json").write_text(json.dumps({"schema": "schema://frank.ops-pointer/v1", "version": 1, "generation": "gen-test", "publication_receipt_id": "receipt:ops/test"}), encoding="utf-8")
+        for other, spec in PROJECTION_SPECS.items():
+            target = generation / spec["filename"]
+            if not target.exists():
+                target.write_text(json.dumps(envelope(other, [])) + "\n", encoding="utf-8")
+        capabilities = {"schema": ACTION_CAPABILITY_SCHEMA, "version": OPS_SCHEMA_VERSION, "projection": "capabilities", "project_id": BLOCKWISE_PROJECT_ID, "workspace_ids": [WORKSPACE], "source_scope": {"project_id": BLOCKWISE_PROJECT_ID, "workspace_ids": [WORKSPACE], "system": "capabilities"}, "published_at": "2026-09-04T00:00:00Z", "fresh_until": value.get("fresh_until") or "2099-01-01T00:00:00Z", "source_revision": "hermes-test-1", "source_receipt_ids": ["receipt:ops/source-test"], "publication_receipt_id": "receipt:ops/test", "items": [{"action": action, "state": "available", "description": "test capability"} for action in sorted(ACTION_CAPABILITY_NAMES)]}
+        (generation / ACTION_CAPABILITY_FILENAME).write_text(json.dumps(capabilities) + "\n", encoding="utf-8")
+        pointer = {"schema": "schema://frank.ops-pointer/v1", "version": 1, "generation": "gen-test", "publication_receipt_id": "receipt:ops/test"}
+        pointer_body = json.dumps(pointer) + "\n"
+        (self.root / "current.json").write_text(pointer_body, encoding="utf-8")
+        files = {spec["filename"]: hashlib.sha256((generation / spec["filename"]).read_bytes()).hexdigest() for spec in PROJECTION_SPECS.values()}
+        files[ACTION_CAPABILITY_FILENAME] = hashlib.sha256((generation / ACTION_CAPABILITY_FILENAME).read_bytes()).hexdigest()
+        files["publication-receipt.json"] = hashlib.sha256((generation / "publication-receipt.json").read_bytes()).hexdigest()
+        manifest_input = {"generation": "gen-test", "publication_receipt_id": "receipt:ops/test", "files": files, "pointer_sha256": hashlib.sha256((self.root / "current.json").read_bytes()).hexdigest()}
+        manifest = {"schema": "schema://frank.ops-manifest/v1", "version": 1, **manifest_input, "bundle_sha256": hashlib.sha256(json.dumps(manifest_input, separators=(",", ":")).encode()).hexdigest()}
+        (generation / "manifest.json").write_text(json.dumps(manifest) + "\n", encoding="utf-8")
 
     def test_missing_projection_is_setup_needed_and_never_fabricated(self):
         response = self.client.get("/api/ops/overview")
@@ -75,6 +91,23 @@ class OpsProjectionApiTest(unittest.TestCase):
         self.assertEqual(self.client.get("/api/ops/projections/customers").get_json()["status"], "error")
         self.write("customers", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "A Customer", "email": "a@example.test"}], fresh_until=stale)
         self.assertEqual(self.client.get("/api/ops/projections/customers").get_json()["status"], "stale")
+
+    def test_generation_manifest_rejects_tampering_and_ambiguous_files(self):
+        self.write("customers", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "A Customer"}])
+        customers = self.root / "generations" / "gen-test" / "customers.json"
+        customers.write_text(customers.read_text(encoding="utf-8") + " ", encoding="utf-8")
+        self.assertEqual(self.store.load("customers").status, "error")
+        self.write("customers", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "A Customer"}])
+        (self.root / "generations" / "gen-test" / "unexpected.json").write_text("{}", encoding="utf-8")
+        self.assertEqual(self.store.load("customers").status, "error")
+
+    def test_generation_manifest_binds_current_pointer(self):
+        self.write("customers", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "A Customer"}])
+        pointer = self.root / "current.json"
+        value = json.loads(pointer.read_text(encoding="utf-8"))
+        value["publication_receipt_id"] = "receipt:ops/other"
+        pointer.write_text(json.dumps(value) + "\n", encoding="utf-8")
+        self.assertEqual(self.store.load("customers").status, "error")
 
     def test_customer_detail_correlates_safe_sections(self):
         self.write("customers", [{"id": WORKSPACE, "workspace_id": WORKSPACE, "display_name": "A Customer", "email": "a@example.test"}])
@@ -123,7 +156,7 @@ class OpsProjectionApiTest(unittest.TestCase):
         generations = list((self.root / "generations").iterdir())
         self.assertEqual(len(generations), 1)
         self.assertTrue((generations[0] / "publication-receipt.json").is_file())
-        self.assertEqual({path.name for path in generations[0].glob("*.json")} - {"publication-receipt.json"}, {spec["filename"] for spec in PROJECTION_SPECS.values()})
+        self.assertEqual({path.name for path in generations[0].glob("*.json")} - {"publication-receipt.json"}, {spec["filename"] for spec in PROJECTION_SPECS.values()} | {ACTION_CAPABILITY_FILENAME})
         self.assertEqual(self.store.load("customers").status, "ready")
         self.assertEqual(self.store.load("mautic").items[0]["stage"], "open")
 
