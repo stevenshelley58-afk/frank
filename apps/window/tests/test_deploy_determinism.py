@@ -399,6 +399,32 @@ class DeployDeterminismTest(unittest.TestCase):
         subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
         subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
         subprocess.run(["git", "-C", str(repo), "config", "user.name", "Frank Test"], check=True)
+        submodules = {
+            "agenttrail": {
+                "package.json": "agenttrail-pinned\n",
+                "bin/agenttrail.mjs": "agenttrail-bin\n",
+                "public/index.html": "agenttrail-public\n",
+            },
+            "archify": {"archify/bin/archify.mjs": "archify-pinned\n"},
+        }
+        self.submodule_pins = {}
+        for name, files in submodules.items():
+            source_repo = self.root / f"{name}-source"
+            source_repo.mkdir()
+            subprocess.run(["git", "init", "-b", "main", str(source_repo)], check=True, capture_output=True)
+            subprocess.run(["git", "-C", str(source_repo), "config", "user.email", "test@example.invalid"], check=True)
+            subprocess.run(["git", "-C", str(source_repo), "config", "user.name", "Frank Test"], check=True)
+            for relative, content in files.items():
+                output = source_repo / relative
+                output.parent.mkdir(parents=True, exist_ok=True)
+                output.write_text(content)
+            subprocess.run(["git", "-C", str(source_repo), "add", "."], check=True)
+            subprocess.run(["git", "-C", str(source_repo), "commit", "-m", "pinned"], check=True, capture_output=True)
+            self.submodule_pins[name] = subprocess.check_output(["git", "-C", str(source_repo), "rev-parse", "HEAD"], text=True).strip()
+            subprocess.run([
+                "git", "-c", "protocol.file.allow=always", "-C", str(repo),
+                "submodule", "add", str(source_repo), f"apps/window/vendor/{name}",
+            ], check=True, capture_output=True)
         subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
         subprocess.run(["git", "-C", str(repo), "commit", "-m", "fixture"], check=True, capture_output=True)
         candidate = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
@@ -445,6 +471,46 @@ class DeployDeterminismTest(unittest.TestCase):
             env=env, capture_output=True, text=True, timeout=60,
         )
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_immutable_package_uses_parent_pinned_submodule_bytes(self):
+        repo, candidate = self.make_immutable_repo()
+        agenttrail = repo / "apps/window/vendor/agenttrail"
+        (agenttrail / "package.json").write_text("dirty-worktree-bytes\n")
+        subprocess.run(["git", "-C", str(agenttrail), "add", "package.json"], check=True)
+        subprocess.run(["git", "-C", str(agenttrail), "commit", "-m", "later head"], check=True, capture_output=True)
+        self.assertNotEqual(
+            subprocess.check_output(["git", "-C", str(agenttrail), "rev-parse", "HEAD"], text=True).strip(),
+            self.submodule_pins["agenttrail"],
+        )
+        package_base = self.root / "packages"
+        script = (
+            f'package="$(frank_create_immutable_package {repo} {candidate})"\n'
+            'grep -Fxq agenttrail-pinned "$package/apps/window/vendor/agenttrail/package.json"\n'
+            'grep -Fxq archify-pinned "$package/apps/window/vendor/archify/archify/bin/archify.mjs"\n'
+            'frank_cleanup_immutable_package "$package"\n'
+        )
+        result = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\nsource %s\n%s" % (DEPLOY_LIB, script)],
+            env=self.immutable_env(repo, package_base), capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(any(package_base.iterdir()) if package_base.exists() else False)
+
+    def test_immutable_package_missing_pinned_submodule_object_fails_and_cleans(self):
+        repo, candidate = self.make_immutable_repo()
+        agenttrail = repo / "apps/window/vendor/agenttrail"
+        shutil.rmtree(agenttrail)
+        shutil.rmtree(repo / ".git/modules/apps/window/vendor/agenttrail")
+        agenttrail.mkdir()
+        subprocess.run(["git", "init", "-b", "main", str(agenttrail)], check=True, capture_output=True)
+        package_base = self.root / "packages"
+        result = subprocess.run(
+            ["bash", "-c", f"set -euo pipefail\nsource {DEPLOY_LIB}\nfrank_create_immutable_package {repo} {candidate}"],
+            env=self.immutable_env(repo, package_base), capture_output=True, text=True, timeout=60,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("pinned submodule object is unavailable", result.stderr)
+        self.assertFalse(any(package_base.iterdir()) if package_base.exists() else False)
 
     def test_immutable_dry_run_initializes_real_context_without_docker(self):
         repo, candidate = self.make_immutable_repo()

@@ -96,7 +96,12 @@ off until the Hermes plugin, broker, and vault checks below are live.
 
    This mode accepts only a commit reachable from `origin/main`, builds solely
    from a private `git archive` of that commit, and removes that package on all
-   exits. It keeps the normal no-argument deploy's strict clean-worktree rule.
+   exits. Gitlinked AgentTrail and Archify inputs are expanded by archiving the
+   exact commits pinned by the selected parent revision from their local object
+   databases; submodule worktree contents and current HEADs are never copied.
+   Missing pinned objects, unexpected gitlinks, and nested submodules abort the
+   release before build. The normal no-argument deploy keeps its strict
+   clean-worktree rule.
    The Caddy file is copied and byte-verified into a revision-pinned release
    artifact before Compose starts, so no live bind mount targets the temporary
    archive. Durable host hooks continue to run from the canonical checkout only
