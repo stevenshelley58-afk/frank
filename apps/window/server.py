@@ -1619,6 +1619,208 @@ def _public_ad_studio_import(value: object) -> dict:
     return public
 
 
+def _public_ad_studio_review_artifact(value: object, run_id: str) -> dict:
+    """Project one image artifact through Frank's authenticated artifact route."""
+    raw = {"name": value} if isinstance(value, str) else value
+    if not isinstance(raw, dict):
+        return {}
+    name = str(raw.get("name") or raw.get("artifact") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.(?:avif|gif|jpe?g|png|webp)", name, re.IGNORECASE):
+        return {}
+    public = {
+        "name": name,
+        "url": f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}",
+    }
+    for key in ("kind", "label", "placement", "view"):
+        cleaned = _public_generation_text(raw.get(key))
+        if cleaned:
+            public[key] = cleaned[:80]
+    return public
+
+
+def _public_ad_studio_review_artifacts(value: object, run_id: str) -> list[dict]:
+    raw_values = value if isinstance(value, list) else list(value.values()) if isinstance(value, dict) else [value]
+    projected = []
+    for raw in raw_values[:24]:
+        artifact = _public_ad_studio_review_artifact(raw, run_id)
+        if artifact and artifact["name"] not in {item["name"] for item in projected}:
+            projected.append(artifact)
+    return projected
+
+
+def _public_ad_studio_review_scores(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    public = {}
+    for key, raw in list(value.items())[:24]:
+        safe_key = str(key or "").strip().lower().replace(" ", "_")
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,47}", safe_key):
+            continue
+        number = _number_from(raw)
+        if number is not None:
+            public[safe_key] = number
+            continue
+        if safe_key != "reviewers" or not isinstance(raw, list):
+            continue
+        reviewers = []
+        for index, item in enumerate(raw[:4], 1):
+            if not isinstance(item, dict):
+                continue
+            score = _number_from(item.get("score"), item.get("overall"), item.get("likeness"))
+            reviewer = {
+                "label": _public_generation_text(item.get("label") or f"Reviewer {index}")[:80],
+                "decision": _public_generation_text(item.get("decision"))[:40],
+            }
+            if score is not None:
+                reviewer["score"] = score
+            if reviewer["label"] or reviewer["decision"] or "score" in reviewer:
+                reviewers.append(reviewer)
+        if reviewers:
+            public["reviewers"] = reviewers
+    return public
+
+
+def _public_ad_studio_review_warnings(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    public = []
+    for raw in value[:24]:
+        item = raw if isinstance(raw, dict) else {"message": raw}
+        message = _public_generation_text(item.get("message") or item.get("detail") or item.get("warning"))
+        if not message:
+            continue
+        warning = {"message": message}
+        for key in ("code", "placement"):
+            cleaned = _public_generation_text(item.get(key))
+            if cleaned:
+                warning[key] = cleaned[:80]
+        public.append(warning)
+    return public
+
+
+def _public_ad_studio_font_substitution(value: object) -> list[dict]:
+    raw_values = value if isinstance(value, list) else [value]
+    public = []
+    for raw in raw_values[:12]:
+        item = raw if isinstance(raw, dict) else {"replacement": raw}
+        substitution = {}
+        for key in ("source", "replacement", "reason"):
+            cleaned = _public_generation_text(item.get(key))
+            if cleaned:
+                substitution[key] = cleaned[:160]
+        if substitution:
+            public.append(substitution)
+    return public
+
+
+def _public_ad_studio_smoke_test(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    status = str(value.get("status") or "").strip().lower()
+    passed = value.get("passed") if isinstance(value.get("passed"), bool) else status in {"passed", "pass", "complete", "completed"}
+    checks = []
+    for raw in value.get("checks") if isinstance(value.get("checks"), list) else []:
+        item = raw if isinstance(raw, dict) else {"label": raw}
+        label = _public_generation_text(item.get("label") or item.get("name") or item.get("message"))
+        if not label:
+            continue
+        check = {"label": label[:160]}
+        if isinstance(item.get("passed"), bool):
+            check["passed"] = item["passed"]
+        checks.append(check)
+    return {
+        "status": status[:32] if re.fullmatch(r"[a-z0-9_-]{1,32}", status) else "passed" if passed else "pending",
+        "passed": passed,
+        "checks": checks[:20],
+    }
+
+
+def _public_ad_studio_layers(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    public = []
+    for index, raw in enumerate(value[:240], 1):
+        if not isinstance(raw, dict):
+            continue
+        layer = {}
+        for key in ("id", "name", "type", "role", "placement"):
+            cleaned = _public_generation_text(raw.get(key))
+            if cleaned:
+                layer[key] = cleaned[:100]
+        if isinstance(raw.get("editable"), bool):
+            layer["editable"] = raw["editable"]
+        if layer:
+            layer.setdefault("name", f"Layer {index}")
+            public.append(layer)
+    return public
+
+
+def _public_ad_studio_review_model_profile(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    roles = []
+    for raw in value.get("roles") if isinstance(value.get("roles"), list) else []:
+        if not isinstance(raw, dict):
+            continue
+        role = {}
+        for key in ("role", "label", "provider", "model"):
+            cleaned = str(raw.get(key) or "").strip()
+            if cleaned and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._+:/-]{0,119}", cleaned):
+                role[key] = cleaned
+        if role.get("model") and role.get("provider"):
+            roles.append(role)
+    public = {"roles": roles[:12]} if roles else {}
+    source = _public_generation_text(value.get("source"))
+    if source:
+        public["source"] = source[:120]
+    revision = value.get("revision")
+    if isinstance(revision, int) and not isinstance(revision, bool) and 0 <= revision <= 1_000_000:
+        public["revision"] = revision
+    if isinstance(value.get("immutable"), bool):
+        public["immutable"] = value["immutable"]
+    return public
+
+
+def _public_ad_studio_review_summary(value: object, run_id: str) -> dict:
+    """Expose the bounded evidence Hermes has declared ready for operator review."""
+    if not isinstance(value, dict):
+        return {}
+    public = {}
+    source = _public_ad_studio_review_artifact(value.get("source"), run_id)
+    if source:
+        public["source"] = source
+    for key in ("references", "previews", "diffs"):
+        artifacts = _public_ad_studio_review_artifacts(value.get(key), run_id)
+        if artifacts:
+            public[key] = artifacts
+    scores = _public_ad_studio_review_scores(value.get("scores"))
+    if scores:
+        public["scores"] = scores
+    warnings = _public_ad_studio_review_warnings(value.get("warnings"))
+    if warnings:
+        public["warnings"] = warnings
+    substitutions = _public_ad_studio_font_substitution(value.get("font_substitution"))
+    if substitutions:
+        public["font_substitution"] = substitutions
+    for key in ("elapsed_seconds", "cost_usd"):
+        number = _number_from(value.get(key))
+        if number is not None and number >= 0:
+            public[key] = number
+    iterations = value.get("iterations")
+    if isinstance(iterations, int) and not isinstance(iterations, bool) and 0 <= iterations <= 10_000:
+        public["iterations"] = iterations
+    smoke_test = _public_ad_studio_smoke_test(value.get("smoke_test"))
+    if smoke_test:
+        public["smoke_test"] = smoke_test
+    layers = _public_ad_studio_layers(value.get("layers"))
+    if layers:
+        public["layers"] = layers
+    model_profile = _public_ad_studio_review_model_profile(value.get("model_profile"))
+    if model_profile:
+        public["model_profile"] = model_profile
+    return public
+
+
 def _ad_studio_source_url(run_id: str, name: str) -> str | None:
     suffix = Path(str(name or "")).suffix.lower()
     if suffix not in {".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}:
@@ -1670,6 +1872,9 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     safe_output = {key: output.get(key) for key in (
         "iterations", "final_review", "process",
     ) if key in output}
+    review_summary = _public_ad_studio_review_summary(output.get("review_summary"), str(run.get("run_id") or run.get("id") or ""))
+    if review_summary:
+        safe_output["review_summary"] = review_summary
     public_import = _public_ad_studio_import(output.get("import"))
     if public_import:
         safe_output["import"] = public_import
@@ -2342,6 +2547,40 @@ def ad_studio_run_retry(run_id: str):
 @app.post("/api/ad-studio/runs/<run_id>/cancel")
 def ad_studio_run_cancel(run_id: str):
     return _proxy_ad_studio_action(run_id, "/cancel", {"reason"})
+
+
+@app.post("/api/ad-studio/runs/<run_id>/approve")
+def ad_studio_run_approve(run_id: str):
+    """Forward the operator's explicit template publication decision to Hermes."""
+    return _proxy_ad_studio_action(run_id, "/approve", set())
+
+
+@app.post("/api/ad-studio/runs/<run_id>/request-changes")
+def ad_studio_run_request_changes(run_id: str):
+    body = request.get_json(silent=True) or {}
+    instructions = str(body.get("instructions") or "").strip() if isinstance(body, dict) else ""
+    if set(body) != {"instructions"} or not instructions or len(instructions) > 2_000:
+        abort(400, "change instructions must contain 1–2,000 characters")
+    try:
+        data = hermes_request(_tool_run_path(run_id, "/request-changes"), {"instructions": instructions}, method="POST", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    return jsonify({"ok": True, "run": _public_ad_studio_run(run)})
+
+
+@app.post("/api/ad-studio/runs/<run_id>/discard")
+def ad_studio_run_discard(run_id: str):
+    body = request.get_json(silent=True) or {}
+    reason = str(body.get("reason") or "").strip() if isinstance(body, dict) else ""
+    if not isinstance(body, dict) or any(key != "reason" for key in body) or len(reason) > 1_000:
+        abort(400, "discard reason must be no more than 1,000 characters")
+    try:
+        data = hermes_request(_tool_run_path(run_id, "/discard"), {"reason": reason} if reason else {}, method="POST", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    return jsonify({"ok": True, "run": _public_ad_studio_run(run)})
 
 
 def _hermes_chat_stream(chat_id: str, payload: dict, *, read_timeout: float | None = None):

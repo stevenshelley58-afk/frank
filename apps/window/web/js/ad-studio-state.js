@@ -1,6 +1,6 @@
 const objectValue = (value) => value && typeof value === "object" && !Array.isArray(value) ? value : {};
-const STATUS_RANK = { queued: 0, started: 1, running: 2, completed: 3, failed: 3, cancelled: 3 };
-const STAGE_RANK = { source: 0, build: 1, render: 2, compare: 3, "final-check": 4, live: 5 };
+const STATUS_RANK = { queued: 0, started: 1, running: 2, ready_for_review: 3, approved: 4, active: 5, completed: 6, discarded: 6, failed: 6, cancelled: 6 };
+const STAGE_RANK = { source: 0, build: 1, render: 2, compare: 3, "final-check": 4, review: 5, live: 6 };
 const SUPERSEDED_STATUSES = new Set(["failed", "cancelled"]);
 
 const cleanPart = (value) => String(value ?? "").trim().toLowerCase();
@@ -28,6 +28,24 @@ export function compareRunRecency(left, right) {
   const created = runTimestamp(right?.created_at) - runTimestamp(left?.created_at);
   if (created) return created;
   return String(right?.id || "").localeCompare(String(left?.id || ""));
+}
+
+export function adStudioReviewState(run) {
+  return cleanPart(
+    run?.review_status
+      || run?.output?.review_summary?.status
+      || run?.status,
+  ).replaceAll("-", "_");
+}
+
+export function isReadyForAdStudioReview(run) {
+  return adStudioReviewState(run) === "ready_for_review";
+}
+
+export function readyAdStudioReviewRuns(runs) {
+  return (Array.isArray(runs) ? runs : [])
+    .filter((run) => run?.id && isReadyForAdStudioReview(run))
+    .sort(compareRunRecency);
 }
 
 export function runHistoryGroupKey(run) {
@@ -157,6 +175,7 @@ export function mergeAdStudioRun(previous, incoming) {
   };
   if (earlierOutput.previews || laterOutput.previews) output.previews = mergeRecordedArray(earlierOutput.previews, laterOutput.previews);
   if (earlierOutput.final_review || laterOutput.final_review) output.final_review = mergeRecordedObject(earlierOutput.final_review, laterOutput.final_review);
+  if (earlierOutput.review_summary || laterOutput.review_summary) output.review_summary = mergeRecordedObject(earlierOutput.review_summary, laterOutput.review_summary);
   const earlierSource = incomingIsStale ? objectValue(next.source) : objectValue(current.source);
   const laterSource = incomingIsStale ? objectValue(current.source) : objectValue(next.source);
   const earlierUsage = incomingIsStale ? objectValue(next.usage) : objectValue(current.usage);

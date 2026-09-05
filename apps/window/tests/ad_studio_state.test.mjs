@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, mergeIterationHistory, runHistoryGroupKey, runListRenderSignature, runTimestamp } from "../web/js/ad-studio-state.js";
+import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, mergeIterationHistory, readyAdStudioReviewRuns, runHistoryGroupKey, runListRenderSignature, runTimestamp } from "../web/js/ad-studio-state.js";
 
 test("a thin run-list refresh cannot erase populated iteration history", () => {
   const detailed = {
@@ -246,4 +246,27 @@ test("stable source hashes prevent same-name source collisions when Hermes expos
 
   assert.notEqual(runHistoryGroupKey(sourceA), runHistoryGroupKey(sourceB));
   assert.equal(groupAdStudioRuns([sourceA, sourceB]).length, 2);
+});
+
+test("review queue contains only Hermes-ready runs in recency order", () => {
+  const ready = readyAdStudioReviewRuns([
+    { id: "old", status: "ready_for_review", updated_at: 10 },
+    { id: "running", status: "running", updated_at: 30 },
+    { id: "new", review_status: "ready-for-review", status: "completed", updated_at: 20 },
+  ]);
+
+  assert.deepEqual(ready.map((run) => run.id), ["new", "old"]);
+});
+
+test("thin refresh preserves review evidence already displayed", () => {
+  const detailed = {
+    id: "review", status: "ready_for_review", updated_at: 10,
+    output: { review_summary: { previews: [{ name: "feed.png", url: "/feed.png" }], scores: { overall: 9.8 }, layers: [{ id: "headline" }] } },
+  };
+  const merged = mergeAdStudioRun(detailed, { id: "review", status: "ready_for_review", updated_at: 11, output: { review_summary: { scores: { feed: 9.9 } } } });
+
+  assert.equal(merged.output.review_summary.scores.overall, 9.8);
+  assert.equal(merged.output.review_summary.scores.feed, 9.9);
+  assert.equal(merged.output.review_summary.previews[0].url, "/feed.png");
+  assert.equal(merged.output.review_summary.layers[0].id, "headline");
 });
