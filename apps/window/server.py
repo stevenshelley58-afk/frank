@@ -595,9 +595,15 @@ def api_http_exception(error: HTTPException):
 @app.get("/api/projects")
 def projects():
     try:
-        return jsonify({"schema": "schema://frank.projects/v1", "projects": _project_items()})
+        items = _project_items()
+        return jsonify({
+            "schema": "schema://frank.projects/v1",
+            "projects": [item for item in items if not item.get("archived")],
+            "archived_projects": [item for item in items if item.get("archived")],
+        })
     except ProjectStoreError as error:
         abort(503, str(error))
+
 
 
 def _project_workspace(project: dict) -> str:
@@ -825,6 +831,67 @@ def projects_create():
         "session": _public_hermes_session(session, project_id=project_id),
         "bootstrap_prompt": _project_bootstrap_prompt(project),
     }), 201
+
+
+def _project_revision(body: dict) -> int:
+    if "revision" not in body:
+        abort(400, "project revision is required")
+    revision = body["revision"]
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+        abort(400, "project revision is invalid")
+    return revision
+
+
+def _update_project(project_id: str, changes: dict, body: dict) -> dict:
+    if not _project_store.get_project(project_id):
+        abort(404, "project not found")
+    try:
+        return _project_store.update_project(
+            project_id, changes, expected_revision=_project_revision(body)
+        )
+    except ValueError as error:
+        if "changed elsewhere" in str(error):
+            abort(409, str(error))
+        abort(400, str(error))
+    except ProjectStoreError as error:
+        abort(503, str(error))
+
+
+@app.patch("/api/projects/<project_id>")
+def projects_update(project_id: str):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        abort(400, "request body must be an object")
+    allowed = {"name", "blurb", "live", "revision"}
+    if not body or set(body) - allowed or set(body) == {"revision"}:
+        abort(400, "unsupported project fields")
+    changes = {}
+    if "name" in body:
+        changes["name"] = _clean_project_text(body["name"], 80, required=True)
+    if "blurb" in body:
+        changes["blurb"] = _clean_project_text(body["blurb"], 240)
+    if "live" in body:
+        changes["live"] = _clean_project_url(body["live"], "live URL")
+    return jsonify({"ok": True, "project": _project_public(_update_project(project_id, changes, body))})
+
+
+@app.post("/api/projects/<project_id>/archive")
+def projects_archive(project_id: str):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or set(body) - {"revision"}:
+        abort(400, "unsupported project fields")
+    project = _update_project(project_id, {"archived": True, "archived_at": int(time.time())}, body)
+    return jsonify({"ok": True, "project": _project_public(project)})
+
+
+@app.post("/api/projects/<project_id>/restore")
+def projects_restore(project_id: str):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or set(body) - {"revision"}:
+        abort(400, "unsupported project fields")
+    project = _update_project(project_id, {"archived": False, "archived_at": 0}, body)
+    return jsonify({"ok": True, "project": _project_public(project)})
+
 
 
 @app.get("/api/accounts")

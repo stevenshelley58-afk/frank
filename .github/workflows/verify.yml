@@ -35,8 +35,17 @@ jobs:
       - name: Window verification
         working-directory: apps/window
         run: npm run verify
-      - name: Container build
-        run: docker build -f apps/window/Dockerfile -t frank-window:verify .
+      - name: Container build from immutable package
+        working-directory: apps/window
+        env:
+          FRANK_IMMUTABLE_PACKAGE_BASE: ${{ runner.temp }}/frank-immutable-package
+        run: |
+          set -euo pipefail
+          source ./deploy_lib.sh
+          package="$(frank_create_immutable_package "$GITHUB_WORKSPACE" "$GITHUB_SHA")"
+          trap 'frank_cleanup_immutable_package "$package"' EXIT
+          docker build -f "$package/apps/window/Dockerfile" -t frank-window:verify "$package"
+          docker build --target agenttrail-runtime -f "$package/apps/window/Dockerfile" -t frank-agenttrail:verify "$package"
 
   secrets:
     runs-on: ubuntu-latest

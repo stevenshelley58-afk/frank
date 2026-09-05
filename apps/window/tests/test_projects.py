@@ -164,6 +164,35 @@ class ProjectApiTest(unittest.TestCase):
         })
         self.assertEqual(response.status_code, 400)
 
+    def test_project_lifecycle_edits_archives_and_preserves_bindings(self):
+        server._project_store.create_project({
+            "id": "custom", "name": "Custom", "root": "custom", "blurb": "Before",
+            "live": "", "capabilities": [], "default_widgets": [],
+        }, "session-bound")
+
+        saved = self.client.patch("/api/projects/custom", json={
+            "name": "Changed", "blurb": "After", "live": "https://example.com", "revision": 0,
+        })
+        self.assertEqual(saved.status_code, 200, saved.get_json())
+        self.assertEqual(saved.get_json()["project"]["root"], "custom")
+
+        archived = self.client.post("/api/projects/custom/archive", json={"revision": 1})
+        self.assertEqual(archived.status_code, 200, archived.get_json())
+        listed = self.client.get("/api/projects").get_json()
+        self.assertNotIn("custom", {item["id"] for item in listed["projects"]})
+        self.assertIn("custom", {item["id"] for item in listed["archived_projects"]})
+        self.assertEqual(server._project_store.project_id_for_session("session-bound"), "custom")
+        self.assertEqual(server._project_store.get_project("custom")["root"], "custom")
+
+        restored = self.client.post("/api/projects/custom/restore", json={"revision": 2})
+        self.assertEqual(restored.status_code, 200, restored.get_json())
+        self.assertIn("custom", {item["id"] for item in self.client.get("/api/projects").get_json()["projects"]})
+
+    def test_project_lifecycle_rejects_unknown_and_malformed_revisions(self):
+        self.assertEqual(self.client.patch("/api/projects/missing", json={"name": "Nope", "revision": 0}).status_code, 404)
+        self.assertEqual(self.client.post("/api/projects/blockwise/archive", json={"revision": True}).status_code, 400)
+        self.assertEqual(self.client.patch("/api/projects/blockwise", json={"root": "moved"}).status_code, 400)
+
     def test_project_list_exposes_mini_frank_and_readiness(self):
         (self.root / "projects" / "mini-frank").mkdir()
 

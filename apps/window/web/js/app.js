@@ -83,21 +83,30 @@ function renderProjectNav() {
   const nav = $("#project-nav");
   if (!nav) return;
   nav.replaceChildren();
-  for (const project of projects.projects || []) {
-    const control = document.createElement("button");
-    control.type = "button";
-    control.className = "rail-item";
-    control.dataset.project = project.id;
-    control.setAttribute("aria-label", project.name || project.id);
-    const dot = document.createElement("span");
-    dot.className = "dot";
-    dot.dataset.status = project.setup_state || "starting";
-    const label = document.createElement("span");
-    label.textContent = project.name || project.id;
-    control.append(dot, label);
-    control.addEventListener("click", () => showProject(project.id));
-    nav.append(control);
-  }
+  const render = (host, items) => {
+    host.replaceChildren();
+    for (const project of items) {
+      const control = document.createElement("button");
+      control.type = "button";
+      control.className = "rail-item";
+      control.dataset.project = project.id;
+      control.setAttribute("aria-label", project.name || project.id);
+      const dot = document.createElement("span");
+      dot.className = "dot";
+      dot.dataset.status = project.setup_state || "starting";
+      const label = document.createElement("span");
+      label.textContent = project.name || project.id;
+      control.append(dot, label);
+      control.addEventListener("click", () => showProject(project.id));
+      host.append(control);
+    }
+  };
+  render(nav, (projects.projects || []).filter((project) => !project.archived));
+  const archived = projects.archived_projects || [];
+  const archivedNav = $("#archived-project-nav");
+  if (archivedNav) render(archivedNav, archived);
+  const archivedHead = $("#archived-projects-head");
+  if (archivedHead) archivedHead.hidden = !archived.length;
 }
 
 function showProject(id, options = {}) {
@@ -456,10 +465,68 @@ function setupProjects() {
   });
 }
 
+function setupProjectSettings() {
+  const dialog = $("#project-settings-dialog");
+  const close = () => { if (dialog?.open) dialog.close(); };
+  const setBusy = (busy) => {
+    $("#project-settings-save").disabled = busy;
+    $("#project-settings-archive").disabled = busy;
+    $("#project-settings-close").disabled = busy;
+  };
+  const request = async (url, options, failure) => {
+    setBusy(true);
+    $("#project-settings-error").textContent = "";
+    try {
+      const response = await fetch(url, options);
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error?.message || data.error || failure);
+      await fetchProjects();
+      currentProject = projects.projects.find((item) => item.id === currentProject.id) || currentProject;
+      close();
+      showProject(currentProject.id, { syncHistory: false });
+    } catch (error) {
+      $("#project-settings-error").textContent = error.message || failure;
+    } finally {
+      setBusy(false);
+    }
+  };
+  $("#project-settings-open")?.addEventListener("click", () => {
+    const project = currentProject;
+    $("#project-settings-name").value = project.name || "";
+    $("#project-settings-blurb").value = project.blurb || "";
+    $("#project-settings-live").value = project.live || "";
+    $("#project-settings-error").textContent = "";
+    $("#project-settings-archive").textContent = project.archived ? "Restore" : "Archive";
+    $("#project-settings-note").textContent = project.archived
+      ? "This project is archived. Files and existing work are kept."
+      : "Update the project details shown in Frank.";
+    setBusy(false);
+    dialog?.showModal();
+  });
+  $("#project-settings-close")?.addEventListener("click", close);
+  $("#project-settings-form")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const project = currentProject;
+    void request("/api/projects/" + encodeURIComponent(project.id), {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: $("#project-settings-name").value, blurb: $("#project-settings-blurb").value, live: $("#project-settings-live").value, revision: project.revision }),
+    }, "Could not save project.");
+  });
+  $("#project-settings-archive")?.addEventListener("click", () => {
+    const project = currentProject;
+    const action = project.archived ? "restore" : "archive";
+    void request("/api/projects/" + encodeURIComponent(project.id) + "/" + action, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ revision: project.revision }),
+    }, "Could not update project.");
+  });
+}
+
 async function fetchProjects() {
   const response = await fetch("/api/projects");
   if (!response.ok) throw new Error("Could not load projects");
-  projects = await response.json();
+  const payload = await response.json();
+  projects = { ...payload, projects: [...(payload.projects || []), ...(payload.archived_projects || [])] };
   renderProjectNav();
   renderChatNav();
   return projects.projects;
@@ -1561,6 +1628,7 @@ setupExplorer();
 setupAccounts();
 setupHomePlatform();
 setupProjects();
+setupProjectSettings();
 
 fetchProjects()
   .then(openPathView)

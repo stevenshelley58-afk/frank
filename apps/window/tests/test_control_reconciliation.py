@@ -54,6 +54,24 @@ class ControlReconciliationTests(unittest.TestCase):
         fresh = __import__("datetime").datetime.fromisoformat(result["fresh_until"].replace("Z", "+00:00"))
         self.assertEqual((fresh - captured).total_seconds(), 15 * 60)
 
+    def test_mismatched_checkout_keeps_approved_deployed_revision(self):
+        from scripts.control_reconcile import _receipt_envelope
+        receipt = _receipt_envelope("fast", "run-1", "2026-09-06T00:00:00Z", "pass", {
+            "revision": {"checkout": {"status": "ready", "value": "1" * 40},
+                         "approved": {"status": "revision_mismatch", "value": "2" * 40}}
+        })
+        self.assertEqual(receipt["source_revision_set"]["project:frank"], "1" * 40)
+        self.assertEqual(receipt["deployed_revision_set"]["project:frank"], "2" * 40)
+
+    def test_missing_approved_revision_does_not_claim_checkout_deployed(self):
+        from scripts.control_reconcile import _receipt_envelope
+        receipt = _receipt_envelope("fast", "run-2", "2026-09-06T00:00:00Z", "pass", {
+            "revision": {"checkout": {"status": "ready", "value": "1" * 40},
+                         "approved": {"status": "unavailable", "value": "not-a-sha"}}
+        })
+        self.assertEqual(receipt["source_revision_set"]["project:frank"], "1" * 40)
+        self.assertEqual(receipt["deployed_revision_set"]["project:frank"], "unknown")
+
     def test_terminal_failure_receipt_has_frozen_contract_without_freshness(self):
         result = Collector(self.root, sources=self.sources, timeout_seconds=-1).run("fast")
         schema = json.loads((Path(__file__).parents[3] / "governance/control-plane/schema/receipt.schema.json").read_text())

@@ -38,6 +38,8 @@
         </button>
       </div>
       <div class="project-nav" id="project-nav" aria-label="Projects"></div>
+      <div class="project-nav-head" id="archived-projects-head" hidden><span>Archived</span></div>
+      <div class="project-nav" id="archived-project-nav" aria-label="Archived projects"></div>
     </div>
 
     <div class="rail-group">
@@ -130,6 +132,7 @@
               <span class="project-dashboard-status" id="project-dashboard-status">Loading status</span>
               <span class="project-dashboard-setup" id="project-dashboard-setup">Checking setup</span>
               <a class="project-dashboard-open" id="project-dashboard-open" target="_blank" rel="noopener noreferrer" hidden>Open app ↗</a>
+              <button type="button" class="project-dashboard-open" id="project-settings-open">Settings</button>
             </div>
           </div>
           <div class="home-context"><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
@@ -472,6 +475,17 @@
     <label>Live app <span>optional</span><input id="project-live" type="url" maxlength="500" placeholder="https://example.com"></label>
     <div class="project-dialog-error" id="new-project-error" role="alert"></div>
     <div class="project-dialog-actions"><button type="button" id="new-project-cancel">Cancel</button><button type="submit" class="primary" id="new-project-submit">Create project</button></div>
+  </form>
+</dialog>
+<dialog class="project-dialog" id="project-settings-dialog" aria-labelledby="project-settings-title">
+  <form id="project-settings-form" autocomplete="off">
+    <div class="project-dialog-head"><div><span>Project</span><h2 id="project-settings-title">Project settings</h2></div><button type="button" id="project-settings-close" aria-label="Close project settings">Close</button></div>
+    <p class="project-dialog-intro" id="project-settings-note">Update the project details shown in Frank.</p>
+    <label>Name<input id="project-settings-name" maxlength="80" required></label>
+    <label>Description<textarea id="project-settings-blurb" maxlength="240" rows="4"></textarea></label>
+    <label>Live app <span>optional</span><input id="project-settings-live" type="url" maxlength="500" placeholder="https://example.com"></label>
+    <div class="project-dialog-error" id="project-settings-error" role="alert"></div>
+    <div class="project-dialog-actions"><button type="button" id="project-settings-archive">Archive</button><button type="submit" class="primary" id="project-settings-save">Save</button></div>
   </form>
 </dialog>
 <div class="ctx" id="ctx" hidden>
