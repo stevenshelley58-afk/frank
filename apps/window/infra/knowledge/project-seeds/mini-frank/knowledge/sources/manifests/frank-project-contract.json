@@ -4,9 +4,9 @@
   "title": "Frank project contract",
   "kind": "local-file",
   "locator": "docs/PROJECT.md",
-  "revision": "sha256:f8ce722d74b1d2330ae2e110c9cd3b4df4b211932a61a53f389a2f3a95c19e19",
-  "sha256": "f8ce722d74b1d2330ae2e110c9cd3b4df4b211932a61a53f389a2f3a95c19e19",
+  "revision": "sha256:3e048754177473c3d2eca7aed3bd375b1dae178593eef1c4029a57f1b742221b",
+  "sha256": "3e048754177473c3d2eca7aed3bd375b1dae178593eef1c4029a57f1b742221b",
   "tier": "A",
-  "verified_at": "2026-09-05",
+  "verified_at": "2026-09-06",
   "retention_rights": "repository-owned"
 }

@@ -1,4 +1,5 @@
 from pathlib import Path
+import yaml
 import unittest
 
 
@@ -28,7 +29,7 @@ class InfraContractTest(unittest.TestCase):
 
     def test_window_image_copies_all_imported_runtime_modules(self):
         dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
-        workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")
+        compose = yaml.safe_load((APP / "docker-compose.yml").read_text(encoding="utf-8"))
         self.assertIn("COPY apps/window/connections_agent.py .", dockerfile)
         self.assertIn("COPY apps/window/mini_frank.py .", dockerfile)
         self.assertIn("COPY apps/window/mini ./mini", dockerfile)
@@ -37,11 +38,20 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("COPY apps/window/archify ./archify", dockerfile)
         self.assertIn("COPY apps/window/vendor/archify/archify ./vendor/archify/archify", dockerfile)
         self.assertIn("COPY governance/control-plane/schema ./governance/control-plane/schema", dockerfile)
-        self.assertIn("docker build -f apps/window/Dockerfile -t frank-window:verify .", workflow)
         self.assertIn("archify.mjs validate architecture", dockerfile)
         self.assertIn("archify.mjs check archify/ad-template-process.html", dockerfile)
         self.assertIn("frank.archify-build-validation.v1", dockerfile)
+
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        deploy_lib = (APP / "deploy_lib.sh").read_text(encoding="utf-8")
+        window_build = compose["services"]["frank-window"]["build"]
+        agenttrail_build = compose["services"]["frank-agenttrail"]["build"]
+        self.assertIn('frank_immutable_package="$(frank_create_immutable_package', deploy)
+        self.assertIn('git -C "$repo" archive --format=tar "$candidate"', deploy_lib)
+        self.assertIn('frank_cleanup_immutable_package "$frank_immutable_package"', deploy)
+        self.assertEqual(window_build["context"], "../..")
+        self.assertEqual(agenttrail_build["context"], window_build["context"])
+        self.assertIn('cd "$app"', deploy)
         self.assertIn('"import connections_agent, home_platform, server, tool_apps;', deploy)
         self.assertIn("import memory_inspector, mini, mini_frank", deploy)
 
