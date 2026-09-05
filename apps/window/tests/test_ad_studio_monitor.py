@@ -178,6 +178,98 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertEqual(summary["layers"][0]["id"], "headline")
         self.assertEqual(summary["model_profile"]["revision"], 41)
 
+    def test_running_exact_clone_recovers_latest_durable_review_evidence(self):
+        run_id = "trun_cccccccccccccccccccccccccccccccc"
+        projected = server._public_ad_studio_run({
+            "run_id": run_id,
+            "status": "running",
+            "stage": "compare",
+            "payload": {"sources": [{"name": "campaign.png", "path": "/srv/private/source.png"}]},
+            "output": {},
+        }, events=[
+            {"sequence": 0, "kind": "command.accepted", "data": {"model_profile": {
+                "profile_revision": 44,
+                "builder": {"provider": "openai-codex", "model": "gpt-5.6-sol"},
+                "comparator": {"provider": "openai-codex", "model": "gpt-5.6-luna"},
+            }}},
+            {"sequence": 4, "kind": "source-map.completed", "data": {}},
+            {"sequence": 7, "kind": "aspect-reference-image.started", "data": {
+                "source_placement": "feed", "target_placement": "story",
+            }},
+            {"sequence": 9, "kind": "aspect-reference.started", "data": {
+                "source_placement": "feed", "target_placement": "story",
+            }},
+            {"sequence": 15, "kind": "iteration.rendered", "data": {
+                "iteration": 1,
+                "previews": ["iteration-01-feed.png", "iteration-01-story.png"],
+                "diffs": ["iteration-01-feed-overlay.png"],
+            }},
+            {"sequence": 20, "kind": "iteration.rendered", "data": {
+                "iteration": 2,
+                "previews": ["iteration-02-feed.png", "iteration-02-story.png", "/srv/private/nope.png"],
+                "diffs": [
+                    "iteration-02-feed-overlay.png", "iteration-02-feed-difference.png",
+                    "iteration-02-story-overlay.png", "iteration-02-story-difference.png",
+                    "iteration-02-story-reference-edges.png",
+                ],
+                "layers": {"feed": {"ordered": [{"layerId": "headline", "type": "text", "inputKey": "headline"}]}, "story": {"ordered": []}},
+            }},
+            {"sequence": 21, "kind": "iteration.compared", "data": {
+                "iteration": 2, "decision": "revise", "score": 0.94,
+                "scores": {"overall": 0.94, "feed": 0.95, "story": 0.93},
+            }},
+        ])
+
+        summary = projected["output"]["review_summary"]
+        self.assertEqual(summary["source"]["name"], "source.png")
+        self.assertEqual(summary["source"]["placement"], "feed")
+        self.assertEqual(summary["references"], [{
+            "name": "reference-story.png", "url": f"/api/ad-studio/runs/{run_id}/artifacts/reference-story.png",
+            "kind": "reciprocal-image-reference", "placement": "story",
+        }])
+        self.assertEqual([item["name"] for item in summary["previews"]], ["iteration-02-feed.png", "iteration-02-story.png"])
+        self.assertEqual([item["kind"] for item in summary["diffs"]], ["overlay", "difference", "overlay", "difference"])
+        self.assertEqual(summary["scores"]["overall"], 9.4)
+        self.assertEqual(summary["layers"][0]["id"], "headline")
+        self.assertEqual(projected["model_profile"]["revision"], 44)
+        self.assertEqual(projected["stage"], "compare")
+        self.assertEqual([item["iteration"] for item in projected["output"]["iterations"]], [1, 2])
+        self.assertNotIn("/srv/private", json.dumps(projected))
+
+    def test_failed_exact_clone_uses_only_proven_artifacts_and_keeps_error(self):
+        run_id = "trun_dddddddddddddddddddddddddddddddd"
+        projected = server._public_ad_studio_run({
+            "run_id": run_id,
+            "status": "failed",
+            "stage": "render",
+            "payload": {"sources": [{"name": "campaign.jpg"}]},
+            "output": {},
+            "error": "renderer stopped",
+        }, events=[
+            {"sequence": 2, "kind": "source-map.completed", "data": {}},
+            {"sequence": 3, "kind": "aspect-reference-image.completed", "data": {
+                "source_placement": "feed", "target_placement": "story", "name": "private-generated-name.png",
+            }},
+            {"sequence": 8, "kind": "iteration.rendered", "data": {
+                "iteration": 1,
+                "previews": ["iteration-01-feed.png", "iteration-01-story.png"],
+                "diffs": ["iteration-01-story-overlay.png", "not-an-artifact.png"],
+            }},
+            {"sequence": 9, "kind": "iteration.compared", "data": {
+                "iteration": 1, "decision": "accept", "score": 9.8,
+            }},
+        ])
+
+        summary = projected["output"]["review_summary"]
+        self.assertEqual(projected["status"], "failed")
+        self.assertEqual(projected["error"], "renderer stopped")
+        self.assertEqual(summary["source"]["name"], "source.jpg")
+        self.assertNotIn("references", summary)
+        self.assertEqual([item["name"] for item in summary["previews"]], ["iteration-01-feed.png", "iteration-01-story.png"])
+        self.assertEqual([item["name"] for item in summary["diffs"]], ["iteration-01-story-overlay.png"])
+        self.assertEqual(summary["scores"]["overall"], 9.8)
+        self.assertNotIn("private-generated-name", json.dumps(projected))
+
     def test_review_decisions_proxy_exact_hermes_routes_and_bodies(self):
         responses = [
             ("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", {}),
