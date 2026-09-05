@@ -7,7 +7,7 @@ const OPERATE_PATHS = { "/live": "live", "/map": "map", "/control": "control" };
 const STATIC_PATHS = { "/tools": "tools", "/files": "files", "/connections": "connections", "/accounts": "accounts", "/trace": "trace", "/releases": "releases" };
 const HOME_PATH = /^\/(project|entity)\/([^/]+)(?:\/([^/]+))?\/?$/;
 const ENTITY_IDS = new Set([
-  "tool:connections", "tool:accounts", "tool:widget-builder", "tool:campaigns", "tool:ad-templates",
+  "tool:connections", "tool:accounts", "tool:mail", "tool:widget-builder", "tool:campaigns", "tool:ad-templates",
   "tool:ad-template-generator", "agent:hermes", "service:umami", "service:activepieces", "service:frank-window",
 ]);
 
