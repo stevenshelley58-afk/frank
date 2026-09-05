@@ -1,5 +1,4 @@
 const $ = (selector, root = document) => root.querySelector(selector);
-import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js";
 import { mountMemoryInspector } from "./memory-inspector.js";
 import {
   BLOCKWISE_PREVIEW_MANIFESTS,
@@ -211,6 +210,7 @@ function setTopActions(controls = []) {
 
 export function clearHomeActions() {
   homeState.controller?.abort();
+  homeState.generation += 1;
   homeState.memoryInspector?.dispose?.();
   homeState.memoryInspector = null;
   homeState.memoryOpen = false;
@@ -824,18 +824,24 @@ function renderProjectSnapshot(body, snapshot, widgetId) {
   return true;
 }
 
-function renderSnapshot(body, snapshot, widgetId = "") {
+async function renderSnapshot(body, snapshot, widgetId = "", generation = homeState.generation) {
   disposeProjectCharts(body);
   destroyGraphMount(body);
   body.replaceChildren();
   if (widgetId === "entity-graph" && snapshot.data?.graph && typeof snapshot.data.graph === "object") {
-    const handle = mountGraphWorkbench(body, {
-      kind: snapshot.entity_kind || "tool",
-      entityId: snapshot.entity_id || "",
-      title: "Graph",
-      load: async () => snapshot.data.graph,
-    });
-    graphMounts.set(body, handle);
+    try {
+      const { mountGraphWorkbench } = await import("../graph/graph-workbench.bundle.js");
+      if (generation !== homeState.generation || !body.isConnected) return;
+      const handle = mountGraphWorkbench(body, {
+        kind: snapshot.entity_kind || "tool",
+        entityId: snapshot.entity_id || "",
+        title: "Graph",
+        load: async () => snapshot.data.graph,
+      });
+      graphMounts.set(body, handle);
+    } catch (error) {
+      if (generation === homeState.generation && body.isConnected) body.replaceChildren(node("p", "home-error", error.message || "Graph unavailable."));
+    }
     return;
   }
   if (renderProjectSnapshot(body, snapshot, widgetId)) return;
@@ -953,15 +959,15 @@ async function loadSnapshot(card, body, instance, generation) {
     const preview = isBlockwiseOperationsPreview() && homeState.home.entity.kind === "project" && homeState.home.entity.id === "blockwise";
     const snapshot = preview
       ? blockwisePreviewSnapshot(instance)
-      : await requestJson(`${homeEndpoint()}/widgets/${encodeURIComponent(instance.instance_id)}`);
+      : await requestJson(`${homeEndpoint()}/widgets/${encodeURIComponent(instance.instance_id)}`, { signal: homeState.controller?.signal });
     if (!snapshot) throw new Error("Preview widget is unavailable.");
     if (generation !== homeState.generation || !card.isConnected) return;
     if (snapshot.entity_kind !== homeState.home.entity.kind || snapshot.entity_id !== homeState.home.entity.id || snapshot.instance_id !== instance.instance_id || snapshot.widget_id !== instance.widget_id) {
       throw new Error("Widget identity mismatch");
     }
-    renderSnapshot(body, snapshot, instance.widget_id);
+    await renderSnapshot(body, snapshot, instance.widget_id, generation);
   } catch (error) {
-    if (generation !== homeState.generation || !card.isConnected) return;
+    if (error.name === "AbortError" || generation !== homeState.generation || !card.isConnected) return;
     destroyGraphMount(body);
     body.replaceChildren(node("p", "home-error", error.message || "Widget unavailable."));
     body.append(button("Retry", () => loadSnapshot(card, body, instance, generation), "home-inline-button"));

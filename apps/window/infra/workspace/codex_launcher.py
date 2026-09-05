@@ -67,7 +67,10 @@ def run_leased_task(
     try:
         process = subprocess.Popen(
             list(argv), cwd=workdir, env=env,
-            stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            # The launcher deliberately returns only the exit status. A pipe
+            # with no reader both leaks its descriptor and can block a noisy
+            # task once its buffer fills.
+            stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT,
         )
         while process.poll() is None:
             if renewal_failure:

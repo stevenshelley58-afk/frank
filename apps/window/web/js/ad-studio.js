@@ -1,4 +1,3 @@
-import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260830-ad-studio-route-v1";
 import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, readyAdStudioReviewRuns, runListRenderSignature, runTimestamp } from "./ad-studio-state.js?v=20260905-ready-review-v1";
 import { AD_STUDIO_BRIEF_MAX_CHARACTERS, adStudioBriefValidation } from "./ad-studio-brief.js?v=20260904-brief-roundtrip-v1";
@@ -24,6 +23,8 @@ let runListRevision = 0;
 let selectedStage = null;
 let graphHandle = null;
 let selectedFiles = [];
+let graphMountPromise = null;
+let graphMountRevision = 0;
 let batchStarting = false;
 let runRefreshPending = false;
 const localRunInputs = new Map();
@@ -35,9 +36,49 @@ let adStudioModelPolicy = null;
 let adStudioModelsReady = false;
 let modelLoadSequence = 0;
 let eventReconnectTimer = null;
+let refreshTimer = null;
+let active = false;
+let ready = false;
 const runEventCache = new Map();
 const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "tif", "tiff", "webp"]);
 const MAX_BATCH_SOURCES = 20;
+
+function stopRunEvents() {
+  eventStream?.close();
+  eventStream = null;
+  if (eventReconnectTimer) window.clearTimeout(eventReconnectTimer);
+  eventReconnectTimer = null;
+}
+
+function stopLiveUpdates() {
+  stopRunEvents();
+  if (refreshTimer) window.clearInterval(refreshTimer);
+  refreshTimer = null;
+}
+
+function resumeLiveUpdates() {
+  if (!active || document.hidden || !ready) return;
+  void refreshRunsSafe();
+  if (selectedRunId && !eventStream) {
+    const selected = runs.find((run) => run.id === selectedRunId);
+    if (selected) connectRunEvents(selected);
+  }
+  if (!refreshTimer) refreshTimer = window.setInterval(() => { if (active && !document.hidden) void refreshRunsSafe(); }, 5_000);
+  if ($("[data-ad-panel=\"pipeline\"]")?.classList.contains("is-on") && !graphHandle) void mountPipeline();
+}
+
+export function setAdStudioActive(nextActive) {
+  active = Boolean(nextActive);
+  if (!active || document.hidden) {
+    stopLiveUpdates();
+    graphMountRevision += 1;
+    graphHandle?.destroy?.();
+    graphHandle = null;
+    return;
+  }
+  resumeLiveUpdates();
+}
+
 const SOURCE_STATUS = {
   queued: "Ready",
   uploading: "Uploading…",
@@ -1218,13 +1259,13 @@ function connectRunEvents(run) {
   runEvents = [...(runEventCache.get(run.id) || [])];
   renderEventViews();
   const connect = () => {
-    if (selectedRunId !== run.id) return;
+    if (!active || selectedRunId !== run.id) return;
     const cursor = runEvents.reduce((last, item) => Math.max(last, Number(item.sequence ?? -1)), -1);
     const stream = new EventSource(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/events?after=${encodeURIComponent(cursor)}`);
     eventStream = stream;
   const receive = (event) => {
     try {
-      if (eventStream !== stream || selectedRunId !== run.id) return;
+      if (!active || eventStream !== stream || selectedRunId !== run.id) return;
       const item = JSON.parse(event.data);
       if (!runEvents.some((existing) => existing.sequence === item.sequence)) {
         runEvents.push(item);
@@ -1242,7 +1283,7 @@ function connectRunEvents(run) {
       else renderRunDetail(run);
       renderReviewQueue();
       if (["run.failed", "run.cancelled", "template.ready_for_review", "template.revision_requested", "template.approved", "template.discarded", "smoke.completed", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {
-        if (eventStream !== stream || selectedRunId !== run.id) return;
+        if (!active || eventStream !== stream || selectedRunId !== run.id) return;
         const updated = runs.find((candidate) => candidate.id === run.id);
         if (updated && selectedReviewRunId === run.id) renderReviewDetail(updated);
         else if (updated) renderRunDetail(updated);
@@ -1254,7 +1295,7 @@ function connectRunEvents(run) {
     for (const selector of ["#ad-live-state", "#ad-review-live-state"]) { const state = $(selector); if (state) state.textContent = "Live"; }
   };
   stream.onerror = () => {
-    if (eventStream !== stream) return;
+    if (!active || eventStream !== stream) return;
     stream.close();
     for (const selector of ["#ad-live-state", "#ad-review-live-state"]) { const state = $(selector); if (state) state.textContent = "Reconnecting…"; }
     eventReconnectTimer = window.setTimeout(connect, 1_500);
@@ -1297,20 +1338,30 @@ async function loadProcessMonitors() {
 function mountPipeline() {
   const root = $("#ad-pipeline-graph");
   const panel = $("[data-ad-panel=\"pipeline\"]");
-  if (!root || !panel.classList.contains("is-on")) return;
-  void loadProcessMonitors();
-  graphHandle?.destroy();
-  graphHandle = mountGraphWorkbench(root, {
-    entityId: TOOL_ID,
-    title: "Pipeline",
-    load: loadScopedGraph,
-    onSelect(node) {
-      selectedStage = node;
-      $("#ad-stage-name").textContent = node.label;
-      $("#ad-stage-kind").textContent = node.kind;
-      updateEvidence();
-    },
+  if (!active || !root || !panel.classList.contains("is-on") || graphHandle) return;
+  if (graphMountPromise) return graphMountPromise;
+  const revision = ++graphMountRevision;
+  graphMountPromise = import("../graph/graph-workbench.bundle.js").then(({ mountGraphWorkbench }) => {
+    if (!active || revision !== graphMountRevision || !root.isConnected || !panel.classList.contains("is-on")) return;
+    void loadProcessMonitors();
+    graphHandle = mountGraphWorkbench(root, {
+      entityId: TOOL_ID,
+      title: "Pipeline",
+      load: loadScopedGraph,
+      onSelect(node) {
+        selectedStage = node;
+        $("#ad-stage-name").textContent = node.label;
+        $("#ad-stage-kind").textContent = node.kind;
+        updateEvidence();
+      },
+    });
+  }).catch((error) => {
+    if (active && revision === graphMountRevision && root.isConnected) root.textContent = error.message || "Pipeline graph unavailable.";
+  }).finally(() => {
+    graphMountPromise = null;
+    if (active && revision !== graphMountRevision && panel.classList.contains("is-on") && !graphHandle) mountPipeline();
   });
+  return graphMountPromise;
 }
 
 function updateEvidence() {
@@ -1446,7 +1497,7 @@ function setupPipelineForm() {
 }
 
 export function mountAdStudio() {
-  if (mounted) { void refreshRunsSafe(); return; }
+  if (mounted) return;
   mounted = true;
   const tabs = $$("[data-ad-tab]");
   tabs.forEach((button, index) => {
@@ -1464,15 +1515,16 @@ export function mountAdStudio() {
   setupPipelineForm();
   void loadProjects().then(async () => {
     await loadAdStudioModels();
-    await refreshRunsSafe();
-    if ($("[data-ad-panel=\"pipeline\"]").classList.contains("is-on")) mountPipeline();
+    ready = true;
+    resumeLiveUpdates();
   }).catch((error) => {
     $("#ad-run-status").textContent = error.message || "Ad Studio could not load.";
     $("#ad-run-status").classList.add("is-error");
   });
   window.addEventListener("beforeunload", () => previewUrls.forEach((url) => URL.revokeObjectURL(url)), { once: true });
-  window.addEventListener("online", () => void refreshRunsSafe());
-  window.setInterval(() => {
-    if (!document.hidden) void refreshRunsSafe();
-  }, 5_000);
+  window.addEventListener("online", () => resumeLiveUpdates());
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) stopLiveUpdates();
+    else resumeLiveUpdates();
+  });
 }

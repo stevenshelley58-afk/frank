@@ -104,7 +104,7 @@ test("production graph build emits runtime assets and renderer licenses", async 
   ]);
   assert.ok(javascript.length > 100_000);
   assert.match(css, /\.graph-workbench/);
-  assert.match(css, /height:\s*min\(62vh, 640px\)/);
+  assert.match(css, /height:\s*min\(62vh,\s*640px\)/);
   assert.match(license, /Apache License\s+Version 2\.0/);
   assert.match(g6License, /MIT License/);
   assert.match(louvainLicense, /MIT License/);

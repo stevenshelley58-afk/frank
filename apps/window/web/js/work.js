@@ -13,6 +13,14 @@ function node(tag, className = "", text = "") {
   return element;
 }
 
+export function workMutation(prefix, payload = {}) {
+  const operationId = freshOperationId(prefix);
+  return {
+    operationId,
+    body: JSON.stringify({ ...payload, operation_id: operationId }),
+  };
+}
+
 function freshOperationId(prefix = "work") {
   return `${prefix}-${crypto.randomUUID().replaceAll("-", "")}`;
 }
@@ -40,11 +48,11 @@ function renderState(root, kind, message) {
   return state;
 }
 
-async function loadSnapshot(url, root, renderReady) {
+async function loadSnapshot(url, root, renderReady, options = {}) {
   const started = Date.now();
   renderState(root, "loading", "Loading…");
   try {
-    const snapshot = await requestJson(url);
+    const snapshot = await requestJson(url, options);
     if (snapshot.schema !== "schema://frank.widget-snapshot/v1") {
       renderState(root, "error", "Unexpected work summary response.");
       return;
@@ -63,14 +71,22 @@ async function loadSnapshot(url, root, renderReady) {
     }
     renderReady(root, snapshot);
   } catch (error) {
+    if (error.name === "AbortError") return;
     renderState(root, "error", `Work summaries failed: ${error.message}`);
   }
 }
 
-function rowList(rows, chipKey) {
+function rowList(rows, chipKey, interactive = false) {
   const list = node("ul", "work-rows");
   for (const row of rows || []) {
     const item = node("li");
+    if (interactive) {
+      item.tabIndex = 0;
+      item.setAttribute("role", "button");
+      item.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") { event.preventDefault(); item.click(); }
+      });
+    }
     if (row[chipKey]) item.append(node("span", "work-chip", row[chipKey]));
     item.append(node("span", "work-row-title", row.title || row.name || row.id || ""));
     list.append(item);
@@ -190,7 +206,7 @@ async function mountAllWork(host, projectId) {
     if (!rows.length) {
       drawer.append(renderState(document.createElement("div"), "empty", "No durable work yet. Create the first task."));
     }
-    const list = rowList(rows.map((task) => ({ ...task, title: `${task.label} · ${task.title}` })), "label");
+    const list = rowList(rows.map((task) => ({ ...task, title: `${task.label} · ${task.title}` })), "label", true);
     list.addEventListener("click", (event) => {
       const item = event.target.closest("li");
       const index = [...list.children].indexOf(item);
@@ -240,13 +256,10 @@ function mountTaskDrawer(host, projectId, task) {
       create.disabled = true;
       conflict.hidden = true;
       try {
+        const mutation = workMutation("task-create", { project_id: projectId, title: title.value, body: body.value });
         await requestJson("/api/work/tasks", {
           method: "POST",
-          body: JSON.stringify({
-            project_id: projectId, title: title.value, body: body.value,
-            operation_id: freshOperationId("task"),
-          }),
-          operationId: freshOperationId("task-create"),
+          ...mutation,
         });
         drawer.replaceChildren(node("h4", "", "Task created"));
         drawer.append(node("p", "work-state is-empty", "Created passive by default: triaged, no worker, nothing fans out until you start it."));
@@ -285,10 +298,10 @@ function mountTaskDrawer(host, projectId, task) {
       button.disabled = true;
       conflict.hidden = true;
       try {
+        const mutation = workMutation(`act-${action}`, { project_id: projectId });
         await requestJson(`/api/work/tasks/${encodeURIComponent(task.id)}/actions/${action}`, {
           method: "POST",
-          body: JSON.stringify({ project_id: projectId, operation_id: freshOperationId(`act`) }),
-          operationId: freshOperationId(`act-${action}`),
+          ...mutation,
         });
         projectWorkSummaryRefresh(host, projectId);
         button.textContent = "Done";
@@ -306,28 +319,23 @@ function mountTaskDrawer(host, projectId, task) {
   drawer.append(actionRow);
 }
 
-let lastSummaryHost = null;
-let lastSummaryProject = "";
-
 function projectWorkSummaryRefresh(host, projectId) {
-  if (host && projectId) {
-    lastSummaryHost = host;
-    lastSummaryProject = projectId;
-  }
-  if (lastSummaryHost && lastSummaryProject) {
-    const summaryRoot = lastSummaryHost.querySelector(".work-root");
-    if (summaryRoot) {
-      mountProjectWorkInto(summaryRoot, lastSummaryProject);
-    }
-  }
+  const summaryRoot = host?.matches?.(".work-root") ? host : host?.closest?.(".work-root") || host?.querySelector?.(".work-root");
+  if (summaryRoot && projectId) mountProjectWorkInto(summaryRoot, projectId);
 }
 
-function mountProjectWorkInto(element, projectId) {
+const projectWorkMounts = new WeakMap();
+
+export function mountProjectWorkInto(element, projectId) {
+  projectWorkMounts.get(element)?.abort();
+  const controller = new AbortController();
+  projectWorkMounts.set(element, controller);
   const listingHost = node("div");
-  element.append(listingHost);
+  element.replaceChildren(listingHost);
   loadSnapshot(`/api/work/tasks?project_id=${encodeURIComponent(projectId)}&limit=50`, listingHost, (root, listing) => {
+    if (projectWorkMounts.get(element) !== controller) return;
     projectWorkRender(root, listing, projectId);
-  });
+  }, { signal: controller.signal });
 }
 
 function projectWorkRender(element, listing, projectId) {
@@ -417,14 +425,10 @@ function mountRoutineDrawer(host, projectId) {
     create.disabled = true;
     conflict.hidden = true;
     try {
+      const mutation = workMutation("routine-create", { project_id: projectId, name: name.value, schedule: schedule.value, prompt: prompt.value, continuity: continuity.checked });
       await requestJson("/api/work/routines", {
         method: "POST",
-        body: JSON.stringify({
-          project_id: projectId, name: name.value, schedule: schedule.value,
-          prompt: prompt.value, continuity: continuity.checked,
-          operation_id: freshOperationId("routine"),
-        }),
-        operationId: freshOperationId("routine-create"),
+        ...mutation,
       });
       drawer.replaceChildren(
         node("h4", "", "Routine created"),
@@ -457,7 +461,7 @@ function mountRoutineDrawer(host, projectId) {
         title: `${item.enabled ? "enabled" : "paused"} · ${item.name} · ${item.schedule_display}`,
         native_state: item.state,
       }));
-      const list = rowList(rows, "native_state");
+      const list = rowList(rows, "native_state", true);
       list.addEventListener("click", (event) => {
         const item = event.target.closest("li");
         const index = [...list.children].indexOf(item);
@@ -483,9 +487,10 @@ function mountRoutineControls(host, projectId, routine) {
           button.disabled = false;
           return;
         }
+        const mutation = workMutation("routine", { project_id: projectId });
         await requestJson(`/api/work/routines/${encodeURIComponent(routine.id)}/actions/${path}`, {
           method: "POST",
-          body: JSON.stringify({ project_id: projectId, operation_id: freshOperationId("routine") }),
+          ...mutation,
         });
         button.textContent = "Done";
       } catch (error) {

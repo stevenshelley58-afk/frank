@@ -29,8 +29,11 @@ never additional Hermes profiles.
 ## Delivery
 
 1. Start from current `main`.
-2. Run `python -m unittest discover -s tests` from `apps/window`
-   and `node --check` on every JavaScript file.
+2. From `apps/window`, install JavaScript dependencies with `npm ci --ignore-scripts`
+   and run `npm run verify`. The runner performs the Python unit suite and
+   syntax checks, checks every non-vendored JavaScript file, and runs the
+   non-browser JavaScript tests in isolated temporary data roots. See
+   `docs/DEVELOPMENT.md` for Python environment selection.
 3. Build the container before release.
 4. Commit and push the exact revision.
 5. Deploy only that committed revision with `apps/window/deploy.sh` on the VPS.

@@ -161,7 +161,7 @@ test("graph renderer hosts have a bounded, visible layout contract", () => {
 test("home lifecycle tears down graph mounts before rerender and grid removal", () => {
   const homes = readFileSync(new URL("../web/js/homes.js", import.meta.url), "utf8");
   assert.match(homes, /const graphMounts = new WeakMap\(\)/);
-  assert.match(homes, /function renderSnapshot\(body, snapshot, widgetId = ""\) \{[\s\S]*?destroyGraphMount\(body\);[\s\S]*?body\.replaceChildren\(\)/);
+  assert.match(homes, /async function renderSnapshot\(body, snapshot, widgetId = "", generation = homeState\.generation\) \{[\s\S]*?destroyGraphMount\(body\);[\s\S]*?body\.replaceChildren\(\)/);
   assert.match(homes, /function destroyHomeGrid\(\) \{\s*destroyGraphMounts\(homeState\.host\);[\s\S]*?homeState\.grid\.destroy\(false\)/);
   assert.match(homes, /async function openHome\(kind, id, host\) \{[\s\S]*?destroyHomeGrid\(\);/);
 });

@@ -8,9 +8,9 @@ import { DictationController } from "./chat/dictation-controller.js";
 import { ModelSelector } from "./chat/model-selector.js";
 import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/turn-stream.js";
 import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
-import { mountAdStudio } from "./ad-studio.js?v=20260905-ready-review-v1";
+import { mountAdStudio, setAdStudioActive } from "./ad-studio.js?v=20260905-ready-review-v1";
 import { adStudioBriefValidation } from "./ad-studio-brief.js?v=20260904-brief-roundtrip-v1";
-import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
+import { pathForView, routeForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
@@ -42,12 +42,12 @@ const TITLES = {
 
 let projects = { projects: [] };
 
-function syncViewLocation(id) {
-  const target = pathForView(id);
-  if (window.location.pathname !== target) window.history.pushState({ view: id }, "", target);
+function syncViewLocation(id, detail = {}) {
+  const target = pathForView(id, detail);
+  if (window.location.pathname !== target) window.history.pushState({ view: id, ...detail }, "", target);
 }
 
-function show(id, { syncHistory = true } = {}) {
+function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}) {
   const editorWasOpen = closeHomeEditors({ restoreFocus: false });
   if (id !== "project" && id !== "entity-home") clearHomeActions();
   const [title, sub] = TITLES[id] || TITLES.hub;
@@ -60,12 +60,20 @@ function show(id, { syncHistory = true } = {}) {
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
-  if (syncHistory) syncViewLocation(id);
+  if (syncHistory) syncViewLocation(id, routeDetail);
   $$(".operate-tab").forEach((button) => button.classList.toggle("is-on", button.dataset.view === id));
   if (id === "live") void mountLive($("#operate-live"));
   if (id === "map") void mountMap($("#operate-map"));
   if (id === "control") void mountControl($("#operate-control"));
   if (id === "ops") void mountOps($("#operate-ops"));
+  if (id === "tools") mountAll("tools", $("#slot-tools"), {});
+  if (id === "trace") mountAll("trace", $("#slot-trace"), {});
+  if (id === "releases") mountAll("releases", $("#slot-releases"), {});
+  if (id === "files") explorerFocus();
+  if (id === "accounts") loadAccounts();
+  if (id === "connections") openConnections(viewDetail);
+  if (id === "ad-studio") mountAdStudio();
+  setAdStudioActive(id === "ad-studio");
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
@@ -93,25 +101,21 @@ function renderProjectNav() {
 }
 
 function showProject(id, options = {}) {
-  currentProject = projects.projects.find((x) => x.id === id) || { id, name: id };
+  const project = projects.projects.find((x) => x.id === id);
+  if (!project) { show("hub", options); return false; }
+  currentProject = project;
   document.body.classList.toggle("blockwise-operations-preview", id === "blockwise" && isBlockwiseOperationsPreview());
-  show("project", options);
+  show("project", { ...options, routeDetail: { projectId: id } });
   openProjectHome(currentProject);
+  return true;
 }
 
 $$(`.operate-tab[data-view]`).forEach((button) => button.addEventListener("click", () => show(button.dataset.view)));
 
 $$(".rail-item[data-view]").forEach((b) =>
   b.addEventListener("click", () => {
-    const v = b.dataset.view;
-    if (v === "files") { show(v); explorerFocus(); }
-    else if (v === "hub") {
-      show(v);
-      $("#view-sub").textContent = chatSessions.find((chat) => chat.id === currentChatId)?.title || "";
-      chatScrollBottom();
-    }
-    else if (v === "ad-studio") { show(v); mountAdStudio(); }
-    else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); if (v === "ops") void mountOps($("#operate-ops")); }
+    show(b.dataset.view);
+    if (b.dataset.view === "hub") chatScrollBottom();
   })
 );
 
@@ -132,16 +136,7 @@ $$(".chip").forEach((c) => {
 });
 
 window.addEventListener("frank:view", (event) => {
-  if (event.detail === "accounts") {
-    show("accounts");
-    loadAccounts();
-  } else if (event.detail === "connections") {
-    show("connections");
-    openConnections();
-  } else if (event.detail === "tools") {
-    show("tools");
-    mountAll("tools", $("#slot-tools"), {});
-  }
+  if (["accounts", "connections", "tools"].includes(event.detail)) show(event.detail);
 });
 
 window.addEventListener("frank:operations-tool", (event) => {
@@ -149,12 +144,10 @@ window.addEventListener("frank:operations-tool", (event) => {
   if (!tool) return;
   if (tool.id === "connections") {
     show("connections");
-    openConnections();
     return;
   }
   if (tool.id === "customers" && !isBlockwiseOperationsPreview()) {
     show("ops");
-    void mountOps($("#operate-ops"));
     return;
   }
   show("operations-tool");
@@ -170,7 +163,7 @@ window.addEventListener("frank:project-home", (event) => {
 window.addEventListener("frank:entity-home", (event) => {
   const entity = event.detail || {};
   if (!entity.kind || !entity.id) return;
-  show("entity-home");
+  show("entity-home", { routeDetail: { entity } });
   $("#view-title").textContent = entity.name || entity.id;
   openEntityHome(entity);
 });
@@ -182,7 +175,6 @@ window.addEventListener("frank:widget-builder", () => {
 
 window.addEventListener("frank:ad-studio", () => {
   show("ad-studio");
-  mountAdStudio();
 });
 
 function openPathView() {
@@ -190,17 +182,33 @@ function openPathView() {
     showProject("blockwise", { syncHistory: false });
     return;
   }
-  const id = viewForPath(window.location.pathname);
-  show(id, { syncHistory: false });
-  if (id === "ad-studio") mountAdStudio();
-  const canonicalPath = pathForView(id);
-  if (window.location.pathname !== canonicalPath) window.history.replaceState({ view: id }, "", `${canonicalPath}${window.location.search}`);
+  const route = routeForPath(window.location.pathname);
+  const canonicalPath = pathForView(route.view, route);
+  if (window.location.pathname !== canonicalPath) window.history.replaceState({ view: route.view }, "", `${canonicalPath}${window.location.search}`);
+  if (route.view === "project") {
+    if (showProject(route.projectId, { syncHistory: false })) return;
+    window.history.replaceState({ view: "hub" }, "", `/${window.location.search}`);
+    $("#view-title").textContent = "Project not found";
+    $("#view-sub").textContent = `No registered project exists for “${route.projectId}”.`;
+    return;
+  }
+  if (route.view === "entity-home") {
+    show("entity-home", { syncHistory: false, routeDetail: route });
+    $("#view-title").textContent = route.entity.id;
+    openEntityHome(route.entity);
+    return;
+  }
+  show(route.view, { syncHistory: false });
+  if (route.invalid) {
+    $("#view-title").textContent = "Home not found";
+    $("#view-sub").textContent = route.message;
+    return;
+  }
 }
 window.addEventListener("popstate", openPathView);
 
 window.addEventListener("frank:connections", (event) => {
-  show("connections");
-  openConnections(event.detail || {});
+  show("connections", { viewDetail: event.detail || {} });
 });
 
 window.addEventListener("frank:open-chat-session", async (event) => {

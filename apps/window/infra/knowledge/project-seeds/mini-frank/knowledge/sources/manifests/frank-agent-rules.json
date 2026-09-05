@@ -1,1 +1,12 @@
-{"schema":"schema://mini-frank.source/v1","id":"src-frank-agent-rules","title":"Frank agent rules","kind":"local-file","locator":"AGENTS.md","revision":"git-blob:552b377a4e5f0d7eac7787d8c30bb28891b08b53","sha256":"50ca136a22374ccf72290c28740dae454f3640ad53f9e72e90d4c2ea19dc1a70","tier":"A","verified_at":"2026-08-30","retention_rights":"repository-owned"}
+{
+  "schema": "schema://mini-frank.source/v1",
+  "id": "src-frank-agent-rules",
+  "title": "Frank agent rules",
+  "kind": "local-file",
+  "locator": "AGENTS.md",
+  "revision": "sha256:0ef88766ffca1e87f6a557627df0c357c3cc5e20b02cd004df58dc763ac89f96",
+  "sha256": "0ef88766ffca1e87f6a557627df0c357c3cc5e20b02cd004df58dc763ac89f96",
+  "tier": "A",
+  "verified_at": "2026-09-05",
+  "retention_rights": "repository-owned"
+}
