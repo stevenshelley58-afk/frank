@@ -42,21 +42,6 @@ SUPPORTED = frozenset({
     "enquiry_assign", "enquiry_close", "enquiry_reply", "enquiry_reopen", "flow_enroll", "flow_pause", "flow_resume",
     "booking_cancel", "booking_reschedule", "billing_reconcile", "billing_cancel_at_period_end", "billing_portal_link",
 })
-# This mirrors the versioned Blockwise action contract. Frank may only submit
-# actions marked available here, and still requires a matching target/version
-# from the fresh projection. Other contract names are rendered as disabled
-# setup/capability states by the operator UI rather than guessed into writes.
-CAPABILITY = {
-    "team_invite": "available", "team_resend": "available", "team_cancel": "available",
-    "team_role_change": "capability_required", "team_suspend": "unsupported", "team_reactivate": "unsupported",
-    "session_revoke": "available",
-    "consent_grant": "capability_required", "consent_withdraw": "capability_required", "consent_unsubscribe": "capability_required",
-    "suppression_add": "capability_required", "suppression_remove": "capability_required",
-    "flow_enroll": "capability_required", "flow_pause": "capability_required", "flow_resume": "capability_required",
-    "enquiry_assign": "available", "enquiry_close": "available", "enquiry_reply": "available", "enquiry_reopen": "available",
-    "booking_cancel": "capability_required", "booking_reschedule": "capability_required",
-    "billing_reconcile": "available", "billing_cancel_at_period_end": "capability_required", "billing_portal_link": "capability_required",
-}
 TARGET_TYPES = {
     "team_invite": "workspace", "team_resend": "invitation", "team_cancel": "invitation",
     "team_role_change": "profile", "team_suspend": "profile", "team_reactivate": "profile",
@@ -624,8 +609,8 @@ def _payload(action: str, value: Any) -> dict[str, Any]:
 def _published_capability(store: OpsProjectionStore, action: str) -> Mapping[str, Any]:
     """Return only Blockwise's current readiness descriptor.
 
-    CAPABILITY below is a compile-time contract allowlist, never a live
-    availability source. A missing, stale, incomplete, or malformed publication
+    ACTIONS and TARGET_TYPES validate supported names and target shapes;
+    availability comes only from the provider. A missing, stale, incomplete, or malformed publication
     therefore fails closed before an operator envelope can be created.
     """
     loader = getattr(store, "action_capabilities", None)

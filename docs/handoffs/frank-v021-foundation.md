@@ -1,4 +1,9 @@
 # Frank v0.21 — Session 5 foundation checkpoint (labeled)
+> Historical handoff, not a current implementation guide. The cleanup on
+> 2026-09-05 removed `workspace_foundation.py` and its dedicated test after
+> their responsibilities were absorbed by the remaining workspace
+> infrastructure. References below record the then-current checkpoint only.
+
 
 Status: **CHECKPOINT PUBLISHED — supersedes `codex/frank-v021-foundation-s1-fallback`
 per the recorded supersede rule.** Dependency-free: no Hermes adapter, no

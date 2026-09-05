@@ -1,4 +1,6 @@
 # Frank v0.21 — Session 5 shared estate handoff
+> Historical shared-estate handoff. The 2026-09-05 cleanup removed the dedicated workspace-foundation test named below; current workspace coverage lives in the remaining infrastructure suite.
+
 
 Branch: `codex/frank-v021-shared-estate` (tip at time of writing: see
 `git rev-parse origin/codex/frank-v021-shared-estate`). No merge to main, no

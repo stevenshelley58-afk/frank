@@ -44,24 +44,25 @@ or searches all Mini customer memory.
 
 ## Reusable industry knowledge
 
-Hindsight also holds centrally approved industry knowledge, for example an
-`industry/med-spa` scope. This is not a customer-memory pool. It contains only
-sanitised, reusable knowledge with industry tags, source provenance,
-confidence, reviewed/expiry dates, and status such as candidate, approved,
-superseded, deprecated, or retracted.
+The intended architecture has a centrally approved industry-knowledge scope,
+for example `industry/med-spa`. It is not a customer-memory pool and, when the
+Hermes adapter is available, may contain only sanitised reusable knowledge with
+industry tags, source provenance, confidence, reviewed/expiry dates, and
+candidate/approved/superseded/deprecated/retracted status.
 
-Useful research or outcomes from a private Mini job may become a candidate,
-but promotion is a separate deterministic admission step. Public-source facts
-may be approved under the central policy. Customer-derived, uncertain, or
-potentially identifying material requires operator review. Customer names,
+That shared-industry adapter is not currently available to Mini: the present
+Mini knowledge binding reports shared-industry retrieval and candidate promotion
+as unavailable. Frank and Mini therefore must not claim automatic cross-project
+reuse or a completed feedback loop. Useful research may be proposed for a
+future reviewed admission path, but no private Mini material is promoted by the
+current runtime.
+
+The intended future policy remains strict: public-source facts may be approved
+under central review; customer-derived, uncertain, or potentially identifying
+material requires operator review and normally remains private. Customer names,
 contacts, credentials, files, private URLs, performance figures, strategies,
 health information, chat excerpts, and recognisable artifacts must never enter
-the shared industry scope.
-
-Hermes retrieves Mini context in this order: exact job, owning account, Mini
-project guidance, then approved industry knowledge. If approved med-spa
-knowledge is current, a later med-spa project reuses it and researches only
-missing or stale areas. Private customer facts always stay in their original
+a shared industry scope. Private customer facts always stay in their original
 scope, and project files or explicit customer corrections override recalled
 knowledge. Hindsight content is untrusted context; it cannot grant tool,
 permission, consent, publication, or payment authority.
@@ -72,9 +73,9 @@ permission, consent, publication, or payment authority.
    workspace.
 2. Hermes supplies the profile, workspace slug, platform, and session context
    to its bundled provider.
-3. Hindsight resolves the exact private scope, recalls relevant durable context
-   and any separately approved industry knowledge before the turn, and offers
-   explicit retain, recall, and reflect tools.
+3. Hindsight resolves the exact private scope and offers explicit retain,
+   recall, and reflect tools. Shared-industry retrieval and promotion await the
+   separately implemented Hermes adapter.
 4. Hermes retains completed turns asynchronously and keeps its small built-in
    memory files active for high-value operator preferences.
 5. Frank's project Memory inspector reads the native Hindsight API through a

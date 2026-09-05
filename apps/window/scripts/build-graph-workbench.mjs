@@ -19,6 +19,7 @@ await build({
   assetNames: "assets/[name]-[hash]",
   outfile: resolve(root, "web/graph/graph-workbench.bundle.js"),
   nodePaths: [`${portableRoot}/node_modules`],
+  minify: true,
   sourcemap: false,
   legalComments: "eof",
 });

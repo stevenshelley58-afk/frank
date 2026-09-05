@@ -135,22 +135,6 @@ app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
 _accounts_lock = threading.RLock()
 
-# v0.21 workspace foundation (contract §4/§5): flag-gated; default off keeps
-# the legacy path byte-identical. Singleton wiring is Session-1-owned.
-import os as _os
-
-if _os.getenv("FRANK_V021_FOUNDATION", "").lower() in ("1", "true", "yes"):
-    import workspace_foundation as _wsf
-
-    _WS_REGISTRY_PATH = _os.environ.get(
-        "FRANK_WS_REGISTRY_PATH", "/srv/frank/data/window/workspace-registry.json"
-    )
-    _ws_registry = _wsf.WorkspaceRegistry(_WS_REGISTRY_PATH)
-    _ws_lease = _wsf.ExecutionLease(_WS_REGISTRY_PATH + ".leases")
-else:
-    _ws_registry = None
-    _ws_lease = None
-
 _authorized_tool_manifests = MappingProxyType({
     item["id"]: deepcopy(item)
     for item in discover_tool_apps(Path(__file__).resolve().parent / "tools")
@@ -251,8 +235,8 @@ DEFAULT_PROJECTS = [
         "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },
     {
-        "id": "mini-frank", "name": "Frank", "root": "mini-frank",
-        "blurb": "Frank project workspace.",
+        "id": "mini-frank", "name": "Mini Frank", "root": "mini-frank",
+        "blurb": "Mini Frank project workspace.",
         "capabilities": ["repository.activity", "repository.summary", "project.files", "accounts.directory", "connections.read", "analytics.setup"],
         "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },

@@ -45,13 +45,19 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn('"import connections_agent, home_platform, server, tool_apps;', deploy)
         self.assertIn("import memory_inspector, mini, mini_frank", deploy)
 
-    def test_ci_runs_every_mini_test_and_checks_every_mini_script(self):
+    def test_ci_invokes_the_single_window_verification_runner(self):
         workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")
-        self.assertIn("python -m compileall -q mini", workflow)
-        self.assertIn("python -m unittest discover -s tests", workflow)
-        self.assertIn("find apps/window/web/mini -type f", workflow)
-        self.assertIn("node --check \"$file\"", workflow)
-        self.assertIn("node --test apps/window/tests/mini_*.test.mjs", workflow)
+        package = (APP / "package.json").read_text(encoding="utf-8")
+        runner = (APP / "scripts" / "verify.sh").read_text(encoding="utf-8")
+        self.assertIn("npm ci --ignore-scripts", workflow)
+        self.assertIn("working-directory: apps/window\n        run: npm run verify", workflow)
+        self.assertIn('"verify": "bash scripts/verify.sh"', package)
+        self.assertIn("python -m unittest discover -s tests", runner)
+        self.assertIn("python -m compileall -q mini", runner)
+        self.assertIn("-not -path './node_modules/*' -not -path './vendor/*'", runner)
+        self.assertIn("node --check \"$file\"", runner)
+        self.assertIn("-not -name 'graph_browser.test.mjs'", runner)
+        self.assertIn('node --test "${js_tests[@]}"', runner)
 
     def test_agenttrail_is_a_read_only_loopback_sidecar(self):
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")

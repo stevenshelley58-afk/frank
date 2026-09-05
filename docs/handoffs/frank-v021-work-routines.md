@@ -1,4 +1,8 @@
 # Handoff — Frank v0.21 Work & Routines (Session 4)
+> Historical handoff, not a current implementation guide. The unregistered
+> `work_tools.py` described below was removed in the 2026-09-05 cleanup; the
+> live workspace and Hermes boundaries remain the supported path.
+
 
 Branch: `codex/frank-v021-work-routines`
 Status: **implementation complete against the frozen contract; canary pending the foundation and adapter READY commits (bounded poll active). Nothing deployed.**

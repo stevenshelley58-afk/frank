@@ -40,6 +40,14 @@ class CodexLauncherTest(unittest.TestCase):
         self.assertEqual(record["state"], "released")
         self.assertEqual(record["queue"], [])
 
+    def test_noisy_task_does_not_block_on_an_unread_output_pipe(self):
+        result = run_leased_task(
+            self.lease, "ws-noisy", _owner(),
+            ["/bin/sh", "-c", "yes x | head -c 131072"],
+            workdir=str(self.workdir), heartbeat_interval=0.05,
+        )
+        self.assertTrue(result["ok"])
+
     def test_busy_workspace_refuses_before_entering_checkout(self):
         holder = self.lease.acquire("ws-canary", LeaseOwner(executor_kind="hermes", executor_id="exec-1"))
         with self.assertRaises(LaunchRefused):

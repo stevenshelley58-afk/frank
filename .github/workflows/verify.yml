@@ -28,31 +28,13 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-      - run: pip install -r apps/window/requirements.txt
-      - name: Python checks
+      - name: Install JavaScript dependencies
         working-directory: apps/window
-        env:
-          CHAT_STORE_DIR: ${{ runner.temp }}/frank-window-data
-          MINI_PREVIEW_ROOT: ${{ runner.temp }}/frank-window-previews
-          MINI_LEGACY_PROJECT_ROOT: ${{ runner.temp }}/frank-window-legacy
-        run: |
-          mkdir -p "$CHAT_STORE_DIR" "$MINI_PREVIEW_ROOT" "$MINI_LEGACY_PROJECT_ROOT"
-          python -m py_compile server.py mini_frank.py
-          python -m compileall -q mini
-          python -m unittest discover -s tests
-      - name: JavaScript checks
-        run: |
-          node --check apps/window/web/js/app.js
-          node --check apps/window/web/js/ad-studio.js
-          node --check apps/window/web/js/ad-studio-brief.js
-          node --check apps/window/web/js/ad-studio-state.js
-          node --check apps/window/web/js/registry.js
-          node --check apps/window/web/js/widgets.js
-          while IFS= read -r -d '' file; do
-            node --check "$file"
-          done < <(find apps/window/web/mini -type f \( -name '*.js' -o -name '*.mjs' \) -print0)
-          node --test apps/window/tests/mini_*.test.mjs apps/window/tests/view_routing.test.mjs
-          node --test apps/window/tests/ad_studio_*.test.mjs
+        run: npm ci --ignore-scripts
+      - run: pip install -r apps/window/requirements.txt
+      - name: Window verification
+        working-directory: apps/window
+        run: npm run verify
       - name: Container build
         run: docker build -f apps/window/Dockerfile -t frank-window:verify .
 
