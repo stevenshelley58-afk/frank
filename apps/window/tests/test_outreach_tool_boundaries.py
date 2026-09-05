@@ -39,12 +39,17 @@ class ToolBoundaryContractsTest(unittest.TestCase):
             "outreach": ["campaign-management", "segment-management", "outbound-delivery"],
             "mail": ["mail-read", "mail-receipts", "mail-events"],
         }
+        expected_default_widget_ids = {
+            "prospect-discovery": [],
+            "outreach": [],
+            "mail": ["connections-summary", "provider-coverage"],
+        }
         for name in TOOL_NAMES:
             home = load_home_manifest(name)
             self.assertEqual(set(home), expected_fields)
             self.assertEqual(home["id"], name)
             self.assertEqual(home["kind"], "tool")
-            self.assertEqual(home["default_widget_ids"], [])
+            self.assertEqual(home["default_widget_ids"], expected_default_widget_ids[name])
             self.assertEqual(home["connection_capabilities"], expected_connections[name])
             for field in ("capabilities", "default_widget_ids", "connection_capabilities"):
                 self.assertIsInstance(home[field], list)

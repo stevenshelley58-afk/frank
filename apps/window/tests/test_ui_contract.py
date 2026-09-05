@@ -323,7 +323,10 @@ class UiContractTest(unittest.TestCase):
         styles = (WEB / "app.css").read_text(encoding="utf-8")
 
         rail_views = re.findall(r'<button class="rail-item[^>]*data-view="([^"]+)"', html)
-        self.assertEqual(rail_views, ["hub", "files", "tools", "ad-studio", "trace", "releases"])
+        self.assertEqual(
+            rail_views,
+            ["hub", "tools", "files", "ad-studio", "trace", "releases", "live", "map", "control", "ops"],
+        )
         self.assertIn('id="project-nav"', html)
         self.assertIn('id="new-project"', html)
         self.assertIn('id="new-project-dialog"', html)

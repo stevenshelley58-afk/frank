@@ -79,3 +79,10 @@ in this source returns `projects` (active) and `archived_projects`. A `409` mean
 the registry changed: refresh the project list before retrying. These operations
 preserve stable IDs, roots, and sessions; they do not delete, uninstall, or stop
 a runtime, and they do not create a second registry.
+
+
+## Rail navigation and Mail
+
+The rail calls the hub **Home**. Tools comes before Files; Trace, Releases, Live, Map, Control, and Customer Ops remain available under **More**, which opens when one of those views is selected.
+
+Mail remains provider-neutral. Its Home defaults surface connection summary and provider coverage only; provider data is shown only when the relevant connection is configured and verified.

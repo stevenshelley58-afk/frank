@@ -22,7 +22,7 @@ const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 
 const TITLES = {
-  hub: ["Hub", ""],
+  hub: ["Home", ""],
   project: ["Project", ""],
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
@@ -61,7 +61,8 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
   if (syncHistory) syncViewLocation(id, routeDetail);
-  $$(".operate-tab").forEach((button) => button.classList.toggle("is-on", button.dataset.view === id));
+  const more = $("#more-nav");
+  if (more && ["trace", "releases", "live", "map", "control", "ops"].includes(id)) more.open = true;
   if (id === "live") void mountLive($("#operate-live"));
   if (id === "map") void mountMap($("#operate-map"));
   if (id === "control") void mountControl($("#operate-control"));
@@ -118,8 +119,6 @@ function showProject(id, options = {}) {
   openProjectHome(currentProject);
   return true;
 }
-
-$$(`.operate-tab[data-view]`).forEach((button) => button.addEventListener("click", () => show(button.dataset.view)));
 
 $$(".rail-item[data-view]").forEach((b) =>
   b.addEventListener("click", () => {

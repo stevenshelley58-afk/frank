@@ -13,6 +13,7 @@ test("Ad Studio has a canonical deep link and every other view returns home", ()
   assert.deepEqual(routeForPath("/project/blockwise"), { view: "project", projectId: "blockwise" });
   assert.equal(pathForView("project", { projectId: "blockwise" }), "/project/blockwise");
   assert.deepEqual(routeForPath("/entity/tool/accounts"), { view: "entity-home", entity: { kind: "tool", id: "accounts" } });
+  assert.deepEqual(routeForPath("/entity/tool/mail"), { view: "entity-home", entity: { kind: "tool", id: "mail" } });
   assert.equal(pathForView("entity-home", { entity: { kind: "tool", id: "accounts" } }), "/entity/tool/accounts");
   assert.deepEqual(routeForPath("/entity/agent/hermes/"), { view: "entity-home", entity: { kind: "agent", id: "hermes" } });
   assert.equal(routeForPath("/entity/tool/not-registered").invalid, true);

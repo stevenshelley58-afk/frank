@@ -502,7 +502,7 @@ def connections_summary(ctx: ProviderContext) -> dict:
     counts = {status: sum(1 for item in connections if item.get("status") == status) for status in ("setup_needed", "connected", "verified", "error")}
     pending = counts["setup_needed"] + counts["connected"] + counts["error"]
     if not connections:
-        return snapshot("empty", "No apps are connected yet.", {
+        return snapshot("setup_needed", "No apps are connected yet.", {
             "connections": [],
             "description": "Choose an available app below to give Frank a provider connection.",
             "status_is_recorded": True,
