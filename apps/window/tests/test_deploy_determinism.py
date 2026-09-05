@@ -8,6 +8,7 @@ docker, realpath) are stubbed through PATH.
 
 import fcntl
 import os
+import shutil
 import subprocess
 import tempfile
 import unittest
@@ -374,6 +375,162 @@ class DeployDeterminismTest(unittest.TestCase):
             calls,
         )
 
+
+    def make_immutable_repo(self):
+        repo = self.root / "immutable-repo"
+        repo.mkdir()
+        copied = [
+            "Dockerfile", "docker-compose.yml", "Caddyfile", "deploy_lib.sh",
+            "infra/mini_builder", "infra/memory", "infra/control_plane",
+            "infra/cleanup", "infra/discovery", "infra/evaluations",
+            "infra/retention", "scripts", "graph",
+        ]
+        target = repo / "apps" / "window"
+        target.mkdir(parents=True)
+        for relative in copied:
+            source = WINDOW_DIR / relative
+            destination = target / relative
+            if source.is_dir():
+                shutil.copytree(source, destination)
+            else:
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(source, destination)
+        shutil.copytree(WINDOW_DIR.parents[1] / "governance" / "control-plane", repo / "governance" / "control-plane")
+        subprocess.run(["git", "init", "-b", "main", str(repo)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.invalid"], check=True)
+        subprocess.run(["git", "-C", str(repo), "config", "user.name", "Frank Test"], check=True)
+        subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+        subprocess.run(["git", "-C", str(repo), "commit", "-m", "fixture"], check=True, capture_output=True)
+        candidate = subprocess.check_output(["git", "-C", str(repo), "rev-parse", "HEAD"], text=True).strip()
+        origin = self.root / "origin.git"
+        subprocess.run(["git", "init", "--bare", str(origin)], check=True, capture_output=True)
+        subprocess.run(["git", "-C", str(repo), "remote", "add", "origin", str(origin)], check=True)
+        subprocess.run(["git", "-C", str(repo), "push", "-u", "origin", "main"], check=True, capture_output=True)
+        return repo, candidate
+
+    def immutable_env(self, repo, package_base):
+        tripwire_bin = self.root / "immutable-bin"
+        tripwire_bin.mkdir(exist_ok=True)
+        docker = tripwire_bin / "docker"
+        docker.write_text("#!/usr/bin/env bash\nprintf 'docker invoked\n' >> \"$FRANK_DOCKER_TRIPWIRE\"\nexit 99\n")
+        docker.chmod(0o755)
+        env = dict(os.environ)
+        env.update({
+            "PATH": f"{tripwire_bin}:/usr/bin:/bin",
+            "FRANK_DOCKER_TRIPWIRE": str(self.root / "docker-tripwire.log"),
+            "FRANK_REPO": str(repo),
+            "FRANK_TEST_CANONICAL_REPO": str(repo),
+            "FRANK_IMMUTABLE_PACKAGE_BASE": str(package_base),
+            "FRANK_DEPLOY_LOCK_FILE": str(self.root / "immutable.lock"),
+            "FRANK_DEPLOY_DRY_RUN": "1",
+        })
+        return env
+
+    def test_immutable_package_excludes_dirty_mini_and_cleans_up(self):
+        repo, candidate = self.make_immutable_repo()
+        sentinel = repo / "apps/window/web/mini/immutable-test-sentinel.txt"
+        sentinel.parent.mkdir(parents=True)
+        sentinel.write_text("must not be archived\n")
+        package_base = self.root / "packages"
+        script = (
+            f'package="$(frank_create_immutable_package {repo} {candidate})"\n'
+            'test -f "$package/apps/window/Dockerfile"\n'
+            'test ! -e "$package/apps/window/web/mini/immutable-test-sentinel.txt"\n'
+            'frank_cleanup_immutable_package "$package"\n'
+            'test ! -e "$package"\n'
+        )
+        env = self.immutable_env(repo, package_base)
+        result = subprocess.run(
+            ["bash", "-c", "set -euo pipefail\nsource %s\n%s" % (DEPLOY_LIB, script)],
+            env=env, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_immutable_dry_run_initializes_real_context_without_docker(self):
+        repo, candidate = self.make_immutable_repo()
+        sentinel = repo / "apps/window/web/mini/uncommitted.txt"
+        sentinel.parent.mkdir(parents=True)
+        sentinel.write_text("Verdent-owned dirty file\n")
+        package_base = self.root / "packages"
+        env = self.immutable_env(repo, package_base)
+        result = subprocess.run(
+            ["bash", str(DEPLOY_SH), "--revision", candidate],
+            env=env, capture_output=True, text=True, timeout=60,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(f"dry-run ok: identity and preflight validation passed for {candidate}", result.stdout)
+        self.assertFalse((self.root / "docker-tripwire.log").exists())
+        self.assertFalse(any(package_base.iterdir()) if package_base.exists() else False)
+
+    def test_immutable_dry_run_rejects_canonical_hook_mismatch_before_live_work(self):
+        repo, candidate = self.make_immutable_repo()
+        hook = repo / "apps/window/infra/memory/expose.sh"
+        hook.write_text(hook.read_text() + "\n# mismatched host hook\n")
+        package_base = self.root / "packages"
+        result = subprocess.run(
+            ["bash", str(DEPLOY_SH), "--revision", candidate],
+            env=self.immutable_env(repo, package_base), capture_output=True, text=True, timeout=60,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("canonical host-hook inputs differ", result.stderr)
+        self.assertFalse(any(package_base.iterdir()) if package_base.exists() else False)
+
+    def test_immutable_revision_rejects_invalid_commit(self):
+        repo, _ = self.make_immutable_repo()
+        result = subprocess.run(
+            ["bash", "-c", f"source {DEPLOY_LIB}; frank_resolve_immutable_revision {repo} {'d' * 40}"],
+            env=dict(os.environ), capture_output=True, text=True, timeout=60,
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("invalid immutable revision", result.stderr)
+
+    def test_immutable_cleanup_refuses_unsafe_path(self):
+        package_base = self.root / "packages"
+        unsafe = package_base / "keep-me"
+        unsafe.mkdir(parents=True)
+        result = self.run_lib(
+            f"frank_cleanup_immutable_package {unsafe}",
+            FRANK_IMMUTABLE_PACKAGE_BASE=str(package_base),
+            PATH=os.environ["PATH"],
+        )
+        self.assertNotEqual(result.returncode, 0)
+        self.assertTrue(unsafe.is_dir())
+        self.assertIn("unsafe immutable package path", result.stderr)
+
+    def test_deploy_keeps_caddy_validation_and_approval_write_in_release_order(self):
+        text = DEPLOY_SH.read_text()
+        caddy_command = 'docker run --rm \\\n  --env-file "$caddy_secret_file" \\\n  --volume "$FRANK_CADDYFILE:/etc/caddy/Caddyfile:ro"'
+        self.assertIn(caddy_command, text)
+        self.assertNotIn('--volume "$app/Caddyfile:/etc/caddy/Caddyfile:ro"', text)
+        canary = text.index("https://frank.fail/mini-frank/")
+        write = text.index('frank_write_approved_sha "$candidate_sha" "$release_dir"')
+        verify = text.index('frank_verify_approved_sha "$candidate_sha" "$release_dir/approved-sha"')
+        self.assertLess(canary, write)
+        self.assertLess(write, verify)
+        self.assertEqual(text.count('echo "deployed $candidate_sha"'), 1)
+
+    def test_immutable_path_invokes_each_verified_canonical_hook_once(self):
+        deploy = DEPLOY_SH.read_text()
+        memory = (WINDOW_DIR / "infra" / "memory" / "expose.sh").read_text()
+        installer = (WINDOW_DIR / "infra" / "control_plane" / "install.sh").read_text()
+        post_deploy = (WINDOW_DIR / "infra" / "control_plane" / "post-deploy.sh").read_text()
+        self.assertEqual(deploy.count('bash "$host_app/infra/memory/expose.sh"'), 1)
+        self.assertEqual(deploy.count('bash "$host_app/infra/control_plane/install.sh"'), 1)
+        self.assertEqual(deploy.count('post_deploy_hook="$host_app/infra/control_plane/post-deploy.sh"'), 1)
+        self.assertEqual(deploy.count('bash "$app/infra/memory/expose.sh"'), 1)
+        self.assertEqual(deploy.count('bash "$app/infra/control_plane/install.sh"'), 1)
+        self.assertEqual(deploy.count('post_deploy_hook="$app/infra/control_plane/post-deploy.sh"'), 1)
+        self.assertLess(deploy.index("frank_verify_canonical_host_inputs"), deploy.index('install -d -m 0700 -- "$secret_dir"'))
+        for hook in (memory, installer, post_deploy):
+            self.assertIn("FRANK_EXPECTED_REVISION", hook)
+            self.assertIn("canonical", hook)
+            self.assertIn("--end-of-options", hook)
+
+    def test_empty_immutable_revision_is_rejected_before_deploy_work(self):
+        result = subprocess.run(["bash", str(DEPLOY_SH), "--revision", ""], env=self.deploy_env(), capture_output=True, text=True, timeout=60)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("--revision requires a commit", result.stderr)
+        self.assertFalse(self.stub_log.exists())
 
 if __name__ == "__main__":
     unittest.main()

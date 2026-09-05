@@ -86,9 +86,25 @@ off until the Hermes plugin, broker, and vault checks below are live.
 
 6. **Deploy Frank.** Run `apps/window/deploy.sh` for the exact committed SHA.
    The deploy installs/verifies all host control-plane units and creates
-   `/srv/frank/backups/control-plane` as a root-owned `0750` directory. A fresh
-   install (or an invalid/missing current release pointer) leaves every timer
-   stopped and disabled; a routine deploy preserves timers only when the
+   `/srv/frank/backups/control-plane` as a root-owned `0750` directory.
+   When the canonical checkout contains another agent's unrelated edits, deploy
+   a verified merged commit without touching that work:
+
+   ```sh
+   /projects/frank/apps/window/deploy.sh --revision <full-40-character-SHA>
+   ```
+
+   This mode accepts only a commit reachable from `origin/main`, builds solely
+   from a private `git archive` of that commit, and removes that package on all
+   exits. It keeps the normal no-argument deploy's strict clean-worktree rule.
+   The Caddy file is copied and byte-verified into a revision-pinned release
+   artifact before Compose starts, so no live bind mount targets the temporary
+   archive. Durable host hooks continue to run from the canonical checkout only
+   after their scripts, imported modules, units, and governance inputs are
+   verified identical to the selected SHA; a mismatch aborts before live state
+   changes.
+   A fresh install (or an invalid/missing current release pointer) leaves every
+   timer stopped and disabled; a routine deploy preserves timers only when the
    existing production current pointer and immutable release record validate.
    It validates the secret boundary, derives a Caddy env file containing only
    basic-auth settings, and uses the existing private basic-auth hash solely
