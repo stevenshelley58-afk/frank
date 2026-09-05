@@ -1824,6 +1824,86 @@ def _public_ad_studio_review_summary(value: object, run_id: str) -> dict:
     return public
 
 
+def _exact_clone_review_summary(output: dict, model_profile: dict) -> dict:
+    """Adapt Hermes' sole exact-clone root output to Frank's review view."""
+    if output.get("process") != "exact-clone":
+        return {}
+    references = output.get("references") if isinstance(output.get("references"), list) else []
+    source_placement = next((
+        str(item.get("sourcePlacement") or "").lower()
+        for item in references if isinstance(item, dict) and item.get("sourcePlacement") in {"feed", "story"}
+    ), "")
+    reciprocal = next((
+        item for item in references
+        if isinstance(item, dict) and item.get("kind") == "reciprocal-image-reference"
+    ), None)
+    if not source_placement and isinstance(reciprocal, dict):
+        source_placement = "story" if reciprocal.get("placement") == "feed" else "feed"
+
+    raw_source = output.get("source")
+    source_name = str(raw_source.get("name") if isinstance(raw_source, dict) else raw_source or "").strip()
+    summary = {
+        "source": {"name": source_name, "kind": "original-source", "placement": source_placement},
+        "references": references,
+        "previews": [],
+        "diffs": output.get("diffs"),
+        "warnings": output.get("warnings"),
+        "font_substitution": output.get("font_substitution"),
+        "smoke_test": output.get("smoke_test"),
+        "model_profile": model_profile,
+    }
+    iterations = output.get("iterations") if isinstance(output.get("iterations"), list) else []
+    accepted = next((
+        item for item in reversed(iterations)
+        if isinstance(item, dict) and str(item.get("decision") or "").lower() in {"accept", "accepted", "pass", "passed"}
+    ), {})
+    for name in accepted.get("previews") if isinstance(accepted.get("previews"), list) else []:
+        match = re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", str(name or ""))
+        if match:
+            summary["previews"].append({"name": name, "placement": match.group(1), "kind": "qa-source-filled"})
+    for item in output.get("previews") if isinstance(output.get("previews"), list) else []:
+        if isinstance(item, dict):
+            summary["previews"].append(item)
+
+    comparator = (output.get("scores") or {}).get("comparator") if isinstance(output.get("scores"), dict) else {}
+    if not isinstance(comparator, dict):
+        comparator = accepted.get("scores") if isinstance(accepted.get("scores"), dict) else {}
+    def normalized(value):
+        number = _number_from(value)
+        return round(number * 10, 4) if number is not None and 0 <= number <= 1 else number
+    scores = {"overall": normalized(comparator.get("overall"))}
+    reviewers = []
+    final = output.get("final_review") if isinstance(output.get("final_review"), dict) else {}
+    for index, item in enumerate(final.get("reviewers") if isinstance(final.get("reviewers"), list) else [], 1):
+        if not isinstance(item, dict):
+            continue
+        item_scores = item.get("scores") if isinstance(item.get("scores"), dict) else {}
+        reviewers.append({
+            "label": f"Final reviewer {index}",
+            "decision": "pass" if str(item.get("decision") or "").lower() in {"accept", "accepted", "pass", "passed"} else str(item.get("decision") or ""),
+            "score": normalized(item_scores.get("overall")),
+        })
+    scores["reviewers"] = reviewers
+    summary["scores"] = scores
+    summary["iterations"] = len(iterations)
+    summary["elapsed_seconds"] = output.get("elapsed_seconds")
+
+    layers = output.get("layers") if isinstance(output.get("layers"), dict) else {}
+    summary["layers"] = [
+        {
+            "id": str(layer.get("layerId") or ""),
+            "name": str(layer.get("inputKey") or layer.get("layerId") or "Layer"),
+            "type": str(layer.get("type") or "unknown"),
+            "placement": placement,
+            "editable": bool(layer.get("inputKey")),
+        }
+        for placement in ("feed", "story")
+        for layer in ((layers.get(placement) or {}).get("ordered") or [])
+        if isinstance(layer, dict)
+    ]
+    return summary
+
+
 def _ad_studio_source_url(run_id: str, name: str) -> str | None:
     suffix = Path(str(name or "")).suffix.lower()
     if suffix not in {".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}:
@@ -2014,7 +2094,258 @@ def _public_ad_studio_model_profile(run: dict) -> dict:
     } if roles else {}
 
 
-def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
+def _exact_clone_event_layers(value: object) -> list[dict]:
+    """Project only layer metadata explicitly recorded in durable evidence."""
+    if isinstance(value, list):
+        return _public_ad_studio_layers(value)
+    if not isinstance(value, dict):
+        return []
+    layers = []
+    for placement in ("feed", "story"):
+        placement_value = value.get(placement)
+        ordered = placement_value.get("ordered") if isinstance(placement_value, dict) else None
+        for raw in ordered if isinstance(ordered, list) else []:
+            if not isinstance(raw, dict):
+                continue
+            layers.append({
+                "id": str(raw.get("layerId") or ""),
+                "name": str(raw.get("inputKey") or raw.get("layerId") or "Layer"),
+                "type": str(raw.get("type") or "unknown"),
+                "placement": placement,
+                "editable": bool(raw.get("inputKey")),
+            })
+    return _public_ad_studio_layers(layers)
+
+
+def _exact_clone_event_model_profile(events: list[dict]) -> dict:
+    """Adapt the immutable profile snapshot recorded with command.accepted."""
+    snapshot = {}
+    for event in events:
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        candidate = data.get("model_profile")
+        if event.get("kind") == "command.accepted" and isinstance(candidate, dict):
+            snapshot = candidate
+    role_specs = (
+        ("builder", "Builder & analysis"),
+        ("comparator", "Comparator"),
+        ("fallback", "Quality escalation"),
+        ("final-review-a", "Final review A"),
+        ("final-review-b", "Final review B"),
+    )
+    roles = []
+    for role, label in role_specs:
+        raw = snapshot.get(role)
+        if not isinstance(raw, dict):
+            continue
+        provider = str(raw.get("provider") or "").strip()
+        model = str(raw.get("model") or "").strip()
+        if not (
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", provider)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", model)
+        ):
+            continue
+        roles.append({"role": role, "label": label, "provider": provider, "model": model})
+    revision = snapshot.get("profile_revision")
+    return {
+        "source": "Hermes durable run event", "immutable": True, "roles": roles,
+        **({"revision": revision} if isinstance(revision, int) and not isinstance(revision, bool) else {}),
+    } if roles else {}
+
+
+def _exact_clone_event_output(run: dict, events: object, model_profile: dict) -> dict:
+    """Recover a bounded monitor view from already-durable exact-clone events."""
+    if not isinstance(events, list):
+        return {}
+    ordered = [item for item in events[:1000] if isinstance(item, dict)]
+    ordered.sort(key=lambda item: item.get("sequence") if isinstance(item.get("sequence"), int) else -1)
+    process_kinds = {
+        "source-map.completed", "aspect-reference-image.started",
+        "aspect-reference-image.completed", "aspect-reference.started",
+        "aspect-reference.completed", "iteration.rendered", "iteration.compared",
+        "final-review.started", "final-review.completed",
+    }
+    if not any(str(item.get("kind") or "") in process_kinds for item in ordered):
+        return {}
+
+    source_placement = target_placement = ""
+    reference_available = False
+    source_available = False
+    iteration_records = {}
+    latest_previews = []
+    latest_diffs = []
+    latest_scores = {}
+    latest_reviewers = []
+    layers = []
+
+    def score(value: object) -> int | float | None:
+        number = _number_from(value)
+        return round(number * 10, 4) if number is not None and 0 <= number <= 1 else number
+
+    for event in ordered:
+        kind = str(event.get("kind") or "")
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        if kind.startswith("aspect-reference"):
+            for key, destination in (("source_placement", "source"), ("target_placement", "target")):
+                placement = str(data.get(key) or "").lower()
+                if placement in {"feed", "story"}:
+                    if destination == "source":
+                        source_placement = placement
+                    else:
+                        target_placement = placement
+        if kind == "source-map.completed":
+            source_available = True
+        # Emitted only after the reciprocal image is in the public preview root.
+        if kind in {"aspect-reference.started", "aspect-reference.completed"}:
+            reference_available = True
+        event_layers = _exact_clone_event_layers(data.get("layers")) if kind in process_kinds else []
+        if event_layers:
+            layers = event_layers
+        if kind == "final-review.completed":
+            reviewers = []
+            for index, raw in enumerate(data.get("reviewers") if isinstance(data.get("reviewers"), list) else [], 1):
+                if not isinstance(raw, dict):
+                    continue
+                raw_scores = raw.get("scores") if isinstance(raw.get("scores"), dict) else {}
+                reviewer_score = score(raw_scores.get("overall"))
+                reviewer = {
+                    "label": f"Final reviewer {index}",
+                    "decision": "pass" if str(raw.get("decision") or "").lower() in {"accept", "accepted", "pass", "passed"} else str(raw.get("decision") or "")[:40],
+                }
+                if reviewer_score is not None:
+                    reviewer["score"] = reviewer_score
+                reviewers.append(reviewer)
+            if reviewers:
+                latest_reviewers = reviewers
+            continue
+        if kind not in {"iteration.rendered", "iteration.compared"}:
+            continue
+
+        iteration = data.get("iteration")
+        if not isinstance(iteration, int) or isinstance(iteration, bool) or not 1 <= iteration <= 10_000:
+            continue
+        record = iteration_records.setdefault(iteration, {
+            "iteration": iteration, "decision": "revise", "comparison": {}, "previews": [],
+        })
+        if kind == "iteration.rendered":
+            previews = []
+            for raw_name in data.get("previews") if isinstance(data.get("previews"), list) else []:
+                name = str(raw_name.get("name") if isinstance(raw_name, dict) else raw_name or "").strip()
+                match = re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", name, re.IGNORECASE)
+                if not match:
+                    continue
+                artifact = _public_ad_studio_review_artifact({
+                    "name": name, "placement": match.group(1).lower(), "kind": "qa-source-filled",
+                }, str(run.get("id") or run.get("run_id") or ""))
+                if artifact:
+                    previews.append(artifact)
+            diffs = []
+            for raw_name in data.get("diffs") if isinstance(data.get("diffs"), list) else []:
+                name = str(raw_name.get("name") if isinstance(raw_name, dict) else raw_name or "").strip()
+                match = re.fullmatch(
+                    r"iteration-[0-9]{2}-(feed|story)-(overlay|difference)\.png", name, re.IGNORECASE,
+                )
+                if not match:
+                    continue
+                artifact = _public_ad_studio_review_artifact({
+                    "name": name, "placement": match.group(1).lower(), "kind": match.group(2).lower(),
+                    "view": match.group(2).lower(),
+                }, str(run.get("id") or run.get("run_id") or ""))
+                if artifact:
+                    diffs.append(artifact)
+            if previews:
+                record["previews"] = previews
+            if previews or diffs:
+                latest_previews = previews
+                latest_diffs = diffs
+        elif kind == "iteration.compared":
+            raw_scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
+            comparison_scores = {}
+            for key, value in list(raw_scores.items())[:24]:
+                normalized = score(value)
+                if normalized is not None:
+                    comparison_scores[str(key)] = normalized
+            overall = score(data.get("score"))
+            if overall is not None:
+                comparison_scores["overall"] = overall
+            if comparison_scores:
+                latest_scores = comparison_scores
+                record["comparison"] = {"score": comparison_scores.get("overall")}
+            decision = str(data.get("decision") or "").lower()
+            if decision in {"accept", "accepted", "pass", "passed"}:
+                record["decision"] = "accepted"
+
+    run_id = str(run.get("id") or run.get("run_id") or "")
+    summary = {"previews": latest_previews, "diffs": latest_diffs}
+    source_values = (run.get("payload") or {}).get("sources") if isinstance(run.get("payload"), dict) else []
+    source_item = source_values[0] if isinstance(source_values, list) and source_values and isinstance(source_values[0], dict) else {}
+    source_url = _ad_studio_source_url(run_id, str(source_item.get("name") or "")) if source_available else None
+    if source_url:
+        summary["source"] = {
+            "name": urllib.parse.unquote(source_url.rsplit("/", 1)[-1]), "kind": "original-source",
+            **({"placement": source_placement} if source_placement else {}),
+        }
+    if reference_available and target_placement:
+        summary["references"] = [{
+            "name": f"reference-{target_placement}.png", "placement": target_placement,
+            "kind": "reciprocal-image-reference",
+        }]
+    if latest_scores or latest_reviewers:
+        summary["scores"] = {**latest_scores, **({"reviewers": latest_reviewers} if latest_reviewers else {})}
+    profile = model_profile or _exact_clone_event_model_profile(ordered)
+    if profile:
+        summary["model_profile"] = profile
+    if layers:
+        summary["layers"] = layers
+    iterations = [iteration_records[key] for key in sorted(iteration_records)[-30:]]
+    if iterations:
+        summary["iterations"] = len(iterations)
+    public_summary = _public_ad_studio_review_summary(summary, run_id)
+    return {
+        "process": "exact-clone",
+        **({"review_summary": public_summary} if public_summary else {}),
+        **({"previews": latest_previews} if latest_previews else {}),
+        **({"iterations": iterations} if iterations else {}),
+    }
+
+
+def _read_ad_studio_run_events(run_id: str) -> list[dict]:
+    """Read the current durable SSE backlog with strict time/size bounds."""
+    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+        return []
+    url = hermes_base() + _tool_run_path(run_id, "/events") + "?" + urllib.parse.urlencode({"after": -1})
+    headers = {"Accept": "text/event-stream"}
+    if HERMES_KEY:
+        headers["Authorization"] = f"Bearer {HERMES_KEY}"
+    events = []
+    total = 0
+    data_lines = []
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=0.75) as response:
+            while total < 1_000_000 and len(events) < 1000:
+                line = response.readline(min(65_537, 1_000_001 - total))
+                if not line:
+                    break
+                total += len(line)
+                if len(line) > 65_536:
+                    data_lines = []
+                    continue
+                text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if text.startswith("data:"):
+                    data_lines.append(text[5:].lstrip())
+                elif not text and data_lines:
+                    try:
+                        event = json.loads("\n".join(data_lines))
+                    except (json.JSONDecodeError, ValueError):
+                        event = None
+                    if isinstance(event, dict):
+                        events.append(event)
+                    data_lines = []
+    except (OSError, TimeoutError, urllib.error.URLError):
+        pass
+    return events
+
+
+def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "", events: object = None) -> dict:
     """Project Hermes state for Frank's internal operator monitor."""
     now = int(time.time())
     payload = run.get("payload") if isinstance(run.get("payload"), dict) else {}
@@ -2022,10 +2353,15 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     source = sources[0] if sources and isinstance(sources[0], dict) else {}
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_id = str(run.get("id") or run.get("run_id") or "")
+    model_profile = _public_ad_studio_model_profile(run)
+    if not model_profile and isinstance(events, list):
+        model_profile = _exact_clone_event_model_profile(events[:1000])
     safe_output = {key: output.get(key) for key in (
         "iterations", "final_review", "process",
     ) if key in output}
-    review_summary = _public_ad_studio_review_summary(output.get("review_summary"), str(run.get("run_id") or run.get("id") or ""))
+    review_value = output.get("review_summary") if isinstance(output.get("review_summary"), dict) else _exact_clone_review_summary(output, model_profile)
+    review_summary = _public_ad_studio_review_summary(review_value, run_id)
     if review_summary:
         safe_output["review_summary"] = review_summary
     public_import = _public_ad_studio_import(output.get("import"))
@@ -2043,7 +2379,11 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         safe_output["previews"] = previews
     if "iterations" in output:
         safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"), str(run.get("run_id") or run.get("id") or ""))
-    run_id = str(run.get("id") or run.get("run_id") or "")
+    if str(run.get("status") or "") not in {"ready_for_review", "completed", "approved"}:
+        event_output = _exact_clone_event_output(run, events, model_profile)
+        for key, value in event_output.items():
+            if key not in safe_output or not safe_output[key]:
+                safe_output[key] = value
     source_public = {
         "name": str(source.get("name") or ""),
         "size": int(source.get("size") or 0),
@@ -2053,7 +2393,6 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     source_url = _ad_studio_source_url(run_id, source_public["name"])
     if source_url:
         source_public["url"] = source_url
-    model_profile = _public_ad_studio_model_profile(run)
     raw_usage = output.get("usage") if isinstance(output.get("usage"), dict) else {}
     raw_cost = output.get("cost") if isinstance(output.get("cost"), dict) else {}
     usage = {}
@@ -2562,7 +2901,8 @@ def ad_studio_run_get(run_id: str):
     except Exception as error:
         return _hermes_error(error)
     run = data.get("run") if isinstance(data.get("run"), dict) else data
-    return jsonify({"run": _public_ad_studio_run(run)})
+    events = _read_ad_studio_run_events(run_id) if isinstance(run, dict) and str(run.get("status") or "") not in {"ready_for_review", "completed", "approved"} else []
+    return jsonify({"run": _public_ad_studio_run(run, events=events)})
 
 
 @app.get("/api/ad-studio/runs/<run_id>/events")

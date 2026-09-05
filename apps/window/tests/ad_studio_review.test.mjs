@@ -46,3 +46,14 @@ test("source-filled QA and reusable customer renders stay visibly distinct", () 
   assert.equal(reviewArtifactPurpose(evidence.previews[1]), "customer-default");
   assert.equal(selectReusableReviewArtifact(summary, "feed"), null);
 });
+
+test("Story source uses the reciprocal reference and final shippable is reusable", () => {
+  const evidence = {
+    source: { name: "source.png", placement: "feed", url: "/source" },
+    references: [{ name: "reference-story.png", placement: "story", kind: "reciprocal-image-reference", url: "/story-reference" }],
+    previews: [{ name: "neutral-story.png", placement: "story", kind: "final-neutral-shippable", url: "/neutral" }],
+  };
+  assert.equal(selectReviewArtifact(evidence, "feed", "source").url, "/source");
+  assert.equal(selectReviewArtifact(evidence, "story", "source").url, "/story-reference");
+  assert.equal(selectReusableReviewArtifact(evidence, "story").url, "/neutral");
+});
