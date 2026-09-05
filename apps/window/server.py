@@ -24,6 +24,7 @@ from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, redirect, request, send_file, send_from_directory, stream_with_context
+from werkzeug.exceptions import HTTPException
 
 import home_platform
 import home_defaults
@@ -581,6 +582,16 @@ def health():
 @app.errorhandler(ProjectStoreError)
 def project_store_error(error: ProjectStoreError):
     return jsonify({"error": str(error)}), 503
+
+
+@app.errorhandler(HTTPException)
+def api_http_exception(error: HTTPException):
+    """Return API validation failures as JSON so operator messages stay visible."""
+    if not request.path.startswith("/api/"):
+        return error
+    description = error.description
+    message = description.strip()[:300] if isinstance(description, str) and description.strip() else error.name
+    return jsonify({"error": {"message": message}}), error.code or 500
 
 
 @app.get("/api/projects")
@@ -2345,6 +2356,25 @@ def _read_ad_studio_run_events(run_id: str) -> list[dict]:
     return events
 
 
+def _public_ad_studio_final_review(value: object) -> dict:
+    """Project only the bounded reviewer evidence the monitor renders."""
+    if not isinstance(value, dict):
+        return {}
+    reviewers = []
+    raw_reviewers = value.get("reviewers") if isinstance(value.get("reviewers"), list) else []
+    for item in raw_reviewers[:8]:
+        if not isinstance(item, dict):
+            continue
+        reviewer = {"decision": str(item.get("decision") or "")[:40]}
+        scores = item.get("scores") if isinstance(item.get("scores"), dict) else {}
+        score = _number_from(scores.get("overall"))
+        if score is not None:
+            reviewer["score"] = score
+        reviewers.append(reviewer)
+    decision = str(value.get("decision") or "")[:40]
+    return {"decision": decision, "reviewers": reviewers} if reviewers or decision else {}
+
+
 def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "", events: object = None) -> dict:
     """Project Hermes state for Frank's internal operator monitor."""
     now = int(time.time())
@@ -2358,8 +2388,11 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "", e
     if not model_profile and isinstance(events, list):
         model_profile = _exact_clone_event_model_profile(events[:1000])
     safe_output = {key: output.get(key) for key in (
-        "iterations", "final_review", "process",
+        "iterations", "process",
     ) if key in output}
+    public_final_review = _public_ad_studio_final_review(output.get("final_review"))
+    if public_final_review:
+        safe_output["final_review"] = public_final_review
     review_value = output.get("review_summary") if isinstance(output.get("review_summary"), dict) else _exact_clone_review_summary(output, model_profile)
     review_summary = _public_ad_studio_review_summary(review_value, run_id)
     if review_summary:

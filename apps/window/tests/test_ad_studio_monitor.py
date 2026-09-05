@@ -297,6 +297,46 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes", json={"instructions": ""}).status_code, 400)
         self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/discard", json={"reason": "x" * 1_001}).status_code, 400)
 
+    def test_api_validation_errors_reach_the_operator_as_json_messages(self):
+        client = server.app.test_client()
+        response = client.post(
+            "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes",
+            json={"instructions": ""},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("change instructions", response.get_json()["error"]["message"])
+        invalid_action = client.post(
+            "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve",
+            json={"force": True},
+        )
+        self.assertEqual(invalid_action.status_code, 400)
+        self.assertEqual(invalid_action.get_json()["error"]["message"], "invalid action")
+
+    def test_final_review_projection_keeps_only_bounded_reviewer_evidence(self):
+        projected = server._public_ad_studio_run({
+            "run_id": "trun_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "status": "ready_for_review",
+            "output": {
+                "final_review": {
+                    "decision": "accepted",
+                    "internal_notes": "/srv/private/notes",
+                    "reviewers": [
+                        {"decision": "accept", "scores": {"overall": 0.99}, "route": "openai-codex/gpt-5.6-luna"},
+                        {"decision": "accept", "scores": {"overall": 9.8}},
+                    ],
+                },
+            },
+        })
+        final_review = projected["output"]["final_review"]
+        self.assertEqual(final_review, {
+            "decision": "accepted",
+            "reviewers": [
+                {"decision": "accept", "score": 0.99},
+                {"decision": "accept", "score": 9.8},
+            ],
+        })
+        self.assertNotIn("internal_notes", json.dumps(final_review))
+
     def test_archify_receipt_is_bound_to_spec_artifact_and_validator(self):
         previous = (
             server.ARCHIFY_ARTIFACT, server.ARCHIFY_SPEC,
