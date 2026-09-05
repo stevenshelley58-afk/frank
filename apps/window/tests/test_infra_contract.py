@@ -254,15 +254,20 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("/srv/frank/data/window:/data", window)
         self.assertNotIn("/projects:/vps/projects", window)
         self.assertNotIn("/var/run/docker.sock", window)
+        # The base compose keeps only Frank's own repo mount. Product workspace
+        # mounts are generated per registry into the workspaces override file
+        # (see apps/window/scripts/generate_workspace_override.py) and must
+        # never be hardcoded back into this file.
+        self.assertIn("/projects/frank:/vps/projects/frank:ro", window)
         for mount in (
-            "/projects/frank:/vps/projects/frank:ro",
             "/projects/mini-frank:/vps/projects/mini-frank:ro",
             "/projects/blockwise-product-release-21a192cd2420:/vps/projects/blockwise:ro",
             "/projects/merrypaws:/vps/projects/merrypaws:ro",
             "/projects/elfandwonder:/vps/projects/elfandwonder:ro",
             "/projects/pavone-demo:/vps/projects/pavone-demo:ro",
         ):
-            self.assertIn(mount, window)
+            self.assertNotIn(mount, window)
+        self.assertIn("generate_workspace_override.py", deploy)
         self.assertIn("/srv/frank/previews:/srv/frank/previews:ro", caddy)
         self.assertNotIn("mini-shared/workspaces", caddy)
         self.assertIn("secrets.token_urlsafe(48)", deploy)

@@ -126,7 +126,10 @@ frank_verify_image_critical_manifest() {
     echo "refusing deploy: image $image lacks a valid critical-file manifest" >&2
     return 1
   }
-  docker run --rm "$image" python -c \
+  docker run --rm \
+    --tmpfs /data:rw,mode=0700 --tmpfs /previews/mini:rw,mode=0755 --tmpfs /legacy-mini-projects:rw,mode=0755 \
+    -e TMPDIR=/data -e CHAT_STORE_DIR=/data -e MINI_PREVIEW_ROOT=/previews/mini \
+    "$image" python -c \
     'import server, connections_agent, home_platform, tool_apps' || {
     echo "refusing deploy: image $image is missing critical runtime modules" >&2
     return 1
