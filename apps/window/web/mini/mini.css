@@ -1487,3 +1487,6 @@ body:not(.is-conversation-active) { overflow-x: hidden; overflow-y: auto; }
   .guide-decision-card.is-transitioning { opacity: 1; transform: none; }
   .guide-choice.is-pressed, .guide-choice:active { transform: none; }
 }
+
+.work-freshness { grid-column: 1 / -1; color: var(--muted); font-size: 10.5px; line-height: 1.35; }
+.work-freshness.is-stale { color: var(--ink-soft); }

@@ -1,0 +1,35 @@
+{
+  "schema": "schema://frank.shared-library-catalog/v1",
+  "version": 1,
+  "records": [
+    {
+      "schema": "schema://frank.shared-library-record/v1",
+      "id": "knowledge:frank/reuse-before-build",
+      "version": 1,
+      "kind": "knowledge",
+      "title": "Reuse approved capabilities before building",
+      "summary": "Inspect Frank's approved central skills, tools, and reusable knowledge before adding product-specific code. Reuse compatible references and build only the missing behaviour.",
+      "tags": ["reuse", "architecture", "skills", "tools"],
+      "industry": "general",
+      "source": {
+        "kind": "repository",
+        "reference": "repo://frank/AGENTS.md",
+        "revision": "sha256:0ef88766ffca1e87f6a557627df0c357c3cc5e20b02cd004df58dc763ac89f96",
+        "sha256": "0ef88766ffca1e87f6a557627df0c357c3cc5e20b02cd004df58dc763ac89f96"
+      },
+      "status": "approved",
+      "sensitivity": "public",
+      "verified_at": "2026-09-05",
+      "expires_at": "2027-09-05",
+      "reference": "",
+      "license_spdx": "",
+      "test_refs": [],
+      "admission": {
+        "mode": "repository_seed",
+        "reviewed_by": "operator:frank-control-plane",
+        "candidate_digest": "sha256:0ef88766ffca1e87f6a557627df0c357c3cc5e20b02cd004df58dc763ac89f96",
+        "admitted_at": "2026-09-05"
+      }
+    }
+  ]
+}
