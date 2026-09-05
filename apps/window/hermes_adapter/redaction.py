@@ -30,7 +30,8 @@ _URL_SECRET = re.compile(
     r"(?i)([?&](?:token|api_key|apikey|access_token|session_token|sig|signature)=)([^&\s'\"]+)"
 )
 _RESTRICTED_PATH = re.compile(
-    r"(?<![\w./-])(?:/srv/frank/secrets|/home/(?:hermes|codex)/\.hermes|"
+    r"(?<![\w./-])(?:/srv/frank/secrets|/srv/frank/data/window|"
+    r"/home/(?:hermes|codex)/\.hermes|"
     r"/home/hermes/\.config|/root/\.codex)(?:/[\w.-]+)*"
 )
 
