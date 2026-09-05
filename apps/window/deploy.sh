@@ -3,6 +3,34 @@ set -euo pipefail
 
 repo="${FRANK_REPO:-/projects/frank}"
 app="$repo/apps/window"
+# Shared, individually testable deployment checks.
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/deploy_lib.sh"
+
+# Exclusive host deployment lock: concurrent deployments must fail
+# immediately, before any build or container mutation.
+frank_acquire_deploy_lock || exit 1
+
+[[ "$(realpath -e -- "$repo")" == "/projects/frank" ]] || {
+  echo "refusing non-canonical Frank repository: $repo" >&2
+  exit 1
+}
+git -C "$repo" diff --quiet HEAD -- || {
+  echo "refusing to deploy an uncommitted Frank revision" >&2
+  exit 1
+}
+
+# Self-check mode: run identity and preflight validation only, exit before
+# any directory, secret, build, or container mutation.
+if [[ "${FRANK_DEPLOY_DRY_RUN:-0}" == "1" ]]; then
+  candidate_sha="$(frank_candidate_sha)"
+  frank_verify_source_identity "$candidate_sha"
+  export FRANK_WINDOW_IMAGE_TAG="$candidate_sha"
+  export FRANK_AGENTTRAIL_IMAGE_TAG="$candidate_sha"
+  frank_verify_tag_encodes_sha "frank-window:${FRANK_WINDOW_IMAGE_TAG}" "$candidate_sha"
+  frank_verify_tag_encodes_sha "frank-agenttrail:${FRANK_AGENTTRAIL_IMAGE_TAG}" "$candidate_sha"
+  echo "dry-run ok: identity and preflight validation passed for $candidate_sha"
+  exit 0
+fi
 secret_dir="/srv/frank/secrets"
 secret_file="$secret_dir/window.env"
 hermes_api_key_file="$secret_dir/hermes-api-key"
@@ -215,31 +243,46 @@ docker build \
   --tag frank-mini-builder:mini-v1 \
   --file "$app/infra/mini_builder/Dockerfile" \
   "$app/infra/mini_builder"
-docker compose build \
-  --build-arg SOURCE_SHA="$(git -C "$app" rev-parse HEAD)" \
-  --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  frank-window frank-agenttrail
-export SOURCE_SHA="$(git -C "$app" rev-parse HEAD)"
+
+# Immutable deployment identity: both images are tagged with the exact
+# full source SHA. The compose file resolves these through the environment
+# and can never name the mutable :current tag as a deployment identity.
+candidate_sha="$(frank_candidate_sha)"
+export SOURCE_SHA="$candidate_sha"
 export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-# Phase E: refuse a revision that is not pushed, and verify the freshly
-# built image carries the exact source SHA before anything is replaced.
-head_sha="$(git -C "$repo" rev-parse HEAD)"
-git -C "$repo" fetch --quiet origin
-git -C "$repo" merge-base --is-ancestor "$head_sha" origin/main || {
-  echo "refusing to deploy an unpushed Frank revision: $head_sha" >&2
-  exit 1
-}
-image_sha="$(docker image inspect frank-window:current \
-  --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
-[[ "$image_sha" == "$head_sha" ]] || {
-  echo "refusing deploy: image label $image_sha != built revision $head_sha" >&2
-  exit 1
-}
+export FRANK_WINDOW_IMAGE_TAG="$candidate_sha"
+export FRANK_AGENTTRAIL_IMAGE_TAG="$candidate_sha"
+docker compose build \
+  --build-arg SOURCE_SHA="$candidate_sha" \
+  --build-arg BUILD_TIME="$BUILD_TIME" \
+  frank-window frank-agenttrail
+
+# Validate everything about the freshly built, immutably tagged images
+# before any container is replaced.
+frank_verify_source_identity "$candidate_sha"
+frank_verify_image_exists "frank-window:$candidate_sha"
+frank_verify_image_exists "frank-agenttrail:$candidate_sha"
+frank_verify_image_label "frank-window:$candidate_sha" "$candidate_sha"
+frank_verify_image_label "frank-agenttrail:$candidate_sha" "$candidate_sha"
+window_digests="$(frank_image_digests "frank-window:$candidate_sha")"
+agenttrail_digests="$(frank_image_digests "frank-agenttrail:$candidate_sha")"
+frank_verify_compose_images "$candidate_sha"
 docker compose config --quiet
 docker run --rm \
   --env-file "$caddy_secret_file" \
   --volume "$app/Caddyfile:/etc/caddy/Caddyfile:ro" \
   caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile
+frank_verify_image_critical_manifest "frank-window:$candidate_sha"
+
+# Record the previously approved revision and running image identities so a
+# failed cutover can restore them; the previous images are immutable-tagged
+# and are never retagged or deleted.
+frank_record_rollback_receipt "$release_dir" "$repo"
+
+# Only after all validation: refresh the convenience pointer tag (never the
+# deployment identity) and cut over.
+docker tag "frank-window:$candidate_sha" frank-window:current
+docker tag "frank-agenttrail:$candidate_sha" frank-agenttrail:current
 
 # The previous Window and Caddy were created by two retired compose projects.
 # Build first, then make the shortest possible atomic cutover to this one stack.
@@ -249,12 +292,11 @@ docker rm -f frank-window frank-caddy frank-frank-caddy-1 >/dev/null 2>&1 || tru
 
 if ! docker compose up -d --remove-orphans; then
   echo "new Frank stack failed to start; restoring the previous runtime" >&2
-  if [[ -f /frank/window/docker-compose.yml ]]; then
-    docker compose -f /frank/window/docker-compose.yml up -d frank-window || true
-  fi
-  if [[ -f /frank/deployed/infra/docker-compose.dev.yml ]]; then
-    docker compose -f /frank/deployed/infra/docker-compose.dev.yml up -d frank-caddy || true
-  fi
+  # Rollback only re-creates the previous stack from its recorded receipt;
+  # it never modifies the approved-sha file.
+  frank_restore_previous_runtime "$release_dir" \
+    "/frank/window/docker-compose.yml:frank-window" \
+    "/frank/deployed/infra/docker-compose.dev.yml:frank-caddy"
   exit 1
 fi
 
@@ -299,9 +341,10 @@ trap - EXIT
 
 release_dir=/var/lib/frank/release
 install -d -o root -g root -m 0755 -- "$release_dir"
-release_tmp="$(mktemp "$release_dir/.approved-sha.XXXXXX")"
-printf '%s\n' "$(git -C "$repo" rev-parse HEAD)" >"$release_tmp"
-chown root:root "$release_tmp"; chmod 0644 "$release_tmp"; mv -f -- "$release_tmp" "$release_dir/approved-sha"
+# Approved only now: the new containers are healthy and every in-script
+# health, import, API, and Mini-canary check has passed.
+frank_write_approved_sha "$candidate_sha" "$release_dir"
+frank_verify_approved_sha "$candidate_sha" "$release_dir/approved-sha"
 curl --fail --silent --show-error --output /dev/null \
   --retry 10 --retry-delay 2 --retry-all-errors \
   https://frank.fail/frank/
