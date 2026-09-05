@@ -203,8 +203,13 @@
               <div class="ad-submit-row"><p id="ad-run-status" role="status">Add one or more images. Each image becomes its own background job.</p><button type="submit" class="ad-primary" id="ad-run-submit" disabled>Run jobs</button></div>
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
-              <h3>Your images. Separate live template runs.</h3>
-              <ol><li><strong>Read the design</strong><span>Hermes measures the source design.</span></li><li><strong>Build editable layers</strong><span>The builder creates separate Feed and Story documents, including shading, effects and editable content.</span></li><li><strong>Render, compare, correct</strong><span>One comparator applies focused corrections until both placements reach 9.8 likeness.</span></li><li><strong>Review before publishing</strong><span>Two final reviews and the Blockwise smoke test must pass before the template reaches your review queue.</span></li></ol>
+              <h3>Exact-clone runs. One source per job.</h3>
+              <ol>
+                <li><strong>Measure a fixed target</strong><span>Hermes measures geometry, colour, type, imagery, shading and effects deterministically.</span></li>
+                <li><strong>Generate reference, build once</strong><span>A generated reciprocal reference checks the source measurement; the builder then authors one editable Feed and Story template.</span></li>
+                <li><strong>Compare, then patch only</strong><span>Up to four focused passes and two final patch passes correct the existing template until both placements reach 9.8 likeness.</span></li>
+                <li><strong>Review once, then quarantine</strong><span>Two final reviewers score the finished result once. A passing Blockwise smoke test sends it to your manual Ready for Review queue.</span></li>
+              </ol>
               <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
             </aside>
           </div>
@@ -249,13 +254,13 @@
               <div><strong>Implementation activity</strong><span id="ad-agenttrail-status">Checking AgentTrail board&</span><pre id="ad-agenttrail-board" hidden></pre></div>
             </section>
             <section class="ad-system-map" aria-label="Frank generation architecture">
-              <div><strong>Frank</strong><span>Starts the run, shows progress and records your final decision.</span></div><i aria-hidden="true"></i>
+              <div><strong>Frank</strong><span>Starts the run, shows Hermes progress and records your manual decision.</span></div><i aria-hidden="true"></i>
               <div><strong>Hermes</strong><span>Owns the durable run and events.</span></div><i aria-hidden="true"></i>
-              <div><strong>Template Builder</strong><span>Creates editable Feed and native Story layers.</span></div><i aria-hidden="true"></i>
-              <div><strong>Blockwise</strong><span>Holds the reviewed template in quarantine until you publish it.</span></div>
+              <div><strong>Template Builder</strong><span>Builds editable Feed and native Story layers once, then applies measured patches.</span></div><i aria-hidden="true"></i>
+              <div><strong>Blockwise</strong><span>Smoke-tests the candidate and holds it in quarantine until you approve and publish.</span></div>
             </section>
             <section class="ad-iteration-law" aria-label="Quality iteration rule">
-              <div><strong>Render</strong><span>Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Compare</strong><span>One focused comparison</span></div><b aria-hidden="true">→</b><div><strong>Revise</strong><span>Below 9.8 loops automatically</span></div><b aria-hidden="true">↻</b><div><strong>Final review</strong><span>Two fresh reviews at completion</span></div><b aria-hidden="true">→</b><div><strong>Your review</strong><span>Approve, revise or discard</span></div>
+              <div><strong>Measure</strong><span>Deterministic target + reciprocal reference</span></div><b aria-hidden="true">→</b><div><strong>Build once</strong><span>Editable Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Patch only</strong><span>Up to 4 passes + 2 final passes to 9.8</span></div><b aria-hidden="true">↻</b><div><strong>Final review once</strong><span>Two independent reviewers</span></div><b aria-hidden="true">→</b><div><strong>Smoke + your review</strong><span>Quarantine, approve, revise or discard</span></div>
             </section>
             <div class="ad-pipeline-layout">
               <section class="ad-pipeline-canvas"><div class="ad-declared-label"><strong>Declared lifecycle</strong><span>The route Frank promises before a run begins.</span></div><div id="ad-pipeline-graph"></div></section>

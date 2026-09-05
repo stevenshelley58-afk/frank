@@ -1079,7 +1079,7 @@ function mergeIterationEvent(run, item) {
   }
   if (item.kind === "iteration.compared") {
     record.comparison = { score: firstNumber(data.score), reason: String(data.reason || "") };
-    record.decision = data.decision || (Number(data.score) >= 9.5 ? "accepted" : "revise");
+    record.decision = data.decision || (Number(data.score) >= 9.8 ? "accepted" : "revise");
   }
   run.output.iterations = records.sort((a, b) => Number(a.iteration) - Number(b.iteration));
 }
