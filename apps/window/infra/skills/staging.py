@@ -11,7 +11,7 @@ import json
 import shutil
 from pathlib import Path
 
-from .inventory import SKILL_INVENTORY_SCHEMA, SkillRecord
+from .inventory import SKILL_INVENTORY_SCHEMA, SkillRecord, _hash_dir
 
 CUTOVER_SCHEMA = "schema://frank.skills-cutover/v1"
 CONSUMERS = ("hermes", "codex-vps")
@@ -53,6 +53,14 @@ def build_staging_tree(
                 continue
             destination = staging_root / record.path
             shutil.copytree(source_root / record.path, destination, symlinks=False)
+            # Post-copy verification: recompute the checksum of what actually
+            # landed in the staging tree, not what we intended to copy.
+            actual = _hash_dir(destination)
+            if actual != record.checksum:
+                raise StagingError(
+                    f"post-copy checksum mismatch for {record.path}: "
+                    f"catalog={record.checksum} copied={actual}"
+                )
             seen_names[record.name] = record.path
             included.append({"name": record.name, "path": record.path, "checksum": record.checksum})
     for extra in extra_operator_skills or []:
@@ -68,8 +76,11 @@ def build_staging_tree(
         (destination / ".frank-skill-scope.json").write_text(
             json.dumps({"scope": scope, "project": extra.get("project", "")}), encoding="utf-8"
         )
+        # Post-copy verification against the checksum of the copied tree
+        # (extras carry no catalog checksum, so the copy itself is truth).
+        copied_checksum = _hash_dir(destination)
         seen_names[name] = source.name
-        included.append({"name": name, "path": source.name, "checksum": "", "scope": scope})
+        included.append({"name": name, "path": source.name, "checksum": copied_checksum, "scope": scope})
     catalog = {
         "schema": CUTOVER_SCHEMA,
         "included": included,
@@ -83,7 +94,12 @@ def build_staging_tree(
 
 
 def validate_staging_tree(staging_root: Path, consumers: tuple[str, ...] = CONSUMERS) -> dict:
-    """Fail-closed staging validation before any consumer is redirected."""
+    """Fail-closed staging validation before any consumer is redirected.
+
+    Recomputes and verifies every catalog item checksum AFTER the copy
+    (post-copy verification): a catalog entry whose on-disk content no
+    longer hashes to its recorded checksum fails validation.
+    """
     staging_root = Path(staging_root)
     catalog_path = staging_root / "catalog.json"
     if not catalog_path.is_file():
@@ -96,6 +112,14 @@ def validate_staging_tree(staging_root: Path, consumers: tuple[str, ...] = CONSU
             problems.append(f"missing SKILL.md: {item['path']}")
         if any(link.is_symlink() for link in skill_dir.rglob("*") if link.is_symlink()):
             problems.append(f"symlink inside staged skill: {item['path']}")
+        recorded = item.get("checksum", "")
+        if recorded:
+            actual = _hash_dir(skill_dir)
+            if actual != recorded:
+                problems.append(
+                    f"post-copy checksum mismatch: {item['path']} "
+                    f"catalog={recorded} disk={actual}"
+                )
     names = [item["name"] for item in catalog["included"]]
     if len(names) != len(set(names)):
         problems.append("duplicate names in staging tree")

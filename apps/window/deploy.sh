@@ -274,6 +274,14 @@ docker run --rm \
   caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile
 frank_verify_image_critical_manifest "frank-window:$candidate_sha"
 
+# Workspace estate mounts: regenerate the read-only Compose override from the
+# workspace registry and validate the merged compose config BEFORE any
+# container is replaced. A failed generation aborts here with the running
+# containers untouched.
+workspaces_override="${FRANK_WORKSPACES_OVERRIDE:-/srv/frank/compose/workspaces-override.yml}"
+python3 "$app/scripts/generate_workspace_override.py" --output "$workspaces_override"
+docker compose -f docker-compose.yml -f "$workspaces_override" config --quiet
+
 # Record the previously approved revision and running image identities so a
 # failed cutover can restore them; the previous images are immutable-tagged
 # and are never retagged or deleted.
@@ -290,7 +298,7 @@ docker rm -f frank-window-sessions-candidate >/dev/null 2>&1 || true
 docker rm -f frank-agenttrail >/dev/null 2>&1 || true
 docker rm -f frank-window frank-caddy frank-frank-caddy-1 >/dev/null 2>&1 || true
 
-if ! docker compose up -d --remove-orphans; then
+if ! docker compose -f docker-compose.yml -f "$workspaces_override" up -d --remove-orphans; then
   echo "new Frank stack failed to start; restoring the previous runtime" >&2
   # Rollback only re-creates the previous stack from its recorded receipt;
   # it never modifies the approved-sha file.
