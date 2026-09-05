@@ -1,6 +1,12 @@
 const $ = (selector, root = document) => root.querySelector(selector);
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js";
 import { mountMemoryInspector } from "./memory-inspector.js";
+import {
+  BLOCKWISE_PREVIEW_MANIFESTS,
+  blockwisePreviewHome,
+  blockwisePreviewSnapshot,
+  isBlockwiseOperationsPreview,
+} from "./blockwise-operations-preview.js";
 
 const graphMounts = new WeakMap();
 
@@ -242,6 +248,18 @@ function homeControls() {
   const controls = [];
   const isConnectionsHome = homeState.home?.entity.kind === "tool" && homeState.home?.entity.id === "connections";
   const isProject = homeState.home?.entity.kind === "project";
+  const isPreview = isProject && homeState.home?.entity.id === "blockwise" && isBlockwiseOperationsPreview();
+  if (isPreview) {
+    controls.push(node("span", "operations-preview-badge", "Approval preview"));
+    controls.push(button("All tools", () => window.dispatchEvent(new CustomEvent("frank:view", { detail: "tools" })), "home-action home-action-primary"));
+    controls.push(button("Exit preview", () => {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("preview");
+      window.location.assign(`${url.pathname}${url.search}`);
+    }));
+    setTopActions(controls);
+    return;
+  }
   if (isProject && homeState.memoryOpen) {
     controls.push(button("Back to dashboard", closeMemoryInspector, "home-action home-action-primary"));
     controls.push(button("Refresh memory", () => homeState.memoryInspector?.refresh?.()));
@@ -458,7 +476,7 @@ function connectionOptions(instance, manifest) {
 }
 
 const SNAPSHOT_STATUSES = new Set(["ready", "recorded", "verified", "empty", "setup_needed", "attention", "error", "unavailable"]);
-const INTERNAL_VIEWS = new Set(["hub", "files", "tools", "trace", "releases", "project", "entity-home", "accounts", "connections", "widget-builder", "campaigns"]);
+const INTERNAL_VIEWS = new Set(["hub", "files", "tools", "trace", "releases", "project", "entity-home", "accounts", "connections", "widget-builder", "campaigns", "operations-tool"]);
 const INTERNAL_KINDS = new Set(["project", "tool", "agent", "service"]);
 
 function displayStatus(value) {
@@ -509,6 +527,11 @@ function validInternalTarget(item) {
     const internal = { view: target.view };
     if (target.view === "connections" && target.action === "add") internal.action = "add";
     if (target.view === "connections" && /^[a-z0-9][a-z0-9._-]{0,79}$/.test(String(target.provider || ""))) internal.provider = String(target.provider);
+    if (target.view === "operations-tool" && /^[a-z0-9][a-z0-9-]{0,79}$/.test(String(target.id || ""))) {
+      internal.id = String(target.id);
+      internal.name = String(target.name || target.id).slice(0, 80);
+    }
+    if (target.view === "operations-tool" && !internal.id) return null;
     return internal;
   }
   if (!INTERNAL_KINDS.has(target.kind) || !/^[a-z0-9][a-z0-9._-]{0,79}$/.test(String(target.id || ""))) return null;
@@ -535,6 +558,8 @@ function appendSnapshotAction(parent, item) {
     const action = button(label, () => {
       if (internal.view === "connections" && (internal.action || internal.provider)) {
         window.dispatchEvent(new CustomEvent("frank:connections", { detail: internal }));
+      } else if (internal.view === "operations-tool") {
+        window.dispatchEvent(new CustomEvent("frank:operations-tool", { detail: internal }));
       } else if (internal.view) window.dispatchEvent(new CustomEvent("frank:view", { detail: internal.view }));
       else window.dispatchEvent(new CustomEvent("frank:entity-home", { detail: internal }));
     }, "home-inline-button");
@@ -725,9 +750,71 @@ function renderProjectQuickPaths(body, snapshot) {
   body.append(coverage);
 }
 
+function updateOperationsPreviewHeading() {
+  const status = $("#project-dashboard-status");
+  const setup = $("#project-dashboard-setup");
+  const dot = $("#project-dashboard-dot");
+  if (status) {
+    status.textContent = "Preview data";
+    status.dataset.status = "setup_needed";
+  }
+  if (setup) setup.textContent = "One source per tool";
+  if (dot) dot.dataset.status = "setup_needed";
+}
+
+function renderOperationsCommand(body, snapshot) {
+  updateOperationsPreviewHeading();
+  const data = snapshot.data || {};
+  body.classList.add("project-command-body");
+  body.append(node("strong", "project-command-headline", scalarValue(data.headline) || "Blockwise at a glance."));
+  body.append(node("p", "project-command-summary", scalarValue(snapshot.summary) || "Nothing needs attention."));
+  const metrics = node("div", "project-command-metrics");
+  (Array.isArray(data.metrics) ? data.metrics : []).slice(0, 3).forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const metric = node("span");
+    metric.append(node("strong", "", scalarValue(item.value)), document.createTextNode(` ${scalarValue(item.label)}`));
+    metrics.append(metric);
+  });
+  body.append(metrics);
+  const footer = node("div", "project-operations-footer");
+  (snapshot.links || []).forEach((item) => appendSnapshotAction(footer, item));
+  if (footer.childElementCount) body.append(footer);
+}
+
+function renderOperationsSummary(body, snapshot) {
+  const data = snapshot.data || {};
+  body.classList.add("project-operations-body");
+  const metric = node("div", "project-operations-metric");
+  metric.append(node("strong", "", scalarValue(data.metric) || "—"), node("span", "", scalarValue(data.metric_label) || "Recorded"));
+  const supporting = node("div", "project-operations-supporting");
+  (Array.isArray(data.supporting_metrics) ? data.supporting_metrics : []).slice(0, 2).forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const value = node("span");
+    value.append(node("strong", "", scalarValue(item.value)), document.createTextNode(` ${scalarValue(item.label)}`));
+    supporting.append(value);
+  });
+  metric.append(supporting);
+  body.append(metric);
+  const rows = node("ul", "project-operations-rows");
+  (Array.isArray(data.rows) ? data.rows : []).slice(0, 2).forEach((item) => {
+    if (!item || typeof item !== "object") return;
+    const row = node("li");
+    const copy = node("span");
+    copy.append(node("strong", "", scalarValue(item.title) || "Record"), node("small", "", scalarValue(item.detail) || ""));
+    row.append(copy, node("em", "", scalarValue(item.status) || "Recorded"));
+    rows.append(row);
+  });
+  if (rows.childElementCount) body.append(rows);
+  const footer = node("div", "project-operations-footer");
+  (snapshot.links || []).forEach((item) => appendSnapshotAction(footer, item));
+  if (footer.childElementCount) body.append(footer);
+}
+
 function renderProjectSnapshot(body, snapshot, widgetId) {
   if (!isProjectHome()) return false;
-  if (widgetId === "project-signal") renderProjectSignal(body, snapshot);
+  if (widgetId === "operations-command") renderOperationsCommand(body, snapshot);
+  else if (widgetId.startsWith("operations-")) renderOperationsSummary(body, snapshot);
+  else if (widgetId === "project-signal") renderProjectSignal(body, snapshot);
   else if (widgetId === "accounts-summary" || widgetId === "connections-summary") renderProjectMetric(body, snapshot, widgetId);
   else if (widgetId === "repository-pulse") renderRepositoryPulse(body, snapshot);
   else if (widgetId === "project-attention") renderProjectAttention(body, snapshot);
@@ -862,7 +949,11 @@ async function loadSnapshot(card, body, instance, generation) {
     return;
   }
   try {
-    const snapshot = await requestJson(`${homeEndpoint()}/widgets/${encodeURIComponent(instance.instance_id)}`);
+    const preview = isBlockwiseOperationsPreview() && homeState.home.entity.kind === "project" && homeState.home.entity.id === "blockwise";
+    const snapshot = preview
+      ? blockwisePreviewSnapshot(instance)
+      : await requestJson(`${homeEndpoint()}/widgets/${encodeURIComponent(instance.instance_id)}`);
+    if (!snapshot) throw new Error("Preview widget is unavailable.");
     if (generation !== homeState.generation || !card.isConnected) return;
     if (snapshot.entity_kind !== homeState.home.entity.kind || snapshot.entity_id !== homeState.home.entity.id || snapshot.instance_id !== instance.instance_id || snapshot.widget_id !== instance.widget_id) {
       throw new Error("Widget identity mismatch");
@@ -1064,11 +1155,21 @@ async function openHome(kind, id, host) {
   setHomeMessage("Loading live widget connections…");
   try {
     await refreshCatalog(controller.signal);
-    const home = validateHome(await requestJson(`/api/homes/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`, { signal: controller.signal }), kind, id);
+    const preview = kind === "project" && id === "blockwise" && isBlockwiseOperationsPreview();
+    if (preview) {
+      const known = new Set(homeState.catalog.map((item) => item.id));
+      homeState.catalog.push(...BLOCKWISE_PREVIEW_MANIFESTS.filter((item) => !known.has(item.id)));
+    }
+    const payload = preview
+      ? blockwisePreviewHome({ name: "Blockwise", live: "https://blockwise.sale" })
+      : await requestJson(`/api/homes/${encodeURIComponent(kind)}/${encodeURIComponent(id)}`, { signal: controller.signal });
+    const home = validateHome(payload, kind, id);
     if (generation !== homeState.generation) return;
     homeState.home = home;
     homeState.draft = structuredClone(home.instances);
-    setHomeMessage(home.updated_at ? `Shared layout revision ${home.revision}.` : "Default layout. Save changes to publish it.");
+    setHomeMessage(preview
+      ? "Approval preview · these are reusable views of the shared Frank tools; nothing here is live yet."
+      : home.updated_at ? `Shared layout revision ${home.revision}.` : "Default layout. Save changes to publish it.");
     renderHome();
   } catch (error) {
     if (error.name === "AbortError" || generation !== homeState.generation) return;
@@ -1079,8 +1180,10 @@ async function openHome(kind, id, host) {
 }
 
 export function openProjectHome(project) {
+  const preview = project.id === "blockwise" && isBlockwiseOperationsPreview();
   $("#project-dashboard-name").textContent = project.name || project.id;
-  $("#project-dashboard-blurb").textContent = project.blurb || "Project workspace.";
+  $("#project-dashboard-blurb").textContent = preview ? "Run the whole Blockwise customer operation from one place." : project.blurb || "Project workspace.";
+  $("#project-dashboard-mode").textContent = preview ? "Project · operations home" : "Project · live signal";
   const status = $("#project-dashboard-status");
   const setup = $("#project-dashboard-setup");
   const dot = $("#project-dashboard-dot");

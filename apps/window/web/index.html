@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260905-ready-review-v1">
+<link rel="stylesheet" href="/app.css?v=20260905-blockwise-operations-preview-v1">
 </head>
 <body>
 <div class="app">
@@ -122,7 +122,7 @@
         <div class="home-surface">
           <div class="project-dashboard-heading">
             <div>
-              <span class="project-dashboard-kicker"><i id="project-dashboard-dot"></i>Project · live signal</span>
+              <span class="project-dashboard-kicker"><i id="project-dashboard-dot"></i><span id="project-dashboard-mode">Project · live signal</span></span>
               <h2 id="project-dashboard-name">Project</h2>
               <p id="project-dashboard-blurb">Project workspace.</p>
             </div>
@@ -450,6 +450,7 @@
       </section>
       <section class="view" data-view="trace"><div class="grid" id="slot-trace"></div></section>
       <section class="view" data-view="releases"><div class="grid" id="slot-releases"></div></section>
+      <section class="view" data-view="operations-tool" id="operations-tool"></section>
       <section class="view operate-view" data-view="ops" id="operate-ops"></section>
       <section class="view operate-view" data-view="live" id="operate-live"></section>
       <section class="view operate-view" data-view="map" id="operate-map"></section>
@@ -490,6 +491,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260905-ready-review-v1"></script>
+<script type="module" src="/js/app.js?v=20260905-blockwise-operations-preview-v1"></script>
 </body>
 </html>
