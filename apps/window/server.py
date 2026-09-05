@@ -1821,6 +1821,86 @@ def _public_ad_studio_review_summary(value: object, run_id: str) -> dict:
     return public
 
 
+def _exact_clone_review_summary(output: dict, model_profile: dict) -> dict:
+    """Adapt Hermes' sole exact-clone root output to Frank's review view."""
+    if output.get("process") != "exact-clone":
+        return {}
+    references = output.get("references") if isinstance(output.get("references"), list) else []
+    source_placement = next((
+        str(item.get("sourcePlacement") or "").lower()
+        for item in references if isinstance(item, dict) and item.get("sourcePlacement") in {"feed", "story"}
+    ), "")
+    reciprocal = next((
+        item for item in references
+        if isinstance(item, dict) and item.get("kind") == "reciprocal-image-reference"
+    ), None)
+    if not source_placement and isinstance(reciprocal, dict):
+        source_placement = "story" if reciprocal.get("placement") == "feed" else "feed"
+
+    raw_source = output.get("source")
+    source_name = str(raw_source.get("name") if isinstance(raw_source, dict) else raw_source or "").strip()
+    summary = {
+        "source": {"name": source_name, "kind": "original-source", "placement": source_placement},
+        "references": references,
+        "previews": [],
+        "diffs": output.get("diffs"),
+        "warnings": output.get("warnings"),
+        "font_substitution": output.get("font_substitution"),
+        "smoke_test": output.get("smoke_test"),
+        "model_profile": model_profile,
+    }
+    iterations = output.get("iterations") if isinstance(output.get("iterations"), list) else []
+    accepted = next((
+        item for item in reversed(iterations)
+        if isinstance(item, dict) and str(item.get("decision") or "").lower() in {"accept", "accepted", "pass", "passed"}
+    ), {})
+    for name in accepted.get("previews") if isinstance(accepted.get("previews"), list) else []:
+        match = re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", str(name or ""))
+        if match:
+            summary["previews"].append({"name": name, "placement": match.group(1), "kind": "qa-source-filled"})
+    for item in output.get("previews") if isinstance(output.get("previews"), list) else []:
+        if isinstance(item, dict):
+            summary["previews"].append(item)
+
+    comparator = (output.get("scores") or {}).get("comparator") if isinstance(output.get("scores"), dict) else {}
+    if not isinstance(comparator, dict):
+        comparator = accepted.get("scores") if isinstance(accepted.get("scores"), dict) else {}
+    def normalized(value):
+        number = _number_from(value)
+        return round(number * 10, 4) if number is not None and 0 <= number <= 1 else number
+    scores = {"overall": normalized(comparator.get("overall"))}
+    reviewers = []
+    final = output.get("final_review") if isinstance(output.get("final_review"), dict) else {}
+    for index, item in enumerate(final.get("reviewers") if isinstance(final.get("reviewers"), list) else [], 1):
+        if not isinstance(item, dict):
+            continue
+        item_scores = item.get("scores") if isinstance(item.get("scores"), dict) else {}
+        reviewers.append({
+            "label": f"Final reviewer {index}",
+            "decision": "pass" if str(item.get("decision") or "").lower() in {"accept", "accepted", "pass", "passed"} else str(item.get("decision") or ""),
+            "score": normalized(item_scores.get("overall")),
+        })
+    scores["reviewers"] = reviewers
+    summary["scores"] = scores
+    summary["iterations"] = len(iterations)
+    summary["elapsed_seconds"] = output.get("elapsed_seconds")
+
+    layers = output.get("layers") if isinstance(output.get("layers"), dict) else {}
+    summary["layers"] = [
+        {
+            "id": str(layer.get("layerId") or ""),
+            "name": str(layer.get("inputKey") or layer.get("layerId") or "Layer"),
+            "type": str(layer.get("type") or "unknown"),
+            "placement": placement,
+            "editable": bool(layer.get("inputKey")),
+        }
+        for placement in ("feed", "story")
+        for layer in ((layers.get(placement) or {}).get("ordered") or [])
+        if isinstance(layer, dict)
+    ]
+    return summary
+
+
 def _ad_studio_source_url(run_id: str, name: str) -> str | None:
     suffix = Path(str(name or "")).suffix.lower()
     if suffix not in {".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}:
@@ -1869,10 +1949,13 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     source = sources[0] if sources and isinstance(sources[0], dict) else {}
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_id = str(run.get("id") or run.get("run_id") or "")
+    model_profile = _public_ad_studio_model_profile(run)
     safe_output = {key: output.get(key) for key in (
         "iterations", "final_review", "process",
     ) if key in output}
-    review_summary = _public_ad_studio_review_summary(output.get("review_summary"), str(run.get("run_id") or run.get("id") or ""))
+    review_value = output.get("review_summary") if isinstance(output.get("review_summary"), dict) else _exact_clone_review_summary(output, model_profile)
+    review_summary = _public_ad_studio_review_summary(review_value, run_id)
     if review_summary:
         safe_output["review_summary"] = review_summary
     public_import = _public_ad_studio_import(output.get("import"))
@@ -1890,7 +1973,6 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         safe_output["previews"] = previews
     if "iterations" in output:
         safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"), str(run.get("run_id") or run.get("id") or ""))
-    run_id = str(run.get("id") or run.get("run_id") or "")
     source_public = {
         "name": str(source.get("name") or ""),
         "size": int(source.get("size") or 0),
@@ -1900,7 +1982,6 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     source_url = _ad_studio_source_url(run_id, source_public["name"])
     if source_url:
         source_public["url"] = source_url
-    model_profile = _public_ad_studio_model_profile(run)
     raw_usage = output.get("usage") if isinstance(output.get("usage"), dict) else {}
     raw_cost = output.get("cost") if isinstance(output.get("cost"), dict) else {}
     usage = {}

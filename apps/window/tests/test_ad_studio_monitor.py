@@ -134,6 +134,50 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertNotIn("/srv/private", serialized)
         self.assertNotIn("never public", serialized)
 
+    def test_exact_clone_root_output_is_adapted_for_ready_review(self):
+        projected = server._public_ad_studio_run({
+            "run_id": "trun_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "status": "ready_for_review",
+            "model_policy_revision": 41,
+            "model_policy": {"stages": {
+                "analyse": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-sol"}},
+                "compare": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-luna"}},
+            }},
+            "output": {
+                "process": "exact-clone", "source": "source.png",
+                "references": [
+                    {"name": "source-map.json", "sourcePlacement": "feed"},
+                    {"name": "reference-story.png", "placement": "story", "kind": "reciprocal-image-reference"},
+                ],
+                "iterations": [
+                    {"iteration": 1, "decision": "revise", "previews": ["iteration-01-feed.png", "iteration-01-story.png"]},
+                    {"iteration": 2, "decision": "accepted", "previews": ["iteration-02-feed.png", "iteration-02-story.png"]},
+                ],
+                "previews": [
+                    {"name": "iteration-03-feed.png", "placement": "feed", "kind": "final-neutral-shippable"},
+                    {"name": "iteration-03-story.png", "placement": "story", "kind": "final-neutral-shippable"},
+                ],
+                "diffs": [{"name": "iteration-02-feed-difference.png", "placement": "feed", "kind": "difference"}],
+                "scores": {"comparator": {"overall": 0.98}},
+                "final_review": {"reviewers": [
+                    {"decision": "accept", "scores": {"overall": 0.99}},
+                    {"decision": "accept", "scores": {"overall": 9.8}},
+                ]},
+                "elapsed_seconds": 90,
+                "smoke_test": {"status": "passed"},
+                "layers": {"feed": {"ordered": [{"layerId": "headline", "type": "text", "inputKey": "headline"}]}, "story": {"ordered": []}},
+            },
+        })
+        summary = projected["output"]["review_summary"]
+        self.assertEqual(summary["source"]["placement"], "feed")
+        self.assertEqual(summary["references"][0]["name"], "reference-story.png")
+        self.assertEqual([item["kind"] for item in summary["previews"]], ["qa-source-filled", "qa-source-filled", "final-neutral-shippable", "final-neutral-shippable"])
+        self.assertEqual(summary["scores"]["overall"], 9.8)
+        self.assertEqual([item["score"] for item in summary["scores"]["reviewers"]], [9.9, 9.8])
+        self.assertTrue(summary["smoke_test"]["passed"])
+        self.assertEqual(summary["layers"][0]["id"], "headline")
+        self.assertEqual(summary["model_profile"]["revision"], 41)
+
     def test_review_decisions_proxy_exact_hermes_routes_and_bodies(self):
         responses = [
             ("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", {}),
