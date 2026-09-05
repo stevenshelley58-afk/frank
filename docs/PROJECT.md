@@ -11,23 +11,22 @@ profile; they are never separate Hermes profiles.
 
 ## Mini Frank hierarchy
 
-Mini Frank is its own `project:mini-frank` boundary in the shared Hermes
-profile. Its current public surface is served by the central Frank
-`apps/window` image and route; that deployment choice does not make Mini a
-separate deployed runtime or frontend source. Customer work stays in isolated
-Mini account and job scopes, while centrally maintained capabilities are used
-only through explicit project-scoped bindings.
+Mini Frank is an independent peer project boundary in the shared Hermes profile,
+not a Frank feature. It has isolated customer account and job scopes; private
+scoped memory remains separate, while shared Hermes execution and centrally
+maintained capabilities are reached only through explicit project-scoped
+bindings.
 
-The shared skills library remains central and runs only through Hermes. A
-file-backed approved-reference library is planned but is not integrated or
-verified yet; it must not be represented as a completed reusable-learning path.
-The separately shared-industry Hindsight adapter is also unavailable. Neither
-pending path permits private-memory merging, copied implementation, or a second
-agent loop.
+The intended Mini public surface is a standalone staged application. It has not
+cut over: the public Mini route is still served by Frank's `apps/window` image.
+Do not infer a separate deployed runtime or claim a completed cutover from the
+staged standalone work, especially while concurrent Mini edits remain dirty.
+The remaining `/projects/mini-frank/customer-projects` path is legacy customer
+data, retained only for safe migration or retention work.
 
-The retired standalone Mini site is not a current product source or served
-surface. The remaining `/projects/mini-frank/customer-projects` path is legacy
-customer data, retained only for safe migration or retention work.
+The shared skills library remains central and runs only through Hermes.
+Approved references are a separate, scoped reference boundary; they do not
+merge private memory, copy implementation, or create a second agent loop.
 
 ## Homes, widgets, and connections
 
@@ -44,6 +43,9 @@ contract; tool and agent homes open inside the existing content pane.
   or arbitrary provider calls.
 - Connections is a catalog and control surface. Frank stores provider, scope,
   capabilities, recorded status, and opaque connection/vault references only.
+- One shared Inbox, Calendar, Notifications, and CRM is the target surface,
+  with project-filtered views rather than per-project copies. It does not claim
+  provider integrations that are not yet implemented and verified.
 - Infisical CE is the credential boundary, Activepieces CE is the preferred
   broad connector/workflow runtime, and Hermes remains the policy/execution
   boundary. Provider systems remain authoritative.
@@ -91,6 +93,11 @@ The authoritative memory design is [MEMORY.md](MEMORY.md).
 These guardrails apply when cleanup resumes: retain current runtime paths,
 avoid mass moves, version-control nonsecret deployment configuration and
 runbooks, and keep credentials and private runtime state outside Git.
+
+This source revision supports project creation, listing, metadata editing,
+archive, and restore. Archive preserves files, sessions, and running work.
+The approved release pointer and live health response identify which source
+revision is deployed; a working branch is not deployment evidence.
 
 ## Creating projects
 

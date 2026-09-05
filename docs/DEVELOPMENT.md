@@ -66,12 +66,16 @@ node --check web/js/widgets.js
 
 ## Add a project
 
-Use the existing New Project UI and Hermes session boundary. Frank records safe
-project metadata, asks Hermes to create the one authoritative session in the
-`default` profile, and binds it to `/projects/<project-id>`. Hermes owns the
-workspace, session lifecycle, transcript history, and execution; Frank keeps
-only the navigation association.
+Use the deployed New Project and project-listing UI with the Hermes session
+boundary. Frank records safe project metadata, asks Hermes to create the one
+authoritative session in the `default` profile, and binds it to
+`/projects/<project-id>`. Hermes owns the workspace, session lifecycle,
+transcript history, and execution; Frank keeps only the navigation association.
 
-Project metadata editing and project archive are not implemented yet. Do not
-document, simulate, or add those operations as though they exist; their policy
-and lifecycle need a separate product change.
+This source revision supports metadata editing, archive, and restore. Use `PATCH /api/projects/<id>` with `name`, `blurb`,
+`live`, and the required `revision`; use `POST /api/projects/<id>/archive` or
+`POST /api/projects/<id>/restore` with the required `revision`. `GET /api/projects`
+in this source returns `projects` (active) and `archived_projects`. A `409` means
+the registry changed: refresh the project list before retrying. These operations
+preserve stable IDs, roots, and sessions; they do not delete, uninstall, or stop
+a runtime, and they do not create a second registry.
