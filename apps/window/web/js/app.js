@@ -3,7 +3,8 @@ import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
 import { mountAdStudio } from "./ad-studio.js?v=20260830-builder-escalation-v1";
-import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
+import { mountBlogStudio } from "./blog-studio.js?v=20260831-blog-studio-v1";
+import { pathForView, viewForPath } from "./view-routing.js?v=20260831-blog-studio-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
@@ -17,6 +18,7 @@ const TITLES = {
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
   "ad-studio": ["Ad Studio", "Source image → ad template"],
+  "blog-studio": ["Blog Studio", "Research → evidence → release"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
   connections: ["Connections", "Recorded provider setup and capabilities"],
@@ -50,6 +52,7 @@ function show(id, { syncHistory = true } = {}) {
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
   if (syncHistory) syncViewLocation(id);
   $$(".operate-tab").forEach((button) => button.classList.toggle("is-on", button.dataset.view === id));
+  window.dispatchEvent(new CustomEvent("frank:view-changed", { detail: { id } }));
   if (id === "live") void mountLive($("#operate-live"));
   if (id === "map") void mountMap($("#operate-map"));
   if (id === "control") void mountControl($("#operate-control"));
@@ -97,6 +100,7 @@ $$(".rail-item[data-view]").forEach((b) =>
       chatScrollBottom();
     }
     else if (v === "ad-studio") { show(v); mountAdStudio(); }
+    else if (v === "blog-studio") { show(v); mountBlogStudio(); }
     else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); }
   })
 );
@@ -145,10 +149,16 @@ window.addEventListener("frank:ad-studio", () => {
   mountAdStudio();
 });
 
+window.addEventListener("frank:blog-studio", () => {
+  show("blog-studio");
+  mountBlogStudio();
+});
+
 function openPathView() {
   const id = viewForPath(window.location.pathname);
   show(id, { syncHistory: false });
   if (id === "ad-studio") mountAdStudio();
+  if (id === "blog-studio") mountBlogStudio();
   const canonicalPath = pathForView(id);
   if (window.location.pathname !== canonicalPath) window.history.replaceState({ view: id }, "", `${canonicalPath}${window.location.search}`);
 }
@@ -197,6 +207,36 @@ window.addEventListener("frank:ad-studio-run", (event) => {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.run?.id) throw new Error(data.error || "Hermes did not start the background job.");
     detail.resolve?.({ run: data.run, runs: data.runs || [data.run], batchId: data.batch_id });
+  })().catch((error) => detail.reject?.(error));
+});
+
+window.addEventListener("frank:blog-studio-run", (event) => {
+  const detail = event.detail || {};
+  void (async () => {
+    const files = Array.isArray(detail.files) ? detail.files.filter((file) => file instanceof File) : [];
+    const projectId = String(detail.projectId || "").trim();
+    const topic = String(detail.topic || "").replace(/\s+/g, " ").trim();
+    if (!projectId) throw new Error("Choose a project.");
+    const uploaded = await uploadFiles(files.map((file) => ({ file, path: file.webkitRelativePath || file.name })));
+    if (uploaded.length !== files.length) throw new Error("One or more evidence files were not accepted.");
+    const response = await fetch("/api/blog-studio/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        job_name: String(detail.jobName || topic).replace(/\s+/g, " ").trim().slice(0, 120),
+        topic: topic,
+        source_text: String(detail.sourceText || "").trim(),
+        source_urls: Array.isArray(detail.sourceUrls) ? detail.sourceUrls.map((url) => String(url).trim()).filter(Boolean) : [],
+        attachments: uploaded.map(attachmentPayload),
+        direction: detail.direction && typeof detail.direction === "object" ? detail.direction : {},
+        outputs: detail.outputs && typeof detail.outputs === "object" ? detail.outputs : {},
+        client_request_id: String(detail.clientRequestId || "").trim(),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.run?.id) throw new Error(data.error || "Hermes did not start the content run.");
+    detail.resolve?.({ run: data.run });
   })().catch((error) => detail.reject?.(error));
 });
 

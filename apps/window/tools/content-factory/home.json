@@ -1,9 +1,9 @@
 {
   "id": "content-factory",
-  "name": "Content Factory",
+  "name": "Blog Studio",
   "kind": "tool",
-  "blurb": "Hermes-owned content planning, production, review, and release contracts.",
-  "capabilities": ["research-to-release", "parallel-channel-branches", "resume-rerun", "quarantine", "immutable-release", "withdrawal-tombstones"],
+  "blurb": "Turn source material into an evidence-backed blog package, review it, and release it safely through Hermes.",
+  "capabilities": ["source-led-writing", "evidence-backed-research", "guided-editing", "qa-gate", "human-approval", "resume-rerun", "immutable-release", "withdrawal-tombstones"],
   "default_widget_ids": [],
   "connection_capabilities": []
 }

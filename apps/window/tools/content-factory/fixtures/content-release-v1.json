@@ -4,8 +4,8 @@
   "project_id": "blockwise",
   "workspace_id": "123e4567-e89b-42d3-a456-426614174000",
   "settings_revision": 3,
-  "pipeline_id": "content-factory-pipeline",
-  "pipeline_version": "1.0.0",
+  "pipeline_id": "blog-studio-v2",
+  "pipeline_version": "2.0.0",
   "consumer_compatibility": ["article-release-v1"],
   "release_id": "release-1",
   "content_id": "content-1",
@@ -22,5 +22,5 @@
   "provenance": {"trace_id": "trace-1", "artifact_checksums": {"body": "e3c8a183c1ea4ac90727ae984b3ff7d97f0e3bd386523970adbc3f6a30874d7f", "seo": "26fa6a3578413037c4f44f88247ed69dedc71e3c0727ea589aa3e0c318486791", "media:hero-1": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
   "sanitization_receipts": {"pii_scan": {"status": "passed", "receipt_id": "pii-scan-1", "scanned_at": "2026-08-14T00:00:00Z"}, "secret_scan": {"status": "passed", "receipt_id": "secret-scan-1", "scanned_at": "2026-08-14T00:00:00Z"}},
   "published_at": "2026-08-14T00:00:00Z",
-  "release_hash": "ac0f1819a79b3c42ab604f4092b6bcb2928cb312462062e2416334cfb447a803"
+  "release_hash": "aa3f56db298d16fac0f4e2d9d00d9c9c88de20d53c3dce457b7bc8b12c47309a"
 }

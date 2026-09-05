@@ -1,49 +1,66 @@
 {
   "schema": "schema://frank.tool-app-manifest/v1",
   "id": "content-factory",
-  "version": "1.1.0",
-  "name": "Content Factory",
-  "description": "Hermes-owned contracts for research-to-release content work.",
+  "version": "2.0.0",
+  "name": "Blog Studio",
+  "description": "Declarative contracts for Hermes-owned, source-led blog production and immutable release.",
   "release_schema": "schema://frank.content-factory-release/v1",
   "scopes": ["project", "workspace", "session"],
   "settings": {
     "schema": "schema://frank.tool-app-settings/v1",
     "properties": {
-      "prompt_refs": {"type": "object", "description": "Versioned Hermes prompt references per stage."},
-      "tone_style": {"type": "object"},
-      "channels": {"type": "array", "items": {"enum": ["web", "email", "social", "ads", "instant-forms"]}},
-      "model_policy": {"type": "object"},
-      "thresholds": {"type": "object"},
-      "approvals": {"type": "object"},
-      "schedule_ref": {"type": "string"},
+      "direction_defaults": {"type": "object", "description": "Project editorial defaults merged by Hermes."},
+      "output_defaults": {"type": "object", "description": "Project output defaults interpreted by Hermes."},
+      "approval_policy": {"type": "object", "description": "Required human decisions before release."},
+      "release_policy": {"type": "object", "description": "Immutable release and withdrawal policy."},
+      "schedule_ref": {"type": "string", "description": "Opaque Hermes-owned schedule reference."},
       "publication_targets": {"type": "array", "description": "Connections-managed target IDs only."}
     }
   },
   "pipelines": [{
-    "id": "content-factory-pipeline",
-    "version": "1.0.0",
+    "id": "blog-studio-v2",
+    "version": "2.0.0",
     "schema": "schema://frank.tool-app-pipeline/v1",
     "nodes": [
-      {"id": "source", "kind": "source"}, {"id": "research", "kind": "stage"}, {"id": "brief", "kind": "stage"}, {"id": "draft", "kind": "stage"}, {"id": "edit", "kind": "stage"}, {"id": "format", "kind": "stage"}, {"id": "seo", "kind": "stage"}, {"id": "media", "kind": "stage"}, {"id": "web", "kind": "channel"}, {"id": "email", "kind": "channel"}, {"id": "social", "kind": "channel"}, {"id": "ads", "kind": "channel"}, {"id": "instant-forms", "kind": "channel"}, {"id": "compliance", "kind": "gate"}, {"id": "human-approval", "kind": "gate"}, {"id": "immutable-release", "kind": "gate"}
+      {"id": "source", "kind": "source"},
+      {"id": "research", "kind": "stage"},
+      {"id": "brief", "kind": "stage"},
+      {"id": "draft", "kind": "stage"},
+      {"id": "edit", "kind": "stage"},
+      {"id": "package", "kind": "stage"},
+      {"id": "qa", "kind": "gate"},
+      {"id": "human-approval", "kind": "gate"},
+      {"id": "immutable-release", "kind": "gate"}
     ],
     "edges": [
-      {"from": "source", "to": "research"}, {"from": "research", "to": "brief"}, {"from": "brief", "to": "draft"}, {"from": "draft", "to": "edit"}, {"from": "edit", "to": "format"}, {"from": "edit", "to": "seo"}, {"from": "edit", "to": "media"}, {"from": "format", "to": "web"}, {"from": "format", "to": "email"}, {"from": "format", "to": "social"}, {"from": "format", "to": "ads"}, {"from": "format", "to": "instant-forms"}, {"from": "seo", "to": "web"}, {"from": "media", "to": "web"}, {"from": "media", "to": "social"}, {"from": "media", "to": "ads"}, {"from": "web", "to": "compliance"}, {"from": "email", "to": "compliance"}, {"from": "social", "to": "compliance"}, {"from": "ads", "to": "compliance"}, {"from": "instant-forms", "to": "compliance"}, {"from": "compliance", "to": "human-approval"}, {"from": "human-approval", "to": "immutable-release"}
+      {"from": "source", "to": "research"},
+      {"from": "research", "to": "brief"},
+      {"from": "brief", "to": "draft"},
+      {"from": "draft", "to": "edit"},
+      {"from": "edit", "to": "package"},
+      {"from": "package", "to": "qa"},
+      {"from": "qa", "to": "human-approval"},
+      {"from": "human-approval", "to": "immutable-release"}
     ]
   }],
-  "capabilities": ["resume", "rerun", "quarantine", "versioning", "withdrawal-tombstones", "otel-trace"],
+  "capabilities": ["source-led-writing", "evidence-backed-research", "resume", "rerun", "quarantine", "versioning", "human-approval", "immutable-release", "withdrawal-tombstones", "otel-trace"],
   "connectors": [{"id": "hermes", "kind": "commands-events"}, {"id": "connections", "kind": "target-ids"}],
   "schedules": [{"id": "hermes-schedule-ref", "owner": "hermes"}],
-  "thresholds": [{"id": "word-count"}, {"id": "media"}, {"id": "seo"}, {"id": "compliance"}],
-  "approval_gates": [{"id": "human-approval", "required": true}, {"id": "immutable-release", "required": true}],
+  "thresholds": [],
+  "approval_gates": [
+    {"id": "qa", "required": true, "owner": "hermes"},
+    {"id": "human-approval", "required": true, "owner": "operator", "actions": ["approve", "request_changes", "reject", "quarantine"]},
+    {"id": "immutable-release", "required": true, "requires": ["qa", "human-approval"]}
+  ],
   "hermes": {
-    "actions": ["run", "resume", "rerun", "withdraw"],
-    "event_kinds": ["stage-completed", "review-requested", "release-immutable", "quarantined", "withdrawn"]
+    "actions": ["run", "cancel", "resume", "rerun", "approve", "request_changes", "reject", "quarantine", "withdraw"],
+    "event_kinds": ["command.accepted", "command.queued", "run.started", "run.recovered", "run.interrupted", "run.resumed", "run.rerun", "run.completed", "run.failed", "run.cancelled", "run.quarantined", "stage.started", "stage.completed", "artifact.created", "review.requested", "review.recorded", "review.approved", "review.changes-requested", "review.rejected", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "release.created", "release.published", "release.withdrawn"]
   },
   "trace": {
     "schema": "schema://frank.tool-app-trace/v1",
     "style": "otel-genai",
-    "event_allowlist": ["stage-started", "stage-completed", "review-requested", "release-immutable", "quarantined", "withdrawn"],
-    "fields": ["trace_id", "span_id", "stage", "model_ref", "prompt_hash", "cost", "artifact_refs", "evidence_refs", "review_decision"],
+    "event_allowlist": ["command.accepted", "command.queued", "run.started", "run.recovered", "run.interrupted", "run.resumed", "run.rerun", "run.completed", "run.failed", "run.cancelled", "run.quarantined", "stage.started", "stage.completed", "artifact.created", "review.requested", "review.recorded", "review.approved", "review.changes-requested", "review.rejected", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "release.created", "release.published", "release.withdrawn"],
+    "fields": ["trace_id", "span_id", "stage", "artifact_refs", "evidence_refs", "qa_decision", "approval_decision", "release_hash"],
     "preserve_hooks": ["trace", "slot-trace", "trace-view"]
   }
 }

@@ -1,4 +1,4 @@
-"""Reusable Content Factory contracts for Frank/Hermes integration.
+"""Reusable Blog Studio contracts under the stable ``content-factory`` tool ID.
 
 This package deliberately contains no worker, model client, scheduler, or
 publication side effects. Hermes owns execution; Frank can inspect these
@@ -10,7 +10,9 @@ from .content_factory import (
     CHANNELS,
     CONTENT_FACTORY_MANIFEST,
     HOME_PROFILE,
+    OUTPUT_KINDS,
     PROCESS_GRAPH,
+    RELEASE_CHANNELS,
     build_command,
     build_event,
     build_withdrawal_tombstone,
@@ -27,6 +29,8 @@ __all__ = [
     "HOME_PROFILE",
     "PROCESS_GRAPH",
     "CHANNELS",
+    "RELEASE_CHANNELS",
+    "OUTPUT_KINDS",
     "ARTIFACT_TAXONOMY",
     "build_command",
     "build_event",

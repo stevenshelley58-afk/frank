@@ -26,6 +26,7 @@ from flask import Flask, Response, abort, jsonify, redirect, request, send_file,
 import home_platform
 import home_defaults
 import mini_frank
+from blog_studio import create_blog_studio_blueprint
 from memory_inspector import HindsightClient, MemoryInspector, create_blueprint as create_memory_blueprint
 from project_store import ProjectStore, ProjectStoreError
 import vault_broker
@@ -1846,6 +1847,15 @@ app.register_blueprint(create_memory_blueprint(MemoryInspector(
     HindsightClient(HINDSIGHT_URL),
     Path(os.environ.get("PROJECT_KNOWLEDGE_ROOT", "/data/knowledge")),
 )))
+app.register_blueprint(create_blog_studio_blueprint(
+    project_getter=_project_store.get_project,
+    project_context=_project_context,
+    hermes_request=hermes_request,
+    hermes_base=hermes_base,
+    hermes_key=lambda: HERMES_KEY,
+    clean_attachments=_clean_atts,
+    upload_target=_upload_target,
+))
 
 
 app.register_blueprint(mini_frank.create_blueprint(

@@ -1,4 +1,8 @@
-"""Pure Content Factory contracts; Hermes remains the execution engine."""
+"""Pure Blog Studio contracts under tool ID ``content-factory``.
+
+Frank validates and forwards closed requests; Hermes remains the execution
+engine and sole owner of reasoning and capability selection.
+"""
 
 from __future__ import annotations
 
@@ -18,6 +22,8 @@ PIPELINE_SCHEMA = "schema://frank.tool-app-pipeline/v1"
 MANIFEST_SCHEMA = "schema://frank.tool-app-manifest/v1"
 _DOMAIN_ID = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 _CORRELATION_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_ACTION_ID = re.compile(r"^[a-z][a-z0-9]*(?:[_-][a-z0-9]+)*$")
+_EVENT_ID = re.compile(r"^[a-z][a-z0-9]*(?:[.-][a-z0-9]+)*$")
 _SEMVER = re.compile(r"^\d+\.\d+\.\d+$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _HTML_OR_SECRET = re.compile(r"</?[a-z][^>]*>|javascript\s*:|-----BEGIN |\bBearer\s+\S+", re.IGNORECASE)
@@ -31,18 +37,20 @@ with _PACKAGE_MANIFEST_PATH.open(encoding="utf-8") as _manifest_file:
     _PACKAGE_MANIFEST = json.load(_manifest_file)
 PIPELINE_SCHEMA = _PACKAGE_MANIFEST["pipelines"][0]["schema"]
 MANIFEST_SCHEMA = _PACKAGE_MANIFEST["schema"]
-PROCESS_GRAPH = deepcopy(next(pipeline for pipeline in _PACKAGE_MANIFEST["pipelines"] if pipeline["id"] == "content-factory-pipeline"))
+PROCESS_GRAPH = deepcopy(next(pipeline for pipeline in _PACKAGE_MANIFEST["pipelines"] if pipeline["id"] == "blog-studio-v2"))
 CONTENT_FACTORY_MANIFEST = deepcopy(_PACKAGE_MANIFEST)
 HOME_PROFILE = MappingProxyType({
     "id": "content-factory",
-    "name": "Content Factory",
+    "name": "Blog Studio",
     "kind": "tool",
-    "blurb": "Hermes-owned content planning, production, review, and release contracts.",
+    "blurb": "Turn source material into an evidence-backed blog package, review it, and release it safely through Hermes.",
     "capabilities": (
-        "research-to-release",
-        "parallel-channel-branches",
+        "source-led-writing",
+        "evidence-backed-research",
+        "guided-editing",
+        "qa-gate",
+        "human-approval",
         "resume-rerun",
-        "quarantine",
         "immutable-release",
         "withdrawal-tombstones",
     ),
@@ -61,17 +69,39 @@ RELEASE_SCHEMA = _PACKAGE_MANIFEST["release_schema"]
 TOOL_ID = _PACKAGE_MANIFEST["id"]
 
 # Taxonomy is intentionally separate from the process graph.
-CHANNELS = ("web", "email", "social", "ads", "instant-forms")
+RELEASE_CHANNELS = ("web", "email", "social")
+# Backwards-compatible export for release consumers; run requests use outputs.
+CHANNELS = RELEASE_CHANNELS
+OUTPUT_KINDS = (
+    "article",
+    "research-report",
+    "seo-package",
+    "media-briefs",
+    "email-companion",
+    "social-companion",
+)
 ARTIFACT_TAXONOMY = {
-    "research": ("research_brief",), "brief": ("strategy_brief",),
-    "draft": ("blog_draft",), "edit": ("blog_final",),
-    "format": ("formatted_page",), "seo": ("seo_schema",),
-    "media": ("image_prompt", "image_file"),
-    "web": ("article_release",), "email": ("email_release",),
-    "social": ("social_facebook", "social_instagram"),
-    "ads": ("lead_ad",), "instant-forms": ("instant_form",),
-    "compliance": ("compliance_report",), "human-approval": ("review_report",),
+    "source": ("source_manifest",),
+    "research": ("research_dossier", "evidence_ledger", "claim_register"),
+    "brief": ("editorial_brief", "article_outline"),
+    "draft": ("article_draft",),
+    "edit": ("article_revision", "edit_report"),
+    "package": ("article_package", "seo_package", "media_briefs", "companion_drafts"),
+    "qa": ("qa_report", "claim_audit", "sanitization_receipts"),
+    "human-approval": ("approval_receipt",),
+    "immutable-release": ("article_release", "release_manifest"),
 }
+
+RUN_REQUEST_REQUIRED = frozenset({"project_id", "content_id", "source_bundle", "direction", "outputs"})
+RUN_REQUEST_OPTIONAL = frozenset({"job_name", "topic", "project_context"})
+_SOURCE_BUNDLE_KEYS = frozenset({"pasted_text", "text", "text_length", "urls", "attachments"})
+_SOURCE_ATTACHMENT_KEYS = frozenset({"path", "name", "media_type", "sha256", "size", "origin"})
+_DIRECTION_KEYS = frozenset({"audience", "outcome", "cta", "locale", "must_include", "must_avoid", "slug"})
+_OUTPUT_KEYS = frozenset({"length", "research_mode", "media", "companions", "publication_target_id"})
+_HERMES_ORCHESTRATION_KEYS = frozenset({
+    "provider", "providerref", "temperature", "topp", "messages", "tools",
+    "skills", "systeminstruction", "systemmessage",
+})
 
 COMMAND_ACTIONS = frozenset(_PACKAGE_MANIFEST["hermes"]["actions"])
 EVENT_KINDS = frozenset(_PACKAGE_MANIFEST["hermes"]["event_kinds"])
@@ -143,6 +173,131 @@ def _walk_safe(value: Any, path: str = "payload", key: str = "") -> None:
         raise ValueError(f"unsupported payload value at {path}")
 
 
+def _hermes_owned_fields(value: Any, path: str = "request") -> list[str]:
+    """Return Frank-side orchestration controls that belong only to Hermes."""
+    found: list[str] = []
+    if isinstance(value, Mapping):
+        for key, child in value.items():
+            if not isinstance(key, str):
+                continue
+            normalized = _normalize_key(key)
+            if normalized.startswith("prompt") or normalized.startswith("model") or normalized in _HERMES_ORCHESTRATION_KEYS:
+                found.append(f"{path}.{key}")
+            found.extend(_hermes_owned_fields(child, f"{path}.{key}"))
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found.extend(_hermes_owned_fields(child, f"{path}[{index}]"))
+    return found
+
+
+def _has_meaningful_value(value: Any) -> bool:
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, Mapping):
+        return any(_has_meaningful_value(item) for item in value.values())
+    if isinstance(value, list):
+        return any(_has_meaningful_value(item) for item in value)
+    return value is not None and value is not False
+
+
+def _source_bundle_has_material(value: Any) -> bool:
+    return isinstance(value, Mapping) and any(
+        _has_meaningful_value(value.get(key))
+        for key in ("pasted_text", "text", "urls", "attachments")
+    )
+
+
+def _validate_source_bundle(source_bundle: Any) -> list[str]:
+    errors: list[str] = []
+    if not isinstance(source_bundle, Mapping):
+        return ["source_bundle:must-be-object"]
+    unknown = set(source_bundle) - _SOURCE_BUNDLE_KEYS
+    errors.extend(f"source_bundle:unsupported:{key}" for key in sorted(unknown))
+
+    for text_key in ("pasted_text", "text"):
+        value = source_bundle.get(text_key)
+        if value is not None and not isinstance(value, str) and not (
+            isinstance(value, list) and all(isinstance(item, str) for item in value)
+        ):
+            errors.append(f"source_bundle:{text_key}-must-be-text-or-text-list")
+    if "text_length" in source_bundle and (
+        type(source_bundle["text_length"]) is not int or source_bundle["text_length"] < 0
+    ):
+        errors.append("source_bundle:text_length-must-be-non-negative-integer")
+
+    urls = source_bundle.get("urls")
+    if urls is not None:
+        url_items = urls if isinstance(urls, list) else [urls]
+        for index, item in enumerate(url_items):
+            candidate = item.get("url") if isinstance(item, Mapping) else item
+            if not isinstance(candidate, str):
+                errors.append(f"source_bundle:urls[{index}]-must-have-url")
+                continue
+            try:
+                parsed = urlsplit(_safe_resource_ref(candidate, f"source_bundle.urls[{index}]"))
+                if parsed.scheme.casefold() not in {"http", "https"}:
+                    errors.append(f"source_bundle:urls[{index}]-must-be-http")
+            except ValueError as exc:
+                errors.append(str(exc))
+
+    attachments = source_bundle.get("attachments")
+    if attachments is not None:
+        if not isinstance(attachments, list):
+            errors.append("source_bundle:attachments-must-be-list")
+        else:
+            for index, item in enumerate(attachments):
+                if not isinstance(item, Mapping):
+                    errors.append(f"source_bundle:attachments[{index}]-must-be-object")
+                    continue
+                unknown_attachment = set(item) - _SOURCE_ATTACHMENT_KEYS
+                errors.extend(
+                    f"source_bundle:attachments[{index}]-unsupported:{key}"
+                    for key in sorted(unknown_attachment)
+                )
+                if not isinstance(item.get("path"), str) or not item["path"].strip():
+                    errors.append(f"source_bundle:attachments[{index}]-path-required")
+                checksum = item.get("sha256")
+                if checksum is not None and (not isinstance(checksum, str) or not _SHA256.fullmatch(checksum)):
+                    errors.append(f"source_bundle:attachments[{index}]-sha256-invalid")
+    return errors
+
+
+def _validate_direction(direction: Any) -> list[str]:
+    if not isinstance(direction, Mapping):
+        return ["direction:must-be-object"]
+    errors = [f"direction:unsupported:{key}" for key in sorted(set(direction) - _DIRECTION_KEYS)]
+    for key, value in direction.items():
+        if key in _DIRECTION_KEYS and not isinstance(value, str):
+            errors.append(f"direction:{key}-must-be-text")
+    return errors
+
+
+def _validate_outputs(outputs: Any) -> list[str]:
+    if not isinstance(outputs, Mapping) or not _has_meaningful_value(outputs):
+        return ["outputs:must-be-non-empty-object"]
+    errors = [f"outputs:unsupported:{key}" for key in sorted(set(outputs) - _OUTPUT_KEYS)]
+    if "length" in outputs and outputs["length"] not in {"concise", "standard", "deep"}:
+        errors.append("outputs:length-unsupported")
+    if "research_mode" in outputs and outputs["research_mode"] not in {"source-only", "verify-enrich"}:
+        errors.append("outputs:research_mode-unsupported")
+    if "media" in outputs and outputs["media"] not in {"none", "briefs", "generate"}:
+        errors.append("outputs:media-unsupported")
+    companions = outputs.get("companions")
+    if companions is not None and (
+        not isinstance(companions, list)
+        or any(item not in {"email", "social"} for item in companions)
+        or len(companions) != len(set(companions))
+    ):
+        errors.append("outputs:companions-unsupported")
+    target_id = outputs.get("publication_target_id")
+    if target_id not in (None, ""):
+        try:
+            _require_scope_id(target_id, "outputs.publication_target_id")
+        except ValueError:
+            errors.append("outputs:publication_target_id-invalid")
+    return errors
+
+
 def validate_process_graph(graph: Mapping[str, Any]) -> list[str]:
     errors: list[str] = []
     if graph != PROCESS_GRAPH:
@@ -181,31 +336,78 @@ def validate_process_graph(graph: Mapping[str, Any]) -> list[str]:
 
 
 def validate_pack(pack: Mapping[str, Any]) -> list[str]:
-    required = ("id", "kind", "version", "project_id", "manifest_ref", "prompt_refs", "publication_targets", "migration_map")
+    required = (
+        "id", "kind", "version", "project_id", "manifest_ref",
+        "process_graph_ref", "request_defaults", "approvals", "release",
+        "publication_targets", "legacy_source", "adoption", "hermes_boundary",
+    )
+    if not isinstance(pack, Mapping):
+        return ["pack:must-be-object"]
     errors = [f"missing:{key}" for key in required if key not in pack]
     if pack.get("kind") != "content-factory-project-pack":
         errors.append("kind:unsupported")
+    if pack.get("manifest_ref") != f"{TOOL_ID}@{CONTENT_FACTORY_MANIFEST['version']}":
+        errors.append("manifest_ref:unsupported")
     if pack.get("process_graph_ref") != PROCESS_GRAPH["id"]:
         errors.append("process_graph_ref:unsupported")
+    if not isinstance(pack.get("version"), str) or not _SEMVER.fullmatch(pack["version"]):
+        errors.append("version:semver-required")
+    for key in ("id", "project_id"):
+        if not isinstance(pack.get(key), str) or not _DOMAIN_ID.fullmatch(pack[key]):
+            errors.append(f"{key}:safe-id-required")
     for target in pack.get("publication_targets", []):
         if not isinstance(target, Mapping) or not _DOMAIN_ID.fullmatch(str(target.get("connection_id", ""))) or not _DOMAIN_ID.fullmatch(str(target.get("target_id", ""))):
             errors.append("publication_targets:connections-ids-required")
+    approvals = pack.get("approvals")
+    if not isinstance(approvals, Mapping) or approvals.get("required") is not True or set(approvals.get("actions", [])) != {"approve", "request_changes", "reject", "quarantine"}:
+        errors.append("approvals:explicit-human-actions-required")
+    release = pack.get("release")
+    if not isinstance(release, Mapping) or release.get("immutable") is not True or set(release.get("requires", [])) != {"qa_pass", "human_approval"}:
+        errors.append("release:qa-and-human-approval-required")
+    if _hermes_owned_fields(pack, "pack"):
+        errors.append("orchestration:hermes-owned")
+    try:
+        _walk_safe(pack, "pack")
+    except ValueError as exc:
+        errors.append(str(exc))
     return sorted(set(errors))
 
 
 def validate_run_request(request: Mapping[str, Any]) -> list[str]:
-    required = ("project_id", "content_id", "pack_ref", "prompt_refs", "channels", "model_policy", "thresholds")
-    errors = [f"missing:{key}" for key in required if key not in request]
-    prompt_refs = request.get("prompt_refs", {})
-    if not isinstance(prompt_refs, Mapping) or any(not isinstance(value, Mapping) or not value.get("version") or not value.get("ref") for value in prompt_refs.values()):
-        errors.append("prompt_refs:each-stage-needs-ref-and-version")
-    if any(channel not in CHANNELS for channel in request.get("channels", [])):
-        errors.append("channels:unsupported")
+    if not isinstance(request, Mapping):
+        return ["request:must-be-object"]
+    errors = [f"missing:{key}" for key in sorted(RUN_REQUEST_REQUIRED - set(request))]
+    errors.extend(f"unsupported:{key}" for key in sorted(set(request) - RUN_REQUEST_REQUIRED - RUN_REQUEST_OPTIONAL))
+    try:
+        _require_id(request.get("project_id"), "project_id")
+    except ValueError:
+        errors.append("project_id:safe-id-required")
+    try:
+        _require_scope_id(request.get("content_id"), "content_id")
+    except ValueError:
+        errors.append("content_id:safe-id-required")
+
+    source_bundle = request.get("source_bundle")
+    errors.extend(_validate_source_bundle(source_bundle))
+    direction = request.get("direction")
+    errors.extend(_validate_direction(direction))
+    outputs = request.get("outputs")
+    errors.extend(_validate_outputs(outputs))
+    for field in ("job_name", "topic"):
+        if field in request and (not isinstance(request[field], str) or not request[field].strip()):
+            errors.append(f"{field}:must-be-non-empty-text")
+    project_context = request.get("project_context")
+    if project_context is not None and not isinstance(project_context, (str, Mapping)):
+        errors.append("project_context:must-be-text-or-object")
+    if not _source_bundle_has_material(source_bundle) and not _has_meaningful_value(direction) and not _has_meaningful_value(request.get("topic")):
+        errors.append("source-or-direction:required")
+    if _hermes_owned_fields(request):
+        errors.append("orchestration:hermes-owned")
     try:
         _walk_safe(request)
     except ValueError as exc:
         errors.append(str(exc))
-    return errors
+    return sorted(set(errors))
 
 
 def _action_metadata(kind: str, name: str, payload: Mapping[str, Any], correlation_id: str) -> dict[str, Any]:
@@ -218,13 +420,17 @@ def _action_metadata(kind: str, name: str, payload: Mapping[str, Any], correlati
 
 
 def build_command(action: str, payload: Mapping[str, Any], correlation_id: str) -> dict[str, Any]:
-    if action not in COMMAND_ACTIONS or not _DOMAIN_ID.fullmatch(action):
+    if action not in COMMAND_ACTIONS or not _ACTION_ID.fullmatch(action):
         raise ValueError("command action is not declared by the manifest")
+    if action == "run":
+        errors = validate_run_request(payload)
+        if errors:
+            raise ValueError(f"invalid Blog Studio run request: {', '.join(errors)}")
     return _action_metadata("command", action, payload, correlation_id)
 
 
 def build_event(event_kind: str, payload: Mapping[str, Any], correlation_id: str) -> dict[str, Any]:
-    if event_kind not in EVENT_KINDS or not _DOMAIN_ID.fullmatch(event_kind):
+    if event_kind not in EVENT_KINDS or not _EVENT_ID.fullmatch(event_kind):
         raise ValueError("event kind is not declared by the manifest")
     return _action_metadata("event", event_kind, payload, correlation_id)
 
