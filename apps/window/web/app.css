@@ -2069,9 +2069,6 @@ a { color: inherit; text-decoration: none; }
 }
 
 /* Step 5 operate surfaces: a calm, dense shell around upstream authorities. */
-.operate-tabs { display: flex; align-items: center; gap: 2px; margin-left: auto; padding: 3px; border: 1px solid var(--line); border-radius: var(--r-pill); background: var(--chip); }
-.operate-tab { min-height: 44px; padding: 8px 16px; border-radius: var(--r-pill); color: var(--mute); font-size: 12px; font-weight: 600; transition: color .15s var(--ease), background .15s var(--ease); }
-.operate-tab:hover, .operate-tab.is-on { color: var(--ink); background: var(--bg); }
 .operate-view { overflow: hidden; }
 .operate-surface { min-height: 0; height: 100%; display: flex; flex-direction: column; padding: 24px; background: var(--bg); }
 .operate-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; flex: none; padding-bottom: 20px; }
@@ -2129,8 +2126,6 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 800px) {
   .topbar { flex-wrap: wrap; height: auto; min-height: 56px; padding: 8px 16px; }
   .topbar .sub { display: none; }
-  .operate-tabs { order: 3; width: 100%; margin: 0; }
-  .operate-tab { flex: 1; }
   .operate-surface { padding: 16px; }
   .operate-heading { padding-bottom: 14px; }
   .operate-heading h2 { font-size: 22px; }
@@ -2221,3 +2216,12 @@ a { color: inherit; text-decoration: none; }
   .operations-tool-detail { min-height: 340px; padding: 18px; }
   .operations-tool-detail-facts { grid-template-columns: 1fr; }
 }
+
+/* Compact rail navigation: infrequent operator views remain available in More. */
+.rail-more { margin: 4px 0 0; }
+.rail-more summary { padding: 8px; border-radius: 8px; color: var(--mute); font-size: 12px; cursor: pointer; list-style: none; }
+.rail-more summary::-webkit-details-marker { display: none; }
+.rail-more summary:hover { background: var(--hover); color: var(--ink); }
+.rail-more[open] summary { color: var(--ink); }
+.rail-more > div { padding-left: 8px; }
+.rail-more .rail-item { font-size: 11px; }

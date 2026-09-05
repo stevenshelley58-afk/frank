@@ -23,7 +23,7 @@
 
     <div class="rail-group">
       <div class="lbl">Workspace</div>
-      <button class="rail-item is-on" data-view="hub" aria-label="Hub"><span class="dot"></span><span>Hub</span></button>
+      <button class="rail-item is-on" data-view="hub" aria-label="Home"><span class="dot"></span><span>Home</span></button>
       <div class="chat-nav-head">
         <span>Chats</span>
         <button type="button" id="new-chat" aria-label="Start a new chat" title="New chat">
@@ -44,11 +44,20 @@
 
     <div class="rail-group">
       <div class="lbl">Window</div>
-      <button class="rail-item" data-view="files" aria-label="Files"><span class="glyph">▤</span><span>Files</span></button>
       <button class="rail-item" data-view="tools" aria-label="Tools"><span class="glyph">⚙</span><span>Tools</span></button>
+      <button class="rail-item" data-view="files" aria-label="Files"><span class="glyph">▤</span><span>Files</span></button>
       <button class="rail-item" data-view="ad-studio" aria-label="Ad Studio"><span class="glyph">▧</span><span>Ad Studio</span></button>
-      <button class="rail-item" data-view="trace" aria-label="Trace"><span class="glyph">◉</span><span>Trace</span></button>
-      <button class="rail-item" data-view="releases" aria-label="Releases"><span class="glyph">✓</span><span>Releases</span></button>
+      <details class="rail-more" id="more-nav">
+        <summary>More</summary>
+        <div>
+          <button class="rail-item" data-view="trace"><span class="glyph">◉</span><span>Trace</span></button>
+          <button class="rail-item" data-view="releases"><span class="glyph">✓</span><span>Releases</span></button>
+          <button class="rail-item" data-view="live"><span>Live</span></button>
+          <button class="rail-item" data-view="map"><span>Map</span></button>
+          <button class="rail-item" data-view="control"><span>Control</span></button>
+          <button class="rail-item" data-view="ops"><span>Customer Ops</span></button>
+        </div>
+      </details>
     </div>
 
     <div class="rail-foot">Frank — window only.<br>Hermes does the thinking.</div>
@@ -56,14 +65,8 @@
 
   <main class="main">
     <header class="topbar">
-      <h1 id="view-title" tabindex="-1">Hub</h1>
+      <h1 id="view-title" tabindex="-1">Home</h1>
       <span class="sub" id="view-sub"></span>
-      <nav class="operate-tabs" aria-label="Operate modes">
-        <button type="button" class="operate-tab" data-view="live">Live</button>
-        <button type="button" class="operate-tab" data-view="map">Map</button>
-        <button type="button" class="operate-tab" data-view="control">Control</button>
-        <button type="button" class="operate-tab" data-view="ops">Customer Ops</button>
-      </nav>
       <div class="right" id="top-actions"></div>
     </header>
 
