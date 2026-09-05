@@ -1,4 +1,6 @@
 import { define } from "./registry.js";
+import { isBlockwiseOperationsPreview } from "./blockwise-operations-preview.js";
+import { OPERATIONS_TOOLS } from "./operations-tools.js";
 
 function emit(name, detail) {
   window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -79,10 +81,10 @@ define({
 });
 
 define({
-  id: "account-manager", title: "Accounts", surfaces: ["tools"],
-  description: "Customer and service-account directory.",
+  id: "account-manager", title: "Accounts & access", surfaces: ["tools"],
+  description: "Authentication, roles, and service-account records.",
   mount(el) {
-    const actions = toolIntro(el, "Customer directory with recorded auth and billing state. Provider actions connect through Hermes later.");
+    const actions = toolIntro(el, "Manage access, workspace roles, authentication state, and service identities without duplicating the customer CRM.");
     actionButton(actions, "Open accounts", () => emit("frank:view", "accounts"));
     actionButton(actions, "Home", () => emit("frank:entity-home", { kind: "tool", id: "accounts", name: "Accounts" }), "tool-secondary");
     const state = statusText(actions);
@@ -117,24 +119,44 @@ define({
 });
 
 define({
-  id: "campaigns", title: "Campaigns · Mautic", surfaces: ["tools"],
-  description: "Campaign and audience control surface.",
+  id: "campaigns", title: "Email flows", surfaces: ["tools"],
+  description: "Lifecycle messages, audiences, consent, and delivery health.",
   mount(el) {
-    const actions = toolIntro(el, "Mautic owns campaigns and audiences. Resend is the selected delivery provider.");
-    actionButton(actions, "Home", () => emit("frank:entity-home", { kind: "tool", id: "campaigns", name: "Campaigns" }));
+    const actions = toolIntro(el, "Mautic owns campaigns and audiences. Stalwart is the open-source sending path.");
+    actionButton(actions, "Open email flows", () => emit("frank:operations-tool", { id: "email-flows", name: "Email flows" }));
     const state = statusText(actions, "Checking setup…");
-    fetch("/api/email-tools")
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("email tools unavailable")))
-      .then((data) => {
+    if (isBlockwiseOperationsPreview()) {
+      state.textContent = "Preview data · Mautic + Stalwart";
+      return;
+    }
+    Promise.all([
+      fetch("/api/email-tools").then((response) => response.ok ? response.json() : Promise.reject(new Error("email tools unavailable"))),
+      fetch("/api/connections").then((response) => response.ok ? response.json() : Promise.reject(new Error("connections unavailable"))),
+    ])
+      .then(([data, connectionData]) => {
         const mautic = data.mautic || {};
-        const resend = data.resend || {};
+        const stalwart = (connectionData.connections || []).find((item) => item.provider === "stalwart") || {};
         if (mautic.status !== "unconfigured" && String(mautic.url || "").startsWith("https://")) actionLink(actions, "Open Mautic", mautic.url);
-        const statusLabel = (status) => ({ ready: "ready", configured: "configured", error: "needs attention" })[status] || "setup needed";
-        state.textContent = `Mautic ${statusLabel(mautic.status)} · Resend ${statusLabel(resend.status)}`;
+        const statusLabel = (value) => ({ ready: "ready", verified: "verified", configured: "configured", error: "needs attention" })[value] || "setup needed";
+        state.textContent = `Mautic ${statusLabel(mautic.status)} · Stalwart ${statusLabel(stalwart.status)}`;
       })
       .catch(() => { state.textContent = "Setup status unavailable"; });
   },
 });
+
+for (const tool of OPERATIONS_TOOLS.filter((item) => !["email-flows", "connections"].includes(item.id))) {
+  define({
+    id: `operations-${tool.id}`,
+    title: tool.name,
+    surfaces: ["tools"],
+    description: tool.description,
+    mount(el) {
+      const actions = toolIntro(el, tool.description);
+      actionButton(actions, `Open ${tool.name.toLowerCase()}`, () => emit("frank:operations-tool", { id: tool.id, name: tool.name }));
+      statusText(actions, isBlockwiseOperationsPreview() ? `Preview data · ${tool.provider}` : `Ready to connect · ${tool.provider}`);
+    },
+  });
+}
 
 define({
   id: "factory-ad", title: "Ad Studio", surfaces: ["tools"],

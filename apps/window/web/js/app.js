@@ -1,6 +1,6 @@
 import { mount, mountAll } from "./registry.js";
-import "./widgets.js";
-import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
+import "./widgets.js?v=20260905-blockwise-operations-preview-v1";
+import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js?v=20260905-blockwise-operations-preview-v1";
 import { SseEventParser } from "./chat-stream.js";
 import * as hubApi from "./chat/api.js";
 import { attachmentDTO, AttachmentController, VPS_DRAG_TYPE } from "./chat/attachment-controller.js";
@@ -15,6 +15,8 @@ import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
 import { mountOps } from "./ops.js?v=20260904-ops-v1";
+import { isBlockwiseOperationsPreview } from "./blockwise-operations-preview.js";
+import { mountOperationsTool, operationsTool } from "./operations-tools.js";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -35,6 +37,7 @@ const TITLES = {
   map: ["Map", "Validated Archify projections"],
   control: ["Control", "Evidence-backed read-only records"],
   ops: ["Customer Ops", "Blockwise customer signal · Hermes projections"],
+  "operations-tool": ["Operations", "Shared Blockwise tool"],
 };
 
 let projects = { projects: [] };
@@ -52,7 +55,7 @@ function show(id, { syncHistory = true } = {}) {
   $("#view-sub").textContent = id === "hub"
     ? (chatSessions.find((chat) => chat.id === currentChatId)?.title || "")
     : sub;
-  const railView = ["accounts", "entity-home", "widget-builder", "connections"].includes(id) ? "tools" : id;
+  const railView = ["accounts", "entity-home", "widget-builder", "connections", "operations-tool"].includes(id) ? "tools" : id;
   $$(".rail-item[data-view]").forEach((b) => b.classList.toggle("is-on", b.dataset.view === railView));
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
@@ -89,9 +92,10 @@ function renderProjectNav() {
   }
 }
 
-function showProject(id) {
+function showProject(id, options = {}) {
   currentProject = projects.projects.find((x) => x.id === id) || { id, name: id };
-  show("project");
+  document.body.classList.toggle("blockwise-operations-preview", id === "blockwise" && isBlockwiseOperationsPreview());
+  show("project", options);
   openProjectHome(currentProject);
 }
 
@@ -134,7 +138,33 @@ window.addEventListener("frank:view", (event) => {
   } else if (event.detail === "connections") {
     show("connections");
     openConnections();
+  } else if (event.detail === "tools") {
+    show("tools");
+    mountAll("tools", $("#slot-tools"), {});
   }
+});
+
+window.addEventListener("frank:operations-tool", (event) => {
+  const tool = operationsTool(event.detail?.id);
+  if (!tool) return;
+  if (tool.id === "connections") {
+    show("connections");
+    openConnections();
+    return;
+  }
+  if (tool.id === "customers" && !isBlockwiseOperationsPreview()) {
+    show("ops");
+    void mountOps($("#operate-ops"));
+    return;
+  }
+  show("operations-tool");
+  $("#view-title").textContent = tool.name;
+  $("#view-sub").textContent = `Blockwise · ${tool.provider}`;
+  mountOperationsTool($("#operations-tool"), tool.id, { preview: isBlockwiseOperationsPreview() });
+});
+
+window.addEventListener("frank:project-home", (event) => {
+  showProject(String(event.detail || "blockwise"));
 });
 
 window.addEventListener("frank:entity-home", (event) => {
@@ -156,6 +186,10 @@ window.addEventListener("frank:ad-studio", () => {
 });
 
 function openPathView() {
+  if (isBlockwiseOperationsPreview()) {
+    showProject("blockwise", { syncHistory: false });
+    return;
+  }
   const id = viewForPath(window.location.pathname);
   show(id, { syncHistory: false });
   if (id === "ad-studio") mountAdStudio();
