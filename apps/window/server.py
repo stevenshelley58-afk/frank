@@ -1832,6 +1832,156 @@ def _ad_studio_source_url(run_id: str, name: str) -> str | None:
     return f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(artifact, safe='')}"
 
 
+_AD_STUDIO_MODEL_ROLES = MappingProxyType({
+    "builder": "analyse",
+    "comparator": "compare",
+    "final_review_a": "final-review-a",
+    "final_review_b": "final-review-b",
+    "quality_fallback": "quality-escalation",
+})
+_AD_STUDIO_REQUIRED_MODEL_STAGES = frozenset({
+    "analyse", "compare", "final-review-a", "final-review-b",
+})
+_AD_STUDIO_OPTIONAL_MODEL_STAGES = frozenset({"quality-escalation"})
+
+
+def _public_ad_studio_candidate(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    provider = str(value.get("provider") or "").strip()
+    model = str(value.get("model") or "").strip()
+    capabilities = value.get("capabilities") if isinstance(value.get("capabilities"), list) else []
+    capabilities = [str(item) for item in capabilities if isinstance(item, str) and len(item) <= 80]
+    if not provider or not model or len(provider) > 80 or len(model) > 200:
+        return {}
+    return {
+        "provider": provider,
+        "model": model,
+        "capability_verified": value.get("capability_verified") is True,
+        "capabilities": capabilities,
+        "supports_vision": value.get("supports_vision") is True,
+        "supports_tools": value.get("supports_tools") is True,
+    }
+
+
+def _public_ad_studio_policy(value: object) -> dict:
+    """Expose only the non-secret Hermes model policy fields needed for one run."""
+    if not isinstance(value, dict):
+        return {}
+    stages = value.get("stages") if isinstance(value.get("stages"), dict) else {}
+    public_stages = {}
+    for stage_id in (*_AD_STUDIO_REQUIRED_MODEL_STAGES, *_AD_STUDIO_OPTIONAL_MODEL_STAGES):
+        stage = stages.get(stage_id)
+        if not isinstance(stage, dict):
+            continue
+        primary = _public_ad_studio_candidate(stage.get("primary"))
+        if not primary:
+            continue
+        public_stages[stage_id] = {
+            "capability": str(stage.get("capability") or ""),
+            "primary": primary,
+            "fallbacks": [],
+            "max_attempts": stage.get("max_attempts"),
+            "timeout_seconds": stage.get("timeout_seconds"),
+            "max_cost_usd": stage.get("max_cost_usd"),
+        }
+    result = {
+        "schema": str(value.get("schema") or ""),
+        "tool_id": str(value.get("tool_id") or ""),
+        "name": str(value.get("name") or "")[:160],
+        "preset": str(value.get("preset") or "")[:80],
+        "stages": public_stages,
+        "deterministic_stages": [
+            str(item) for item in value.get("deterministic_stages", [])
+            if isinstance(item, str) and len(item) <= 80
+        ],
+    }
+    if isinstance(value.get("seed_revision"), int):
+        result["seed_revision"] = value["seed_revision"]
+    return result
+
+
+def _ad_studio_model_catalogue(project_id: str = "") -> dict:
+    """Read Hermes-owned capabilities and its current Ad Studio policy."""
+    model_data = hermes_request("/v1/tool-runs/models", timeout=8)
+    raw_models = model_data.get("ad_studio_capabilities") if isinstance(model_data, dict) else []
+    models = []
+    for raw in raw_models if isinstance(raw_models, list) else []:
+        candidate = _public_ad_studio_candidate(raw)
+        if not candidate or "vision_structured" not in candidate["capabilities"]:
+            continue
+        candidate.update({
+            "available": raw.get("available") is True,
+            "credential_ready": raw.get("credential_ready") is True,
+        })
+        models.append(candidate)
+    query = urllib.parse.urlencode({"project_id": project_id}) if project_id else ""
+    path = "/v1/tool-runs/policies/ad-template-generator" + (f"?{query}" if query else "")
+    policy_data = hermes_request(path, timeout=8)
+    records = policy_data.get("data") if isinstance(policy_data, dict) else []
+    records = [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+    record = next((item for item in records if item.get("is_default") is True), records[0] if records else {})
+    policy = _public_ad_studio_policy(record.get("policy"))
+    return {
+        "models": models,
+        "policy_schema": str(model_data.get("policy_schema") or "") if isinstance(model_data, dict) else "",
+        "policy_revision": record.get("revision") if isinstance(record.get("revision"), int) else None,
+        "policy": policy,
+    }
+
+
+def _validated_ad_studio_model_policy(value: object, *, project_id: str) -> dict:
+    """Fail visibly unless every selected route is currently verified by Hermes."""
+    policy = _public_ad_studio_policy(value)
+    stages = policy.get("stages") if isinstance(policy.get("stages"), dict) else {}
+    if (
+        policy.get("schema") != "schema://hermes.tool-model-policy/v1"
+        or policy.get("tool_id") != "ad-template-generator"
+        or not _AD_STUDIO_REQUIRED_MODEL_STAGES.issubset(stages)
+        or set(stages) - (_AD_STUDIO_REQUIRED_MODEL_STAGES | _AD_STUDIO_OPTIONAL_MODEL_STAGES)
+    ):
+        raise _AdStudioSourceError("invalid_model_policy", "Choose a valid Ad Studio model setup.")
+    catalogue = _ad_studio_model_catalogue(project_id)
+    available = {
+        (item["provider"], item["model"]): item
+        for item in catalogue["models"]
+        if item.get("available") and item.get("credential_ready")
+        and item.get("supports_vision") and item.get("supports_tools")
+        and "vision_structured" in item.get("capabilities", [])
+    }
+    for stage_id, stage in stages.items():
+        primary = stage.get("primary") if isinstance(stage, dict) else {}
+        route = (primary.get("provider"), primary.get("model")) if isinstance(primary, dict) else (None, None)
+        verified = available.get(route)
+        if not verified:
+            label = stage_id.replace("-", " ")
+            raise _AdStudioSourceError(
+                "model_unavailable",
+                f"The selected {label} model is not currently available with verified vision and structured output in Hermes.",
+            )
+        # Candidate capabilities come from the live Hermes catalogue, never
+        # from browser claims or provider-specific logic in Frank.
+        stage["primary"] = {
+            "provider": verified["provider"],
+            "model": verified["model"],
+            "capability_verified": True,
+            "capabilities": ["vision_structured"],
+            "supports_vision": True,
+            "supports_tools": True,
+        }
+    return policy
+
+
+@app.get("/api/ad-studio/models")
+def ad_studio_models():
+    project_id = _clean_project_id(request.args.get("project_id")) if request.args.get("project_id") else ""
+    try:
+        data = _ad_studio_model_catalogue(project_id)
+    except Exception as error:
+        return _hermes_error(error)
+    if not data["models"] or not data["policy"]:
+        return jsonify({"error": "Hermes has no verified Ad Studio model setup available."}), 503
+    return jsonify(data)
 def _public_ad_studio_model_profile(run: dict) -> dict:
     """Expose only the immutable provider/model choices frozen for this run."""
     policy = run.get("model_policy") if isinstance(run.get("model_policy"), dict) else {}
@@ -1936,6 +2086,7 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "model_profile": model_profile,
         "title": title or str(run.get("title") or payload.get("job_name") or "Ad template"),
         "project_id": project_id or str(scope.get("project_id") or payload.get("project_id") or ""),
+        "model_policy_revision": run.get("model_policy_revision"),
         **({"error": str(run.get("error"))[:1200]} if run.get("error") else {}),
     }
 
@@ -2225,6 +2376,7 @@ def _start_ad_studio_source_run(
     brief: str,
     project_id: str,
     project: dict,
+    model_policy: dict,
 ) -> tuple[dict | None, dict]:
     index = source_item["index"]
     attachment = source_item["attachment"]
@@ -2248,6 +2400,7 @@ def _start_ad_studio_source_run(
         "scope": {"project_id": project_id},
         "payload": command_payload,
         "idempotency_key": f"ad-template:{secrets.token_hex(16)}",
+        "model_policy_override": deepcopy(model_policy),
     }
     try:
         data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=8)
@@ -2309,6 +2462,17 @@ def ad_studio_run_create():
         _remove_raw_ad_studio_attachments(raw_attachments)
         abort(404, "project not found")
 
+    try:
+        model_policy = _validated_ad_studio_model_policy(
+            body.get("model_policy_override"), project_id=project_id,
+        )
+    except _AdStudioSourceError as error:
+        _remove_raw_ad_studio_attachments(raw_attachments)
+        return jsonify({"error": str(error), "code": error.code}), 422
+    except Exception as error:
+        _remove_raw_ad_studio_attachments(raw_attachments)
+        return _hermes_error(error)
+
     sources = []
     results = []
     total_size = 0
@@ -2343,6 +2507,7 @@ def ad_studio_run_create():
                     brief=brief,
                     project_id=project_id,
                     project=project,
+                    model_policy=model_policy,
                 ),
                 sources,
             )

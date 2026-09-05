@@ -189,6 +189,22 @@
           <div class="ad-studio-panel is-on" id="ad-panel-run" role="tabpanel" aria-labelledby="ad-tab-run" data-ad-panel="run">
             <form class="ad-run-form" id="ad-run-form">
               <div class="ad-section-heading"><div><h3>Source images → ad templates</h3><p>Add up to 20 images, then start them together.</p></div><span id="ad-run-mode">No images</span></div>
+              <section class="ad-model-control" aria-labelledby="ad-model-heading">
+                <div class="ad-model-primary">
+                  <label for="ad-model-builder"><strong id="ad-model-heading">Generation model</strong><span>Only for these Ad Studio jobs</span></label>
+                  <select id="ad-model-builder" aria-describedby="ad-model-status" disabled><option>Loading Hermes models…</option></select>
+                </div>
+                <details class="ad-model-advanced" id="ad-model-advanced">
+                  <summary>Advanced model roles</summary>
+                  <div class="ad-model-grid">
+                    <label>Iteration comparator<select id="ad-model-comparator" disabled></select></label>
+                    <label>Completion reviewer A<select id="ad-model-reviewer-a" disabled></select></label>
+                    <label>Completion reviewer B<select id="ad-model-reviewer-b" disabled></select></label>
+                    <label>Quality fallback<select id="ad-model-fallback" disabled></select></label>
+                  </div>
+                </details>
+                <p class="ad-model-status" id="ad-model-status" role="status">Reading verified vision models from Hermes…</p>
+              </section>
               <input type="file" id="ad-source-files" accept="image/*" multiple hidden>
               <button type="button" class="ad-drop" id="ad-drop">
                 <span class="ad-drop-mark" aria-hidden="true">+</span>
