@@ -238,6 +238,27 @@ class UiContractTest(unittest.TestCase):
         self.assertIn("max-width: 1100px", styles)
         self.assertIn(".rail-item { min-height: 44px; }", styles)
 
+    def test_ops_has_separate_global_enquiry_queue_and_accessible_tabs(self):
+        ops = (WEB / "js" / "ops.js").read_text(encoding="utf-8")
+        styles = (WEB / "app.css").read_text(encoding="utf-8")
+        self.assertIn("/api/ops/enquiries/unassigned", ops)
+        self.assertIn("Unassigned enquiries", ops)
+        self.assertIn('role="tablist"', ops)
+        self.assertIn('role="tabpanel"', ops)
+        self.assertIn('aria-controls="ops-panel-${id}"', ops)
+        self.assertIn("ArrowLeft", ops)
+        self.assertIn("ops-unassigned", styles)
+        self.assertNotIn("provider_record_suffix", ops)
+
+    def test_ops_email_consent_state_is_explicitly_bounded_and_visible(self):
+        ops = (WEB / "js" / "ops.js").read_text(encoding="utf-8")
+        self.assertIn('"email_preferences"', ops)
+        self.assertIn('"email_suppressions"', ops)
+        self.assertIn('"consent_state"', ops)
+        self.assertIn('"suppression_state"', ops)
+        self.assertIn("value.slice(0, 20)", ops)
+        self.assertIn("Object.entries(value).slice(0, 8)", ops)
+
     def test_entity_homes_add_tools_without_changing_the_live_rail(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")

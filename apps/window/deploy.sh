@@ -5,6 +5,7 @@ repo="${FRANK_REPO:-/projects/frank}"
 app="$repo/apps/window"
 secret_dir="/srv/frank/secrets"
 secret_file="$secret_dir/window.env"
+hermes_api_key_file="$secret_dir/hermes-api-key"
 caddy_secret_file="$secret_dir/caddy.env"
 data_dir="/srv/frank/data/window"
 template_release_dir="$data_dir/releases/ad-template-generator"
@@ -55,8 +56,8 @@ id hermes >/dev/null 2>&1 || {
   echo "Hermes user is required for project workspace provisioning" >&2
   exit 1
 }
-# Only trusted Frank publishing code writes customer-facing snapshots. Hermes
-# can write its private build workspace but has no access to this projection.
+# Hermes/provider workers stage customer-ops snapshots outside the Frank
+# runtime. Window consumes them through the dedicated read-only compose mount.
 install -d -o root -g root -m 0755 -- "$mini_preview_dir"
 install -d -o root -g hermes -m 2750 -- "$data_dir/mini-shared" "$mini_workspace_dir"
 install -d -o root -g hermes -m 2775 -- /projects
@@ -147,6 +148,22 @@ for key in HERMES_API_KEY FRANK_BASIC_AUTH_USER FRANK_BASIC_AUTH_HASH; do
     exit 1
   }
 done
+
+# The dispatcher reads Hermes credentials through a dedicated file inside the
+# Window container. Derive it atomically from the existing root-only secret
+# source; never print or pass the credential as a command argument.
+if [[ -e "$hermes_api_key_file" || -L "$hermes_api_key_file" ]]; then
+  [[ -f "$hermes_api_key_file" && ! -L "$hermes_api_key_file" ]] || { echo "refusing non-regular Hermes API key file" >&2; exit 1; }
+  [[ "$(stat -c '%a' -- "$hermes_api_key_file")" == "600" ]] || { echo "Hermes API key file must be mode 0600" >&2; exit 1; }
+else
+  hermes_api_key="$(grep -m1 -E '^HERMES_API_KEY=' "$secret_file" | cut -d= -f2- || true)"
+  [[ -n "$hermes_api_key" ]] || { echo "missing Hermes API key for dedicated credential file" >&2; exit 1; }
+  hermes_tmp="$(mktemp "$secret_dir/.hermes-api-key.XXXXXX")"
+  printf '%s\n' "$hermes_api_key" > "$hermes_tmp"
+  unset hermes_api_key
+  chmod 0600 "$hermes_tmp"
+  mv -f -- "$hermes_tmp" "$hermes_api_key_file"
+fi
 
 if ! grep -q -E '^HERMES_CONNECTIONS_AGENT_KEY=[^[:space:]]' "$secret_file"; then
   echo "Connections Agent ingress is not configured; authenticated agent routes remain disabled." >&2
