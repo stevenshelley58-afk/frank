@@ -16,12 +16,12 @@ export const OPERATIONS_TOOLS = Object.freeze([
   {
     id: "calendar",
     name: "Calendar",
-    provider: "SnagTime + Google Calendar",
-    description: "Bookings, availability, reschedules, and cancellations in one calendar.",
+    provider: "SnagTime native calendar",
+    description: "SnagTime bookings, availability, reschedules, and cancellations in one calendar.",
     primaryAction: "New booking",
     metrics: [["3", "Today"], ["11", "This week"], ["10:30", "Next booking"]],
     items: [
-      { title: "10:30 · Onboarding", meta: "Northline Property · 45 minutes", status: "Confirmed", detail: "Google Meet · First workspace and ad account setup." },
+      { title: "10:30 · Onboarding", meta: "Northline Property · 45 minutes", status: "Confirmed", detail: "Phone call · First workspace and ad account setup." },
       { title: "13:00 · Product demo", meta: "Amelia Stone · 30 minutes", status: "Confirmed", detail: "New website lead assigned to Steven." },
       { title: "15:30 · Account review", meta: "Willow & Co · 30 minutes", status: "Needs notes", detail: "Quarterly results and renewal discussion." },
       { title: "Tomorrow · 09:00", meta: "Open availability · 2 hours", status: "Available", detail: "Bookable through the Blockwise website." },
@@ -38,7 +38,7 @@ export const OPERATIONS_TOOLS = Object.freeze([
       { title: "Payment needs attention", meta: "Harbour Realty · 12 minutes ago", status: "Action", detail: "The latest renewal payment failed. Customer access is still active." },
       { title: "New website enquiry", meta: "Assigned to Steven · 18 minutes ago", status: "New", detail: "A buyer's agent requested a Team plan demo." },
       { title: "Onboarding flow paused", meta: "Northline Property · 42 minutes ago", status: "Review", detail: "The customer replied, so automated follow-up paused." },
-      { title: "Calendar connected", meta: "Google Calendar · Today", status: "Healthy", detail: "Booking availability and receipts are current." },
+      { title: "Calendar connected", meta: "SnagTime · Today", status: "Healthy", detail: "Native booking availability and receipts are current." },
     ],
   },
   {

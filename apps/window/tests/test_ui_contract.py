@@ -281,6 +281,9 @@ class UiContractTest(unittest.TestCase):
             self.assertIn(f'"operations-{tool_id}"', preview)
         self.assertIn('title: "Email flows"', widgets)
         self.assertIn("Stalwart is the open-source sending path", widgets)
+        self.assertIn('provider: "SnagTime native calendar"', tools)
+        self.assertNotIn("Google Calendar", tools)
+        self.assertNotIn("Google Meet", tools)
 
     def test_ops_email_consent_state_is_explicitly_bounded_and_visible(self):
         ops = (WEB / "js" / "ops.js").read_text(encoding="utf-8")
