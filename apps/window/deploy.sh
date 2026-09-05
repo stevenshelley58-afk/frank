@@ -204,12 +204,36 @@ if ! grep -q -E '^MINI_TIP_PROVIDER_URL=https://[^[:space:]]+' "$secret_file"; t
   echo "Mini Frank tip provider is not configured; the explicit tip CTA remains honestly unavailable." >&2
 fi
 
-# Caddy receives only the two values required by its basic-auth directive.
-# Rebuild this derived file without ever passing Window or Hermes credentials
-# into the public proxy container.
+# Caddy receives only the values required by its basic-auth directives: the
+# operator pair and the dedicated browser-acceptance harness pair. The harness
+# credentials are provisioned once, atomically, without ever disturbing the
+# operator's password; their plaintext lives only in /secure (mode 0600) and is
+# never printed, logged, or committed.
+if ! grep -q -E '^FRANK_ACCEPTANCE_AUTH_USER=[^[:space:]]' "$secret_file" \
+  || ! grep -q -E '^FRANK_ACCEPTANCE_AUTH_HASH=' "$secret_file"; then
+  acceptance_tmp="$(mktemp "$secret_dir/.window.env.XXXXXX")"
+  trap 'rm -f -- "$acceptance_tmp"' EXIT
+  cp -- "$secret_file" "$acceptance_tmp"
+  grep -q -E '^FRANK_ACCEPTANCE_AUTH_USER=' "$acceptance_tmp" \
+    || printf 'FRANK_ACCEPTANCE_AUTH_USER=frank-acceptance\n' >> "$acceptance_tmp"
+  if ! grep -q -E '^FRANK_ACCEPTANCE_AUTH_HASH=' "$acceptance_tmp"; then
+    acceptance_password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(36))')"
+    acceptance_hash="$(docker run --rm caddy:2.8-alpine caddy hash-password --plaintext "$acceptance_password" | sed 's/\$/\$\$/g')"
+    printf 'FRANK_ACCEPTANCE_AUTH_HASH=%s\n' "$acceptance_hash" >> "$acceptance_tmp"
+    install -d -o root -g root -m 0700 -- /secure
+    secure_tmp="$(mktemp /secure/.frank-acceptance.env.XXXXXX)"
+    { printf 'FRANK_BROWSER_BASIC_AUTH_USER=frank-acceptance\n'
+      printf 'FRANK_BROWSER_BASIC_AUTH_PASSWORD=%s\n' "$acceptance_password"; } > "$secure_tmp"
+    chmod 0600 "$secure_tmp"; mv -f -- "$secure_tmp" /secure/frank-acceptance.env
+    unset acceptance_password
+  fi
+  chmod 0600 "$acceptance_tmp"; mv -f -- "$acceptance_tmp" "$secret_file"
+  trap - EXIT
+fi
+
 caddy_tmp="$(mktemp "$secret_dir/.caddy.env.XXXXXX")"
 trap 'rm -f -- "$caddy_tmp"' EXIT
-grep -E '^(FRANK_BASIC_AUTH_USER|FRANK_BASIC_AUTH_HASH)=' "$secret_file" > "$caddy_tmp" || {
+grep -E '^(FRANK_BASIC_AUTH_USER|FRANK_BASIC_AUTH_HASH|FRANK_ACCEPTANCE_AUTH_USER|FRANK_ACCEPTANCE_AUTH_HASH)=' "$secret_file" > "$caddy_tmp" || {
   echo "missing Caddy basic-auth settings in $secret_file" >&2
   exit 1
 }
