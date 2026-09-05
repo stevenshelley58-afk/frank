@@ -38,6 +38,14 @@ services:
       # Hermes publishes the bounded Blockwise bundle. Frank receives only a
       # read-only mount of the staged root and never owns its source data.
       HERMES_OPS_PROJECTION_ROOT: /ops-projections
+      # Customer-ops mutations are signed server-side; the browser never sees
+      # this URL or either secret file. Empty URL/role/AAL keeps actions fail-closed.
+      FRANK_OPS_CONTROL_URL: ${FRANK_OPS_CONTROL_URL:-}
+      FRANK_OPS_CONTROL_SECRET_FILE: /srv/frank/secrets/customer-ops-control-secret
+      FRANK_OPS_OPERATOR_ID_FILE: /srv/frank/secrets/frank-operator-id
+      FRANK_OPS_OPERATOR_ROLE: ${FRANK_OPS_OPERATOR_ROLE:-}
+      FRANK_OPS_OPERATOR_AAL: ${FRANK_OPS_OPERATOR_AAL:-}
+      FRANK_OPS_ACTION_JOURNAL_FILE: /data/ops-action-intents.json
       VAULT_METADATA_FILE: /data/vault-metadata.json
       VPS_ROOT: /vps
       PORT: "8080"
@@ -49,6 +57,8 @@ services:
       # process cannot reach the Hermes-owned bundle through another path.
       - /srv/frank/data/ops-projections:/ops-projections:ro
       - /srv/frank/secrets/hermes-api-key:/srv/frank/secrets/hermes-api-key:ro
+      - /srv/frank/secrets/customer-ops-control-secret:/srv/frank/secrets/customer-ops-control-secret:ro
+      - /srv/frank/secrets/frank-operator-id:/srv/frank/secrets/frank-operator-id:ro
       - /srv/frank/previews/mini:/previews/mini
       - /projects/mini-frank/customer-projects:/legacy-mini-projects
       # Project browsing is limited to named product roots. Host-wide

@@ -31,7 +31,25 @@
 .ops-empty { display: grid; align-content: center; justify-items: start; min-height: 150px; gap: 5px; color: var(--mute); }.ops-empty strong { color: var(--ink); font-size: 13px; }.ops-empty span { font-size: 12px; }.ops-empty-error strong { color: var(--bad); }
 .ops-empty-stale strong { color: #a56818; }.ops-empty-setup strong { color: var(--mark); }
 .ops-action-receipts { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--line); }.ops-action-receipts > strong { display: block; margin-bottom: 8px; font-size: 12px; }.ops-action-receipts > div { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; color: var(--mute); font-size: 11px; }.ops-action-receipts code { color: var(--ink); }
-@media (max-width: 800px) { .ops-surface { padding: 20px 14px; }.ops-heading, .ops-detail-heading { flex-direction: column; }.ops-heading-actions { justify-content: flex-start; }.ops-layout { grid-template-columns: 1fr; }.ops-customers { max-height: 340px; overflow: auto; }.ops-detail { min-height: 400px; } }
+.ops-action-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin: 16px 0 0; padding: 12px 0; }.ops-action-toolbar strong { margin-right: auto; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+.ops-record-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }.ops-assignment { display: grid; grid-template-columns: repeat(3, minmax(150px, 1fr)); align-items: end; gap: 9px; margin-top: 12px; }.ops-assignment label { display: grid; gap: 5px; color: var(--faint); font-size: 10px; letter-spacing: .04em; text-transform: uppercase; }.ops-assignment select { min-height: 34px; padding: 6px 8px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font-size: 12px; }.ops-assignment .ops-button { min-height: 34px; }
+.ops-action-dialog { width: min(510px, calc(100vw - 28px)); padding: 0; border: 1px solid var(--line); background: var(--card); color: var(--ink); box-shadow: 0 20px 80px rgba(0,0,0,.24); }.ops-action-dialog::backdrop { background: rgba(20, 25, 30, .5); }.ops-action-dialog form { display: grid; gap: 10px; padding: 22px; }.ops-action-dialog h2 { margin: 0; font-size: 19px; }.ops-action-dialog p { margin: 0; color: var(--mute); font-size: 12px; line-height: 1.5; }.ops-action-dialog label { margin-top: 7px; font-size: 12px; font-weight: 650; }.ops-action-dialog textarea { width: 100%; min-height: 90px; padding: 9px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; resize: vertical; }.ops-dialog-help { font-size: 11px !important; }.ops-dialog-error { min-height: 18px; color: var(--bad); font-size: 12px; }.ops-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 6px; }
+.ops-invite-fields { display: grid; gap: 7px; }.ops-action-dialog input, .ops-action-dialog select { min-height: 36px; padding: 7px 9px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }.ops-invite-fields[hidden] { display: none; }
+button.ops-action:disabled { cursor: not-allowed; }.ops-action-dialog .ops-button, .ops-action-toolbar .ops-button, .ops-record-actions .ops-button { min-height: 34px; }.ops-action:focus-visible, .ops-assignment select:focus-visible, .ops-action-dialog textarea:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+@media (max-width: 800px) { .ops-surface { padding: 20px 14px; }.ops-heading, .ops-detail-heading { flex-direction: column; }.ops-heading-actions { justify-content: flex-start; }.ops-layout { grid-template-columns: 1fr; }.ops-customers { max-height: 340px; overflow: auto; }.ops-detail { min-height: 400px; }.ops-assignment { grid-template-columns: 1fr; } }
+.ops-capability-note { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--mark); color: var(--mute); font-size: 12px; }
+.ops-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.ops-info-grid h3 { margin: 0 0 10px; font-size: 13px; }
+.ops-muted { color: var(--mute); font-size: 12px; line-height: 1.5; }
+.ops-thread-card { margin-bottom: 12px; padding: 14px; border: 1px solid var(--line); background: var(--card); }
+.ops-thread-heading, .ops-thread-meta { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.ops-thread { display: grid; gap: 10px; margin: 14px 0; padding: 0; list-style: none; }
+.ops-thread li { padding: 10px; border-left: 2px solid var(--line); background: color-mix(in srgb, var(--bg) 75%, transparent); }
+.ops-thread p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
+.ops-thread time { color: var(--faint); font-size: 11px; }
+.ops-action-dialog input:focus-visible, .ops-action-dialog select:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+.ops-action-dialog [hidden] { display: none; }
+@media (max-width: 800px) { .ops-info-grid { grid-template-columns: 1fr; } }
 
 @font-face {
   font-family: "Inter";
