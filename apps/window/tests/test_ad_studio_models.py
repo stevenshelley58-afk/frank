@@ -118,10 +118,10 @@ class AdStudioModelsTest(unittest.TestCase):
             "model_policy": policy(),
         })
         self.assertEqual(projected["model_policy_revision"], 14)
-        self.assertEqual(projected["model_profile"]["builder"], {
-            "provider": "openai-codex", "model": "gpt-5.6-sol",
-        })
-        self.assertEqual(projected["model_profile"]["comparator"]["model"], "gpt-5.6-luna")
+        roles = {item["role"]: item for item in projected["model_profile"]["roles"]}
+        self.assertEqual(roles["builder"]["provider"], "openai-codex")
+        self.assertEqual(roles["builder"]["model"], "gpt-5.6-sol")
+        self.assertEqual(roles["comparator"]["model"], "gpt-5.6-luna")
 
 
 if __name__ == "__main__":

@@ -105,6 +105,33 @@ frank.fail {
     }
 
     route {
+        # Signed template packs and their hash-declared assets are intentionally
+        # public, source-free release artifacts. Keep this exact read-only
+        # route ahead of the operator-authenticated fallback.
+        @ad_template_release {
+            method GET HEAD
+            path_regexp ad_template_release ^/releases/ad-template-generator/[A-Za-z0-9][A-Za-z0-9._-]{0,127}/[A-Za-z0-9_-][A-Za-z0-9._/-]{0,511}\.(json|png|webp|jpg|jpeg|woff2?|ttf|otf)$
+        }
+        handle @ad_template_release {
+            header {
+                -Cache-Control
+                Cache-Control "public, max-age=31536000, immutable"
+                -Cross-Origin-Resource-Policy
+                Cross-Origin-Resource-Policy "cross-origin"
+                X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+            }
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -Cookie
+                header_up -X-Frank-Operator-Attestation
+                header_down -Set-Cookie
+            }
+        }
+
         @pavone_root path /pavone
         handle @pavone_root {
             import frank_private_response_headers

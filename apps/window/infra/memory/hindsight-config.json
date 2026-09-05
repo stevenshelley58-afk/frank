@@ -8,7 +8,7 @@
   "recall_budget": "mid",
   "memory_mode": "hybrid",
   "recall_prefetch_method": "recall",
-  "auto_retain": true,
+  "auto_retain": false,
   "retain_every_n_turns": 1,
   "retain_async": true,
   "retain_context": "Hermes project conversation",

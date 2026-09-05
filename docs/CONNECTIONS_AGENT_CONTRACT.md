@@ -4,6 +4,26 @@ Frank is only the authenticated transport and display boundary. It does not
 reason, select models, invoke tools, run provider adapters, or host an agent
 loop. Hermes remains the sole brain and executor.
 
+## CRM and support projection (additive)
+
+For the Blockwise launch, Mautic (GPL) is the CRM/campaign authority and
+Chatwoot (MIT) is the customer-enquiry/support authority. Frank accepts only
+provider-neutral connection metadata (`provider: mautic|chatwoot`) and opaque
+`credential_ref`/`connection_ref` values. `GET /api/providers/readiness` reports
+`unconfigured`, `configured`, `ready`, or `error`; a URL alone never implies
+configured or verified. These are operator/Hermes projection inputs; Frank
+does not independently verify credentials or manufacture receipts.
+
+Hermes may publish a redacted JSON projection at the path in
+`SUPPORT_CONVERSATIONS_FILE` with `{version: 1, conversations: [...]}`. Each
+record may contain only `id`, `account_id`, `project_id`, `status` (open,
+pending, snoozed, resolved, closed), `subject`, `updated_at`, `external_ref`,
+and an HTTPS `url` on the configured Chatwoot origin. Frank exposes this read-only at
+`GET /api/support/conversations` (optionally `account_id=...`) and returns 503
+for malformed or unknown-state data. Frank never accepts provider tokens,
+message bodies, or writes to Mautic/Chatwoot. Provider execution and receipt
+schemas remain Hermes-owned.
+
 ## Existing compatibility surface
 
 `GET /api/connections` is unchanged. Existing consumers continue to receive

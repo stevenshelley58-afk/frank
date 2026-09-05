@@ -8,11 +8,13 @@ import { DictationController } from "./chat/dictation-controller.js";
 import { ModelSelector } from "./chat/model-selector.js";
 import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/turn-stream.js";
 import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
-import { mountAdStudio } from "./ad-studio.js?v=20260831-batch-live-history-v1";
+import { mountAdStudio } from "./ad-studio.js?v=20260905-ready-review-v1";
+import { adStudioBriefValidation } from "./ad-studio-brief.js?v=20260904-brief-roundtrip-v1";
 import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
+import { mountOps } from "./ops.js?v=20260904-ops-v1";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -32,6 +34,7 @@ const TITLES = {
   live: ["Live", "Pinned AgentTrail activity"],
   map: ["Map", "Validated Archify projections"],
   control: ["Control", "Evidence-backed read-only records"],
+  ops: ["Customer Ops", "Blockwise customer signal · Hermes projections"],
 };
 
 let projects = { projects: [] };
@@ -59,6 +62,7 @@ function show(id, { syncHistory = true } = {}) {
   if (id === "live") void mountLive($("#operate-live"));
   if (id === "map") void mountMap($("#operate-map"));
   if (id === "control") void mountControl($("#operate-control"));
+  if (id === "ops") void mountOps($("#operate-ops"));
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
@@ -103,7 +107,7 @@ $$(".rail-item[data-view]").forEach((b) =>
       chatScrollBottom();
     }
     else if (v === "ad-studio") { show(v); mountAdStudio(); }
-    else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); }
+    else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); if (v === "ops") void mountOps($("#operate-ops")); }
   })
 );
 
@@ -184,6 +188,7 @@ window.addEventListener("frank:ad-studio-run", (event) => {
     const sources = Array.isArray(detail.sources) ? detail.sources : [];
     const localSources = sources.filter((source) => source?.kind === "local" && source.file instanceof File);
     const projectId = String(detail.projectId || "").trim();
+    const brief = typeof detail.brief === "string" ? detail.brief : "";
     const settled = new Set();
     const progress = (source, status, options = {}) => {
       if (["started", "error"].includes(status)) settled.add(source.key);
@@ -194,6 +199,8 @@ window.addEventListener("frank:ad-studio-run", (event) => {
         throw new Error("Choose between 1 and 20 source images from this device.");
       }
       if (!projectId) throw new Error("Choose a project.");
+      const briefValidation = adStudioBriefValidation(brief);
+      if (!briefValidation.valid) throw new Error(briefValidation.message);
       const fallbackName = String(localSources[0]?.name || "source image").replace(/\.[^.]+$/, "");
       const jobName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
       localSources.forEach((source) => progress(source, "uploading"));
@@ -206,13 +213,16 @@ window.addEventListener("frank:ad-studio-run", (event) => {
         body: JSON.stringify({
           project_id: projectId,
           name: jobName,
-          brief: String(detail.brief || "").trim(),
+          brief,
           attachments: uploaded.map(attachmentPayload),
           model_policy_override: detail.modelPolicyOverride,
         }),
       });
       const data = await response.json().catch(() => ({}));
-      if (!response.ok && !Array.isArray(data.results)) throw new Error(data.error || "Hermes did not start the background jobs.");
+      if (!response.ok && !Array.isArray(data.results)) {
+        const message = typeof data.error === "string" ? data.error : data.error?.message;
+        throw new Error(message || "Hermes did not start the background jobs.");
+      }
       const runs = Array.isArray(data.runs) ? data.runs.filter((run) => run?.id) : (data.run?.id ? [data.run] : []);
       const orderedResults = Array.isArray(data.results) ? data.results : [];
       const failures = [];

@@ -52,6 +52,13 @@ ENDPOINTS: frozenset[tuple[str, str, str]] = frozenset({
     ("gateway", "GET", "/v1/capabilities"),
     ("serve", "GET", "/api/status"),
     ("serve", "POST", "/api/audio/transcribe"),
+    ("serve", "GET", "/api/model/options"),
+    ("serve", "GET", "/api/cron/jobs"),
+    ("serve", "POST", "/api/cron/jobs"),
+    ("serve", "GET", "/api/cron/jobs/{job_id}"),
+    ("serve", "PUT", "/api/cron/jobs/{job_id}"),
+    ("serve", "DELETE", "/api/cron/jobs/{job_id}"),
+    ("serve", "POST", "/api/cron/jobs/{job_id}/trigger"),
 })
 
 _FRANK_CODES = {
@@ -108,7 +115,14 @@ class RestSurface:
     ):
         if name not in ("gateway", "serve"):
             raise ValueError("surface must be gateway or serve")
-        if not base_url.startswith(("http://127.0.0.1", "http://localhost", "https://")):
+        allowed_prefixes = ["http://127.0.0.1", "http://localhost", "https://"]
+        # The path-aware Docker-to-host bridge (contract §3) listens on the
+        # private Docker-bridge interface; the browser can never reach it.
+        import os as _os
+        bridge_hosts = [h for h in _os.environ.get(
+            "FRANK_PRIVATE_BRIDGE_HOSTS", "172.16.1.1").split(",") if h.strip()]
+        allowed_prefixes += [f"http://{h.strip()}:" for h in bridge_hosts]
+        if not base_url.startswith(tuple(allowed_prefixes)):
             # Loopback/private bridge only; the browser never talks to Hermes directly.
             raise ValueError("base_url must be loopback or https")
         self.name = name

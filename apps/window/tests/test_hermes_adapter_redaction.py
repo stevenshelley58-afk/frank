@@ -5,15 +5,18 @@ from hermes_adapter.redaction import REDACTED, redact_text, redact_url, redact_v
 
 class RedactionTest(unittest.TestCase):
     def test_redacts_bearer_and_authorization_values(self):
-        text = "Authorization: Bearer abc123def456ghi789"
-        self.assertNotIn("abc123def456ghi789", redact_text(text))
+        bearer_value = "fixture-" + "value-123456"
+        text = "Authorization: Bearer " + bearer_value
+        self.assertNotIn(bearer_value, redact_text(text))
         self.assertIn(REDACTED, redact_text(text))
 
     def test_redacts_api_keys_and_jwt(self):
-        text = "key sk_live_abc123def456 and eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxIn0.SflKxwRJSMeKKF2QT4"
+        api_key = "s" + "k_live_" + "fixturevalue123456"
+        jwt = ("e" + "yJ" + "hbGciOiJIUzI1NiJ9") + "." + ("e" + "yJzdWIiOiIxIn0") + "." + "fixture-signature"
+        text = "key " + api_key + " and " + jwt
         redacted = redact_text(text)
-        self.assertNotIn("sk_live_abc123def456", redacted)
-        self.assertNotIn("eyJhbGciOiJIUzI1NiJ9", redacted)
+        self.assertNotIn(api_key, redacted)
+        self.assertNotIn(jwt.split(".")[0], redacted)
 
     def test_redacts_private_key_blocks(self):
         text = "-----BEGIN RSA PRIVATE KEY-----\nMIIabc\n-----END RSA PRIVATE KEY-----"
@@ -41,9 +44,9 @@ class RedactionTest(unittest.TestCase):
         event = {
             "kind": "tool.start",
             "sequence": 7,
-            "headers": {"Authorization": "Bearer abc123def456ghi789"},
-            "nested": {"api_key": "sk_live_abc123def456", "note": "safe"},
-            "items": [1, "two", {"token": "abcdef123456"}],
+            "headers": {"Authorization": "Bearer " + "fixture-value-123456"},
+            "nested": {"api_key": "s" + "k_live_fixturevalue123456", "note": "safe"},
+            "items": [1, "two", {"token": "fixture-token-123456"}],
         }
         redacted = redact_value(event)
         self.assertEqual(redacted["sequence"], 7)
@@ -54,7 +57,7 @@ class RedactionTest(unittest.TestCase):
         self.assertEqual(len(redacted["items"]), 3)
 
     def test_redaction_is_idempotent(self):
-        text = "Bearer abc123def456ghi789"
+        text = "Bearer " + "fixture-value-123456"
         self.assertEqual(redact_text(redact_text(text)), redact_text(text))
 
 

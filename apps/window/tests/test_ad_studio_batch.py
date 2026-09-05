@@ -1,3 +1,4 @@
+import hashlib
 import threading
 import time
 from pathlib import Path
@@ -76,7 +77,7 @@ class AdStudioBatchApiTest(unittest.TestCase):
 
         return request
 
-    def post(self, attachments, hermes):
+    def post(self, attachments, hermes, *, brief="Match it"):
         with (
             mock.patch.object(server._project_store, "get_project", return_value=self.project),
             mock.patch.object(server, "hermes_request", side_effect=hermes),
@@ -85,7 +86,7 @@ class AdStudioBatchApiTest(unittest.TestCase):
             return self.client.post(
                 "/api/ad-studio/runs",
                 json={
-                    "project_id": "ad-project", "name": "Campaign", "brief": "Match it",
+                    "project_id": "ad-project", "name": "Campaign", "brief": brief,
                     "attachments": attachments, "model_policy_override": MODEL_POLICY,
                 },
             )
@@ -201,6 +202,53 @@ class AdStudioBatchApiTest(unittest.TestCase):
         payload = response.get_json()
         self.assertEqual(payload["run"], payload["runs"][0])
         self.assertEqual(payload["run"]["id"], "trun_00000000000000000000000000000001")
+
+    def test_immutable_1975_character_brief_round_trips_to_run_ledger_with_exact_utf8_sha(self):
+        prefix = "  Keep leading space\r\nKeep newlines\tand Unicode: café — 😀\n"
+        brief = prefix + ("界" * (1975 - len(prefix)))
+        self.assertEqual(len(brief), 1975)
+        attachment = self.stage("exact-brief.png")
+        calls = []
+
+        response = self.post([attachment], self.hermes_success(calls), brief=brief)
+
+        self.assertEqual(response.status_code, 202)
+        ledger_payload = calls[0]["payload"]
+        self.assertEqual(ledger_payload["brief"], brief)
+        self.assertEqual(
+            ledger_payload["brief_sha256"],
+            hashlib.sha256(brief.encode("utf-8")).hexdigest(),
+        )
+        self.assertNotIn("\ufffd", ledger_payload["brief"])
+
+    def test_4001_character_brief_is_visibly_rejected_without_starting_or_truncating(self):
+        brief = "😀" * 4001
+        attachment = self.stage("over-limit.png")
+        hermes = mock.Mock()
+
+        response = self.post([attachment], hermes, brief=brief)
+
+        self.assertEqual(response.status_code, 413)
+        payload = response.get_json()
+        self.assertEqual(payload["error"]["code"], "brief_too_long")
+        self.assertIn("4,001 characters", payload["error"]["message"])
+        self.assertIn("did not shorten", payload["error"]["message"])
+        hermes.assert_not_called()
+        self.assertFalse((server.UPLOAD_DIR / attachment["id"]).exists())
+
+    def test_4000_character_brief_is_accepted_at_the_hermes_prompt_boundary(self):
+        brief = "😀" * 4000
+        attachment = self.stage("at-limit.png")
+        calls = []
+
+        response = self.post([attachment], self.hermes_success(calls), brief=brief)
+
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(calls[0]["payload"]["brief"], brief)
+        self.assertEqual(
+            calls[0]["payload"]["brief_sha256"],
+            hashlib.sha256(brief.encode("utf-8")).hexdigest(),
+        )
 
 
 if __name__ == "__main__":
