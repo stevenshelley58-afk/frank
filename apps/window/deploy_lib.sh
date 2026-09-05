@@ -99,6 +99,44 @@ frank_immutable_package_base() {
   printf '%s\n' "${FRANK_IMMUTABLE_PACKAGE_BASE:-/var/lib/frank/build-packages}"
 }
 
+# git archive records submodules only as gitlinks. Expand the two pinned build
+# dependencies from their local object databases, never from worktree bytes.
+frank_expand_immutable_gitlinks() {
+  local repo="$1" candidate="$2" package="$3"
+  local mode type object path subrepo repo_real subrepo_real nested
+  repo_real="$(realpath -e -- "$repo")" || return 1
+  while read -r mode type object path; do
+    [[ "$mode" == "160000" ]] || continue
+    case "$path" in
+      apps/window/vendor/agenttrail|apps/window/vendor/archify) ;;
+      *)
+        echo "refusing deploy: unsupported immutable gitlink path: $path" >&2
+        return 1
+        ;;
+    esac
+    subrepo="$repo/$path"
+    subrepo_real="$(realpath -e -- "$subrepo" 2>/dev/null || true)"
+    [[ -n "$subrepo_real" && "$subrepo_real" == "$repo_real"/* ]] || {
+      echo "refusing deploy: unsafe or unavailable submodule path: $path" >&2
+      return 1
+    }
+    git -C "$subrepo" cat-file -e "${object}^{commit}" 2>/dev/null || {
+      echo "refusing deploy: pinned submodule object is unavailable: $path@$object" >&2
+      return 1
+    }
+    nested="$(git -C "$subrepo" ls-tree -r "$object" | awk '$1 == "160000" { print $4; exit }')" || return 1
+    [[ -z "$nested" ]] || {
+      echo "refusing deploy: nested submodule is unsupported: $path/$nested" >&2
+      return 1
+    }
+    install -d -m 0700 -- "$package/$path" || return 1
+    git -C "$subrepo" archive --format=tar "$object" | tar -xf - -C "$package/$path" || {
+      echo "refusing deploy: could not archive pinned submodule: $path@$object" >&2
+      return 1
+    }
+  done < <(git -C "$repo" ls-tree -r "$candidate")
+}
+
 # The archive is a private, short-lived build context, never a checkout. Every
 # deployment-time executable/config input must be a regular archived file.
 frank_verify_immutable_package_inputs() {
@@ -111,7 +149,11 @@ frank_verify_immutable_package_inputs() {
     apps/window/infra/memory/expose.sh \
     apps/window/infra/control_plane/install.sh \
     apps/window/infra/control_plane/post-deploy.sh \
-    apps/window/scripts/generate_workspace_override.py; do
+    apps/window/scripts/generate_workspace_override.py \
+    apps/window/vendor/agenttrail/package.json \
+    apps/window/vendor/agenttrail/bin/agenttrail.mjs \
+    apps/window/vendor/agenttrail/public/index.html \
+    apps/window/vendor/archify/archify/bin/archify.mjs; do
     [[ -f "$package/$required" && ! -L "$package/$required" ]] || {
       echo "refusing deploy: immutable package lacks tracked input $required" >&2
       return 1
@@ -131,6 +173,10 @@ frank_create_immutable_package() {
   if ! git -C "$repo" archive --format=tar "$candidate" | tar -xf - -C "$package"; then
     frank_cleanup_immutable_package "$package"
     echo "refusing deploy: could not create immutable source package" >&2
+    return 1
+  fi
+  if ! frank_expand_immutable_gitlinks "$repo" "$candidate" "$package"; then
+    frank_cleanup_immutable_package "$package" || true
     return 1
   fi
   if ! frank_verify_immutable_package_inputs "$package"; then
