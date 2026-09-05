@@ -14,6 +14,10 @@ RUN node vendor/archify/archify/bin/archify.mjs check archify/ad-template-proces
 RUN node --input-type=module -e 'import fs from "node:fs"; import { createHash } from "node:crypto"; const digest=(path)=>createHash("sha256").update(fs.readFileSync(path)).digest("hex"); fs.writeFileSync("archify/validation-receipt.json", JSON.stringify({schema:"frank.archify-build-validation.v1",validated:true,artifactSha256:digest("archify/ad-template-process.html"),specSha256:digest("archify/ad-template-process.json"),validatorSha256:digest("vendor/archify/archify/bin/archify.mjs")})+"\n");'
 
 FROM node:22-alpine AS agenttrail-runtime
+# Release provenance: deploy.sh verifies the revision label on every image it
+# deploys, so the agenttrail runtime must carry it too.
+ARG SOURCE_SHA=unknown
+LABEL org.opencontainers.image.revision="${SOURCE_SHA}"
 WORKDIR /agenttrail
 COPY apps/window/vendor/agenttrail/package.json ./package.json
 COPY apps/window/vendor/agenttrail/bin ./bin
@@ -37,6 +41,7 @@ COPY apps/window/server.py .
 COPY apps/window/control_plane_view.py .
 COPY apps/window/ops_projections.py .
 COPY apps/window/action_dispatcher.py .
+COPY apps/window/customer_ops_actions.py .
 COPY apps/window/scripts/run_scheduled_control_job.py ./scripts/run_scheduled_control_job.py
 COPY apps/window/runtime_evidence.py .
 COPY apps/window/project_store.py .

@@ -22,7 +22,7 @@ function asArtifacts(value) {
 export function reviewArtifactPurpose(artifact) {
   const words = artifactWords(artifact);
   if (/(source-filled|source filled|fidelity|qa-render|qa render)/.test(words)) return "qa-source-filled";
-  if (/(customer-default|customer default|reusable|neutral-final|neutral final)/.test(words)) return "customer-default";
+  if (/(customer-default|customer default|reusable|neutral-final|neutral final|final-neutral-shippable)/.test(words)) return "customer-default";
   return "recorded";
 }
 
@@ -35,7 +35,11 @@ export function selectReusableReviewArtifact(summary, placement) {
 export function selectReviewArtifact(summary, placement, view) {
   const review = summary && typeof summary === "object" ? summary : {};
   const wantedView = clean(view).toLowerCase();
-  if (wantedView === "source") return review.source?.url ? review.source : null;
+  if (wantedView === "source") {
+    const reciprocal = asArtifacts(review.references).find((artifact) => artifactWords(artifact).includes("reciprocal-image-reference") && clean(artifact.placement).toLowerCase() === clean(placement).toLowerCase());
+    if (reciprocal) return reciprocal;
+    return review.source?.url ? review.source : null;
+  }
   const groups = wantedView === "template"
     ? asArtifacts(review.previews)
     : [...asArtifacts(review.diffs), ...asArtifacts(review.previews)];

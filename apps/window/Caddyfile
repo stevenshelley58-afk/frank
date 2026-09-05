@@ -240,6 +240,7 @@ frank.fail {
             import frank_agenttrail_response_headers
             basic_auth {
                 {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
+                {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
             }
             reverse_proxy frank-window:8080 {
                 header_up Host {host}
@@ -259,6 +260,7 @@ frank.fail {
             import frank_map_artifact_response_headers
             basic_auth {
                 {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
+                {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
             }
             reverse_proxy frank-window:8080 {
                 header_up Host {host}
@@ -278,6 +280,7 @@ frank.fail {
             }
             basic_auth {
                 {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
+                {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
             }
             reverse_proxy frank-window:8080 {
                 header_up Host {host}

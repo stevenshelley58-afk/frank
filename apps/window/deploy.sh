@@ -3,6 +3,34 @@ set -euo pipefail
 
 repo="${FRANK_REPO:-/projects/frank}"
 app="$repo/apps/window"
+# Shared, individually testable deployment checks.
+source "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/deploy_lib.sh"
+
+# Exclusive host deployment lock: concurrent deployments must fail
+# immediately, before any build or container mutation.
+frank_acquire_deploy_lock || exit 1
+
+[[ "$(realpath -e -- "$repo")" == "/projects/frank" ]] || {
+  echo "refusing non-canonical Frank repository: $repo" >&2
+  exit 1
+}
+git -C "$repo" diff --quiet HEAD -- || {
+  echo "refusing to deploy an uncommitted Frank revision" >&2
+  exit 1
+}
+
+# Self-check mode: run identity and preflight validation only, exit before
+# any directory, secret, build, or container mutation.
+if [[ "${FRANK_DEPLOY_DRY_RUN:-0}" == "1" ]]; then
+  candidate_sha="$(frank_candidate_sha)"
+  frank_verify_source_identity "$candidate_sha"
+  export FRANK_WINDOW_IMAGE_TAG="$candidate_sha"
+  export FRANK_AGENTTRAIL_IMAGE_TAG="$candidate_sha"
+  frank_verify_tag_encodes_sha "frank-window:${FRANK_WINDOW_IMAGE_TAG}" "$candidate_sha"
+  frank_verify_tag_encodes_sha "frank-agenttrail:${FRANK_AGENTTRAIL_IMAGE_TAG}" "$candidate_sha"
+  echo "dry-run ok: identity and preflight validation passed for $candidate_sha"
+  exit 0
+fi
 secret_dir="/srv/frank/secrets"
 secret_file="$secret_dir/window.env"
 hermes_api_key_file="$secret_dir/hermes-api-key"
@@ -176,12 +204,36 @@ if ! grep -q -E '^MINI_TIP_PROVIDER_URL=https://[^[:space:]]+' "$secret_file"; t
   echo "Mini Frank tip provider is not configured; the explicit tip CTA remains honestly unavailable." >&2
 fi
 
-# Caddy receives only the two values required by its basic-auth directive.
-# Rebuild this derived file without ever passing Window or Hermes credentials
-# into the public proxy container.
+# Caddy receives only the values required by its basic-auth directives: the
+# operator pair and the dedicated browser-acceptance harness pair. The harness
+# credentials are provisioned once, atomically, without ever disturbing the
+# operator's password; their plaintext lives only in /secure (mode 0600) and is
+# never printed, logged, or committed.
+if ! grep -q -E '^FRANK_ACCEPTANCE_AUTH_USER=[^[:space:]]' "$secret_file" \
+  || ! grep -q -E '^FRANK_ACCEPTANCE_AUTH_HASH=' "$secret_file"; then
+  acceptance_tmp="$(mktemp "$secret_dir/.window.env.XXXXXX")"
+  trap 'rm -f -- "$acceptance_tmp"' EXIT
+  cp -- "$secret_file" "$acceptance_tmp"
+  grep -q -E '^FRANK_ACCEPTANCE_AUTH_USER=' "$acceptance_tmp" \
+    || printf 'FRANK_ACCEPTANCE_AUTH_USER=frank-acceptance\n' >> "$acceptance_tmp"
+  if ! grep -q -E '^FRANK_ACCEPTANCE_AUTH_HASH=' "$acceptance_tmp"; then
+    acceptance_password="$(python3 -c 'import secrets; print(secrets.token_urlsafe(36))')"
+    acceptance_hash="$(docker run --rm caddy:2.8-alpine caddy hash-password --plaintext "$acceptance_password" | sed 's/\$/\$\$/g')"
+    printf 'FRANK_ACCEPTANCE_AUTH_HASH=%s\n' "$acceptance_hash" >> "$acceptance_tmp"
+    install -d -o root -g root -m 0700 -- /secure
+    secure_tmp="$(mktemp /secure/.frank-acceptance.env.XXXXXX)"
+    { printf 'FRANK_BROWSER_BASIC_AUTH_USER=frank-acceptance\n'
+      printf 'FRANK_BROWSER_BASIC_AUTH_PASSWORD=%s\n' "$acceptance_password"; } > "$secure_tmp"
+    chmod 0600 "$secure_tmp"; mv -f -- "$secure_tmp" /secure/frank-acceptance.env
+    unset acceptance_password
+  fi
+  chmod 0600 "$acceptance_tmp"; mv -f -- "$acceptance_tmp" "$secret_file"
+  trap - EXIT
+fi
+
 caddy_tmp="$(mktemp "$secret_dir/.caddy.env.XXXXXX")"
 trap 'rm -f -- "$caddy_tmp"' EXIT
-grep -E '^(FRANK_BASIC_AUTH_USER|FRANK_BASIC_AUTH_HASH)=' "$secret_file" > "$caddy_tmp" || {
+grep -E '^(FRANK_BASIC_AUTH_USER|FRANK_BASIC_AUTH_HASH|FRANK_ACCEPTANCE_AUTH_USER|FRANK_ACCEPTANCE_AUTH_HASH)=' "$secret_file" > "$caddy_tmp" || {
   echo "missing Caddy basic-auth settings in $secret_file" >&2
   exit 1
 }
@@ -215,31 +267,54 @@ docker build \
   --tag frank-mini-builder:mini-v1 \
   --file "$app/infra/mini_builder/Dockerfile" \
   "$app/infra/mini_builder"
-docker compose build \
-  --build-arg SOURCE_SHA="$(git -C "$app" rev-parse HEAD)" \
-  --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  frank-window frank-agenttrail
-export SOURCE_SHA="$(git -C "$app" rev-parse HEAD)"
+
+# Immutable deployment identity: both images are tagged with the exact
+# full source SHA. The compose file resolves these through the environment
+# and can never name the mutable :current tag as a deployment identity.
+candidate_sha="$(frank_candidate_sha)"
+export SOURCE_SHA="$candidate_sha"
 export BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-# Phase E: refuse a revision that is not pushed, and verify the freshly
-# built image carries the exact source SHA before anything is replaced.
-head_sha="$(git -C "$repo" rev-parse HEAD)"
-git -C "$repo" fetch --quiet origin
-git -C "$repo" merge-base --is-ancestor "$head_sha" origin/main || {
-  echo "refusing to deploy an unpushed Frank revision: $head_sha" >&2
-  exit 1
-}
-image_sha="$(docker image inspect frank-window:current \
-  --format '{{index .Config.Labels "org.opencontainers.image.revision"}}')"
-[[ "$image_sha" == "$head_sha" ]] || {
-  echo "refusing deploy: image label $image_sha != built revision $head_sha" >&2
-  exit 1
-}
+export FRANK_WINDOW_IMAGE_TAG="$candidate_sha"
+export FRANK_AGENTTRAIL_IMAGE_TAG="$candidate_sha"
+docker compose build \
+  --build-arg SOURCE_SHA="$candidate_sha" \
+  --build-arg BUILD_TIME="$BUILD_TIME" \
+  frank-window frank-agenttrail
+
+# Validate everything about the freshly built, immutably tagged images
+# before any container is replaced.
+frank_verify_source_identity "$candidate_sha"
+frank_verify_image_exists "frank-window:$candidate_sha"
+frank_verify_image_exists "frank-agenttrail:$candidate_sha"
+frank_verify_image_label "frank-window:$candidate_sha" "$candidate_sha"
+frank_verify_image_label "frank-agenttrail:$candidate_sha" "$candidate_sha"
+window_digests="$(frank_image_digests "frank-window:$candidate_sha")"
+agenttrail_digests="$(frank_image_digests "frank-agenttrail:$candidate_sha")"
+frank_verify_compose_images "$candidate_sha"
 docker compose config --quiet
 docker run --rm \
   --env-file "$caddy_secret_file" \
   --volume "$app/Caddyfile:/etc/caddy/Caddyfile:ro" \
   caddy:2.8-alpine caddy validate --config /etc/caddy/Caddyfile
+frank_verify_image_critical_manifest "frank-window:$candidate_sha"
+
+# Workspace estate mounts: regenerate the read-only Compose override from the
+# workspace registry and validate the merged compose config BEFORE any
+# container is replaced. A failed generation aborts here with the running
+# containers untouched.
+workspaces_override="${FRANK_WORKSPACES_OVERRIDE:-/srv/frank/compose/workspaces-override.yml}"
+python3 "$app/scripts/generate_workspace_override.py" --output "$workspaces_override"
+docker compose -f docker-compose.yml -f "$workspaces_override" config --quiet
+
+# Record the previously approved revision and running image identities so a
+# failed cutover can restore them; the previous images are immutable-tagged
+# and are never retagged or deleted.
+frank_record_rollback_receipt "$release_dir" "$repo"
+
+# Only after all validation: refresh the convenience pointer tag (never the
+# deployment identity) and cut over.
+docker tag "frank-window:$candidate_sha" frank-window:current
+docker tag "frank-agenttrail:$candidate_sha" frank-agenttrail:current
 
 # The previous Window and Caddy were created by two retired compose projects.
 # Build first, then make the shortest possible atomic cutover to this one stack.
@@ -247,14 +322,13 @@ docker rm -f frank-window-sessions-candidate >/dev/null 2>&1 || true
 docker rm -f frank-agenttrail >/dev/null 2>&1 || true
 docker rm -f frank-window frank-caddy frank-frank-caddy-1 >/dev/null 2>&1 || true
 
-if ! docker compose up -d --remove-orphans; then
+if ! docker compose -f docker-compose.yml -f "$workspaces_override" up -d --remove-orphans; then
   echo "new Frank stack failed to start; restoring the previous runtime" >&2
-  if [[ -f /frank/window/docker-compose.yml ]]; then
-    docker compose -f /frank/window/docker-compose.yml up -d frank-window || true
-  fi
-  if [[ -f /frank/deployed/infra/docker-compose.dev.yml ]]; then
-    docker compose -f /frank/deployed/infra/docker-compose.dev.yml up -d frank-caddy || true
-  fi
+  # Rollback only re-creates the previous stack from its recorded receipt;
+  # it never modifies the approved-sha file.
+  frank_restore_previous_runtime "$release_dir" \
+    "/frank/window/docker-compose.yml:frank-window" \
+    "/frank/deployed/infra/docker-compose.dev.yml:frank-caddy"
   exit 1
 fi
 
@@ -299,9 +373,10 @@ trap - EXIT
 
 release_dir=/var/lib/frank/release
 install -d -o root -g root -m 0755 -- "$release_dir"
-release_tmp="$(mktemp "$release_dir/.approved-sha.XXXXXX")"
-printf '%s\n' "$(git -C "$repo" rev-parse HEAD)" >"$release_tmp"
-chown root:root "$release_tmp"; chmod 0644 "$release_tmp"; mv -f -- "$release_tmp" "$release_dir/approved-sha"
+# Approved only now: the new containers are healthy and every in-script
+# health, import, API, and Mini-canary check has passed.
+frank_write_approved_sha "$candidate_sha" "$release_dir"
+frank_verify_approved_sha "$candidate_sha" "$release_dir/approved-sha"
 curl --fail --silent --show-error --output /dev/null \
   --retry 10 --retry-delay 2 --retry-all-errors \
   https://frank.fail/frank/
