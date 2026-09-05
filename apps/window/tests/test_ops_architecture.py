@@ -40,7 +40,7 @@ class OpsArchitectureTest(unittest.TestCase):
                 "source_revision": "hermes-test",
                 "source_receipt_ids": ["receipt:ops/source"],
                 "published_at": "2026-09-04T00:00:00Z",
-                "projection_count": 9,
+                "projection_count": 10,
             }
             receipt_body = json.dumps(receipt) + "\n"
             (generation / "publication-receipt.json").write_text(receipt_body, encoding="utf-8")
@@ -66,7 +66,10 @@ class OpsArchitectureTest(unittest.TestCase):
                 if not target.exists():
                     empty = {**customer_envelope, "schema": spec["schema"], "projection": name, "source_scope": {"project_id": "blockwise", "workspace_ids": receipt["workspace_ids"], "system": name}, "items": []}
                     target.write_text(json.dumps(empty) + "\n", encoding="utf-8")
+            capabilities = {"schema": "schema://blockwise.ops-action-capabilities/v1", "version": 1, "projection": "capabilities", "project_id": "blockwise", "workspace_ids": receipt["workspace_ids"], "source_scope": {"project_id": "blockwise", "workspace_ids": receipt["workspace_ids"], "system": "capabilities"}, "source_revision": receipt["source_revision"], "source_receipt_ids": receipt["source_receipt_ids"], "publication_receipt_id": receipt["publication_receipt_id"], "published_at": receipt["published_at"], "fresh_until": "2099-01-01T00:00:00Z", "items": [{"action": action, "state": "available", "description": "test capability"} for action in sorted(__import__("ops_projections").ACTION_CAPABILITY_NAMES)]}
+            (generation / "capabilities.json").write_text(json.dumps(capabilities) + "\n", encoding="utf-8")
             files = {spec["filename"]: hashlib.sha256((generation / spec["filename"]).read_bytes()).hexdigest() for spec in __import__("ops_projections").PROJECTION_SPECS.values()}
+            files["capabilities.json"] = hashlib.sha256((generation / "capabilities.json").read_bytes()).hexdigest()
             files["publication-receipt.json"] = hashlib.sha256((generation / "publication-receipt.json").read_bytes()).hexdigest()
             manifest_input = {"generation": "gen-test", "publication_receipt_id": "receipt:ops/test", "files": files, "pointer_sha256": hashlib.sha256((root / "current.json").read_bytes()).hexdigest()}
             manifest = {"schema": "schema://frank.ops-manifest/v1", "version": 1, **manifest_input, "bundle_sha256": hashlib.sha256(json.dumps(manifest_input, separators=(",", ":")).encode()).hexdigest()}

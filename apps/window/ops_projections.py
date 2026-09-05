@@ -69,7 +69,7 @@ PROJECTION_SPECS: dict[str, dict[str, Any]] = {
         "filename": "flows.json",
         "title": "Email flow and campaign summaries",
         "fields": {
-            "id", "customer_id", "name", "type", "status", "stage", "campaign",
+            "id", "customer_id", "profile_id", "profile_ops_version", "flow_id", "name", "type", "status", "stage", "campaign",
             "enrolled_at", "last_activity_at", "next_step_at", "metrics", "updated_at",
             "snapshot_kind", "provider_record_suffix", "source_event_id", "source_version",
         },
@@ -92,7 +92,7 @@ PROJECTION_SPECS: dict[str, dict[str, Any]] = {
             "id", "customer_id", "subject", "status", "priority",
             "assignee", "last_message_at", "created_at", "updated_at", "channel", "summary",
             "workspace_id", "source_system", "enquiry_type", "requester_email", "requester_name",
-            "snapshot_kind", "delivery_status", "source_event_id", "source_version",
+            "snapshot_kind", "delivery_status", "source_event_id", "source_version", "messages",
         },
     },
     "bookings": {
@@ -167,6 +167,14 @@ _GLOBAL_ENQUIRY_ASSOCIATION = frozenset({
     "customer_workspace_id", "workspace_customer_id",
 })
 _ACTION_STATUSES = frozenset({"accepted", "queued", "completed", "recorded", "preview", "error", "failed"})
+ACTION_CAPABILITY_SCHEMA = "schema://blockwise.ops-action-capabilities/v1"
+ACTION_CAPABILITY_FILENAME = "capabilities.json"
+ACTION_CAPABILITY_NAMES = frozenset({
+    "team_invite", "team_resend", "team_cancel", "team_role_change", "team_suspend", "team_reactivate",
+    "session_revoke", "consent_grant", "consent_withdraw", "consent_unsubscribe", "suppression_add", "suppression_remove",
+    "enquiry_assign", "enquiry_close", "enquiry_reply", "enquiry_reopen", "flow_enroll", "flow_pause", "flow_resume", "booking_cancel", "booking_reschedule",
+    "billing_reconcile", "billing_cancel_at_period_end", "billing_portal_link",
+})
 _STATUS = frozenset({"active", "inactive", "pending", "invited", "suspended", "closed", "sent", "delivered", "failed", "bounced", "opened", "clicked", "draft", "paused", "archived", "enrolled", "open", "new", "resolved", "snoozed", "scheduled", "confirmed", "completed", "complete", "canceled", "cancelled", "trial", "past_due", "unpaid", "setup_needed", "ready", "stale", "error", "recorded"})
 _ENUMS = {
     "lifecycle": frozenset({"email_pending", "brand_setup", "brand_review", "first_value", "meta_setup", "conversion", "activated", "active", "lead", "prospect", "trial", "customer", "retention", "churn_risk", "churned", "unknown"}),
@@ -621,6 +629,31 @@ def _safe_value(value: Any, *, depth: int = 0) -> Any:
     return None
 
 
+def _safe_messages(value: Any) -> list[dict[str, Any]]:
+    """Validate the intentionally narrow, provider-neutral thread schema."""
+    if not isinstance(value, list) or len(value) > 50:
+        raise ProjectionError("enquiry messages must be a bounded list")
+    output: list[dict[str, Any]] = []
+    previous: datetime | None = None
+    for message in value:
+        if not isinstance(message, Mapping) or set(message) != {"id", "direction", "sender", "body", "occurred_at", "attachments"}:
+            raise ProjectionError("enquiry message schema is invalid")
+        message_id = message.get("id")
+        sender = message.get("sender")
+        body = message.get("body")
+        direction = message.get("direction")
+        attachments = message.get("attachments")
+        occurred_at = _parse_time(message.get("occurred_at"), "message occurred_at")
+        if not isinstance(message_id, str) or not _ID.fullmatch(message_id) or direction not in {"incoming", "outgoing"} or sender is not None and (not isinstance(sender, str) or not 1 <= len(sender) <= 120) or not isinstance(body, str) or not 1 <= len(body) <= 4000 or not isinstance(attachments, list) or len(attachments) > 5 or not all(isinstance(item, Mapping) and set(item) == {"name", "content_type", "size"} and isinstance(item.get("name"), str) and 1 <= len(item["name"]) <= 120 and isinstance(item.get("content_type"), str) and 1 <= len(item["content_type"]) <= 120 and isinstance(item.get("size"), int) and not isinstance(item.get("size"), bool) and 0 <= item["size"] <= 10_000_000 for item in attachments) or not occurred_at:
+            raise ProjectionError("enquiry message contains an invalid field")
+        parsed = datetime.fromisoformat(occurred_at.replace("Z", "+00:00"))
+        if previous is not None and parsed < previous:
+            raise ProjectionError("enquiry messages are not chronological")
+        previous = parsed
+        output.append({"id": message_id, "direction": direction, "sender": sender, "body": _SECRET_VALUE.sub("[redacted]", body), "occurred_at": occurred_at, "attachments": [{"name": item["name"], "content_type": item["content_type"], "size": item["size"]} for item in attachments]})
+    return output
+
+
 def _parse_time(value: Any, field: str) -> str | None:
     if value is None or value == "":
         return None
@@ -656,7 +689,7 @@ def _safe_item(name: str, item: Any) -> dict[str, Any]:
             raise ProjectionError(f"{name} contains unsupported field {key_text}")
         if _SENSITIVE_KEY.search(key_text):
             raise ProjectionError(f"{name} contains sensitive field {key_text}")
-        output[key_text] = _safe_value(value)
+        output[key_text] = _safe_messages(value) if key_text == "messages" else _safe_value(value)
     item_id = output.get("id")
     if not isinstance(item_id, str) or not _ID.fullmatch(item_id):
         raise ProjectionError(f"{name} contains an invalid item id")
@@ -819,7 +852,7 @@ class OpsProjectionStore:
         files from an incomplete or tampered generation.
         """
         path = generation_root / "manifest.json"
-        expected_order = [spec["filename"] for spec in PROJECTION_SPECS.values()] + ["publication-receipt.json"]
+        expected_order = [spec["filename"] for spec in PROJECTION_SPECS.values()] + [ACTION_CAPABILITY_FILENAME, "publication-receipt.json"]
         expected_files = set(expected_order)
         if not path.is_file() or path.is_symlink():
             raise ProjectionError("ops generation manifest is unavailable")
@@ -877,7 +910,7 @@ class OpsProjectionStore:
             raise ProjectionError("ops publication receipt is invalid")
         workspace_ids = value.get("workspace_ids")
         source_receipts = value.get("source_receipt_ids")
-        if not isinstance(workspace_ids, list) or not workspace_ids or any(not isinstance(item, str) or not _UUID.fullmatch(item) for item in workspace_ids) or workspace_ids != sorted(set(workspace_ids)) or not isinstance(value.get("source_revision"), str) or not value["source_revision"] or not isinstance(source_receipts, list) or not source_receipts or any(not isinstance(item, str) or not _RECEIPT.fullmatch(item) for item in source_receipts) or value.get("projection_count") != len(PROJECTION_SPECS):
+        if not isinstance(workspace_ids, list) or not workspace_ids or any(not isinstance(item, str) or not _UUID.fullmatch(item) for item in workspace_ids) or workspace_ids != sorted(set(workspace_ids)) or not isinstance(value.get("source_revision"), str) or not value["source_revision"] or not isinstance(source_receipts, list) or not source_receipts or any(not isinstance(item, str) or not _RECEIPT.fullmatch(item) for item in source_receipts) or value.get("projection_count") != len(PROJECTION_SPECS) + 1:
             raise ProjectionError("ops publication receipt metadata is invalid")
         if not _parse_time(value.get("published_at"), "publication receipt published_at"):
             raise ProjectionError("ops publication receipt published_at is required")
@@ -900,6 +933,53 @@ class OpsProjectionStore:
         if generation is None:
             return {name: ProjectionSnapshot(name, "setup_needed", [], message="Hermes has not published a complete generation yet.") for name in PROJECTION_NAMES}
         return {name: self._load_from_root(name, generation) for name in PROJECTION_NAMES}
+
+    def action_capabilities(self) -> dict[str, Any]:
+        """Load the separately published, versioned action/readiness projection.
+
+        The action catalogue is deliberately not inferred from Frank code or a
+        provider connection. Blockwise publishes this sidecar next to the
+        read-only projection root and binds it to the exact current generation
+        receipt, source revision, workspace scope and freshness window. Until
+        that publication exists, Frank must render every mutation unavailable.
+        """
+        try:
+            generation = self._generation_root()
+            if generation is None:
+                return {"schema": ACTION_CAPABILITY_SCHEMA, "version": 1, "status": "setup_needed", "actions": {}, "message": "Blockwise has not published action readiness."}
+            receipt = self._publication_receipt(generation)
+            path = generation / ACTION_CAPABILITY_FILENAME
+            if not path.is_file() or path.is_symlink() or path.resolve().parent != generation.resolve():
+                return {"schema": ACTION_CAPABILITY_SCHEMA, "version": 1, "status": "setup_needed", "actions": {}, "message": "Blockwise has not published action readiness."}
+            value = json.loads(path.read_text(encoding="utf-8"))
+            if not isinstance(value, Mapping) or set(value) != _ENVELOPE_FIELDS or value.get("schema") != ACTION_CAPABILITY_SCHEMA or value.get("version") != OPS_SCHEMA_VERSION or value.get("projection") != "capabilities":
+                raise ProjectionError("action capability projection is invalid")
+            workspace_ids = value.get("workspace_ids")
+            scope = value.get("source_scope")
+            if workspace_ids != receipt["workspace_ids"] or value.get("project_id") != BLOCKWISE_PROJECT_ID or not isinstance(scope, Mapping) or set(scope) != {"project_id", "workspace_ids", "system"} or scope.get("project_id") != BLOCKWISE_PROJECT_ID or scope.get("workspace_ids") != workspace_ids or scope.get("system") != "capabilities":
+                raise ProjectionError("action capability workspace scope is invalid")
+            if value.get("source_revision") != receipt["source_revision"] or set(value.get("source_receipt_ids", [])) != set(receipt["source_receipt_ids"]) or value.get("publication_receipt_id") != receipt["publication_receipt_id"]:
+                raise ProjectionError("action capability provenance does not match current generation")
+            items = value.get("items")
+            if not isinstance(items, list) or len(items) != len(ACTION_CAPABILITY_NAMES):
+                raise ProjectionError("action capability catalogue is incomplete")
+            target_types = {"team_invite": "workspace", "team_resend": "invitation", "team_cancel": "invitation", "team_role_change": "profile", "team_suspend": "profile", "team_reactivate": "profile", "session_revoke": "session", "consent_grant": "profile", "consent_withdraw": "profile", "consent_unsubscribe": "profile", "suppression_add": "profile", "suppression_remove": "profile", "enquiry_assign": "enquiry", "enquiry_close": "enquiry", "enquiry_reply": "enquiry", "enquiry_reopen": "enquiry", "flow_enroll": "profile", "flow_pause": "profile", "flow_resume": "profile", "booking_cancel": "booking", "booking_reschedule": "booking", "billing_reconcile": "billing", "billing_cancel_at_period_end": "billing", "billing_portal_link": "billing"}
+            normalized: dict[str, dict[str, Any]] = {}
+            for item in items:
+                if not isinstance(item, Mapping) or set(item) - {"action", "state", "description"} or item.get("action") not in ACTION_CAPABILITY_NAMES or item.get("state") not in {"available", "capability_required", "unsupported"} or item.get("action") in normalized:
+                    raise ProjectionError("action capability descriptor is invalid")
+                action = item["action"]
+                normalized[action] = {"action": action, "target_type": target_types[action], "capability": item["state"], "description": str(item.get("description") or "Action capability published by Blockwise")[:240], "reason": str(item.get("description") or "")[:240], "workspace_ids": workspace_ids}
+            if set(normalized) != ACTION_CAPABILITY_NAMES:
+                raise ProjectionError("action capability catalogue is incomplete")
+            published_at = _parse_time(value.get("published_at"), "action capability published_at")
+            fresh_until = _parse_time(value.get("fresh_until"), "action capability fresh_until")
+            if not published_at or not fresh_until:
+                raise ProjectionError("action capability freshness is invalid")
+            status = "stale" if datetime.fromisoformat(fresh_until.replace("Z", "+00:00")).timestamp() <= self.clock() else "ready"
+            return {"schema": ACTION_CAPABILITY_SCHEMA, "version": OPS_SCHEMA_VERSION, "status": status, "generation": generation.name, "publication_receipt_id": receipt["publication_receipt_id"], "source_revision": receipt["source_revision"], "source_receipt_ids": receipt["source_receipt_ids"], "published_at": published_at, "fresh_until": fresh_until, "actions": normalized, "message": "Action readiness is outside its freshness window." if status == "stale" else None}
+        except (OSError, UnicodeError, json.JSONDecodeError, ProjectionError, ValueError) as error:
+            return {"schema": ACTION_CAPABILITY_SCHEMA, "version": 1, "status": "error", "actions": {}, "message": str(error)}
 
     def action_receipts(self, customer_id: str | None = None) -> list[dict[str, Any]]:
         with self._receipt_lock:
@@ -1038,8 +1118,11 @@ def publish_bundle(bundle: Mapping[str, Any], root: str | Path, *, now: float | 
         if datetime.fromisoformat(source_fresh_until.replace("Z", "+00:00")).timestamp() <= (now if now is not None else time.time()):
             raise ProjectionError("publisher source is expired")
     projections = bundle.get("projections")
-    if not isinstance(projections, Mapping) or set(projections) != set(PROJECTION_NAMES):
-        raise ProjectionError("publisher requires projections")
+    if not isinstance(projections, Mapping) or set(projections) != set(PROJECTION_NAMES) | {"capabilities"}:
+        raise ProjectionError("publisher requires the nine projections and capabilities")
+    capabilities = projections.get("capabilities")
+    if not isinstance(capabilities, list) or not capabilities:
+        raise ProjectionError("publisher requires capabilities")
     stamp = datetime.fromtimestamp(now if now is not None else time.time(), timezone.utc)
     published_at = stamp.isoformat().replace("+00:00", "Z")
     local_fresh_until = datetime.fromtimestamp((now if now is not None else time.time()) + freshness_seconds, timezone.utc).isoformat().replace("+00:00", "Z")
@@ -1070,10 +1153,17 @@ def publish_bundle(bundle: Mapping[str, Any], root: str | Path, *, now: float | 
                         "fresh_until": fresh_until, "items": rows}
             target = stage / spec["filename"]
             _durable_write(target, json.dumps(envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
+        capability_envelope = {"schema": ACTION_CAPABILITY_SCHEMA, "version": OPS_SCHEMA_VERSION, "projection": "capabilities",
+                              "project_id": BLOCKWISE_PROJECT_ID, "workspace_ids": workspace_ids,
+                              "source_scope": {"project_id": BLOCKWISE_PROJECT_ID, "workspace_ids": workspace_ids, "system": "capabilities"},
+                              "source_revision": source_revision, "source_receipt_ids": source_receipts,
+                              "publication_receipt_id": publication_receipt, "published_at": published_at,
+                              "fresh_until": fresh_until, "items": capabilities}
+        _durable_write(stage / ACTION_CAPABILITY_FILENAME, json.dumps(capability_envelope, ensure_ascii=False, sort_keys=True, separators=(",", ":")) + "\n")
         receipt = {"schema": "schema://frank.ops-publication-receipt/v1", "project_id": BLOCKWISE_PROJECT_ID,
                    "workspace_ids": workspace_ids, "publication_receipt_id": publication_receipt,
                    "source_revision": source_revision, "source_receipt_ids": source_receipts,
-                   "published_at": published_at, "projection_count": len(PROJECTION_SPECS)}
+                   "published_at": published_at, "projection_count": len(PROJECTION_SPECS) + 1}
         _durable_write(stage / "publication-receipt.json", json.dumps(receipt, sort_keys=True) + "\n")
         check = OpsProjectionStore(output_root, clock=lambda: now if now is not None else time.time())
         if any(check._load_from_root(name, stage).status not in {"ready", "setup_needed"} for name in PROJECTION_NAMES):
@@ -1131,6 +1221,7 @@ def create_blueprint(*, store: OpsProjectionStore | None = None, dispatcher_fact
             "status": _overall_status(snapshots),
             "customers": customers.items,
             "projections": {name: snapshot.to_dict(include_items=False) for name, snapshot in snapshots.items()},
+            "action_capabilities": projection_store.action_capabilities(),
         })
 
     @api.get("/api/ops/projections/<name>")
@@ -1163,7 +1254,7 @@ def create_blueprint(*, store: OpsProjectionStore | None = None, dispatcher_fact
             if name == "customers":
                 continue
             sections[name] = [row for row in snapshot.items if _customer_id(row) == customer_id]
-        return jsonify({"schema": OPS_SCHEMA, "version": OPS_SCHEMA_VERSION, "status": _overall_status(snapshots), "customer": customer, "sections": sections, "action_receipts": projection_store.action_receipts(customer_id), "projections": {name: item.to_dict(include_items=False) for name, item in snapshots.items()}})
+        return jsonify({"schema": OPS_SCHEMA, "version": OPS_SCHEMA_VERSION, "status": _overall_status(snapshots), "customer": customer, "sections": sections, "action_receipts": projection_store.action_receipts(customer_id), "action_capabilities": projection_store.action_capabilities(), "projections": {name: item.to_dict(include_items=False) for name, item in snapshots.items()}})
 
     @api.get("/api/ops/activity")
     def activity():
@@ -1252,4 +1343,4 @@ def _actions_path() -> Path:
     return control_plane_view.CONTROL_ROOT / "actions.yaml"
 
 
-__all__ = ["BLOCKWISE_PROJECT_ID", "OPS_SCHEMA", "OPS_SCHEMA_VERSION", "OPS_PROJECTION_SCHEMAS", "PROJECTION_NAMES", "PROJECTION_SPECS", "OpsProjectionStore", "ProjectionError", "create_blueprint"]
+__all__ = ["ACTION_CAPABILITY_FILENAME", "ACTION_CAPABILITY_SCHEMA", "BLOCKWISE_PROJECT_ID", "OPS_SCHEMA", "OPS_SCHEMA_VERSION", "OPS_PROJECTION_SCHEMAS", "PROJECTION_NAMES", "PROJECTION_SPECS", "OpsProjectionStore", "ProjectionError", "create_blueprint"]

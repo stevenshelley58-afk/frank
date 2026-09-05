@@ -37,6 +37,19 @@
 .ops-invite-fields { display: grid; gap: 7px; }.ops-action-dialog input, .ops-action-dialog select { min-height: 36px; padding: 7px 9px; border: 1px solid var(--line); background: var(--bg); color: var(--ink); font: inherit; }.ops-invite-fields[hidden] { display: none; }
 button.ops-action:disabled { cursor: not-allowed; }.ops-action-dialog .ops-button, .ops-action-toolbar .ops-button, .ops-record-actions .ops-button { min-height: 34px; }.ops-action:focus-visible, .ops-assignment select:focus-visible, .ops-action-dialog textarea:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
 @media (max-width: 800px) { .ops-surface { padding: 20px 14px; }.ops-heading, .ops-detail-heading { flex-direction: column; }.ops-heading-actions { justify-content: flex-start; }.ops-layout { grid-template-columns: 1fr; }.ops-customers { max-height: 340px; overflow: auto; }.ops-detail { min-height: 400px; }.ops-assignment { grid-template-columns: 1fr; } }
+.ops-capability-note { margin-top: 12px; padding: 10px 12px; border-left: 3px solid var(--mark); color: var(--mute); font-size: 12px; }
+.ops-info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+.ops-info-grid h3 { margin: 0 0 10px; font-size: 13px; }
+.ops-muted { color: var(--mute); font-size: 12px; line-height: 1.5; }
+.ops-thread-card { margin-bottom: 12px; padding: 14px; border: 1px solid var(--line); background: var(--card); }
+.ops-thread-heading, .ops-thread-meta { display: flex; justify-content: space-between; gap: 12px; align-items: baseline; }
+.ops-thread { display: grid; gap: 10px; margin: 14px 0; padding: 0; list-style: none; }
+.ops-thread li { padding: 10px; border-left: 2px solid var(--line); background: color-mix(in srgb, var(--bg) 75%, transparent); }
+.ops-thread p { margin: 5px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; line-height: 1.5; }
+.ops-thread time { color: var(--faint); font-size: 11px; }
+.ops-action-dialog input:focus-visible, .ops-action-dialog select:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
+.ops-action-dialog [hidden] { display: none; }
+@media (max-width: 800px) { .ops-info-grid { grid-template-columns: 1fr; } }
 
 @font-face {
   font-family: "Inter";

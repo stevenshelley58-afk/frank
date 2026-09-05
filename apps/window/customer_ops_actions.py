@@ -28,7 +28,7 @@ from typing import Any, Mapping
 from flask import Blueprint, jsonify, request
 from werkzeug.exceptions import RequestEntityTooLarge
 
-from ops_projections import OpsProjectionStore, ProjectionError, _UUID
+from ops_projections import ACTION_CAPABILITY_SCHEMA, OpsProjectionStore, ProjectionError, _UUID
 
 
 ACTION_SCHEMA = "blockwise.ops.action.v1"
@@ -37,16 +37,36 @@ CONTROL_MAX_BODY = 128 * 1024
 REQUEST_MAX_BODY = 32 * 1024
 REPLAY_WINDOW_SECONDS = 300
 SUPPORTED = frozenset({
-    "team_invite", "team_resend", "team_cancel", "session_revoke",
-    "enquiry_assign", "billing_reconcile",
+    "team_invite", "team_resend", "team_cancel", "team_role_change", "team_suspend", "team_reactivate",
+    "session_revoke", "consent_grant", "consent_withdraw", "consent_unsubscribe", "suppression_add", "suppression_remove",
+    "enquiry_assign", "enquiry_close", "enquiry_reply", "enquiry_reopen", "flow_enroll", "flow_pause", "flow_resume",
+    "booking_cancel", "booking_reschedule", "billing_reconcile", "billing_cancel_at_period_end", "billing_portal_link",
 })
+# This mirrors the versioned Blockwise action contract. Frank may only submit
+# actions marked available here, and still requires a matching target/version
+# from the fresh projection. Other contract names are rendered as disabled
+# setup/capability states by the operator UI rather than guessed into writes.
 CAPABILITY = {
     "team_invite": "available", "team_resend": "available", "team_cancel": "available",
-    "session_revoke": "available", "enquiry_assign": "available", "billing_reconcile": "available",
+    "team_role_change": "capability_required", "team_suspend": "unsupported", "team_reactivate": "unsupported",
+    "session_revoke": "available",
+    "consent_grant": "capability_required", "consent_withdraw": "capability_required", "consent_unsubscribe": "capability_required",
+    "suppression_add": "capability_required", "suppression_remove": "capability_required",
+    "flow_enroll": "capability_required", "flow_pause": "capability_required", "flow_resume": "capability_required",
+    "enquiry_assign": "available", "enquiry_close": "available", "enquiry_reply": "available", "enquiry_reopen": "available",
+    "booking_cancel": "capability_required", "booking_reschedule": "capability_required",
+    "billing_reconcile": "available", "billing_cancel_at_period_end": "capability_required", "billing_portal_link": "capability_required",
 }
 TARGET_TYPES = {
     "team_invite": "workspace", "team_resend": "invitation", "team_cancel": "invitation",
-    "session_revoke": "session", "enquiry_assign": "enquiry", "billing_reconcile": "billing",
+    "team_role_change": "profile", "team_suspend": "profile", "team_reactivate": "profile",
+    "session_revoke": "session",
+    "consent_grant": "profile", "consent_withdraw": "profile", "consent_unsubscribe": "profile",
+    "suppression_add": "profile", "suppression_remove": "profile",
+    "flow_enroll": "profile", "flow_pause": "profile", "flow_resume": "profile",
+    "enquiry_assign": "enquiry", "enquiry_close": "enquiry", "enquiry_reply": "enquiry", "enquiry_reopen": "enquiry",
+    "booking_cancel": "booking", "booking_reschedule": "booking",
+    "billing_reconcile": "billing", "billing_cancel_at_period_end": "billing", "billing_portal_link": "billing",
 }
 IDEMPOTENCY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/-]{7,255}$")
 CORRELATION = re.compile(r"^[A-Za-z0-9._:-]{8,128}$")
@@ -527,8 +547,13 @@ def _payload(action: str, value: Any) -> dict[str, Any]:
     if not isinstance(value, Mapping):
         raise CustomerOpsActionError("action payload is invalid", 422)
     allowed = {
-        "team_invite": {"email", "role"}, "team_resend": set(), "team_cancel": set(),
-        "session_revoke": set(), "enquiry_assign": {"assigneeProfileId"}, "billing_reconcile": set(),
+        "team_invite": {"email", "role"}, "team_resend": set(), "team_cancel": set(), "team_role_change": {"role"},
+        "team_suspend": set(), "team_reactivate": set(), "session_revoke": set(),
+        "consent_grant": {"topic"}, "consent_withdraw": {"topic"}, "consent_unsubscribe": set(),
+        "suppression_add": {"reason"}, "suppression_remove": {"reason"}, "flow_enroll": {"flowId"}, "flow_pause": {"flowId"}, "flow_resume": {"flowId"},
+        "enquiry_assign": {"assigneeProfileId"}, "enquiry_close": set(), "enquiry_reply": {"body"}, "enquiry_reopen": set(),
+        "booking_cancel": set(), "booking_reschedule": {"scheduledStartAt", "scheduledEndAt"},
+        "billing_reconcile": set(), "billing_cancel_at_period_end": {"cancelAtPeriodEnd"}, "billing_portal_link": set(),
     }[action]
     if set(value) - allowed:
         raise CustomerOpsActionError("action payload fields are not allowlisted", 422)
@@ -537,22 +562,97 @@ def _payload(action: str, value: Any) -> dict[str, Any]:
         if not isinstance(email, str) or len(email.strip()) > 320 or not re.fullmatch(r"\S+@\S+", email.strip()) or role not in {"admin", "member", "viewer"}:
             raise CustomerOpsActionError("invite email or role is invalid", 422)
         return {"email": email.strip().lower(), "role": role}
+    if action == "team_role_change":
+        if value.get("role") not in {"admin", "member", "viewer"}:
+            raise CustomerOpsActionError("workspace role is invalid", 422)
+        return {"role": value["role"]}
+    if action == "consent_grant":
+        topic = value.get("topic")
+        if not isinstance(topic, str) or not topic.strip() or len(topic.strip()) > 128:
+            raise CustomerOpsActionError("consent topic is invalid", 422)
+        return {"topic": topic.strip()}
+    if action == "consent_withdraw":
+        topic = value.get("topic")
+        if topic is None:
+            return {}
+        if not isinstance(topic, str) or not topic.strip() or len(topic.strip()) > 128:
+            raise CustomerOpsActionError("consent topic is invalid", 422)
+        return {"topic": topic.strip()}
+    if action in {"suppression_add", "suppression_remove"}:
+        reason = value.get("reason")
+        if not isinstance(reason, str) or not 3 <= len(reason.strip()) <= 500:
+            raise CustomerOpsActionError("a suppression reason is required", 422)
+        return {"reason": reason.strip()}
+    if action in {"flow_enroll", "flow_pause", "flow_resume"}:
+        flow_id = value.get("flowId")
+        if not isinstance(flow_id, str) or not re.fullmatch(r"[A-Za-z0-9._:-]{1,128}", flow_id):
+            raise CustomerOpsActionError("flow identifier is invalid", 422)
+        return {"flowId": flow_id}
     if action == "enquiry_assign":
         assignee = value.get("assigneeProfileId")
         if assignee is not None:
             assignee = _uuid(assignee, "assigneeProfileId")
         return {"assigneeProfileId": assignee}
+    if action == "enquiry_reply":
+        body = value.get("body")
+        if not isinstance(body, str) or not 1 <= len(body.strip()) <= 4000:
+            raise CustomerOpsActionError("reply body is invalid", 422)
+        return {"body": body.strip()}
+    if action == "booking_reschedule":
+        scheduled_start = value.get("scheduledStartAt")
+        scheduled_end = value.get("scheduledEndAt")
+        try:
+            start = datetime.fromisoformat(str(scheduled_start).replace("Z", "+00:00"))
+            end = datetime.fromisoformat(str(scheduled_end).replace("Z", "+00:00")) if scheduled_end is not None else None
+        except (TypeError, ValueError):
+            raise CustomerOpsActionError("booking timestamp is invalid", 422)
+        if not isinstance(scheduled_start, str) or start.tzinfo is None or (end is not None and (not isinstance(scheduled_end, str) or end.tzinfo is None or end <= start)):
+            raise CustomerOpsActionError("booking timestamp is invalid", 422)
+        payload = {"scheduledStartAt": start.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")}
+        if end is not None:
+            payload["scheduledEndAt"] = end.astimezone(timezone.utc).isoformat(timespec="milliseconds").replace("+00:00", "Z")
+        return payload
+    if action == "billing_cancel_at_period_end":
+        if not isinstance(value.get("cancelAtPeriodEnd"), bool):
+            raise CustomerOpsActionError("billing cancellation value is invalid", 422)
+        return {"cancelAtPeriodEnd": value["cancelAtPeriodEnd"]}
     if value:
         raise CustomerOpsActionError("action payload fields are not allowlisted", 422)
     return {}
+
+
+def _published_capability(store: OpsProjectionStore, action: str) -> Mapping[str, Any]:
+    """Return only Blockwise's current readiness descriptor.
+
+    CAPABILITY below is a compile-time contract allowlist, never a live
+    availability source. A missing, stale, incomplete, or malformed publication
+    therefore fails closed before an operator envelope can be created.
+    """
+    loader = getattr(store, "action_capabilities", None)
+    if not callable(loader):
+        raise CustomerOpsActionError("Blockwise action readiness is not published", 409)
+    document = loader()
+    if not isinstance(document, Mapping) or document.get("status") != "ready":
+        raise CustomerOpsActionError(str(document.get("message") or "Blockwise action readiness is unavailable"), 409)
+    descriptor = document.get("actions", {}).get(action) if isinstance(document.get("actions"), Mapping) else None
+    if not isinstance(descriptor, Mapping) or descriptor.get("action") != action or descriptor.get("target_type") != TARGET_TYPES[action]:
+        raise CustomerOpsActionError("Blockwise action capability is not published", 403)
+    scoped = descriptor.get("workspace_ids")
+    if scoped is not None and (not isinstance(scoped, list) or any(not isinstance(item, str) for item in scoped)):
+        raise CustomerOpsActionError("Blockwise action capability scope is invalid", 409)
+    if descriptor.get("capability") != "available":
+        reason = descriptor.get("reason") or "a provider capability is required"
+        raise CustomerOpsActionError(f"this customer-ops action is unavailable: {reason}", 403)
+    return descriptor
 
 
 def _make_envelope(body: Mapping[str, Any], *, operator_id: str, role: str, store: OpsProjectionStore) -> dict[str, Any]:
     action = body.get("action")
     if action not in SUPPORTED:
         raise CustomerOpsActionError("this customer-ops action is unavailable", 403)
-    if action == "session_revoke" and role != "owner":
-        raise CustomerOpsActionError("owner role is required for session revocation", 403)
+    descriptor = _published_capability(store, action)
+    if action in {"team_role_change", "team_suspend", "team_reactivate", "session_revoke", "billing_cancel_at_period_end"} and role != "owner":
+        raise CustomerOpsActionError("owner role is required for this action", 403)
     workspace_id = _uuid(body.get("workspace_id"), "workspace_id")
     customer_id = _uuid(body.get("customer_id"), "customer_id")
     if workspace_id != customer_id:
@@ -570,6 +670,8 @@ def _make_envelope(body: Mapping[str, Any], *, operator_id: str, role: str, stor
     snapshot = store.all()
     if any(item.status != "ready" for item in snapshot.values()):
         raise CustomerOpsActionError("customer operations are unavailable while projections are not ready", 409)
+    if descriptor.get("workspace_ids") and workspace_id not in descriptor["workspace_ids"]:
+        raise CustomerOpsActionError("action capability is not published for this workspace", 403)
     customer = next((row for row in snapshot["customers"].items if row.get("id") == customer_id), None)
     if customer is None:
         raise CustomerOpsActionError("customer is not in the current projection", 404)
@@ -593,6 +695,11 @@ def _make_envelope(body: Mapping[str, Any], *, operator_id: str, role: str, stor
     elif action in {"team_resend", "team_cancel"}:
         if not any(row.get("id") == target_id and row.get("customer_id") == customer_id and row.get("ops_version") == version and str(row.get("status", "")).lower() in {"invited", "pending"} for row in snapshot["members"].items):
             raise CustomerOpsActionError("invitation target is not pending in the current projection", 409)
+    elif action in {"team_role_change", "team_suspend", "team_reactivate", "consent_grant", "consent_withdraw", "consent_unsubscribe", "suppression_add", "suppression_remove", "flow_enroll", "flow_pause", "flow_resume"}:
+        if not any(row.get("profile_id") == target_id and row.get("workspace_id") == workspace_id and row.get("customer_id") == customer_id and row.get("ops_version") == version for row in snapshot["members"].items):
+            raise CustomerOpsActionError("profile target is not current in the workspace projection", 409)
+        if action in {"flow_enroll", "flow_pause", "flow_resume"} and not any(row.get("flow_id") == payload.get("flowId") and row.get("customer_id") == customer_id and row.get("workspace_id") == workspace_id and row.get("profile_id") == target_id for row in snapshot["flows"].items):
+            raise CustomerOpsActionError("flow target is not an allowlisted customer flow", 409)
     elif action == "session_revoke":
         # Blockwise's executor revokes sessions by profile id. Audit/activity
         # rows are evidence only and must never be treated as session targets.
@@ -605,6 +712,15 @@ def _make_envelope(body: Mapping[str, Any], *, operator_id: str, role: str, stor
             for row in snapshot["members"].items
         ):
             raise CustomerOpsActionError("session target is not an active workspace member", 409)
+    elif action in {"enquiry_close", "enquiry_reply", "enquiry_reopen"}:
+        if not any(row.get("id") == target_id and row.get("customer_id") == customer_id and row.get("workspace_id") == workspace_id and row.get("ops_version") == version for row in snapshot["enquiries"].items):
+            raise CustomerOpsActionError("enquiry target is not current in the workspace projection", 409)
+    elif action in {"booking_cancel", "booking_reschedule"}:
+        if not any(row.get("id") == target_id and row.get("customer_id") == customer_id and row.get("workspace_id") == workspace_id and row.get("ops_version") == version for row in snapshot["bookings"].items):
+            raise CustomerOpsActionError("booking target is not current in the workspace projection", 409)
+    elif action in {"billing_cancel_at_period_end", "billing_portal_link"}:
+        if target_id != customer_id or not any(row.get("id") == customer_id and row.get("workspace_id") == customer_id and row.get("customer_id") == customer_id and row.get("ops_version") == version for row in snapshot["billing"].items):
+            raise CustomerOpsActionError("billing target is not the authoritative workspace state", 409)
     envelope = {
         "schema": ACTION_SCHEMA, "actionId": str(uuid.uuid4()), "idempotencyKey": str(body.get("idempotency_key") or "ops:" + secrets.token_urlsafe(18)),
         "workspaceId": workspace_id, "customerId": customer_id,
@@ -627,6 +743,26 @@ def create_blueprint(*, store: OpsProjectionStore | None = None, client_factory=
 
     def client():
         return client_factory() if client_factory else CustomerOpsControlClient()
+
+    @api.get("/api/ops/action-capabilities")
+    def action_capabilities():
+        published = projection_store.action_capabilities() if callable(getattr(projection_store, "action_capabilities", None)) else {"status": "setup_needed", "actions": {}, "message": "Blockwise action readiness is not published"}
+        live = published.get("actions") if isinstance(published, Mapping) and published.get("status") == "ready" and isinstance(published.get("actions"), Mapping) else {}
+        descriptions = {
+            "team_invite": "Create a teammate invitation", "team_resend": "Resend a pending teammate invitation", "team_cancel": "Cancel a pending teammate invitation", "team_role_change": "Change a member role", "team_suspend": "Suspend a member", "team_reactivate": "Reactivate a member", "session_revoke": "Revoke all sessions for this member", "consent_grant": "Grant a marketing consent topic", "consent_withdraw": "Withdraw a marketing consent topic", "consent_unsubscribe": "Unsubscribe from marketing", "suppression_add": "Add an email suppression", "suppression_remove": "Remove an email suppression", "enquiry_assign": "Associate an enquiry with this workspace", "enquiry_close": "Resolve the Chatwoot enquiry", "enquiry_reply": "Send a reply through the Chatwoot action lane", "enquiry_reopen": "Reopen the Chatwoot enquiry", "flow_enroll": "Enroll a contact in a Mautic flow", "flow_pause": "Pause a Mautic flow", "flow_resume": "Resume a Mautic flow", "booking_cancel": "Cancel a booking", "booking_reschedule": "Reschedule a booking", "billing_reconcile": "Request billing reconciliation", "billing_cancel_at_period_end": "Cancel at the end of the billing period", "billing_portal_link": "Open the customer billing portal",
+        }
+        actions = {
+            action: {
+                "action": action,
+                "target_type": TARGET_TYPES[action],
+                "capability": live.get(action, {}).get("capability", "capability_required") if isinstance(live.get(action), Mapping) else "capability_required",
+                "description": live.get(action, {}).get("description", descriptions[action]) if isinstance(live.get(action), Mapping) else descriptions[action],
+                "reason": live.get(action, {}).get("reason", published.get("message") or "Blockwise action readiness is not published") if isinstance(live.get(action), Mapping) else published.get("message") or "Blockwise action readiness is not published",
+                "workspace_ids": live.get(action, {}).get("workspace_ids", []) if isinstance(live.get(action), Mapping) else [],
+            }
+            for action in sorted(SUPPORTED)
+        }
+        return jsonify({"schema": ACTION_CAPABILITY_SCHEMA, "version": 1, "status": published.get("status", "setup_needed"), "generation": published.get("generation"), "publication_receipt_id": published.get("publication_receipt_id"), "source_revision": published.get("source_revision"), "fresh_until": published.get("fresh_until"), "actions": actions, "message": published.get("message")})
 
     @api.post("/api/ops/customer-actions")
     def enqueue_action():

@@ -7,7 +7,7 @@ from unittest.mock import patch
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from ops_projections import BLOCKWISE_PROJECT_ID, OPS_SCHEMA, OPS_SCHEMA_VERSION, BlockwiseOpsClient, OpsProjectionStore, PROJECTION_SPECS, ProjectionError, _customer_id, _masked_suffix, _safe_value, create_blueprint, publish_bundle
+from ops_projections import ACTION_CAPABILITY_FILENAME, ACTION_CAPABILITY_NAMES, ACTION_CAPABILITY_SCHEMA, BLOCKWISE_PROJECT_ID, OPS_SCHEMA, OPS_SCHEMA_VERSION, BlockwiseOpsClient, OpsProjectionStore, PROJECTION_SPECS, ProjectionError, _customer_id, _masked_suffix, _safe_value, create_blueprint, publish_bundle
 import control_plane_view
 from flask import Flask
 
@@ -53,7 +53,7 @@ class OpsProjectionApiTest(unittest.TestCase):
     def write_raw(self, name, value):
         generation = self.root / "generations" / "gen-test"
         generation.mkdir(parents=True, exist_ok=True)
-        publication = {"schema": "schema://frank.ops-publication-receipt/v1", "project_id": "blockwise", "workspace_ids": [WORKSPACE], "publication_receipt_id": "receipt:ops/test", "source_revision": "hermes-test-1", "source_receipt_ids": ["receipt:ops/source-test"], "published_at": "2026-09-04T00:00:00Z", "projection_count": len(PROJECTION_SPECS)}
+        publication = {"schema": "schema://frank.ops-publication-receipt/v1", "project_id": "blockwise", "workspace_ids": [WORKSPACE], "publication_receipt_id": "receipt:ops/test", "source_revision": "hermes-test-1", "source_receipt_ids": ["receipt:ops/source-test"], "published_at": "2026-09-04T00:00:00Z", "projection_count": len(PROJECTION_SPECS) + 1}
         receipt_body = json.dumps(publication) + "\n"
         (generation / "publication-receipt.json").write_text(receipt_body, encoding="utf-8")
         (generation / PROJECTION_SPECS[name]["filename"]).write_text(json.dumps(value), encoding="utf-8")
@@ -61,10 +61,13 @@ class OpsProjectionApiTest(unittest.TestCase):
             target = generation / spec["filename"]
             if not target.exists():
                 target.write_text(json.dumps(envelope(other, [])) + "\n", encoding="utf-8")
+        capabilities = {"schema": ACTION_CAPABILITY_SCHEMA, "version": OPS_SCHEMA_VERSION, "projection": "capabilities", "project_id": BLOCKWISE_PROJECT_ID, "workspace_ids": [WORKSPACE], "source_scope": {"project_id": BLOCKWISE_PROJECT_ID, "workspace_ids": [WORKSPACE], "system": "capabilities"}, "published_at": "2026-09-04T00:00:00Z", "fresh_until": value.get("fresh_until") or "2099-01-01T00:00:00Z", "source_revision": "hermes-test-1", "source_receipt_ids": ["receipt:ops/source-test"], "publication_receipt_id": "receipt:ops/test", "items": [{"action": action, "state": "available", "description": "test capability"} for action in sorted(ACTION_CAPABILITY_NAMES)]}
+        (generation / ACTION_CAPABILITY_FILENAME).write_text(json.dumps(capabilities) + "\n", encoding="utf-8")
         pointer = {"schema": "schema://frank.ops-pointer/v1", "version": 1, "generation": "gen-test", "publication_receipt_id": "receipt:ops/test"}
         pointer_body = json.dumps(pointer) + "\n"
         (self.root / "current.json").write_text(pointer_body, encoding="utf-8")
         files = {spec["filename"]: hashlib.sha256((generation / spec["filename"]).read_bytes()).hexdigest() for spec in PROJECTION_SPECS.values()}
+        files[ACTION_CAPABILITY_FILENAME] = hashlib.sha256((generation / ACTION_CAPABILITY_FILENAME).read_bytes()).hexdigest()
         files["publication-receipt.json"] = hashlib.sha256((generation / "publication-receipt.json").read_bytes()).hexdigest()
         manifest_input = {"generation": "gen-test", "publication_receipt_id": "receipt:ops/test", "files": files, "pointer_sha256": hashlib.sha256((self.root / "current.json").read_bytes()).hexdigest()}
         manifest = {"schema": "schema://frank.ops-manifest/v1", "version": 1, **manifest_input, "bundle_sha256": hashlib.sha256(json.dumps(manifest_input, separators=(",", ":")).encode()).hexdigest()}
@@ -153,7 +156,7 @@ class OpsProjectionApiTest(unittest.TestCase):
         generations = list((self.root / "generations").iterdir())
         self.assertEqual(len(generations), 1)
         self.assertTrue((generations[0] / "publication-receipt.json").is_file())
-        self.assertEqual({path.name for path in generations[0].glob("*.json")} - {"publication-receipt.json"}, {spec["filename"] for spec in PROJECTION_SPECS.values()})
+        self.assertEqual({path.name for path in generations[0].glob("*.json")} - {"publication-receipt.json"}, {spec["filename"] for spec in PROJECTION_SPECS.values()} | {ACTION_CAPABILITY_FILENAME})
         self.assertEqual(self.store.load("customers").status, "ready")
         self.assertEqual(self.store.load("mautic").items[0]["stage"], "open")
 

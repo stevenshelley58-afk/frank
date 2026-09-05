@@ -13,7 +13,7 @@ from unittest.mock import patch
 from flask import Flask
 
 from customer_ops_actions import ActionIntentJournal, CustomerOpsActionError, CustomerOpsControlClient, _safe_file, _secret, create_blueprint
-from ops_projections import ProjectionSnapshot
+from ops_projections import ProjectionError, ProjectionSnapshot, _safe_item
 
 WORKSPACE = "123e4567-e89b-12d3-a456-426614174000"
 OPERATOR = "123e4567-e89b-12d3-a456-426614174001"
@@ -28,6 +28,13 @@ class FakeStore:
 
     def all(self):
         return self.snapshots
+
+    def action_capabilities(self):
+        available = {"team_invite", "team_resend", "team_cancel", "session_revoke", "enquiry_assign", "billing_reconcile"}
+        target_types = {
+            "team_invite": "workspace", "team_resend": "invitation", "team_cancel": "invitation", "team_role_change": "profile", "team_suspend": "profile", "team_reactivate": "profile", "session_revoke": "session", "consent_grant": "profile", "consent_withdraw": "profile", "consent_unsubscribe": "profile", "suppression_add": "profile", "suppression_remove": "profile", "enquiry_assign": "enquiry", "enquiry_close": "enquiry", "enquiry_reply": "enquiry", "enquiry_reopen": "enquiry", "flow_enroll": "profile", "flow_pause": "profile", "flow_resume": "profile", "booking_cancel": "booking", "booking_reschedule": "booking", "billing_reconcile": "billing", "billing_cancel_at_period_end": "billing", "billing_portal_link": "billing",
+        }
+        return {"status": "ready", "actions": {action: {"action": action, "target_type": target, "capability": "available" if action in available else "capability_required", "workspace_ids": [WORKSPACE]} for action, target in target_types.items()}}
 
 
 class FakeClient:
@@ -96,6 +103,40 @@ class CustomerOpsActionsTest(unittest.TestCase):
         self.assertEqual(response.status_code, 202)
         self.assertEqual(self.client_boundary.envelopes[0]["actor"], {"operatorId": OPERATOR, "role": "support", "aal": "aal2"})
         self.assertNotIn("FRANK_OPS_CONTROL_SECRET_FILE", json.dumps(response.get_json()))
+
+    def test_capabilities_are_published_projection_and_missing_source_fails_closed(self):
+        response = self.client.get("/api/ops/action-capabilities")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.get_json()["schema"], "schema://blockwise.ops-action-capabilities/v1")
+        self.assertEqual(len(response.get_json()["actions"]), 24)
+
+        class MissingCapabilities:
+            def __init__(self):
+                self.base = FakeStore()
+
+            def all(self):
+                return self.base.all()
+
+        app = Flask(__name__)
+        app.register_blueprint(create_blueprint(store=MissingCapabilities(), client_factory=lambda: self.client_boundary))
+        response = app.test_client().post("/api/ops/customer-actions", json={
+            "action": "billing_reconcile", "workspace_id": WORKSPACE, "customer_id": WORKSPACE,
+            "target_type": "billing", "target_id": WORKSPACE, "expected_version": 2,
+            "reason": "Review failed invoice state", "payload": {},
+        })
+        self.assertEqual(response.status_code, 409)
+
+    def test_enquiry_messages_use_bounded_internal_chronological_schema(self):
+        item = {"id": "enquiry-1", "workspace_id": WORKSPACE, "messages": [{
+            "id": "message-1", "direction": "incoming", "sender": "Customer",
+            "body": "A" * 1000, "occurred_at": "2026-09-05T00:00:00Z", "attachments": [],
+        }]}
+        self.assertEqual(len(_safe_item("enquiries", item)["messages"][0]["body"]), 1000)
+        self.assertEqual(_safe_item("enquiries", {**item, "messages": [{**item["messages"][0], "body": "password: sk_12345678901234567890"}]})["messages"][0]["body"], "[redacted]")
+        with self.assertRaises(ProjectionError):
+            _safe_item("enquiries", {**item, "messages": [{**item["messages"][0], "body": "ok", "unknown": "x"}]})
+        with self.assertRaises(ProjectionError):
+            _safe_item("enquiries", {**item, "messages": [{"id": "message-2", "direction": "incoming", "sender": "Customer", "body": "later", "occurred_at": "2026-09-05T00:01:00Z", "attachments": []}, item["messages"][0]]})
 
     def test_unsupported_and_stale_actions_fail_closed(self):
         response = self.client.post("/api/ops/customer-actions", json={"action": "enquiry_reply", "workspace_id": WORKSPACE, "customer_id": WORKSPACE, "target_type": "enquiry", "target_id": ACTION, "expected_version": 1, "reason": "reply", "payload": {"body": "hello"}})

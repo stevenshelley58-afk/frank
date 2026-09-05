@@ -31,6 +31,15 @@ timestamps, symlinks, and oversized files fail closed. Missing files are
 reported as `setup_needed`; expired `fresh_until` values are reported as
 `stale`. Unknown fields are never copied into the response.
 
+The tenth immutable file is `capabilities.json`. It uses the generic
+`schema://blockwise.ops-action-capabilities/v1` envelope with
+`projection: "capabilities"` and `items: [{action, state, description}]`.
+Its workspace scope, source revision, source receipts, publication receipt,
+and `fresh_until` must match the current generation and its SHA-256 must be in
+the manifest. Frank treats the compile-time action list as validation only;
+missing, stale, malformed, or out-of-generation capability data disables all
+mutations. Deploy the Blockwise ten-file publisher before this reader.
+
 The Blockwise/Hermes provider worker owns upstream reads, normalization,
 publication, freshness, and provenance. Frank contains no Blockwise endpoint,
 signing key, poller, publisher, scheduler, or provider adapter. It only reads
