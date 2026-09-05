@@ -5,7 +5,7 @@ services:
     build:
       context: ../..
       dockerfile: apps/window/Dockerfile
-    image: frank-window:current
+    image: frank-window:${FRANK_WINDOW_IMAGE_TAG:?set by deploy.sh to the immutable source SHA}
     container_name: frank-window
     restart: unless-stopped
     env_file:
@@ -83,7 +83,7 @@ services:
       context: ../..
       dockerfile: apps/window/Dockerfile
       target: agenttrail-runtime
-    image: frank-agenttrail:current
+    image: frank-agenttrail:${FRANK_AGENTTRAIL_IMAGE_TAG:?set by deploy.sh to the immutable source SHA}
     container_name: frank-agenttrail
     restart: unless-stopped
     network_mode: "service:frank-window"
