@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260904-brief-roundtrip-v1">
+<link rel="stylesheet" href="/app.css?v=20260905-ready-review-v1">
 </head>
 <body>
 <div class="app">
@@ -182,6 +182,7 @@
           <nav class="ad-studio-tabs" role="tablist" aria-label="Ad Studio sections">
             <button type="button" class="is-on" id="ad-tab-run" role="tab" aria-selected="true" aria-controls="ad-panel-run" data-ad-tab="run">Create</button>
             <button type="button" id="ad-tab-runs" role="tab" aria-selected="false" aria-controls="ad-panel-runs" data-ad-tab="runs">Runs</button>
+            <button type="button" id="ad-tab-review" role="tab" aria-selected="false" aria-controls="ad-panel-review" data-ad-tab="review">Ready for Review <span class="ad-review-count" id="ad-review-count" hidden>0</span></button>
             <button type="button" id="ad-tab-pipeline" role="tab" aria-selected="false" aria-controls="ad-panel-pipeline" data-ad-tab="pipeline">How it works</button>
           </nav>
 
@@ -203,8 +204,13 @@
               <div class="ad-submit-row"><p id="ad-run-status" role="status">Add one or more images. Each image becomes its own background job.</p><button type="submit" class="ad-primary" id="ad-run-submit" disabled>Run jobs</button></div>
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
-              <h3>Your images. Separate live template runs.</h3>
-              <ol><li><strong>Read the design</strong><span>Hermes analyses the source design.</span></li><li><strong>Build editable layers</strong><span>The builder starts cheap, creates separate Feed and Story documents, and switches automatically to the stronger builder after a regression or two consecutive gains below 0.5.</span></li><li><strong>Render, score, improve</strong><span>One comparator runs per iteration. A score below 9.5 triggers another revision.</span></li><li><strong>Finish automatically</strong><span>After the comparator passes, two final reviewers run automatically.</span></li></ol>
+              <h3>Exact-clone runs. One source per job.</h3>
+              <ol>
+                <li><strong>Measure a fixed target</strong><span>Hermes measures geometry, colour, type, imagery, shading and effects deterministically.</span></li>
+                <li><strong>Generate reference, build once</strong><span>A generated reciprocal reference checks the source measurement; the builder then authors one editable Feed and Story template.</span></li>
+                <li><strong>Compare, then patch only</strong><span>Up to four focused passes and two final patch passes correct the existing template until both placements reach 9.8 likeness.</span></li>
+                <li><strong>Review once, then quarantine</strong><span>Two final reviewers score the finished result once. A passing Blockwise smoke test sends it to your manual Ready for Review queue.</span></li>
+              </ol>
               <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
             </aside>
           </div>
@@ -229,6 +235,16 @@
             </div>
           </div>
 
+          <div class="ad-studio-panel" id="ad-panel-review" role="tabpanel" aria-labelledby="ad-tab-review" data-ad-panel="review" hidden>
+            <div class="ad-review-layout">
+              <section class="ad-review-list-panel">
+                <div class="ad-section-heading"><div><h3>Ready for Review</h3><p>Passed automated QA and waiting for your decision.</p></div><span class="ad-live-state" id="ad-review-live-state">Live</span></div>
+                <div class="ad-review-list" id="ad-review-list" aria-live="polite"></div>
+              </section>
+              <section class="ad-review-detail" id="ad-review-detail"><div class="ad-empty"><strong>Select a template</strong><span>Compare the source and finished placements before publishing it to Blockwise.</span></div></section>
+            </div>
+          </div>
+
           <div class="ad-studio-panel" id="ad-panel-pipeline" role="tabpanel" aria-labelledby="ad-tab-pipeline" data-ad-panel="pipeline" hidden>
             <div class="ad-pipeline-toolbar">
               <div><h3>How template generation works</h3><p>Frank starts the run. This view shows what Hermes actually did.</p></div>
@@ -239,13 +255,13 @@
               <div><strong>Implementation activity</strong><span id="ad-agenttrail-status">Checking AgentTrail board&</span><pre id="ad-agenttrail-board" hidden></pre></div>
             </section>
             <section class="ad-system-map" aria-label="Frank generation architecture">
-              <div><strong>Frank</strong><span>Starts the run and shows its progress.</span></div><i aria-hidden="true"></i>
+              <div><strong>Frank</strong><span>Starts the run, shows Hermes progress and records your manual decision.</span></div><i aria-hidden="true"></i>
               <div><strong>Hermes</strong><span>Owns the durable run and events.</span></div><i aria-hidden="true"></i>
-              <div><strong>Template Builder</strong><span>Creates editable Feed and native Story layers.</span></div><i aria-hidden="true"></i>
-              <div><strong>Blockwise</strong><span>Imports the finished template into Blockwise.</span></div>
+              <div><strong>Template Builder</strong><span>Builds editable Feed and native Story layers once, then applies measured patches.</span></div><i aria-hidden="true"></i>
+              <div><strong>Blockwise</strong><span>Smoke-tests the candidate and holds it in quarantine until you approve and publish.</span></div>
             </section>
             <section class="ad-iteration-law" aria-label="Quality iteration rule">
-              <div><strong>Render</strong><span>Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Compare</strong><span>One comparison per iteration</span></div><b aria-hidden="true">→</b><div><strong>Revise</strong><span>Below 9.5 loops automatically</span></div><b aria-hidden="true">↻</b><div><strong>Final review</strong><span>Two fresh reviews at completion</span></div><b aria-hidden="true">→</b><div><strong>Accept</strong><span>Both scores must reach 9.5</span></div>
+              <div><strong>Measure</strong><span>Deterministic target + reciprocal reference</span></div><b aria-hidden="true">→</b><div><strong>Build once</strong><span>Editable Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Patch only</strong><span>Up to 4 passes + 2 final passes to 9.8</span></div><b aria-hidden="true">↻</b><div><strong>Final review once</strong><span>Two independent reviewers</span></div><b aria-hidden="true">→</b><div><strong>Smoke + your review</strong><span>Quarantine, approve, revise or discard</span></div>
             </section>
             <div class="ad-pipeline-layout">
               <section class="ad-pipeline-canvas"><div class="ad-declared-label"><strong>Declared lifecycle</strong><span>The route Frank promises before a run begins.</span></div><div id="ad-pipeline-graph"></div></section>
@@ -458,6 +474,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260904-brief-roundtrip-v1"></script>
+<script type="module" src="/js/app.js?v=20260905-ready-review-v1"></script>
 </body>
 </html>

@@ -3,6 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import server
 
@@ -93,6 +94,72 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertEqual(projected["usage"]["status"], "not_reported")
         self.assertNotIn("total_tokens", projected["usage"])
         self.assertIsNone(projected["cost"])
+
+    def test_ready_for_review_projection_exposes_only_safe_recorded_evidence(self):
+        projected = server._public_ad_studio_run({
+            "run_id": "trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            "status": "ready_for_review",
+            "output": {"review_summary": {
+                "source": {"name": "source.png", "url": "https://private.example/source.png"},
+                "previews": [
+                    {"name": "final-feed.png", "placement": "feed", "kind": "template", "private_path": "/srv/private"},
+                    {"name": "meta-story.png", "placement": "story", "kind": "meta-preview"},
+                ],
+                "diffs": [{"name": "diff-feed.png", "placement": "feed", "view": "difference"}],
+                "scores": {"overall": 9.8, "feed": 9.9, "story": 9.8, "reviewers": [
+                    {"label": "Final A", "score": 9.8, "decision": "pass", "prompt": "never public"},
+                ]},
+                "warnings": [{"code": "FONT", "message": "Poppins replaced", "secret": "never"}],
+                "font_substitution": [{"source": "Paid Font", "replacement": "Poppins", "reason": "Closest available"}],
+                "iterations": 7,
+                "elapsed_seconds": 144,
+                "cost_usd": 0.42,
+                "model_profile": {"source": "Hermes frozen run policy", "immutable": True, "roles": [
+                    {"role": "builder", "label": "Builder", "provider": "openai-codex", "model": "gpt-5.6-sol", "secret": "never"},
+                ]},
+                "smoke_test": {"status": "passed", "passed": True, "checks": [{"label": "Editor opened", "passed": True}]},
+                "layers": [{"id": "headline", "name": "Headline", "type": "text", "placement": "feed", "editable": True, "bounds": [0, 0, 1, 1]}],
+            }},
+        })
+
+        summary = projected["output"]["review_summary"]
+        self.assertEqual(summary["source"]["url"], "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/source.png")
+        self.assertEqual(summary["previews"][0]["url"], "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/final-feed.png")
+        self.assertEqual(summary["scores"]["reviewers"][0], {"label": "Final A", "decision": "pass", "score": 9.8})
+        self.assertEqual(summary["smoke_test"]["checks"], [{"label": "Editor opened", "passed": True}])
+        self.assertEqual(summary["model_profile"]["roles"], [{"role": "builder", "label": "Builder", "provider": "openai-codex", "model": "gpt-5.6-sol"}])
+        self.assertEqual(summary["layers"], [{"id": "headline", "name": "Headline", "type": "text", "placement": "feed", "editable": True}])
+        serialized = json.dumps(summary)
+        self.assertNotIn("private.example", serialized)
+        self.assertNotIn("/srv/private", serialized)
+        self.assertNotIn("never public", serialized)
+
+    def test_review_decisions_proxy_exact_hermes_routes_and_bodies(self):
+        responses = [
+            ("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", {}),
+            ("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes", {"instructions": "Increase title tracking."}),
+            ("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/discard", {"reason": "Wrong source."}),
+        ]
+        with mock.patch.object(server, "hermes_request", return_value={"run_id": "trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "status": "approved"}) as request_mock:
+            client = server.app.test_client()
+            for route, body in responses:
+                response = client.post(route, json=body)
+                self.assertEqual(response.status_code, 200)
+            self.assertEqual(
+                [(call.args[0], call.args[1]) for call in request_mock.call_args_list],
+                [
+                    ("/v1/tool-runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", {}),
+                    ("/v1/tool-runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes", {"instructions": "Increase title tracking."}),
+                    ("/v1/tool-runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/discard", {"reason": "Wrong source."}),
+                ],
+            )
+            self.assertTrue(all(call.kwargs == {"method": "POST", "timeout": 15} for call in request_mock.call_args_list))
+
+    def test_review_decisions_fail_closed_on_invalid_operator_input(self):
+        client = server.app.test_client()
+        self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", json={"force": True}).status_code, 400)
+        self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes", json={"instructions": ""}).status_code, 400)
+        self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/discard", json={"reason": "x" * 1_001}).status_code, 400)
 
     def test_archify_receipt_is_bound_to_spec_artifact_and_validator(self):
         previous = (
