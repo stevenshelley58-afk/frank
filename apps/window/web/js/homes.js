@@ -949,6 +949,7 @@ async function loadSnapshot(card, body, instance, generation) {
     return;
   }
   try {
+    await Promise.resolve();
     const preview = isBlockwiseOperationsPreview() && homeState.home.entity.kind === "project" && homeState.home.entity.id === "blockwise";
     const snapshot = preview
       ? blockwisePreviewSnapshot(instance)

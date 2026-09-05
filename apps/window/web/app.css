@@ -1090,20 +1090,20 @@ a { color: inherit; text-decoration: none; }
 .project-command-body .project-operations-footer { border-top-color: rgb(255 255 255 / 16%); }
 .project-command-body .home-inline-button { border-color: rgb(255 255 255 / 24%); background: transparent; color: #fff; }
 .project-command-body .home-inline-button:hover { background: rgb(255 255 255 / 10%); }
-.project-operations-metric { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 6px 10px; }
-.project-operations-metric > strong { font-size: 27px; font-weight: 550; line-height: 1; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
+.project-operations-metric { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: end; gap: 4px 10px; }
+.project-operations-metric > strong { font-size: 24px; font-weight: 550; line-height: 1; letter-spacing: -.035em; font-variant-numeric: tabular-nums; }
 .project-operations-metric > span { color: var(--mute); font-size: 9px; }
 .project-operations-supporting { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px 12px; color: var(--mute); font-size: 9px; }
 .project-operations-supporting strong { color: var(--ink); font-weight: 600; font-variant-numeric: tabular-nums; }
-.project-operations-rows { margin: 12px 0 0; padding: 0; list-style: none; }
-.project-operations-rows li { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); }
+.project-operations-rows { margin: 6px 0 0; padding: 0; list-style: none; }
+.project-operations-rows li { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 4px 0; border-top: 1px solid var(--line); }
 .project-operations-rows li > span { min-width: 0; }
 .project-operations-rows strong,
 .project-operations-rows small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .project-operations-rows strong { font-size: 10px; font-weight: 600; }
 .project-operations-rows small { margin-top: 1px; color: var(--mute); font-size: 9px; }
 .project-operations-rows em { color: var(--mute); font-size: 8px; font-style: normal; white-space: nowrap; }
-.project-operations-footer { display: flex; flex-wrap: wrap; gap: 7px; margin-top: auto; padding-top: 9px; border-top: 1px solid var(--line); }
+.project-operations-footer { display: flex; flex-wrap: wrap; gap: 7px; margin-top: auto; padding-top: 6px; border-top: 1px solid var(--line); }
 .project-operations-footer .home-inline-button { min-height: 29px; padding: 5px 9px; font-size: 9px; }
 
 /* One reusable workbench for Inbox, Calendar, Notifications, Customers, Flows, Billing and Analytics. */

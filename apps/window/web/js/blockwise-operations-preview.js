@@ -4,15 +4,15 @@ const PREVIEW_ID = "blockwise-operations";
 const WIDGET_PREFIX = "operations-";
 
 const LAYOUTS = Object.freeze({
-  "operations-command": { x: 0, y: 0, w: 4, h: 2 },
-  "operations-inbox": { x: 4, y: 0, w: 4, h: 2 },
-  "operations-calendar": { x: 8, y: 0, w: 4, h: 2 },
-  "operations-customers": { x: 0, y: 2, w: 3, h: 2 },
-  "operations-email-flows": { x: 3, y: 2, w: 3, h: 2 },
-  "operations-notifications": { x: 6, y: 2, w: 3, h: 2 },
-  "operations-billing": { x: 9, y: 2, w: 3, h: 2 },
-  "operations-analytics": { x: 0, y: 4, w: 6, h: 2 },
-  "operations-connections": { x: 6, y: 4, w: 6, h: 2 },
+  "operations-command": { x: 0, y: 0, w: 4, h: 3 },
+  "operations-inbox": { x: 4, y: 0, w: 4, h: 3 },
+  "operations-calendar": { x: 8, y: 0, w: 4, h: 3 },
+  "operations-customers": { x: 0, y: 3, w: 3, h: 3 },
+  "operations-email-flows": { x: 3, y: 3, w: 3, h: 3 },
+  "operations-notifications": { x: 6, y: 3, w: 3, h: 3 },
+  "operations-billing": { x: 9, y: 3, w: 3, h: 3 },
+  "operations-analytics": { x: 0, y: 6, w: 6, h: 3 },
+  "operations-connections": { x: 6, y: 6, w: 6, h: 3 },
 });
 
 const commandManifest = {
