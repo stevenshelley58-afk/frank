@@ -469,23 +469,48 @@ class _AdDbNoRedirect(urllib.request.HTTPRedirectHandler):
         return None
 
 
-def _ad_db_media_redirect(ad_id: str, asset_id: str) -> Response:
-    """Relay Hermes' integrity-gated archive redirect without downloading it."""
+def _ad_db_media_response(ad_id: str, asset_id: str) -> Response:
+    """Stream only Hermes-authenticated archive bytes; never relay redirects."""
     path = f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
     headers = {"Accept": "application/octet-stream"}
     if HERMES_KEY:
         headers["Authorization"] = f"Bearer {HERMES_KEY}"
-    req = urllib.request.Request(hermes_base() + path, headers=headers, method="GET")
-    try:
-        upstream = urllib.request.build_opener(_AdDbNoRedirect()).open(req, timeout=15)
-    except urllib.error.HTTPError as error:
-        if error.code != 302:
-            raise
-        upstream = error
-    location = upstream.headers.get("Location")
-    if getattr(upstream, "status", upstream.getcode()) != 302 or not location:
-        abort(502, description="Hermes did not return an archived-media redirect")
-    return redirect(location, code=302)
+    for name in ("Range", "If-Range", "If-None-Match"):
+        if request.headers.get(name):
+            headers[name] = request.headers[name]
+    upstream_request = urllib.request.Request(
+        hermes_base() + path,
+        headers=headers,
+        method=request.method,
+    )
+    upstream = urllib.request.build_opener(_AdDbNoRedirect()).open(upstream_request, timeout=15)
+    status = getattr(upstream, "status", upstream.getcode())
+    if status not in (200, 206, 304):
+        upstream.close()
+        abort(502, description="Hermes returned an invalid archived-media response")
+    response_headers = {
+        name: value
+        for name in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified")
+        if (value := upstream.headers.get(name))
+    }
+    response_headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    if request.method == "HEAD" or status == 304:
+        upstream.close()
+        return Response(status=status, headers=response_headers)
+
+    def stream():
+        try:
+            while chunk := upstream.read(64 * 1024):
+                yield chunk
+        finally:
+            upstream.close()
+
+    return Response(
+        stream_with_context(stream()),
+        status=status,
+        headers=response_headers,
+        direct_passthrough=True,
+    )
 
 
 def _session_path(session_id: str, suffix: str = "") -> str:
@@ -2890,10 +2915,10 @@ def ad_db_ad(ad_id: str):
     return jsonify(_ad_db_public_payload(payload))
 
 
-@app.get("/api/ad-db/ads/<ad_id>/media/<asset_id>")
+@app.route("/api/ad-db/ads/<ad_id>/media/<asset_id>", methods=["GET", "HEAD"])
 def ad_db_media(ad_id: str, asset_id: str):
     try:
-        return _ad_db_media_redirect(_ad_db_id(ad_id), _ad_db_id(asset_id))
+        return _ad_db_media_response(_ad_db_id(ad_id), _ad_db_id(asset_id))
     except Exception as error:
         return _hermes_error(error)
 
