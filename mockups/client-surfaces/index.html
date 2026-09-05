@@ -1,0 +1,293 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff">
+  <title>Frank client surfaces — mockup</title>
+  <link rel="icon" href="../../apps/window/web/brand/mark.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="prototype-note" aria-label="Prototype status">
+    <span class="prototype-dot"></span>
+    Mockup · sample data
+  </div>
+
+  <div class="app-shell">
+    <aside class="desktop-rail" aria-label="Frank navigation">
+      <a class="brand" href="#" data-go="hub" aria-label="Frank Hub">
+        <img src="../../apps/window/web/brand/wordmark.svg" alt="Frank">
+      </a>
+
+      <section class="rail-section">
+        <div class="rail-caption">Workspace</div>
+        <button class="rail-link is-active" data-go="hub"><span class="active-dot"></span><span>Hub</span></button>
+        <div class="rail-subhead"><span>Chats</span><button class="icon-button tiny" aria-label="New chat" title="New chat">+</button></div>
+        <button class="chat-link is-active" data-go="hub"><span>Today</span><small>Frank client surfaces</small></button>
+        <button class="chat-link"><span>Yesterday</span><small>VPS overnight review</small></button>
+        <button class="chat-link"><span>Tuesday</span><small>Blockwise release</small></button>
+      </section>
+
+      <section class="rail-section rail-projects">
+        <div class="rail-caption">Projects</div>
+        <button class="rail-link" data-go="project" data-project="Frank"><span class="active-dot"></span><span>Frank</span></button>
+        <button class="rail-link" data-go="project" data-project="Blockwise"><span class="active-dot"></span><span>Blockwise</span></button>
+        <button class="rail-link" data-go="project" data-project="Merrypaws"><span class="active-dot"></span><span>Merrypaws</span></button>
+        <button class="rail-link" data-go="project" data-project="Elf & Wonder"><span class="active-dot"></span><span>Elf &amp; Wonder</span></button>
+      </section>
+
+      <section class="rail-section rail-window">
+        <div class="rail-caption">Window</div>
+        <button class="rail-link" data-go="files">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6.5Z"/></svg><span>Files</span>
+        </button>
+        <button class="rail-link"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.8-1L14.4 3h-4l-.4 3.1a8 8 0 0 0-1.8 1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.8 1l.4 3.1h4l.4-3.1a8 8 0 0 0 1.8-1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"/></svg><span>Tools</span></button>
+        <button class="rail-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 18V9m5 9V5m5 13v-6m5 6V3"/></svg><span>Trace</span></button>
+        <button class="rail-link"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg><span>Releases</span></button>
+      </section>
+
+      <div class="rail-footer"><span class="live-pulse"></span> Hermes connected</div>
+    </aside>
+
+    <main class="main-stage">
+      <header class="topbar">
+        <div class="mobile-brand"><img src="../../apps/window/web/brand/mark.svg" alt=""><span>Frank</span></div>
+        <div class="title-group">
+          <button class="mobile-back" aria-label="Back" hidden>←</button>
+          <div>
+            <h1 id="page-title">Hub</h1>
+            <p id="page-subtitle">Frank client surfaces</p>
+          </div>
+        </div>
+        <div class="top-actions">
+          <span class="sync-state"><span class="live-pulse"></span><span>Live</span></span>
+          <button class="icon-button alerts-button" aria-label="Open alerts" title="Alerts">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7M10 20h4"/></svg>
+            <span class="badge">3</span>
+          </button>
+          <button class="avatar" aria-label="Account">S</button>
+        </div>
+      </header>
+
+      <div class="offline-banner" hidden><strong>Offline</strong><span>Showing the last saved view. Actions are paused.</span></div>
+
+      <div class="views">
+        <section class="view is-active hub-view" data-view="hub">
+          <div class="conversation" aria-label="Conversation">
+            <div class="message-list">
+              <div class="day-rule"><span>Today</span></div>
+
+              <article class="message user-message">
+                <div class="message-copy">
+                  <p>Show me what needs my attention before I start work.</p>
+                  <div class="sent-attachment">
+                    <span class="file-icon">PDF</span>
+                    <span><strong>release-notes.pdf</strong><small>1.8 MB</small></span>
+                  </div>
+                </div>
+              </article>
+
+              <article class="message frank-message">
+                <div class="message-author"><img src="../../apps/window/web/brand/mark.svg" alt=""><span>Frank</span><time>8:42 am</time></div>
+                <div class="message-copy">
+                  <p>Morning, Steven. Three things need you. Everything else is moving normally.</p>
+                  <div class="inline-brief">
+                    <div class="brief-row is-urgent"><span class="brief-mark"></span><div><strong>Blockwise release is waiting</strong><p>Production checks passed. Your sign-off is the final step.</p></div><button data-alert-action>Review</button></div>
+                    <div class="brief-row"><span class="brief-mark"></span><div><strong>Night Watch found one failed backup</strong><p>The previous healthy copy is intact.</p></div><button data-alert-action>Inspect</button></div>
+                    <div class="brief-row"><span class="brief-mark"></span><div><strong>Merrypaws needs a content decision</strong><p>Two homepage versions are ready to compare.</p></div><button data-go="project" data-project="Merrypaws">Open</button></div>
+                  </div>
+                  <p class="muted-line">I’ll keep this list in sync wherever Frank is open.</p>
+                </div>
+              </article>
+            </div>
+
+            <div class="composer-wrap">
+              <div class="staged-attachments" aria-live="polite"></div>
+              <form class="composer">
+                <div class="attachment-picker">
+                  <button type="button" class="composer-tool attach-trigger" aria-label="Attach files or folder" title="Attach files or folder">
+                    <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m20.5 11.5-8.2 8.2a5 5 0 0 1-7.1-7.1l8.5-8.5a3.2 3.2 0 1 1 4.5 4.5l-8.6 8.6a1.6 1.6 0 1 1-2.3-2.3l7.5-7.5"/></svg>
+                  </button>
+                  <div class="attachment-menu" hidden>
+                    <button type="button" data-attach="file"><svg viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h5"/></svg><span><strong>Choose files</strong><small>Images, documents, anything</small></span></button>
+                    <button type="button" data-attach="folder"><svg viewBox="0 0 24 24"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6.5Z"/></svg><span><strong>Choose a folder</strong><small>Preserves the folder structure</small></span></button>
+                  </div>
+                </div>
+                <textarea rows="1" aria-label="Message Frank" placeholder="Message Frank — drop a file anywhere here"></textarea>
+                <button type="button" class="composer-tool voice-button" aria-label="Voice input"><svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+                <button type="submit" class="send-button" aria-label="Send"><svg viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></svg></button>
+              </form>
+              <p class="composer-hint">Hermes handles the work. Frank keeps you in control.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="view project-view" data-view="project">
+          <div class="project-page">
+            <div class="project-hero">
+              <div>
+                <span class="eyebrow">Project</span>
+                <h2 id="project-name">Frank</h2>
+                <p>A thin, live window into Hermes and the VPS.</p>
+              </div>
+              <div class="project-actions">
+                <span class="quiet-status"><span class="live-pulse"></span>Healthy</span>
+                <button class="secondary-button" data-go="hub">Open chat</button>
+              </div>
+            </div>
+
+            <div class="project-grid">
+              <article class="widget attention-widget">
+                <div class="widget-head"><span>Waiting on you</span><span class="count">2</span></div>
+                <div class="attention-item"><span class="attention-line"></span><div><strong>Approve desktop and Android mockups</strong><p>Design review · ready now</p></div><button>Review</button></div>
+                <div class="attention-item"><span class="attention-line"></span><div><strong>Choose private Play testers</strong><p>Required before the first Android release</p></div><button>Open</button></div>
+              </article>
+
+              <article class="widget status-widget">
+                <div class="widget-head"><span>Live status</span><span class="status-time">just now</span></div>
+                <dl class="status-list">
+                  <div><dt>Window</dt><dd><span class="status-dot"></span>Live</dd></div>
+                  <div><dt>Hermes</dt><dd><span class="status-dot"></span>Connected</dd></div>
+                  <div><dt>VPS</dt><dd><span class="status-dot"></span>Healthy</dd></div>
+                  <div><dt>Revision</dt><dd>79f467d</dd></div>
+                </dl>
+              </article>
+
+              <article class="widget activity-widget">
+                <div class="widget-head"><span>Recent activity</span><button>View all</button></div>
+                <div class="timeline-item"><span class="timeline-dot"></span><div><strong>Explorer repair released</strong><p>Attachment cleanup preserved · 18 min ago</p></div></div>
+                <div class="timeline-item"><span class="timeline-dot"></span><div><strong>Client mockups started</strong><p>Isolated worktree · 31 min ago</p></div></div>
+                <div class="timeline-item"><span class="timeline-dot quiet"></span><div><strong>Overnight checks completed</strong><p>No action needed · 7:04 am</p></div></div>
+              </article>
+
+              <article class="widget chats-widget">
+                <div class="widget-head"><span>Open chats</span><button data-go="hub">New chat</button></div>
+                <button class="chat-card" data-go="hub"><span class="chat-avatar">F</span><span><strong>Frank client surfaces</strong><small>Mockups only · active now</small></span><span class="chevron">›</span></button>
+                <button class="chat-card"><span class="chat-avatar soft">V</span><span><strong>VPS overnight review</strong><small>Last message yesterday</small></span><span class="chevron">›</span></button>
+              </article>
+
+              <article class="widget files-widget">
+                <div class="widget-head"><span>Files</span><button data-go="files">Open Explorer</button></div>
+                <button class="file-shortcut" data-go="files"><span class="folder-symbol"></span><span><strong>apps/window</strong><small>Canonical Window source</small></span></button>
+                <button class="file-shortcut" data-go="files"><span class="doc-symbol">MD</span><span><strong>PROJECT.md</strong><small>Product contract</small></span></button>
+              </article>
+
+              <article class="widget release-widget loading-demo">
+                <div class="widget-head"><span>Latest release</span><span class="release-tag">production</span></div>
+                <div class="skeleton-stack" aria-label="Loading release data"><span></span><span></span><span></span></div>
+                <div class="loaded-release"><strong>Explorer and attachments preserved</strong><p>Committed revision 79f467d</p><div class="release-meta"><span>Passed checks</span><time>18 minutes ago</time></div></div>
+              </article>
+            </div>
+          </div>
+        </section>
+
+        <section class="view files-view" data-view="files">
+          <div class="explorer-shell">
+            <div class="explorer-toolbar">
+              <div class="explorer-nav">
+                <button aria-label="Back">←</button><button aria-label="Forward">→</button><button aria-label="Up">↑</button><button aria-label="Refresh">↻</button>
+              </div>
+              <button class="mobile-tree-trigger"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 12h16M4 19h16"/></svg><span>Folders</span></button>
+              <div class="breadcrumbs"><button>VPS</button><span>›</span><button>projects</button><span>›</span><button>frank</button></div>
+              <label class="explorer-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input placeholder="Search frank"></label>
+            </div>
+            <div class="explorer-body">
+              <aside class="folder-tree">
+                <div class="tree-heading">Quick access</div>
+                <button><span class="pin-icon">⌖</span><span>Frank</span></button>
+                <button><span class="pin-icon">⌖</span><span>Vault</span></button>
+                <div class="tree-heading tree-space">VPS</div>
+                <button><span class="disclosure">⌄</span><span class="folder-symbol"></span><span>projects</span></button>
+                <button class="tree-child is-selected"><span class="disclosure"></span><span class="folder-symbol"></span><span>frank</span></button>
+                <button class="tree-child"><span class="disclosure"></span><span class="folder-symbol"></span><span>blockwise</span></button>
+                <button><span class="disclosure">›</span><span class="folder-symbol"></span><span>vault</span></button>
+                <button><span class="disclosure">›</span><span class="folder-symbol"></span><span>skills</span></button>
+              </aside>
+              <div class="file-pane">
+                <div class="file-columns"><button>Name ↑</button><button>Date modified</button><button>Type</button><button>Size</button><span></span></div>
+                <div class="file-rows">
+                  <button class="file-row" data-kind="folder"><span class="file-name"><span class="folder-symbol"></span><strong>apps</strong></span><span>Today, 8:31 am</span><span>File folder</span><span>—</span><span class="pin-action">⌖</span></button>
+                  <button class="file-row" data-kind="folder"><span class="file-name"><span class="folder-symbol"></span><strong>docs</strong></span><span>Yesterday, 6:12 pm</span><span>File folder</span><span>—</span><span class="pin-action">⌖</span></button>
+                  <button class="file-row" data-kind="folder"><span class="file-name"><span class="folder-symbol"></span><strong>frank-deploy</strong></span><span>Tuesday, 10:04 am</span><span>File folder</span><span>—</span><span class="pin-action">⌖</span></button>
+                  <button class="file-row"><span class="file-name"><span class="doc-symbol">MD</span><strong>AGENTS.md</strong></span><span>Today, 8:06 am</span><span>Markdown file</span><span>3 KB</span><span class="pin-action">⌖</span></button>
+                  <button class="file-row is-selected"><span class="file-name"><span class="doc-symbol">MD</span><strong>README.md</strong></span><span>Yesterday, 7:51 pm</span><span>Markdown file</span><span>2 KB</span><span class="pin-action is-pinned">⌖</span></button>
+                  <button class="file-row"><span class="file-name"><span class="code-symbol">YML</span><strong>docker-compose.yml</strong></span><span>Tuesday, 2:44 pm</span><span>YAML file</span><span>1 KB</span><span class="pin-action">⌖</span></button>
+                </div>
+              </div>
+            </div>
+            <div class="explorer-status"><span>6 items</span><span>1 item selected</span></div>
+          </div>
+        </section>
+
+        <section class="view alerts-view" data-view="alerts">
+          <div class="mobile-page">
+            <div class="mobile-page-intro"><span class="eyebrow">Inbox</span><h2>Three things need you.</h2><p>Only failures and decisions that block progress appear here.</p></div>
+            <div class="alert-section">
+              <div class="alert-section-title"><span>Needs you</span><span>2</span></div>
+              <article class="alert-card is-action"><div class="alert-icon">!</div><div class="alert-copy"><div class="alert-meta"><span>Blockwise</span><time>11 min</time></div><h3>Release ready for sign-off</h3><p>All production checks passed.</p><div class="alert-actions"><button class="primary-action" data-resolve>Review release</button><button data-dismiss>Later</button></div></div></article>
+              <article class="alert-card"><div class="alert-icon decision">?</div><div class="alert-copy"><div class="alert-meta"><span>Merrypaws</span><time>34 min</time></div><h3>Choose the homepage direction</h3><p>Two reviewed options are ready.</p><div class="alert-actions"><button class="primary-action" data-resolve>Compare</button><button data-dismiss>Later</button></div></div></article>
+            </div>
+            <div class="alert-section">
+              <div class="alert-section-title"><span>Failed</span><span>1</span></div>
+              <article class="alert-card"><div class="alert-icon failed">×</div><div class="alert-copy"><div class="alert-meta"><span>Night Watch</span><time>7:04 am</time></div><h3>One backup did not complete</h3><p>The previous healthy copy is intact.</p><div class="alert-actions"><button class="primary-action" data-resolve>Inspect</button><button data-dismiss>Dismiss</button></div></div></article>
+            </div>
+            <div class="resolved-note" hidden><span>✓</span> Actioned here. The alert is now cleared on desktop and web.</div>
+          </div>
+        </section>
+
+        <section class="view more-view" data-view="more">
+          <div class="mobile-page">
+            <div class="mobile-page-intro"><span class="eyebrow">Window</span><h2>Everything else.</h2><p>Open the deeper controls only when you need them.</p></div>
+            <div class="more-list">
+              <button data-go="files"><span class="more-icon"><svg viewBox="0 0 24 24"><path d="M3.5 6.5h6l2 2h9v9.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V6.5Z"/></svg></span><span><strong>Files</strong><small>Browse the VPS</small></span><span>›</span></button>
+              <button><span class="more-icon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.8-1L14.4 3h-4l-.4 3.1a8 8 0 0 0-1.8 1l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2l-2 1.5 2 3.4 2.4-1a8 8 0 0 0 1.8 1l.4 3.1h4l.4-3.1a8 8 0 0 0 1.8-1l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1Z"/></svg></span><span><strong>Tools</strong><small>Available Hermes tools</small></span><span>›</span></button>
+              <button><span class="more-icon"><svg viewBox="0 0 24 24"><path d="M4 18V9m5 9V5m5 13v-6m5 6V3"/></svg></span><span><strong>Trace</strong><small>See what happened</small></span><span>›</span></button>
+              <button><span class="more-icon"><svg viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg></span><span><strong>Releases</strong><small>Review and sign</small></span><span>›</span></button>
+            </div>
+            <div class="more-list secondary-list">
+              <button class="offline-toggle"><span class="more-icon"><svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 0 1 14.9-4M20 12a8 8 0 0 1-14.9 4M3 4l18 16"/></svg></span><span><strong>Preview offline mode</strong><small>Cached information becomes read-only</small></span><span class="switch"><i></i></span></button>
+              <button><span class="more-icon account-icon">S</span><span><strong>Steven</strong><small>Private operator account</small></span><span>›</span></button>
+            </div>
+          </div>
+        </section>
+      </div>
+    </main>
+
+    <aside class="alert-drawer" aria-label="Alerts" aria-hidden="true">
+      <div class="drawer-head"><div><span class="eyebrow">Live inbox</span><h2>Needs you</h2></div><button class="icon-button drawer-close" aria-label="Close alerts">×</button></div>
+      <p class="drawer-intro">Failures and decisions that block progress. Nothing noisy.</p>
+      <div class="drawer-list">
+        <article class="drawer-alert"><div class="drawer-alert-top"><span class="alert-kicker"><i></i>Blockwise</span><time>11 min</time></div><h3>Release ready for sign-off</h3><p>All production checks passed.</p><div><button class="primary-action" data-resolve>Review release</button><button data-dismiss>Later</button></div></article>
+        <article class="drawer-alert"><div class="drawer-alert-top"><span class="alert-kicker"><i></i>Merrypaws</span><time>34 min</time></div><h3>Choose the homepage direction</h3><p>Two reviewed options are ready.</p><div><button class="primary-action" data-resolve>Compare</button><button data-dismiss>Later</button></div></article>
+        <article class="drawer-alert is-failed"><div class="drawer-alert-top"><span class="alert-kicker"><i></i>Night Watch</span><time>7:04 am</time></div><h3>One backup did not complete</h3><p>The previous healthy copy is intact.</p><div><button class="primary-action" data-resolve>Inspect</button><button data-dismiss>Dismiss</button></div></article>
+      </div>
+      <div class="drawer-foot"><span><i class="live-pulse"></i> Synced across Frank</span><button>Resolved</button></div>
+    </aside>
+
+    <div class="drawer-scrim"></div>
+
+    <aside class="mobile-tree-sheet" aria-hidden="true">
+      <div class="sheet-handle"></div>
+      <div class="sheet-head"><h2>Folders</h2><button class="tree-sheet-close" aria-label="Close">×</button></div>
+      <div class="sheet-tree">
+        <button><span>⌖</span><strong>Quick access</strong></button>
+        <button><span>⌄</span><span class="folder-symbol"></span><strong>projects</strong></button>
+        <button class="sheet-child is-selected"><span></span><span class="folder-symbol"></span><strong>frank</strong></button>
+        <button class="sheet-child"><span></span><span class="folder-symbol"></span><strong>blockwise</strong></button>
+        <button><span>›</span><span class="folder-symbol"></span><strong>vault</strong></button>
+        <button><span>›</span><span class="folder-symbol"></span><strong>skills</strong></button>
+      </div>
+    </aside>
+
+    <nav class="bottom-nav" aria-label="Primary navigation">
+      <button class="is-active" data-go="hub"><svg viewBox="0 0 24 24"><path d="M4 5h16v12H8l-4 4V5Z"/></svg><span>Hub</span></button>
+      <button data-go="project"><svg viewBox="0 0 24 24"><path d="M4 6.5h6l2 2h8v10H4v-12Z"/></svg><span>Projects</span></button>
+      <button data-go="alerts"><span class="nav-icon-wrap"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 7h18s-3 0-3-7M10 20h4"/></svg><i>3</i></span><span>Alerts</span></button>
+      <button data-go="more"><svg viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="19" cy="12" r="1.5"/></svg><span>More</span></button>
+    </nav>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
