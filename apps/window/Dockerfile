@@ -37,6 +37,7 @@ COPY apps/window/server.py .
 COPY apps/window/control_plane_view.py .
 COPY apps/window/ops_projections.py .
 COPY apps/window/action_dispatcher.py .
+COPY apps/window/customer_ops_actions.py .
 COPY apps/window/scripts/run_scheduled_control_job.py ./scripts/run_scheduled_control_job.py
 COPY apps/window/runtime_evidence.py .
 COPY apps/window/project_store.py .
