@@ -1,7 +1,7 @@
 {
   "schema": "schema://frank.tool-app-manifest/v1",
   "id": "ad-intelligence",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "name": "Ad Radar",
   "description": "Discover and compare public advertising creative through Hermes-owned research execution.",
   "release_schema": "schema://frank.ad-intelligence-release/v1",
@@ -9,19 +9,119 @@
   "scopes": ["project"],
   "settings": {
     "schema": "schema://frank.tool-app-settings/v1",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["taxonomy", "sources", "cadence", "model_policy", "media_policy", "thresholds", "retention", "approval_policy", "connection"],
     "properties": {
-      "taxonomy": {"type": "object"},
-      "sources": {"type": "array"},
-      "cadence": {"type": "object"},
-      "prompt_ref": {"type": "string"},
-      "prompt_version": {"type": "string"},
-      "style_preset": {"type": "string"},
-      "model_policy": {"type": "object"},
-      "media_policy": {"type": "object"},
-      "thresholds": {"type": "object"},
-      "retention": {"type": "object"},
-      "approval_policy": {"type": "object"},
-      "connection": {"type": "object", "properties": {"connection_id": {"type": "string"}, "capability": {"type": "string"}}}
+      "taxonomy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision", "categories", "formats", "lifecycle_statuses"],
+        "properties": {
+          "revision": {"type": "integer", "minimum": 1},
+          "categories": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 80}},
+          "formats": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 80}},
+          "lifecycle_statuses": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 1, "maxLength": 80}}
+        }
+      },
+      "sources": {
+        "type": "array",
+        "minItems": 1,
+        "uniqueItems": true,
+        "items": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["source_id", "label", "kind", "enabled", "markets"],
+          "properties": {
+            "source_id": {"type": "string", "pattern": "^[a-z0-9][a-z0-9._-]{0,79}$"},
+            "label": {"type": "string", "minLength": 1, "maxLength": 120},
+            "kind": {"enum": ["public-ad-library", "public-web"]},
+            "enabled": {"type": "boolean"},
+            "markets": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"type": "string", "minLength": 2, "maxLength": 80}},
+            "connection_id": {"type": "string", "minLength": 1, "maxLength": 160}
+          }
+        }
+      },
+      "cadence": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["mode", "timezone"],
+        "properties": {
+          "mode": {"enum": ["manual", "interval", "schedule-ref"]},
+          "interval_minutes": {"type": "integer", "minimum": 15, "maximum": 10080},
+          "schedule_ref": {"type": "string", "pattern": "^schedule://[A-Za-z0-9._/-]+$"},
+          "timezone": {"type": "string", "minLength": 1, "maxLength": 80}
+        }
+      },
+      "prompt_ref": {"type": "string", "pattern": "^prompt://[A-Za-z0-9._/-]+$"},
+      "prompt_version": {"type": "string", "minLength": 1, "maxLength": 40},
+      "style_preset": {"type": "string", "minLength": 1, "maxLength": 80},
+      "model_policy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["policy_ref", "tier", "multimodal", "max_items_per_batch"],
+        "properties": {
+          "policy_ref": {"type": "string", "pattern": "^policy://[A-Za-z0-9._/-]+$"},
+          "tier": {"enum": ["economy", "balanced", "quality"]},
+          "multimodal": {"type": "boolean"},
+          "max_items_per_batch": {"type": "integer", "minimum": 1, "maximum": 200}
+        }
+      },
+      "media_policy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["allowed_kinds", "min_width", "min_height", "max_bytes", "require_preview", "require_qa_pass"],
+        "properties": {
+          "allowed_kinds": {"type": "array", "minItems": 1, "uniqueItems": true, "items": {"enum": ["image", "video", "carousel"]}},
+          "min_width": {"type": "integer", "minimum": 1},
+          "min_height": {"type": "integer", "minimum": 1},
+          "max_bytes": {"type": "integer", "minimum": 1},
+          "require_preview": {"type": "boolean"},
+          "require_qa_pass": {"type": "boolean"}
+        }
+      },
+      "thresholds": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["publish_confidence", "media_quality", "max_missing_fields", "max_retry_attempts"],
+        "properties": {
+          "publish_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "media_quality": {"type": "number", "minimum": 0, "maximum": 1},
+          "max_missing_fields": {"type": "integer", "minimum": 0},
+          "max_retry_attempts": {"type": "integer", "minimum": 0, "maximum": 20}
+        }
+      },
+      "retention": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["raw_evidence_days", "normalized_days", "release_days", "quarantine_days"],
+        "properties": {
+          "raw_evidence_days": {"type": "integer", "minimum": 0, "maximum": 3650},
+          "normalized_days": {"type": "integer", "minimum": 1, "maximum": 3650},
+          "release_days": {"type": "integer", "minimum": 1, "maximum": 3650},
+          "quarantine_days": {"type": "integer", "minimum": 1, "maximum": 3650}
+        }
+      },
+      "approval_policy": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["new_source", "low_confidence", "publish", "required_roles"],
+        "properties": {
+          "new_source": {"type": "boolean"},
+          "low_confidence": {"type": "boolean"},
+          "publish": {"type": "boolean"},
+          "required_roles": {"type": "array", "uniqueItems": true, "items": {"enum": ["operator", "reviewer", "publisher"]}}
+        }
+      },
+      "connection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["connection_id", "capability"],
+        "properties": {
+          "connection_id": {"type": "string", "minLength": 1, "maxLength": 160},
+          "capability": {"const": "browser-public-read"}
+        }
+      }
     }
   },
   "pipelines": [{
@@ -52,13 +152,65 @@
   "thresholds": ["publish-confidence", "media-quality", "max-missing-fields"],
   "approval_gates": ["new-source", "low-confidence", "publish"],
   "hermes": {
-    "actions": ["run", "retry", "approve-publish", "pause", "health"],
-    "event_kinds": ["run-started", "stage-completed", "run-quarantined", "publish-completed"]
+    "actions": [
+      "run", "retry", "approve-publish", "pause", "health",
+      "validate-settings", "activate-settings-revision", "test-connection",
+      "resume", "retry-stage", "cancel-run",
+      "recapture-creative", "reclassify", "recheck-media", "archive-creative", "restore-creative",
+      "quarantine-creative", "resolve-quarantine", "approve-creative", "reject-creative",
+      "verify-release", "supersede-release"
+    ],
+    "event_kinds": [
+      "run-started", "stage-completed", "run-quarantined", "publish-completed",
+      "settings-validation-completed", "settings-revision-activated", "connection-check-completed",
+      "run-paused", "run-resumed", "run-cancelled", "run-completed",
+      "stage-started", "stage-retry-scheduled", "stage-failed", "health-snapshot-recorded",
+      "creative-observed", "advertiser-resolved", "evidence-captured", "creative-normalized",
+      "creative-recapture-completed", "creative-reclassified", "creative-archived", "creative-restored",
+      "classification-completed", "media-qa-completed", "creative-quarantined",
+      "creative-approved", "creative-rejected", "quarantine-resolved",
+      "approval-requested", "approval-recorded",
+      "publish-started", "publish-failed", "release-verified", "release-superseded"
+    ],
+    "operations": {
+      "setup": {
+        "actions": ["validate-settings", "activate-settings-revision", "test-connection"],
+        "event_kinds": ["settings-validation-completed", "settings-revision-activated", "connection-check-completed"]
+      },
+      "live": {
+        "actions": ["run", "retry", "pause", "resume", "retry-stage", "cancel-run", "health"],
+        "event_kinds": ["run-started", "run-paused", "run-resumed", "run-cancelled", "run-completed", "stage-started", "stage-completed", "stage-retry-scheduled", "stage-failed", "health-snapshot-recorded"]
+      },
+      "library": {
+        "actions": ["recapture-creative", "reclassify", "recheck-media", "archive-creative", "restore-creative"],
+        "event_kinds": ["creative-observed", "advertiser-resolved", "evidence-captured", "creative-normalized", "creative-recapture-completed", "creative-reclassified", "creative-archived", "creative-restored"]
+      },
+      "qa": {
+        "actions": ["quarantine-creative", "resolve-quarantine", "approve-creative", "reject-creative"],
+        "event_kinds": ["classification-completed", "media-qa-completed", "creative-quarantined", "creative-approved", "creative-rejected", "run-quarantined", "quarantine-resolved", "approval-requested", "approval-recorded"]
+      },
+      "release": {
+        "actions": ["approve-publish", "verify-release", "supersede-release"],
+        "event_kinds": ["publish-started", "publish-completed", "publish-failed", "release-verified", "release-superseded"]
+      }
+    },
+    "recovery_actions": ["retry", "resume", "retry-stage", "recapture-creative", "reclassify", "recheck-media", "resolve-quarantine", "restore-creative", "verify-release", "supersede-release"]
   },
   "trace": {
     "schema": "schema://frank.tool-app-trace/v1",
     "instrumentation": "gen-ai",
     "span_prefix": "ad-radar",
-    "event_kinds": ["run-started", "stage-completed", "run-quarantined", "publish-completed"]
+    "event_kinds": [
+      "run-started", "stage-completed", "run-quarantined", "publish-completed",
+      "settings-validation-completed", "settings-revision-activated", "connection-check-completed",
+      "run-paused", "run-resumed", "run-cancelled", "run-completed",
+      "stage-started", "stage-retry-scheduled", "stage-failed", "health-snapshot-recorded",
+      "creative-observed", "advertiser-resolved", "evidence-captured", "creative-normalized",
+      "creative-recapture-completed", "creative-reclassified", "creative-archived", "creative-restored",
+      "classification-completed", "media-qa-completed", "creative-quarantined",
+      "creative-approved", "creative-rejected", "quarantine-resolved",
+      "approval-requested", "approval-recorded",
+      "publish-started", "publish-failed", "release-verified", "release-superseded"
+    ]
   }
 }

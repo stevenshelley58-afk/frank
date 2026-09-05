@@ -148,6 +148,17 @@ define({
 });
 
 define({
+  id: "ad-radar", title: "Ad Radar", surfaces: ["tools"],
+  description: "Observe public creative changes, verify evidence, compare patterns, and control durable research runs.",
+  mount(el) {
+    const actions = toolIntro(el, "Timeline, creative library, media QA, quarantine recovery, and immutable releases. Hermes owns every run.");
+    actionButton(actions, "Open Ad Radar", () => emit("frank:ad-radar"));
+    actionButton(actions, "Tool home", () => emit("frank:entity-home", { kind: "tool", id: "ad-intelligence", name: "Ad Radar" }), "tool-secondary");
+    statusText(actions, "/frank/tools/ad-intelligence");
+  },
+});
+
+define({
   id: "hermes-tool", title: "Hermes", surfaces: ["tools"],
   description: "Home for the sole Frank brain.",
   mount(el) {

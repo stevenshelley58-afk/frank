@@ -1,0 +1,45 @@
+{
+  "title": "Choose the Ad Radar working surface",
+  "question": "All three keep Frank's existing visual language and the same Hermes lifecycle. Choose which daily job should dominate the app.",
+  "options": [
+    {
+      "id": "observation-timeline",
+      "label": "Observation Timeline",
+      "kicker": "THE ROLL",
+      "thesis": "Make change over time the primary navigation, so every new, changed, stopped, quarantined, approved, or published creative lands as a precise observation.",
+      "palette": ["#FFFFFF", "#111111", "#666666", "#E53C1F", "#ECECEC"],
+      "materials": ["hairline event rail", "media contact sheets", "evidence stamps"],
+      "viewport": "A compact run and freshness header sits above a full-height observation rail; the selected event opens its creative, source, classification, media QA, and receipt evidence in a fixed inspector.",
+      "risk": "High-volume runs can bury deliberate comparison unless the compare tray and saved filters remain pinned.",
+      "comp": ".impeccable/mocks/decision/observation-timeline.webp"
+    },
+    {
+      "id": "creative-fieldbook",
+      "label": "Creative Fieldbook",
+      "thesis": "Put the searchable creative library first, with evidence-rich cards and a persistent tray for comparing ads across advertisers, locations, formats, hooks, and time.",
+      "palette": ["#FFFFFF", "#111111", "#666666", "#E53C1F", "#ECECEC"],
+      "materials": ["indexed field notes", "media contact sheets", "filter ledger"],
+      "viewport": "A terse search and filter ledger spans the top, a dense creative contact sheet fills the workspace, and a right inspector plus bottom compare tray expose evidence without leaving the library.",
+      "risk": "A library-first surface can make runtime failures feel secondary unless live health and attention states stay visible.",
+      "comp": ".impeccable/mocks/decision/creative-fieldbook.webp"
+    },
+    {
+      "id": "signal-desk",
+      "label": "Signal Desk",
+      "thesis": "Unify research setup, live findings, and evidence in one three-pane operator desk with the current Hermes stage always visible.",
+      "palette": ["#FFFFFF", "#111111", "#666666", "#E53C1F", "#ECECEC"],
+      "materials": ["flat control desk", "stage ribbon", "evidence ledger"],
+      "viewport": "A narrow sources and research-brief pane feeds a central live creative stream; a fixed evidence inspector closes the loop while a top stage ribbon exposes run, pause, retry, quarantine, and approval state.",
+      "risk": "The simultaneous context is powerful but can become dense below laptop width unless panes collapse with discipline.",
+      "comp": ".impeccable/mocks/decision/signal-desk.webp"
+    }
+  ],
+  "reroll": {
+    "registers": ["safer", "bolder"]
+  },
+  "buildPath": {
+    "value": "comp",
+    "toggle": true
+  },
+  "steer": true
+}

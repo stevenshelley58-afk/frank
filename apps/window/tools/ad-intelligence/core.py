@@ -485,6 +485,10 @@ def _release_hash(value: dict[str, Any]) -> str:
     payload = {key: item for key, item in value.items() if key != "release_hash"}
     return canonical_sha256(payload)
 
+def validate_public_export(value: Any) -> dict[str, Any]:
+    """Return a detached public export only after the complete strict contract passes."""
+    return _validate_release_export(value)
+
 def _json_ready(value: Any) -> Any:
     if isinstance(value, dict): return {key: _json_ready(child) for key, child in value.items()}
     if isinstance(value, tuple): return [_json_ready(child) for child in value]

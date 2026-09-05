@@ -10,9 +10,16 @@
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
 <link rel="stylesheet" href="/app.css?v=20260830-ad-studio">
 <link rel="stylesheet" href="/ad-studio-picker.css?v=20260830-source-dialog">
+<link rel="stylesheet" href="/ad-radar.css?v=20260831-observation-timeline-v1">
 </head>
-<body>
-<div class="app">
+<body><!--
+THESIS: Ad Radar is a chronological observation instrument, not a generic analytics dashboard; change over time is the primary navigation.
+OWN-WORLD: Pure white ground, black ink, grey evidence hairlines, tabular time, compact ledger controls, and red confined to the Frank mark and active rail dot.
+STORY: The operator sees what changed, verifies the public source and every receipt, compares useful creative, then runs, retries, or approves through Hermes.
+FIRST VIEWPORT: A pinned filter ledger tops a full-height observation roll; the selected creative opens in a fixed 420px evidence inspector and comparison stays pinned at the bottom.
+FORM: Observation Timeline, first of seven viable structures; assigned seed afbfc622.
+FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
+--><div class="app">
   <nav class="rail">
     <a class="logo" href="/" aria-label="Frank home">
       <svg viewBox="0 0 88 87" fill="none" aria-hidden="true">
@@ -46,6 +53,7 @@
       <button class="rail-item" data-view="files" aria-label="Files"><span class="glyph">▤</span><span>Files</span></button>
       <button class="rail-item" data-view="tools" aria-label="Tools"><span class="glyph">⚙</span><span>Tools</span></button>
       <button class="rail-item" data-view="ad-studio" aria-label="Ad Studio"><span class="glyph">▧</span><span>Ad Studio</span></button>
+      <button class="rail-item" data-view="ad-radar" aria-label="Ad Radar"><span class="dot"></span><span>Ad Radar</span></button>
       <button class="rail-item" data-view="trace" aria-label="Trace"><span class="glyph">◉</span><span>Trace</span></button>
       <button class="rail-item" data-view="releases" aria-label="Releases"><span class="glyph">✓</span><span>Releases</span></button>
     </div>
@@ -257,6 +265,112 @@
           <footer><button type="button" class="ad-source-cancel" id="ad-source-cancel">Cancel</button></footer>
         </div>
       </dialog>
+      <section class="view" data-view="ad-radar" aria-labelledby="radar-surface-title">
+        <div class="radar" id="ad-radar">
+          <header class="radar-commandbar">
+            <div class="radar-identity">
+              <h2 id="radar-surface-title">Observation timeline</h2>
+              <span id="radar-freshness">Waiting for Hermes</span>
+            </div>
+            <nav class="radar-tabs" role="tablist" aria-label="Ad Radar sections">
+              <button type="button" class="is-on" id="radar-tab-timeline" role="tab" aria-selected="true" aria-controls="radar-panel-timeline" tabindex="0" data-radar-tab="timeline">Timeline</button>
+              <button type="button" id="radar-tab-library" role="tab" aria-selected="false" aria-controls="radar-panel-library" tabindex="-1" data-radar-tab="library">Library</button>
+              <button type="button" id="radar-tab-runs" role="tab" aria-selected="false" aria-controls="radar-panel-runs" tabindex="-1" data-radar-tab="runs">Runs</button>
+              <button type="button" id="radar-tab-control" role="tab" aria-selected="false" aria-controls="radar-panel-control" tabindex="-1" data-radar-tab="control">Control</button>
+            </nav>
+            <div class="radar-command-actions">
+              <label class="radar-project-control"><span>Project</span><select id="radar-project" aria-label="Ad Radar project"></select></label>
+              <span class="radar-owner" id="radar-owner">Hermes owns execution</span>
+              <button type="button" class="radar-icon-button" id="radar-refresh" aria-label="Refresh Ad Radar" title="Refresh">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6"/></svg>
+              </button>
+            </div>
+          </header>
+
+          <div class="radar-notice" id="radar-notice" role="status" aria-live="polite" hidden></div>
+
+          <div class="radar-stage">
+            <section class="radar-panel is-on" id="radar-panel-timeline" role="tabpanel" aria-labelledby="radar-tab-timeline" data-radar-panel="timeline">
+              <div class="radar-filter-ledger" aria-label="Timeline filters">
+                <span>Pinned filters</span>
+                <button type="button" class="is-on" aria-pressed="true" data-radar-timeline-filter="all">All observations</button>
+                <button type="button" aria-pressed="false" data-radar-timeline-filter="changed">Changed</button>
+                <button type="button" aria-pressed="false" data-radar-timeline-filter="quarantined">Quarantined</button>
+                <button type="button" aria-pressed="false" data-radar-timeline-filter="published">Published</button>
+                <button type="button" class="radar-filter-reset" id="radar-timeline-clear">Clear</button>
+              </div>
+              <div class="radar-ledger-head">
+                <div><strong>Public creative observations</strong><span id="radar-timeline-summary">No observations loaded</span></div>
+                <button type="button" class="radar-quiet-button" data-radar-open-control>Run research</button>
+              </div>
+              <div class="radar-timeline" id="radar-timeline" aria-label="Creative observation timeline"></div>
+            </section>
+
+            <section class="radar-panel" id="radar-panel-library" role="tabpanel" aria-labelledby="radar-tab-library" data-radar-panel="library" hidden>
+              <div class="radar-library-tools">
+                <label class="radar-search">
+                  <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg>
+                  <span class="sr-only">Search public creative</span>
+                  <input id="radar-library-search" type="search" placeholder="Search advertiser, copy, category, or market" autocomplete="off">
+                </label>
+                <label><span>Status</span><select id="radar-library-status"><option value="all">All statuses</option><option value="active">Active</option><option value="quarantined">Quarantined</option><option value="published">Published</option></select></label>
+                <label><span>Media</span><select id="radar-library-media"><option value="all">All media</option><option value="image">Image</option><option value="video">Video</option><option value="carousel">Carousel</option></select></label>
+                <button type="button" class="radar-quiet-button" id="radar-library-clear">Clear filters</button>
+              </div>
+              <div class="radar-library-head"><div><strong>Creative fieldbook</strong><span id="radar-library-summary">No approved public creative</span></div><span>Synthetic data is never loaded by default</span></div>
+              <div class="radar-library" id="radar-library" aria-label="Public creative library"></div>
+            </section>
+
+            <section class="radar-panel radar-runs-panel" id="radar-panel-runs" role="tabpanel" aria-labelledby="radar-tab-runs" data-radar-panel="runs" hidden>
+              <aside class="radar-run-list-pane">
+                <header><div><strong>Run history</strong><span>Durable jobs recorded by Hermes</span></div><button type="button" class="radar-icon-button" data-radar-open-control aria-label="Create a run"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg></button></header>
+                <div class="radar-run-list" id="radar-run-list"></div>
+              </aside>
+              <article class="radar-run-detail" id="radar-run-detail" aria-live="polite"></article>
+            </section>
+
+            <section class="radar-panel radar-control-panel" id="radar-panel-control" role="tabpanel" aria-labelledby="radar-tab-control" data-radar-panel="control" hidden>
+              <form class="radar-run-form" id="radar-run-form">
+                <header><h3>Run public creative research</h3><p>Define the scope. Frank validates it; Hermes performs and records the work.</p></header>
+                <label><span>Run name</span><input id="radar-run-name" name="name" maxlength="70" placeholder="Perth competitor pulse"></label>
+                <label><span>Markets</span><input id="radar-run-markets" name="markets" placeholder="Perth WA, 6000" aria-describedby="radar-list-help"></label>
+                <label><span>Advertisers</span><input id="radar-run-advertisers" name="advertisers" placeholder="Northline Homes, Kin & Coast" aria-describedby="radar-list-help"></label>
+                <label><span>Query terms</span><input id="radar-run-queries" name="query_terms" placeholder="appraisal, just listed" aria-describedby="radar-list-help"></label>
+                <label><span>Source IDs</span><input id="radar-run-sources" name="source_ids" placeholder="meta-public-au" aria-describedby="radar-list-help"></label>
+                <p class="radar-field-help" id="radar-list-help">Separate values with commas. Credentials stay in the approved Hermes connection.</p>
+                <div class="radar-form-row">
+                  <label><span>Settings revision</span><input id="radar-run-revision" name="settings_revision" type="number" min="1" step="1" value="1"></label>
+                  <label class="radar-check"><input id="radar-run-surrounding" name="include_surrounding" type="checkbox" checked><span>Include surrounding markets</span></label>
+                </div>
+                <div class="radar-form-actions"><button type="submit" class="radar-primary" id="radar-run-submit">Start Hermes run</button><span id="radar-run-form-status" role="status"></span></div>
+              </form>
+
+              <section class="radar-control-ledger">
+                <header><h3>Pipeline and attention</h3><p>The graph is fixed; policy and source scope are revisioned.</p></header>
+                <ol class="radar-pipeline" id="radar-pipeline"></ol>
+                <div class="radar-run-actions" id="radar-run-actions"></div>
+              </section>
+
+              <section class="radar-release-ledger">
+                <header><h3>Release gate</h3><p>Only a sanitized, checksum-matched candidate can publish.</p></header>
+                <div id="radar-release-queue"></div>
+              </section>
+            </section>
+
+            <aside class="radar-inspector" id="radar-inspector" role="complementary" aria-labelledby="radar-inspector-title" tabindex="-1">
+              <header><div><span id="radar-inspector-status">Evidence inspector</span><h3 id="radar-inspector-title">Select an observation</h3></div><button type="button" class="radar-icon-button radar-inspector-close" id="radar-inspector-close" aria-label="Close evidence inspector"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m6 6 12 12M18 6 6 18"/></svg></button></header>
+              <div class="radar-inspector-body" id="radar-inspector-body"><div class="radar-empty"><strong>No observation selected</strong><span>Choose a timeline row or creative to inspect its public evidence and receipts.</span></div></div>
+            </aside>
+
+            <div class="radar-compare" id="radar-compare" hidden>
+              <button type="button" class="radar-compare-label" id="radar-compare-toggle" aria-expanded="true"><span>Compare</span><b id="radar-compare-count">0</b></button>
+              <div class="radar-compare-items" id="radar-compare-items"></div>
+              <button type="button" class="radar-quiet-button" id="radar-compare-clear">Clear</button>
+              <button type="button" class="radar-primary" id="radar-compare-open">Open comparison</button>
+            </div>
+          </div>
+        </div>
+      </section>
       <section class="view" data-view="entity-home">
         <div class="home-surface">
           <div class="entity-home-heading"><div><span class="home-kicker" id="entity-home-kind">Tool</span><h2 id="entity-home-name">Home</h2></div><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
@@ -450,6 +564,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260830-ad-studio-route-v2"></script>
+<script type="module" src="/js/app.js?v=20260831-ad-radar-v1"></script>
 </body>
 </html>

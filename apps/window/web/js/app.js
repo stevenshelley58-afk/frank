@@ -3,7 +3,8 @@ import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
 import { mountAdStudio } from "./ad-studio.js?v=20260830-builder-escalation-v1";
-import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
+import { mountAdRadar, unmountAdRadar } from "./ad-radar.js?v=20260831-observation-timeline-v1";
+import { pathForView, viewForPath } from "./view-routing.js?v=20260831-ad-radar-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
@@ -17,6 +18,7 @@ const TITLES = {
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
   "ad-studio": ["Ad Studio", "Source image → ad template"],
+  "ad-radar": ["Ad Radar", "Public creative observation and evidence"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
   connections: ["Connections", "Recorded provider setup and capabilities"],
@@ -36,6 +38,7 @@ function syncViewLocation(id) {
 }
 
 function show(id, { syncHistory = true } = {}) {
+  if (id !== "ad-radar") unmountAdRadar();
   const editorWasOpen = closeHomeEditors({ restoreFocus: false });
   if (id !== "project" && id !== "entity-home") clearHomeActions();
   const [title, sub] = TITLES[id] || TITLES.hub;
@@ -97,6 +100,7 @@ $$(".rail-item[data-view]").forEach((b) =>
       chatScrollBottom();
     }
     else if (v === "ad-studio") { show(v); mountAdStudio(); }
+    else if (v === "ad-radar") { show(v); void mountAdRadar(); }
     else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); }
   })
 );
@@ -145,10 +149,16 @@ window.addEventListener("frank:ad-studio", () => {
   mountAdStudio();
 });
 
+window.addEventListener("frank:ad-radar", () => {
+  show("ad-radar");
+  void mountAdRadar();
+});
+
 function openPathView() {
   const id = viewForPath(window.location.pathname);
   show(id, { syncHistory: false });
   if (id === "ad-studio") mountAdStudio();
+  if (id === "ad-radar") void mountAdRadar();
   const canonicalPath = pathForView(id);
   if (window.location.pathname !== canonicalPath) window.history.replaceState({ view: id }, "", `${canonicalPath}${window.location.search}`);
 }

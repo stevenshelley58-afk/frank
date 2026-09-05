@@ -1,4 +1,5 @@
 const AD_STUDIO_PATH = "/ad-studio";
+const AD_RADAR_PATH = "/ad-radar";
 const BLOCKWISE_ORIGIN = "https://blockwise.sale";
 const TEMPLATE_PATH = "/ad-studio/templates/";
 const TEMPLATE_ID = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
@@ -6,11 +7,13 @@ const OPERATE_PATHS = { "/live": "live", "/map": "map", "/control": "control" };
 
 export function viewForPath(pathname) {
   if (pathname === AD_STUDIO_PATH || pathname === `${AD_STUDIO_PATH}/`) return "ad-studio";
+  if (pathname === AD_RADAR_PATH || pathname === `${AD_RADAR_PATH}/`) return "ad-radar";
   return OPERATE_PATHS[pathname.replace(/\/$/, "")] || "hub";
 }
 
 export function pathForView(view) {
   if (view === "ad-studio") return AD_STUDIO_PATH;
+  if (view === "ad-radar") return AD_RADAR_PATH;
   if (view === "live" || view === "map" || view === "control") return `/${view}`;
   return "/";
 }

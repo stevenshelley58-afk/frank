@@ -22,10 +22,22 @@ import urllib.request
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, redirect, request, send_file, send_from_directory, stream_with_context
+from werkzeug.exceptions import HTTPException
 
 import home_platform
 import home_defaults
 import mini_frank
+from ad_radar import (
+    AdRadarInputError,
+    approval_payload as ad_radar_approval_payload,
+    build_run_command as build_ad_radar_run_command,
+    pause_payload as ad_radar_pause_payload,
+    public_run as public_ad_radar_run,
+    public_run_summary as public_ad_radar_run_summary,
+    public_sse_block as public_ad_radar_sse_block,
+    resume_payload as ad_radar_resume_payload,
+    retry_payload as ad_radar_retry_payload,
+)
 from memory_inspector import HindsightClient, MemoryInspector, create_blueprint as create_memory_blueprint
 from project_store import ProjectStore, ProjectStoreError
 import vault_broker
@@ -95,6 +107,7 @@ MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 10
 HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
 HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
+AD_RADAR_MEDIA_TYPES = frozenset({"image/png", "image/jpeg", "image/webp", "video/mp4", "video/webm"})
 HINDSIGHT_URL = os.environ.get("HINDSIGHT_API_URL", "http://172.16.1.1:9178").rstrip("/")
 # Read-only implementation monitors; Hermes remains template-run truth.
 ARCHIFY_ARTIFACT = Path(os.environ.get("ARCHIFY_ARTIFACT", str(Path(__file__).resolve().parent / "archify" / "ad-template-process.html"))).resolve()
@@ -146,7 +159,7 @@ ACCOUNT_MODES = {"selfserve", "managed", "internal"}
 ACCOUNT_ENVIRONMENTS = {"test", "live"}
 AUTH_STATUSES = {"not_connected", "invited", "active", "suspended", "closed"}
 BILLING_STATUSES = {"not_connected", "trial", "active", "past_due", "canceled"}
-AD_STUDIO_RUN_ID = re.compile(r"trun_[0-9a-f]{32}")
+TOOL_RUN_ID = re.compile(r"trun_[0-9a-f]{32}")
 AD_STUDIO_PLACEMENTS = {"square", "portrait", "story"}
 AD_STUDIO_IMAGE_EXTENSIONS = {
     ".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg",
@@ -1596,7 +1609,7 @@ def _ad_studio_source(attachment: dict) -> dict:
 
 
 def _tool_run_path(run_id: str, suffix: str = "") -> str:
-    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+    if not TOOL_RUN_ID.fullmatch(run_id):
         abort(404)
     return f"/v1/tool-runs/{urllib.parse.quote(run_id, safe='')}{suffix}"
 
@@ -1635,7 +1648,7 @@ def ad_studio_run_create():
         data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=15)
         run_data = data.get("run") if isinstance(data.get("run"), dict) else data
         run_id = str(run_data.get("id") or run_data.get("run_id") or "")
-        if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+        if not TOOL_RUN_ID.fullmatch(run_id):
             return jsonify({"error": "Hermes did not return a valid Tool run id"}), 502
         result = _public_ad_studio_run(run_data, title=f"Ad Studio · {name}", project_id=project_id)
         staging_target = _upload_target(attachment["id"])
@@ -1751,6 +1764,285 @@ def ad_studio_run_retry(run_id: str):
 @app.post("/api/ad-studio/runs/<run_id>/cancel")
 def ad_studio_run_cancel(run_id: str):
     return _proxy_ad_studio_action(run_id, "/cancel", {"reason"})
+
+
+@app.get("/api/ad-radar/contract")
+def ad_radar_contract():
+    """Return the declared, non-executable Tool contract used by the app."""
+    manifest = _authorized_tool_manifests.get("ad-intelligence")
+    if not isinstance(manifest, dict):
+        abort(503, "Ad Radar Tool contract is unavailable")
+    pipelines = manifest.get("pipelines") if isinstance(manifest.get("pipelines"), list) else []
+    pipeline = pipelines[0] if pipelines and isinstance(pipelines[0], dict) else {}
+    nodes = pipeline.get("nodes") if isinstance(pipeline.get("nodes"), list) else []
+    edges = pipeline.get("edges") if isinstance(pipeline.get("edges"), list) else []
+    hermes = manifest.get("hermes") if isinstance(manifest.get("hermes"), dict) else {}
+    declared_actions = [str(item) for item in hermes.get("actions", []) if isinstance(item, str)]
+    operations = hermes.get("operations") if isinstance(hermes.get("operations"), dict) else {}
+    return jsonify({
+        "tool": {
+            "id": "ad-intelligence",
+            "name": str(manifest.get("name") or "Ad Radar"),
+            "version": str(manifest.get("version") or ""),
+            "description": str(manifest.get("description") or ""),
+        },
+        "pipeline": {
+            "id": str(pipeline.get("id") or "ad-radar-pipeline"),
+            "version": str(pipeline.get("version") or ""),
+            "nodes": [
+                {"id": str(item.get("id") or ""), "kind": str(item.get("kind") or "")}
+                for item in nodes if isinstance(item, dict) and item.get("id")
+            ],
+            "edges": [
+                {"from": str(item.get("from") or ""), "to": str(item.get("to") or "")}
+                for item in edges if isinstance(item, dict) and item.get("from") and item.get("to")
+            ],
+        },
+        "actions": [item for item in declared_actions if item in {"run", "retry", "pause", "resume", "approve-publish"}],
+        "capabilities": {
+            name: {
+                "actions": [item for item in value.get("actions", []) if isinstance(item, str)],
+                "event_kinds": [item for item in value.get("event_kinds", []) if isinstance(item, str)],
+            }
+            for name, value in operations.items()
+            if isinstance(name, str) and isinstance(value, dict)
+        },
+        "event_kinds": [str(item) for item in hermes.get("event_kinds", []) if isinstance(item, str)],
+    })
+
+
+def _ad_radar_hermes_error(error: Exception):
+    """Keep upstream diagnostics inside Hermes while preserving useful status codes."""
+    if isinstance(error, urllib.error.HTTPError):
+        status = error.code if 400 <= error.code < 600 else 502
+        if status == 404:
+            message = "The requested Ad Radar run was not found."
+        elif status in {409, 412}:
+            message = "Ad Radar state changed in Hermes. Refresh and retry the action."
+        elif status == 429:
+            message = "Hermes is busy. Wait briefly and retry."
+        elif 400 <= status < 500:
+            message = "Hermes rejected the Ad Radar request."
+        else:
+            message = "Hermes is unavailable. Check the connection and retry."
+        return jsonify({"error": message, "code": "ad_radar_upstream_error"}), status
+    return jsonify({
+        "error": "Hermes is unavailable. Check the connection and retry.",
+        "code": "ad_radar_upstream_unavailable",
+    }), 502
+
+
+def _ad_radar_project_id(raw: object) -> str:
+    if not str(raw or "").strip():
+        abort(400, "project_id is required")
+    project_id = _clean_project_id(raw)
+    if not _project_store.get_project(project_id):
+        abort(404, "project not found")
+    return project_id
+
+
+def _is_scoped_ad_radar_run(run: object, project_id: str) -> bool:
+    if not isinstance(run, dict) or run.get("tool_id") != "ad-intelligence":
+        return False
+    scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    return scope.get("project_id") == project_id
+
+
+def _load_scoped_ad_radar_run(run_id: str, project_id: str) -> dict:
+    data = hermes_request(_tool_run_path(run_id), timeout=8)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    if not _is_scoped_ad_radar_run(run, project_id):
+        abort(404)
+    return run
+
+
+@app.post("/api/ad-radar/runs")
+def ad_radar_run_create():
+    """Submit one validated project-scoped research command to Hermes."""
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        abort(400, "request body must be an object")
+    project_id = _clean_project_id(body.get("project_id")) if body.get("project_id") else ""
+    project = _project_store.get_project(project_id) if project_id else None
+    if not project:
+        abort(404, "project not found")
+    try:
+        command = build_ad_radar_run_command(
+            body,
+            project_id=project_id,
+            project_context=_project_context(project),
+            request_id=f"req_{secrets.token_hex(16)}",
+        )
+    except AdRadarInputError as error:
+        abort(400, str(error))
+    try:
+        data = hermes_request("/v1/tool-runs", command, method="POST", timeout=15)
+    except Exception as error:
+        return _ad_radar_hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    run_id = str(run.get("id") or run.get("run_id") or "") if isinstance(run, dict) else ""
+    if not TOOL_RUN_ID.fullmatch(run_id) or not _is_scoped_ad_radar_run(run, project_id):
+        return jsonify({
+            "error": "Hermes returned an invalid scoped Ad Radar run.",
+            "code": "ad_radar_upstream_contract_error",
+        }), 502
+    return jsonify({"ok": True, "run": public_ad_radar_run(run)}), 202
+
+
+@app.get("/api/ad-radar/runs")
+def ad_radar_run_list():
+    project_id = _ad_radar_project_id(request.args.get("project_id"))
+    query = urllib.parse.urlencode({
+        "tool_id": "ad-intelligence",
+        "project_id": project_id,
+        "limit": min(50, max(1, request.args.get("limit", type=int) or 50)),
+    })
+    try:
+        data = hermes_request(f"/v1/tool-runs?{query}", timeout=8)
+    except Exception as error:
+        return _ad_radar_hermes_error(error)
+    raw_runs = data.get("runs") if isinstance(data.get("runs"), list) else data.get("data", [])
+    return jsonify({
+        "runs": [
+            public_ad_radar_run_summary(item)
+            for item in raw_runs
+            if _is_scoped_ad_radar_run(item, project_id)
+        ],
+    })
+
+
+@app.get("/api/ad-radar/runs/<run_id>")
+def ad_radar_run_get(run_id: str):
+    project_id = _ad_radar_project_id(request.args.get("project_id"))
+    try:
+        run = _load_scoped_ad_radar_run(run_id, project_id)
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _ad_radar_hermes_error(error)
+    return jsonify({"run": public_ad_radar_run(run)})
+
+
+@app.get("/api/ad-radar/runs/<run_id>/events")
+def ad_radar_run_events(run_id: str):
+    project_id = _ad_radar_project_id(request.args.get("project_id"))
+    try:
+        _load_scoped_ad_radar_run(run_id, project_id)
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _ad_radar_hermes_error(error)
+    after = request.args.get("after", type=int)
+    if after is None:
+        try:
+            after = int(request.headers.get("Last-Event-ID") or 0)
+        except ValueError:
+            after = 0
+    url = hermes_base() + _tool_run_path(run_id, "/events") + "?" + urllib.parse.urlencode({"after": max(-1, after)})
+
+    def generate():
+        headers = {"Accept": "text/event-stream"}
+        if HERMES_KEY:
+            headers["Authorization"] = f"Bearer {HERMES_KEY}"
+        try:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=75) as response:
+                block = []
+                for raw_line in response:
+                    line = raw_line.decode("utf-8", errors="replace").rstrip("\r\n")
+                    if line:
+                        block.append(line)
+                        continue
+                    safe = public_ad_radar_sse_block(block)
+                    block = []
+                    if safe:
+                        yield safe
+                safe = public_ad_radar_sse_block(block)
+                if safe:
+                    yield safe
+        except (urllib.error.URLError, TimeoutError):
+            yield b"event: disconnected\ndata: {}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream", headers=_sse_headers())
+
+
+@app.get("/api/ad-radar/runs/<run_id>/artifacts/<name>")
+def ad_radar_run_artifact(run_id: str, name: str):
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}", name):
+        abort(404)
+    project_id = _ad_radar_project_id(request.args.get("project_id"))
+    try:
+        _load_scoped_ad_radar_run(run_id, project_id)
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _ad_radar_hermes_error(error)
+    url = hermes_base() + _tool_run_path(run_id, f"/artifacts/{urllib.parse.quote(name, safe='')}")
+    headers = {"Accept": "image/png,image/jpeg,image/webp,video/mp4,video/webm"}
+    if HERMES_KEY:
+        headers["Authorization"] = f"Bearer {HERMES_KEY}"
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15) as upstream:
+            data = upstream.read(40 * 1024 * 1024 + 1)
+            if len(data) > 40 * 1024 * 1024:
+                abort(413)
+            media_type = upstream.headers.get_content_type()
+            if media_type not in AD_RADAR_MEDIA_TYPES:
+                abort(415)
+            return Response(data, mimetype=media_type, headers={
+                "Cache-Control": "private, no-store",
+                "X-Content-Type-Options": "nosniff",
+            })
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _ad_radar_hermes_error(error)
+
+
+def _proxy_ad_radar_action(run_id: str, suffix: str, validator):
+    project_id = _ad_radar_project_id(request.args.get("project_id"))
+    try:
+        incoming = request.get_json(silent=True)
+        if incoming is None and request.get_data(cache=True).strip():
+            raise AdRadarInputError("action body must contain valid JSON")
+        body = validator({} if incoming is None else incoming)
+    except AdRadarInputError as error:
+        abort(400, str(error))
+    try:
+        _load_scoped_ad_radar_run(run_id, project_id)
+        data = hermes_request(_tool_run_path(run_id, suffix), body, method="POST", timeout=15)
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _ad_radar_hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    returned_id = str(run.get("id") or run.get("run_id") or "") if isinstance(run, dict) else ""
+    if returned_id != run_id or not _is_scoped_ad_radar_run(run, project_id):
+        return jsonify({
+            "error": "Hermes returned an invalid scoped Ad Radar run.",
+            "code": "ad_radar_upstream_contract_error",
+        }), 502
+    return jsonify({"ok": True, "run": public_ad_radar_run(run)})
+
+
+@app.post("/api/ad-radar/runs/<run_id>/retry")
+def ad_radar_run_retry(run_id: str):
+    return _proxy_ad_radar_action(run_id, "/retry", ad_radar_retry_payload)
+
+
+@app.post("/api/ad-radar/runs/<run_id>/pause")
+def ad_radar_run_pause(run_id: str):
+    return _proxy_ad_radar_action(run_id, "/pause", ad_radar_pause_payload)
+
+
+@app.post("/api/ad-radar/runs/<run_id>/resume")
+def ad_radar_run_resume(run_id: str):
+    return _proxy_ad_radar_action(run_id, "/resume", ad_radar_resume_payload)
+
+
+@app.post("/api/ad-radar/runs/<run_id>/approve")
+def ad_radar_run_approve(run_id: str):
+    return _proxy_ad_radar_action(run_id, "/approval", ad_radar_approval_payload)
 
 
 def _hermes_chat_stream(chat_id: str, payload: dict, *, read_timeout: float | None = None):
