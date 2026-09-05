@@ -21,7 +21,12 @@ from typing import Any
 from .http import RestError, RestSurface, STT_TIMEOUT
 
 DECODED_STT_CAP_BYTES = 25 * 1024 * 1024
-_DATA_URL = re.compile(r"^data:([A-Za-z0-9.+/-]+);base64,([A-Za-z0-9+/=]+)$")
+# Chrome's MediaRecorder emits parameterised MIME types, e.g.
+# "data:audio/webm;codecs=opus;base64,..." — accept data-URL parameters
+# between the MIME type and the base64 payload.
+_DATA_URL = re.compile(
+    r"^data:([A-Za-z0-9.+/-]+)(?:;[A-Za-z0-9.+*=-]+)*;base64,([A-Za-z0-9+/=]+)$"
+)
 
 
 class ServeError(RuntimeError):
