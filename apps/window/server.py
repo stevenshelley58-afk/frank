@@ -425,6 +425,69 @@ def _hermes_error(err: Exception):
     return jsonify({"error": f"Could not reach Hermes: {str(err).split(chr(10))[0][:180]}"}), 502
 
 
+_AD_DB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+_AD_DB_QUERY_KEYS = frozenset({"q", "cursor", "limit", "agentId", "agentName", "agencyId", "agencyName", "state", "suburb", "postcode", "locationRelation", "status"})
+
+
+def _ad_db_id(value: str) -> str:
+    if not _AD_DB_ID.fullmatch(value or ""):
+        abort(404)
+    return value
+
+
+def _ad_db_query() -> str:
+    pairs = []
+    for key, value in request.args.items(multi=True):
+        if key not in _AD_DB_QUERY_KEYS or len(value) > 240:
+            abort(400, description="unsupported Ad DB filter")
+        pairs.append((key, value))
+    return urllib.parse.urlencode(pairs)
+
+
+def _ad_db_public_payload(payload: object) -> object:
+    """Replace internal media routes; source URLs never reach the browser."""
+    if not isinstance(payload, dict):
+        return payload
+    result = deepcopy(payload)
+    records = result.get("items") if isinstance(result.get("items"), list) else [result]
+    for record in records:
+        if not isinstance(record, dict) or not _AD_DB_ID.fullmatch(str(record.get("id") or "")):
+            continue
+        for asset in record.get("media") if isinstance(record.get("media"), list) else []:
+            if not isinstance(asset, dict):
+                continue
+            asset_id = str(asset.get("id") or "")
+            if _AD_DB_ID.fullmatch(asset_id):
+                asset["archiveUrl"] = f"/api/ad-db/ads/{urllib.parse.quote(record['id'], safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
+            asset.pop("sourceUrl", None)
+            asset.pop("sourceURLs", None)
+    return result
+
+
+class _AdDbNoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _ad_db_media_redirect(ad_id: str, asset_id: str) -> Response:
+    """Relay Hermes' integrity-gated archive redirect without downloading it."""
+    path = f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
+    headers = {"Accept": "application/octet-stream"}
+    if HERMES_KEY:
+        headers["Authorization"] = f"Bearer {HERMES_KEY}"
+    req = urllib.request.Request(hermes_base() + path, headers=headers, method="GET")
+    try:
+        upstream = urllib.request.build_opener(_AdDbNoRedirect()).open(req, timeout=15)
+    except urllib.error.HTTPError as error:
+        if error.code != 302:
+            raise
+        upstream = error
+    location = upstream.headers.get("Location")
+    if getattr(upstream, "status", upstream.getcode()) != 302 or not location:
+        abort(502, description="Hermes did not return an archived-media redirect")
+    return redirect(location, code=302)
+
+
 def _session_path(session_id: str, suffix: str = "") -> str:
     safe_id = urllib.parse.quote(str(session_id), safe="")
     return f"/api/sessions/{safe_id}{suffix}"
@@ -2801,6 +2864,38 @@ def _tool_run_path(run_id: str, suffix: str = "") -> str:
     if not AD_STUDIO_RUN_ID.fullmatch(run_id):
         abort(404)
     return f"/v1/tool-runs/{urllib.parse.quote(run_id, safe='')}{suffix}"
+
+
+@app.get("/api/ad-db/ads")
+@app.get("/api/ad-db/prospects")
+@app.get("/api/ad-db/runs")
+def ad_db_collection():
+    """Read-only Ad DB facade; canonical data and policy stay in Hermes."""
+    collection = request.path.rsplit("/", 1)[-1]
+    query = _ad_db_query()
+    try:
+        payload = hermes_request(f"/v1/ad-db/{collection}" + (f"?{query}" if query else ""), timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(_ad_db_public_payload(payload))
+
+
+@app.get("/api/ad-db/ads/<ad_id>")
+def ad_db_ad(ad_id: str):
+    ad_id = _ad_db_id(ad_id)
+    try:
+        payload = hermes_request(f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(_ad_db_public_payload(payload))
+
+
+@app.get("/api/ad-db/ads/<ad_id>/media/<asset_id>")
+def ad_db_media(ad_id: str, asset_id: str):
+    try:
+        return _ad_db_media_redirect(_ad_db_id(ad_id), _ad_db_id(asset_id))
+    except Exception as error:
+        return _hermes_error(error)
 
 
 @app.post("/api/ad-studio/runs")
