@@ -8,7 +8,7 @@ import { DictationController } from "./chat/dictation-controller.js";
 import { ModelSelector } from "./chat/model-selector.js";
 import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/turn-stream.js";
 import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
-import { mountAdStudio } from "./ad-studio.js?v=20260904-brief-roundtrip-v1";
+import { mountAdStudio } from "./ad-studio.js?v=20260905-ready-review-v1";
 import { adStudioBriefValidation } from "./ad-studio-brief.js?v=20260904-brief-roundtrip-v1";
 import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
@@ -215,6 +215,7 @@ window.addEventListener("frank:ad-studio-run", (event) => {
           name: jobName,
           brief,
           attachments: uploaded.map(attachmentPayload),
+          model_policy_override: detail.modelPolicyOverride,
         }),
       });
       const data = await response.json().catch(() => ({}));

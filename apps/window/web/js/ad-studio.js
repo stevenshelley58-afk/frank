@@ -1,7 +1,9 @@
 import { mountGraphWorkbench } from "../graph/graph-workbench.bundle.js?v=20260822-ad-studio";
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260830-ad-studio-route-v1";
-import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, runListRenderSignature, runTimestamp } from "./ad-studio-state.js?v=20260904-run-history-v1";
+import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, readyAdStudioReviewRuns, runListRenderSignature, runTimestamp } from "./ad-studio-state.js?v=20260905-ready-review-v1";
 import { AD_STUDIO_BRIEF_MAX_CHARACTERS, adStudioBriefValidation } from "./ad-studio-brief.js?v=20260904-brief-roundtrip-v1";
+import { approveAdStudioTemplate, cancelAdStudioRun, discardAdStudioTemplate, getAdStudioRun, listAdStudioRuns, requestAdStudioTemplateChanges, retryAdStudioRun } from "./ad-studio-api.js?v=20260905-ready-review-v1";
+import { placementScore, reviewArtifactPurpose, reviewModelProfile, reviewOverallScore, selectMetaPreview, selectReusableReviewArtifact, selectReviewArtifact } from "./ad-studio-review.js?v=20260905-ready-review-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -11,6 +13,12 @@ let mounted = false;
 let projects = [];
 let runs = [];
 let selectedRunId = "";
+let selectedReviewRunId = "";
+let reviewPlacement = "feed";
+let reviewView = "template";
+let reviewZoom = "fit";
+let reviewActionPending = false;
+let reviewActionMessage = "";
 let runSelectionRevision = 0;
 let runListRevision = 0;
 let selectedStage = null;
@@ -22,6 +30,12 @@ const localRunInputs = new Map();
 const previewUrls = new Set();
 let runEvents = [];
 let eventStream = null;
+let adStudioModels = [];
+let adStudioModelPolicy = null;
+let adStudioModelsReady = false;
+let modelLoadSequence = 0;
+let eventReconnectTimer = null;
+const runEventCache = new Map();
 const IMAGE_EXTENSIONS = new Set(["avif", "bmp", "gif", "heic", "heif", "jpeg", "jpg", "png", "tif", "tiff", "webp"]);
 const MAX_BATCH_SOURCES = 20;
 const SOURCE_STATUS = {
@@ -49,9 +63,131 @@ const canonicalStage = (stage) => {
   return PIPELINE_STAGES.includes(value) ? value : (STAGE_ALIASES[value] || "source");
 };
 
+const MODEL_ROLE_FIELDS = {
+  analyse: "#ad-model-builder",
+  compare: "#ad-model-comparator",
+  "final-review-a": "#ad-model-reviewer-a",
+  "final-review-b": "#ad-model-reviewer-b",
+  "quality-escalation": "#ad-model-fallback",
+};
+
+function modelName(item) {
+  if (!item) return "Model unavailable";
+  return `${item.model} · ${item.provider}`;
+}
+
+function modelIndex(candidate) {
+  if (!candidate) return -1;
+  return adStudioModels.findIndex((item) => item.provider === candidate.provider && item.model === candidate.model);
+}
+
+function selectedModel(indexValue) {
+  const index = Number(indexValue);
+  return Number.isInteger(index) && index >= 0 ? adStudioModels[index] : null;
+}
+
+function modelCandidate(item) {
+  return {
+    provider: item.provider,
+    model: item.model,
+    capability_verified: true,
+    capabilities: ["vision_structured"],
+    supports_vision: true,
+    supports_tools: true,
+  };
+}
+
+function currentModelPolicy() {
+  if (!adStudioModelsReady || !adStudioModelPolicy) throw new Error("Wait for Hermes to load the Ad Studio models.");
+  const policy = structuredClone(adStudioModelPolicy);
+  for (const [stageId, selector] of Object.entries(MODEL_ROLE_FIELDS)) {
+    const select = $(selector);
+    const model = selectedModel(select?.value);
+    if (stageId === "quality-escalation" && !model) {
+      delete policy.stages[stageId];
+      continue;
+    }
+    if (!model || !model.available || !model.credential_ready) {
+      throw new Error(`Choose an available ${stageId.replaceAll("-", " ")} model.`);
+    }
+    policy.stages[stageId].primary = modelCandidate(model);
+  }
+  const first = policy.stages["final-review-a"].primary;
+  const second = policy.stages["final-review-b"].primary;
+  if (first.provider === second.provider && first.model === second.model) {
+    throw new Error("Completion reviewers A and B must use different model routes.");
+  }
+  return policy;
+}
+
+function validateModelControls() {
+  const status = $("#ad-model-status");
+  if (!adStudioModelsReady) return false;
+  try {
+    currentModelPolicy();
+    status.textContent = "This model setup is independent of Hub chat and will be locked to every job in the batch.";
+    status.classList.remove("is-error");
+    return true;
+  } catch (error) {
+    status.textContent = error.message || "Choose a valid Ad Studio model setup.";
+    status.classList.add("is-error");
+    return false;
+  }
+}
+
+function populateModelControls(policy) {
+  const stages = policy?.stages || {};
+  for (const [stageId, selector] of Object.entries(MODEL_ROLE_FIELDS)) {
+    const select = $(selector);
+    select.replaceChildren();
+    if (stageId === "quality-escalation") select.append(new Option("Off", "-1"));
+    adStudioModels.forEach((item, index) => {
+      const option = new Option(modelName(item), String(index));
+      option.disabled = !item.available || !item.credential_ready;
+      select.append(option);
+    });
+    const selected = modelIndex(stages[stageId]?.primary);
+    select.value = selected >= 0 ? String(selected) : (stageId === "quality-escalation" ? "-1" : "");
+    select.disabled = false;
+  }
+  validateModelControls();
+  updateRunControls();
+}
+
+async function loadAdStudioModels() {
+  const sequence = ++modelLoadSequence;
+  const status = $("#ad-model-status");
+  adStudioModelsReady = false;
+  status.textContent = "Reading verified vision models from Hermes…";
+  status.classList.remove("is-error");
+  updateRunControls();
+  const projectId = clean($("#ad-run-project")?.value);
+  const query = new URLSearchParams();
+  if (projectId) query.set("project_id", projectId);
+  try {
+    const response = await fetch(`/api/ad-studio/models${query.size ? `?${query}` : ""}`);
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "Hermes model catalogue is unavailable.");
+    if (sequence !== modelLoadSequence) return;
+    adStudioModels = Array.isArray(data.models) ? data.models : [];
+    adStudioModelPolicy = data.policy && typeof data.policy === "object" ? data.policy : null;
+    if (!adStudioModels.length || !adStudioModelPolicy) throw new Error("Hermes has no verified Ad Studio models available.");
+    adStudioModelsReady = true;
+    populateModelControls(adStudioModelPolicy);
+  } catch (error) {
+    if (sequence !== modelLoadSequence) return;
+    adStudioModels = [];
+    adStudioModelPolicy = null;
+    status.textContent = error.message || "Hermes model catalogue is unavailable.";
+    status.classList.add("is-error");
+    Object.values(MODEL_ROLE_FIELDS).forEach((selector) => { $(selector).disabled = true; });
+    updateRunControls();
+  }
+}
+
 
 function runStatusLabel(status) {
-  return ({ queued: "Running", started: "Running", running: "Running", completed: "Complete", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Running";
+  return ({ queued: "Running", started: "Running", running: "Running", ready_for_review: "Ready for review", approved: "Approved", active: "Live", completed: "Complete", discarded: "Discarded", failed: "Failed", cancelled: "Cancelled", unavailable: "Status unavailable" })[status] || "Running";
 }
 
 function dateLabel(value) {
@@ -75,6 +211,11 @@ function activate(tab) {
     panel.hidden = !active;
   });
   if (tab === "runs") void refreshRunsSafe();
+  if (tab === "review") void refreshRunsSafe().then(() => {
+    renderReviewQueue();
+    const ready = readyAdStudioReviewRuns(runs);
+    if (!selectedReviewRunId && ready[0]) void selectReviewRun(ready[0].id);
+  });
   if (tab === "pipeline") { void refreshRunsSafe(); mountPipeline(); }
 }
 
@@ -214,7 +355,8 @@ function updateRunControls() {
   const submit = $("#ad-run-submit");
   if (!submit) return;
   const runnable = selectedFiles.filter((source) => ["queued", "error"].includes(source.status)).length;
-  submit.disabled = batchStarting || runnable === 0;
+  const modelsValid = adStudioModelsReady && validateModelControls();
+  submit.disabled = batchStarting || runnable === 0 || !modelsValid;
   submit.textContent = batchStarting ? "Starting…" : runnable ? `Run ${runnable} job${runnable === 1 ? "" : "s"}` : "Run jobs";
 }
 
@@ -251,6 +393,8 @@ function clearRunSelection() {
   selectedRunId = "";
   eventStream?.close();
   eventStream = null;
+  if (eventReconnectTimer) window.clearTimeout(eventReconnectTimer);
+  eventReconnectTimer = null;
   runEvents = [];
   const detail = $("#ad-run-detail");
   if (detail) detail.innerHTML = '<div class="ad-empty"><strong>Select a run</strong><span>Open a run to inspect every iteration, comparator score and final review.</span></div>';
@@ -325,15 +469,12 @@ function renderRuns() {
 async function refreshRuns() {
   const refreshRevision = ++runListRevision;
   const projectId = clean($("#ad-run-project")?.value || $("#ad-pipeline-project")?.value);
-  const query = new URLSearchParams({ limit: "100" });
-  if (projectId) query.set("project_id", projectId);
-  const response = await fetch(`/api/ad-studio/runs?${query}`);
-  if (!response.ok) throw new Error("Hermes job history is unavailable");
-  const data = await response.json();
+  const incoming = await listAdStudioRuns({ projectId, limit: 100 });
   if (refreshRevision !== runListRevision) return;
   const previousSignature = runListRenderSignature(runs);
-  runs = mergeAdStudioRunList(runs, data.runs);
+  runs = mergeAdStudioRunList(runs, incoming);
   if (runListRenderSignature(runs) !== previousSignature) renderRuns();
+  renderReviewQueue();
 }
 
 async function refreshRunsSafe() {
@@ -344,6 +485,8 @@ async function refreshRunsSafe() {
   } catch {
     const host = $("#ad-runs-list");
     if (host && !host.children.length) host.innerHTML = '<div class="ad-empty"><strong>Jobs unavailable</strong><span>Frank cannot reach Hermes right now.</span></div>';
+    const reviewHost = $("#ad-review-list");
+    if (reviewHost && !reviewHost.children.length) reviewHost.innerHTML = '<div class="ad-empty"><strong>Review queue unavailable</strong><span>Frank will reconnect to Hermes automatically.</span></div>';
   } finally {
     runRefreshPending = false;
   }
@@ -356,19 +499,353 @@ async function selectRun(runId) {
   let run = runs.find((item) => item.id === runId);
   if (!run) return;
   try {
-    const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}`);
-    const data = await response.json().catch(() => ({}));
-    if (response.ok && data.run) {
+    const detail = await getAdStudioRun(run.id);
+    if (detail) {
       if (selectionRevision !== runSelectionRevision || selectedRunId !== runId) return;
-      run = mergeAdStudioRun(runs.find((item) => item.id === run.id), data.run);
+      run = mergeAdStudioRun(runs.find((item) => item.id === run.id), detail);
       runs = runs.map((item) => item.id === run.id ? run : item);
       renderRuns();
+      renderReviewQueue();
     }
   } catch { /* keep the last visible status */ }
   if (selectionRevision !== runSelectionRevision || selectedRunId !== runId) return;
   run = runs.find((item) => item.id === runId) || run;
   renderRunDetail(run);
   connectRunEvents(run);
+}
+
+function reviewScoreLabel(value) {
+  return value === null ? "—" : Number(value).toFixed(1);
+}
+
+function formatDuration(seconds) {
+  const value = Number(seconds);
+  if (!Number.isFinite(value) || value < 0) return "Not reported";
+  if (value < 60) return `${Math.round(value)} sec`;
+  const minutes = Math.floor(value / 60);
+  const remainder = Math.round(value % 60);
+  return remainder ? `${minutes} min ${remainder} sec` : `${minutes} min`;
+}
+
+function renderReviewQueue() {
+  const host = $("#ad-review-list");
+  const count = $("#ad-review-count");
+  if (!host || !count) return;
+  const ready = readyAdStudioReviewRuns(runs);
+  count.textContent = String(ready.length);
+  count.hidden = ready.length === 0;
+  host.replaceChildren();
+  if (!ready.length) {
+    host.innerHTML = '<div class="ad-empty"><strong>Nothing waiting</strong><span>Templates appear here only after final reviews and the Blockwise smoke test are recorded.</span></div>';
+    return;
+  }
+  ready.forEach((run) => {
+    const summary = run.output?.review_summary || {};
+    const preview = selectReviewArtifact(summary, "feed", "template") || summary.source;
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `ad-review-row${run.id === selectedReviewRunId ? " is-on" : ""}`;
+    if (preview?.url) {
+      const image = document.createElement("img");
+      image.src = preview.url;
+      image.alt = "";
+      button.append(image);
+    } else {
+      const missing = document.createElement("span");
+      missing.className = "ad-review-row-missing";
+      missing.textContent = "No preview";
+      button.append(missing);
+    }
+    const copy = document.createElement("span");
+    copy.className = "ad-review-row-copy";
+    const title = document.createElement("strong");
+    title.textContent = String(run.title || run.source?.name || "Template review").replace(/^Ad Studio\s*[·|-]?\s*/, "") || "Template review";
+    const source = document.createElement("span");
+    source.textContent = run.source?.name || "Source recorded in Hermes";
+    const scores = document.createElement("small");
+    scores.textContent = `Overall ${reviewScoreLabel(reviewOverallScore(summary))} · Feed ${reviewScoreLabel(placementScore(summary, "feed"))} · Story ${reviewScoreLabel(placementScore(summary, "story"))}`;
+    copy.append(title, source, scores);
+    const time = document.createElement("time");
+    time.textContent = dateLabel(run.updated_at || run.created_at);
+    button.append(copy, time);
+    button.addEventListener("click", () => void selectReviewRun(run.id));
+    host.append(button);
+  });
+}
+
+async function selectReviewRun(runId) {
+  const selectionRevision = ++runSelectionRevision;
+  selectedReviewRunId = runId;
+  selectedRunId = runId;
+  reviewActionMessage = "";
+  renderRuns();
+  renderReviewQueue();
+  let run = runs.find((item) => item.id === runId);
+  if (!run) return;
+  renderReviewDetail(run, { loading: true });
+  try {
+    const detail = await getAdStudioRun(runId);
+    if (detail && selectionRevision === runSelectionRevision && selectedReviewRunId === runId) {
+      run = mergeAdStudioRun(run, detail);
+      runs = runs.map((item) => item.id === runId ? run : item);
+    }
+  } catch { /* retain the safe summary already in the list response */ }
+  if (selectionRevision !== runSelectionRevision || selectedReviewRunId !== runId) return;
+  renderRuns();
+  renderReviewQueue();
+  renderReviewDetail(run);
+  connectRunEvents(run);
+}
+
+function makeSegment(label, value, selected, onSelect) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = label;
+  button.className = selected === value ? "is-on" : "";
+  button.setAttribute("aria-pressed", String(selected === value));
+  button.addEventListener("click", () => onSelect(value));
+  return button;
+}
+
+function appendReviewImage(host, artifact, label) {
+  host.replaceChildren();
+  if (!artifact?.url) {
+    const missing = document.createElement("div");
+    missing.className = "ad-review-artifact-missing";
+    missing.innerHTML = `<strong>${escapeHtml(label)} not supplied</strong><span>Hermes has not recorded this evidence for the selected placement.</span>`;
+    host.append(missing);
+    return;
+  }
+  const image = document.createElement("img");
+  image.src = artifact.url;
+  image.alt = `${label} for ${reviewPlacement} placement`;
+  image.dataset.zoom = reviewZoom;
+  host.append(image);
+}
+
+function appendReviewFacts(parent, summary) {
+  const smoke = summary.smoke_test || {};
+  const facts = [
+    ["Overall", reviewScoreLabel(reviewOverallScore(summary))],
+    ["Iterations", Number.isInteger(summary.iterations) ? String(summary.iterations) : "Not reported"],
+    ["Elapsed", formatDuration(summary.elapsed_seconds)],
+    ["Cost", Number.isFinite(Number(summary.cost_usd)) ? `$${Number(summary.cost_usd).toFixed(3)}` : "Not reported"],
+    ["Blockwise smoke", smoke.passed === true ? "Passed" : smoke.passed === false ? "Failed" : "Not recorded"],
+  ];
+  const list = document.createElement("dl");
+  list.className = "ad-review-facts";
+  facts.forEach(([label, value]) => {
+    const item = document.createElement("div");
+    const term = document.createElement("dt"); term.textContent = label;
+    const description = document.createElement("dd"); description.textContent = value;
+    item.append(term, description); list.append(item);
+  });
+  parent.append(list);
+}
+
+function appendMetaPreviews(parent, summary) {
+  const section = document.createElement("section");
+  section.className = "ad-review-section";
+  section.innerHTML = '<div class="ad-inline-heading"><strong>Meta placement previews</strong><span>Recorded output, not a simulated fallback.</span></div>';
+  const grid = document.createElement("div");
+  grid.className = "ad-review-meta-grid";
+  for (const placement of ["feed", "story"]) {
+    const artifact = selectMetaPreview(summary, placement);
+    const figure = document.createElement("figure");
+    if (artifact?.url) {
+      const image = document.createElement("img"); image.src = artifact.url; image.alt = `${placement} Meta ad preview`;
+      figure.append(image);
+    } else {
+      const missing = document.createElement("div"); missing.className = "ad-review-artifact-missing"; missing.textContent = "Meta preview not supplied"; figure.append(missing);
+    }
+    const caption = document.createElement("figcaption"); caption.textContent = placement === "feed" ? "Feed" : "Story"; figure.append(caption);
+    grid.append(figure);
+  }
+  section.append(grid); parent.append(section);
+}
+
+function appendReviewEvidence(parent, run, summary) {
+  const section = document.createElement("section");
+  section.className = "ad-review-section ad-review-evidence";
+  const heading = document.createElement("div");
+  heading.className = "ad-inline-heading";
+  heading.innerHTML = '<strong>Visual evidence</strong><span>Compare at Fit or actual pixels.</span>';
+  const toolbar = document.createElement("div");
+  toolbar.className = "ad-review-toolbar";
+  const placements = document.createElement("div");
+  placements.className = "ad-review-segments";
+  placements.setAttribute("aria-label", "Placement");
+  placements.append(
+    makeSegment("Feed", "feed", reviewPlacement, (value) => { reviewPlacement = value; renderReviewDetail(run); }),
+    makeSegment("Story", "story", reviewPlacement, (value) => { reviewPlacement = value; renderReviewDetail(run); }),
+  );
+  const views = document.createElement("div");
+  views.className = "ad-review-segments ad-review-views";
+  views.setAttribute("aria-label", "Evidence view");
+  for (const [label, value] of [["Source", "source"], ["Template", "template"], ["Overlay", "overlay"], ["Difference", "difference"]]) {
+    views.append(makeSegment(label, value, reviewView, (next) => { reviewView = next; renderReviewDetail(run); }));
+  }
+  const zoom = document.createElement("div");
+  zoom.className = "ad-review-segments";
+  zoom.setAttribute("aria-label", "Zoom");
+  zoom.append(
+    makeSegment("Fit", "fit", reviewZoom, (value) => { reviewZoom = value; renderReviewDetail(run); }),
+    makeSegment("100%", "actual", reviewZoom, (value) => { reviewZoom = value; renderReviewDetail(run); }),
+  );
+  toolbar.append(placements, views, zoom);
+  const viewport = document.createElement("div");
+  viewport.className = `ad-review-viewport is-${reviewZoom}`;
+  const selectedArtifact = selectReviewArtifact(summary, reviewPlacement, reviewView);
+  appendReviewImage(viewport, selectedArtifact, reviewView.replace(/^./, (value) => value.toUpperCase()));
+  section.append(heading, toolbar, viewport); parent.append(section);
+  if (reviewView === "template" && reviewArtifactPurpose(selectedArtifact) === "qa-source-filled") {
+    const note = document.createElement("p");
+    note.className = "ad-review-evidence-note";
+    note.textContent = "QA fidelity render · filled with the source only for comparison. Source pixels do not ship in the reusable template.";
+    section.append(note);
+  }
+  const reusable = selectReusableReviewArtifact(summary, reviewPlacement);
+  if (reviewView === "template" && reusable && reusable.name !== selectedArtifact?.name) {
+    const reusableSection = document.createElement("section");
+    reusableSection.className = "ad-review-reusable";
+    const copy = document.createElement("div");
+    copy.innerHTML = "<strong>Reusable customer default</strong><span>This exact neutral render is imported into Blockwise.</span>";
+    const image = document.createElement("img"); image.src = reusable.url; image.alt = `${reviewPlacement} reusable customer default`;
+    reusableSection.append(copy, image); section.append(reusableSection);
+  }
+}
+
+function appendRecordedDetails(parent, run, summary) {
+  const grid = document.createElement("div");
+  grid.className = "ad-review-record-grid";
+  const reviewers = Array.isArray(summary.scores?.reviewers) ? summary.scores.reviewers : [];
+  const checks = Array.isArray(summary.smoke_test?.checks) ? summary.smoke_test.checks : [];
+  const warnings = Array.isArray(summary.warnings) ? summary.warnings : [];
+  const substitutions = Array.isArray(summary.font_substitution) ? summary.font_substitution : [];
+  const profile = reviewModelProfile(run);
+  const roles = Array.isArray(profile.roles) ? profile.roles : [];
+  const entries = [
+    ["Final reviewers", reviewers.length ? reviewers.map((item, index) => `${item.label || `Reviewer ${index + 1}`}: ${reviewScoreLabel(Number.isFinite(Number(item.score)) ? Number(item.score) : null)}${item.decision ? ` · ${item.decision}` : ""}`) : ["No reviewer results supplied"]],
+    ["Warnings", warnings.length ? warnings.map((item) => item.message) : ["No warnings recorded"]],
+    ["Font substitutions", substitutions.length ? substitutions.map((item) => `${item.source || "Original font"} → ${item.replacement || "Replacement not recorded"}${item.reason ? ` · ${item.reason}` : ""}`) : ["None recorded"]],
+    ["Models", roles.length ? roles.map((item) => `${item.label || item.role}: ${item.model} · ${item.provider}`) : ["Model profile not supplied"]],
+    ["Blockwise smoke", checks.length ? checks.map((item) => `${item.passed === true ? "Passed" : item.passed === false ? "Failed" : "Recorded"}: ${item.label}`) : [summary.smoke_test?.passed === true ? "Passed" : "No smoke checks supplied"]],
+  ];
+  entries.forEach(([title, lines]) => {
+    const section = document.createElement("section");
+    const heading = document.createElement("strong"); heading.textContent = title;
+    const list = document.createElement("ul");
+    lines.forEach((line) => { const item = document.createElement("li"); item.textContent = line; list.append(item); });
+    section.append(heading, list); grid.append(section);
+  });
+  parent.append(grid);
+
+  const layers = Array.isArray(summary.layers) ? summary.layers : [];
+  const layerSection = document.createElement("details");
+  layerSection.className = "ad-review-layers";
+  const layerSummary = document.createElement("summary");
+  layerSummary.textContent = layers.length ? `Editable layer inventory · ${layers.length}` : "Editable layer inventory · not supplied";
+  layerSection.append(layerSummary);
+  if (layers.length) {
+    const list = document.createElement("div");
+    layers.forEach((layer) => {
+      const row = document.createElement("div");
+      const name = document.createElement("strong"); name.textContent = layer.name || layer.id || "Layer";
+      const meta = document.createElement("span"); meta.textContent = [layer.placement, layer.type, layer.role, layer.editable === false ? "Locked" : "Editable"].filter(Boolean).join(" · ");
+      row.append(name, meta); list.append(row);
+    });
+    layerSection.append(list);
+  }
+  parent.append(layerSection);
+}
+
+function appendReviewActions(parent, run) {
+  const section = document.createElement("section");
+  section.className = "ad-review-actions";
+  const status = document.createElement("p");
+  status.setAttribute("role", "status");
+  status.textContent = reviewActionMessage || "Approval publishes this reviewed template to Blockwise.";
+  const currentStatus = clean(run.review_status || run.output?.review_summary?.status || run.status).toLowerCase().replaceAll("-", "_");
+  if (currentStatus !== "ready_for_review") {
+    status.textContent = reviewActionMessage || `This review is now ${runStatusLabel(currentStatus).toLowerCase()}.`;
+    section.append(status);
+    parent.append(section);
+    return;
+  }
+  const buttons = document.createElement("div");
+  const request = document.createElement("button"); request.type = "button"; request.className = "ad-text-button"; request.textContent = "Request Changes";
+  const discard = document.createElement("button"); discard.type = "button"; discard.className = "ad-text-button ad-review-discard"; discard.textContent = "Discard";
+  const approve = document.createElement("button"); approve.type = "button"; approve.className = "ad-primary"; approve.textContent = "Approve & Publish Template";
+  [request, discard, approve].forEach((button) => { button.disabled = reviewActionPending; });
+  buttons.append(request, discard, approve);
+  section.append(status, buttons);
+  const formHost = document.createElement("div"); formHost.className = "ad-review-action-form"; section.append(formHost);
+
+  const act = async (callback, pendingLabel) => {
+    reviewActionPending = true; reviewActionMessage = pendingLabel; renderReviewDetail(run);
+    try {
+      const updated = await callback();
+      if (updated) {
+        const merged = mergeAdStudioRun(runs.find((item) => item.id === run.id), updated);
+        runs = runs.map((item) => item.id === run.id ? merged : item);
+        run = merged;
+      }
+      reviewActionMessage = pendingLabel === "Publishing…" ? "Approved and sent to Blockwise." : pendingLabel === "Sending changes…" ? "Changes requested. Hermes will continue this run." : "Template discarded.";
+      await refreshRunsSafe();
+    } catch (error) {
+      reviewActionMessage = error?.message || "The action failed. Try again.";
+    } finally {
+      reviewActionPending = false; renderRuns(); renderReviewQueue(); renderReviewDetail(run);
+    }
+  };
+
+  approve.addEventListener("click", () => void act(() => approveAdStudioTemplate(run.id), "Publishing…"));
+  request.addEventListener("click", () => {
+    formHost.replaceChildren();
+    const form = document.createElement("form");
+    const label = document.createElement("label"); label.textContent = "What must change?";
+    const textarea = document.createElement("textarea"); textarea.required = true; textarea.maxLength = 2000; textarea.rows = 4; textarea.placeholder = "Be specific about the visual difference to correct.";
+    label.append(textarea);
+    const row = document.createElement("div");
+    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel"; cancel.addEventListener("click", () => formHost.replaceChildren());
+    const submit = document.createElement("button"); submit.type = "submit"; submit.className = "ad-primary"; submit.textContent = "Send changes";
+    row.append(cancel, submit); form.append(label, row); formHost.append(form); textarea.focus();
+    form.addEventListener("submit", (event) => { event.preventDefault(); const instructions = clean(textarea.value); if (instructions) void act(() => requestAdStudioTemplateChanges(run.id, instructions), "Sending changes…"); });
+  });
+  discard.addEventListener("click", () => {
+    formHost.replaceChildren();
+    const form = document.createElement("form");
+    const label = document.createElement("label"); label.textContent = "Discard reason (optional)";
+    const textarea = document.createElement("textarea"); textarea.maxLength = 1000; textarea.rows = 3;
+    label.append(textarea);
+    const row = document.createElement("div");
+    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Keep template"; cancel.addEventListener("click", () => formHost.replaceChildren());
+    const submit = document.createElement("button"); submit.type = "submit"; submit.className = "ad-primary ad-danger-button"; submit.textContent = "Confirm discard";
+    row.append(cancel, submit); form.append(label, row); formHost.append(form); textarea.focus();
+    form.addEventListener("submit", (event) => { event.preventDefault(); void act(() => discardAdStudioTemplate(run.id, clean(textarea.value)), "Discarding…"); });
+  });
+  parent.append(section);
+}
+
+function renderReviewDetail(run, { loading = false } = {}) {
+  const detail = $("#ad-review-detail");
+  if (!detail || !run) return;
+  detail.replaceChildren();
+  const review = run.output?.review_summary || {};
+  const heading = document.createElement("header");
+  heading.className = "ad-review-detail-head";
+  const copy = document.createElement("div");
+  const eyebrow = document.createElement("span"); eyebrow.textContent = loading ? "Loading recorded evidence…" : "Ready for your review";
+  const title = document.createElement("h3"); title.textContent = run.title || run.source?.name || "Template review";
+  const source = document.createElement("p"); source.textContent = run.source?.name || "Source recorded in Hermes";
+  copy.append(eyebrow, title, source);
+  const score = document.createElement("div"); score.className = "ad-review-hero-score"; score.innerHTML = `<strong>${reviewScoreLabel(reviewOverallScore(review))}</strong><span>likeness</span>`;
+  heading.append(copy, score); detail.append(heading);
+  appendReviewFacts(detail, review);
+  appendReviewEvidence(detail, run, review);
+  appendMetaPreviews(detail, review);
+  appendRecordedDetails(detail, run, review);
+  appendReviewActions(detail, run);
 }
 
 function formatCost(run) {
@@ -602,10 +1079,10 @@ function renderRunDetail(run) {
   if (!["completed", "cancelled"].includes(run.status)) {
     const actions = document.createElement("div"); actions.className = "ad-run-actions";
     const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel job";
-    cancel.addEventListener("click", async () => { cancel.disabled = true; try { const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/cancel`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }); if (!response.ok) throw new Error("Cancel failed"); await selectRun(run.id); } catch { cancel.textContent = "Cancel failed — retry"; cancel.disabled = false; } });
+    cancel.addEventListener("click", async () => { cancel.disabled = true; try { await cancelAdStudioRun(run.id); await selectRun(run.id); } catch { cancel.textContent = "Cancel failed — retry"; cancel.disabled = false; } });
     if (run.status === "failed") {
       const retry = document.createElement("button"); retry.type = "button"; retry.className = "ad-primary"; retry.textContent = "Retry from checkpoint";
-      retry.addEventListener("click", async () => { retry.disabled = true; try { const response = await fetch(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/retry`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ from_stage: run.stage }) }); if (!response.ok) throw new Error("Retry failed"); await selectRun(run.id); } catch { retry.textContent = "Retry failed — try again"; retry.disabled = false; } });
+      retry.addEventListener("click", async () => { retry.disabled = true; try { await retryAdStudioRun(run.id, run.stage); await selectRun(run.id); } catch { retry.textContent = "Retry failed — try again"; retry.disabled = false; } });
       actions.append(retry);
     }
     actions.append(cancel); detail.append(actions);
@@ -615,7 +1092,7 @@ function renderRunDetail(run) {
   renderEventViews();
 }
 
-const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "builder.escalated", "final-review.started", "final-review.completed", "template.imported"];
+const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "provider.attempt", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "builder.escalated", "final-review.started", "final-review.completed", "template.ready_for_review", "template.revision_requested", "template.approved", "template.discarded", "smoke.completed", "template.imported"];
 
 const SAFE_TOOL_LABELS = {
   terminal: "Builder action",
@@ -729,17 +1206,22 @@ function mergeIterationEvent(run, item) {
   }
   if (item.kind === "iteration.compared") {
     record.comparison = { score: firstNumber(data.score), reason: String(data.reason || "") };
-    record.decision = data.decision || (Number(data.score) >= 9.5 ? "accepted" : "revise");
+    record.decision = data.decision || (Number(data.score) >= 9.8 ? "accepted" : "revise");
   }
   run.output.iterations = records.sort((a, b) => Number(a.iteration) - Number(b.iteration));
 }
 
 function connectRunEvents(run) {
   eventStream?.close();
-  runEvents = [];
+  if (eventReconnectTimer) window.clearTimeout(eventReconnectTimer);
+  eventReconnectTimer = null;
+  runEvents = [...(runEventCache.get(run.id) || [])];
   renderEventViews();
-  const stream = new EventSource(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/events?after=-1`);
-  eventStream = stream;
+  const connect = () => {
+    if (selectedRunId !== run.id) return;
+    const cursor = runEvents.reduce((last, item) => Math.max(last, Number(item.sequence ?? -1)), -1);
+    const stream = new EventSource(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/events?after=${encodeURIComponent(cursor)}`);
+    eventStream = stream;
   const receive = (event) => {
     try {
       if (eventStream !== stream || selectedRunId !== run.id) return;
@@ -747,6 +1229,7 @@ function connectRunEvents(run) {
       if (!runEvents.some((existing) => existing.sequence === item.sequence)) {
         runEvents.push(item);
         runEvents.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
+        runEventCache.set(run.id, [...runEvents]);
       }
       run = mergeAdStudioRun(runs.find((candidate) => candidate.id === run.id), run);
       if (["iteration.rendered", "iteration.compared"].includes(item.kind)) mergeIterationEvent(run, item);
@@ -755,17 +1238,29 @@ function connectRunEvents(run) {
         run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(run.stage)) / PIPELINE_STAGES.length);
       }
       runs = runs.map((candidate) => candidate.id === run.id ? run : candidate);
-      renderRunDetail(run);
-      if (["run.failed", "run.cancelled", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {
+      if (selectedReviewRunId === run.id) renderReviewDetail(run);
+      else renderRunDetail(run);
+      renderReviewQueue();
+      if (["run.failed", "run.cancelled", "template.ready_for_review", "template.revision_requested", "template.approved", "template.discarded", "smoke.completed", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {
         if (eventStream !== stream || selectedRunId !== run.id) return;
         const updated = runs.find((candidate) => candidate.id === run.id);
-        if (updated) renderRunDetail(updated);
+        if (updated && selectedReviewRunId === run.id) renderReviewDetail(updated);
+        else if (updated) renderRunDetail(updated);
       });
     } catch { /* a keepalive contains no event data */ }
   };
   for (const kind of EVENT_KINDS) stream.addEventListener(kind, receive);
-  stream.onopen = () => { const state = $("#ad-live-state"); if (state) state.textContent = "Live"; };
-  stream.onerror = () => { const state = $("#ad-live-state"); if (state) state.textContent = "Reconnecting…"; };
+  stream.onopen = () => {
+    for (const selector of ["#ad-live-state", "#ad-review-live-state"]) { const state = $(selector); if (state) state.textContent = "Live"; }
+  };
+  stream.onerror = () => {
+    if (eventStream !== stream) return;
+    stream.close();
+    for (const selector of ["#ad-live-state", "#ad-review-live-state"]) { const state = $(selector); if (state) state.textContent = "Reconnecting…"; }
+    eventReconnectTimer = window.setTimeout(connect, 1_500);
+  };
+  };
+  connect();
 }
 
 async function loadScopedGraph({ entityId, lens }) {
@@ -878,7 +1373,10 @@ function setupRunForm() {
     input.value = "";
   });
   drop.addEventListener("click", () => input.click());
-  $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); });
+  $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); void loadAdStudioModels(); });
+  Object.values(MODEL_ROLE_FIELDS).forEach((selector) => {
+    $(selector).addEventListener("change", () => { validateModelControls(); updateRunControls(); });
+  });
   for (const type of ["dragenter", "dragover"]) drop.addEventListener(type, (event) => { event.preventDefault(); drop.classList.add("is-drag"); });
   for (const type of ["dragleave", "drop"]) drop.addEventListener(type, (event) => {
     event.preventDefault();
@@ -908,9 +1406,11 @@ function setupRunForm() {
     renderSourcePreview();
     status.textContent = `Uploading ${sources.length} image${sources.length === 1 ? "" : "s"}…`;
     try {
+      const modelPolicyOverride = currentModelPolicy();
       const result = await requestEvent("frank:ad-studio-run", {
         sources, projectId: $("#ad-run-project").value,
         name: clean($("#ad-run-name").value), brief,
+        modelPolicyOverride,
         onProgress: ({ key, status: nextStatus, run, error }) => updateSourceStatus(key, nextStatus, { run, error }),
       });
       const started = Array.isArray(result.runs) ? result.runs : [];
@@ -963,6 +1463,7 @@ export function mountAdStudio() {
   setupRunForm();
   setupPipelineForm();
   void loadProjects().then(async () => {
+    await loadAdStudioModels();
     await refreshRunsSafe();
     if ($("[data-ad-panel=\"pipeline\"]").classList.contains("is-on")) mountPipeline();
   }).catch((error) => {
