@@ -515,12 +515,25 @@ def _public_hermes_messages(items: list) -> list:
             continue
         messages.append({
             "role": role,
-            "text": text,
+            "text": _redact_public_text(text),
             "tools": tools,
             "attachments": [],
             "ts": item.get("timestamp") or 0,
         })
     return messages
+
+
+def _redact_public_text(text: str) -> str:
+    """Browser-facing chat text must never carry host paths or secrets.
+
+    Hermes may legitimately see staging/agent paths inside a turn; the served
+    projection redacts them so /api/chat stays within the public boundary.
+    """
+    try:
+        from hermes_adapter.redaction import redact_text
+        return redact_text(text)
+    except Exception:
+        return text
 
 
 def hermes_reachable() -> dict:

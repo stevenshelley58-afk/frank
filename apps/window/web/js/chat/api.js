@@ -19,7 +19,8 @@ async function errorFrom(response, fallback) {
   let message = fallback || `Frank returned HTTP ${response.status}.`;
   try {
     const data = await response.json();
-    message = data.error || data.message || message;
+    const raw = data.error || data.message;
+    message = typeof raw === "string" ? raw : raw?.message || message;
   } catch { /* plain status text only */ }
   const error = new Error(message);
   error.status = response.status;

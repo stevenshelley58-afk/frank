@@ -231,6 +231,35 @@ if ! grep -q -E '^FRANK_ACCEPTANCE_AUTH_USER=[^[:space:]]' "$secret_file" \
   trap - EXIT
 fi
 
+# The pinned hermes serve surface (model truth + audio transcription) reaches
+# Window only through the path-aware serve bridge on the private Docker
+# gateway. Backfill its credentials once from the bridge's 0600 secret file;
+# never print or log the token. Window must not talk to serve on any other
+# route, and a missing secret file keeps the serve surface honestly disabled
+# instead of inventing a URL.
+if ! grep -q -E '^HERMES_SERVE_TOKEN=[^[:space:]]' "$secret_file"; then
+  serve_token_source="${FRANK_HERMES_SERVE_TOKEN_FILE:-/srv/frank/secrets/hermes-serve-token.env}"
+  if [[ -f "$serve_token_source" && ! -L "$serve_token_source" ]]; then
+    serve_token_tmp="$(mktemp "$secret_dir/.window.env.XXXXXX")"
+    trap 'rm -f -- "$serve_token_tmp"' EXIT
+    cp -- "$secret_file" "$serve_token_tmp"
+    grep -q -E '^HERMES_SERVE_URL=' "$serve_token_tmp" \
+      || printf 'HERMES_SERVE_URL=http://172.16.1.1:%s\n' \
+        "${FRANK_SERVE_BRIDGE_PORT:-9119}" >> "$serve_token_tmp"
+    serve_token_value="$(grep -m1 -E '^HERMES_DASHBOARD_SESSION_TOKEN=' "$serve_token_source" | cut -d= -f2-)"
+    [[ "$serve_token_value" =~ ^[^[:space:]]+$ ]] || {
+      echo "refusing empty serve token in $serve_token_source" >&2
+      exit 1
+    }
+    printf 'HERMES_SERVE_TOKEN=%s\n' "$serve_token_value" >> "$serve_token_tmp"
+    unset serve_token_value
+    chmod 0600 "$serve_token_tmp"; mv -f -- "$serve_token_tmp" "$secret_file"
+    trap - EXIT
+  else
+    echo "hermes serve bridge credentials are not configured; model selection and transcription remain setup_needed." >&2
+  fi
+fi
+
 caddy_tmp="$(mktemp "$secret_dir/.caddy.env.XXXXXX")"
 trap 'rm -f -- "$caddy_tmp"' EXIT
 grep -E '^(FRANK_BASIC_AUTH_USER|FRANK_BASIC_AUTH_HASH|FRANK_ACCEPTANCE_AUTH_USER|FRANK_ACCEPTANCE_AUTH_HASH)=' "$secret_file" > "$caddy_tmp" || {
