@@ -477,7 +477,7 @@ class DeployDeterminismTest(unittest.TestCase):
         agenttrail = repo / "apps/window/vendor/agenttrail"
         (agenttrail / "package.json").write_text("dirty-worktree-bytes\n")
         subprocess.run(["git", "-C", str(agenttrail), "add", "package.json"], check=True)
-        subprocess.run(["git", "-C", str(agenttrail), "commit", "-m", "later head"], check=True, capture_output=True)
+        subprocess.run(["git", "-c", "user.name=Frank Test", "-c", "user.email=test@example.invalid", "-C", str(agenttrail), "commit", "-m", "later head"], check=True, capture_output=True)
         self.assertNotEqual(
             subprocess.check_output(["git", "-C", str(agenttrail), "rev-parse", "HEAD"], text=True).strip(),
             self.submodule_pins["agenttrail"],
