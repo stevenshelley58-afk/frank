@@ -134,6 +134,142 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertNotIn("/srv/private", serialized)
         self.assertNotIn("never public", serialized)
 
+    def test_exact_clone_root_output_is_adapted_for_ready_review(self):
+        projected = server._public_ad_studio_run({
+            "run_id": "trun_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "status": "ready_for_review",
+            "model_policy_revision": 41,
+            "model_policy": {"stages": {
+                "analyse": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-sol"}},
+                "compare": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-luna"}},
+            }},
+            "output": {
+                "process": "exact-clone", "source": "source.png",
+                "references": [
+                    {"name": "source-map.json", "sourcePlacement": "feed"},
+                    {"name": "reference-story.png", "placement": "story", "kind": "reciprocal-image-reference"},
+                ],
+                "iterations": [
+                    {"iteration": 1, "decision": "revise", "previews": ["iteration-01-feed.png", "iteration-01-story.png"]},
+                    {"iteration": 2, "decision": "accepted", "previews": ["iteration-02-feed.png", "iteration-02-story.png"]},
+                ],
+                "previews": [
+                    {"name": "iteration-03-feed.png", "placement": "feed", "kind": "final-neutral-shippable"},
+                    {"name": "iteration-03-story.png", "placement": "story", "kind": "final-neutral-shippable"},
+                ],
+                "diffs": [{"name": "iteration-02-feed-difference.png", "placement": "feed", "kind": "difference"}],
+                "scores": {"comparator": {"overall": 0.98}},
+                "final_review": {"reviewers": [
+                    {"decision": "accept", "scores": {"overall": 0.99}},
+                    {"decision": "accept", "scores": {"overall": 9.8}},
+                ]},
+                "elapsed_seconds": 90,
+                "smoke_test": {"status": "passed"},
+                "layers": {"feed": {"ordered": [{"layerId": "headline", "type": "text", "inputKey": "headline"}]}, "story": {"ordered": []}},
+            },
+        })
+        summary = projected["output"]["review_summary"]
+        self.assertEqual(summary["source"]["placement"], "feed")
+        self.assertEqual(summary["references"][0]["name"], "reference-story.png")
+        self.assertEqual([item["kind"] for item in summary["previews"]], ["qa-source-filled", "qa-source-filled", "final-neutral-shippable", "final-neutral-shippable"])
+        self.assertEqual(summary["scores"]["overall"], 9.8)
+        self.assertEqual([item["score"] for item in summary["scores"]["reviewers"]], [9.9, 9.8])
+        self.assertTrue(summary["smoke_test"]["passed"])
+        self.assertEqual(summary["layers"][0]["id"], "headline")
+        self.assertEqual(summary["model_profile"]["revision"], 41)
+
+    def test_running_exact_clone_recovers_latest_durable_review_evidence(self):
+        run_id = "trun_cccccccccccccccccccccccccccccccc"
+        projected = server._public_ad_studio_run({
+            "run_id": run_id,
+            "status": "running",
+            "stage": "compare",
+            "payload": {"sources": [{"name": "campaign.png", "path": "/srv/private/source.png"}]},
+            "output": {},
+        }, events=[
+            {"sequence": 0, "kind": "command.accepted", "data": {"model_profile": {
+                "profile_revision": 44,
+                "builder": {"provider": "openai-codex", "model": "gpt-5.6-sol"},
+                "comparator": {"provider": "openai-codex", "model": "gpt-5.6-luna"},
+            }}},
+            {"sequence": 4, "kind": "source-map.completed", "data": {}},
+            {"sequence": 7, "kind": "aspect-reference-image.started", "data": {
+                "source_placement": "feed", "target_placement": "story",
+            }},
+            {"sequence": 9, "kind": "aspect-reference.started", "data": {
+                "source_placement": "feed", "target_placement": "story",
+            }},
+            {"sequence": 15, "kind": "iteration.rendered", "data": {
+                "iteration": 1,
+                "previews": ["iteration-01-feed.png", "iteration-01-story.png"],
+                "diffs": ["iteration-01-feed-overlay.png"],
+            }},
+            {"sequence": 20, "kind": "iteration.rendered", "data": {
+                "iteration": 2,
+                "previews": ["iteration-02-feed.png", "iteration-02-story.png", "/srv/private/nope.png"],
+                "diffs": [
+                    "iteration-02-feed-overlay.png", "iteration-02-feed-difference.png",
+                    "iteration-02-story-overlay.png", "iteration-02-story-difference.png",
+                    "iteration-02-story-reference-edges.png",
+                ],
+                "layers": {"feed": {"ordered": [{"layerId": "headline", "type": "text", "inputKey": "headline"}]}, "story": {"ordered": []}},
+            }},
+            {"sequence": 21, "kind": "iteration.compared", "data": {
+                "iteration": 2, "decision": "revise", "score": 0.94,
+                "scores": {"overall": 0.94, "feed": 0.95, "story": 0.93},
+            }},
+        ])
+
+        summary = projected["output"]["review_summary"]
+        self.assertEqual(summary["source"]["name"], "source.png")
+        self.assertEqual(summary["source"]["placement"], "feed")
+        self.assertEqual(summary["references"], [{
+            "name": "reference-story.png", "url": f"/api/ad-studio/runs/{run_id}/artifacts/reference-story.png",
+            "kind": "reciprocal-image-reference", "placement": "story",
+        }])
+        self.assertEqual([item["name"] for item in summary["previews"]], ["iteration-02-feed.png", "iteration-02-story.png"])
+        self.assertEqual([item["kind"] for item in summary["diffs"]], ["overlay", "difference", "overlay", "difference"])
+        self.assertEqual(summary["scores"]["overall"], 9.4)
+        self.assertEqual(summary["layers"][0]["id"], "headline")
+        self.assertEqual(projected["model_profile"]["revision"], 44)
+        self.assertEqual(projected["stage"], "compare")
+        self.assertEqual([item["iteration"] for item in projected["output"]["iterations"]], [1, 2])
+        self.assertNotIn("/srv/private", json.dumps(projected))
+
+    def test_failed_exact_clone_uses_only_proven_artifacts_and_keeps_error(self):
+        run_id = "trun_dddddddddddddddddddddddddddddddd"
+        projected = server._public_ad_studio_run({
+            "run_id": run_id,
+            "status": "failed",
+            "stage": "render",
+            "payload": {"sources": [{"name": "campaign.jpg"}]},
+            "output": {},
+            "error": "renderer stopped",
+        }, events=[
+            {"sequence": 2, "kind": "source-map.completed", "data": {}},
+            {"sequence": 3, "kind": "aspect-reference-image.completed", "data": {
+                "source_placement": "feed", "target_placement": "story", "name": "private-generated-name.png",
+            }},
+            {"sequence": 8, "kind": "iteration.rendered", "data": {
+                "iteration": 1,
+                "previews": ["iteration-01-feed.png", "iteration-01-story.png"],
+                "diffs": ["iteration-01-story-overlay.png", "not-an-artifact.png"],
+            }},
+            {"sequence": 9, "kind": "iteration.compared", "data": {
+                "iteration": 1, "decision": "accept", "score": 9.8,
+            }},
+        ])
+
+        summary = projected["output"]["review_summary"]
+        self.assertEqual(projected["status"], "failed")
+        self.assertEqual(projected["error"], "renderer stopped")
+        self.assertEqual(summary["source"]["name"], "source.jpg")
+        self.assertNotIn("references", summary)
+        self.assertEqual([item["name"] for item in summary["previews"]], ["iteration-01-feed.png", "iteration-01-story.png"])
+        self.assertEqual([item["name"] for item in summary["diffs"]], ["iteration-01-story-overlay.png"])
+        self.assertEqual(summary["scores"]["overall"], 9.8)
+        self.assertNotIn("private-generated-name", json.dumps(projected))
+
     def test_review_decisions_proxy_exact_hermes_routes_and_bodies(self):
         responses = [
             ("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", {}),
@@ -160,6 +296,46 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", json={"force": True}).status_code, 400)
         self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes", json={"instructions": ""}).status_code, 400)
         self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/discard", json={"reason": "x" * 1_001}).status_code, 400)
+
+    def test_api_validation_errors_reach_the_operator_as_json_messages(self):
+        client = server.app.test_client()
+        response = client.post(
+            "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes",
+            json={"instructions": ""},
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("change instructions", response.get_json()["error"]["message"])
+        invalid_action = client.post(
+            "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve",
+            json={"force": True},
+        )
+        self.assertEqual(invalid_action.status_code, 400)
+        self.assertEqual(invalid_action.get_json()["error"]["message"], "invalid action")
+
+    def test_final_review_projection_keeps_only_bounded_reviewer_evidence(self):
+        projected = server._public_ad_studio_run({
+            "run_id": "trun_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            "status": "ready_for_review",
+            "output": {
+                "final_review": {
+                    "decision": "accepted",
+                    "internal_notes": "/srv/private/notes",
+                    "reviewers": [
+                        {"decision": "accept", "scores": {"overall": 0.99}, "route": "openai-codex/gpt-5.6-luna"},
+                        {"decision": "accept", "scores": {"overall": 9.8}},
+                    ],
+                },
+            },
+        })
+        final_review = projected["output"]["final_review"]
+        self.assertEqual(final_review, {
+            "decision": "accepted",
+            "reviewers": [
+                {"decision": "accept", "score": 0.99},
+                {"decision": "accept", "score": 9.8},
+            ],
+        })
+        self.assertNotIn("internal_notes", json.dumps(final_review))
 
     def test_archify_receipt_is_bound_to_spec_artifact_and_validator(self):
         previous = (
