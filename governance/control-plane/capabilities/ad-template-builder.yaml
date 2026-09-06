@@ -1,6 +1,6 @@
 id: capability:frank/ad-template-builder
 kind: template
-title: Ad Template Builder
+title: Ad Template Generator
 eli5: Builds validated ad templates from approved inputs.
 why_it_exists: Canonical Frank-owned workflow for repeatable ad artifacts.
 benefits: [repeatable builds, validation receipts]
@@ -8,9 +8,9 @@ tradeoffs: [data stores and retention are not yet verified]
 applies_when: [approved template request]
 does_not_apply_when: [private customer material, unapproved source]
 scope_ids: [project:frank]
-source_locator: apps/window/web/js/ad-studio.js
-source_revision: 366f4bacad6294261a57751289121193ac162b08
-content_hash: sha256:98c555fa2d9bda484b49cd97886d937347e6f22cbaa8b740a44b8c9c1099b1ae
+source_locator: apps/window/web/js/ad-template-generator.js
+source_revision: b656a1d016c94bf6f1c843b919dc3b995eb35ba4
+content_hash: sha256:0963f0a37687ec6bcad4300aca19e6e3ef1435fee4821b369bbb4660b1fc128b
 authority_tier: repo
 enforcement: ci
 state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
