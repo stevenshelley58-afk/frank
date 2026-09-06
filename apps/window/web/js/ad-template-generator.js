@@ -453,7 +453,7 @@ function createRunRow(run, { current = false, superseded = false } = {}) {
   const copy = document.createElement("span");
   copy.className = "ad-run-row-copy";
   const title = document.createElement("strong");
-  title.textContent = String(run.title || "Ad Template Generator Run").replace(/^Ad Template Generator\s*[·|-]?\s*/, "") || "Run";
+  title.textContent = String(run.title || "Ad Template Generator Run").replace(/^(?:Ad Template Generator|Ad Studio)\s*[·|-]?\s*/, "") || "Run";
   const meta = document.createElement("span");
   const project = projects.find((item) => item.id === run.project_id);
   meta.textContent = [project?.name || run.project_id || "Workspace", runStatusLabel(run.status), current ? "Current" : ""].filter(Boolean).join(" · ");
@@ -600,7 +600,7 @@ function renderReviewQueue() {
     const copy = document.createElement("span");
     copy.className = "ad-review-row-copy";
     const title = document.createElement("strong");
-    title.textContent = String(run.title || run.source?.name || "Template review").replace(/^Ad Template Generator\s*[·|-]?\s*/, "") || "Template review";
+    title.textContent = String(run.title || run.source?.name || "Template review").replace(/^(?:Ad Template Generator|Ad Studio)\s*[·|-]?\s*/, "") || "Template review";
     const source = document.createElement("span");
     source.textContent = run.source?.name || "Source recorded in Hermes";
     const scores = document.createElement("small");
