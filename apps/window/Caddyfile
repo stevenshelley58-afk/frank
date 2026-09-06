@@ -97,7 +97,11 @@ frank.fail {
                 request>headers>X-Mini-Account-Claim delete
                 request>headers>Idempotency-Key delete
                 request>headers>Referer delete
-                request>headers>Cookie delete
+                # Cookie is intentionally NOT listed here: Caddy's log-filter field
+                # deletion mutates the live request (caddyserver/caddy#5786 class bug
+                # in 2.8.x), stripping the header from every request through this
+                # edge instead of just redacting it in the log line. Cookie is
+                # already redacted from logs by default (no log_credentials set).
                 request>uri delete
                 response>headers>Set-Cookie delete
             }
@@ -307,7 +311,13 @@ blockwise.sale {
             fields {
                 request>headers>Authorization delete
                 request>headers>Proxy-Authorization delete
-                request>headers>Cookie delete
+                # Cookie is intentionally NOT listed here: Caddy's log-filter field
+                # deletion mutates the live request (caddyserver/caddy#5786 class bug
+                # in 2.8.x), stripping the header from every blockwise request
+                # instead of just redacting it in the log line. This broke PKCE email
+                # confirmation, since the code_verifier cookie never reached the app.
+                # Cookie is already redacted from logs by default (no log_credentials
+                # set). Fixed 2026-09-06.
                 request>uri delete
                 response>headers>Set-Cookie delete
             }

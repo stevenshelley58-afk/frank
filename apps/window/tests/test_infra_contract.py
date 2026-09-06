@@ -334,7 +334,13 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("header_up X-Forwarded-Proto https", product)
         self.assertIn("max_size 14MB", product)
         self.assertIn("request>headers>Authorization delete", product)
-        self.assertIn("request>headers>Cookie delete", product)
+        # Cookie must NOT be deleted by the log filter: Caddy's field deletion
+        # mutates the live request, not just the log line (caddyserver/caddy#5786
+        # class bug), which silently stripped cookies from every blockwise
+        # request and broke PKCE email confirmation. See the Caddyfile comment
+        # on this block for the incident writeup. Cookie stays redacted from
+        # logs by default (no log_credentials set), so this is log-safe.
+        self.assertNotIn("request>headers>Cookie delete", product)
         self.assertNotIn("basic_auth", product)
 
     def test_customer_previews_are_not_indexed_or_content_sniffed(self):
