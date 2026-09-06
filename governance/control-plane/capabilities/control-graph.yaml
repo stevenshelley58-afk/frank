@@ -12,7 +12,7 @@ source_locator: governance/control-plane/catalog.yaml
 # The catalog is this release candidate's declaration, so validation must use
 # the checked-in candidate bytes rather than the frozen Step 0 snapshot.
 source_revision: release-candidate-29e7026f59a4eed11892bf17a5dfd275f2ab7a6b
-content_hash: sha256:dd334e9f704066cc468ba987bb68266ee8264b068b29a2149b67fdb987ddf8bb
+content_hash: sha256:4a78137322e429d44f9a17200a55fc1702ffad5db728e0aa806e081a6bb61b38
 authority_tier: repo
 enforcement: ci
 state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: read_only}
