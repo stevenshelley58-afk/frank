@@ -10,6 +10,7 @@ import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/t
 import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
 import { mountAdTemplateGenerator, setAdTemplateGeneratorActive } from "./ad-template-generator.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
+import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
 import { pathForView, routeForPath } from "./view-routing.js?v=20260906-ad-template-generator-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
@@ -288,19 +289,7 @@ const startAdTemplateGeneratorRun = (event) => {
           progress(source, "started", { run });
           return;
         }
-        const errorCode = String(result.error?.code || "");
-        const error = ({
-          source_missing: "This image is no longer available. Add it again.",
-          empty_file: "This image is empty. Choose another file.",
-          unsupported_type: "This file is not a supported image.",
-          type_mismatch: "This file is not a supported image.",
-          invalid_image: "This file does not appear to be a valid image.",
-          file_too_large: "This image is too large.",
-          batch_too_large: "These images are too large to start together.",
-          hermes_rejected: "This image could not be started. Try again.",
-          hermes_unavailable: "This image could not be started just now. Try again.",
-          invalid_hermes_response: "This image could not be started. Try again.",
-        })[errorCode] || (String(result.error?.message || result.error || "").startsWith("[object") ? "" : String(result.error?.message || result.error || "")) || "This image could not be started. Try again.";
+        const error = adTemplateGeneratorStartError(result.error);
         failures.push({ name: source.name, error });
         progress(source, "error", { error });
       });
