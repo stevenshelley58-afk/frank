@@ -2001,10 +2001,12 @@ _AD_TEMPLATE_GENERATOR_MODEL_ROLES = MappingProxyType({
     "final_review_b": "final-review-b",
     "quality_fallback": "quality-escalation",
 })
+_AD_TEMPLATE_GENERATOR_IMAGE_STAGE = "aspect-reference-image"
 _AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES = frozenset({
-    "analyse", "compare", "final-review-a", "final-review-b",
+    _AD_TEMPLATE_GENERATOR_IMAGE_STAGE, "analyse", "compare", "final-review-a", "final-review-b",
 })
 _AD_TEMPLATE_GENERATOR_OPTIONAL_MODEL_STAGES = frozenset({"quality-escalation"})
+_AD_TEMPLATE_GENERATOR_IMAGE_CAPABILITIES = ("reference_image_edit", "masked_image_edit")
 
 
 def _public_ad_template_generator_candidate(value: object) -> dict:
@@ -2068,15 +2070,27 @@ def _ad_template_generator_model_catalogue(project_id: str = "") -> dict:
     model_data = hermes_request("/v1/tool-runs/models", timeout=8)
     raw_models = (model_data.get("ad_template_generator_capabilities") or model_data.get("ad_studio_capabilities")) if isinstance(model_data, dict) else []
     models = []
+    image_models = []
     for raw in raw_models if isinstance(raw_models, list) else []:
         candidate = _public_ad_template_generator_candidate(raw)
-        if not candidate or "vision_structured" not in candidate["capabilities"]:
+        if not candidate:
             continue
         candidate.update({
             "available": raw.get("available") is True,
             "credential_ready": raw.get("credential_ready") is True,
         })
-        models.append(candidate)
+        image_capability = next((
+            capability for capability in _AD_TEMPLATE_GENERATOR_IMAGE_CAPABILITIES
+            if capability in candidate["capabilities"]
+        ), "")
+        if (
+            image_capability
+            and candidate["capability_verified"]
+            and candidate["supports_vision"]
+        ):
+            image_models.append({**candidate, "capability": image_capability})
+        if "vision_structured" in candidate["capabilities"]:
+            models.append(candidate)
     query = urllib.parse.urlencode({"project_id": project_id}) if project_id else ""
     path = "/v1/tool-runs/policies/ad-template-generator" + (f"?{query}" if query else "")
     policy_data = hermes_request(path, timeout=8)
@@ -2086,6 +2100,7 @@ def _ad_template_generator_model_catalogue(project_id: str = "") -> dict:
     policy = _public_ad_template_generator_policy(record.get("policy"))
     return {
         "models": models,
+        "image_models": image_models,
         "policy_schema": str(model_data.get("policy_schema") or "") if isinstance(model_data, dict) else "",
         "policy_revision": record.get("revision") if isinstance(record.get("revision"), int) else None,
         "policy": policy,
@@ -2111,25 +2126,40 @@ def _validated_ad_template_generator_model_policy(value: object, *, project_id: 
         and item.get("supports_vision") and item.get("supports_tools")
         and "vision_structured" in item.get("capabilities", [])
     }
+    image_available = {
+        (item["provider"], item["model"]): item
+        for item in catalogue["image_models"]
+        if item.get("available") and item.get("credential_ready")
+    }
     for stage_id, stage in stages.items():
         primary = stage.get("primary") if isinstance(stage, dict) else {}
         route = (primary.get("provider"), primary.get("model")) if isinstance(primary, dict) else (None, None)
-        verified = available.get(route)
-        if not verified:
-            label = stage_id.replace("-", " ")
-            raise _AdTemplateGeneratorSourceError(
-                "model_unavailable",
-                f"The selected {label} model is not currently available with verified vision and structured output in Hermes.",
-            )
+        if stage_id == _AD_TEMPLATE_GENERATOR_IMAGE_STAGE:
+            verified = image_available.get(route)
+            capability = verified.get("capability") if verified else ""
+            if not verified or stage.get("capability") != capability:
+                raise _AdTemplateGeneratorSourceError(
+                    "model_unavailable",
+                    "The selected photo assets model is not currently available with an audited image-edit route in Hermes.",
+                )
+        else:
+            verified = available.get(route)
+            capability = "vision_structured"
+            if not verified:
+                label = stage_id.replace("-", " ")
+                raise _AdTemplateGeneratorSourceError(
+                    "model_unavailable",
+                    f"The selected {label} model is not currently available with verified vision and structured output in Hermes.",
+                )
         # Candidate capabilities come from the live Hermes catalogue, never
-        # from browser claims or provider-specific logic in Frank.
+        # from browser claims.
         stage["primary"] = {
             "provider": verified["provider"],
             "model": verified["model"],
             "capability_verified": True,
-            "capabilities": ["vision_structured"],
+            "capabilities": [capability],
             "supports_vision": True,
-            "supports_tools": True,
+            "supports_tools": verified["supports_tools"],
         }
     return policy
 
@@ -2142,7 +2172,7 @@ def ad_template_generator_models():
         data = _ad_template_generator_model_catalogue(project_id)
     except Exception as error:
         return _hermes_error(error)
-    if not data["models"] or not data["policy"]:
+    if not data["models"] or not data["image_models"] or not data["policy"]:
         return jsonify({"error": "Hermes has no verified Ad Template Generator model setup available."}), 503
     return jsonify(data)
 def _public_ad_template_generator_model_profile(run: dict) -> dict:
@@ -2150,6 +2180,7 @@ def _public_ad_template_generator_model_profile(run: dict) -> dict:
     policy = run.get("model_policy") if isinstance(run.get("model_policy"), dict) else {}
     stages = policy.get("stages") if isinstance(policy.get("stages"), dict) else {}
     role_specs = (
+        ("photo-assets", "Photo assets", ("aspect-reference-image",)),
         ("builder", "Builder & analysis", ("analyse", "build")),
         ("comparator", "Comparator", ("compare",)),
         ("quality-escalation", "Quality escalation", ("quality-escalation",)),

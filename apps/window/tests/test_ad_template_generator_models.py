@@ -16,6 +16,23 @@ def candidate(model, *, available=True):
     }
 
 
+def image_candidate(
+    provider="meta-direct", model="muse-image-1.0", capability="reference_image_edit",
+    *, available=True, supports_tools=False,
+):
+    return {
+        "provider": provider,
+        "model": model,
+        "capability": capability,
+        "capabilities": [capability],
+        "capability_verified": True,
+        "supports_vision": True,
+        "supports_tools": supports_tools,
+        "available": available,
+        "credential_ready": available,
+    }
+
+
 def policy():
     routes = {
         "analyse": "gpt-5.6-sol",
@@ -24,26 +41,35 @@ def policy():
         "final-review-b": "gpt-5.6-sol",
         "quality-escalation": "gpt-5.6-sol",
     }
+    stages = {
+        stage: {
+            "capability": "vision_structured",
+            "primary": {**candidate(model), "capability_verified": True},
+            "fallbacks": [],
+            "max_attempts": 1,
+            "timeout_seconds": 120,
+            "max_cost_usd": 0.35,
+        }
+        for stage, model in routes.items()
+    }
+    photo = image_candidate()
+    stages["aspect-reference-image"] = {
+        "capability": photo["capability"],
+        "primary": {key: photo[key] for key in (
+            "provider", "model", "capability_verified", "capabilities", "supports_vision", "supports_tools"
+        )},
+        "fallbacks": [],
+        "max_attempts": 1,
+        "timeout_seconds": 180,
+        "max_cost_usd": 0.35,
+    }
     return {
         "schema": "schema://hermes.tool-model-policy/v1",
         "tool_id": "ad-template-generator",
         "name": "Sole ad-template process",
         "preset": "cheap-quality",
         "seed_revision": 9,
-        "stages": {
-            stage: {
-                "capability": "vision_structured",
-                "primary": {
-                    **candidate(model),
-                    "capability_verified": True,
-                },
-                "fallbacks": [],
-                "max_attempts": 1,
-                "timeout_seconds": 120,
-                "max_cost_usd": 0.35,
-            }
-            for stage, model in routes.items()
-        },
+        "stages": stages,
         "deterministic_stages": ["qa", "import"],
     }
 
@@ -62,7 +88,9 @@ class AdTemplateGeneratorModelsTest(unittest.TestCase):
                     "policy_schema": "schema://hermes.tool-model-policy/v1",
                     "ad_template_generator_capabilities": [
                         candidate("gpt-5.6-sol"),
-                        candidate("image-only") | {"capabilities": ["masked_image_edit"]},
+                        image_candidate(),
+                        image_candidate("openai-codex", "gpt-image-2-high", "masked_image_edit"),
+                        image_candidate("openai-api", "generic-image", "masked_image_edit"),
                     ],
                 }
             return {"data": [{"revision": 12, "is_default": True, "policy": policy()}]}
@@ -75,6 +103,15 @@ class AdTemplateGeneratorModelsTest(unittest.TestCase):
         self.assertEqual([(item["provider"], item["model"]) for item in body["models"]], [("openai-codex", "gpt-5.6-sol")])
         self.assertEqual(body["policy_revision"], 12)
         self.assertEqual(body["policy"]["stages"]["analyse"]["primary"]["model"], "gpt-5.6-sol")
+        self.assertEqual(
+            [(item["provider"], item["model"], item["capability"]) for item in body["image_models"]],
+            [
+                ("meta-direct", "muse-image-1.0", "reference_image_edit"),
+                ("openai-codex", "gpt-image-2-high", "masked_image_edit"),
+                ("openai-api", "generic-image", "masked_image_edit"),
+            ],
+        )
+        self.assertEqual(body["policy"]["stages"]["aspect-reference-image"]["primary"]["model"], "muse-image-1.0")
         self.assertIn("project_id=blockwise", calls[1])
 
     def test_policy_validation_uses_live_hermes_availability_and_replaces_browser_claims(self):
@@ -86,6 +123,7 @@ class AdTemplateGeneratorModelsTest(unittest.TestCase):
         }
         catalogue = {
             "models": [candidate("gpt-5.6-sol"), candidate("gpt-5.6-luna")],
+            "image_models": [image_candidate()],
             "policy_schema": "schema://hermes.tool-model-policy/v1",
             "policy_revision": 12,
             "policy": policy(),
@@ -97,11 +135,31 @@ class AdTemplateGeneratorModelsTest(unittest.TestCase):
         self.assertTrue(comparator["supports_vision"])
         self.assertEqual(comparator["capabilities"], ["vision_structured"])
 
+    def test_photo_assets_route_uses_live_hermes_capability_not_browser_claims(self):
+        selected = policy()
+        selected["stages"]["aspect-reference-image"]["primary"] = {
+            "provider": "meta-direct", "model": "muse-image-1.0",
+            "capability_verified": False, "capabilities": [],
+            "supports_vision": False, "supports_tools": True,
+        }
+        catalogue = {
+            "models": [candidate("gpt-5.6-sol"), candidate("gpt-5.6-luna")],
+            "image_models": [image_candidate(supports_tools=True)],
+            "policy": policy(),
+        }
+        with mock.patch.object(server, "_ad_template_generator_model_catalogue", return_value=catalogue):
+            result = server._validated_ad_template_generator_model_policy(selected, project_id="blockwise")
+        photo = result["stages"]["aspect-reference-image"]
+        self.assertEqual(photo["capability"], "reference_image_edit")
+        self.assertEqual(photo["primary"]["capabilities"], ["reference_image_edit"])
+        self.assertTrue(photo["primary"]["supports_tools"])
+
     def test_unavailable_selected_model_fails_without_silent_fallback(self):
         selected = policy()
         selected["stages"]["compare"]["primary"]["model"] = "offline-model"
         catalogue = {
             "models": [candidate("gpt-5.6-sol"), candidate("offline-model", available=False)],
+            "image_models": [image_candidate()],
             "policy": policy(),
         }
         with (
@@ -119,6 +177,8 @@ class AdTemplateGeneratorModelsTest(unittest.TestCase):
         })
         self.assertEqual(projected["model_policy_revision"], 14)
         roles = {item["role"]: item for item in projected["model_profile"]["roles"]}
+        self.assertEqual(roles["photo-assets"]["provider"], "meta-direct")
+        self.assertEqual(roles["photo-assets"]["model"], "muse-image-1.0")
         self.assertEqual(roles["builder"]["provider"], "openai-codex")
         self.assertEqual(roles["builder"]["model"], "gpt-5.6-sol")
         self.assertEqual(roles["comparator"]["model"], "gpt-5.6-luna")

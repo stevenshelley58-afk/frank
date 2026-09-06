@@ -32,6 +32,7 @@ const previewUrls = new Set();
 let runEvents = [];
 let eventStream = null;
 let adTemplateGeneratorModels = [];
+let adTemplateGeneratorImageModels = [];
 let adTemplateGeneratorModelPolicy = null;
 let adTemplateGeneratorModelsReady = false;
 let modelLoadSequence = 0;
@@ -104,7 +105,9 @@ const canonicalStage = (stage) => {
   return PIPELINE_STAGES.includes(value) ? value : (STAGE_ALIASES[value] || "source");
 };
 
+const IMAGE_MODEL_STAGE = "aspect-reference-image";
 const MODEL_ROLE_FIELDS = {
+  [IMAGE_MODEL_STAGE]: "#ad-model-photo-assets",
   analyse: "#ad-model-builder",
   compare: "#ad-model-comparator",
   "final-review-a": "#ad-model-reviewer-a",
@@ -117,24 +120,29 @@ function modelName(item) {
   return `${item.model} · ${item.provider}`;
 }
 
-function modelIndex(candidate) {
+function modelsForStage(stageId) {
+  return stageId === IMAGE_MODEL_STAGE ? adTemplateGeneratorImageModels : adTemplateGeneratorModels;
+}
+
+function modelIndex(candidate, stageId) {
   if (!candidate) return -1;
-  return adTemplateGeneratorModels.findIndex((item) => item.provider === candidate.provider && item.model === candidate.model);
+  return modelsForStage(stageId).findIndex((item) => item.provider === candidate.provider && item.model === candidate.model);
 }
 
-function selectedModel(indexValue) {
+function selectedModel(indexValue, stageId) {
   const index = Number(indexValue);
-  return Number.isInteger(index) && index >= 0 ? adTemplateGeneratorModels[index] : null;
+  return Number.isInteger(index) && index >= 0 ? modelsForStage(stageId)[index] : null;
 }
 
-function modelCandidate(item) {
+function modelCandidate(item, stageId) {
+  const imageStage = stageId === IMAGE_MODEL_STAGE;
   return {
     provider: item.provider,
     model: item.model,
     capability_verified: true,
-    capabilities: ["vision_structured"],
+    capabilities: [imageStage ? item.capability : "vision_structured"],
     supports_vision: true,
-    supports_tools: true,
+    supports_tools: !imageStage,
   };
 }
 
@@ -143,15 +151,17 @@ function currentModelPolicy() {
   const policy = structuredClone(adTemplateGeneratorModelPolicy);
   for (const [stageId, selector] of Object.entries(MODEL_ROLE_FIELDS)) {
     const select = $(selector);
-    const model = selectedModel(select?.value);
+    const model = selectedModel(select?.value, stageId);
     if (stageId === "quality-escalation" && !model) {
       delete policy.stages[stageId];
       continue;
     }
     if (!model || !model.available || !model.credential_ready) {
-      throw new Error(`Choose an available ${stageId.replaceAll("-", " ")} model.`);
+      const label = stageId === IMAGE_MODEL_STAGE ? "photo assets" : stageId.replaceAll("-", " ");
+      throw new Error(`Choose an available ${label} model.`);
     }
-    policy.stages[stageId].primary = modelCandidate(model);
+    policy.stages[stageId].capability = stageId === IMAGE_MODEL_STAGE ? model.capability : "vision_structured";
+    policy.stages[stageId].primary = modelCandidate(model, stageId);
   }
   const first = policy.stages["final-review-a"].primary;
   const second = policy.stages["final-review-b"].primary;
@@ -182,12 +192,12 @@ function populateModelControls(policy) {
     const select = $(selector);
     select.replaceChildren();
     if (stageId === "quality-escalation") select.append(new Option("Off", "-1"));
-    adTemplateGeneratorModels.forEach((item, index) => {
+    modelsForStage(stageId).forEach((item, index) => {
       const option = new Option(modelName(item), String(index));
       option.disabled = !item.available || !item.credential_ready;
       select.append(option);
     });
-    const selected = modelIndex(stages[stageId]?.primary);
+    const selected = modelIndex(stages[stageId]?.primary, stageId);
     select.value = selected >= 0 ? String(selected) : (stageId === "quality-escalation" ? "-1" : "");
     select.disabled = false;
   }
@@ -211,13 +221,15 @@ async function loadAdTemplateGeneratorModels() {
     if (!response.ok) throw new Error(data.error || "Hermes model catalogue is unavailable.");
     if (sequence !== modelLoadSequence) return;
     adTemplateGeneratorModels = Array.isArray(data.models) ? data.models : [];
+    adTemplateGeneratorImageModels = Array.isArray(data.image_models) ? data.image_models : [];
     adTemplateGeneratorModelPolicy = data.policy && typeof data.policy === "object" ? data.policy : null;
-    if (!adTemplateGeneratorModels.length || !adTemplateGeneratorModelPolicy) throw new Error("Hermes has no verified Ad Template Generator models available.");
+    if (!adTemplateGeneratorModels.length || !adTemplateGeneratorImageModels.length || !adTemplateGeneratorModelPolicy) throw new Error("Hermes has no verified Ad Template Generator models available.");
     adTemplateGeneratorModelsReady = true;
     populateModelControls(adTemplateGeneratorModelPolicy);
   } catch (error) {
     if (sequence !== modelLoadSequence) return;
     adTemplateGeneratorModels = [];
+    adTemplateGeneratorImageModels = [];
     adTemplateGeneratorModelPolicy = null;
     status.textContent = error.message || "Hermes model catalogue is unavailable.";
     status.classList.add("is-error");
