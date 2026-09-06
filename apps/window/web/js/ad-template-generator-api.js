@@ -28,7 +28,7 @@ async function runAction(runId, action, body = {}) {
   return payload.run || null;
 }
 
-export const retryAdTemplateGeneratorRun = (runId, fromStage = "") => runAction(runId, "retry", fromStage ? { from_stage: fromStage } : {});
+export const retryAdTemplateGeneratorRun = (runId) => runAction(runId, "retry");
 export const cancelAdTemplateGeneratorRun = (runId, reason = "") => runAction(runId, "cancel", reason ? { reason } : {});
 export const approveAdTemplateGeneratorTemplate = (runId) => runAction(runId, "approve");
 export const requestAdTemplateGeneratorTemplateChanges = (runId, instructions) => runAction(runId, "request-changes", { instructions });

@@ -3194,7 +3194,7 @@ def _number_from(*values):
 @app.post("/api/ad-studio/runs/<run_id>/retry")
 @app.post("/api/ad-template-generator/runs/<run_id>/retry")
 def ad_template_generator_run_retry(run_id: str):
-    return _proxy_ad_template_generator_action(run_id, "/retry", {"from_stage"})
+    return _proxy_ad_template_generator_action(run_id, "/retry", set())
 
 
 @app.post("/api/ad-studio/runs/<run_id>/cancel")

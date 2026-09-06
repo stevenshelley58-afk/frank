@@ -1,7 +1,7 @@
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260906-ad-template-generator-v1";
 import { groupAdTemplateGeneratorRuns, mergeAdTemplateGeneratorRun, mergeAdTemplateGeneratorRunList, readyAdTemplateGeneratorReviewRuns, runListRenderSignature, runTimestamp } from "./ad-template-generator-state.js?v=20260905-ready-review-v1";
 import { AD_TEMPLATE_GENERATOR_BRIEF_MAX_CHARACTERS, adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260904-brief-roundtrip-v1";
-import { approveAdTemplateGeneratorTemplate, cancelAdTemplateGeneratorRun, discardAdTemplateGeneratorTemplate, getAdTemplateGeneratorRun, listAdTemplateGeneratorRuns, requestAdTemplateGeneratorTemplateChanges, retryAdTemplateGeneratorRun } from "./ad-template-generator-api.js?v=20260905-ready-review-v1";
+import { approveAdTemplateGeneratorTemplate, cancelAdTemplateGeneratorRun, discardAdTemplateGeneratorTemplate, getAdTemplateGeneratorRun, listAdTemplateGeneratorRuns, requestAdTemplateGeneratorTemplateChanges, retryAdTemplateGeneratorRun } from "./ad-template-generator-api.js?v=20260906-retry-contract-v1";
 import { placementScore, reviewArtifactPurpose, reviewModelProfile, reviewOverallScore, selectMetaPreview, selectReusableReviewArtifact, selectReviewArtifact } from "./ad-template-generator-review.js?v=20260905-ready-review-v1";
 
 const TOOL_ID = "ad-template-generator";
@@ -1135,7 +1135,7 @@ function renderRunDetail(run) {
     cancel.addEventListener("click", async () => { cancel.disabled = true; try { await cancelAdTemplateGeneratorRun(run.id); await selectRun(run.id); } catch { cancel.textContent = "Cancel failed — retry"; cancel.disabled = false; } });
     if (run.status === "failed") {
       const retry = document.createElement("button"); retry.type = "button"; retry.className = "ad-primary"; retry.textContent = "Retry from checkpoint";
-      retry.addEventListener("click", async () => { retry.disabled = true; try { await retryAdTemplateGeneratorRun(run.id, run.stage); await selectRun(run.id); } catch { retry.textContent = "Retry failed — try again"; retry.disabled = false; } });
+      retry.addEventListener("click", async () => { retry.disabled = true; try { await retryAdTemplateGeneratorRun(run.id); await selectRun(run.id); } catch { retry.textContent = "Retry failed — try again"; retry.disabled = false; } });
       actions.append(retry);
     }
     actions.append(cancel); detail.append(actions);
