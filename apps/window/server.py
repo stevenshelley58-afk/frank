@@ -2006,10 +2006,7 @@ _AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES = frozenset({
     _AD_TEMPLATE_GENERATOR_IMAGE_STAGE, "analyse", "compare", "final-review-a", "final-review-b",
 })
 _AD_TEMPLATE_GENERATOR_OPTIONAL_MODEL_STAGES = frozenset({"quality-escalation"})
-_AD_TEMPLATE_GENERATOR_AUDITED_IMAGE_ROUTES = MappingProxyType({
-    ("meta-direct", "muse-image-1.0"): "reference_image_edit",
-    ("openai-codex", "gpt-image-2-high"): "masked_image_edit",
-})
+_AD_TEMPLATE_GENERATOR_IMAGE_CAPABILITIES = ("reference_image_edit", "masked_image_edit")
 
 
 def _public_ad_template_generator_candidate(value: object) -> dict:
@@ -2082,14 +2079,14 @@ def _ad_template_generator_model_catalogue(project_id: str = "") -> dict:
             "available": raw.get("available") is True,
             "credential_ready": raw.get("credential_ready") is True,
         })
-        route = (candidate["provider"], candidate["model"])
-        image_capability = _AD_TEMPLATE_GENERATOR_AUDITED_IMAGE_ROUTES.get(route)
+        image_capability = next((
+            capability for capability in _AD_TEMPLATE_GENERATOR_IMAGE_CAPABILITIES
+            if capability in candidate["capabilities"]
+        ), "")
         if (
             image_capability
             and candidate["capability_verified"]
-            and image_capability in candidate["capabilities"]
             and candidate["supports_vision"]
-            and not candidate["supports_tools"]
         ):
             image_models.append({**candidate, "capability": image_capability})
         if "vision_structured" in candidate["capabilities"]:
@@ -2162,7 +2159,7 @@ def _validated_ad_template_generator_model_policy(value: object, *, project_id: 
             "capability_verified": True,
             "capabilities": [capability],
             "supports_vision": True,
-            "supports_tools": stage_id != _AD_TEMPLATE_GENERATOR_IMAGE_STAGE,
+            "supports_tools": verified["supports_tools"],
         }
     return policy
 

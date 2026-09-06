@@ -16,7 +16,10 @@ def candidate(model, *, available=True):
     }
 
 
-def image_candidate(provider="meta-direct", model="muse-image-1.0", capability="reference_image_edit", *, available=True):
+def image_candidate(
+    provider="meta-direct", model="muse-image-1.0", capability="reference_image_edit",
+    *, available=True, supports_tools=False,
+):
     return {
         "provider": provider,
         "model": model,
@@ -24,7 +27,7 @@ def image_candidate(provider="meta-direct", model="muse-image-1.0", capability="
         "capabilities": [capability],
         "capability_verified": True,
         "supports_vision": True,
-        "supports_tools": False,
+        "supports_tools": supports_tools,
         "available": available,
         "credential_ready": available,
     }
@@ -105,6 +108,7 @@ class AdTemplateGeneratorModelsTest(unittest.TestCase):
             [
                 ("meta-direct", "muse-image-1.0", "reference_image_edit"),
                 ("openai-codex", "gpt-image-2-high", "masked_image_edit"),
+                ("openai-api", "generic-image", "masked_image_edit"),
             ],
         )
         self.assertEqual(body["policy"]["stages"]["aspect-reference-image"]["primary"]["model"], "muse-image-1.0")
@@ -131,7 +135,7 @@ class AdTemplateGeneratorModelsTest(unittest.TestCase):
         self.assertTrue(comparator["supports_vision"])
         self.assertEqual(comparator["capabilities"], ["vision_structured"])
 
-    def test_photo_assets_route_uses_audited_image_capability_without_tool_claims(self):
+    def test_photo_assets_route_uses_live_hermes_capability_not_browser_claims(self):
         selected = policy()
         selected["stages"]["aspect-reference-image"]["primary"] = {
             "provider": "meta-direct", "model": "muse-image-1.0",
@@ -140,7 +144,7 @@ class AdTemplateGeneratorModelsTest(unittest.TestCase):
         }
         catalogue = {
             "models": [candidate("gpt-5.6-sol"), candidate("gpt-5.6-luna")],
-            "image_models": [image_candidate()],
+            "image_models": [image_candidate(supports_tools=True)],
             "policy": policy(),
         }
         with mock.patch.object(server, "_ad_template_generator_model_catalogue", return_value=catalogue):
@@ -148,7 +152,7 @@ class AdTemplateGeneratorModelsTest(unittest.TestCase):
         photo = result["stages"]["aspect-reference-image"]
         self.assertEqual(photo["capability"], "reference_image_edit")
         self.assertEqual(photo["primary"]["capabilities"], ["reference_image_edit"])
-        self.assertFalse(photo["primary"]["supports_tools"])
+        self.assertTrue(photo["primary"]["supports_tools"])
 
     def test_unavailable_selected_model_fails_without_silent_fallback(self):
         selected = policy()
