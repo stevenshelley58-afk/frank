@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { adTemplateGeneratorStartError } from "../web/js/ad-template-generator-api.js";
+import { adTemplateGeneratorStartError, retryAdTemplateGeneratorRun } from "../web/js/ad-template-generator-api.js";
 
 test("Hermes run rejection keeps its bounded actionable message", () => {
   const message = "model policy stages must exactly match the required route order";
@@ -30,4 +30,20 @@ test("unsafe or absent rejection detail uses a useful safe fallback", () => {
     adTemplateGeneratorStartError({ code: "source_missing", message: "internal detail" }),
     "This image is no longer available. Add it again.",
   );
+});
+
+test("retry sends the Hermes checkpoint command with an empty body", async () => {
+  const originalFetch = globalThis.fetch;
+  let recorded;
+  globalThis.fetch = async (url, options) => {
+    recorded = { url, options };
+    return { ok: true, json: async () => ({ run: { id: "trun-retry" } }) };
+  };
+  try {
+    await retryAdTemplateGeneratorRun("trun-retry");
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+  assert.equal(recorded.url, "/api/ad-template-generator/runs/trun-retry/retry");
+  assert.equal(recorded.options.body, "{}");
 });

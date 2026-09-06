@@ -108,6 +108,24 @@ class AdTemplateGeneratorBatchApiTest(unittest.TestCase):
                 },
             )
 
+    def test_retry_forwards_empty_body_and_rejects_obsolete_stage_override(self):
+        calls = []
+
+        def hermes(path, payload, **kwargs):
+            calls.append((path, payload))
+            return {"run": {"id": "trun_00000000000000000000000000000001", "status": "queued"}}
+
+        with mock.patch.object(server, "hermes_request", side_effect=hermes):
+            response = self.client.post("/api/ad-template-generator/runs/trun_00000000000000000000000000000001/retry", json={})
+            rejected = self.client.post(
+                "/api/ad-template-generator/runs/trun_00000000000000000000000000000001/retry",
+                json={"from_stage": "compare"},
+            )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(calls, [("/v1/tool-runs/trun_00000000000000000000000000000001/retry", {})])
+        self.assertEqual(rejected.status_code, 400)
+
     def test_all_accepted_returns_202_with_one_run_per_image_and_unique_keys(self):
         attachments = [self.stage("one.png"), self.stage("two.jpg", JPEG)]
         calls = []
