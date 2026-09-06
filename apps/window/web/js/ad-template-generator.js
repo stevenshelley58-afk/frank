@@ -1,8 +1,8 @@
-import { blockwiseTemplateUrl } from "./view-routing.js?v=20260830-ad-studio-route-v1";
-import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, readyAdStudioReviewRuns, runListRenderSignature, runTimestamp } from "./ad-studio-state.js?v=20260905-ready-review-v1";
-import { AD_STUDIO_BRIEF_MAX_CHARACTERS, adStudioBriefValidation } from "./ad-studio-brief.js?v=20260904-brief-roundtrip-v1";
-import { approveAdStudioTemplate, cancelAdStudioRun, discardAdStudioTemplate, getAdStudioRun, listAdStudioRuns, requestAdStudioTemplateChanges, retryAdStudioRun } from "./ad-studio-api.js?v=20260905-ready-review-v1";
-import { placementScore, reviewArtifactPurpose, reviewModelProfile, reviewOverallScore, selectMetaPreview, selectReusableReviewArtifact, selectReviewArtifact } from "./ad-studio-review.js?v=20260905-ready-review-v1";
+import { blockwiseTemplateUrl } from "./view-routing.js?v=20260906-ad-template-generator-v1";
+import { groupAdTemplateGeneratorRuns, mergeAdTemplateGeneratorRun, mergeAdTemplateGeneratorRunList, readyAdTemplateGeneratorReviewRuns, runListRenderSignature, runTimestamp } from "./ad-template-generator-state.js?v=20260905-ready-review-v1";
+import { AD_TEMPLATE_GENERATOR_BRIEF_MAX_CHARACTERS, adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260904-brief-roundtrip-v1";
+import { approveAdTemplateGeneratorTemplate, cancelAdTemplateGeneratorRun, discardAdTemplateGeneratorTemplate, getAdTemplateGeneratorRun, listAdTemplateGeneratorRuns, requestAdTemplateGeneratorTemplateChanges, retryAdTemplateGeneratorRun } from "./ad-template-generator-api.js?v=20260905-ready-review-v1";
+import { placementScore, reviewArtifactPurpose, reviewModelProfile, reviewOverallScore, selectMetaPreview, selectReusableReviewArtifact, selectReviewArtifact } from "./ad-template-generator-review.js?v=20260905-ready-review-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -31,9 +31,9 @@ const localRunInputs = new Map();
 const previewUrls = new Set();
 let runEvents = [];
 let eventStream = null;
-let adStudioModels = [];
-let adStudioModelPolicy = null;
-let adStudioModelsReady = false;
+let adTemplateGeneratorModels = [];
+let adTemplateGeneratorModelPolicy = null;
+let adTemplateGeneratorModelsReady = false;
 let modelLoadSequence = 0;
 let eventReconnectTimer = null;
 let refreshTimer = null;
@@ -67,7 +67,7 @@ function resumeLiveUpdates() {
   if ($("[data-ad-panel=\"pipeline\"]")?.classList.contains("is-on") && !graphHandle) void mountPipeline();
 }
 
-export function setAdStudioActive(nextActive) {
+export function setAdTemplateGeneratorActive(nextActive) {
   active = Boolean(nextActive);
   if (!active || document.hidden) {
     stopLiveUpdates();
@@ -83,7 +83,7 @@ const SOURCE_STATUS = {
   queued: "Ready",
   uploading: "Uploading…",
   starting: "Starting…",
-  started: "Job started",
+  started: "Run started",
   error: "Needs attention",
 };
 
@@ -109,7 +109,7 @@ const MODEL_ROLE_FIELDS = {
   compare: "#ad-model-comparator",
   "final-review-a": "#ad-model-reviewer-a",
   "final-review-b": "#ad-model-reviewer-b",
-  "quality-escalation": "#ad-model-fallback",
+  "quality-escalation": "#ad-model-diagnosis",
 };
 
 function modelName(item) {
@@ -119,12 +119,12 @@ function modelName(item) {
 
 function modelIndex(candidate) {
   if (!candidate) return -1;
-  return adStudioModels.findIndex((item) => item.provider === candidate.provider && item.model === candidate.model);
+  return adTemplateGeneratorModels.findIndex((item) => item.provider === candidate.provider && item.model === candidate.model);
 }
 
 function selectedModel(indexValue) {
   const index = Number(indexValue);
-  return Number.isInteger(index) && index >= 0 ? adStudioModels[index] : null;
+  return Number.isInteger(index) && index >= 0 ? adTemplateGeneratorModels[index] : null;
 }
 
 function modelCandidate(item) {
@@ -139,8 +139,8 @@ function modelCandidate(item) {
 }
 
 function currentModelPolicy() {
-  if (!adStudioModelsReady || !adStudioModelPolicy) throw new Error("Wait for Hermes to load the Ad Studio models.");
-  const policy = structuredClone(adStudioModelPolicy);
+  if (!adTemplateGeneratorModelsReady || !adTemplateGeneratorModelPolicy) throw new Error("Wait for Hermes to load the Ad Template Generator models.");
+  const policy = structuredClone(adTemplateGeneratorModelPolicy);
   for (const [stageId, selector] of Object.entries(MODEL_ROLE_FIELDS)) {
     const select = $(selector);
     const model = selectedModel(select?.value);
@@ -163,14 +163,14 @@ function currentModelPolicy() {
 
 function validateModelControls() {
   const status = $("#ad-model-status");
-  if (!adStudioModelsReady) return false;
+  if (!adTemplateGeneratorModelsReady) return false;
   try {
     currentModelPolicy();
-    status.textContent = "This model setup is independent of Hub chat and will be locked to every job in the batch.";
+    status.textContent = "This model setup is independent of Hub chat and will be locked to every Run in the batch.";
     status.classList.remove("is-error");
     return true;
   } catch (error) {
-    status.textContent = error.message || "Choose a valid Ad Studio model setup.";
+    status.textContent = error.message || "Choose a valid Ad Template Generator model setup.";
     status.classList.add("is-error");
     return false;
   }
@@ -182,7 +182,7 @@ function populateModelControls(policy) {
     const select = $(selector);
     select.replaceChildren();
     if (stageId === "quality-escalation") select.append(new Option("Off", "-1"));
-    adStudioModels.forEach((item, index) => {
+    adTemplateGeneratorModels.forEach((item, index) => {
       const option = new Option(modelName(item), String(index));
       option.disabled = !item.available || !item.credential_ready;
       select.append(option);
@@ -195,10 +195,10 @@ function populateModelControls(policy) {
   updateRunControls();
 }
 
-async function loadAdStudioModels() {
+async function loadAdTemplateGeneratorModels() {
   const sequence = ++modelLoadSequence;
   const status = $("#ad-model-status");
-  adStudioModelsReady = false;
+  adTemplateGeneratorModelsReady = false;
   status.textContent = "Reading verified vision models from Hermes…";
   status.classList.remove("is-error");
   updateRunControls();
@@ -206,19 +206,19 @@ async function loadAdStudioModels() {
   const query = new URLSearchParams();
   if (projectId) query.set("project_id", projectId);
   try {
-    const response = await fetch(`/api/ad-studio/models${query.size ? `?${query}` : ""}`);
+    const response = await fetch(`/api/ad-template-generator/models${query.size ? `?${query}` : ""}`);
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "Hermes model catalogue is unavailable.");
     if (sequence !== modelLoadSequence) return;
-    adStudioModels = Array.isArray(data.models) ? data.models : [];
-    adStudioModelPolicy = data.policy && typeof data.policy === "object" ? data.policy : null;
-    if (!adStudioModels.length || !adStudioModelPolicy) throw new Error("Hermes has no verified Ad Studio models available.");
-    adStudioModelsReady = true;
-    populateModelControls(adStudioModelPolicy);
+    adTemplateGeneratorModels = Array.isArray(data.models) ? data.models : [];
+    adTemplateGeneratorModelPolicy = data.policy && typeof data.policy === "object" ? data.policy : null;
+    if (!adTemplateGeneratorModels.length || !adTemplateGeneratorModelPolicy) throw new Error("Hermes has no verified Ad Template Generator models available.");
+    adTemplateGeneratorModelsReady = true;
+    populateModelControls(adTemplateGeneratorModelPolicy);
   } catch (error) {
     if (sequence !== modelLoadSequence) return;
-    adStudioModels = [];
-    adStudioModelPolicy = null;
+    adTemplateGeneratorModels = [];
+    adTemplateGeneratorModelPolicy = null;
     status.textContent = error.message || "Hermes model catalogue is unavailable.";
     status.classList.add("is-error");
     Object.values(MODEL_ROLE_FIELDS).forEach((selector) => { $(selector).disabled = true; });
@@ -254,7 +254,7 @@ function activate(tab) {
   if (tab === "runs") void refreshRunsSafe();
   if (tab === "review") void refreshRunsSafe().then(() => {
     renderReviewQueue();
-    const ready = readyAdStudioReviewRuns(runs);
+    const ready = readyAdTemplateGeneratorReviewRuns(runs);
     if (!selectedReviewRunId && ready[0]) void selectReviewRun(ready[0].id);
   });
   if (tab === "pipeline") { void refreshRunsSafe(); mountPipeline(); }
@@ -318,7 +318,7 @@ function renderSourcePreview() {
     const summary = document.createElement("div");
     summary.className = "ad-source-summary";
     const count = document.createElement("span");
-    count.textContent = batchStarting ? "Starting jobs…" : `${runnable} image${runnable === 1 ? "" : "s"} ready to run`;
+    count.textContent = batchStarting ? "Starting Runs…" : `${runnable} image${runnable === 1 ? "" : "s"} ready to run`;
     const clear = document.createElement("button");
     clear.type = "button";
     clear.className = "ad-source-clear";
@@ -389,16 +389,16 @@ function clearSourceQueue() {
   selectedFiles = [];
   const status = $("#ad-run-status");
   status.classList.remove("is-error");
-  status.textContent = "Add one or more images. Each image becomes its own background job.";
+  status.textContent = "Add one or more images. Each image becomes its own Run.";
 }
 
 function updateRunControls() {
   const submit = $("#ad-run-submit");
   if (!submit) return;
   const runnable = selectedFiles.filter((source) => ["queued", "error"].includes(source.status)).length;
-  const modelsValid = adStudioModelsReady && validateModelControls();
+  const modelsValid = adTemplateGeneratorModelsReady && validateModelControls();
   submit.disabled = batchStarting || runnable === 0 || !modelsValid;
-  submit.textContent = batchStarting ? "Starting…" : runnable ? `Run ${runnable} job${runnable === 1 ? "" : "s"}` : "Run jobs";
+  submit.textContent = batchStarting ? "Starting…" : runnable ? `Start ${runnable} Run${runnable === 1 ? "" : "s"}` : "Start Runs";
 }
 
 function updateSourceStatus(key, status, options = {}) {
@@ -415,7 +415,7 @@ function renderRunOptions() {
   if (!select) return;
   const previous = selectedRunId || select.value;
   select.replaceChildren(new Option("No run selected", ""));
-  for (const group of groupAdStudioRuns(runs)) {
+  for (const group of groupAdTemplateGeneratorRuns(runs)) {
     const options = document.createElement("optgroup");
     options.label = [group.sourceLabel, group.templateLabel].filter(Boolean).join(" · ");
     const supersededIds = new Set(group.superseded.map((run) => run.id));
@@ -453,7 +453,7 @@ function createRunRow(run, { current = false, superseded = false } = {}) {
   const copy = document.createElement("span");
   copy.className = "ad-run-row-copy";
   const title = document.createElement("strong");
-  title.textContent = String(run.title || "Ad Studio job").replace(/^Ad Studio\s*[·|-]?\s*/, "") || "Job";
+  title.textContent = String(run.title || "Ad Template Generator Run").replace(/^Ad Template Generator\s*[·|-]?\s*/, "") || "Run";
   const meta = document.createElement("span");
   const project = projects.find((item) => item.id === run.project_id);
   meta.textContent = [project?.name || run.project_id || "Workspace", runStatusLabel(run.status), current ? "Current" : ""].filter(Boolean).join(" · ");
@@ -471,12 +471,12 @@ function renderRuns() {
   if (!runs.length) {
     const empty = document.createElement("div");
     empty.className = "ad-empty";
-    empty.innerHTML = "<strong>No jobs yet</strong><span>Run a source image to create the first real Ad Studio job.</span>";
+    empty.innerHTML = "<strong>No Runs yet</strong><span>Run a source image to create the first real Ad Template Generator Run.</span>";
     host.append(empty);
     renderRunOptions();
     return;
   }
-  for (const group of groupAdStudioRuns(runs)) {
+  for (const group of groupAdTemplateGeneratorRuns(runs)) {
     const section = document.createElement("section");
     section.className = "ad-run-group";
     const heading = document.createElement("div");
@@ -510,10 +510,10 @@ function renderRuns() {
 async function refreshRuns() {
   const refreshRevision = ++runListRevision;
   const projectId = clean($("#ad-run-project")?.value || $("#ad-pipeline-project")?.value);
-  const incoming = await listAdStudioRuns({ projectId, limit: 100 });
+  const incoming = await listAdTemplateGeneratorRuns({ projectId, limit: 100 });
   if (refreshRevision !== runListRevision) return;
   const previousSignature = runListRenderSignature(runs);
-  runs = mergeAdStudioRunList(runs, incoming);
+  runs = mergeAdTemplateGeneratorRunList(runs, incoming);
   if (runListRenderSignature(runs) !== previousSignature) renderRuns();
   renderReviewQueue();
 }
@@ -525,7 +525,7 @@ async function refreshRunsSafe() {
     await refreshRuns();
   } catch {
     const host = $("#ad-runs-list");
-    if (host && !host.children.length) host.innerHTML = '<div class="ad-empty"><strong>Jobs unavailable</strong><span>Frank cannot reach Hermes right now.</span></div>';
+    if (host && !host.children.length) host.innerHTML = '<div class="ad-empty"><strong>Runs unavailable</strong><span>Frank cannot reach Hermes right now.</span></div>';
     const reviewHost = $("#ad-review-list");
     if (reviewHost && !reviewHost.children.length) reviewHost.innerHTML = '<div class="ad-empty"><strong>Review queue unavailable</strong><span>Frank will reconnect to Hermes automatically.</span></div>';
   } finally {
@@ -540,10 +540,10 @@ async function selectRun(runId) {
   let run = runs.find((item) => item.id === runId);
   if (!run) return;
   try {
-    const detail = await getAdStudioRun(run.id);
+    const detail = await getAdTemplateGeneratorRun(run.id);
     if (detail) {
       if (selectionRevision !== runSelectionRevision || selectedRunId !== runId) return;
-      run = mergeAdStudioRun(runs.find((item) => item.id === run.id), detail);
+      run = mergeAdTemplateGeneratorRun(runs.find((item) => item.id === run.id), detail);
       runs = runs.map((item) => item.id === run.id ? run : item);
       renderRuns();
       renderReviewQueue();
@@ -572,7 +572,7 @@ function renderReviewQueue() {
   const host = $("#ad-review-list");
   const count = $("#ad-review-count");
   if (!host || !count) return;
-  const ready = readyAdStudioReviewRuns(runs);
+  const ready = readyAdTemplateGeneratorReviewRuns(runs);
   count.textContent = String(ready.length);
   count.hidden = ready.length === 0;
   host.replaceChildren();
@@ -600,7 +600,7 @@ function renderReviewQueue() {
     const copy = document.createElement("span");
     copy.className = "ad-review-row-copy";
     const title = document.createElement("strong");
-    title.textContent = String(run.title || run.source?.name || "Template review").replace(/^Ad Studio\s*[·|-]?\s*/, "") || "Template review";
+    title.textContent = String(run.title || run.source?.name || "Template review").replace(/^Ad Template Generator\s*[·|-]?\s*/, "") || "Template review";
     const source = document.createElement("span");
     source.textContent = run.source?.name || "Source recorded in Hermes";
     const scores = document.createElement("small");
@@ -625,9 +625,9 @@ async function selectReviewRun(runId) {
   if (!run) return;
   renderReviewDetail(run, { loading: true });
   try {
-    const detail = await getAdStudioRun(runId);
+    const detail = await getAdTemplateGeneratorRun(runId);
     if (detail && selectionRevision === runSelectionRevision && selectedReviewRunId === runId) {
-      run = mergeAdStudioRun(run, detail);
+      run = mergeAdTemplateGeneratorRun(run, detail);
       runs = runs.map((item) => item.id === runId ? run : item);
     }
   } catch { /* retain the safe summary already in the list response */ }
@@ -827,7 +827,7 @@ function appendReviewActions(parent, run) {
     try {
       const updated = await callback();
       if (updated) {
-        const merged = mergeAdStudioRun(runs.find((item) => item.id === run.id), updated);
+        const merged = mergeAdTemplateGeneratorRun(runs.find((item) => item.id === run.id), updated);
         runs = runs.map((item) => item.id === run.id ? merged : item);
         run = merged;
       }
@@ -840,7 +840,7 @@ function appendReviewActions(parent, run) {
     }
   };
 
-  approve.addEventListener("click", () => void act(() => approveAdStudioTemplate(run.id), "Publishing…"));
+  approve.addEventListener("click", () => void act(() => approveAdTemplateGeneratorTemplate(run.id), "Publishing…"));
   request.addEventListener("click", () => {
     formHost.replaceChildren();
     const form = document.createElement("form");
@@ -851,7 +851,7 @@ function appendReviewActions(parent, run) {
     const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel"; cancel.addEventListener("click", () => formHost.replaceChildren());
     const submit = document.createElement("button"); submit.type = "submit"; submit.className = "ad-primary"; submit.textContent = "Send changes";
     row.append(cancel, submit); form.append(label, row); formHost.append(form); textarea.focus();
-    form.addEventListener("submit", (event) => { event.preventDefault(); const instructions = clean(textarea.value); if (instructions) void act(() => requestAdStudioTemplateChanges(run.id, instructions), "Sending changes…"); });
+    form.addEventListener("submit", (event) => { event.preventDefault(); const instructions = clean(textarea.value); if (instructions) void act(() => requestAdTemplateGeneratorTemplateChanges(run.id, instructions), "Sending changes…"); });
   });
   discard.addEventListener("click", () => {
     formHost.replaceChildren();
@@ -863,7 +863,7 @@ function appendReviewActions(parent, run) {
     const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Keep template"; cancel.addEventListener("click", () => formHost.replaceChildren());
     const submit = document.createElement("button"); submit.type = "submit"; submit.className = "ad-primary ad-danger-button"; submit.textContent = "Confirm discard";
     row.append(cancel, submit); form.append(label, row); formHost.append(form); textarea.focus();
-    form.addEventListener("submit", (event) => { event.preventDefault(); void act(() => discardAdStudioTemplate(run.id, clean(textarea.value)), "Discarding…"); });
+    form.addEventListener("submit", (event) => { event.preventDefault(); void act(() => discardAdTemplateGeneratorTemplate(run.id, clean(textarea.value)), "Discarding…"); });
   });
   parent.append(section);
 }
@@ -1066,7 +1066,7 @@ function renderRunDetail(run) {
   summary.className = "ad-run-summary";
   const copy = document.createElement("div");
   const heading = document.createElement("h3");
-  heading.textContent = run.title || "Ad Studio job";
+  heading.textContent = run.title || "Ad Template Generator Run";
   const meta = document.createElement("p");
   const visibleStage = canonicalStage(run.stage);
   meta.textContent = `${runStatusLabel(run.status)} · ${PIPELINE_LABELS[visibleStage]} · ${formatCost(run)}`;
@@ -1108,7 +1108,7 @@ function renderRunDetail(run) {
 
   if (run.attention || run.error) {
     const attention = document.createElement("div"); attention.className = "ad-attention";
-    attention.textContent = run.error || "This job needs attention."; detail.append(attention);
+    attention.textContent = run.error || "This Run needs attention."; detail.append(attention);
   }
   renderPreviewGallery(run, detail);
   renderGenerationHistory(run, detail);
@@ -1119,11 +1119,11 @@ function renderRunDetail(run) {
   detail.append(activity);
   if (!["completed", "cancelled"].includes(run.status)) {
     const actions = document.createElement("div"); actions.className = "ad-run-actions";
-    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel job";
-    cancel.addEventListener("click", async () => { cancel.disabled = true; try { await cancelAdStudioRun(run.id); await selectRun(run.id); } catch { cancel.textContent = "Cancel failed — retry"; cancel.disabled = false; } });
+    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel Run";
+    cancel.addEventListener("click", async () => { cancel.disabled = true; try { await cancelAdTemplateGeneratorRun(run.id); await selectRun(run.id); } catch { cancel.textContent = "Cancel failed — retry"; cancel.disabled = false; } });
     if (run.status === "failed") {
       const retry = document.createElement("button"); retry.type = "button"; retry.className = "ad-primary"; retry.textContent = "Retry from checkpoint";
-      retry.addEventListener("click", async () => { retry.disabled = true; try { await retryAdStudioRun(run.id, run.stage); await selectRun(run.id); } catch { retry.textContent = "Retry failed — try again"; retry.disabled = false; } });
+      retry.addEventListener("click", async () => { retry.disabled = true; try { await retryAdTemplateGeneratorRun(run.id, run.stage); await selectRun(run.id); } catch { retry.textContent = "Retry failed — try again"; retry.disabled = false; } });
       actions.append(retry);
     }
     actions.append(cancel); detail.append(actions);
@@ -1242,12 +1242,12 @@ function mergeIterationEvent(run, item) {
   if (item.kind === "iteration.rendered") {
     record.previews = (Array.isArray(data.previews) ? data.previews : []).map((preview) => ({
       ...preview,
-      url: `/api/ad-studio/runs/${encodeURIComponent(run.id)}/artifacts/${encodeURIComponent(preview.name || "")}`,
+      url: `/api/ad-template-generator/runs/${encodeURIComponent(run.id)}/artifacts/${encodeURIComponent(preview.name || "")}`,
     }));
   }
   if (item.kind === "iteration.compared") {
     record.comparison = { score: firstNumber(data.score), reason: String(data.reason || "") };
-    record.decision = data.decision || (Number(data.score) >= 9.8 ? "accepted" : "revise");
+    record.decision = data.decision || (Number(data.score) >= 9.5 ? "accepted" : "revise");
   }
   run.output.iterations = records.sort((a, b) => Number(a.iteration) - Number(b.iteration));
 }
@@ -1261,7 +1261,7 @@ function connectRunEvents(run) {
   const connect = () => {
     if (!active || selectedRunId !== run.id) return;
     const cursor = runEvents.reduce((last, item) => Math.max(last, Number(item.sequence ?? -1)), -1);
-    const stream = new EventSource(`/api/ad-studio/runs/${encodeURIComponent(run.id)}/events?after=${encodeURIComponent(cursor)}`);
+    const stream = new EventSource(`/api/ad-template-generator/runs/${encodeURIComponent(run.id)}/events?after=${encodeURIComponent(cursor)}`);
     eventStream = stream;
   const receive = (event) => {
     try {
@@ -1272,7 +1272,7 @@ function connectRunEvents(run) {
         runEvents.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
         runEventCache.set(run.id, [...runEvents]);
       }
-      run = mergeAdStudioRun(runs.find((candidate) => candidate.id === run.id), run);
+      run = mergeAdTemplateGeneratorRun(runs.find((candidate) => candidate.id === run.id), run);
       if (["iteration.rendered", "iteration.compared"].includes(item.kind)) mergeIterationEvent(run, item);
       if (item.kind === "stage.started" && item.node_id) {
         run.stage = canonicalStage(item.node_id);
@@ -1320,13 +1320,13 @@ async function loadProcessMonitors() {
   const trailStatus = $("#ad-agenttrail-status");
   const trailBoard = $("#ad-agenttrail-board");
   try {
-    const response = await fetch("/api/ad-studio/architecture");
+    const response = await fetch("/api/ad-template-generator/architecture");
     const data = await response.json();
     archStatus.textContent = data.available ? `Archify typed-IR artifact ready | ${data.revision || "pinned"}` : (data.message || "Archify artifact unavailable.");
     if (data.available && data.artifact_url) { archLink.href = data.artifact_url; archLink.hidden = false; }
   } catch (error) { archStatus.textContent = "Archify status unavailable."; }
   try {
-    const response = await fetch("/api/ad-studio/implementation-activity");
+    const response = await fetch("/api/ad-template-generator/implementation-activity");
     const data = await response.json();
     if (!data.available) { trailStatus.textContent = data.message || "AgentTrail board unavailable."; return; }
     trailStatus.textContent = `Read-only AgentTrail board | ${data.revision || "pinned"}`;
@@ -1411,9 +1411,9 @@ function setupRunForm() {
   const briefInput = $("#ad-run-brief");
   const briefLimit = $("#ad-run-brief-limit");
   const updateBriefLimit = () => {
-    const validation = adStudioBriefValidation(briefInput.value);
+    const validation = adTemplateGeneratorBriefValidation(briefInput.value);
     briefLimit.textContent = validation.valid
-      ? `Up to ${AD_STUDIO_BRIEF_MAX_CHARACTERS.toLocaleString("en-AU")} characters · ${validation.length.toLocaleString("en-AU")} used`
+      ? `Up to ${AD_TEMPLATE_GENERATOR_BRIEF_MAX_CHARACTERS.toLocaleString("en-AU")} characters · ${validation.length.toLocaleString("en-AU")} used`
       : validation.message;
     briefLimit.classList.toggle("is-error", !validation.valid);
   };
@@ -1424,7 +1424,7 @@ function setupRunForm() {
     input.value = "";
   });
   drop.addEventListener("click", () => input.click());
-  $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); void loadAdStudioModels(); });
+  $("#ad-run-project").addEventListener("change", () => { void refreshRunsSafe(); void loadAdTemplateGeneratorModels(); });
   Object.values(MODEL_ROLE_FIELDS).forEach((selector) => {
     $(selector).addEventListener("change", () => { validateModelControls(); updateRunControls(); });
   });
@@ -1439,7 +1439,7 @@ function setupRunForm() {
     const status = $("#ad-run-status");
     status.classList.remove("is-error");
     const brief = briefInput.value;
-    const briefValidation = adStudioBriefValidation(brief);
+    const briefValidation = adTemplateGeneratorBriefValidation(brief);
     if (!briefValidation.valid) {
       status.textContent = briefValidation.message;
       status.classList.add("is-error");
@@ -1458,7 +1458,7 @@ function setupRunForm() {
     status.textContent = `Uploading ${sources.length} image${sources.length === 1 ? "" : "s"}…`;
     try {
       const modelPolicyOverride = currentModelPolicy();
-      const result = await requestEvent("frank:ad-studio-run", {
+      const result = await requestEvent("frank:ad-template-generator-run", {
         sources, projectId: $("#ad-run-project").value,
         name: clean($("#ad-run-name").value), brief,
         modelPolicyOverride,
@@ -1471,8 +1471,8 @@ function setupRunForm() {
         localRunInputs.set(source.run.id, { url: source.previewUrl, name: source.name });
       }
       status.textContent = failed.length
-        ? `${started.length} job${started.length === 1 ? "" : "s"} started. ${failed.length} image${failed.length === 1 ? " needs" : "s need"} attention.`
-        : `${started.length} background job${started.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
+        ? `${started.length} Run${started.length === 1 ? "" : "s"} started. ${failed.length} image${failed.length === 1 ? " needs" : "s need"} attention.`
+        : `${started.length} Run${started.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
       status.classList.toggle("is-error", failed.length > 0);
       await refreshRunsSafe();
       if (started.length) {
@@ -1481,7 +1481,7 @@ function setupRunForm() {
         await selectRun(started[0].id);
       }
     } catch (error) {
-      status.textContent = error.message || "The job could not be started.";
+      status.textContent = error.message || "The Run could not be started.";
       status.classList.add("is-error");
     } finally {
       batchStarting = false;
@@ -1496,7 +1496,7 @@ function setupPipelineForm() {
   $$('[data-ad-open-pipeline]').forEach((button) => button.addEventListener("click", () => activate("pipeline")));
 }
 
-export function mountAdStudio() {
+export function mountAdTemplateGenerator() {
   if (mounted) return;
   mounted = true;
   const tabs = $$("[data-ad-tab]");
@@ -1514,11 +1514,11 @@ export function mountAdStudio() {
   setupRunForm();
   setupPipelineForm();
   void loadProjects().then(async () => {
-    await loadAdStudioModels();
+    await loadAdTemplateGeneratorModels();
     ready = true;
     resumeLiveUpdates();
   }).catch((error) => {
-    $("#ad-run-status").textContent = error.message || "Ad Studio could not load.";
+    $("#ad-run-status").textContent = error.message || "Ad Template Generator could not load.";
     $("#ad-run-status").classList.add("is-error");
   });
   window.addEventListener("beforeunload", () => previewUrls.forEach((url) => URL.revokeObjectURL(url)), { once: true });

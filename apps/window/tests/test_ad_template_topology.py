@@ -26,7 +26,7 @@ class AdTemplateTopologyContractTests(unittest.TestCase):
         payload = ControlPlaneContracts(CONTROL).validate()
         nodes = {item["id"]: item for item in payload["catalog"]["nodes"]}
         edges = {item["id"]: item for item in payload["catalog"]["relationships"]}
-        self.assertEqual(nodes["component:frank/ad-studio"]["source_locator"], "apps/window/web/js/ad-studio.js")
+        self.assertEqual(nodes["component:frank/ad-studio"]["source_locator"], "apps/window/web/js/ad-template-generator.js")
         self.assertEqual(nodes["route:hermes-tool-runs"]["source_locator"], "apps/window/server.py")
         self.assertEqual(nodes["tool:ad-template-generator"]["evidence_receipt_ids"], [RECEIPT_ID])
         for stage in STAGES:
@@ -37,7 +37,7 @@ class AdTemplateTopologyContractTests(unittest.TestCase):
         self.assertEqual(edges["edge:ad-template-builder/compare-revises-render"]["to"], "component:frank/ad-template-builder/render")
 
     def test_declared_source_files_contain_the_boundaries_the_graph_names(self):
-        studio = (ROOT / "apps" / "window" / "web" / "js" / "ad-studio.js").read_text(encoding="utf-8")
+        studio = (ROOT / "apps" / "window" / "web" / "js" / "ad-template-generator.js").read_text(encoding="utf-8")
         server = (ROOT / "apps" / "window" / "server.py").read_text(encoding="utf-8")
         self.assertIn('const PIPELINE_STAGES = ["source", "build", "render", "compare", "final-check", "live"]', studio)
         self.assertIn('"final-review.completed"', studio)

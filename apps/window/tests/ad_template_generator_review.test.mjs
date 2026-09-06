@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { placementScore, reviewArtifactPurpose, reviewOverallScore, selectMetaPreview, selectReusableReviewArtifact, selectReviewArtifact } from "../web/js/ad-studio-review.js";
+import { placementScore, reviewArtifactPurpose, reviewOverallScore, selectMetaPreview, selectReusableReviewArtifact, selectReviewArtifact } from "../web/js/ad-template-generator-review.js";
 
 const summary = {
   source: { name: "source.png", url: "/source" },

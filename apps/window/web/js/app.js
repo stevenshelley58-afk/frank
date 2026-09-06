@@ -1,5 +1,5 @@
 import { mount, mountAll } from "./registry.js";
-import "./widgets.js?v=20260905-blockwise-operations-preview-v1";
+import "./widgets.js?v=20260906-ad-template-generator-v1";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js?v=20260905-blockwise-operations-preview-v1";
 import { SseEventParser } from "./chat-stream.js";
 import * as hubApi from "./chat/api.js";
@@ -8,9 +8,9 @@ import { DictationController } from "./chat/dictation-controller.js";
 import { ModelSelector } from "./chat/model-selector.js";
 import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/turn-stream.js";
 import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
-import { mountAdStudio, setAdStudioActive } from "./ad-studio.js?v=20260905-ready-review-v1";
-import { adStudioBriefValidation } from "./ad-studio-brief.js?v=20260904-brief-roundtrip-v1";
-import { pathForView, routeForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
+import { mountAdTemplateGenerator, setAdTemplateGeneratorActive } from "./ad-template-generator.js?v=20260906-ad-template-generator-v1";
+import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
+import { pathForView, routeForPath } from "./view-routing.js?v=20260906-ad-template-generator-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
@@ -26,7 +26,7 @@ const TITLES = {
   project: ["Project", ""],
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
-  "ad-studio": ["Ad Studio", "Source image → ad template"],
+  "ad-template-generator": ["Ad Template Generator", "Source image → ad template"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
   connections: ["Connections", "Recorded provider setup and capabilities"],
@@ -73,8 +73,8 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   if (id === "files") explorerFocus();
   if (id === "accounts") loadAccounts();
   if (id === "connections") openConnections(viewDetail);
-  if (id === "ad-studio") mountAdStudio();
-  setAdStudioActive(id === "ad-studio");
+  if (id === "ad-template-generator") mountAdTemplateGenerator();
+  setAdTemplateGeneratorActive(id === "ad-template-generator");
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
@@ -181,9 +181,11 @@ window.addEventListener("frank:widget-builder", () => {
   openWidgetBuilder();
 });
 
-window.addEventListener("frank:ad-studio", () => {
-  show("ad-studio");
-});
+const openAdTemplateGenerator = () => {
+  show("ad-template-generator");
+};
+window.addEventListener("frank:ad-template-generator", openAdTemplateGenerator);
+window.addEventListener("frank:ad-studio", openAdTemplateGenerator);
 
 function openPathView() {
   if (isBlockwiseOperationsPreview()) {
@@ -232,7 +234,7 @@ window.addEventListener("frank:new-project-chat", (event) => {
   void createChat(projectId).catch((error) => addChatMsg({ role: "sys", text: error.message || "Could not start a project chat.", ts: Date.now() / 1000 | 0 }));
 });
 
-window.addEventListener("frank:ad-studio-run", (event) => {
+const startAdTemplateGeneratorRun = (event) => {
   const detail = event.detail || {};
   void (async () => {
     const sources = Array.isArray(detail.sources) ? detail.sources : [];
@@ -249,20 +251,20 @@ window.addEventListener("frank:ad-studio-run", (event) => {
         throw new Error("Choose between 1 and 20 source images from this device.");
       }
       if (!projectId) throw new Error("Choose a project.");
-      const briefValidation = adStudioBriefValidation(brief);
+      const briefValidation = adTemplateGeneratorBriefValidation(brief);
       if (!briefValidation.valid) throw new Error(briefValidation.message);
       const fallbackName = String(localSources[0]?.name || "source image").replace(/\.[^.]+$/, "");
-      const jobName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
+      const runName = String(detail.name || fallbackName).replace(/\s+/g, " ").trim().slice(0, 60);
       localSources.forEach((source) => progress(source, "uploading"));
       const uploaded = await hubApi.uploadFiles(localSources.map((source) => ({ file: source.file, path: source.file.name })));
       if (uploaded.length !== localSources.length) throw new Error("One or more source images were not accepted.");
       localSources.forEach((source) => progress(source, "starting"));
-      const response = await fetch("/api/ad-studio/runs", {
+      const response = await fetch("/api/ad-template-generator/runs", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: projectId,
-          name: jobName,
+          name: runName,
           brief,
           attachments: uploaded.map(attachmentPayload),
           model_policy_override: detail.modelPolicyOverride,
@@ -271,7 +273,7 @@ window.addEventListener("frank:ad-studio-run", (event) => {
       const data = await response.json().catch(() => ({}));
       if (!response.ok && !Array.isArray(data.results)) {
         const message = typeof data.error === "string" ? data.error : data.error?.message;
-        throw new Error(message || "Hermes did not start the background jobs.");
+        throw new Error(message || "Hermes did not start the Runs.");
       }
       const runs = Array.isArray(data.runs) ? data.runs.filter((run) => run?.id) : (data.run?.id ? [data.run] : []);
       const orderedResults = Array.isArray(data.results) ? data.results : [];
@@ -302,14 +304,16 @@ window.addEventListener("frank:ad-studio-run", (event) => {
         failures.push({ name: source.name, error });
         progress(source, "error", { error });
       });
-      if (!runs.length && !failures.length) throw new Error(data.error || "Hermes did not start the background jobs.");
+      if (!runs.length && !failures.length) throw new Error(data.error || "Hermes did not start the Runs.");
       detail.resolve?.({ run: runs[0], runs, failures, results: orderedResults, batchId: data.batch_id });
     } catch (error) {
       localSources.filter((source) => !settled.has(source.key)).forEach((source) => progress(source, "error", { error: error.message || "This image could not be started." }));
       detail.reject?.(error);
     }
   })();
-});
+};
+window.addEventListener("frank:ad-template-generator-run", startAdTemplateGeneratorRun);
+window.addEventListener("frank:ad-studio-run", startAdTemplateGeneratorRun);
 
 /* ---------------- chat — window only, Hermes thinks ---------------- */
 
@@ -588,7 +592,7 @@ function notify(text, error = false) {
 }
 const TERMINAL_STATES = new Set([TURN_STATES.COMPLETE, TURN_STATES.CANCELLED, TURN_STATES.FAILED]);
 
-/* Ad Studio run payloads carry only server-side attachment fields. */
+/* Ad Template Generator run payloads carry only server-side attachment fields. */
 function attachmentPayload(attachment) {
   const { status, previewUrl, upload, uploadError, batchKey, discarded, file, ...payload } = attachment;
   return payload;

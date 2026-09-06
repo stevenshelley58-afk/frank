@@ -159,12 +159,12 @@ for (const tool of OPERATIONS_TOOLS.filter((item) => !["email-flows", "connectio
 }
 
 define({
-  id: "factory-ad", title: "Ad Studio", surfaces: ["tools"],
+  id: "factory-ad", title: "Ad Template Generator", surfaces: ["tools"],
   description: "Run source images through the ad-template pipeline and inspect each job.",
   mount(el) {
     const actions = toolIntro(el, "Run one image or a batch, inspect the work, and request pipeline changes through Hermes.");
-    actionButton(actions, "Open studio", () => emit("frank:ad-studio"));
-    actionButton(actions, "Tool home", () => emit("frank:entity-home", { kind: "tool", id: "ad-template-generator", name: "Ad Studio" }), "tool-secondary");
+    actionButton(actions, "Open studio", () => emit("frank:ad-template-generator"));
+    actionButton(actions, "Tool home", () => emit("frank:entity-home", { kind: "tool", id: "ad-template-generator", name: "Ad Template Generator" }), "tool-secondary");
     statusText(actions, "/frank/tools/ad-template-generator");
   },
 });

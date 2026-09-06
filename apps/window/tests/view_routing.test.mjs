@@ -3,12 +3,14 @@ import test from "node:test";
 
 import { blockwiseTemplateUrl, pathForView, routeForPath, viewForPath } from "../web/js/view-routing.js";
 
-test("Ad Studio has a canonical deep link and every other view returns home", () => {
-  assert.equal(viewForPath("/ad-studio"), "ad-studio");
-  assert.equal(viewForPath("/ad-studio/"), "ad-studio");
+test("Ad Template Generator has a canonical deep link and every other view returns home", () => {
+  assert.equal(viewForPath("/ad-template-generator"), "ad-template-generator");
+  assert.equal(viewForPath("/ad-template-generator/"), "ad-template-generator");
+  assert.equal(viewForPath("/ad-studio"), "ad-template-generator");
+  assert.equal(pathForView(viewForPath("/ad-studio")), "/ad-template-generator");
   assert.equal(viewForPath("/"), "hub");
   assert.equal(viewForPath("/not-a-view"), "hub");
-  assert.equal(pathForView("ad-studio"), "/ad-studio");
+  assert.equal(pathForView("ad-template-generator"), "/ad-template-generator");
   assert.equal(pathForView("tools"), "/tools");
   assert.deepEqual(routeForPath("/project/blockwise"), { view: "project", projectId: "blockwise" });
   assert.equal(pathForView("project", { projectId: "blockwise" }), "/project/blockwise");
