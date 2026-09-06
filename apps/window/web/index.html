@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260905-blockwise-operations-preview-v1">
+<link rel="stylesheet" href="/app.css?v=20260906-ad-template-generator-v1">
 </head>
 <body>
 <div class="app">
@@ -46,7 +46,7 @@
       <div class="lbl">Window</div>
       <button class="rail-item" data-view="tools" aria-label="Tools"><span class="glyph">⚙</span><span>Tools</span></button>
       <button class="rail-item" data-view="files" aria-label="Files"><span class="glyph">▤</span><span>Files</span></button>
-      <button class="rail-item" data-view="ad-studio" aria-label="Ad Studio"><span class="glyph">▧</span><span>Ad Studio</span></button>
+      <button class="rail-item" data-view="ad-template-generator" aria-label="Ad Template Generator"><span class="glyph">▧</span><span>Ad Template Generator</span></button>
       <details class="rail-more" id="more-nav">
         <summary>More</summary>
         <div>
@@ -179,25 +179,25 @@
       </section>
 
       <section class="view" data-view="tools"><div class="grid" id="slot-tools"></div></section>
-      <section class="view" data-view="ad-studio" aria-labelledby="ad-studio-heading">
-        <div class="ad-studio" id="ad-studio">
-          <header class="ad-studio-head">
-            <div><h2 id="ad-studio-heading">Ad Studio</h2><p>Turn a source image into a Feed and native Story template.</p></div>
-            <span class="ad-studio-owner">Runs on Hermes</span>
+      <section class="view" data-view="ad-template-generator" aria-labelledby="ad-template-generator-heading">
+        <div class="ad-template-generator" id="ad-template-generator">
+          <header class="ad-template-generator-head">
+            <div><h2 id="ad-template-generator-heading">Ad Template Generator</h2><p>Turn a source image into a Feed and native Story template.</p></div>
+            <span class="ad-template-generator-owner">Runs on Hermes</span>
           </header>
-          <nav class="ad-studio-tabs" role="tablist" aria-label="Ad Studio sections">
+          <nav class="ad-template-generator-tabs" role="tablist" aria-label="Ad Template Generator sections">
             <button type="button" class="is-on" id="ad-tab-run" role="tab" aria-selected="true" aria-controls="ad-panel-run" data-ad-tab="run">Create</button>
             <button type="button" id="ad-tab-runs" role="tab" aria-selected="false" aria-controls="ad-panel-runs" data-ad-tab="runs">Runs</button>
             <button type="button" id="ad-tab-review" role="tab" aria-selected="false" aria-controls="ad-panel-review" data-ad-tab="review">Ready for Review <span class="ad-review-count" id="ad-review-count" hidden>0</span></button>
             <button type="button" id="ad-tab-pipeline" role="tab" aria-selected="false" aria-controls="ad-panel-pipeline" data-ad-tab="pipeline">How it works</button>
           </nav>
 
-          <div class="ad-studio-panel is-on" id="ad-panel-run" role="tabpanel" aria-labelledby="ad-tab-run" data-ad-panel="run">
+          <div class="ad-template-generator-panel is-on" id="ad-panel-run" role="tabpanel" aria-labelledby="ad-tab-run" data-ad-panel="run">
             <form class="ad-run-form" id="ad-run-form">
               <div class="ad-section-heading"><div><h3>Source images → ad templates</h3><p>Add up to 20 images, then start them together.</p></div><span id="ad-run-mode">No images</span></div>
               <section class="ad-model-control" aria-labelledby="ad-model-heading">
                 <div class="ad-model-primary">
-                  <label for="ad-model-builder"><strong id="ad-model-heading">Generation model</strong><span>Only for these Ad Studio jobs</span></label>
+                  <label for="ad-model-builder"><strong id="ad-model-heading">Generation model</strong><span>Only for these Ad Template Generator runs</span></label>
                   <select id="ad-model-builder" aria-describedby="ad-model-status" disabled><option>Loading Hermes models…</option></select>
                 </div>
                 <details class="ad-model-advanced" id="ad-model-advanced">
@@ -206,7 +206,7 @@
                     <label>Iteration comparator<select id="ad-model-comparator" disabled></select></label>
                     <label>Completion reviewer A<select id="ad-model-reviewer-a" disabled></select></label>
                     <label>Completion reviewer B<select id="ad-model-reviewer-b" disabled></select></label>
-                    <label>Quality fallback<select id="ad-model-fallback" disabled></select></label>
+                    <label>Stall diagnosis<select id="ad-model-diagnosis" disabled></select></label>
                   </div>
                 </details>
                 <p class="ad-model-status" id="ad-model-status" role="status">Reading verified vision models from Hermes…</p>
@@ -220,27 +220,27 @@
               <div class="ad-source-preview" id="ad-source-preview" aria-live="polite" aria-label="Source image queue"></div>
               <div class="ad-form-pair">
                 <label>Project<select id="ad-run-project" required><option value="">Loading projects…</option></select></label>
-                <label>Job name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
+                <label>Run name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
               </div>
               <label>Brief <span>optional</span><textarea id="ad-run-brief" rows="4" aria-describedby="ad-run-brief-limit" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea><small class="ad-brief-limit" id="ad-run-brief-limit">Up to 4,000 characters · 0 used</small></label>
-              <div class="ad-submit-row"><p id="ad-run-status" role="status">Add one or more images. Each image becomes its own background job.</p><button type="submit" class="ad-primary" id="ad-run-submit" disabled>Run jobs</button></div>
+              <div class="ad-submit-row"><p id="ad-run-status" role="status">Add one or more images. Each image becomes its own Run.</p><button type="submit" class="ad-primary" id="ad-run-submit" disabled>Start runs</button></div>
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
-              <h3>Exact-clone runs. One source per job.</h3>
+              <h3>Source-matched templates. One source per Run.</h3>
               <ol>
                 <li><strong>Measure a fixed target</strong><span>Hermes measures geometry, colour, type, imagery, shading and effects deterministically.</span></li>
-                <li><strong>Generate reference, build once</strong><span>A generated reciprocal reference checks the source measurement; the builder then authors one editable Feed and Story template.</span></li>
-                <li><strong>Compare, then patch only</strong><span>Up to four focused passes and two final patch passes correct the existing template until both placements reach 9.8 likeness.</span></li>
-                <li><strong>Review once, then quarantine</strong><span>Two final reviewers score the finished result once. A passing Blockwise smoke test sends it to your manual Ready for Review queue.</span></li>
+                <li><strong>Build editable placements</strong><span>The builder creates editable Feed and Story templates from the measured source.</span></li>
+                <li><strong>Refine the best candidate</strong><span>Each edit uses the source, best editable template and matching previews. Equal or worse results are discarded; after five attempts without improvement, a frontier model diagnoses the stall once.</span></li>
+                <li><strong>Review, then approve manually</strong><span>After at most 16 comparisons, the final reviewer gate and Blockwise smoke test send a passing template to your Ready for Review queue.</span></li>
               </ol>
               <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
             </aside>
           </div>
 
-          <div class="ad-studio-panel" id="ad-panel-runs" role="tabpanel" aria-labelledby="ad-tab-runs" data-ad-panel="runs" hidden>
+          <div class="ad-template-generator-panel" id="ad-panel-runs" role="tabpanel" aria-labelledby="ad-tab-runs" data-ad-panel="runs" hidden>
             <div class="ad-runs-layout">
               <section class="ad-runs-list-panel">
-                <div class="ad-section-heading"><div><h3>Run history</h3><p>Durable jobs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div>
+                <div class="ad-section-heading"><div><h3>Run history</h3><p>Saved runs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div>
                 <details class="ad-run-status-guide">
                   <summary>What the statuses mean</summary>
                   <dl>
@@ -257,7 +257,7 @@
             </div>
           </div>
 
-          <div class="ad-studio-panel" id="ad-panel-review" role="tabpanel" aria-labelledby="ad-tab-review" data-ad-panel="review" hidden>
+          <div class="ad-template-generator-panel" id="ad-panel-review" role="tabpanel" aria-labelledby="ad-tab-review" data-ad-panel="review" hidden>
             <div class="ad-review-layout">
               <section class="ad-review-list-panel">
                 <div class="ad-section-heading"><div><h3>Ready for Review</h3><p>Passed automated QA and waiting for your decision.</p></div><span class="ad-live-state" id="ad-review-live-state">Live</span></div>
@@ -267,23 +267,23 @@
             </div>
           </div>
 
-          <div class="ad-studio-panel" id="ad-panel-pipeline" role="tabpanel" aria-labelledby="ad-tab-pipeline" data-ad-panel="pipeline" hidden>
+          <div class="ad-template-generator-panel" id="ad-panel-pipeline" role="tabpanel" aria-labelledby="ad-tab-pipeline" data-ad-panel="pipeline" hidden>
             <div class="ad-pipeline-toolbar">
               <div><h3>How template generation works</h3><p>Frank starts the run. This view shows what Hermes actually did.</p></div>
               <div class="ad-pipeline-controls"><label>Project<select id="ad-pipeline-project"></select></label><label>Inspect run<select id="ad-pipeline-run"><option value="">No run selected</option></select></label></div>
             </div>
             <section class="ad-process-monitors" aria-label="Implementation monitors">
-              <div><strong>Architecture</strong><span id="ad-archify-status">Checking Archify artifact&</span><a id="ad-archify-link" href="/api/ad-studio/architecture/artifact" target="_blank" rel="noreferrer" hidden>Open diagram</a></div>
+              <div><strong>Architecture</strong><span id="ad-archify-status">Checking Archify artifact&</span><a id="ad-archify-link" href="/api/ad-template-generator/architecture/artifact" target="_blank" rel="noreferrer" hidden>Open diagram</a></div>
               <div><strong>Implementation activity</strong><span id="ad-agenttrail-status">Checking AgentTrail board&</span><pre id="ad-agenttrail-board" hidden></pre></div>
             </section>
             <section class="ad-system-map" aria-label="Frank generation architecture">
               <div><strong>Frank</strong><span>Starts the run, shows Hermes progress and records your manual decision.</span></div><i aria-hidden="true"></i>
               <div><strong>Hermes</strong><span>Owns the durable run and events.</span></div><i aria-hidden="true"></i>
-              <div><strong>Template Builder</strong><span>Builds editable Feed and native Story layers once, then applies measured patches.</span></div><i aria-hidden="true"></i>
+              <div><strong>Builder</strong><span>Builds editable Feed and Story layers, then refines the best measured candidate.</span></div><i aria-hidden="true"></i>
               <div><strong>Blockwise</strong><span>Smoke-tests the candidate and holds it in quarantine until you approve and publish.</span></div>
             </section>
             <section class="ad-iteration-law" aria-label="Quality iteration rule">
-              <div><strong>Measure</strong><span>Deterministic target + reciprocal reference</span></div><b aria-hidden="true">→</b><div><strong>Build once</strong><span>Editable Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Patch only</strong><span>Up to 4 passes + 2 final passes to 9.8</span></div><b aria-hidden="true">↻</b><div><strong>Final review once</strong><span>Two independent reviewers</span></div><b aria-hidden="true">→</b><div><strong>Smoke + your review</strong><span>Quarantine, approve, revise or discard</span></div>
+              <div><strong>Measure</strong><span>Deterministic source target</span></div><b aria-hidden="true">→</b><div><strong>Build</strong><span>Editable Feed + Story</span></div><b aria-hidden="true">→</b><div><strong>Compare + refine</strong><span>Keep only the best candidate</span></div><b aria-hidden="true">↻</b><div><strong>Final reviewer gate</strong><span>Recorded quality decision</span></div><b aria-hidden="true">→</b><div><strong>Your review</strong><span>Approve, revise or discard</span></div>
             </section>
             <div class="ad-pipeline-layout">
               <section class="ad-pipeline-canvas"><div class="ad-declared-label"><strong>Declared lifecycle</strong><span>The route Frank promises before a run begins.</span></div><div id="ad-pipeline-graph"></div></section>
@@ -508,6 +508,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260905-blockwise-operations-preview-v1"></script>
+<script type="module" src="/js/app.js?v=20260906-ad-template-generator-v1"></script>
 </body>
 </html>

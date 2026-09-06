@@ -48,7 +48,7 @@ def policy():
     }
 
 
-class AdStudioModelsTest(unittest.TestCase):
+class AdTemplateGeneratorModelsTest(unittest.TestCase):
     def setUp(self):
         self.client = server.app.test_client()
 
@@ -60,7 +60,7 @@ class AdStudioModelsTest(unittest.TestCase):
             if path == "/v1/tool-runs/models":
                 return {
                     "policy_schema": "schema://hermes.tool-model-policy/v1",
-                    "ad_studio_capabilities": [
+                    "ad_template_generator_capabilities": [
                         candidate("gpt-5.6-sol"),
                         candidate("image-only") | {"capabilities": ["masked_image_edit"]},
                     ],
@@ -68,7 +68,7 @@ class AdStudioModelsTest(unittest.TestCase):
             return {"data": [{"revision": 12, "is_default": True, "policy": policy()}]}
 
         with mock.patch.object(server, "hermes_request", side_effect=hermes):
-            response = self.client.get("/api/ad-studio/models?project_id=blockwise")
+            response = self.client.get("/api/ad-template-generator/models?project_id=blockwise")
 
         self.assertEqual(response.status_code, 200)
         body = response.get_json()
@@ -90,8 +90,8 @@ class AdStudioModelsTest(unittest.TestCase):
             "policy_revision": 12,
             "policy": policy(),
         }
-        with mock.patch.object(server, "_ad_studio_model_catalogue", return_value=catalogue):
-            result = server._validated_ad_studio_model_policy(selected, project_id="blockwise")
+        with mock.patch.object(server, "_ad_template_generator_model_catalogue", return_value=catalogue):
+            result = server._validated_ad_template_generator_model_policy(selected, project_id="blockwise")
         comparator = result["stages"]["compare"]["primary"]
         self.assertTrue(comparator["capability_verified"])
         self.assertTrue(comparator["supports_vision"])
@@ -105,13 +105,13 @@ class AdStudioModelsTest(unittest.TestCase):
             "policy": policy(),
         }
         with (
-            mock.patch.object(server, "_ad_studio_model_catalogue", return_value=catalogue),
-            self.assertRaisesRegex(server._AdStudioSourceError, "not currently available"),
+            mock.patch.object(server, "_ad_template_generator_model_catalogue", return_value=catalogue),
+            self.assertRaisesRegex(server._AdTemplateGeneratorSourceError, "not currently available"),
         ):
-            server._validated_ad_studio_model_policy(selected, project_id="blockwise")
+            server._validated_ad_template_generator_model_policy(selected, project_id="blockwise")
 
     def test_run_projection_exposes_immutable_model_snapshot_not_chat_state(self):
-        projected = server._public_ad_studio_run({
+        projected = server._public_ad_template_generator_run({
             "run_id": "trun-models",
             "status": "queued",
             "model_policy_revision": 14,

@@ -1,4 +1,5 @@
 import hashlib
+import os
 import threading
 import time
 from pathlib import Path
@@ -34,13 +35,29 @@ MODEL_POLICY = {
 }
 
 
-class AdStudioBatchApiTest(unittest.TestCase):
+class AdTemplateGeneratorEnvironmentTest(unittest.TestCase):
+    def test_canonical_limits_win_then_legacy_limits_then_defaults(self):
+        cases = (
+            ("MAX_SOURCES", "20", "7", "9"),
+            ("MAX_SOURCE_BYTES", "26214400", "1048576", "2097152"),
+            ("MAX_BATCH_BYTES", "104857600", "4194304", "8388608"),
+        )
+        for suffix, default, legacy, canonical in cases:
+            with self.subTest(suffix=suffix), mock.patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(server._ad_template_generator_env(suffix, default), default)
+                os.environ[f"AD_STUDIO_{suffix}"] = legacy
+                self.assertEqual(server._ad_template_generator_env(suffix, default), legacy)
+                os.environ[f"AD_TEMPLATE_GENERATOR_{suffix}"] = canonical
+                self.assertEqual(server._ad_template_generator_env(suffix, default), canonical)
+
+
+class AdTemplateGeneratorBatchApiTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.previous_upload_dir = server.UPLOAD_DIR
-        self.previous_max_sources = server.AD_STUDIO_MAX_SOURCES
-        self.previous_max_source_bytes = server.AD_STUDIO_MAX_SOURCE_BYTES
-        self.previous_max_batch_bytes = server.AD_STUDIO_MAX_BATCH_BYTES
+        self.previous_max_sources = server.AD_TEMPLATE_GENERATOR_MAX_SOURCES
+        self.previous_max_source_bytes = server.AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES
+        self.previous_max_batch_bytes = server.AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES
         server.UPLOAD_DIR = Path(self.temp.name) / "uploads"
         server.UPLOAD_DIR.mkdir(parents=True)
         self.client = server.app.test_client()
@@ -48,9 +65,9 @@ class AdStudioBatchApiTest(unittest.TestCase):
 
     def tearDown(self):
         server.UPLOAD_DIR = self.previous_upload_dir
-        server.AD_STUDIO_MAX_SOURCES = self.previous_max_sources
-        server.AD_STUDIO_MAX_SOURCE_BYTES = self.previous_max_source_bytes
-        server.AD_STUDIO_MAX_BATCH_BYTES = self.previous_max_batch_bytes
+        server.AD_TEMPLATE_GENERATOR_MAX_SOURCES = self.previous_max_sources
+        server.AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES = self.previous_max_source_bytes
+        server.AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES = self.previous_max_batch_bytes
         self.temp.cleanup()
 
     def stage(self, name, content=PNG, *, batch="batch"):
@@ -81,10 +98,10 @@ class AdStudioBatchApiTest(unittest.TestCase):
         with (
             mock.patch.object(server._project_store, "get_project", return_value=self.project),
             mock.patch.object(server, "hermes_request", side_effect=hermes),
-            mock.patch.object(server, "_validated_ad_studio_model_policy", return_value=MODEL_POLICY),
+            mock.patch.object(server, "_validated_ad_template_generator_model_policy", return_value=MODEL_POLICY),
         ):
             return self.client.post(
-                "/api/ad-studio/runs",
+                "/api/ad-template-generator/runs",
                 json={
                     "project_id": "ad-project", "name": "Campaign", "brief": brief,
                     "attachments": attachments, "model_policy_override": MODEL_POLICY,
@@ -153,16 +170,16 @@ class AdStudioBatchApiTest(unittest.TestCase):
         self.assertFalse(any(server.UPLOAD_DIR.rglob("*.*")))
 
     def test_signature_size_and_batch_count_are_bounded(self):
-        server.AD_STUDIO_MAX_SOURCE_BYTES = len(PNG) - 1
-        server.AD_STUDIO_MAX_BATCH_BYTES = len(PNG) * 2
+        server.AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES = len(PNG) - 1
+        server.AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES = len(PNG) * 2
         too_large = self.stage("large.png")
         response = self.post([too_large], mock.Mock())
         self.assertEqual(response.status_code, 422)
         self.assertEqual(response.get_json()["results"][0]["error"]["code"], "file_too_large")
         self.assertFalse((server.UPLOAD_DIR / too_large["id"]).exists())
 
-        server.AD_STUDIO_MAX_SOURCE_BYTES = len(PNG) * 2
-        server.AD_STUDIO_MAX_SOURCES = 2
+        server.AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES = len(PNG) * 2
+        server.AD_TEMPLATE_GENERATOR_MAX_SOURCES = 2
         over_count = [self.stage(f"source-{index}.png", batch="over") for index in range(3)]
         response = self.post(over_count, mock.Mock())
         self.assertEqual(response.status_code, 413)

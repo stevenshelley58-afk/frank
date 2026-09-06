@@ -30,7 +30,7 @@ export function compareRunRecency(left, right) {
   return String(right?.id || "").localeCompare(String(left?.id || ""));
 }
 
-export function adStudioReviewState(run) {
+export function adTemplateGeneratorReviewState(run) {
   return cleanPart(
     run?.review_status
       || run?.output?.review_summary?.status
@@ -38,13 +38,13 @@ export function adStudioReviewState(run) {
   ).replaceAll("-", "_");
 }
 
-export function isReadyForAdStudioReview(run) {
-  return adStudioReviewState(run) === "ready_for_review";
+export function isReadyForAdTemplateGeneratorReview(run) {
+  return adTemplateGeneratorReviewState(run) === "ready_for_review";
 }
 
-export function readyAdStudioReviewRuns(runs) {
+export function readyAdTemplateGeneratorReviewRuns(runs) {
   return (Array.isArray(runs) ? runs : [])
-    .filter((run) => run?.id && isReadyForAdStudioReview(run))
+    .filter((run) => run?.id && isReadyForAdTemplateGeneratorReview(run))
     .sort(compareRunRecency);
 }
 
@@ -61,7 +61,7 @@ export function runHistoryGroupKey(run) {
   return [project, "run", cleanPart(run?.id || run?.title) || "unknown"].join("::");
 }
 
-export function groupAdStudioRuns(runs) {
+export function groupAdTemplateGeneratorRuns(runs) {
   const grouped = new Map();
   (Array.isArray(runs) ? runs : []).filter((run) => run?.id).forEach((run) => {
     const key = runHistoryGroupKey(run);
@@ -145,7 +145,7 @@ export function mergeIterationHistory(previous, incoming) {
   });
 }
 
-export function mergeAdStudioRun(previous, incoming) {
+export function mergeAdTemplateGeneratorRun(previous, incoming) {
   const current = objectValue(previous);
   const next = objectValue(incoming);
   if (!Object.keys(current).length) return next;
@@ -189,7 +189,7 @@ export function mergeAdStudioRun(previous, incoming) {
   };
 }
 
-export function mergeAdStudioRunList(previous, incoming) {
+export function mergeAdTemplateGeneratorRunList(previous, incoming) {
   const before = Array.isArray(previous) ? previous.filter((run) => run?.id) : [];
   const after = Array.isArray(incoming) ? incoming.filter((run) => run?.id) : [];
   // A list response is a polling snapshot, not a deletion ledger. Hermes can
@@ -197,7 +197,7 @@ export function mergeAdStudioRunList(previous, incoming) {
   // explicit operator action may remove durable history from the UI session.
   if (!after.length) return before;
   const recorded = new Map(before.map((run) => [run.id, run]));
-  after.forEach((run) => recorded.set(run.id, mergeAdStudioRun(recorded.get(run.id), run)));
+  after.forEach((run) => recorded.set(run.id, mergeAdTemplateGeneratorRun(recorded.get(run.id), run)));
   return [...recorded.values()].sort(compareRunRecency);
 }
 

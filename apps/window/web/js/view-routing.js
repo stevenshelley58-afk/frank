@@ -1,4 +1,5 @@
-const AD_STUDIO_PATH = "/ad-studio";
+const AD_TEMPLATE_GENERATOR_PATH = "/ad-template-generator";
+const LEGACY_AD_STUDIO_PATH = "/ad-studio";
 const OPS_PATH = "/ops";
 const BLOCKWISE_ORIGIN = "https://blockwise.sale";
 const TEMPLATE_PATH = "/ad-studio/templates/";
@@ -17,7 +18,7 @@ function validId(value) {
 
 export function routeForPath(pathname) {
   const path = pathname.replace(/\/+$/, "") || "/";
-  if (path === AD_STUDIO_PATH) return { view: "ad-studio" };
+  if (path === AD_TEMPLATE_GENERATOR_PATH || path === LEGACY_AD_STUDIO_PATH) return { view: "ad-template-generator" };
   if (path === OPS_PATH) return { view: "ops" };
   if (OPERATE_PATHS[path]) return { view: OPERATE_PATHS[path] };
   if (STATIC_PATHS[path]) return { view: STATIC_PATHS[path] };
@@ -38,7 +39,7 @@ export function viewForPath(pathname) {
 }
 
 export function pathForView(view, detail = {}) {
-  if (view === "ad-studio") return AD_STUDIO_PATH;
+  if (view === "ad-template-generator") return AD_TEMPLATE_GENERATOR_PATH;
   if (view === "ops") return OPS_PATH;
   if (view === "live" || view === "map" || view === "control") return `/${view}`;
   if (Object.values(STATIC_PATHS).includes(view)) return `/${view}`;

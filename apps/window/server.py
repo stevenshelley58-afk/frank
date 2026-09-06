@@ -101,16 +101,22 @@ def _mini_legacy_root() -> Path | None:
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
-AD_STUDIO_MAX_SOURCES = min(50, max(1, int(os.environ.get("AD_STUDIO_MAX_SOURCES", "20"))))
-AD_STUDIO_MAX_SOURCE_BYTES = min(
+def _ad_template_generator_env(suffix: str, default: str) -> str:
+    canonical = f"AD_TEMPLATE_GENERATOR_{suffix}"
+    legacy = f"AD_STUDIO_{suffix}"
+    return os.environ.get(canonical, os.environ.get(legacy, default))
+
+
+AD_TEMPLATE_GENERATOR_MAX_SOURCES = min(50, max(1, int(_ad_template_generator_env("MAX_SOURCES", "20"))))
+AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES = min(
     MAX_UPLOAD_BYTES,
-    max(1, int(os.environ.get("AD_STUDIO_MAX_SOURCE_BYTES", str(25 * 1024 * 1024)))),
+    max(1, int(_ad_template_generator_env("MAX_SOURCE_BYTES", str(25 * 1024 * 1024)))),
 )
-AD_STUDIO_MAX_BATCH_BYTES = min(
+AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES = min(
     MAX_UPLOAD_BYTES,
-    max(AD_STUDIO_MAX_SOURCE_BYTES, int(os.environ.get("AD_STUDIO_MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
+    max(AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES, int(_ad_template_generator_env("MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
 )
-AD_STUDIO_MAX_BRIEF_CHARACTERS = 4000
+AD_TEMPLATE_GENERATOR_MAX_BRIEF_CHARACTERS = 4000
 # HERMES_ENDPOINT is the canonical dispatcher contract; retain the legacy
 # variable only as an explicit compatibility fallback for older deployments.
 HERMES_URL = os.environ.get("HERMES_ENDPOINT", os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642")).rstrip("/")
@@ -159,9 +165,9 @@ ACCOUNT_MODES = {"selfserve", "managed", "internal"}
 ACCOUNT_ENVIRONMENTS = {"test", "live"}
 AUTH_STATUSES = {"not_connected", "invited", "active", "suspended", "closed"}
 BILLING_STATUSES = {"not_connected", "trial", "active", "past_due", "canceled"}
-AD_STUDIO_RUN_ID = re.compile(r"trun_[0-9a-f]{32}")
-AD_STUDIO_PLACEMENTS = {"square", "portrait", "story"}
-AD_STUDIO_IMAGE_EXTENSIONS = {
+AD_TEMPLATE_GENERATOR_RUN_ID = re.compile(r"trun_[0-9a-f]{32}")
+AD_TEMPLATE_GENERATOR_PLACEMENTS = {"square", "portrait", "story"}
+AD_TEMPLATE_GENERATOR_IMAGE_EXTENSIONS = {
     ".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg",
     ".png", ".tif", ".tiff", ".webp",
 }
@@ -1181,7 +1187,7 @@ def tree_search():
                 if child.is_dir():
                     stack.append(child)
                     continue
-                if child.suffix.lower() not in AD_STUDIO_IMAGE_EXTENSIONS or query not in child.name.lower():
+                if child.suffix.lower() not in AD_TEMPLATE_GENERATOR_IMAGE_EXTENSIONS or query not in child.name.lower():
                     continue
                 resolved = child.resolve()
                 resolved.relative_to(base.resolve())
@@ -1629,7 +1635,7 @@ def _public_generation_text(value: object) -> str:
     return text
 
 
-def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]:
+def _public_ad_template_generator_generations(value: object, run_id: str = "") -> list[dict]:
     if not isinstance(value, list):
         return []
     public = []
@@ -1644,7 +1650,7 @@ def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]
             if not isinstance(item, dict): continue
             name = str(item.get("name") or "").strip()
             if not re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", name): continue
-            previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}"})
+            previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-template-generator/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}"})
         public.append({
             "iteration": iteration,
             "decision": str(raw.get("decision") or "revise")[:20],
@@ -1654,7 +1660,7 @@ def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]
     return public
 
 
-def _public_ad_studio_import(value: object) -> dict:
+def _public_ad_template_generator_import(value: object) -> dict:
     """Project only a verified Blockwise template destination from Hermes output."""
     if not isinstance(value, dict):
         return {}
@@ -1698,7 +1704,7 @@ def _public_ad_studio_import(value: object) -> dict:
     return public
 
 
-def _public_ad_studio_review_artifact(value: object, run_id: str) -> dict:
+def _public_ad_template_generator_review_artifact(value: object, run_id: str) -> dict:
     """Project one image artifact through Frank's authenticated artifact route."""
     raw = {"name": value} if isinstance(value, str) else value
     if not isinstance(raw, dict):
@@ -1708,7 +1714,7 @@ def _public_ad_studio_review_artifact(value: object, run_id: str) -> dict:
         return {}
     public = {
         "name": name,
-        "url": f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}",
+        "url": f"/api/ad-template-generator/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}",
     }
     for key in ("kind", "label", "placement", "view"):
         cleaned = _public_generation_text(raw.get(key))
@@ -1717,17 +1723,17 @@ def _public_ad_studio_review_artifact(value: object, run_id: str) -> dict:
     return public
 
 
-def _public_ad_studio_review_artifacts(value: object, run_id: str) -> list[dict]:
+def _public_ad_template_generator_review_artifacts(value: object, run_id: str) -> list[dict]:
     raw_values = value if isinstance(value, list) else list(value.values()) if isinstance(value, dict) else [value]
     projected = []
     for raw in raw_values[:24]:
-        artifact = _public_ad_studio_review_artifact(raw, run_id)
+        artifact = _public_ad_template_generator_review_artifact(raw, run_id)
         if artifact and artifact["name"] not in {item["name"] for item in projected}:
             projected.append(artifact)
     return projected
 
 
-def _public_ad_studio_review_scores(value: object) -> dict:
+def _public_ad_template_generator_review_scores(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
     public = {}
@@ -1759,7 +1765,7 @@ def _public_ad_studio_review_scores(value: object) -> dict:
     return public
 
 
-def _public_ad_studio_review_warnings(value: object) -> list[dict]:
+def _public_ad_template_generator_review_warnings(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
     public = []
@@ -1777,7 +1783,7 @@ def _public_ad_studio_review_warnings(value: object) -> list[dict]:
     return public
 
 
-def _public_ad_studio_font_substitution(value: object) -> list[dict]:
+def _public_ad_template_generator_font_substitution(value: object) -> list[dict]:
     raw_values = value if isinstance(value, list) else [value]
     public = []
     for raw in raw_values[:12]:
@@ -1792,7 +1798,7 @@ def _public_ad_studio_font_substitution(value: object) -> list[dict]:
     return public
 
 
-def _public_ad_studio_smoke_test(value: object) -> dict:
+def _public_ad_template_generator_smoke_test(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
     status = str(value.get("status") or "").strip().lower()
@@ -1814,7 +1820,7 @@ def _public_ad_studio_smoke_test(value: object) -> dict:
     }
 
 
-def _public_ad_studio_layers(value: object) -> list[dict]:
+def _public_ad_template_generator_layers(value: object) -> list[dict]:
     if not isinstance(value, list):
         return []
     public = []
@@ -1834,7 +1840,7 @@ def _public_ad_studio_layers(value: object) -> list[dict]:
     return public
 
 
-def _public_ad_studio_review_model_profile(value: object) -> dict:
+def _public_ad_template_generator_review_model_profile(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
     roles = []
@@ -1860,25 +1866,25 @@ def _public_ad_studio_review_model_profile(value: object) -> dict:
     return public
 
 
-def _public_ad_studio_review_summary(value: object, run_id: str) -> dict:
+def _public_ad_template_generator_review_summary(value: object, run_id: str) -> dict:
     """Expose the bounded evidence Hermes has declared ready for operator review."""
     if not isinstance(value, dict):
         return {}
     public = {}
-    source = _public_ad_studio_review_artifact(value.get("source"), run_id)
+    source = _public_ad_template_generator_review_artifact(value.get("source"), run_id)
     if source:
         public["source"] = source
     for key in ("references", "previews", "diffs"):
-        artifacts = _public_ad_studio_review_artifacts(value.get(key), run_id)
+        artifacts = _public_ad_template_generator_review_artifacts(value.get(key), run_id)
         if artifacts:
             public[key] = artifacts
-    scores = _public_ad_studio_review_scores(value.get("scores"))
+    scores = _public_ad_template_generator_review_scores(value.get("scores"))
     if scores:
         public["scores"] = scores
-    warnings = _public_ad_studio_review_warnings(value.get("warnings"))
+    warnings = _public_ad_template_generator_review_warnings(value.get("warnings"))
     if warnings:
         public["warnings"] = warnings
-    substitutions = _public_ad_studio_font_substitution(value.get("font_substitution"))
+    substitutions = _public_ad_template_generator_font_substitution(value.get("font_substitution"))
     if substitutions:
         public["font_substitution"] = substitutions
     for key in ("elapsed_seconds", "cost_usd"):
@@ -1888,20 +1894,20 @@ def _public_ad_studio_review_summary(value: object, run_id: str) -> dict:
     iterations = value.get("iterations")
     if isinstance(iterations, int) and not isinstance(iterations, bool) and 0 <= iterations <= 10_000:
         public["iterations"] = iterations
-    smoke_test = _public_ad_studio_smoke_test(value.get("smoke_test"))
+    smoke_test = _public_ad_template_generator_smoke_test(value.get("smoke_test"))
     if smoke_test:
         public["smoke_test"] = smoke_test
-    layers = _public_ad_studio_layers(value.get("layers"))
+    layers = _public_ad_template_generator_layers(value.get("layers"))
     if layers:
         public["layers"] = layers
-    model_profile = _public_ad_studio_review_model_profile(value.get("model_profile"))
+    model_profile = _public_ad_template_generator_review_model_profile(value.get("model_profile"))
     if model_profile:
         public["model_profile"] = model_profile
     return public
 
 
-def _exact_clone_review_summary(output: dict, model_profile: dict) -> dict:
-    """Adapt Hermes' sole exact-clone root output to Frank's review view."""
+def _source_matched_review_summary(output: dict, model_profile: dict) -> dict:
+    """Adapt Hermes' source-matched root output to Frank's review view."""
     if output.get("process") != "exact-clone":
         return {}
     references = output.get("references") if isinstance(output.get("references"), list) else []
@@ -1980,28 +1986,28 @@ def _exact_clone_review_summary(output: dict, model_profile: dict) -> dict:
     return summary
 
 
-def _ad_studio_source_url(run_id: str, name: str) -> str | None:
+def _ad_template_generator_source_url(run_id: str, name: str) -> str | None:
     suffix = Path(str(name or "")).suffix.lower()
     if suffix not in {".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}:
         return None
     artifact = f"source{suffix}"
-    return f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(artifact, safe='')}"
+    return f"/api/ad-template-generator/runs/{run_id}/artifacts/{urllib.parse.quote(artifact, safe='')}"
 
 
-_AD_STUDIO_MODEL_ROLES = MappingProxyType({
+_AD_TEMPLATE_GENERATOR_MODEL_ROLES = MappingProxyType({
     "builder": "analyse",
     "comparator": "compare",
     "final_review_a": "final-review-a",
     "final_review_b": "final-review-b",
     "quality_fallback": "quality-escalation",
 })
-_AD_STUDIO_REQUIRED_MODEL_STAGES = frozenset({
+_AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES = frozenset({
     "analyse", "compare", "final-review-a", "final-review-b",
 })
-_AD_STUDIO_OPTIONAL_MODEL_STAGES = frozenset({"quality-escalation"})
+_AD_TEMPLATE_GENERATOR_OPTIONAL_MODEL_STAGES = frozenset({"quality-escalation"})
 
 
-def _public_ad_studio_candidate(value: object) -> dict:
+def _public_ad_template_generator_candidate(value: object) -> dict:
     if not isinstance(value, dict):
         return {}
     provider = str(value.get("provider") or "").strip()
@@ -2020,17 +2026,17 @@ def _public_ad_studio_candidate(value: object) -> dict:
     }
 
 
-def _public_ad_studio_policy(value: object) -> dict:
+def _public_ad_template_generator_policy(value: object) -> dict:
     """Expose only the non-secret Hermes model policy fields needed for one run."""
     if not isinstance(value, dict):
         return {}
     stages = value.get("stages") if isinstance(value.get("stages"), dict) else {}
     public_stages = {}
-    for stage_id in (*_AD_STUDIO_REQUIRED_MODEL_STAGES, *_AD_STUDIO_OPTIONAL_MODEL_STAGES):
+    for stage_id in (*_AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES, *_AD_TEMPLATE_GENERATOR_OPTIONAL_MODEL_STAGES):
         stage = stages.get(stage_id)
         if not isinstance(stage, dict):
             continue
-        primary = _public_ad_studio_candidate(stage.get("primary"))
+        primary = _public_ad_template_generator_candidate(stage.get("primary"))
         if not primary:
             continue
         public_stages[stage_id] = {
@@ -2057,13 +2063,13 @@ def _public_ad_studio_policy(value: object) -> dict:
     return result
 
 
-def _ad_studio_model_catalogue(project_id: str = "") -> dict:
-    """Read Hermes-owned capabilities and its current Ad Studio policy."""
+def _ad_template_generator_model_catalogue(project_id: str = "") -> dict:
+    """Read Hermes-owned capabilities and its current Ad Template Generator policy."""
     model_data = hermes_request("/v1/tool-runs/models", timeout=8)
-    raw_models = model_data.get("ad_studio_capabilities") if isinstance(model_data, dict) else []
+    raw_models = (model_data.get("ad_template_generator_capabilities") or model_data.get("ad_studio_capabilities")) if isinstance(model_data, dict) else []
     models = []
     for raw in raw_models if isinstance(raw_models, list) else []:
-        candidate = _public_ad_studio_candidate(raw)
+        candidate = _public_ad_template_generator_candidate(raw)
         if not candidate or "vision_structured" not in candidate["capabilities"]:
             continue
         candidate.update({
@@ -2077,7 +2083,7 @@ def _ad_studio_model_catalogue(project_id: str = "") -> dict:
     records = policy_data.get("data") if isinstance(policy_data, dict) else []
     records = [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
     record = next((item for item in records if item.get("is_default") is True), records[0] if records else {})
-    policy = _public_ad_studio_policy(record.get("policy"))
+    policy = _public_ad_template_generator_policy(record.get("policy"))
     return {
         "models": models,
         "policy_schema": str(model_data.get("policy_schema") or "") if isinstance(model_data, dict) else "",
@@ -2086,18 +2092,18 @@ def _ad_studio_model_catalogue(project_id: str = "") -> dict:
     }
 
 
-def _validated_ad_studio_model_policy(value: object, *, project_id: str) -> dict:
+def _validated_ad_template_generator_model_policy(value: object, *, project_id: str) -> dict:
     """Fail visibly unless every selected route is currently verified by Hermes."""
-    policy = _public_ad_studio_policy(value)
+    policy = _public_ad_template_generator_policy(value)
     stages = policy.get("stages") if isinstance(policy.get("stages"), dict) else {}
     if (
         policy.get("schema") != "schema://hermes.tool-model-policy/v1"
         or policy.get("tool_id") != "ad-template-generator"
-        or not _AD_STUDIO_REQUIRED_MODEL_STAGES.issubset(stages)
-        or set(stages) - (_AD_STUDIO_REQUIRED_MODEL_STAGES | _AD_STUDIO_OPTIONAL_MODEL_STAGES)
+        or not _AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES.issubset(stages)
+        or set(stages) - (_AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES | _AD_TEMPLATE_GENERATOR_OPTIONAL_MODEL_STAGES)
     ):
-        raise _AdStudioSourceError("invalid_model_policy", "Choose a valid Ad Studio model setup.")
-    catalogue = _ad_studio_model_catalogue(project_id)
+        raise _AdTemplateGeneratorSourceError("invalid_model_policy", "Choose a valid Ad Template Generator model setup.")
+    catalogue = _ad_template_generator_model_catalogue(project_id)
     available = {
         (item["provider"], item["model"]): item
         for item in catalogue["models"]
@@ -2111,7 +2117,7 @@ def _validated_ad_studio_model_policy(value: object, *, project_id: str) -> dict
         verified = available.get(route)
         if not verified:
             label = stage_id.replace("-", " ")
-            raise _AdStudioSourceError(
+            raise _AdTemplateGeneratorSourceError(
                 "model_unavailable",
                 f"The selected {label} model is not currently available with verified vision and structured output in Hermes.",
             )
@@ -2129,16 +2135,17 @@ def _validated_ad_studio_model_policy(value: object, *, project_id: str) -> dict
 
 
 @app.get("/api/ad-studio/models")
-def ad_studio_models():
+@app.get("/api/ad-template-generator/models")
+def ad_template_generator_models():
     project_id = _clean_project_id(request.args.get("project_id")) if request.args.get("project_id") else ""
     try:
-        data = _ad_studio_model_catalogue(project_id)
+        data = _ad_template_generator_model_catalogue(project_id)
     except Exception as error:
         return _hermes_error(error)
     if not data["models"] or not data["policy"]:
-        return jsonify({"error": "Hermes has no verified Ad Studio model setup available."}), 503
+        return jsonify({"error": "Hermes has no verified Ad Template Generator model setup available."}), 503
     return jsonify(data)
-def _public_ad_studio_model_profile(run: dict) -> dict:
+def _public_ad_template_generator_model_profile(run: dict) -> dict:
     """Expose only the immutable provider/model choices frozen for this run."""
     policy = run.get("model_policy") if isinstance(run.get("model_policy"), dict) else {}
     stages = policy.get("stages") if isinstance(policy.get("stages"), dict) else {}
@@ -2170,10 +2177,10 @@ def _public_ad_studio_model_profile(run: dict) -> dict:
     } if roles else {}
 
 
-def _exact_clone_event_layers(value: object) -> list[dict]:
+def _source_matched_event_layers(value: object) -> list[dict]:
     """Project only layer metadata explicitly recorded in durable evidence."""
     if isinstance(value, list):
-        return _public_ad_studio_layers(value)
+        return _public_ad_template_generator_layers(value)
     if not isinstance(value, dict):
         return []
     layers = []
@@ -2190,10 +2197,10 @@ def _exact_clone_event_layers(value: object) -> list[dict]:
                 "placement": placement,
                 "editable": bool(raw.get("inputKey")),
             })
-    return _public_ad_studio_layers(layers)
+    return _public_ad_template_generator_layers(layers)
 
 
-def _exact_clone_event_model_profile(events: list[dict]) -> dict:
+def _source_matched_event_model_profile(events: list[dict]) -> dict:
     """Adapt the immutable profile snapshot recorded with command.accepted."""
     snapshot = {}
     for event in events:
@@ -2228,8 +2235,8 @@ def _exact_clone_event_model_profile(events: list[dict]) -> dict:
     } if roles else {}
 
 
-def _exact_clone_event_output(run: dict, events: object, model_profile: dict) -> dict:
-    """Recover a bounded monitor view from already-durable exact-clone events."""
+def _source_matched_event_output(run: dict, events: object, model_profile: dict) -> dict:
+    """Recover a bounded monitor view from already-durable source-matched events."""
     if not isinstance(events, list):
         return {}
     ordered = [item for item in events[:1000] if isinstance(item, dict)]
@@ -2273,7 +2280,7 @@ def _exact_clone_event_output(run: dict, events: object, model_profile: dict) ->
         # Emitted only after the reciprocal image is in the public preview root.
         if kind in {"aspect-reference.started", "aspect-reference.completed"}:
             reference_available = True
-        event_layers = _exact_clone_event_layers(data.get("layers")) if kind in process_kinds else []
+        event_layers = _source_matched_event_layers(data.get("layers")) if kind in process_kinds else []
         if event_layers:
             layers = event_layers
         if kind == "final-review.completed":
@@ -2309,7 +2316,7 @@ def _exact_clone_event_output(run: dict, events: object, model_profile: dict) ->
                 match = re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", name, re.IGNORECASE)
                 if not match:
                     continue
-                artifact = _public_ad_studio_review_artifact({
+                artifact = _public_ad_template_generator_review_artifact({
                     "name": name, "placement": match.group(1).lower(), "kind": "qa-source-filled",
                 }, str(run.get("id") or run.get("run_id") or ""))
                 if artifact:
@@ -2322,7 +2329,7 @@ def _exact_clone_event_output(run: dict, events: object, model_profile: dict) ->
                 )
                 if not match:
                     continue
-                artifact = _public_ad_studio_review_artifact({
+                artifact = _public_ad_template_generator_review_artifact({
                     "name": name, "placement": match.group(1).lower(), "kind": match.group(2).lower(),
                     "view": match.group(2).lower(),
                 }, str(run.get("id") or run.get("run_id") or ""))
@@ -2354,7 +2361,7 @@ def _exact_clone_event_output(run: dict, events: object, model_profile: dict) ->
     summary = {"previews": latest_previews, "diffs": latest_diffs}
     source_values = (run.get("payload") or {}).get("sources") if isinstance(run.get("payload"), dict) else []
     source_item = source_values[0] if isinstance(source_values, list) and source_values and isinstance(source_values[0], dict) else {}
-    source_url = _ad_studio_source_url(run_id, str(source_item.get("name") or "")) if source_available else None
+    source_url = _ad_template_generator_source_url(run_id, str(source_item.get("name") or "")) if source_available else None
     if source_url:
         summary["source"] = {
             "name": urllib.parse.unquote(source_url.rsplit("/", 1)[-1]), "kind": "original-source",
@@ -2367,7 +2374,7 @@ def _exact_clone_event_output(run: dict, events: object, model_profile: dict) ->
         }]
     if latest_scores or latest_reviewers:
         summary["scores"] = {**latest_scores, **({"reviewers": latest_reviewers} if latest_reviewers else {})}
-    profile = model_profile or _exact_clone_event_model_profile(ordered)
+    profile = model_profile or _source_matched_event_model_profile(ordered)
     if profile:
         summary["model_profile"] = profile
     if layers:
@@ -2375,7 +2382,7 @@ def _exact_clone_event_output(run: dict, events: object, model_profile: dict) ->
     iterations = [iteration_records[key] for key in sorted(iteration_records)[-30:]]
     if iterations:
         summary["iterations"] = len(iterations)
-    public_summary = _public_ad_studio_review_summary(summary, run_id)
+    public_summary = _public_ad_template_generator_review_summary(summary, run_id)
     return {
         "process": "exact-clone",
         **({"review_summary": public_summary} if public_summary else {}),
@@ -2384,9 +2391,9 @@ def _exact_clone_event_output(run: dict, events: object, model_profile: dict) ->
     }
 
 
-def _read_ad_studio_run_events(run_id: str) -> list[dict]:
+def _read_ad_template_generator_run_events(run_id: str) -> list[dict]:
     """Read the current durable SSE backlog with strict time/size bounds."""
-    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+    if not AD_TEMPLATE_GENERATOR_RUN_ID.fullmatch(run_id):
         return []
     url = hermes_base() + _tool_run_path(run_id, "/events") + "?" + urllib.parse.urlencode({"after": -1})
     headers = {"Accept": "text/event-stream"}
@@ -2421,7 +2428,7 @@ def _read_ad_studio_run_events(run_id: str) -> list[dict]:
     return events
 
 
-def _public_ad_studio_final_review(value: object) -> dict:
+def _public_ad_template_generator_final_review(value: object) -> dict:
     """Project only the bounded reviewer evidence the monitor renders."""
     if not isinstance(value, dict):
         return {}
@@ -2440,7 +2447,7 @@ def _public_ad_studio_final_review(value: object) -> dict:
     return {"decision": decision, "reviewers": reviewers} if reviewers or decision else {}
 
 
-def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "", events: object = None) -> dict:
+def _public_ad_template_generator_run(run: dict, *, title: str = "", project_id: str = "", events: object = None) -> dict:
     """Project Hermes state for Frank's internal operator monitor."""
     now = int(time.time())
     payload = run.get("payload") if isinstance(run.get("payload"), dict) else {}
@@ -2449,20 +2456,20 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "", e
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
     run_id = str(run.get("id") or run.get("run_id") or "")
-    model_profile = _public_ad_studio_model_profile(run)
+    model_profile = _public_ad_template_generator_model_profile(run)
     if not model_profile and isinstance(events, list):
-        model_profile = _exact_clone_event_model_profile(events[:1000])
+        model_profile = _source_matched_event_model_profile(events[:1000])
     safe_output = {key: output.get(key) for key in (
         "iterations", "process",
     ) if key in output}
-    public_final_review = _public_ad_studio_final_review(output.get("final_review"))
+    public_final_review = _public_ad_template_generator_final_review(output.get("final_review"))
     if public_final_review:
         safe_output["final_review"] = public_final_review
-    review_value = output.get("review_summary") if isinstance(output.get("review_summary"), dict) else _exact_clone_review_summary(output, model_profile)
-    review_summary = _public_ad_studio_review_summary(review_value, run_id)
+    review_value = output.get("review_summary") if isinstance(output.get("review_summary"), dict) else _source_matched_review_summary(output, model_profile)
+    review_summary = _public_ad_template_generator_review_summary(review_value, run_id)
     if review_summary:
         safe_output["review_summary"] = review_summary
-    public_import = _public_ad_studio_import(output.get("import"))
+    public_import = _public_ad_template_generator_import(output.get("import"))
     if public_import:
         safe_output["import"] = public_import
     previews = []
@@ -2472,13 +2479,13 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "", e
         name = str(item.get("name") or "").strip()
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", name):
             continue
-        previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-studio/runs/{run.get('run_id') or run.get('id')}/artifacts/{urllib.parse.quote(name, safe='')}"})
+        previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-template-generator/runs/{run.get('run_id') or run.get('id')}/artifacts/{urllib.parse.quote(name, safe='')}"})
     if previews:
         safe_output["previews"] = previews
     if "iterations" in output:
-        safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"), str(run.get("run_id") or run.get("id") or ""))
+        safe_output["iterations"] = _public_ad_template_generator_generations(output.get("iterations"), str(run.get("run_id") or run.get("id") or ""))
     if str(run.get("status") or "") not in {"ready_for_review", "completed", "approved"}:
-        event_output = _exact_clone_event_output(run, events, model_profile)
+        event_output = _source_matched_event_output(run, events, model_profile)
         for key, value in event_output.items():
             if key not in safe_output or not safe_output[key]:
                 safe_output[key] = value
@@ -2488,7 +2495,7 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "", e
         "media_type": str(source.get("media_type") or ""),
         "origin": str(source.get("origin") or ""),
     }
-    source_url = _ad_studio_source_url(run_id, source_public["name"])
+    source_url = _ad_template_generator_source_url(run_id, source_public["name"])
     if source_url:
         source_public["url"] = source_url
     raw_usage = output.get("usage") if isinstance(output.get("usage"), dict) else {}
@@ -2529,12 +2536,13 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "", e
 
 
 @app.get("/api/ad-studio/architecture")
-def ad_studio_architecture():
+@app.get("/api/ad-template-generator/architecture")
+def ad_template_generator_architecture():
     validated = _archify_build_validated()
     return jsonify({
         "available": validated, "source": "archify",
         "read_only": True, "validated": validated,
-        "artifact_url": "/api/ad-studio/architecture/artifact" if validated else None,
+        "artifact_url": "/api/ad-template-generator/architecture/artifact" if validated else None,
         "message": "Archify build validation or its content binding is unavailable." if not validated else "Archify typed-IR artifact is validated and available.",
     })
 
@@ -2561,14 +2569,16 @@ def _archify_build_validated() -> bool:
 
 
 @app.get("/api/ad-studio/architecture/artifact")
-def ad_studio_architecture_artifact():
+@app.get("/api/ad-template-generator/architecture/artifact")
+def ad_template_generator_architecture_artifact():
     if not _archify_build_validated():
         abort(404, "Archify artifact is not available")
     return send_file(ARCHIFY_ARTIFACT, mimetype="text/html", max_age=0)
 
 
 @app.get("/api/ad-studio/implementation-activity")
-def ad_studio_implementation_activity():
+@app.get("/api/ad-template-generator/implementation-activity")
+def ad_template_generator_implementation_activity():
     # AgentTrail shares only Frank's loopback namespace. Frank proxies one read
     # endpoint and never exposes AgentTrail's hook/setup/control surfaces.
     if not AGENTTRAIL_URL:
@@ -2655,7 +2665,7 @@ def agenttrail_proxy(agenttrail_path: str):
     return Response(body, status=200, content_type=content_type, headers={"Cache-Control": "no-store"})
 
 
-def _ad_studio_source(attachment: dict) -> dict:
+def _ad_template_generator_source(attachment: dict) -> dict:
     target = _upload_target(attachment["id"])
     if target is None or not target.is_file():
         abort(400, "source image is no longer available")
@@ -2668,7 +2678,7 @@ def _ad_studio_source(attachment: dict) -> dict:
     }
 
 
-_AD_STUDIO_IMAGE_EXTENSIONS = MappingProxyType({
+_AD_TEMPLATE_GENERATOR_IMAGE_EXTENSIONS = MappingProxyType({
     ".avif": "image/avif",
     ".bmp": "image/bmp",
     ".gif": "image/gif",
@@ -2683,39 +2693,39 @@ _AD_STUDIO_IMAGE_EXTENSIONS = MappingProxyType({
 })
 
 
-class _AdStudioSourceError(ValueError):
+class _AdTemplateGeneratorSourceError(ValueError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
 
 
-class _AdStudioBriefError(ValueError):
+class _AdTemplateGeneratorBriefError(ValueError):
     def __init__(self, code: str, message: str, status: int = 400):
         super().__init__(message)
         self.code = code
         self.status = status
 
 
-def _ad_studio_brief(raw: object) -> str:
+def _ad_template_generator_brief(raw: object) -> str:
     """Validate without rewriting the immutable UTF-8 generator brief."""
     if raw is None:
         return ""
     if not isinstance(raw, str):
-        raise _AdStudioBriefError("brief_invalid", "The generator brief must be text.")
-    if len(raw) > AD_STUDIO_MAX_BRIEF_CHARACTERS:
-        raise _AdStudioBriefError(
+        raise _AdTemplateGeneratorBriefError("brief_invalid", "The generator brief must be text.")
+    if len(raw) > AD_TEMPLATE_GENERATOR_MAX_BRIEF_CHARACTERS:
+        raise _AdTemplateGeneratorBriefError(
             "brief_too_long",
-            f"Brief is {len(raw):,} characters. Keep it to {AD_STUDIO_MAX_BRIEF_CHARACTERS:,} or fewer; Frank did not shorten it.",
+            f"Brief is {len(raw):,} characters. Keep it to {AD_TEMPLATE_GENERATOR_MAX_BRIEF_CHARACTERS:,} or fewer; Frank did not shorten it.",
             413,
         )
     try:
         raw.encode("utf-8", errors="strict")
     except UnicodeEncodeError as error:
-        raise _AdStudioBriefError("brief_invalid_utf8", "The generator brief must be valid UTF-8 text.") from error
+        raise _AdTemplateGeneratorBriefError("brief_invalid_utf8", "The generator brief must be valid UTF-8 text.") from error
     return raw
 
 
-def _ad_studio_safe_filename(raw: object, index: int) -> str:
+def _ad_template_generator_safe_filename(raw: object, index: int) -> str:
     """Return one display-safe basename; staging prefixes prevent collisions."""
     basename = Path(str(raw or "").replace("\\", "/")).name.strip()
     if not basename or basename in {".", ".."}:
@@ -2726,7 +2736,7 @@ def _ad_studio_safe_filename(raw: object, index: int) -> str:
     return f"{stem[:96]}{suffix[:12]}"
 
 
-def _ad_studio_signature_matches(media_type: str, header: bytes) -> bool:
+def _ad_template_generator_signature_matches(media_type: str, header: bytes) -> bool:
     if media_type == "image/png":
         return header.startswith(b"\x89PNG\r\n\x1a\n")
     if media_type == "image/jpeg":
@@ -2750,35 +2760,35 @@ def _ad_studio_signature_matches(media_type: str, header: bytes) -> bool:
     return False
 
 
-def _validate_ad_studio_attachment(attachment: dict) -> dict:
+def _validate_ad_template_generator_attachment(attachment: dict) -> dict:
     target = _upload_target(str(attachment.get("id") or ""))
     if target is None or not target.is_file():
-        raise _AdStudioSourceError("source_missing", "source image is no longer available")
+        raise _AdTemplateGeneratorSourceError("source_missing", "source image is no longer available")
     size = target.stat().st_size
     if size <= 0:
-        raise _AdStudioSourceError("empty_file", "source image is empty")
-    if size > AD_STUDIO_MAX_SOURCE_BYTES:
-        raise _AdStudioSourceError("file_too_large", "source image exceeds the per-file size limit")
+        raise _AdTemplateGeneratorSourceError("empty_file", "source image is empty")
+    if size > AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES:
+        raise _AdTemplateGeneratorSourceError("file_too_large", "source image exceeds the per-file size limit")
     suffix = target.suffix.lower()
-    media_type = _AD_STUDIO_IMAGE_EXTENSIONS.get(suffix)
+    media_type = _AD_TEMPLATE_GENERATOR_IMAGE_EXTENSIONS.get(suffix)
     if not media_type:
-        raise _AdStudioSourceError("unsupported_type", "source must use a supported image file type")
+        raise _AdTemplateGeneratorSourceError("unsupported_type", "source must use a supported image file type")
     declared_type = str(attachment.get("type") or "").lower().split(";", 1)[0].strip()
     if declared_type and declared_type not in {media_type, "application/octet-stream"}:
-        raise _AdStudioSourceError("type_mismatch", "source image type does not match its filename")
+        raise _AdTemplateGeneratorSourceError("type_mismatch", "source image type does not match its filename")
     try:
         with target.open("rb") as source_file:
             header = source_file.read(64)
     except OSError as error:
-        raise _AdStudioSourceError("source_unreadable", "source image could not be read") from error
-    if not _ad_studio_signature_matches(media_type, header):
-        raise _AdStudioSourceError("invalid_image", "source image content does not match its file type")
+        raise _AdTemplateGeneratorSourceError("source_unreadable", "source image could not be read") from error
+    if not _ad_template_generator_signature_matches(media_type, header):
+        raise _AdTemplateGeneratorSourceError("invalid_image", "source image content does not match its file type")
     clean = dict(attachment)
     clean.update({"name": target.name, "size": size, "type": media_type})
     return clean
 
 
-def _remove_ad_studio_staging(attachment: dict) -> None:
+def _remove_ad_template_generator_staging(attachment: dict) -> None:
     target = _upload_target(str(attachment.get("id") or ""))
     if target is None:
         return
@@ -2796,16 +2806,16 @@ def _remove_ad_studio_staging(attachment: dict) -> None:
         parent = parent.parent
 
 
-def _remove_raw_ad_studio_attachments(raw_attachments: list) -> None:
+def _remove_raw_ad_template_generator_attachments(raw_attachments: list) -> None:
     for raw_attachment in raw_attachments:
         if not isinstance(raw_attachment, dict):
             continue
         cleaned = _clean_atts([raw_attachment])
         if cleaned:
-            _remove_ad_studio_staging(cleaned[0])
+            _remove_ad_template_generator_staging(cleaned[0])
 
 
-def _start_ad_studio_source_run(
+def _start_ad_template_generator_source_run(
     source_item: dict,
     *,
     total_items: int,
@@ -2826,7 +2836,7 @@ def _start_ad_studio_source_run(
         "brief": brief,
         "brief_sha256": hashlib.sha256(brief.encode("utf-8")).hexdigest(),
         "placements": ["feed", "story"],
-        "sources": [_ad_studio_source(attachment)],
+        "sources": [_ad_template_generator_source(attachment)],
         "project_context": _project_context(project),
     }
     request_payload = {
@@ -2843,11 +2853,11 @@ def _start_ad_studio_source_run(
         data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=8)
         run_data = data.get("run") if isinstance(data.get("run"), dict) else data
         run_id = str(run_data.get("id") or run_data.get("run_id") or "")
-        if not AD_STUDIO_RUN_ID.fullmatch(run_id):
-            raise _AdStudioSourceError("invalid_hermes_response", "Hermes did not return a valid Tool run id")
-        run = _public_ad_studio_run(run_data, title=f"Ad Studio · {name}", project_id=project_id)
+        if not AD_TEMPLATE_GENERATOR_RUN_ID.fullmatch(run_id):
+            raise _AdTemplateGeneratorSourceError("invalid_hermes_response", "Hermes did not return a valid Tool run id")
+        run = _public_ad_template_generator_run(run_data, title=f"Ad Template Generator · {name}", project_id=project_id)
         return run, {"index": index, "name": attachment["name"], "status": "accepted", "run": run}
-    except _AdStudioSourceError as error:
+    except _AdTemplateGeneratorSourceError as error:
         return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": error.code, "message": str(error)}}
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")[:1200]
@@ -2861,17 +2871,18 @@ def _start_ad_studio_source_run(
     except Exception as error:
         return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": "hermes_unavailable", "message": f"Could not reach Hermes: {str(error).split(chr(10))[0][:180]}"}}
     finally:
-        _remove_ad_studio_staging(attachment)
+        _remove_ad_template_generator_staging(attachment)
 
 
 def _tool_run_path(run_id: str, suffix: str = "") -> str:
-    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+    if not AD_TEMPLATE_GENERATOR_RUN_ID.fullmatch(run_id):
         abort(404)
     return f"/v1/tool-runs/{urllib.parse.quote(run_id, safe='')}{suffix}"
 
 
 @app.post("/api/ad-studio/runs")
-def ad_studio_run_create():
+@app.post("/api/ad-template-generator/runs")
+def ad_template_generator_run_create():
     """Start one durable canonical Feed + Story Hermes run per source image."""
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict):
@@ -2879,55 +2890,55 @@ def ad_studio_run_create():
     raw_attachments = body.get("attachments")
     if not isinstance(raw_attachments, list) or not raw_attachments:
         abort(400, "choose at least one source image")
-    if len(raw_attachments) > AD_STUDIO_MAX_SOURCES:
-        _remove_raw_ad_studio_attachments(raw_attachments)
-        abort(413, f"choose no more than {AD_STUDIO_MAX_SOURCES} source images")
+    if len(raw_attachments) > AD_TEMPLATE_GENERATOR_MAX_SOURCES:
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
+        abort(413, f"choose no more than {AD_TEMPLATE_GENERATOR_MAX_SOURCES} source images")
 
     try:
-        brief = _ad_studio_brief(body.get("brief"))
-    except _AdStudioBriefError as error:
-        _remove_raw_ad_studio_attachments(raw_attachments)
+        brief = _ad_template_generator_brief(body.get("brief"))
+    except _AdTemplateGeneratorBriefError as error:
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
         return jsonify({
             "ok": False,
             "error": {"code": error.code, "message": str(error)},
-            "limit": AD_STUDIO_MAX_BRIEF_CHARACTERS,
+            "limit": AD_TEMPLATE_GENERATOR_MAX_BRIEF_CHARACTERS,
         }), error.status
 
     project_id = _clean_project_id(body.get("project_id")) if body.get("project_id") else ""
     project = _project_store.get_project(project_id) if project_id else None
     if not project:
-        _remove_raw_ad_studio_attachments(raw_attachments)
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
         abort(404, "project not found")
 
     try:
-        model_policy = _validated_ad_studio_model_policy(
+        model_policy = _validated_ad_template_generator_model_policy(
             body.get("model_policy_override"), project_id=project_id,
         )
-    except _AdStudioSourceError as error:
-        _remove_raw_ad_studio_attachments(raw_attachments)
+    except _AdTemplateGeneratorSourceError as error:
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
         return jsonify({"error": str(error), "code": error.code}), 422
     except Exception as error:
-        _remove_raw_ad_studio_attachments(raw_attachments)
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
         return _hermes_error(error)
 
     sources = []
     results = []
     total_size = 0
     for index, raw_attachment in enumerate(raw_attachments):
-        name = _ad_studio_safe_filename(raw_attachment.get("name") if isinstance(raw_attachment, dict) else "", index)
+        name = _ad_template_generator_safe_filename(raw_attachment.get("name") if isinstance(raw_attachment, dict) else "", index)
         cleaned = _clean_atts([raw_attachment]) if isinstance(raw_attachment, dict) else []
         attachment = cleaned[0] if cleaned else None
         try:
             if attachment is None:
-                raise _AdStudioSourceError("source_missing", "source image is no longer available")
-            attachment = _validate_ad_studio_attachment(attachment)
+                raise _AdTemplateGeneratorSourceError("source_missing", "source image is no longer available")
+            attachment = _validate_ad_template_generator_attachment(attachment)
             total_size += attachment["size"]
-            if total_size > AD_STUDIO_MAX_BATCH_BYTES:
-                raise _AdStudioSourceError("batch_too_large", "source images exceed the batch size limit")
+            if total_size > AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES:
+                raise _AdTemplateGeneratorSourceError("batch_too_large", "source images exceed the batch size limit")
             sources.append({"index": index, "attachment": attachment})
-        except _AdStudioSourceError as error:
+        except _AdTemplateGeneratorSourceError as error:
             if attachment is not None:
-                _remove_ad_studio_staging(attachment)
+                _remove_ad_template_generator_staging(attachment)
             results.append({"index": index, "name": name, "status": "rejected", "error": {"code": error.code, "message": str(error)}})
 
     common_name = _clean_project_text(body.get("name"), 60)
@@ -2935,9 +2946,9 @@ def ad_studio_run_create():
     if sources:
         total_items = len(sources) + len(results)
         worker_count = min(4, len(sources))
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ad-studio-start") as executor:
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ad-template-generator-start") as executor:
             outcomes = executor.map(
-                lambda source_item: _start_ad_studio_source_run(
+                lambda source_item: _start_ad_template_generator_source_run(
                     source_item,
                     total_items=total_items,
                     common_name=common_name,
@@ -2977,7 +2988,8 @@ def ad_studio_run_create():
 
 
 @app.get("/api/ad-studio/runs")
-def ad_studio_run_list():
+@app.get("/api/ad-template-generator/runs")
+def ad_template_generator_run_list():
     query = urllib.parse.urlencode({
         "tool_id": "ad-template-generator",
         "project_id": str(request.args.get("project_id") or ""),
@@ -2988,23 +3000,25 @@ def ad_studio_run_list():
     except Exception as error:
         return _hermes_error(error)
     raw_runs = data.get("runs") if isinstance(data.get("runs"), list) else data.get("data", [])
-    return jsonify({"runs": [_public_ad_studio_run(item) for item in raw_runs if isinstance(item, dict)]})
+    return jsonify({"runs": [_public_ad_template_generator_run(item) for item in raw_runs if isinstance(item, dict)]})
 
 
 @app.get("/api/ad-studio/runs/<run_id>")
-def ad_studio_run_get(run_id: str):
+@app.get("/api/ad-template-generator/runs/<run_id>")
+def ad_template_generator_run_get(run_id: str):
     """Read authoritative Tool-run status without creating a Hub chat."""
     try:
         data = hermes_request(_tool_run_path(run_id), timeout=8)
     except Exception as error:
         return _hermes_error(error)
     run = data.get("run") if isinstance(data.get("run"), dict) else data
-    events = _read_ad_studio_run_events(run_id) if isinstance(run, dict) and str(run.get("status") or "") not in {"ready_for_review", "completed", "approved"} else []
-    return jsonify({"run": _public_ad_studio_run(run, events=events)})
+    events = _read_ad_template_generator_run_events(run_id) if isinstance(run, dict) and str(run.get("status") or "") not in {"ready_for_review", "completed", "approved"} else []
+    return jsonify({"run": _public_ad_template_generator_run(run, events=events)})
 
 
 @app.get("/api/ad-studio/runs/<run_id>/events")
-def ad_studio_run_events(run_id: str):
+@app.get("/api/ad-template-generator/runs/<run_id>/events")
+def ad_template_generator_run_events(run_id: str):
     after = request.args.get("after", type=int)
     if after is None:
         try:
@@ -3031,7 +3045,8 @@ def ad_studio_run_events(run_id: str):
 
 
 @app.get("/api/ad-studio/runs/<run_id>/artifacts/<name>")
-def ad_studio_run_artifact(run_id: str, name: str):
+@app.get("/api/ad-template-generator/runs/<run_id>/artifacts/<name>")
+def ad_template_generator_run_artifact(run_id: str, name: str):
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", name):
         abort(404)
     url = hermes_base() + _tool_run_path(run_id, f"/artifacts/{urllib.parse.quote(name, safe='')}")
@@ -3120,7 +3135,7 @@ def ad_template_generator_release_artifact(release_id: str, artifact: str):
         abort(404)
 
 
-def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):
+def _proxy_ad_template_generator_action(run_id: str, suffix: str, allowed: set[str]):
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict) or any(key not in allowed for key in body):
         abort(400, "invalid action")
@@ -3129,7 +3144,7 @@ def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):
     except Exception as error:
         return _hermes_error(error)
     run = data.get("run") if isinstance(data.get("run"), dict) else data
-    return jsonify({"ok": True, "run": _public_ad_studio_run(run)})
+    return jsonify({"ok": True, "run": _public_ad_template_generator_run(run)})
 
 
 def _number_from(*values):
@@ -3146,23 +3161,27 @@ def _number_from(*values):
 
 
 @app.post("/api/ad-studio/runs/<run_id>/retry")
-def ad_studio_run_retry(run_id: str):
-    return _proxy_ad_studio_action(run_id, "/retry", {"from_stage"})
+@app.post("/api/ad-template-generator/runs/<run_id>/retry")
+def ad_template_generator_run_retry(run_id: str):
+    return _proxy_ad_template_generator_action(run_id, "/retry", {"from_stage"})
 
 
 @app.post("/api/ad-studio/runs/<run_id>/cancel")
-def ad_studio_run_cancel(run_id: str):
-    return _proxy_ad_studio_action(run_id, "/cancel", {"reason"})
+@app.post("/api/ad-template-generator/runs/<run_id>/cancel")
+def ad_template_generator_run_cancel(run_id: str):
+    return _proxy_ad_template_generator_action(run_id, "/cancel", {"reason"})
 
 
 @app.post("/api/ad-studio/runs/<run_id>/approve")
-def ad_studio_run_approve(run_id: str):
+@app.post("/api/ad-template-generator/runs/<run_id>/approve")
+def ad_template_generator_run_approve(run_id: str):
     """Forward the operator's explicit template publication decision to Hermes."""
-    return _proxy_ad_studio_action(run_id, "/approve", set())
+    return _proxy_ad_template_generator_action(run_id, "/approve", set())
 
 
 @app.post("/api/ad-studio/runs/<run_id>/request-changes")
-def ad_studio_run_request_changes(run_id: str):
+@app.post("/api/ad-template-generator/runs/<run_id>/request-changes")
+def ad_template_generator_run_request_changes(run_id: str):
     body = request.get_json(silent=True) or {}
     instructions = str(body.get("instructions") or "").strip() if isinstance(body, dict) else ""
     if set(body) != {"instructions"} or not instructions or len(instructions) > 2_000:
@@ -3172,11 +3191,12 @@ def ad_studio_run_request_changes(run_id: str):
     except Exception as error:
         return _hermes_error(error)
     run = data.get("run") if isinstance(data.get("run"), dict) else data
-    return jsonify({"ok": True, "run": _public_ad_studio_run(run)})
+    return jsonify({"ok": True, "run": _public_ad_template_generator_run(run)})
 
 
 @app.post("/api/ad-studio/runs/<run_id>/discard")
-def ad_studio_run_discard(run_id: str):
+@app.post("/api/ad-template-generator/runs/<run_id>/discard")
+def ad_template_generator_run_discard(run_id: str):
     body = request.get_json(silent=True) or {}
     reason = str(body.get("reason") or "").strip() if isinstance(body, dict) else ""
     if not isinstance(body, dict) or any(key != "reason" for key in body) or len(reason) > 1_000:
@@ -3186,7 +3206,7 @@ def ad_studio_run_discard(run_id: str):
     except Exception as error:
         return _hermes_error(error)
     run = data.get("run") if isinstance(data.get("run"), dict) else data
-    return jsonify({"ok": True, "run": _public_ad_studio_run(run)})
+    return jsonify({"ok": True, "run": _public_ad_template_generator_run(run)})
 
 
 def _hermes_chat_stream(chat_id: str, payload: dict, *, read_timeout: float | None = None):

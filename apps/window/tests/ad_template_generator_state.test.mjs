@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { groupAdStudioRuns, mergeAdStudioRun, mergeAdStudioRunList, mergeIterationHistory, readyAdStudioReviewRuns, runHistoryGroupKey, runListRenderSignature, runTimestamp } from "../web/js/ad-studio-state.js";
+import { groupAdTemplateGeneratorRuns, mergeAdTemplateGeneratorRun, mergeAdTemplateGeneratorRunList, mergeIterationHistory, readyAdTemplateGeneratorReviewRuns, runHistoryGroupKey, runListRenderSignature, runTimestamp } from "../web/js/ad-template-generator-state.js";
 
 test("a thin run-list refresh cannot erase populated iteration history", () => {
   const detailed = {
@@ -16,7 +16,7 @@ test("a thin run-list refresh cannot erase populated iteration history", () => {
   };
   const summary = { id: "trun-history", status: "completed", stage: "live", updated_at: 11, output: {} };
 
-  const merged = mergeAdStudioRun(detailed, summary);
+  const merged = mergeAdTemplateGeneratorRun(detailed, summary);
 
   assert.equal(merged.status, "completed");
   assert.equal(merged.output.iterations.length, 1);
@@ -39,7 +39,7 @@ test("iteration event snapshots enrich history without dropping earlier evidence
 });
 
 test("partial detail snapshots union artifacts and preserve nested evidence", () => {
-  const merged = mergeAdStudioRun(
+  const merged = mergeAdTemplateGeneratorRun(
     {
       id: "trun-evidence",
       updated_at: 10,
@@ -77,13 +77,13 @@ test("iteration records without a valid iteration number cannot overwrite one an
 
 test("terminal replay followed by a thin list refresh keeps recorded iterations", () => {
   const selected = { id: "trun-terminal", status: "running", updated_at: 30, output: {} };
-  const afterReplay = mergeAdStudioRun(selected, {
+  const afterReplay = mergeAdTemplateGeneratorRun(selected, {
     id: "trun-terminal",
     status: "running",
     updated_at: 31,
     output: { iterations: [{ iteration: 1, decision: "revise", comparison: { score: 8.9 } }] },
   });
-  const afterTerminalRefresh = mergeAdStudioRun(afterReplay, { id: "trun-terminal", status: "failed", updated_at: 32, output: {} });
+  const afterTerminalRefresh = mergeAdTemplateGeneratorRun(afterReplay, { id: "trun-terminal", status: "failed", updated_at: 32, output: {} });
 
   assert.equal(afterTerminalRefresh.status, "failed");
   assert.equal(afterTerminalRefresh.output.iterations.length, 1);
@@ -94,7 +94,7 @@ test("an older polling response cannot regress current run state", () => {
   const current = { id: "trun-history", status: "completed", stage: "live", updated_at: 20, source: { url: "/current.png" }, output: { iterations: [{ iteration: 1, comparison: { score: 9.6 } }] } };
   const stale = { id: "trun-history", status: "running", stage: "render", updated_at: 15, source: { url: "" }, output: { iterations: [{ iteration: 1, comparison: { score: 8.2 } }] } };
 
-  const merged = mergeAdStudioRun(current, stale);
+  const merged = mergeAdTemplateGeneratorRun(current, stale);
 
   assert.equal(merged.status, "completed");
   assert.equal(merged.stage, "live");
@@ -121,7 +121,7 @@ test("an equal-second delayed snapshot cannot overwrite event-derived state", ()
     output: { iterations: [{ iteration: 1, decision: "revise", comparison: { score: 8.0 }, previews: [{ url: "/stale.png" }] }] },
   };
 
-  const merged = mergeAdStudioRun(eventState, delayed);
+  const merged = mergeAdTemplateGeneratorRun(eventState, delayed);
 
   assert.equal(merged.stage, "compare");
   assert.equal(merged.progress, 0.7);
@@ -134,7 +134,7 @@ test("an equal-second terminal summary can still advance status", () => {
   const running = { id: "trun-terminal", status: "running", stage: "compare", updated_at: 50, output: { iterations: [{ iteration: 1 }] } };
   const failed = { id: "trun-terminal", status: "failed", stage: "compare", updated_at: 50, output: {} };
 
-  const merged = mergeAdStudioRun(running, failed);
+  const merged = mergeAdTemplateGeneratorRun(running, failed);
 
   assert.equal(merged.status, "failed");
   assert.equal(merged.output.iterations.length, 1);
@@ -152,7 +152,7 @@ test("rich detail changes do not force an unchanged run-list DOM rebuild", () =>
 test("an empty polling snapshot cannot erase durable run history", () => {
   const before = [{ id: "trun-kept", status: "running", created_at: 20, output: { iterations: [{ iteration: 1 }] } }];
 
-  const merged = mergeAdStudioRunList(before, []);
+  const merged = mergeAdTemplateGeneratorRunList(before, []);
 
   assert.deepEqual(merged, before);
 });
@@ -163,7 +163,7 @@ test("a truncated polling page updates returned runs without dropping an older s
     { id: "trun-selected", status: "completed", created_at: 10, output: { iterations: [{ iteration: 1 }] } },
   ];
 
-  const merged = mergeAdStudioRunList(before, [{ id: "trun-new", status: "completed", created_at: 20, updated_at: 30 }]);
+  const merged = mergeAdTemplateGeneratorRunList(before, [{ id: "trun-new", status: "completed", created_at: 20, updated_at: 30 }]);
 
   assert.deepEqual(merged.map((run) => run.id), ["trun-new", "trun-selected"]);
   assert.equal(merged[0].status, "completed");
@@ -176,7 +176,7 @@ test("frozen model roles survive a thin refresh", () => {
     model_profile: { source: "Hermes frozen run policy", roles: [{ role: "builder", provider: "openai-codex", model: "gpt-5.6-sol" }] },
   }];
 
-  const [merged] = mergeAdStudioRunList(before, [{ id: "trun-models", status: "running", updated_at: 11 }]);
+  const [merged] = mergeAdTemplateGeneratorRunList(before, [{ id: "trun-models", status: "running", updated_at: 11 }]);
 
   assert.equal(merged.model_profile.roles[0].model, "gpt-5.6-sol");
 });
@@ -190,7 +190,7 @@ test("run timestamps accept Hermes seconds, milliseconds, numeric strings, and I
 });
 
 test("run lists sort mixed Hermes timestamp formats by latest activity", () => {
-  const merged = mergeAdStudioRunList([], [
+  const merged = mergeAdTemplateGeneratorRunList([], [
     { id: "trun-seconds", created_at: 1_788_500_000, updated_at: 1_788_500_000 },
     { id: "trun-iso", created_at: "2026-09-04T12:00:00Z", updated_at: "2026-09-04T12:00:00Z" },
     { id: "trun-old", created_at: 10, updated_at: 10 },
@@ -208,7 +208,7 @@ test("repeated attempts group by project and source without losing Hermes record
   ];
   const before = JSON.stringify(runs);
 
-  const [group] = groupAdStudioRuns(runs);
+  const [group] = groupAdTemplateGeneratorRuns(runs);
 
   assert.equal(group.primary.id, "trun-current");
   assert.deepEqual(group.history.map((run) => run.id), ["trun-previous"]);
@@ -220,7 +220,7 @@ test("repeated attempts group by project and source without losing Hermes record
 });
 
 test("the newest failed attempt remains current rather than becoming superseded", () => {
-  const [group] = groupAdStudioRuns([
+  const [group] = groupAdTemplateGeneratorRuns([
     { id: "trun-new-failure", project_id: "blockwise", status: "failed", updated_at: 50, source: { name: "retry.png", size: 1, media_type: "image/png" } },
     { id: "trun-old-cancel", project_id: "blockwise", status: "cancelled", updated_at: 40, source: { name: "retry.png", size: 1, media_type: "image/png" } },
   ]);
@@ -237,7 +237,7 @@ test("source groups stay project-scoped and template identity is the source-less
 
   assert.notEqual(runHistoryGroupKey(sourceA), runHistoryGroupKey(sourceB));
   assert.equal(runHistoryGroupKey(templateA), runHistoryGroupKey(templateB));
-  assert.equal(groupAdStudioRuns([sourceA, sourceB, templateA, templateB]).length, 3);
+  assert.equal(groupAdTemplateGeneratorRuns([sourceA, sourceB, templateA, templateB]).length, 3);
 });
 
 test("stable source hashes prevent same-name source collisions when Hermes exposes them", () => {
@@ -245,11 +245,11 @@ test("stable source hashes prevent same-name source collisions when Hermes expos
   const sourceB = { id: "trun-b", project_id: "alpha", source: { name: "same.png", size: 1, media_type: "image/png", sha256: "hash-b" } };
 
   assert.notEqual(runHistoryGroupKey(sourceA), runHistoryGroupKey(sourceB));
-  assert.equal(groupAdStudioRuns([sourceA, sourceB]).length, 2);
+  assert.equal(groupAdTemplateGeneratorRuns([sourceA, sourceB]).length, 2);
 });
 
 test("review queue contains only Hermes-ready runs in recency order", () => {
-  const ready = readyAdStudioReviewRuns([
+  const ready = readyAdTemplateGeneratorReviewRuns([
     { id: "old", status: "ready_for_review", updated_at: 10 },
     { id: "running", status: "running", updated_at: 30 },
     { id: "new", review_status: "ready-for-review", status: "completed", updated_at: 20 },
@@ -263,7 +263,7 @@ test("thin refresh preserves review evidence already displayed", () => {
     id: "review", status: "ready_for_review", updated_at: 10,
     output: { review_summary: { previews: [{ name: "feed.png", url: "/feed.png" }], scores: { overall: 9.8 }, layers: [{ id: "headline" }] } },
   };
-  const merged = mergeAdStudioRun(detailed, { id: "review", status: "ready_for_review", updated_at: 11, output: { review_summary: { scores: { feed: 9.9 } } } });
+  const merged = mergeAdTemplateGeneratorRun(detailed, { id: "review", status: "ready_for_review", updated_at: 11, output: { review_summary: { scores: { feed: 9.9 } } } });
 
   assert.equal(merged.output.review_summary.scores.overall, 9.8);
   assert.equal(merged.output.review_summary.scores.feed, 9.9);

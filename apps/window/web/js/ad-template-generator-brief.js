@@ -1,15 +1,15 @@
-export const AD_STUDIO_BRIEF_MAX_CHARACTERS = 4000;
+export const AD_TEMPLATE_GENERATOR_BRIEF_MAX_CHARACTERS = 4000;
 
-export function adStudioBriefLength(value) {
+export function adTemplateGeneratorBriefLength(value) {
   return Array.from(typeof value === "string" ? value : "").length;
 }
 
-export function adStudioBriefValidation(value) {
+export function adTemplateGeneratorBriefValidation(value) {
   if (typeof value !== "string") {
     return { valid: false, length: 0, message: "The generator brief must be text." };
   }
-  const length = adStudioBriefLength(value);
-  return length <= AD_STUDIO_BRIEF_MAX_CHARACTERS
+  const length = adTemplateGeneratorBriefLength(value);
+  return length <= AD_TEMPLATE_GENERATOR_BRIEF_MAX_CHARACTERS
     ? { valid: true, length, message: "" }
     : {
       valid: false,

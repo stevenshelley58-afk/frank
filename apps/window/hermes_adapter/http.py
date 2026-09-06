@@ -9,7 +9,7 @@ Surfaces are strictly separated:
   ``X-Hermes-Session-Token``; status gating and STT only, via the additive
   path-aware bridge.  Serve URLs are secrets and are never logged.
 
-The Ad Studio gateway API Server Bearer key (``/v1/tool-runs`` contract) is a
+The Ad Template Generator gateway API Server Bearer key (``/v1/tool-runs`` contract) is a
 different credential and is never cross-used here.  Every call uses an
 allowlisted method+path template, a deadline, a response-size cap, and
 redacted error reporting.  Secrets are read at runtime through injectable

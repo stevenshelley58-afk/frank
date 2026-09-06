@@ -8,9 +8,9 @@ from unittest import mock
 import server
 
 
-class AdStudioMonitorTest(unittest.TestCase):
+class AdTemplateGeneratorMonitorTest(unittest.TestCase):
     def test_run_projection_has_durable_source_url_and_replayed_receipt(self):
-        projected = server._public_ad_studio_run({
+        projected = server._public_ad_template_generator_run({
             "run_id": "trun-example",
             "status": "completed",
             "stage": "live",
@@ -22,7 +22,7 @@ class AdStudioMonitorTest(unittest.TestCase):
         })
         self.assertEqual(
             projected["source"]["url"],
-            "/api/ad-studio/runs/trun-example/artifacts/source.png",
+            "/api/ad-template-generator/runs/trun-example/artifacts/source.png",
         )
         self.assertEqual(projected["output"]["import"]["status"], "replayed")
         self.assertEqual(projected["output"]["import"]["template_id"], "template-1")
@@ -32,7 +32,7 @@ class AdStudioMonitorTest(unittest.TestCase):
         )
 
     def test_import_projection_rejects_unsafe_or_mismatched_destinations(self):
-        unsafe = server._public_ad_studio_import({
+        unsafe = server._public_ad_template_generator_import({
             "status": "imported",
             "template_id": "../admin",
             "template_url": "https://evil.example/ad-studio/templates/template-1",
@@ -40,7 +40,7 @@ class AdStudioMonitorTest(unittest.TestCase):
         })
         self.assertEqual(unsafe, {"status": "imported"})
 
-        mismatched = server._public_ad_studio_import({
+        mismatched = server._public_ad_template_generator_import({
             "status": "ready",
             "template_id": "template-1",
             "template_url": "https://blockwise.sale/ad-studio/templates/template-2",
@@ -48,7 +48,7 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertEqual(mismatched, {"status": "ready"})
 
     def test_run_projection_exposes_frozen_models_and_truthful_usage_source(self):
-        projected = server._public_ad_studio_run({
+        projected = server._public_ad_template_generator_run({
             "run_id": "trun-model-profile",
             "model_policy_revision": 35,
             "model_policy": {
@@ -85,7 +85,7 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertEqual(projected["usage"]["estimated_cost_usd"], 0.125)
 
     def test_missing_usage_is_reported_as_missing_not_zero(self):
-        projected = server._public_ad_studio_run({
+        projected = server._public_ad_template_generator_run({
             "run_id": "trun-no-usage",
             "model_policy": {"stages": {"compare": {"primary": {"provider": "openai-codex", "model": "gpt-5.6-luna"}}}},
             "output": {},
@@ -96,7 +96,7 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertIsNone(projected["cost"])
 
     def test_ready_for_review_projection_exposes_only_safe_recorded_evidence(self):
-        projected = server._public_ad_studio_run({
+        projected = server._public_ad_template_generator_run({
             "run_id": "trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "status": "ready_for_review",
             "output": {"review_summary": {
@@ -123,8 +123,8 @@ class AdStudioMonitorTest(unittest.TestCase):
         })
 
         summary = projected["output"]["review_summary"]
-        self.assertEqual(summary["source"]["url"], "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/source.png")
-        self.assertEqual(summary["previews"][0]["url"], "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/final-feed.png")
+        self.assertEqual(summary["source"]["url"], "/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/source.png")
+        self.assertEqual(summary["previews"][0]["url"], "/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/final-feed.png")
         self.assertEqual(summary["scores"]["reviewers"][0], {"label": "Final A", "decision": "pass", "score": 9.8})
         self.assertEqual(summary["smoke_test"]["checks"], [{"label": "Editor opened", "passed": True}])
         self.assertEqual(summary["model_profile"]["roles"], [{"role": "builder", "label": "Builder", "provider": "openai-codex", "model": "gpt-5.6-sol"}])
@@ -134,8 +134,8 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertNotIn("/srv/private", serialized)
         self.assertNotIn("never public", serialized)
 
-    def test_exact_clone_root_output_is_adapted_for_ready_review(self):
-        projected = server._public_ad_studio_run({
+    def test_source_matched_root_output_is_adapted_for_ready_review(self):
+        projected = server._public_ad_template_generator_run({
             "run_id": "trun_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "status": "ready_for_review",
             "model_policy_revision": 41,
@@ -178,9 +178,9 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertEqual(summary["layers"][0]["id"], "headline")
         self.assertEqual(summary["model_profile"]["revision"], 41)
 
-    def test_running_exact_clone_recovers_latest_durable_review_evidence(self):
+    def test_running_source_matched_recovers_latest_durable_review_evidence(self):
         run_id = "trun_cccccccccccccccccccccccccccccccc"
-        projected = server._public_ad_studio_run({
+        projected = server._public_ad_template_generator_run({
             "run_id": run_id,
             "status": "running",
             "stage": "compare",
@@ -224,7 +224,7 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertEqual(summary["source"]["name"], "source.png")
         self.assertEqual(summary["source"]["placement"], "feed")
         self.assertEqual(summary["references"], [{
-            "name": "reference-story.png", "url": f"/api/ad-studio/runs/{run_id}/artifacts/reference-story.png",
+            "name": "reference-story.png", "url": f"/api/ad-template-generator/runs/{run_id}/artifacts/reference-story.png",
             "kind": "reciprocal-image-reference", "placement": "story",
         }])
         self.assertEqual([item["name"] for item in summary["previews"]], ["iteration-02-feed.png", "iteration-02-story.png"])
@@ -236,9 +236,9 @@ class AdStudioMonitorTest(unittest.TestCase):
         self.assertEqual([item["iteration"] for item in projected["output"]["iterations"]], [1, 2])
         self.assertNotIn("/srv/private", json.dumps(projected))
 
-    def test_failed_exact_clone_uses_only_proven_artifacts_and_keeps_error(self):
+    def test_failed_source_matched_uses_only_proven_artifacts_and_keeps_error(self):
         run_id = "trun_dddddddddddddddddddddddddddddddd"
-        projected = server._public_ad_studio_run({
+        projected = server._public_ad_template_generator_run({
             "run_id": run_id,
             "status": "failed",
             "stage": "render",
@@ -272,9 +272,9 @@ class AdStudioMonitorTest(unittest.TestCase):
 
     def test_review_decisions_proxy_exact_hermes_routes_and_bodies(self):
         responses = [
-            ("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", {}),
-            ("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes", {"instructions": "Increase title tracking."}),
-            ("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/discard", {"reason": "Wrong source."}),
+            ("/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", {}),
+            ("/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes", {"instructions": "Increase title tracking."}),
+            ("/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/discard", {"reason": "Wrong source."}),
         ]
         with mock.patch.object(server, "hermes_request", return_value={"run_id": "trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", "status": "approved"}) as request_mock:
             client = server.app.test_client()
@@ -293,27 +293,27 @@ class AdStudioMonitorTest(unittest.TestCase):
 
     def test_review_decisions_fail_closed_on_invalid_operator_input(self):
         client = server.app.test_client()
-        self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", json={"force": True}).status_code, 400)
-        self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes", json={"instructions": ""}).status_code, 400)
-        self.assertEqual(client.post("/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/discard", json={"reason": "x" * 1_001}).status_code, 400)
+        self.assertEqual(client.post("/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve", json={"force": True}).status_code, 400)
+        self.assertEqual(client.post("/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes", json={"instructions": ""}).status_code, 400)
+        self.assertEqual(client.post("/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/discard", json={"reason": "x" * 1_001}).status_code, 400)
 
     def test_api_validation_errors_reach_the_operator_as_json_messages(self):
         client = server.app.test_client()
         response = client.post(
-            "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes",
+            "/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/request-changes",
             json={"instructions": ""},
         )
         self.assertEqual(response.status_code, 400)
         self.assertIn("change instructions", response.get_json()["error"]["message"])
         invalid_action = client.post(
-            "/api/ad-studio/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve",
+            "/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/approve",
             json={"force": True},
         )
         self.assertEqual(invalid_action.status_code, 400)
         self.assertEqual(invalid_action.get_json()["error"]["message"], "invalid action")
 
     def test_final_review_projection_keeps_only_bounded_reviewer_evidence(self):
-        projected = server._public_ad_studio_run({
+        projected = server._public_ad_template_generator_run({
             "run_id": "trun_bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "status": "ready_for_review",
             "output": {
@@ -375,7 +375,7 @@ class AdStudioMonitorTest(unittest.TestCase):
         previous = server.AGENTTRAIL_URL
         try:
             server.AGENTTRAIL_URL = ""
-            response = server.app.test_client().get("/api/ad-studio/implementation-activity")
+            response = server.app.test_client().get("/api/ad-template-generator/implementation-activity")
             self.assertEqual(response.status_code, 503)
             self.assertFalse(response.get_json()["available"])
             self.assertIn("not configured", response.get_json()["message"])

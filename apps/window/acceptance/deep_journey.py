@@ -580,12 +580,12 @@ def desktop_journey(j: Journey, audit: NetworkAudit, tag: str, *, skip_turns: bo
     tools_nodes = page.eval_on_selector_all("#slot-tools *", "els => els.length")
     j.check("route_tools", tools_nodes > 0, f"{tools_nodes} rendered nodes in #slot-tools")
     j.shot("13-tools")
-    j.goto("/ad-studio")
+    j.goto("/ad-template-generator")
     page.wait_for_timeout(1200)
     ad_nodes = page.evaluate(
-        "() => (document.querySelector(\".view[data-view='ad-studio']\")?.textContent || '').trim().length")
-    j.check("route_ad_studio", ad_nodes > 0, f"{ad_nodes} chars of real Ad Studio surface")
-    j.shot("14-ad-studio")
+        "() => (document.querySelector(\".view[data-view='ad-template-generator']\")?.textContent || '').trim().length")
+    j.check("route_ad_template_generator", ad_nodes > 0, f"{ad_nodes} chars of real Ad Template Generator surface")
+    j.shot("14-ad-template-generator")
     j.goto("/ops")
     page.wait_for_timeout(1200)
     ops_nodes = page.evaluate(
@@ -594,7 +594,7 @@ def desktop_journey(j: Journey, audit: NetworkAudit, tag: str, *, skip_turns: bo
     j.shot("15-ops")
     j.not_proven(
         "route_skills",
-        "No Skills surface exists in this build: view-routing.js maps only /, /ad-studio, /ops, "
+        "No Skills surface exists in this build: view-routing.js maps only /, /ad-template-generator, /ops, "
         "/live, /map, /control (everything else -> hub), and web/index.html registers no Skills "
         "view or rail item. There is nothing to load, so this cannot be proven either way.")
 

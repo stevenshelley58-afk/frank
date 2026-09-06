@@ -8,7 +8,7 @@ test("Hub modules do not resolve the graph chunk before a graph surface opens", 
   const result = spawnSync(process.execPath, [
     "--experimental-loader", "./tests/no_graph_loader.mjs",
     "--input-type=module", "--eval",
-    "await import('./web/js/homes.js'); await import('./web/js/ad-studio.js');",
+    "await import('./web/js/homes.js'); await import('./web/js/ad-template-generator.js');",
   ], { cwd: root, encoding: "utf8" });
   assert.equal(result.status, 0, result.stderr || result.stdout);
 });
