@@ -9,7 +9,7 @@ applies_when: [approved template request]
 does_not_apply_when: [private customer material, unapproved source]
 scope_ids: [project:frank]
 source_locator: apps/window/web/js/ad-template-generator.js
-source_revision: 0df25f64eb047ad90c106562f3964faa22c71da0
+source_revision: 781a4a5a8b3cd2dedaac6898e496e0915e45e33a
 content_hash: sha256:b23773d41a3ddc774f23d7447e92b6ddcb90161727553564c01347d5f2d5c41a
 authority_tier: repo
 enforcement: ci
