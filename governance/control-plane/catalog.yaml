@@ -215,84 +215,84 @@ nodes:
     kind: component
     title: Frank Ad Template Generator surface and run monitor
     source_locator: apps/window/web/js/ad-template-generator.js
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: read_only}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
   - id: route:hermes-tool-runs
     kind: route
     title: Hermes Tool-run command and event boundary
     source_locator: apps/window/server.py
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: read_only}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001, receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: tool:ad-template-generator
     kind: tool
     title: Hermes ad-template-generator Tool
     source_locator: apps/window/server.py
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: enabled, production_authority: operate}
     evidence_receipt_ids: [receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: component:frank/ad-template-builder/source
     kind: component
     title: Ad Template Generator source stage
     source_locator: apps/window/web/js/ad-template-generator.js
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001, receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: component:frank/ad-template-builder/build
     kind: component
     title: Ad Template Generator build stage
     source_locator: apps/window/server.py
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
     evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001, receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: component:frank/ad-template-builder/render
     kind: component
     title: Ad Template Generator render stage
     source_locator: apps/window/web/js/ad-template-generator.js
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
     evidence_receipt_ids: [receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: component:frank/ad-template-builder/compare
     kind: component
     title: Ad Template Generator compare and revise stage
     source_locator: apps/window/web/js/ad-template-generator.js
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
     evidence_receipt_ids: [receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: component:frank/ad-template-builder/final-check
     kind: component
     title: Ad Template Generator final check stage
     source_locator: apps/window/web/js/ad-template-generator.js
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
     evidence_receipt_ids: [receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: component:frank/ad-template-builder/live
     kind: component
     title: Ad Template Generator live and import stage
     source_locator: apps/window/web/js/ad-template-generator.js
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
     evidence_receipt_ids: [receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: gate:frank/ad-template-final-review
     kind: component
     title: Ad Template Generator final review gate
     source_locator: apps/window/web/js/ad-template-generator.js
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
     evidence_receipt_ids: [receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: component:frank/ad-template-feed
     kind: artifact
     title: Generated Feed preview artifact
     source_locator: apps/window/server.py
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
     evidence_receipt_ids: [receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: component:frank/ad-template-story
     kind: artifact
     title: Generated Story preview artifact
     source_locator: apps/window/server.py
-    source_revision: 5ac2cfc82b171634d491d98ecbe7b2f8e385b155
+    source_revision: 6453f1200159a2e0e9db6fa3d5e39c9dbf44df1a
     state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
     evidence_receipt_ids: [receipt:ad-template-builder/runtime-consumption-20260831-001]
   - id: release:frank
