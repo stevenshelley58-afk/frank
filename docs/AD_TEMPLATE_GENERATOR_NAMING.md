@@ -10,7 +10,11 @@ The former `/ad-studio` browser path, `/api/ad-studio` API prefix, and
 `frank:ad-studio*` browser events remain accepted aliases so bookmarks and
 external callers continue to work during migration. Frank reads Hermes'
 `ad_template_generator_capabilities` field first and falls back to the legacy
-`ad_studio_capabilities` field.
+`ad_studio_capabilities` field. The size and batch settings follow the same
+precedence: `AD_TEMPLATE_GENERATOR_MAX_SOURCES`,
+`AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES`, and
+`AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES` win when set; their `AD_STUDIO_*`
+predecessors remain fallbacks before the built-in defaults.
 
 Do not rename contracts that identify another system rather than this product:
 the stored Tool ID `ad-template-generator`, Blockwise `/api/internal/adstudio/*`,

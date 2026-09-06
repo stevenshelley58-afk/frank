@@ -197,7 +197,7 @@
               <div class="ad-section-heading"><div><h3>Source images → ad templates</h3><p>Add up to 20 images, then start them together.</p></div><span id="ad-run-mode">No images</span></div>
               <section class="ad-model-control" aria-labelledby="ad-model-heading">
                 <div class="ad-model-primary">
-                  <label for="ad-model-builder"><strong id="ad-model-heading">Generation model</strong><span>Only for these Ad Template Generator Runs</span></label>
+                  <label for="ad-model-builder"><strong id="ad-model-heading">Generation model</strong><span>Only for these Ad Template Generator runs</span></label>
                   <select id="ad-model-builder" aria-describedby="ad-model-status" disabled><option>Loading Hermes models…</option></select>
                 </div>
                 <details class="ad-model-advanced" id="ad-model-advanced">
@@ -223,14 +223,14 @@
                 <label>Run name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
               </div>
               <label>Brief <span>optional</span><textarea id="ad-run-brief" rows="4" aria-describedby="ad-run-brief-limit" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea><small class="ad-brief-limit" id="ad-run-brief-limit">Up to 4,000 characters · 0 used</small></label>
-              <div class="ad-submit-row"><p id="ad-run-status" role="status">Add one or more images. Each image becomes its own Run.</p><button type="submit" class="ad-primary" id="ad-run-submit" disabled>Start Runs</button></div>
+              <div class="ad-submit-row"><p id="ad-run-status" role="status">Add one or more images. Each image becomes its own Run.</p><button type="submit" class="ad-primary" id="ad-run-submit" disabled>Start runs</button></div>
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
               <h3>Source-matched templates. One source per Run.</h3>
               <ol>
                 <li><strong>Measure a fixed target</strong><span>Hermes measures geometry, colour, type, imagery, shading and effects deterministically.</span></li>
                 <li><strong>Build editable placements</strong><span>The builder creates editable Feed and Story templates from the measured source.</span></li>
-                <li><strong>Refine the best candidate</strong><span>Hermes compares JSON and renders, keeps improvements, discards equal or worse attempts, and diagnoses the frontier after five non-improvements.</span></li>
+                <li><strong>Refine the best candidate</strong><span>Each edit uses the source, best editable template and matching previews. Equal or worse results are discarded; after five attempts without improvement, a frontier model diagnoses the stall once.</span></li>
                 <li><strong>Review, then approve manually</strong><span>After at most 16 comparisons, the final reviewer gate and Blockwise smoke test send a passing template to your Ready for Review queue.</span></li>
               </ol>
               <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
@@ -240,7 +240,7 @@
           <div class="ad-template-generator-panel" id="ad-panel-runs" role="tabpanel" aria-labelledby="ad-tab-runs" data-ad-panel="runs" hidden>
             <div class="ad-runs-layout">
               <section class="ad-runs-list-panel">
-                <div class="ad-section-heading"><div><h3>Run history</h3><p>Durable Runs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div>
+                <div class="ad-section-heading"><div><h3>Run history</h3><p>Saved runs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div>
                 <details class="ad-run-status-guide">
                   <summary>What the statuses mean</summary>
                   <dl>
@@ -279,7 +279,7 @@
             <section class="ad-system-map" aria-label="Frank generation architecture">
               <div><strong>Frank</strong><span>Starts the run, shows Hermes progress and records your manual decision.</span></div><i aria-hidden="true"></i>
               <div><strong>Hermes</strong><span>Owns the durable run and events.</span></div><i aria-hidden="true"></i>
-              <div><strong>Template Builder</strong><span>Builds editable Feed and Story layers, then refines the best measured candidate.</span></div><i aria-hidden="true"></i>
+              <div><strong>Builder</strong><span>Builds editable Feed and Story layers, then refines the best measured candidate.</span></div><i aria-hidden="true"></i>
               <div><strong>Blockwise</strong><span>Smoke-tests the candidate and holds it in quarantine until you approve and publish.</span></div>
             </section>
             <section class="ad-iteration-law" aria-label="Quality iteration rule">

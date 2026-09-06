@@ -101,14 +101,20 @@ def _mini_legacy_root() -> Path | None:
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
-AD_TEMPLATE_GENERATOR_MAX_SOURCES = min(50, max(1, int(os.environ.get("AD_TEMPLATE_GENERATOR_MAX_SOURCES", "20"))))
+def _ad_template_generator_env(suffix: str, default: str) -> str:
+    canonical = f"AD_TEMPLATE_GENERATOR_{suffix}"
+    legacy = f"AD_STUDIO_{suffix}"
+    return os.environ.get(canonical, os.environ.get(legacy, default))
+
+
+AD_TEMPLATE_GENERATOR_MAX_SOURCES = min(50, max(1, int(_ad_template_generator_env("MAX_SOURCES", "20"))))
 AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES = min(
     MAX_UPLOAD_BYTES,
-    max(1, int(os.environ.get("AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES", str(25 * 1024 * 1024)))),
+    max(1, int(_ad_template_generator_env("MAX_SOURCE_BYTES", str(25 * 1024 * 1024)))),
 )
 AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES = min(
     MAX_UPLOAD_BYTES,
-    max(AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES, int(os.environ.get("AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
+    max(AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES, int(_ad_template_generator_env("MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
 )
 AD_TEMPLATE_GENERATOR_MAX_BRIEF_CHARACTERS = 4000
 # HERMES_ENDPOINT is the canonical dispatcher contract; retain the legacy

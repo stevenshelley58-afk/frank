@@ -318,7 +318,7 @@ function renderSourcePreview() {
     const summary = document.createElement("div");
     summary.className = "ad-source-summary";
     const count = document.createElement("span");
-    count.textContent = batchStarting ? "Starting Runs…" : `${runnable} image${runnable === 1 ? "" : "s"} ready to run`;
+    count.textContent = batchStarting ? "Starting runs…" : `${runnable} image${runnable === 1 ? "" : "s"} ready to run`;
     const clear = document.createElement("button");
     clear.type = "button";
     clear.className = "ad-source-clear";
@@ -398,7 +398,7 @@ function updateRunControls() {
   const runnable = selectedFiles.filter((source) => ["queued", "error"].includes(source.status)).length;
   const modelsValid = adTemplateGeneratorModelsReady && validateModelControls();
   submit.disabled = batchStarting || runnable === 0 || !modelsValid;
-  submit.textContent = batchStarting ? "Starting…" : runnable ? `Start ${runnable} Run${runnable === 1 ? "" : "s"}` : "Start Runs";
+  submit.textContent = batchStarting ? "Starting…" : runnable ? `Start ${runnable} run${runnable === 1 ? "" : "s"}` : "Start runs";
 }
 
 function updateSourceStatus(key, status, options = {}) {
@@ -471,7 +471,7 @@ function renderRuns() {
   if (!runs.length) {
     const empty = document.createElement("div");
     empty.className = "ad-empty";
-    empty.innerHTML = "<strong>No Runs yet</strong><span>Run a source image to create the first real Ad Template Generator Run.</span>";
+    empty.innerHTML = "<strong>No runs yet</strong><span>Run a source image to create the first Ad Template Generator run.</span>";
     host.append(empty);
     renderRunOptions();
     return;
@@ -1471,8 +1471,8 @@ function setupRunForm() {
         localRunInputs.set(source.run.id, { url: source.previewUrl, name: source.name });
       }
       status.textContent = failed.length
-        ? `${started.length} Run${started.length === 1 ? "" : "s"} started. ${failed.length} image${failed.length === 1 ? " needs" : "s need"} attention.`
-        : `${started.length} Run${started.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
+        ? `${started.length} run${started.length === 1 ? "" : "s"} started. ${failed.length} image${failed.length === 1 ? " needs" : "s need"} attention.`
+        : `${started.length} run${started.length === 1 ? "" : "s"} started. You can close Frank; Hermes will keep working.`;
       status.classList.toggle("is-error", failed.length > 0);
       await refreshRunsSafe();
       if (started.length) {

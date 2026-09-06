@@ -273,7 +273,7 @@ const startAdTemplateGeneratorRun = (event) => {
       const data = await response.json().catch(() => ({}));
       if (!response.ok && !Array.isArray(data.results)) {
         const message = typeof data.error === "string" ? data.error : data.error?.message;
-        throw new Error(message || "Hermes did not start the Runs.");
+        throw new Error(message || "Hermes did not start the runs.");
       }
       const runs = Array.isArray(data.runs) ? data.runs.filter((run) => run?.id) : (data.run?.id ? [data.run] : []);
       const orderedResults = Array.isArray(data.results) ? data.results : [];
@@ -304,7 +304,7 @@ const startAdTemplateGeneratorRun = (event) => {
         failures.push({ name: source.name, error });
         progress(source, "error", { error });
       });
-      if (!runs.length && !failures.length) throw new Error(data.error || "Hermes did not start the Runs.");
+      if (!runs.length && !failures.length) throw new Error(data.error || "Hermes did not start the runs.");
       detail.resolve?.({ run: runs[0], runs, failures, results: orderedResults, batchId: data.batch_id });
     } catch (error) {
       localSources.filter((source) => !settled.has(source.key)).forEach((source) => progress(source, "error", { error: error.message || "This image could not be started." }));

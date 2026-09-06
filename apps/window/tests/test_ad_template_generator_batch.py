@@ -1,4 +1,5 @@
 import hashlib
+import os
 import threading
 import time
 from pathlib import Path
@@ -32,6 +33,22 @@ MODEL_POLICY = {
     },
     "deterministic_stages": ["qa", "import"],
 }
+
+
+class AdTemplateGeneratorEnvironmentTest(unittest.TestCase):
+    def test_canonical_limits_win_then_legacy_limits_then_defaults(self):
+        cases = (
+            ("MAX_SOURCES", "20", "7", "9"),
+            ("MAX_SOURCE_BYTES", "26214400", "1048576", "2097152"),
+            ("MAX_BATCH_BYTES", "104857600", "4194304", "8388608"),
+        )
+        for suffix, default, legacy, canonical in cases:
+            with self.subTest(suffix=suffix), mock.patch.dict(os.environ, {}, clear=True):
+                self.assertEqual(server._ad_template_generator_env(suffix, default), default)
+                os.environ[f"AD_STUDIO_{suffix}"] = legacy
+                self.assertEqual(server._ad_template_generator_env(suffix, default), legacy)
+                os.environ[f"AD_TEMPLATE_GENERATOR_{suffix}"] = canonical
+                self.assertEqual(server._ad_template_generator_env(suffix, default), canonical)
 
 
 class AdTemplateGeneratorBatchApiTest(unittest.TestCase):
