@@ -81,7 +81,7 @@ define({
 });
 
 define({
-  id: "account-manager", title: "Accounts & access", surfaces: ["tool-catalog"],
+  id: "account-manager", title: "Accounts & access", surfaces: ["tools"],
   description: "Authentication, roles, and service-account records.",
   mount(el) {
     const actions = toolIntro(el, "Manage access, workspace roles, authentication state, and service identities without duplicating the customer CRM.");
@@ -100,7 +100,7 @@ define({
 });
 
 define({
-  id: "connections", title: "Connections", surfaces: ["tool-catalog"],
+  id: "connections", title: "Connections", surfaces: ["tools"],
   description: "Provider catalog and non-secret connection metadata.",
   mount(el) {
     const actions = toolIntro(el, "One place to see provider setup, recorded health, capabilities, and secure connection references.");
@@ -159,7 +159,7 @@ for (const tool of OPERATIONS_TOOLS.filter((item) => !["email-flows", "connectio
 }
 
 define({
-  id: "factory-ad", title: "Ad Template Generator", surfaces: ["tool-catalog"],
+  id: "factory-ad", title: "Ad Template Generator", surfaces: ["tools"],
   description: "Run source images through the ad-template pipeline and inspect each job.",
   mount(el) {
     const actions = toolIntro(el, "Run one image or a batch, inspect the work, and request pipeline changes through Hermes.");
@@ -170,7 +170,7 @@ define({
 });
 
 define({
-  id: "hermes-tool", title: "Hermes", surfaces: ["tool-catalog"],
+  id: "hermes-tool", title: "Hermes", surfaces: ["tools"],
   description: "Home for the sole Frank brain.",
   mount(el) {
     const actions = toolIntro(el, "Hermes owns reasoning, tools, skills, memory, model choice, and execution.");
@@ -184,7 +184,7 @@ define({
 });
 
 define({
-  id: "widget-builder", title: "Widget Builder", surfaces: ["tool-catalog"],
+  id: "widget-builder", title: "Widget Builder", surfaces: ["tools"],
   description: "Create and manage safe reusable display widgets.",
   mount(el) {
     const actions = toolIntro(el, "Create reusable note and link widgets, then place them on any appropriate home.");
@@ -221,7 +221,7 @@ define({
   },
 });
 const LAUNCH_PROVIDER_NAMES = Object.freeze({
-  stalwart: "Stalwart inbound mail",
+  stalwart: "Stalwart mail",
   mautic: "Mautic CRM",
   chatwoot: "Chatwoot inbox",
   ga4: "Google Analytics 4",
@@ -240,31 +240,31 @@ function launchStyles() {
   const style = document.createElement("style");
   style.id = "launch-desk-styles";
   style.textContent = `
-    .launch-tools-grid { grid-template-columns: minmax(0, 1080px); justify-content: center; padding: 24px; }
-    .launch-tools-grid .w-card { padding: 0; overflow: auto; }
-    .launch-tools-grid .w-card > h3 { display: none; }
+    .launch-tools-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; max-width: 1200px; width: 100%; margin-inline: auto; padding: 24px; }
+    .launch-tools-grid .launch-desk-shell { grid-column: 1 / -1; order: -1; padding: 0; }
+    .launch-desk-shell > h3 { display: none; }
     .launch-desk { padding: 28px; }
     .launch-desk-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
     .launch-desk-kicker { color: var(--mute); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
     .launch-desk h2 { margin-top: 6px; color: var(--ink); font-size: 30px; font-weight: 500; letter-spacing: -.04em; }
     .launch-desk-head p { max-width: 590px; margin-top: 8px; color: var(--mute); font-size: 13px; line-height: 1.55; }
     .launch-desk-summary { flex: 0 0 auto; border: 1px solid var(--line); border-radius: var(--r-pill); padding: 8px 11px; color: var(--mute); font-size: 11px; white-space: nowrap; }
-    .launch-desk-summary[data-tone="ready"], .launch-desk-status[data-tone="ready"] { color: var(--ok); }
-    .launch-desk-summary[data-tone="blocked"], .launch-desk-status[data-tone="blocked"] { color: #87631e; }
+    .launch-desk-summary[data-tone="ready"], .launch-desk-status[data-tone="ready"] { color: var(--ink); }
+    .launch-desk-summary[data-tone="blocked"], .launch-desk-status[data-tone="blocked"] { color: var(--mute); }
     .launch-desk-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
-    .launch-desk-card { min-width: 0; min-height: 206px; padding: 17px; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); }
+    .launch-desk-card { min-width: 0; min-height: 186px; padding: 17px; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); }
     .launch-desk-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
     .launch-desk-card h3 { margin-top: 4px; color: var(--ink); font-size: 16px; font-weight: 500; letter-spacing: -.02em; }
     .launch-desk-card p { margin-top: 10px; color: var(--mute); font-size: 12px; line-height: 1.55; }
     .launch-desk-status { flex: 0 0 auto; border-radius: var(--r-pill); background: var(--chip); padding: 4px 7px; color: var(--mute); font-size: 10px; white-space: nowrap; }
     .launch-desk-provider-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
     .launch-desk-provider { border: 1px solid var(--line); border-radius: var(--r-pill); padding: 4px 7px; color: var(--mute); font-size: 10px; }
-    .launch-desk-provider[data-state="ready"] { color: var(--ok); border-color: #dfece4; }
+    .launch-desk-provider[data-state="ready"] { color: var(--ink); border-color: #dfece4; }
     .launch-desk-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
     .launch-desk-actions .tool-link, .launch-desk-actions .tool-secondary { margin: 0; }
     .launch-desk-note { grid-column: 1 / -1; padding: 14px 17px; border-left: 2px solid var(--ink); color: var(--mute); font-size: 12px; line-height: 1.55; }
     @media (max-width: 760px) {
-      .launch-tools-grid { padding: 14px; }
+      .launch-tools-grid { padding: 14px; grid-template-columns: minmax(0, 1fr); }
       .launch-desk { padding: 20px; }
       .launch-desk-head { align-items: flex-start; flex-direction: column; gap: 12px; }
       .launch-desk-grid { grid-template-columns: 1fr; }
@@ -302,12 +302,12 @@ function launchSetupAction(actions, label) {
   actions.append(button);
 }
 
-function launchCard({ eyebrow, title, copy, providers, ready, blocker, links = [], setupLabel }) {
+function launchCard({ eyebrow, title, copy, providers, ready, blocker, links = [], setupLabel, label }) {
   const card = launchElement("section", "launch-desk-card");
   const top = launchElement("div", "launch-desk-card-top");
   const heading = launchElement("div");
   heading.append(launchElement("span", "launch-desk-kicker", eyebrow), launchElement("h3", "", title));
-  const status = launchElement("span", "launch-desk-status", ready ? "Live" : "Blocked");
+  const status = launchElement("span", "launch-desk-status", label || (ready ? "Connected" : "Setup needed"));
   status.dataset.tone = ready ? "ready" : "blocked";
   top.append(heading, status);
   card.append(top, launchElement("p", "", ready ? copy : blocker));
@@ -324,15 +324,16 @@ function launchCard({ eyebrow, title, copy, providers, ready, blocker, links = [
 function mountLaunchDesk(el) {
   launchStyles();
   el.closest(".grid")?.classList.add("launch-tools-grid");
+  el.closest(".w-card")?.classList.add("launch-desk-shell");
   el.replaceChildren();
 
   const desk = launchElement("div", "launch-desk");
   const heading = launchElement("header", "launch-desk-head");
   const copy = launchElement("div");
   copy.append(
-    launchElement("span", "launch-desk-kicker", "Blockwise - launch control"),
-    launchElement("h2", "", "Launch the customer loop"),
-    launchElement("p", "", "Use the native systems for customer records, conversations and campaigns. Frank shows only the setup state and the next safe move.")
+    launchElement("span", "launch-desk-kicker", "Blockwise"),
+    launchElement("h2", "", "Launch essentials"),
+    launchElement("p", "", "Contacts, email and website insights. Open the real apps below; a dashboard link does not mean its automation is switched on.")
   );
   const summary = launchElement("span", "launch-desk-summary", "Checking launch setup...");
   heading.append(copy, summary);
@@ -345,65 +346,59 @@ function mountLaunchDesk(el) {
     fetch("/api/email-tools").then((response) => response.ok ? response.json() : Promise.reject(new Error("email tools unavailable"))),
   ]).then(([readiness, emailTools]) => {
     const chatwoot = launchProvider(readiness, "chatwoot");
-    const stalwart = launchProvider(readiness, "stalwart");
     const mautic = launchProvider(readiness, "mautic");
     const ga4 = launchProvider(readiness, "ga4");
     const clarity = launchProvider(readiness, "clarity");
-    const inboundReady = chatwoot.verified && stalwart.verified;
-    const lifecycleReady = mautic.verified && stalwart.verified;
-    const analyticsReady = ga4.verified && clarity.verified;
-    const blockers = [inboundReady, lifecycleReady, analyticsReady].filter((ready) => !ready).length + 1;
-    summary.textContent = `${blockers} launch blocker${blockers === 1 ? "" : "s"}`;
-    summary.dataset.tone = "blocked";
-
+    const resendReady = emailTools.resend?.status === "ready";
+    summary.textContent = "Customer email and outreach stay separate";
     grid.replaceChildren(
       launchCard({
-        eyebrow: "01 - captured email",
-        title: "Inbox",
-        copy: "New enquiries and replies are handled in the native inbox; Frank does not store a parallel conversation queue.",
-        blocker: "Customer email is not live until both the Chatwoot inbox and Stalwart mail path are verified.",
-        providers: [chatwoot, stalwart],
-        ready: inboundReady,
-        links: chatwoot.verified ? [["Open Chatwoot", chatwoot.base_url]] : [],
-        setupLabel: "Record inbound setup",
+        eyebrow: "01 - contacts", title: "CRM", providers: [mautic], ready: mautic.verified,
+        copy: "Open Mautic to manage contacts, segments and campaigns.",
+        blocker: "Mautic is not connected. Existing Blockwise customer records are separate from a prospect CRM.",
+        links: [...(mautic.base_url ? [["Open Mautic", mautic.base_url]] : []), ["Customer records", "https://blockwise.sale/operator/customers"]],
+        setupLabel: "CRM connection settings",
       }),
       launchCard({
-        eyebrow: "02 - CRM and follow-up",
-        title: "Contacts & signup emails",
-        copy: "Mautic owns contacts, consent-aware segments and lifecycle follow-up. Open the configured Mautic dashboard to work there.",
-        blocker: "Captured-email follow-up is blocked until Mautic and the mail path are verified. A configured URL alone is not treated as live.",
-        providers: [mautic, stalwart],
-        ready: lifecycleReady,
-        links: mautic.verified ? [["Open Mautic", emailTools.mautic?.url || mautic.base_url]] : [],
-        setupLabel: "Record CRM setup",
+        eyebrow: "02 - incoming email", title: "Inbox", providers: [chatwoot], ready: chatwoot.verified,
+        label: chatwoot.verified ? "Connected" : "Mail viewer available",
+        copy: "Read and reply to conversations in Chatwoot.",
+        blocker: "Incoming mail is viewable in Resend. A shared inbox with compose and reply is not connected yet.",
+        links: [...(chatwoot.base_url ? [["Open shared inbox", chatwoot.base_url]] : []), ["Read incoming email", "https://resend.com/emails/receiving"]],
       }),
       launchCard({
-        eyebrow: "03 - cold outreach",
-        title: "Draft first, approve before sending",
-        copy: "Cold outreach has no active sending route here. Resend is excluded: its acceptable-use policy prohibits this use.",
-        blocker: "A draft needs documented legal basis, approval, project and global suppression checks, quiet-hours and a suitable verified sender before any delivery request.",
-        providers: [],
-        ready: false,
+        eyebrow: "03 - outgoing email", title: "Sent email", providers: [], ready: resendReady,
+        label: resendReady ? "Delivery verified" : "Check delivery",
+        copy: "Review delivery results for Blockwise customer and account emails. This is a delivery log, not a compose screen.",
+        blocker: "Review sent messages and delivery results in Resend. Signup email and queued welcome email use different sending paths.",
+        links: [["Open sent email", "https://resend.com/emails"], ["Sender domains", "https://resend.com/domains"]],
       }),
       launchCard({
-        eyebrow: "04 - measurement",
-        title: "Website analytics",
-        copy: "Use the native analytics dashboards for traffic, signup and behaviour evidence.",
-        blocker: "Analytics is blocked until both GA4 and Microsoft Clarity are verified. Installed tags or dashboard URLs are not proof of collection.",
-        providers: [ga4, clarity],
-        ready: analyticsReady,
-        links: [
-          ...(ga4.verified ? [["Open GA4", "https://analytics.google.com/analytics/web/"]] : []),
-          ...(clarity.verified ? [["Open Microsoft Clarity", "https://clarity.microsoft.com/"]] : []),
-        ],
-        setupLabel: "Record analytics setup",
+        eyebrow: "04 - captured email", title: "Signup follow-ups", providers: [], ready: false,
+        label: "Launch checks required",
+        blocker: "Capture → save consent → welcome email → helpful follow-up. Blockwise owns the welcome queue; the native flow builder is available, but nurture flows are not connected or active yet.",
+        links: [["Open flow builder", "https://resend.com/automations"], ...(mautic.base_url ? [["Mautic campaigns", mautic.base_url]] : [])],
       }),
-      launchElement("p", "launch-desk-note", "Safety boundary: lifecycle messages and customer replies are distinct from cold outreach. No campaign is sent from Frank, and no legal-basis or suppression control is bypassed.")
+      launchCard({
+        eyebrow: "05 - cold outreach", title: "Review before sending", providers: [], ready: false,
+        label: "Not active",
+        blocker: "Document a lawful audience → draft a personal introduction → approve → use a permitted sender. Stop on reply, bounce or unsubscribe. Resend prohibits cold outreach; no campaign is active here.",
+        links: [["Consent requirements", "https://www.acma.gov.au/avoid-sending-spam"]],
+      }),
+      launchCard({
+        eyebrow: "06 - website insights", title: "Google Analytics + Clarity", providers: [ga4, clarity],
+        ready: ga4.verified && clarity.verified,
+        copy: "Google Analytics shows traffic and conversions. Clarity shows heatmaps and session recordings.",
+        blocker: "Finish the Blockwise GA4 property and Clarity project. Tracking stays off until real IDs are installed and the visitor allows analytics.",
+        links: [[ga4.verified ? "Open Google Analytics" : "Google Analytics setup", "https://analytics.google.com/analytics/web/"], [clarity.verified ? "Open Clarity" : "Clarity setup", "https://clarity.microsoft.com/projects"]],
+      }),
+      launchElement("p", "launch-desk-note", "Nothing on this page sends an email or starts a campaign. Customer follow-ups require consent; cold outreach needs its own approved audience and permitted sender.")
     );
   }).catch(() => {
     summary.textContent = "Launch status unavailable";
     summary.dataset.tone = "blocked";
-    grid.replaceChildren(launchElement("p", "launch-desk-note", "Provider readiness could not be read. No provider is assumed ready; refresh once the launch source is available."));
+    grid.replaceChildren(launchElement("p", "launch-desk-note", "Setup status could not be read. No service is assumed connected."));
+    actionButton(grid, "Try again", () => mountLaunchDesk(el), "tool-secondary");
   });
 }
 
