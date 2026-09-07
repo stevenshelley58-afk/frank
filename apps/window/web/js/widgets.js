@@ -341,10 +341,7 @@ function mountLaunchDesk(el) {
   desk.append(heading, grid);
   el.append(desk);
 
-  Promise.all([
-    fetch("/api/providers/readiness").then((response) => response.ok ? response.json() : Promise.reject(new Error("provider readiness unavailable"))),
-    fetch("/api/email-tools").then((response) => response.ok ? response.json() : Promise.reject(new Error("email tools unavailable"))),
-  ]).then(([readiness, emailTools]) => {
+  const renderCards = (readiness = {}, emailTools = {}) => {
     const chatwoot = launchProvider(readiness, "chatwoot");
     const mautic = launchProvider(readiness, "mautic");
     const ga4 = launchProvider(readiness, "ga4");
@@ -394,10 +391,17 @@ function mountLaunchDesk(el) {
       }),
       launchElement("p", "launch-desk-note", "Nothing on this page sends an email or starts a campaign. Customer follow-ups require consent; cold outreach needs its own approved audience and permitted sender.")
     );
-  }).catch(() => {
+  };
+  // Keep navigation usable even if a status endpoint stalls or is unavailable.
+  renderCards();
+  summary.textContent = "Checking launch setup...";
+  Promise.all([
+    fetch("/api/providers/readiness", { signal: AbortSignal.timeout(8000) }).then((response) => response.ok ? response.json() : Promise.reject(new Error("provider readiness unavailable"))),
+    fetch("/api/email-tools", { signal: AbortSignal.timeout(8000) }).then((response) => response.ok ? response.json() : Promise.reject(new Error("email tools unavailable"))),
+  ]).then(([readiness, emailTools]) => renderCards(readiness, emailTools)).catch(() => {
     summary.textContent = "Launch status unavailable";
     summary.dataset.tone = "blocked";
-    grid.replaceChildren(launchElement("p", "launch-desk-note", "Setup status could not be read. No service is assumed connected."));
+    grid.append(launchElement("p", "launch-desk-note", "Setup status could not be read. No service is assumed connected. Direct app links remain available."));
     actionButton(grid, "Try again", () => mountLaunchDesk(el), "tool-secondary");
   });
 }
