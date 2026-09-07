@@ -182,19 +182,19 @@ export function mountOperationsTool(root, toolId, { preview = false } = {}) {
 
   const notice = node("p", "operations-tool-notice", preview
     ? "Preview only · no action has been taken."
-    : `${tool.name} is ready for its live data adapter.`);
+    : "Live records are not available here.");
   notice.dataset.operationsNotice = "";
   notice.setAttribute("aria-live", "polite");
   surface.append(notice);
 
   if (!preview) {
     const setup = node("section", "operations-tool-setup");
-    setup.append(node("h3", "", `${tool.name} is not connected yet`));
-    setup.append(node("p", "", `Connect ${tool.provider} through the shared Connections tool. This screen will then use that provider state without creating another record store.`));
-    const connect = node("button", "operations-tool-primary", "Open connections");
-    connect.type = "button";
-    connect.addEventListener("click", () => window.dispatchEvent(new CustomEvent("frank:connections")));
-    setup.append(connect);
+    setup.append(node("h3", "", tool.name + " has no live source"));
+    setup.append(node("p", "", "Return to the launch checklist to see the exact service that is missing. Frank will not show a second empty inbox, CRM or campaign screen."));
+    const backToTools = node("button", "operations-tool-primary", "Back to launch checklist");
+    backToTools.type = "button";
+    backToTools.addEventListener("click", () => window.dispatchEvent(new CustomEvent("frank:view", { detail: "tools" })));
+    setup.append(backToTools);
     surface.append(setup);
     root.append(surface);
     return;
