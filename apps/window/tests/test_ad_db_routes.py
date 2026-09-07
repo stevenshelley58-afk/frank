@@ -32,7 +32,7 @@ class AdDbRoutesTest(unittest.TestCase):
 
     def test_ads_forward_documented_filters_and_rewrite_media_route(self):
         payload = {"items": [{"id": AD_ID, "media": [{"id": ASSET_ID, "archiveUrl": f"/v1/ad-db/ads/{AD_ID}/media/{ASSET_ID}", "sourceUrl": "https://cdn.example/private.mp4", "sourceURLs": ["https://cdn.example/private.mp4"]}]}], "page": {"nextCursor": None, "limit": 20}}
-        with mock.patch.object(server, "hermes_request", return_value=payload) as upstream:
+        with mock.patch.object(server, "_ad_db_request", return_value=payload) as upstream:
             response = self.client.get("/api/ad-db/ads?q=coast&advertiserPageId=11111111-1111-4111-8111-111111111111&locationRelation=office&limit=20")
         self.assertEqual(response.status_code, 200)
         upstream.assert_called_once_with("/v1/ad-db/ads?q=coast&advertiserPageId=11111111-1111-4111-8111-111111111111&locationRelation=office&limit=20", timeout=15)
@@ -43,7 +43,7 @@ class AdDbRoutesTest(unittest.TestCase):
 
     def test_ad_prospects_and_runs_forward_only_to_canonical_read_routes(self):
         for route, target in ((f"/api/ad-db/ads/{AD_ID}", f"/v1/ad-db/ads/{AD_ID}"), ("/api/ad-db/prospects?agentName=Alex", "/v1/ad-db/prospects?agentName=Alex"), ("/api/ad-db/runs?status=paused", "/v1/ad-db/runs?status=paused")):
-            with self.subTest(route=route), mock.patch.object(server, "hermes_request", return_value={"items": []}) as upstream:
+            with self.subTest(route=route), mock.patch.object(server, "_ad_db_request", return_value={"items": []}) as upstream:
                 response = self.client.get(route)
             self.assertEqual(response.status_code, 200)
             upstream.assert_called_once_with(target, timeout=15)
@@ -54,13 +54,13 @@ class AdDbRoutesTest(unittest.TestCase):
             "maxCredits": 20,
             "idempotencyKey": "frank-scan-2026-01",
         }
-        with mock.patch.object(server, "hermes_request", return_value={"status": "accepted"}) as upstream:
+        with mock.patch.object(server, "_ad_db_request", return_value={"status": "accepted"}) as upstream:
             response = self.client.post("/api/ad-db/runs/scan", json=body)
         self.assertEqual(response.status_code, 202)
         upstream.assert_called_once_with("/v1/ad-db/runs/scan", body, method="POST", timeout=15)
 
     def test_scan_proxy_rejects_duplicate_or_unknown_page_ids_without_upstream(self):
-        with mock.patch.object(server, "hermes_request") as upstream:
+        with mock.patch.object(server, "_ad_db_request") as upstream:
             response = self.client.post("/api/ad-db/runs/scan", json={
                 "pageIds": ["55555555-5555-4555-8555-555555555555"] * 2,
                 "idempotencyKey": "frank-scan-2026-02",
@@ -69,13 +69,13 @@ class AdDbRoutesTest(unittest.TestCase):
         upstream.assert_not_called()
 
     def test_readiness_proxy_is_canonical(self):
-        with mock.patch.object(server, "hermes_request", return_value={"status": "blocked"}) as upstream:
+        with mock.patch.object(server, "_ad_db_request", return_value={"status": "blocked"}) as upstream:
             response = self.client.get("/api/ad-db/runs/readiness")
         self.assertEqual(response.status_code, 200)
         upstream.assert_called_once_with("/v1/ad-db/runs/readiness", timeout=10)
 
     def test_rejects_unknown_filters_and_unsafe_identifiers_before_upstream(self):
-        with mock.patch.object(server, "hermes_request") as upstream:
+        with mock.patch.object(server, "_ad_db_request") as upstream:
             self.assertEqual(self.client.get("/api/ad-db/ads?sourceUrl=https://cdn.example").status_code, 400)
             self.assertEqual(self.client.get("/api/ad-db/ads?locationType=target").status_code, 400)
             self.assertEqual(self.client.get("/api/ad-db/ads/%2E%2E").status_code, 404)
@@ -84,7 +84,10 @@ class AdDbRoutesTest(unittest.TestCase):
     def _media(self, upstream, *, method="GET", headers=None):
         opener = mock.Mock()
         opener.open.return_value = upstream
-        with mock.patch.object(server.urllib.request, "build_opener", return_value=opener), mock.patch.object(server, "HERMES_KEY", "session-secret"):
+        with mock.patch.object(server.urllib.request, "build_opener", return_value=opener), mock.patch.dict(
+            server.os.environ,
+            {"HERMES_SERVE_URL": "http://hermes-serve", "HERMES_SERVE_TOKEN": "session-secret"},
+        ):
             response = self.client.open(
                 f"/api/ad-db/ads/{AD_ID}/media/{ASSET_ID}",
                 method=method,
@@ -110,7 +113,8 @@ class AdDbRoutesTest(unittest.TestCase):
         self.assertTrue(response.headers["Cache-Control"].startswith("private"))
         self.assertNotIn("Location", response.headers)
         request = opener.open.call_args.args[0]
-        self.assertEqual(request.get_header("Authorization"), "Bearer session-secret")
+        self.assertEqual(request.get_header("X-hermes-session-token"), "session-secret")
+        self.assertTrue(request.full_url.startswith("http://hermes-serve/v1/ad-db/"))
         self.assertEqual(request.get_method(), "GET")
         self.assertTrue(upstream.closed)
 
@@ -146,7 +150,10 @@ class AdDbRoutesTest(unittest.TestCase):
         missing = urllib.error.HTTPError("http://hermes/media", 404, "missing", {}, io.BytesIO(b'{"detail":"missing"}'))
         opener = mock.Mock()
         opener.open.side_effect = missing
-        with mock.patch.object(server.urllib.request, "build_opener", return_value=opener):
+        with mock.patch.object(server.urllib.request, "build_opener", return_value=opener), mock.patch.dict(
+            server.os.environ,
+            {"HERMES_SERVE_URL": "http://hermes-serve", "HERMES_SERVE_TOKEN": "session-secret"},
+        ):
             response = self.client.get(f"/api/ad-db/ads/{AD_ID}/media/{ASSET_ID}")
         self.assertEqual(response.status_code, 404)
 
@@ -158,7 +165,10 @@ class AdDbRoutesTest(unittest.TestCase):
             io.BytesIO(b""),
         )
         opener.open.side_effect = redirect
-        with mock.patch.object(server.urllib.request, "build_opener", return_value=opener):
+        with mock.patch.object(server.urllib.request, "build_opener", return_value=opener), mock.patch.dict(
+            server.os.environ,
+            {"HERMES_SERVE_URL": "http://hermes-serve", "HERMES_SERVE_TOKEN": "session-secret"},
+        ):
             response = self.client.get(f"/api/ad-db/ads/{AD_ID}/media/{ASSET_ID}")
         self.assertEqual(response.status_code, 502)
         self.assertNotIn("Location", response.headers)

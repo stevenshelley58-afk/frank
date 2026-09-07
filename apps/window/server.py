@@ -462,6 +462,40 @@ def _ad_db_query() -> str:
     return urllib.parse.urlencode(pairs)
 
 
+def _ad_db_connection() -> tuple[str, str]:
+    """Use the private Serve surface, never the generic Hermes gateway."""
+    base = os.environ.get("HERMES_SERVE_URL", "").strip().rstrip("/")
+    token = os.environ.get("HERMES_SERVE_TOKEN", "").strip()
+    if not base or not token:
+        raise RuntimeError("Hermes Ad DB connection is not configured")
+    return base, token
+
+
+def _ad_db_request(
+    path: str,
+    payload: dict | None = None,
+    *,
+    method: str | None = None,
+    timeout: float = 30,
+):
+    base, token = _ad_db_connection()
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "X-Hermes-Session-Token": token,
+    }
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    upstream_request = urllib.request.Request(
+        base + path,
+        data=data,
+        headers=headers,
+        method=method or ("GET" if data is None else "POST"),
+    )
+    with urllib.request.urlopen(upstream_request, timeout=timeout) as upstream:
+        return json.loads(upstream.read().decode("utf-8") or "{}")
+
+
 def _ad_db_public_payload(payload: object) -> object:
     """Replace internal media routes; source URLs never reach the browser."""
     if not isinstance(payload, dict):
@@ -490,14 +524,16 @@ class _AdDbNoRedirect(urllib.request.HTTPRedirectHandler):
 def _ad_db_media_response(ad_id: str, asset_id: str) -> Response:
     """Stream only Hermes-authenticated archive bytes; never relay redirects."""
     path = f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
-    headers = {"Accept": "application/octet-stream"}
-    if HERMES_KEY:
-        headers["Authorization"] = f"Bearer {HERMES_KEY}"
+    base, token = _ad_db_connection()
+    headers = {
+        "Accept": "application/octet-stream",
+        "X-Hermes-Session-Token": token,
+    }
     for name in ("Range", "If-Range", "If-None-Match"):
         if request.headers.get(name):
             headers[name] = request.headers[name]
     upstream_request = urllib.request.Request(
-        hermes_base() + path,
+        base + path,
         headers=headers,
         method=request.method,
     )
@@ -3019,7 +3055,7 @@ def _tool_run_path(run_id: str, suffix: str = "") -> str:
 @app.get("/api/ad-db/runs/readiness")
 def ad_db_scan_readiness():
     try:
-        payload = hermes_request("/v1/ad-db/runs/readiness", timeout=10)
+        payload = _ad_db_request("/v1/ad-db/runs/readiness", timeout=10)
     except Exception as error:
         return _hermes_error(error)
     return jsonify(payload)
@@ -3044,7 +3080,7 @@ def ad_db_scan_create():
     if not isinstance(idempotency_key, str) or not _AD_DB_IDEMPOTENCY.fullmatch(idempotency_key):
         abort(400, "idempotencyKey has an invalid format")
     try:
-        payload = hermes_request("/v1/ad-db/runs/scan", {
+        payload = _ad_db_request("/v1/ad-db/runs/scan", {
             "pageIds": page_ids,
             "maxCredits": max_credits,
             "idempotencyKey": idempotency_key,
@@ -3062,7 +3098,7 @@ def ad_db_collection():
     collection = request.path.rsplit("/", 1)[-1]
     query = _ad_db_query()
     try:
-        payload = hermes_request(f"/v1/ad-db/{collection}" + (f"?{query}" if query else ""), timeout=15)
+        payload = _ad_db_request(f"/v1/ad-db/{collection}" + (f"?{query}" if query else ""), timeout=15)
     except Exception as error:
         return _hermes_error(error)
     return jsonify(_ad_db_public_payload(payload))
@@ -3072,7 +3108,7 @@ def ad_db_collection():
 def ad_db_ad(ad_id: str):
     ad_id = _ad_db_id(ad_id)
     try:
-        payload = hermes_request(f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}", timeout=15)
+        payload = _ad_db_request(f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}", timeout=15)
     except Exception as error:
         return _hermes_error(error)
     return jsonify(_ad_db_public_payload(payload))
