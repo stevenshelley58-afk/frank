@@ -5,8 +5,9 @@ allowlisted paths/methods to upstream `hermes serve` on host loopback
 127.0.0.1:9119. Rules frozen by FRANK_HERMES_V021_CONTRACT:
 - upstream Host header is always forced to 127.0.0.1:9119;
 - browser `Origin` headers are rejected (no cross-site browser use);
-- the upstream session token is required on every forwarded request and is
-  passed through only as the `X-Hermes-Session-Token` header — it is never
+- the upstream session token is required for operator requests; the narrower
+  customer read token is accepted only for GET/HEAD Ad DB ad reads;
+  credentials are forwarded only in their original auth header and are never
   logged, echoed, or stored;
 - complete URLs/queries are redacted from logs;
 - no WebSocket upgrade, no raw relay beyond the allowlist.
@@ -55,6 +56,17 @@ def _allowed(path: str, method: str) -> bool:
     return False
 
 
+def _auth_headers(path: str, method: str, headers) -> dict[str, str]:
+    session_token = headers.get("X-Hermes-Session-Token", "")
+    if session_token:
+        return {"X-Hermes-Session-Token": session_token}
+    customer_token = headers.get("X-Hermes-Ad-Db-Read-Token", "")
+    is_customer_read = path == "/v1/ad-db/ads" or path.startswith("/v1/ad-db/ads/")
+    if customer_token and is_customer_read and method in {"GET", "HEAD"}:
+        return {"X-Hermes-Ad-Db-Read-Token": customer_token}
+    return {}
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "frank-serve-bridge/1"
     protocol_version = "HTTP/1.1"
@@ -76,9 +88,9 @@ class Handler(BaseHTTPRequestHandler):
         if not _allowed(split.path, self.command):
             self._reply(404, "path not allowed")
             return
-        token = self.headers.get("X-Hermes-Session-Token", "")
-        if not token:
-            self._reply(403, "session token required")
+        auth_headers = _auth_headers(split.path, self.command, self.headers)
+        if not auth_headers:
+            self._reply(403, "private credential required")
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
         body = self.rfile.read(length) if length else None
@@ -86,8 +98,8 @@ class Handler(BaseHTTPRequestHandler):
             conn = http.client.HTTPConnection(UPSTREAM_HOST, UPSTREAM_PORT, timeout=UPSTREAM_TIMEOUT)
             headers = {
                 "Host": f"{UPSTREAM_HOST}:{UPSTREAM_PORT}",
-                "X-Hermes-Session-Token": token,
                 "Accept": self.headers.get("Accept", "application/json"),
+                **auth_headers,
             }
             if length:
                 headers["Content-Type"] = self.headers.get("Content-Type", "application/json")
