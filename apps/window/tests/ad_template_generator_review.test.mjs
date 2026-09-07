@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { placementScore, reviewArtifactPurpose, reviewOverallScore, selectMetaPreview, selectReusableReviewArtifact, selectReviewArtifact } from "../web/js/ad-template-generator-review.js";
+import { placementScore, reviewArtifactPurpose, reviewOverallScore, reusableValidationChecks, selectFaithfulReviewArtifact, selectMetaPreview, selectReusableReviewArtifact, selectReviewArtifact } from "../web/js/ad-template-generator-review.js";
 
 const summary = {
   source: { name: "source.png", url: "/source" },
@@ -56,4 +56,43 @@ test("Story source uses the reciprocal reference and final shippable is reusable
   assert.equal(selectReviewArtifact(evidence, "feed", "source").url, "/source");
   assert.equal(selectReviewArtifact(evidence, "story", "source").url, "/story-reference");
   assert.equal(selectReusableReviewArtifact(evidence, "story").url, "/neutral");
+});
+
+test("faithful and reusable review cards require their declared artifact kinds", () => {
+  assert.equal(selectFaithfulReviewArtifact({
+    previews: [{ name: "neutral-feed.png", placement: "feed", kind: "customer-default", url: "/neutral" }],
+  }, "feed"), null);
+  assert.equal(selectFaithfulReviewArtifact({
+    previews: [{ name: "qa-feed.png", placement: "feed", kind: "qa-source-filled", url: "/qa" }],
+  }, "feed").url, "/qa");
+  assert.equal(selectReusableReviewArtifact({
+    previews: [{ name: "qa-feed.png", placement: "feed", kind: "qa-source-filled", url: "/qa" }],
+  }, "feed"), null);
+});
+
+test("reusable validation reports only consistent recorded scenarios", () => {
+  assert.deepEqual(reusableValidationChecks({}), []);
+  assert.deepEqual(reusableValidationChecks({ reusable_validation: {
+    status: "passed", counts: { total: 2, passed: 2, failed: 0 },
+    scenarios: [{ name: "No source pixels", status: "passed" }, { identity: "Editable layers", status: "passed" }],
+  } }), [
+    { label: "No source pixels", status: "passed" },
+    { label: "Editable layers", status: "passed" },
+  ]);
+  assert.deepEqual(reusableValidationChecks({ reusable_validation: {
+    status: "passed", counts: { total: 1, passed: 1, failed: 0 },
+    scenarios: [{ name: "Incomplete", status: "unknown" }],
+  } }), []);
+  assert.deepEqual(reusableValidationChecks({ reusable_validation: {
+    status: "passed", counts: { total: 2, passed: 2, failed: 0 },
+    scenarios: [{ name: "Only one", status: "passed" }],
+  } }), []);
+  assert.deepEqual(reusableValidationChecks({ reusable_validation: {
+    status: "failed", counts: { total: 1, passed: 0, failed: 1 },
+    scenarios: [{ name: "Contradictory", status: "passed" }],
+  } }), []);
+  assert.deepEqual(reusableValidationChecks({ reusable_validation: {
+    status: "passed", counts: { total: 1.5, passed: 1, failed: 0 },
+    scenarios: [{ name: "Fractional", status: "passed" }],
+  } }), []);
 });

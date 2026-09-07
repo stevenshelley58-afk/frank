@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260906-ad-template-generator-v1">
+<link rel="stylesheet" href="/app.css?v=20260907-ad-template-workflow-v2">
 </head>
 <body>
 <div class="app">
@@ -182,19 +182,20 @@
       <section class="view" data-view="ad-template-generator" aria-labelledby="ad-template-generator-heading">
         <div class="ad-template-generator" id="ad-template-generator">
           <header class="ad-template-generator-head">
-            <div><h2 id="ad-template-generator-heading">Ad Template Generator</h2><p>Turn a source image into a Feed and native Story template.</p></div>
+            <div><h2 id="ad-template-generator-heading">Ad Template Generator</h2><p>Upload once, compare the evidence, then edit or approve the reusable template.</p></div>
             <span class="ad-template-generator-owner">Runs on Hermes</span>
           </header>
+          <ol class="ad-workflow-steps" aria-label="Ad template workflow"><li><span>1</span><strong>Upload</strong><small>Add source images</small></li><li><span>2</span><strong>Generate</strong><small>Hermes builds both placements</small></li><li><span>3</span><strong>Compare</strong><small>Check faithful evidence</small></li><li><span>4</span><strong>Edit / approve</strong><small>Finish in Blockwise</small></li></ol>
           <nav class="ad-template-generator-tabs" role="tablist" aria-label="Ad Template Generator sections">
-            <button type="button" class="is-on" id="ad-tab-run" role="tab" aria-selected="true" aria-controls="ad-panel-run" data-ad-tab="run">Create</button>
+            <button type="button" class="is-on" id="ad-tab-run" role="tab" aria-selected="true" aria-controls="ad-panel-run" data-ad-tab="run">Upload and generate</button>
             <button type="button" id="ad-tab-runs" role="tab" aria-selected="false" aria-controls="ad-panel-runs" data-ad-tab="runs">Runs</button>
-            <button type="button" id="ad-tab-review" role="tab" aria-selected="false" aria-controls="ad-panel-review" data-ad-tab="review">Ready for Review <span class="ad-review-count" id="ad-review-count" hidden>0</span></button>
+            <button type="button" id="ad-tab-review" role="tab" aria-selected="false" aria-controls="ad-panel-review" data-ad-tab="review">Compare and approve <span class="ad-review-count" id="ad-review-count" hidden>0</span></button>
             <button type="button" id="ad-tab-pipeline" role="tab" aria-selected="false" aria-controls="ad-panel-pipeline" data-ad-tab="pipeline">How it works</button>
           </nav>
 
           <div class="ad-template-generator-panel is-on" id="ad-panel-run" role="tabpanel" aria-labelledby="ad-tab-run" data-ad-panel="run">
             <form class="ad-run-form" id="ad-run-form">
-              <div class="ad-section-heading"><div><h3>Source images → ad templates</h3><p>Add up to 20 images, then start them together.</p></div><span id="ad-run-mode">No images</span></div>
+              <div class="ad-section-heading"><div><h3>1. Upload source images</h3><p>Add up to 20 images. Each image becomes its own durable Run.</p></div><span id="ad-run-mode">No images</span></div>
               <section class="ad-model-control" aria-labelledby="ad-model-heading">
                 <div class="ad-model-primary">
                   <label for="ad-model-builder"><strong id="ad-model-heading">Generation model</strong><span>Only for these Ad Template Generator runs</span></label>
@@ -261,7 +262,7 @@
           <div class="ad-template-generator-panel" id="ad-panel-review" role="tabpanel" aria-labelledby="ad-tab-review" data-ad-panel="review" hidden>
             <div class="ad-review-layout">
               <section class="ad-review-list-panel">
-                <div class="ad-section-heading"><div><h3>Ready for Review</h3><p>Passed automated QA and waiting for your decision.</p></div><span class="ad-live-state" id="ad-review-live-state">Live</span></div>
+                <div class="ad-section-heading"><div><h3>3. Compare, then edit or approve</h3><p>Passed automated QA and waiting for your decision.</p></div><span class="ad-live-state" id="ad-review-live-state">Live</span></div>
                 <div class="ad-review-list" id="ad-review-list" aria-live="polite"></div>
               </section>
               <section class="ad-review-detail" id="ad-review-detail"><div class="ad-empty"><strong>Select a template</strong><span>Compare the source and finished placements before publishing it to Blockwise.</span></div></section>
@@ -509,6 +510,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260906-retry-contract-v1"></script>
+<script type="module" src="/js/app.js?v=20260907-ad-template-workflow-v2"></script>
 </body>
 </html>

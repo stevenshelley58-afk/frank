@@ -2,7 +2,7 @@ import { blockwiseTemplateUrl } from "./view-routing.js?v=20260906-ad-template-g
 import { groupAdTemplateGeneratorRuns, mergeAdTemplateGeneratorRun, mergeAdTemplateGeneratorRunList, readyAdTemplateGeneratorReviewRuns, runListRenderSignature, runTimestamp } from "./ad-template-generator-state.js?v=20260905-ready-review-v1";
 import { AD_TEMPLATE_GENERATOR_BRIEF_MAX_CHARACTERS, adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260904-brief-roundtrip-v1";
 import { approveAdTemplateGeneratorTemplate, cancelAdTemplateGeneratorRun, discardAdTemplateGeneratorTemplate, getAdTemplateGeneratorRun, listAdTemplateGeneratorRuns, requestAdTemplateGeneratorTemplateChanges, retryAdTemplateGeneratorRun } from "./ad-template-generator-api.js?v=20260906-retry-contract-v1";
-import { placementScore, reviewArtifactPurpose, reviewModelProfile, reviewOverallScore, selectMetaPreview, selectReusableReviewArtifact, selectReviewArtifact } from "./ad-template-generator-review.js?v=20260905-ready-review-v1";
+import { placementScore, reviewArtifactPurpose, reviewModelProfile, reviewOverallScore, reusableValidationChecks, selectMetaPreview, selectReusableReviewArtifact, selectFaithfulReviewArtifact, selectReviewArtifact } from "./ad-template-generator-review.js?v=20260905-ready-review-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -684,6 +684,9 @@ function appendReviewFacts(parent, summary) {
     ["Elapsed", formatDuration(summary.elapsed_seconds)],
     ["Cost", Number.isFinite(Number(summary.cost_usd)) ? `$${Number(summary.cost_usd).toFixed(3)}` : "Not reported"],
     ["Blockwise smoke", smoke.passed === true ? "Passed" : smoke.passed === false ? "Failed" : "Not recorded"],
+    ["Reusable validation", reusableValidationChecks(summary).length
+      ? reusableValidationChecks(summary).map((item) => (item.status === "passed" ? "Passed" : item.status === "failed" ? "Failed" : "Not recorded") + ": " + item.label)
+      : ["Not recorded"]],
   ];
   const list = document.createElement("dl");
   list.className = "ad-review-facts";
@@ -722,7 +725,7 @@ function appendReviewEvidence(parent, run, summary) {
   section.className = "ad-review-section ad-review-evidence";
   const heading = document.createElement("div");
   heading.className = "ad-inline-heading";
-  heading.innerHTML = '<strong>Visual evidence</strong><span>Compare at Fit or actual pixels.</span>';
+  heading.innerHTML = "<strong>3. Compare visual evidence</strong><span>Faithful reconstruction and reusable template are separate recorded artifacts.</span>";
   const toolbar = document.createElement("div");
   toolbar.className = "ad-review-toolbar";
   const placements = document.createElement("div");
@@ -746,28 +749,36 @@ function appendReviewEvidence(parent, run, summary) {
     makeSegment("100%", "actual", reviewZoom, (value) => { reviewZoom = value; renderReviewDetail(run); }),
   );
   toolbar.append(placements, views, zoom);
-  const viewport = document.createElement("div");
-  viewport.className = `ad-review-viewport is-${reviewZoom}`;
-  const selectedArtifact = selectReviewArtifact(summary, reviewPlacement, reviewView);
-  appendReviewImage(viewport, selectedArtifact, reviewView.replace(/^./, (value) => value.toUpperCase()));
-  section.append(heading, toolbar, viewport); parent.append(section);
-  if (reviewView === "template" && reviewArtifactPurpose(selectedArtifact) === "qa-source-filled") {
-    const note = document.createElement("p");
-    note.className = "ad-review-evidence-note";
-    note.textContent = "QA fidelity render · filled with the source only for comparison. Source pixels do not ship in the reusable template.";
-    section.append(note);
-  }
-  const reusable = selectReusableReviewArtifact(summary, reviewPlacement);
-  if (reviewView === "template" && reusable && reusable.name !== selectedArtifact?.name) {
-    const reusableSection = document.createElement("section");
-    reusableSection.className = "ad-review-reusable";
-    const copy = document.createElement("div");
-    copy.innerHTML = "<strong>Reusable customer default</strong><span>This exact neutral render is imported into Blockwise.</span>";
-    const image = document.createElement("img"); image.src = reusable.url; image.alt = `${reviewPlacement} reusable customer default`;
-    reusableSection.append(copy, image); section.append(reusableSection);
-  }
-}
+  section.append(heading, toolbar);
 
+  const selectedArtifact = reviewView === "template" ? selectFaithfulReviewArtifact(summary, reviewPlacement) : selectReviewArtifact(summary, reviewPlacement, reviewView);
+  const reusable = selectReusableReviewArtifact(summary, reviewPlacement);
+  if (reviewView === "template") {
+    const compare = document.createElement("div");
+    compare.className = "ad-review-compare-grid";
+    const cards = [
+      ["Faithful reconstruction", selectedArtifact, "Source-filled QA evidence for comparison only. Source pixels do not ship."],
+      ["Reusable template", reusable, "Neutral editable artifact intended for Blockwise."],
+    ];
+    cards.forEach(([label, artifact, description]) => {
+      const card = document.createElement("article");
+      card.className = "ad-review-compare-card";
+      const title = document.createElement("strong"); title.textContent = label;
+      const note = document.createElement("span"); note.textContent = description;
+      const viewport = document.createElement("div"); viewport.className = "ad-review-viewport is-" + reviewZoom;
+      appendReviewImage(viewport, artifact, label);
+      card.append(title, note, viewport);
+      compare.append(card);
+    });
+    section.append(compare);
+  } else {
+    const viewport = document.createElement("div");
+    viewport.className = "ad-review-viewport is-" + reviewZoom;
+    appendReviewImage(viewport, selectedArtifact, reviewView.replace(/^./, (value) => value.toUpperCase()));
+    section.append(viewport);
+  }
+  parent.append(section);
+}
 function appendRecordedDetails(parent, run, summary) {
   const grid = document.createElement("div");
   grid.className = "ad-review-record-grid";
@@ -824,6 +835,17 @@ function appendReviewActions(parent, run) {
     section.append(status);
     parent.append(section);
     return;
+  }
+  const editorUrl = blockwiseTemplateUrl(run.output?.import);
+  if (editorUrl) {
+    const editor = document.createElement("a");
+    editor.className = "ad-primary";
+    editor.href = editorUrl;
+    editor.target = "_blank";
+    editor.rel = "noopener noreferrer";
+    editor.textContent = "Edit in Blockwise";
+    editor.setAttribute("aria-label", "Edit imported template in Blockwise");
+    section.append(editor);
   }
   const buttons = document.createElement("div");
   const request = document.createElement("button"); request.type = "button"; request.className = "ad-text-button"; request.textContent = "Request Changes";
@@ -884,7 +906,8 @@ function renderReviewDetail(run, { loading = false } = {}) {
   const detail = $("#ad-review-detail");
   if (!detail || !run) return;
   detail.replaceChildren();
-  const review = run.output?.review_summary || {};
+  const review = { ...(run.output?.review_summary || {}) };
+  if (!review.reusable_validation && run.output?.reusable_validation) review.reusable_validation = run.output.reusable_validation;
   const heading = document.createElement("header");
   heading.className = "ad-review-detail-head";
   const copy = document.createElement("div");
@@ -1113,7 +1136,7 @@ function renderRunDetail(run) {
     const editorUrl = blockwiseTemplateUrl(run.output?.import);
     if (editorUrl) {
       const open = document.createElement("a"); open.className = "ad-primary"; open.href = editorUrl;
-      open.target = "_blank"; open.rel = "noopener noreferrer"; open.textContent = "Open in Blockwise"; readySection.append(open);
+      open.target = "_blank"; open.rel = "noopener noreferrer"; open.setAttribute("aria-label", "Edit imported template in Blockwise"); open.textContent = "Open in Blockwise"; readySection.append(open);
     }
     detail.append(readySection);
   }

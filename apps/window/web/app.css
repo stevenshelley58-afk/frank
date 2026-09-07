@@ -2225,3 +2225,19 @@ a { color: inherit; text-decoration: none; }
 .rail-more[open] summary { color: var(--ink); }
 .rail-more > div { padding-left: 8px; }
 .rail-more .rail-item { font-size: 11px; }
+
+.ad-workflow-steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: 0; padding: 14px 28px; list-style: none; border-bottom: 1px solid var(--line); background: var(--line); }
+.ad-workflow-steps li { display: grid; grid-template-columns: 24px minmax(0, 1fr); column-gap: 8px; align-items: center; padding: 8px 12px; background: var(--bg); }
+.ad-workflow-steps li > span { grid-row: span 2; display: grid; place-items: center; width: 22px; height: 22px; border: 1px solid var(--line); border-radius: 50%; color: var(--mute); font-size: 10px; }
+.ad-workflow-steps strong { font-size: 11px; font-weight: 650; }
+.ad-workflow-steps small { color: var(--faint); font-size: 9px; }
+.ad-review-compare-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 12px; }
+.ad-review-compare-card { min-width: 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; background: var(--card); }
+.ad-review-compare-card > strong, .ad-review-compare-card > span { display: block; }
+.ad-review-compare-card > strong { font-size: 12px; }
+.ad-review-compare-card > span { min-height: 30px; margin-top: 4px; color: var(--faint); font-size: 10px; line-height: 1.4; }
+.ad-review-compare-card .ad-review-viewport { min-height: 360px; max-height: 620px; margin-top: 10px; padding: 12px; }
+@media (max-width: 760px) {
+  .ad-workflow-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-inline: 14px; }
+  .ad-review-compare-grid { grid-template-columns: 1fr; }
+}
