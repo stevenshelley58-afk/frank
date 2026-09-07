@@ -33,6 +33,18 @@ ALLOWED: tuple[tuple[str, frozenset], ...] = (
     ("/api/model/options", frozenset({"GET"})),
     ("/api/audio/transcribe", frozenset({"POST"})),
     ("/api/sessions", frozenset({"GET", "POST", "PATCH", "DELETE"})),
+    ("/v1/ad-db", frozenset({"GET", "HEAD", "POST"})),
+)
+
+REQUEST_PASSTHROUGH_HEADERS = ("Range", "If-Range", "If-None-Match")
+RESPONSE_PASSTHROUGH_HEADERS = (
+    "Content-Type",
+    "Content-Length",
+    "Content-Range",
+    "Accept-Ranges",
+    "ETag",
+    "Last-Modified",
+    "Cache-Control",
 )
 
 
@@ -79,21 +91,29 @@ class Handler(BaseHTTPRequestHandler):
             }
             if length:
                 headers["Content-Type"] = self.headers.get("Content-Type", "application/json")
+            for key in REQUEST_PASSTHROUGH_HEADERS:
+                if self.headers.get(key):
+                    headers[key] = self.headers[key]
             conn.request(self.command, path, body=body, headers=headers)
             resp = conn.getresponse()
-            data = resp.read()
             self.send_response(resp.status)
-            for key in ("Content-Type",):
-                if resp.getheader(key):
-                    self.send_header(key, resp.getheader(key))
-            self.send_header("Content-Length", str(len(data)))
+            forwarded_length = False
+            for key in RESPONSE_PASSTHROUGH_HEADERS:
+                if value := resp.getheader(key):
+                    self.send_header(key, value)
+                    forwarded_length = forwarded_length or key == "Content-Length"
+            if not forwarded_length:
+                self.send_header("Connection", "close")
+                self.close_connection = True
             self.end_headers()
-            self.wfile.write(data)
+            if self.command != "HEAD" and resp.status != 304:
+                while chunk := resp.read(64 * 1024):
+                    self.wfile.write(chunk)
             conn.close()
         except (OSError, TimeoutError) as error:
             self._reply(502, f"upstream unavailable: {error}")
 
-    do_GET = do_POST = do_PATCH = do_DELETE = _proxy  # noqa: N815
+    do_GET = do_HEAD = do_POST = do_PATCH = do_DELETE = _proxy  # noqa: N815
 
     def log_message(self, fmt: str, *args) -> None:
         # Redact complete URLs/queries: log method + status only.
