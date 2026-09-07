@@ -424,11 +424,111 @@ def _hermes_error(err: Exception):
         message = f"Hermes returned HTTP {err.code}."
         try:
             parsed = json.loads(detail)
-            message = parsed.get("error", {}).get("message") or parsed.get("message") or message
+            error_value = parsed.get("error")
+            if isinstance(error_value, dict):
+                message = error_value.get("message") or message
+            elif isinstance(error_value, str):
+                message = error_value
+            detail_value = parsed.get("detail")
+            if isinstance(detail_value, dict):
+                message = detail_value.get("reason") or detail_value.get("message") or message
+            elif isinstance(detail_value, str):
+                message = detail_value
+            message = parsed.get("message") or message
         except (json.JSONDecodeError, AttributeError):
             pass
         return jsonify({"error": message}), err.code if 400 <= err.code < 600 else 502
     return jsonify({"error": f"Could not reach Hermes: {str(err).split(chr(10))[0][:180]}"}), 502
+
+
+_AD_DB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+_AD_DB_PAGE_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
+_AD_DB_IDEMPOTENCY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/-]{7,127}$")
+_AD_DB_QUERY_KEYS = frozenset({"q", "cursor", "limit", "advertiserPageId", "agentId", "agentName", "agencyId", "agencyName", "state", "suburb", "postcode", "locationRelation", "status"})
+
+
+def _ad_db_id(value: str) -> str:
+    if not _AD_DB_ID.fullmatch(value or ""):
+        abort(404)
+    return value
+
+
+def _ad_db_query() -> str:
+    pairs = []
+    for key, value in request.args.items(multi=True):
+        if key not in _AD_DB_QUERY_KEYS or len(value) > 240:
+            abort(400, description="unsupported Ad DB filter")
+        pairs.append((key, value))
+    return urllib.parse.urlencode(pairs)
+
+
+def _ad_db_public_payload(payload: object) -> object:
+    """Replace internal media routes; source URLs never reach the browser."""
+    if not isinstance(payload, dict):
+        return payload
+    result = deepcopy(payload)
+    records = result.get("items") if isinstance(result.get("items"), list) else [result]
+    for record in records:
+        if not isinstance(record, dict) or not _AD_DB_ID.fullmatch(str(record.get("id") or "")):
+            continue
+        for asset in record.get("media") if isinstance(record.get("media"), list) else []:
+            if not isinstance(asset, dict):
+                continue
+            asset_id = str(asset.get("id") or "")
+            if _AD_DB_ID.fullmatch(asset_id):
+                asset["archiveUrl"] = f"/api/ad-db/ads/{urllib.parse.quote(record['id'], safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
+            asset.pop("sourceUrl", None)
+            asset.pop("sourceURLs", None)
+    return result
+
+
+class _AdDbNoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _ad_db_media_response(ad_id: str, asset_id: str) -> Response:
+    """Stream only Hermes-authenticated archive bytes; never relay redirects."""
+    path = f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
+    headers = {"Accept": "application/octet-stream"}
+    if HERMES_KEY:
+        headers["Authorization"] = f"Bearer {HERMES_KEY}"
+    for name in ("Range", "If-Range", "If-None-Match"):
+        if request.headers.get(name):
+            headers[name] = request.headers[name]
+    upstream_request = urllib.request.Request(
+        hermes_base() + path,
+        headers=headers,
+        method=request.method,
+    )
+    upstream = urllib.request.build_opener(_AdDbNoRedirect()).open(upstream_request, timeout=15)
+    status = getattr(upstream, "status", upstream.getcode())
+    if status not in (200, 206, 304):
+        upstream.close()
+        abort(502, description="Hermes returned an invalid archived-media response")
+    response_headers = {
+        name: value
+        for name in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified")
+        if (value := upstream.headers.get(name))
+    }
+    response_headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    if request.method == "HEAD" or status == 304:
+        upstream.close()
+        return Response(status=status, headers=response_headers)
+
+    def stream():
+        try:
+            while chunk := upstream.read(64 * 1024):
+                yield chunk
+        finally:
+            upstream.close()
+
+    return Response(
+        stream_with_context(stream()),
+        status=status,
+        headers=response_headers,
+        direct_passthrough=True,
+    )
 
 
 def _session_path(session_id: str, suffix: str = "") -> str:
@@ -2914,6 +3014,76 @@ def _tool_run_path(run_id: str, suffix: str = "") -> str:
     if not AD_TEMPLATE_GENERATOR_RUN_ID.fullmatch(run_id):
         abort(404)
     return f"/v1/tool-runs/{urllib.parse.quote(run_id, safe='')}{suffix}"
+
+
+@app.get("/api/ad-db/runs/readiness")
+def ad_db_scan_readiness():
+    try:
+        payload = hermes_request("/v1/ad-db/runs/readiness", timeout=10)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(payload)
+
+
+@app.post("/api/ad-db/runs/scan")
+def ad_db_scan_create():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) - {"pageIds", "maxCredits", "idempotencyKey"}:
+        abort(400, "scan body must contain only pageIds, maxCredits, and idempotencyKey")
+    page_ids = body.get("pageIds")
+    if not isinstance(page_ids, list) or not 1 <= len(page_ids) <= 50:
+        abort(400, "pageIds must contain 1 to 50 advertiser page IDs")
+    if any(not isinstance(value, str) or not _AD_DB_PAGE_UUID.fullmatch(value) for value in page_ids):
+        abort(400, "pageIds must be UUIDs")
+    if len(set(page_ids)) != len(page_ids):
+        abort(400, "pageIds must be distinct")
+    max_credits = body.get("maxCredits", 25)
+    if isinstance(max_credits, bool) or not isinstance(max_credits, (int, float)) or not 0 < max_credits <= 25:
+        abort(400, "maxCredits must be greater than 0 and no more than 25")
+    idempotency_key = body.get("idempotencyKey")
+    if not isinstance(idempotency_key, str) or not _AD_DB_IDEMPOTENCY.fullmatch(idempotency_key):
+        abort(400, "idempotencyKey has an invalid format")
+    try:
+        payload = hermes_request("/v1/ad-db/runs/scan", {
+            "pageIds": page_ids,
+            "maxCredits": max_credits,
+            "idempotencyKey": idempotency_key,
+        }, method="POST", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(payload), 202
+
+
+@app.get("/api/ad-db/ads")
+@app.get("/api/ad-db/prospects")
+@app.get("/api/ad-db/runs")
+def ad_db_collection():
+    """Read-only Ad DB facade; canonical data and policy stay in Hermes."""
+    collection = request.path.rsplit("/", 1)[-1]
+    query = _ad_db_query()
+    try:
+        payload = hermes_request(f"/v1/ad-db/{collection}" + (f"?{query}" if query else ""), timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(_ad_db_public_payload(payload))
+
+
+@app.get("/api/ad-db/ads/<ad_id>")
+def ad_db_ad(ad_id: str):
+    ad_id = _ad_db_id(ad_id)
+    try:
+        payload = hermes_request(f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(_ad_db_public_payload(payload))
+
+
+@app.route("/api/ad-db/ads/<ad_id>/media/<asset_id>", methods=["GET", "HEAD"])
+def ad_db_media(ad_id: str, asset_id: str):
+    try:
+        return _ad_db_media_response(_ad_db_id(ad_id), _ad_db_id(asset_id))
+    except Exception as error:
+        return _hermes_error(error)
 
 
 @app.post("/api/ad-studio/runs")

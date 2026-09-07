@@ -12,6 +12,7 @@ import { mountAdTemplateGenerator, setAdTemplateGeneratorActive } from "./ad-tem
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
 import { pathForView, routeForPath } from "./view-routing.js?v=20260906-ad-template-generator-v1";
+import { mountAdDb, setAdDbActive } from "./ad-db.js?v=20260907-ad-db-v2";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
@@ -28,6 +29,7 @@ const TITLES = {
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
   "ad-template-generator": ["Ad Template Generator", "Source image → ad template"],
+  "ad-db": ["Ad database", "Verified ad archive and collection evidence"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
   connections: ["Connections", "Recorded provider setup and capabilities"],
@@ -76,6 +78,8 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   if (id === "connections") openConnections(viewDetail);
   if (id === "ad-template-generator") mountAdTemplateGenerator();
   setAdTemplateGeneratorActive(id === "ad-template-generator");
+  if (id === "ad-db") mountAdDb();
+  setAdDbActive(id === "ad-db");
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 

@@ -319,7 +319,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn("idempotency_key: pending.idempotencyKey", ops)
         self.assertNotIn('actionButton("session_revoke", row.id', ops)
 
-    def test_entity_homes_add_tools_without_changing_the_live_rail(self):
+    def test_entity_homes_keep_the_canonical_operational_rail(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
@@ -334,7 +334,7 @@ class UiContractTest(unittest.TestCase):
         rail_views = re.findall(r'<button class="rail-item[^>]*data-view="([^"]+)"', html)
         self.assertEqual(
             rail_views,
-            ["hub", "tools", "files", "ad-template-generator", "trace", "releases", "live", "map", "control", "ops"],
+            ["hub", "tools", "files", "ad-template-generator", "ad-db", "trace", "releases", "live", "map", "control", "ops"],
         )
         self.assertIn('id="project-nav"', html)
         self.assertIn('id="new-project"', html)
