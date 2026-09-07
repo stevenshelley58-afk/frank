@@ -40,7 +40,7 @@ test("unconfigured launch exposes real email tools without invented readiness or
   assert.ok(!nodes.some((n) => n.className === "launch-desk-status" && ["Live", "Connected"].includes(n.textContent)));
   assert.ok(nodes.some((n) => /Resend prohibits cold outreach/.test(n.textContent || "")));
   assert.equal(calls.length, 2);
-  assert.ok(calls.every(([, options]) => options === undefined));
+  assert.ok(calls.every(([, options]) => options.signal instanceof AbortSignal && options.method === undefined && options.body === undefined));
 });
 
 test("CRM access never incorrectly requires replacing the sender with Stalwart", async () => {
@@ -60,4 +60,15 @@ test("failed setup reads show a retry rather than a healthy-looking empty dashbo
   const { nodes } = await render([], {}, true);
   assert.ok(nodes.some((n) => /No service is assumed connected/.test(n.textContent || "")));
   assert.ok(nodes.some((n) => n.tag === "button" && n.textContent === "Try again" && n.listeners.click));
+});
+
+test("direct app links are usable before status requests finish", () => {
+  globalThis.document = { head: new Element(), getElementById: () => null, createElement: (tag) => new Element(tag) };
+  globalThis.window = {};
+  globalThis.fetch = () => new Promise(() => {});
+  const host = new Element();
+  get("blockwise-launch-desk").mount(host);
+  const nodes = descend(host);
+  assert.equal(nodes.filter((n) => n.className === "launch-desk-card").length, 6);
+  assert.ok(nodes.some((n) => n.tag === "a" && n.href === "https://resend.com/emails/receiving"));
 });
