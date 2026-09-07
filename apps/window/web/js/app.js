@@ -8,7 +8,7 @@ import { DictationController } from "./chat/dictation-controller.js";
 import { ModelSelector } from "./chat/model-selector.js";
 import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/turn-stream.js";
 import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
-import { mountAdTemplateGenerator, setAdTemplateGeneratorActive } from "./ad-template-generator.js?v=20260906-retry-contract-v1";
+import { mountAdTemplateGenerator, setAdTemplateGeneratorActive } from "./ad-template-generator.js?v=20260907-ad-template-workflow-v2";
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
 import { pathForView, routeForPath } from "./view-routing.js?v=20260906-ad-template-generator-v1";

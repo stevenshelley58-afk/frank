@@ -26,6 +26,37 @@ export function reviewArtifactPurpose(artifact) {
   return "recorded";
 }
 
+export function reusableValidationChecks(summary) {
+  const validation = summary?.reusable_validation;
+  if (!validation || typeof validation !== "object") return [];
+  const scenarios = Array.isArray(validation.scenarios) ? validation.scenarios
+    : Array.isArray(validation.results) ? validation.results : [];
+  const counts = validation.counts && typeof validation.counts === "object" ? validation.counts : {};
+  const total = Number(counts.total);
+  const passed = Number(counts.passed);
+  const failed = Number(counts.failed);
+  const statuses = scenarios.map((scenario) => scenario?.status);
+  const validCounts = Number.isInteger(total) && total > 0
+    && Number.isInteger(passed) && Number.isInteger(failed)
+    && passed >= 0 && failed >= 0 && passed + failed === total
+    && scenarios.length === total
+    && statuses.every((status) => status === "passed" || status === "failed")
+    && statuses.filter((status) => status === "passed").length === passed
+    && statuses.filter((status) => status === "failed").length === failed;
+  const aggregate = failed === 0 && passed === total ? "passed" : "failed";
+  if (!validCounts || validation.status !== aggregate) return [];
+  return scenarios.map((scenario) => ({
+    label: String(scenario?.name || scenario?.identity || "Reusable validation"),
+    status: scenario.status,
+  }));
+}
+
+
+export function selectFaithfulReviewArtifact(summary, placement) {
+  const candidate = selectReviewArtifact(summary, placement, "template");
+  return reviewArtifactPurpose(candidate) === "qa-source-filled" ? candidate : null;
+}
+
 export function selectReusableReviewArtifact(summary, placement) {
   return asArtifacts(summary?.previews)
     .filter((artifact) => placementMatches(artifact, placement))
