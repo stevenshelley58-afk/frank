@@ -1026,6 +1026,11 @@ def providers_readiness():
         "stalwart": ("STALWART_CONNECTOR_STATUS", "STALWART_BASE_URL"),
         "mautic": ("MAUTIC_CONNECTOR_STATUS", "MAUTIC_BASE_URL"),
         "chatwoot": ("CHATWOOT_CONNECTOR_STATUS", "CHATWOOT_BASE_URL"),
+        # Analytics tools are intentionally represented only by their recorded
+        # connector state. A dashboard URL or a tracking snippet is never
+        # treated as proof that the property is collecting data.
+        "ga4": ("GA4_CONNECTOR_STATUS", "GA4_DASHBOARD_URL"),
+        "clarity": ("CLARITY_CONNECTOR_STATUS", "CLARITY_DASHBOARD_URL"),
     }
     items = []
     for provider, (status_var, url_var) in providers.items():

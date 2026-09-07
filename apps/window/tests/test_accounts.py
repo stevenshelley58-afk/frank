@@ -163,6 +163,8 @@ class AccountsApiTest(unittest.TestCase):
         self.assertFalse(by_provider["mautic"]["verified"])
         self.assertTrue(by_provider["chatwoot"]["verified"])
         self.assertEqual(by_provider["mautic"]["base_url"], "https://mautic.example.test")
+        self.assertFalse(by_provider["ga4"]["verified"])
+        self.assertFalse(by_provider["clarity"]["configured"])
 
     def test_support_projection_filters_account_and_rejects_unsafe_links(self):
         server.SUPPORT_CONVERSATIONS_FILE.write_text(json.dumps({"conversations": [{
