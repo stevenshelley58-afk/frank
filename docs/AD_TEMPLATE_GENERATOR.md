@@ -48,6 +48,25 @@ evidence or a UI fallback. Never overwrite recorded scores to meet this policy.
 
 ## Readiness evidence
 
+### Complete successful handoff observed 8 September 2026
+
+Run `trun_cf767d809b8c438497a1e9bc9676ea80` reached `ready_for_review` on
+Hermes `78f6f3db8fcad7370ad65b95130eb4c0a6acd549`, pinned renderer
+`a009543dda9ccf47a3ebe56b69ee168828d31436`, and Blockwise app
+`e09a5d6f9b141c2613d914e293c1d4bfd9521a00`. Template
+`open-house-estate-1080` imported with four assets and remains quarantined.
+Its matching smoke test passed. Comparator minimum 9.85; independent reviewer
+minima 9.8 and 9.85; all effects matched/absent, no issues, and
+`no_obvious_errors=true`. Short, maximum, Unicode and optional-empty scenarios
+all passed. The serving first-50 acceptance predicate returned true; the dry
+manifest verified 50 distinct source IDs/hashes and no batch has started.
+
+Measured final repairs now compile directly through the normal validations,
+with full rechecks afterwards. Comparator-approved repairs survive later
+handoff failures. The live importer now understands the current review policy.
+This verifies one complete pipeline handoff, not guaranteed acceptance of all
+50 sources. Batch execution must retain its stop-on-failure and approval gates.
+
 As observed earlier on 8 September 2026, Hermes release `e691c16a2a` still used
 a 9.5 gate while its pinned Blockwise renderer `39e51fed` required review metadata
 declaring at least 9.8. That mismatch caused the latest sample to fail final
