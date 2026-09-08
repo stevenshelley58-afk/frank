@@ -117,3 +117,10 @@ No application release or provider operation was performed for this audit.
 
 - docs/contracts/fixtures/canonical-fixture-checksums.txt
 - docs/contracts/fixtures/tool-runs-404.txt
+
+## Provenance repair addendum
+
+The consolidated AGENTS.md rules changed its normalized UTF-8 SHA-256
+fingerprint. The Frank agent-rules source manifest now records the observed
+digest and verification date. No integrity check was bypassed; the focused
+Mini Frank knowledge verification passed all 4 tests.

@@ -113,3 +113,7 @@ verified source/release; do not assume a task worktree is a permanent runtime.
 
 Before using the batch, require a genuinely correct live sample to complete the
 full handoff under the approved policy. Keep unapproved outputs quarantined.
+
+The same minimums apply at every new import boundary. Existing historical
+templates and run evidence remain readable; older scores are not retroactively
+promoted to a pass.
