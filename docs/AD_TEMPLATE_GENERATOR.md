@@ -259,7 +259,14 @@ promoted to a pass.
 ## Review chat and annotation workflow (2026-09-08 preview)
 
 The review surface keeps the final review preview alongside a durable Hermes-backed
-conversation. An operator can mark rectangular areas on the reusable production
+conversation. The primary workspace has one production image, a prominent Annotate
+button, Feed/Story controls, and a Corrections panel. Click Annotate, then click a
+spot or drag a box. A numbered correction field receives focus. Done annotating
+or Escape exits drawing mode. Comparison and quality evidence, plus prior revision
+history, remain available in secondary disclosures. On narrow screens, corrections
+stack beneath the image and the run queue is compact.
+
+An operator can mark rectangular areas on the reusable production
 preview for either Feed or Story, add an optional comment to each marked area, or
 send text without a mark. A request accepts at most 8 areas. The message is limited
 to 1,200 characters and each area comment to 200 characters. Coordinates are
@@ -290,3 +297,9 @@ On 2026-09-08, the isolated desktop and mobile browser review flow passed 11:34
 UTC. A real production artifact copied to a temporary snapshot passed the snapshot
 contract without modifying production. This is preview evidence only, not a release
 or production verification claim.
+
+The revised annotation workspace passed isolated desktop and mobile browser checks
+on 2026-09-08, including explicit drawing mode, Escape, click-to-mark, correction
+focus, normalized placement-safe drawing, persistence, send, undo and processing
+locks. Real ad artwork was read only into fixture responses; no providers or
+publishing endpoints were invoked. This remains unreleased preview evidence.

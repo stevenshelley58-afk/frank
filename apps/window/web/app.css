@@ -2281,3 +2281,58 @@ a { color: inherit; text-decoration: none; }
 .ad-review-saved-area { position: absolute; border: 2px solid var(--mark); color: var(--mark); font-size: 12px; pointer-events: none; box-sizing: border-box; }
 
 .ad-review-before-after img, .ad-review-image-stage > img { border-radius: 0; }
+
+/* The final artwork is the primary review surface; evidence stays secondary. */
+.ad-review-layout { grid-template-columns: minmax(180px,220px) minmax(0,1fr); }
+.ad-review-detail { padding: 18px 22px; }
+.ad-review-detail-head { padding-bottom: 12px; }
+.ad-review-detail-head h3 { font-size: 18px; }
+.ad-review-detail-head p, .ad-review-hero-score { display: none; }
+.ad-review-workspace { display: grid; grid-template-columns: minmax(0,1fr) 300px; margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: white; }
+.ad-review-canvas-panel { min-width: 0; padding: 16px; }
+.ad-review-workspace .ad-review-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 0; gap: 12px; }
+.ad-annotate-button { min-height: 42px; padding: 10px 20px; border-radius: 8px; background: #111; color: #fff; font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.ad-annotate-button[aria-pressed="true"] { outline: 2px solid #111; outline-offset: 3px; }
+.ad-annotate-button:disabled { opacity: .45; cursor: not-allowed; }
+.ad-annotate-button:focus-visible { outline: 3px solid #666; outline-offset: 3px; }
+.ad-annotation-instruction { min-height: 20px; margin: 12px 0; font-size: 12px; color: #666; }
+.ad-review-primary-artwork { padding: 0; margin: 0; border: 0; }
+.ad-review-artwork-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.ad-review-primary-artwork .ad-review-viewport { min-height: 0; max-height: none; height: auto; margin: 0; padding: 16px; overflow: visible; background: #fff; border: 1px solid #ececec; border-radius: 4px; }
+.ad-review-primary-artwork .ad-review-image-stage { display: block; width: fit-content; max-width: 100%; margin: auto; }
+.ad-review-primary-artwork .ad-review-image-stage > img { display: block; width: auto; max-width: 100%; height: auto; max-height: max(200px,calc(100dvh - 580px)); object-fit: contain; box-shadow: none; }
+.ad-review-comment-panel { min-width: 0; padding: 20px; border-left: 1px solid var(--line); }
+.ad-review-comment-panel > h3 { margin: 0 0 16px; font-size: 16px; }
+.ad-review-comment-panel .ad-review-chat { margin: 0; padding: 0; border: 0; }
+.ad-review-comment-panel .ad-review-chat > h3 { display: none; }
+.ad-review-comment-panel .ad-review-chat > p { margin: 0 0 12px; font-size: 12px; color: #666; }
+.ad-review-comment-panel .ad-review-chat-form { display: flex; flex-direction: column; align-items: stretch; gap: 12px; margin: 0; }
+.ad-review-comment-panel .ad-review-chat-form label { font-size: 13px; gap: 8px; }
+.ad-review-comment-panel .ad-review-chat-form textarea { min-height: 120px; font-size: 14px; line-height: 1.5; }
+.ad-review-comment-panel .ad-review-chat-form button { min-height: 42px; font-size: 13px; }
+.ad-review-comment-panel .ad-review-annotation-comments { width: 100%; margin: 0 0 20px; }
+.ad-review-comment-panel .ad-review-area-field { display: grid; grid-template-columns: 1fr auto; padding: 12px; border: 1px solid #ddd; border-radius: 8px; color: #111; gap: 8px; }
+.ad-review-area-field > span { grid-column: 1; font-size: 12px; font-weight: 600; }
+.ad-review-comment-panel .ad-review-area-field input { grid-column: 1 / -1; grid-row: 2; background: #fff; color: #111; border: 1px solid #ddd; font-size: 13px; min-height: 40px; }
+.ad-review-area-field button { grid-column: 2; grid-row: 1; background: none; font-size: 11px; color: #666; }
+.ad-review-history, .ad-review-secondary { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+.ad-review-history > summary, .ad-review-secondary > summary { cursor: pointer; font-size: 13px; font-weight: 500; padding: 4px 0; }
+.ad-review-history .ad-review-before-after { grid-template-columns: 1fr; }
+.ad-review-secondary .ad-review-compare-grid img { max-width: 100%; max-height: 500px; object-fit: contain; }
+.ad-review-actions > a.ad-primary { width: auto; display: inline-flex; padding: 10px 16px; }
+@media(max-width:1100px) { .ad-review-layout { grid-template-columns: 170px minmax(0,1fr); } .ad-review-workspace { grid-template-columns: minmax(0,1fr) 270px; } }
+@media(max-width:850px) { .ad-review-layout { grid-template-columns: 1fr; } .ad-review-list-panel { border-right: 0; } .ad-review-workspace { grid-template-columns: minmax(0,1fr); } .ad-review-comment-panel { border-left: 0; border-top: 1px solid var(--line); } .ad-review-primary-artwork .ad-review-image-stage > img { max-height: 480px; } .ad-review-detail { padding: 14px; } }
+
+.ad-review-list-panel .ad-section-heading { flex-direction: column; align-items: flex-start; gap: 10px; }
+.ad-review-list-panel .ad-section-heading h3 { font-size: 16px; }
+.ad-review-list-panel .ad-live-state { white-space: nowrap; }
+
+@media(max-width:850px) {
+  .ad-review-list-panel { padding: 10px 14px; max-height: 90px; border-bottom: 1px solid var(--line); }
+  .ad-review-list-panel .ad-section-heading { display: none; }
+  .ad-review-list { margin-top: 0; }
+  .ad-review-row { grid-template-columns: 32px minmax(0,1fr); padding: 5px; }
+  .ad-review-row > img, .ad-review-row-missing { width: 32px; height: 40px; }
+  .ad-review-row time { display: none; }
+  .ad-review-workspace .ad-review-toolbar { flex-wrap: wrap; }
+}

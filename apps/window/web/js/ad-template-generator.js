@@ -17,6 +17,7 @@ let selectedReviewRunId = "";
 let reviewPlacement = "feed";
 let reviewView = "template";
 let reviewZoom = "fit";
+let reviewAnnotating = false;
 let reviewActionPending = false;
 let reviewActionMessage = "";
 const reviewDraftAnnotations = new Map();
@@ -727,74 +728,99 @@ function appendMetaPreviews(parent, summary) {
 }
 
 function appendReviewEvidence(parent, run, summary) {
-  const section = document.createElement("section");
-  section.className = "ad-review-section ad-review-evidence";
-  const heading = document.createElement("div");
-  heading.className = "ad-inline-heading";
-  heading.innerHTML = "<strong>3. Compare visual evidence</strong><span>Faithful reconstruction and reusable template are separate recorded artifacts.</span>";
-  const toolbar = document.createElement("div");
-  toolbar.className = "ad-review-toolbar";
-  const placements = document.createElement("div");
-  placements.className = "ad-review-segments";
-  placements.setAttribute("aria-label", "Placement");
-  placements.append(
-    makeSegment("Feed", "feed", reviewPlacement, (value) => { reviewPlacement = value; renderReviewDetail(run); }),
-    makeSegment("Story", "story", reviewPlacement, (value) => { reviewPlacement = value; renderReviewDetail(run); }),
-  );
-  const views = document.createElement("div");
-  views.className = "ad-review-segments ad-review-views";
-  views.setAttribute("aria-label", "Evidence view");
-  for (const [label, value] of [["Source", "source"], ["Template", "template"], ["Overlay", "overlay"], ["Difference", "difference"]]) {
-    views.append(makeSegment(label, value, reviewView, (next) => { reviewView = next; renderReviewDetail(run); }));
+  const grid = document.createElement("div"); grid.className = "ad-review-compare-grid";
+  for (const [label, artifact] of [["Source", selectReviewArtifact(summary, reviewPlacement, "source")], ["Faithful reconstruction", selectFaithfulReviewArtifact(summary, reviewPlacement)]]) {
+    const figure = document.createElement("figure");
+    const title = document.createElement("figcaption"); title.textContent = label;
+    figure.append(title); appendReviewImage(figure, artifact, label); grid.append(figure);
   }
-  const zoom = document.createElement("div");
-  zoom.className = "ad-review-segments";
-  zoom.setAttribute("aria-label", "Zoom");
-  zoom.append(
-    makeSegment("Fit", "fit", reviewZoom, (value) => { reviewZoom = value; renderReviewDetail(run); }),
-    makeSegment("100%", "actual", reviewZoom, (value) => { reviewZoom = value; renderReviewDetail(run); }),
-  );
-  toolbar.append(placements, views, zoom);
-  section.append(heading, toolbar);
-
-  const selectedArtifact = reviewView === "template" ? selectFaithfulReviewArtifact(summary, reviewPlacement) : selectReviewArtifact(summary, reviewPlacement, reviewView);
-  const reusable = selectReusableReviewArtifact(summary, reviewPlacement);
-  if (reviewView === "template") {
-    const compare = document.createElement("div");
-    compare.className = "ad-review-compare-grid";
-    const cards = [
-      ["Faithful reconstruction", selectedArtifact, "Source-filled QA evidence for comparison only. Source pixels do not ship."],
-      ["Reusable template", reusable, "Neutral editable artifact intended for Blockwise."],
-    ];
-    cards.forEach(([label, artifact, description]) => {
-      const card = document.createElement("article");
-      card.className = "ad-review-compare-card";
-      const title = document.createElement("strong"); title.textContent = label;
-      const note = document.createElement("span"); note.textContent = description;
-      const viewport = createAnnotatedViewport(run, artifact, label, reviewPlacement, { enabled: label === "Reusable template" && run.status === "ready_for_review" && !reviewInFlight.has(run.id) }); viewport.className += " is-" + reviewZoom;
-      card.append(title, note, viewport);
-      compare.append(card);
-    });
-    section.append(compare);
-  } else {
-    const viewport = document.createElement("div");
-    viewport.className = "ad-review-viewport is-" + reviewZoom;
-    appendReviewImage(viewport, selectedArtifact, reviewView.replace(/^./, (value) => value.toUpperCase()));
-    section.append(viewport);
-  }
-  parent.append(section);
+  parent.append(grid);
 }
+
 function createAnnotatedViewport(run, artifact, label, placement, { enabled = false } = {}) {
   const viewport = document.createElement("div"); viewport.className = "ad-review-viewport ad-review-annotated-viewport";
   const stage = document.createElement("div"); stage.className = "ad-review-image-stage";
-  if (!artifact?.url) { appendReviewImage(stage, artifact, label); viewport.append(stage); return viewport; }
-  const image = document.createElement("img"); image.src = artifact.url; image.alt = `${label} for ${placement} placement`; stage.append(image);
-  const overlay = document.createElement("div"); overlay.className = "ad-review-annotation-layer"; overlay.setAttribute("aria-label", `${placement} annotation canvas`); overlay.style.pointerEvents = enabled ? "auto" : "none"; stage.append(overlay); const comments = document.createElement("div"); comments.className = "ad-review-annotation-comments";
-  const key = `${run.id}:${placement}`; let annotations = serializeAnnotations(reviewDraftAnnotations.get(key) || []);
-  const draw = () => { overlay.replaceChildren(); comments.replaceChildren(); annotations.forEach((annotation, index) => { const box = document.createElement("div"); box.className = "ad-review-annotation-box ad-review-annotation is-draft"; box.dataset.testid = "draft-annotation"; box.style.left = `${annotation.x * 100}%`; box.style.top = `${annotation.y * 100}%`; box.style.width = `${annotation.width * 100}%`; box.style.height = `${annotation.height * 100}%`; const tag = document.createElement("span"); tag.textContent = String(index + 1); box.append(tag); const remove = document.createElement("button"); remove.type = "button"; remove.className = "ad-review-annotation-remove"; remove.setAttribute("aria-label", `Remove annotation ${index + 1}`); remove.textContent = "×"; remove.addEventListener("click", (event) => { event.stopPropagation(); annotations.splice(index, 1); reviewDraftAnnotations.set(key, annotations); draw(); }); box.append(remove); overlay.append(box); const field = document.createElement("label"); field.textContent = `Area ${index + 1}`; const input = document.createElement("input"); input.value = annotation.comment || ""; input.maxLength = 200; input.dataset.annotationIndex = String(index); input.placeholder = "What should change here?"; input.addEventListener("input", () => { annotation.comment = safeAnnotationText(input.value); reviewDraftAnnotations.set(key, annotations); }); field.append(input); comments.append(field); }); };
+  const comments = document.createElement("div"); comments.className = "ad-review-annotation-comments";
+  if (!artifact?.url) { appendReviewImage(stage, artifact, label); viewport.append(stage, comments); return viewport; }
+  const image = document.createElement("img"); image.src = artifact.url; image.alt = `${label} for ${placement} placement`; image.draggable = false; stage.append(image);
+  const overlay = document.createElement("div"); overlay.className = "ad-review-annotation-layer";
+  overlay.setAttribute("aria-label", `${placement} annotation canvas`);
+  overlay.style.pointerEvents = enabled && reviewAnnotating ? "auto" : "none";
+  stage.append(overlay);
+  const key = `${run.id}:${placement}`;
+  let annotations = serializeAnnotations(reviewDraftAnnotations.get(key) || []);
+  const draw = () => {
+    overlay.replaceChildren(); comments.replaceChildren();
+    annotations.forEach((annotation, index) => {
+      const box = document.createElement("div"); box.className = "ad-review-annotation-box"; box.dataset.testid = "draft-annotation";
+      Object.assign(box.style, {left:`${annotation.x*100}%`, top:`${annotation.y*100}%`, width:`${annotation.width*100}%`, height:`${annotation.height*100}%`});
+      const number = document.createElement("span"); number.textContent = String(index+1); box.append(number); overlay.append(box);
+      const field = document.createElement("label"); field.className = "ad-review-area-field";
+      const heading = document.createElement("span"); heading.textContent = `${placement === "feed" ? "Feed" : "Story"} · Area ${index+1}`;
+      const input = document.createElement("input"); input.maxLength = 200; input.value = annotation.comment || ""; input.disabled = !enabled;
+      input.dataset.annotationIndex = String(index); input.placeholder = "What should change here?";
+      input.addEventListener("input", () => { annotation.comment = input.value; reviewDraftAnnotations.set(key, annotations); });
+      const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Remove"; remove.disabled = !enabled;
+      remove.setAttribute("aria-label", `Remove annotation ${index+1}`);
+      remove.addEventListener("click", () => { annotations.splice(index,1); reviewDraftAnnotations.set(key,annotations); draw(); });
+      field.append(heading,input,remove); comments.append(field);
+    });
+    comments.hidden = annotations.length === 0;
+  };
   draw();
-  if (enabled) { let start = null; let draft = null; const move = (event) => { if (!start) return; const point = pointerToNormalized(event, viewport, image); if (!point) return; draft = normalizeRect(start, point); overlay.style.setProperty("--draft-left", `${draft.x * 100}%`); overlay.style.setProperty("--draft-top", `${draft.y * 100}%`); overlay.style.setProperty("--draft-width", `${draft.width * 100}%`); overlay.style.setProperty("--draft-height", `${draft.height * 100}%`); overlay.dataset.drawing = "true"; }; const cancel = (event) => { if (!start) return; start = null; draft = null; overlay.removeAttribute("data-drawing"); overlay.releasePointerCapture?.(event.pointerId); }; overlay.addEventListener("pointerdown", (event) => { if (event.target !== overlay || annotations.length >= 8) return; event.preventDefault(); start = pointerToNormalized(event, viewport, image); overlay.setPointerCapture?.(event.pointerId); }); overlay.addEventListener("pointermove", move); overlay.addEventListener("pointercancel", cancel); overlay.addEventListener("pointerup", (event) => { if (!start) return; const origin = start; const end = pointerToNormalized(event, viewport, image); start = null; overlay.removeAttribute("data-drawing"); overlay.releasePointerCapture?.(event.pointerId); if (!end) return; const rect = normalizeRect(origin, end); draft = null; if (rect.width < .01 || rect.height < .01) return; annotations.push({ ...rect, comment: "" }); reviewDraftAnnotations.set(key, annotations); draw(); const field = comments.querySelector(`input[data-annotation-index="${annotations.length - 1}"]`); field?.focus(); }); }
-  viewport.append(stage); if (enabled) { const add = document.createElement("button"); add.type = "button"; add.className = "ad-text-button"; add.dataset.testid = "add-comment"; add.textContent = "Add comment"; add.addEventListener("click", () => comments.querySelector("input:not(:disabled)")?.focus()); viewport.append(add, comments); } if (enabled) { const hint = document.createElement("p"); hint.className = "ad-review-annotation-hint"; hint.textContent = "Draw a rectangle on the preview. Each box can include a short correction."; viewport.append(hint); } return viewport;
+  if (enabled) {
+    let start = null;
+    const clear = event => { start = null; overlay.removeAttribute("data-drawing"); if (overlay.hasPointerCapture?.(event.pointerId)) overlay.releasePointerCapture(event.pointerId); };
+    overlay.addEventListener("pointerdown", event => {
+      if (!reviewAnnotating || event.button !== 0 || event.target !== overlay) return;
+      if ([...reviewDraftAnnotations.entries()].filter(([id]) => id.startsWith(`${run.id}:`)).reduce((sum,[,items]) => sum+items.length,0) >= 8) return;
+      event.preventDefault(); start = pointerToNormalized(event,viewport,image); overlay.setPointerCapture(event.pointerId);
+    });
+    overlay.addEventListener("pointermove", event => {
+      if (!start) return;
+      const point = pointerToNormalized(event,viewport,image); if (!point) return;
+      const rect = normalizeRect(start,point);
+      for (const [name,value] of Object.entries({left:rect.x,top:rect.y,width:rect.width,height:rect.height})) overlay.style.setProperty(`--draft-${name}`,`${value*100}%`);
+      overlay.dataset.drawing = "true";
+    });
+    overlay.addEventListener("pointercancel", clear);
+    overlay.addEventListener("pointerup", event => {
+      if (!start) return;
+      const origin = start, end = pointerToNormalized(event,viewport,image); clear(event); if (!end) return;
+      let rect = normalizeRect(origin,end);
+      if (rect.width < .01 && rect.height < .01) rect = {x:Math.max(0,Math.min(.88,end.x-.06)),y:Math.max(0,Math.min(.92,end.y-.04)),width:.12,height:.08};
+      if (rect.width < .005 || rect.height < .005) return;
+      annotations.push({...rect,comment:""}); reviewDraftAnnotations.set(key,annotations); draw();
+      comments.querySelector(`input[data-annotation-index="${annotations.length-1}"]`)?.focus();
+    });
+  }
+  viewport.append(stage,comments); return viewport;
+}
+
+function appendReviewWorkspace(parent, run, summary) {
+  const workspace = document.createElement("div"); workspace.className = "ad-review-workspace";
+  const canvas = document.createElement("section"); canvas.className = "ad-review-canvas-panel";
+  const toolbar = document.createElement("div"); toolbar.className = "ad-review-toolbar";
+  const placements = document.createElement("div"); placements.className = "ad-review-segments"; placements.setAttribute("aria-label","Placement");
+  for (const place of ["feed","story"]) placements.append(makeSegment(place === "feed" ? "Feed" : "Story",place,reviewPlacement,value => {reviewPlacement=value;renderReviewDetail(run);}));
+  const annotate = document.createElement("button"); annotate.type = "button"; annotate.className = "ad-annotate-button"; annotate.dataset.testid = "review-annotate";
+  annotate.textContent = reviewAnnotating ? "✓ Done annotating" : "+ Annotate"; annotate.setAttribute("aria-pressed", String(reviewAnnotating));
+  const editable = run.status === "ready_for_review" && !reviewInFlight.has(run.id);
+  annotate.disabled = !editable;
+  annotate.addEventListener("click", () => { reviewAnnotating = !reviewAnnotating; renderReviewDetail(run); document.querySelector('[data-testid="review-annotate"]')?.focus(); });
+  toolbar.append(placements,annotate);
+  const instruction = document.createElement("p"); instruction.className = "ad-annotation-instruction"; instruction.setAttribute("role","status");
+  instruction.textContent = !editable ? "Editing is locked for this run." : reviewAnnotating ? "Click a spot or drag a box on the ad. Then describe the correction." : "Choose Annotate to mark a change on the ad.";
+  const card = document.createElement("article"); card.className = "ad-review-compare-card ad-review-primary-artwork";
+  const label = document.createElement("strong"); label.textContent = "Reusable template"; label.className = "ad-review-artwork-label";
+  const viewport = createAnnotatedViewport(run,selectReusableReviewArtifact(summary,reviewPlacement),"Reusable template",reviewPlacement,{enabled:editable});
+  card.append(label,viewport); canvas.append(toolbar,instruction,card);
+  const side = document.createElement("aside"); side.className = "ad-review-comment-panel";
+  const title = document.createElement("h3"); title.textContent = "Corrections"; side.append(title);
+  const comments = viewport.querySelector(".ad-review-annotation-comments"); if (comments) side.append(comments);
+  appendReviewChat(side,run);
+  workspace.append(canvas,side); parent.append(workspace);
+  workspace.addEventListener("keydown",event => { if (event.key === "Escape" && reviewAnnotating) {reviewAnnotating=false;renderReviewDetail(run); document.querySelector('[data-testid="review-annotate"]')?.focus();} });
 }
 
 function appendRecordedDetails(parent, run, summary) {
@@ -902,13 +928,15 @@ function appendReviewChat(parent, run) {
   const form = document.createElement("form"); form.className = "ad-review-chat-form";
   const label = document.createElement("label"); label.textContent = "What should change?";
   const input = document.createElement("textarea"); input.rows = 3; input.maxLength = 1200; input.dataset.testid = "review-chat-input";
-  input.placeholder = "Describe a correction, or mark an area above.";
+  input.placeholder = "Describe a correction, or annotate the ad.";
   input.value = reviewDraftText.get(run.id) || "";
   input.addEventListener("input", () => { reviewDraftText.set(run.id, input.value); input.setCustomValidity(""); });
   label.append(input);
   const send = document.createElement("button"); send.type = "submit"; send.className = "ad-primary"; send.textContent = "Send correction"; send.dataset.testid = "review-chat-send";
   const undo = document.createElement("button"); undo.type = "button"; undo.className = "ad-text-button"; undo.textContent = "Undo last revision"; undo.dataset.testid = "review-undo";
-  form.append(label, send); section.append(heading, state, thread, evidence, form, undo); parent.append(section);
+  form.append(label, send); const history = document.createElement("details"); history.className = "ad-review-history";
+  const historyLabel = document.createElement("summary"); historyLabel.textContent = "Previous corrections"; history.append(historyLabel,thread,evidence,undo);
+  section.append(heading,state,form,history); parent.append(section);
   let loaded = false;
   let latest = reviewRevisionState.get(run.id);
   const currentStatus = () => (runs.find(item => item.id === run.id) || run).status;
@@ -1036,18 +1064,7 @@ function appendReviewActions(parent, run) {
   };
 
   approve.addEventListener("click", () => void act(() => approveAdTemplateGeneratorTemplate(run.id), "Publishing…"));
-  request.addEventListener("click", () => {
-    formHost.replaceChildren();
-    const form = document.createElement("form");
-    const label = document.createElement("label"); label.textContent = "What must change?";
-    const textarea = document.createElement("textarea"); textarea.required = false; textarea.maxLength = 2000; textarea.rows = 4; textarea.placeholder = "Describe the correction, or draw a box on the preview.";
-    label.append(textarea);
-    const row = document.createElement("div");
-    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel"; cancel.addEventListener("click", () => formHost.replaceChildren());
-    const submit = document.createElement("button"); submit.type = "submit"; submit.className = "ad-primary"; submit.textContent = "Send changes";
-    row.append(cancel, submit); form.append(label, row); formHost.append(form); textarea.focus();
-    form.addEventListener("submit", (event) => { event.preventDefault(); const key = `${run.id}:${reviewPlacement}`; const text = safeAnnotationText(textarea.value); const boxes = serializeAnnotations(reviewDraftAnnotations.get(key) || []); reviewDraftText.set(key, text); if (!text && !boxes.length) { textarea.setCustomValidity("Describe a correction or draw at least one box."); textarea.reportValidity(); return; } const marked = boxes.length ? `\n\nMarked areas for ${reviewPlacement}:\n${boxes.map((box, index) => `${index + 1}. x=${box.x.toFixed(4)}, y=${box.y.toFixed(4)}, width=${box.width.toFixed(4)}, height=${box.height.toFixed(4)}${box.comment ? `: ${box.comment}` : ""}`).join("\n")}` : ""; void act(() => requestAdTemplateGeneratorTemplateChanges(run.id, `${text}${marked}`.trim()), "Sending changes…"); });
-  });
+  request.addEventListener("click", () => $("[data-testid=review-chat-input]")?.focus());
   discard.addEventListener("click", () => {
     formHost.replaceChildren();
     const form = document.createElement("form");
@@ -1078,11 +1095,10 @@ function renderReviewDetail(run, { loading = false } = {}) {
   copy.append(eyebrow, title, source);
   const score = document.createElement("div"); score.className = "ad-review-hero-score"; score.innerHTML = `<strong>${reviewScoreLabel(reviewOverallScore(review))}</strong><span>likeness</span>`;
   heading.append(copy, score); detail.append(heading);
-  appendReviewFacts(detail, review);
-  appendReviewEvidence(detail, run, review);
-  appendReviewChat(detail, run);
-  appendMetaPreviews(detail, review);
-  appendRecordedDetails(detail, run, review);
+  appendReviewWorkspace(detail, run, review);
+  const checks = document.createElement("details"); checks.className = "ad-review-secondary";
+  const checksTitle = document.createElement("summary"); checksTitle.textContent = "Comparison and quality checks"; checks.append(checksTitle);
+  appendReviewFacts(checks,review); appendReviewEvidence(checks,run,review); appendMetaPreviews(checks,review); appendRecordedDetails(checks,run,review); detail.append(checks);
   appendReviewActions(detail, run);
 }
 

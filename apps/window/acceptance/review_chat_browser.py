@@ -7,6 +7,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 from playwright.sync_api import sync_playwright, expect
 
+ARTWORK_DIR = None
 ROOT = "/api/ad-template-generator/runs/fixture-run"
 
 def record(number, message="Earlier correction", status="ready_for_review", annotations=None):
@@ -27,6 +28,9 @@ class Fixture:
         path=urlsplit(route.request.url).path
         def reply(body, status=200): route.fulfill(status=status,content_type="application/json",body=json.dumps(body))
         if "/artifacts/" in path or path.startswith("/fixtures/"):
+            if ARTWORK_DIR:
+                placement = "story" if "story" in path else "feed"
+                route.fulfill(content_type="image/png",body=(ARTWORK_DIR/f"{placement}.png").read_bytes()); return
             height=1920 if "story" in path else 1350
             svg=f'<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="{height}"><rect width="1080" height="{height}" fill="#dad5c9"/><rect x="80" y="180" width="900" height="500" fill="#4d7168"/><text x="90" y="120" font-size="60">Review fixture</text></svg>'
             route.fulfill(content_type="image/svg+xml",body=svg); return
@@ -56,6 +60,10 @@ def select_review(page):
     expect(page.locator('[data-testid="review-chat-input"]')).to_be_enabled()
 
 def draw(page):
+    button = page.locator('[data-testid="review-annotate"]')
+    expect(button).to_be_visible()
+    if button.get_attribute("aria-pressed") != "true": button.click()
+    expect(button).to_have_attribute("aria-pressed","true")
     canvas=page.locator(".ad-review-compare-card").filter(has=page.locator("strong",has_text="Reusable template")).locator(".ad-review-annotation-layer")
     canvas.scroll_into_view_if_needed(); box=canvas.bounding_box(); assert box and box["width"]>80
     page.mouse.move(box["x"]+box["width"]*.15,box["y"]+box["height"]*.2); page.mouse.down()
@@ -70,12 +78,38 @@ def journey(browser,url,output,name,width):
     try:
         page.goto(url+"/ad-template-generator",wait_until="domcontentloaded"); select_review(page)
         assert fixture.events == 0; checks.append("terminal run opens no event stream")
+        page.locator(".ad-review-history > summary").click()
         snapshots=page.locator("img[data-review-snapshot]"); expect(snapshots).to_have_count(2)
         for image in snapshots.all():
             expect(image).to_have_js_property("complete",True)
             assert image.evaluate("img => img.naturalWidth > 0")
         checks.append("immutable before and after images")
+        page.locator(".ad-review-history > summary").click()
+        annotate=page.locator('[data-testid="review-annotate"]')
+        expect(annotate).to_have_attribute("aria-pressed","false")
+        stage=page.locator(".ad-review-primary-artwork .ad-review-image-stage")
+        stage.click(position={"x":20,"y":20})
+        expect(page.locator(".ad-review-annotation-box")).to_have_count(0)
+        annotate.click()
+        page.keyboard.press("Escape")
+        expect(annotate).to_have_attribute("aria-pressed","false")
+        annotate.click()
+        stage.click(position={"x":30,"y":30})
+        expect(page.locator(".ad-review-annotation-box")).to_have_count(1)
+        expect(page.locator(".ad-review-annotation-comments input")).to_be_focused()
+        page.get_by_role("button",name="Remove annotation 1",exact=True).click()
+        annotate.click()
+        if width > 850:
+            image=stage.locator("img")
+            image.scroll_into_view_if_needed()
+            bounds=image.bounding_box()
+            footer=page.locator(".ad-review-actions").bounding_box()
+            assert bounds and footer and bounds["y"]+bounds["height"] <= footer["y"]+1, (bounds,footer)
+            assert annotate.bounding_box()["y"] >= 0
+        checks.append("explicit annotation mode, Escape, click-to-mark and focused correction field")
+        page.screenshot(path=str(output.parent/f"annotation-workspace-{name}-ready.png"),full_page=True)
         draw(page); page.locator(".ad-review-annotation-comments input").fill("Move this headline lower")
+        page.screenshot(path=str(output.parent/f"annotation-workspace-{name}-marked.png"),full_page=True)
         composer=page.locator('[data-testid="review-chat-input"]'); composer.fill("Keep everything else unchanged")
         toolbar=page.locator(".ad-review-toolbar")
         toolbar.get_by_role("button",name="Story",exact=True).click()
@@ -95,6 +129,7 @@ def journey(browser,url,output,name,width):
         checks.append("annotated correction queued once with correct coordinates")
         fixture.complete(); page.reload(wait_until="domcontentloaded"); select_review(page)
         expect(page.locator(".ad-review-chat-thread")).to_contain_text("Keep everything else unchanged")
+        page.locator(".ad-review-history > summary").click()
         page.locator('[data-testid="review-undo"]').click(); expect(composer).to_be_disabled()
         assert fixture.posts[-1][0].endswith("/revisions/undo") and fixture.revision==3
         checks.append("saved history survives reload and undo queues a new revision")
@@ -111,8 +146,10 @@ def journey(browser,url,output,name,width):
     finally: context.close()
 
 def main():
-    parser=argparse.ArgumentParser(); parser.add_argument("--url",required=True); parser.add_argument("--output",type=Path,required=True); args=parser.parse_args()
+    global ARTWORK_DIR
+    parser=argparse.ArgumentParser(); parser.add_argument("--artwork-dir",type=Path); parser.add_argument("--url",required=True); parser.add_argument("--output",type=Path,required=True); args=parser.parse_args()
     if urlsplit(args.url).hostname not in {"127.0.0.1","localhost"}: raise SystemExit("Only isolated loopback previews are permitted")
+    ARTWORK_DIR = args.artwork_dir
     args.output.parent.mkdir(parents=True,exist_ok=True)
     with sync_playwright() as pw:
         browser=pw.chromium.launch(); journeys={n:journey(browser,args.url.rstrip("/"),args.output,n,w) for n,w in (("desktop",1280),("mobile",390))}; browser.close()
