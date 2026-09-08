@@ -17,19 +17,25 @@ Dated plans, release notes and old builder skills are not alternate procedures.
 
 Steven approved this policy on 8 September 2026:
 
-| Scored field | Minimum |
+| Scored section | Minimum |
 | --- | --- |
-| Overall (`overall`) | 9.8 |
 | Geometry (`geometry`) | 9.8 |
 | Colour and effects (`colourEffects`) | 9.8 |
 | Image crop (`imageCrop`) | 9.8 |
-| Typography (`typography`) | 9.8 |
+| Typography except exact font family (`typography`) | 9.8 |
 | Details (`details`) | 9.8 |
 
-There are six fields in total: overall plus five sections. The comparator and
-both independent final reviewers must each meet every minimum. A higher overall
-score cannot compensate for a lower section. There is no font-substitution
-exception below the minimum.
+The comparator and both independent final reviewers must each meet every section
+minimum. A higher score in one section cannot compensate for a lower score in
+another. Exact font-family matching is excluded from scoring because proprietary
+or unavailable source fonts may require the closest bundled substitute. Font
+substitutions remain recorded evidence. Text sizing, weight, spacing, alignment,
+hierarchy and legibility remain part of the typography score.
+
+There is one overall pass/fail check: `noObviousErrors`. It passes only when the
+combined review evidence contains no overlap, clipping, missing text or media,
+stray glyph, illegible content, unresolved effect mismatch or other immediately
+visible production defect. A numeric overall score is not an acceptance gate.
 
 A score alone is not approval. The current requirements also include valid
 editable Feed and Story layouts, no unresolved material defects, complete
@@ -42,15 +48,31 @@ evidence or a UI fallback. Never overwrite recorded scores to meet this policy.
 
 ## Readiness evidence
 
-As observed on 8 September 2026, the approved policy is **not fully implemented
-or deployed**. Live Hermes release `e691c16a2a` still uses a 9.5 gate, while its
-pinned Blockwise renderer `39e51fed` requires review metadata declaring at least
-9.8. The latest sample fails final validation; no recorded run has completed the
-full successful handoff. The first-50 batch has not been started.
+As observed earlier on 8 September 2026, Hermes release `e691c16a2a` still used
+a 9.5 gate while its pinned Blockwise renderer `39e51fed` required review metadata
+declaring at least 9.8. That mismatch caused the latest sample to fail final
+validation. No recorded run had completed the full successful handoff, and the
+first-50 batch had not been started. See the latest deployment evidence below
+before treating that dated failure as the current runtime state.
 
 These are dated observations, not permanent current-version claims. Recheck
 the live deployment and a real completed run before updating readiness.
 Documentation changes do not fix the implementation or establish template quality.
+
+### Deployment evidence, 8 September 2026
+
+The five-section 9.8, exact-font-exempt policy deployed in Hermes
+75bd842674a1f677de598f5bd3868645ff856861 with renderer
+cbc3f92e061477f5f2162ef816d26e130ec16fcf. Prompt improvements then deployed in
+Hermes 502fafe9f8f8262e7c7e5aa68324a33b26eada21 at 04:30:39 UTC, with the same
+renderer. Runtime selectors and authenticated health were verified.
+
+The baseline canary reached a comparator pass after 16 comparisons but failed
+maximum replacement-text validation before independent final review/import.
+The improved-prompt canary failed twice at source analysis with provider HTTP
+402, Insufficient Balance, before reaching the changed prompts. No full live
+handoff or faster convergence is established. The first-50 batch remains unstarted.
+Detailed dated evidence is Hermes docs/ad-template-prompt-review-20260908.md.
 
 ## Run control
 
