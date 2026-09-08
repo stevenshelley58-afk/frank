@@ -42,6 +42,7 @@ from graph.provider import (
     manifest_reader,
 )
 from tool_apps import discover_tool_apps
+from review_chat import ReviewChatError, hermes_review_payload, hermes_undo_payload, validate_review_message, validate_undo_body
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
 MINI_PUBLIC_ASSETS = {
@@ -3425,6 +3426,70 @@ def ad_template_generator_run_cancel(run_id: str):
 def ad_template_generator_run_approve(run_id: str):
     """Forward the operator's explicit template publication decision to Hermes."""
     return _proxy_ad_template_generator_action(run_id, "/approve", set())
+
+
+def _review_run_scope(run_id: str, project_id: str) -> dict:
+    run_data = hermes_request(_tool_run_path(run_id), timeout=8)
+    run = run_data.get("run") if isinstance(run_data.get("run"), dict) else run_data
+    scope = run.get("scope") if isinstance(run, dict) and isinstance(run.get("scope"), dict) else {}
+    if not _project_store.get_project(project_id) or str(scope.get("project_id") or "") != project_id:
+        abort(403, "review project scope does not match the Tool run")
+    return run
+
+
+def _review_payload_response(data):
+    return jsonify(data)
+
+
+@app.post("/api/ad-template-generator/runs/<run_id>/review-messages")
+def ad_template_generator_run_review_message(run_id: str):
+    try:
+        review = validate_review_message(request.get_json(silent=True))
+        _review_run_scope(run_id, review["project_id"])
+        data = hermes_request(_tool_run_path(run_id, "/request-changes"), hermes_review_payload(review), method="POST", timeout=15)
+        return _review_payload_response(data)
+    except ReviewChatError as error:
+        return jsonify({"error": {"message": str(error), "code": "invalid_review_message"}}), 400
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _hermes_error(error)
+
+
+@app.get("/api/ad-template-generator/runs/<run_id>/revisions")
+def ad_template_generator_run_review_revisions(run_id: str):
+    project_id = str(request.args.get("project_id") or "").strip()
+    try:
+        if not project_id: raise ReviewChatError("project_id is required")
+        _review_run_scope(run_id, project_id)
+        query = urllib.parse.urlencode({"project_id": project_id})
+        return _review_payload_response(hermes_request(_tool_run_path(run_id, "/revisions") + "?" + query, timeout=8))
+    except ReviewChatError as error:
+        return jsonify({"error": {"message": str(error), "code": "invalid_review_revisions"}}), 400
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _hermes_error(error)
+
+
+@app.post("/api/ad-template-generator/runs/<run_id>/revisions/undo")
+def ad_template_generator_run_review_undo(run_id: str):
+    try:
+        body = validate_undo_body(request.get_json(silent=True))
+        _review_run_scope(run_id, body["project_id"])
+        query = urllib.parse.urlencode({"project_id": body["project_id"]})
+        history = hermes_request(_tool_run_path(run_id, "/revisions") + "?" + query, timeout=8)
+        records = history.get("revisions") if isinstance(history, dict) else []
+        target = next((item for item in reversed(records if isinstance(records, list) else []) if isinstance(item, dict) and item.get("status") in {"ready_for_review", "completed"} and item.get("revision") == body["expected_revision"] and item.get("id")), None)
+        if target is None: raise ReviewChatError("no ready revision matches expected_revision")
+        data = hermes_request(_tool_run_path(run_id, "/request-changes"), hermes_undo_payload(body, str(target["id"])), method="POST", timeout=15)
+        return _review_payload_response(data)
+    except ReviewChatError as error:
+        return jsonify({"error": {"message": str(error), "code": "invalid_review_undo"}}), 409
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _hermes_error(error)
 
 
 @app.post("/api/ad-studio/runs/<run_id>/request-changes")
