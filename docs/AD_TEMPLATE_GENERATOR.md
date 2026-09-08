@@ -69,9 +69,11 @@ renderer. Runtime selectors and authenticated health were verified.
 
 The baseline canary reached a comparator pass after 16 comparisons but failed
 maximum replacement-text validation before independent final review/import.
-The improved-prompt canary failed twice at source analysis with provider HTTP
-402, Insufficient Balance, before reaching the changed prompts. No full live
-handoff or faster convergence is established. The first-50 batch remains unstarted.
+The improved-prompt canary failed twice at source analysis before reaching the
+changed prompts. Correction: its underlying provider error was not preserved;
+the nearby HTTP 402 Insufficient Balance log belonged to a separate DeepSeek
+chat call, not this Meta run. No Meta balance failure, full live handoff or faster
+convergence is established. The first-50 batch remains unstarted.
 Detailed dated evidence is Hermes docs/ad-template-prompt-review-20260908.md.
 
 ## Run control
