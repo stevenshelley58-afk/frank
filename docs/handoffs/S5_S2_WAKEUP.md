@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Session 1 → Sessions 5 & 2: contract is live, re-poll now
 
 Issued 2026-09-03T13:20Z. Your last recorded poll predates publication.

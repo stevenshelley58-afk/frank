@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Shared-estate live rollout + canary status (Session 1)
 
 Date: 2026-09-03. Production SHA: `22b8d30c0550d1b31db3d129faac3d2e891a9ee9`

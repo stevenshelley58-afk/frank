@@ -1,42 +1,33 @@
-# Frank agent rules
+# Frank project rules
 
-## One Frank
+The shared engineering, verification, security, and delivery rules live in
+[docs/standards/engineering-rules.md](docs/standards/engineering-rules.md).
+This file is the project-specific entry point. If a historical handoff or
+component note conflicts with the current guides, follow the current guide and
+record any necessary correction in the appropriate document.
 
-Frank is one lightweight Window and Hub. Its only application source is
-`apps/window`, and its only production checkout is `/projects/frank` on the
-VPS. Do not create a second Frank UI, API, agent runtime, checkout, deployment
-stack, memory store, skills tree, or database.
+## Product boundary
 
-## Boundary
+- Frank is one lightweight Window and Hub. Its only application source and
+  canonical production checkout are `apps/window` and `/projects/frank` on the
+  VPS.
+- Hermes is the sole brain and executor. Frank renders and forwards work; it
+  must not add an agent loop, provider runtime, duplicate memory store, or
+  second Hermes profile.
+- Hermes uses one VPS profile, `default`. Product workspaces are projects
+  inside that profile. Blockwise is a separate customer product, not a second
+  Frank application or deployment.
 
-Frank displays work, chats, files, tools, traces, and releases. Hermes is the
-only brain: reasoning, model selection, tools, skills, memory, and autonomous
-work belong to Hermes. Frank may forward requests and render results; it must
-not implement an agent loop or duplicate Hermes state.
+## Data and security boundary
 
-Hermes has one VPS profile (`default`). Frank is an unassigned session in that
-profile. Product bodies of work are projects/workspaces inside the profile,
-never additional Hermes profiles.
-
-## Data and security
-
-- Browse only the explicit read-only mounts beneath `/vps` in the container.
-- Keep chats in `/srv/frank/data/window` and secrets in
-  `/srv/frank/secrets/window.env`; neither belongs in Git.
+- Keep Frank chats and uploads in `/srv/frank/data/window` and runtime secrets
+  in `/srv/frank/secrets/window.env`; neither belongs in Git.
 - Never expose dotfiles, credentials, databases, private keys, or Hermes state.
-- Preserve existing chat data during deploys.
+- Preserve existing chat data during releases. Keep authentication, approval,
+  consent, and fail-closed controls intact.
 
-## Delivery
+## Documentation precedence
 
-1. Start from current `main`.
-2. From `apps/window`, install JavaScript dependencies with `npm ci --ignore-scripts`
-   and run `npm run verify`. The runner performs the Python unit suite and
-   syntax checks, checks every non-vendored JavaScript file, and runs the
-   non-browser JavaScript tests in isolated temporary data roots. See
-   `docs/DEVELOPMENT.md` for Python environment selection.
-3. Build the container before release.
-4. Commit and push the exact revision.
-5. Deploy only that committed revision with `apps/window/deploy.sh` on the VPS.
-6. Verify `frank.fail` in a real browser, including the changed interaction.
-
-Do not patch production source files in place.
+Begin with [README.md](README.md) and [docs/README.md](docs/README.md).
+Component guides under `apps/window/` and current contracts linked by the
+index provide component-specific requirements, not competing shared rules.

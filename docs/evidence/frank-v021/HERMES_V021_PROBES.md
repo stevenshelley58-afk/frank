@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Frank v0.21 Phase B — live canary probe receipts (redacted)
 
 Canary: clean clone of upstream tag `v2026.8.31` = commit

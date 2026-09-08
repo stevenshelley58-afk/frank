@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Per-project .frank-attachments read-only binds (host change)
 
 Date: 2026-09-03. Owner: Session 1 (integration). Contract: shared-estate

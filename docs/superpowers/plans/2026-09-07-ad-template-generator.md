@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Ad Template Generator Implementation Plan
 
 > **For agentic workers:** Use the loaded subagent-driven-development workflow with the user's explicit Luna swarm selection. User rules override routine reviewer-agent and repeated approval gates. Implement the owned subsystem tasks below; parent coordinates actual diff review and integration.

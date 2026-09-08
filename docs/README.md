@@ -2,9 +2,15 @@
 
 ## Current guides
 
+Read the [shared engineering rules](standards/engineering-rules.md) and
+[Frank project rules](../AGENTS.md) first. This is the sole current Frank
+documentation index. Worktree snapshots and dated records do not override it.
+
 Start with the [root README](../README.md), then use
 [DEVELOPMENT.md](DEVELOPMENT.md) for VPS verification and supported extensions.
 
+- [Ad Template Generator](AD_TEMPLATE_GENERATOR.md) owns the cross-system
+  operator workflow and acceptance policy.
 - [PROJECT.md](PROJECT.md) defines the Window, Hermes, project, and Mini
   deployment-versus-product boundary.
 - [MEMORY.md](MEMORY.md) defines durable-memory ownership and distinguishes
@@ -21,7 +27,7 @@ Start with the [root README](../README.md), then use
 - [apps/window/DESIGN.md](../apps/window/DESIGN.md) is the current Window
   design contract; [apps/window/infra](../apps/window/infra) and each
   non-vendored Tool README contain component-specific runbooks.
-- [CLEANUP-20260905.md](CLEANUP-20260905.md) records current cleanup evidence
+- [CLEANUP-20260905.md](CLEANUP-20260905.md) records dated cleanup evidence
   and explicitly deferred work.
 
 ## Historical material

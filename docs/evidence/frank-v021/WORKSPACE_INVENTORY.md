@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Frank v0.21 Phase A 3b — workspace/project inventory (redacted)
 
 Captured 2026-09-03T10:45Z. Raw queries under `/secure/frank-v021/raw/`.

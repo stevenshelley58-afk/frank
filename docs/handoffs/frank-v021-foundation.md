@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Frank v0.21 — Session 5 foundation checkpoint (labeled)
 > Historical handoff, not a current implementation guide. The cleanup on
 > 2026-09-05 removed `workspace_foundation.py` and its dedicated test after

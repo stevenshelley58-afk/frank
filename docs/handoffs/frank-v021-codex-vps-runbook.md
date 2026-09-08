@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Codex on the VPS shared estate — setup/check runbook (Session 1 handoff)
 
 Target: a Codex task whose process runs on the VPS inside the private host
