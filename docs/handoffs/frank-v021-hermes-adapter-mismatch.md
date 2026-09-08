@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Frank v0.21 Hermes runtime adapter — interface-contract mismatch handoff
 
 Owner: Hermes v0.21 runtime adapter session (Session 2, Prompt 2 of 5).

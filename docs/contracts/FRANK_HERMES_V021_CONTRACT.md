@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # FRANK ↔ HERMES v0.21 INTERFACE CONTRACT
 
 `INTERFACE_CONTRACT_STATUS: READY`

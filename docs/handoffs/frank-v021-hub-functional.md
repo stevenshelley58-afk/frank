@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Frank v0.21 — Hub Functional Handoff (`codex/frank-v021-hub-functional`)
 
 Owner: Frank Hub workstream (independent Frank-domain owner for the release gate).

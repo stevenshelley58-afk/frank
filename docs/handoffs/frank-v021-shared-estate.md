@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Frank v0.21 — Session 5 shared estate handoff
 > Historical shared-estate handoff. The 2026-09-05 cleanup removed the dedicated workspace-foundation test named below; current workspace coverage lives in the remaining infrastructure suite.
 

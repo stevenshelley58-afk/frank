@@ -1,3 +1,7 @@
+> Historical record or proposal. This is not current operating authority.
+> Use the [maintained documentation index](../../README.md) before applying commands,
+> endpoints, deployment claims or acceptance criteria from this record.
+
 # Reference-to-editable ad template generator
 
 Approved direction: Steven requested implementation using a swarm of Luna agents on 2026-09-07 after reviewing the clean-sheet proposal.
