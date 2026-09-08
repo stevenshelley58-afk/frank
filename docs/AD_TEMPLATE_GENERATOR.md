@@ -95,6 +95,27 @@ for exact run, deployment, cost and failure evidence.
 
 ## Run control
 
+### Required repair and recheck step
+
+Before each visual comparison, validate the editable contract, render both
+placements, and run all four reusable-content scenarios. Feed text remains at
+least 24px and Story at least 32px. A failure enters the bounded repair step
+with actual replacement text and measured renderer failures; a default preview
+alone is not reusable-template evidence.
+
+Repairs must preserve useful text capacity, source layout, generated photographs
+and unaffected layers. Validate correction targets before locking them: rounding
+the opaque canvas background is not a valid way to round a visible card. Review
+images identify the source, current candidate, diagnostics and saved baseline so
+old draft defects are not attributed to the current candidate.
+
+After a failed final review, repair, rerender and repeat the comparator,
+reusable validation and both independent final reviews. Optional diagnosis
+transport failure does not waive a check or imply acceptance. Preserve run
+history, cost and lifetime comparison limits through supported retries.
+Only a fully accepted candidate proceeds to quarantined import and its smoke
+test. `ready_for_review` is the successful generation handoff, not approval.
+
 Use Frank's `/ad-template-generator` page for upload, generation, evidence,
 request-changes and approval. The canonical Frank API prefix is
 `/api/ad-template-generator`; legacy naming aliases are documented only in the
