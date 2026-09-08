@@ -241,8 +241,10 @@ frank.fail {
 
         @agenttrail path /agenttrail /agenttrail/*
         handle @agenttrail {
+            # Only the owner laptop on the private Tailscale network bypasses Basic Auth.
+            @frank_operator_auth not remote_ip 100.86.154.37
             import frank_agenttrail_response_headers
-            basic_auth {
+            basic_auth @frank_operator_auth {
                 {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
                 {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
             }
@@ -261,8 +263,9 @@ frank.fail {
 
         @map_artifact path /api/control/maps/artifact /api/control/projections/*/artifact
         handle @map_artifact {
+            @frank_operator_auth not remote_ip 100.86.154.37
             import frank_map_artifact_response_headers
-            basic_auth {
+            basic_auth @frank_operator_auth {
                 {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
                 {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
             }
@@ -279,10 +282,11 @@ frank.fail {
 
         handle {
             import frank_private_response_headers
+            @frank_operator_auth not remote_ip 100.86.154.37
             request_body {
                 max_size 260MB
             }
-            basic_auth {
+            basic_auth @frank_operator_auth {
                 {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
                 {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
             }
