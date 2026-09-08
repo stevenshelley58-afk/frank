@@ -303,3 +303,21 @@ on 2026-09-08, including explicit drawing mode, Escape, click-to-mark, correctio
 focus, normalized placement-safe drawing, persistence, send, undo and processing
 locks. Real ad artwork was read only into fixture responses; no providers or
 publishing endpoints were invoked. This remains unreleased preview evidence.
+
+
+### Live annotation release, 8 September 2026
+
+Frank `1a2e59e269fa4a364a4ce70713ea7e41a0bae41b` and Hermes `00097034cb35ac90493969556a7ad20912a8bcf0`
+were deployed and passed health checks. Steven explicitly approved using his
+signed-in Chrome session instead of the saved-session acceptance harness.
+Live desktop and phone-sized checks confirmed mark creation, correction-field
+focus, mark removal, Escape, loaded Feed/Story images, enabled correction input,
+and settled Ready for review status with no console errors. Temporary marks were
+removed and the viewport restored. No production correction was submitted and
+nothing was approved or published. Send/revision/undo coverage remains the
+isolated fixture and backend evidence, not a production revision claim.
+
+Receipt: `/srv/frank/data/window/evidence/annotation-workspace-20260908/live-release.json`.
+Retained rollback: Frank `72b29405984a56420a26b34eb88e61bf4b340e83`,
+Hermes `/opt/releases/hermes-template-4758d83a8c`, and online SQLite/selector
+backup `/srv/hermes/backups/ad-template-review-chat-20260908-00097034cb`.
