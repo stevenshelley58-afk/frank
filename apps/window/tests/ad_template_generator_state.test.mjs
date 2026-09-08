@@ -140,6 +140,35 @@ test("an equal-second terminal summary can still advance status", () => {
   assert.equal(merged.output.iterations.length, 1);
 });
 
+test("a delayed terminal snapshot cannot override a newer review state", () => {
+  const ready = { id: "trun-stale-terminal", status: "ready_for_review", updated_at: 51, output: {} };
+  const delayedFailure = { id: "trun-stale-terminal", status: "failed", updated_at: 50, output: {} };
+
+  const merged = mergeAdTemplateGeneratorRun(ready, delayedFailure);
+
+  assert.equal(merged.status, "ready_for_review");
+});
+
+test("a newer revision may return a ready run to processing", () => {
+  const ready = { id: "trun-revision", status: "ready_for_review", updated_at: 50, output: {} };
+  const revision = { id: "trun-revision", status: "running", review_status: "revision_requested", updated_at: 51, output: {} };
+
+  const merged = mergeAdTemplateGeneratorRun(ready, revision);
+
+  assert.equal(merged.status, "running");
+  assert.equal(merged.review_status, "revision_requested");
+});
+
+test("an authoritative ready response clears the local revision marker", () => {
+  const optimisticRevision = { id: "trun-marker", status: "running", review_status: "revision_requested", updated_at: 50, output: {} };
+  const canonicalReady = { id: "trun-marker", status: "ready_for_review", updated_at: 50, output: {} };
+
+  const merged = mergeAdTemplateGeneratorRun(optimisticRevision, canonicalReady);
+
+  assert.equal(merged.status, "ready_for_review");
+  assert.equal(merged.review_status, undefined);
+});
+
 test("rich detail changes do not force an unchanged run-list DOM rebuild", () => {
   const before = [{ id: "trun-history", title: "History", project_id: "blockwise", status: "running", updated_at: 120, output: {} }];
   const after = [{ ...before[0], updated_at: 150, output: { iterations: [{ iteration: 1 }] } }];
@@ -256,6 +285,18 @@ test("review queue contains only Hermes-ready runs in recency order", () => {
   ]);
 
   assert.deepEqual(ready.map((run) => run.id), ["new", "old"]);
+});
+
+test("stale review-summary evidence cannot queue a canonical processing run", () => {
+  const processing = { id: "trun-processing", status: "queued", output: { review_summary: { status: "ready_for_review" } } };
+
+  assert.deepEqual(readyAdTemplateGeneratorReviewRuns([processing]), []);
+});
+
+test("canonical ready status queues despite stale processing evidence", () => {
+  const ready = { id: "trun-ready", status: "ready_for_review", output: { review_summary: { status: "running" } } };
+
+  assert.deepEqual(readyAdTemplateGeneratorReviewRuns([ready]).map((item) => item.id), ["trun-ready"]);
 });
 
 test("thin refresh preserves review evidence already displayed", () => {

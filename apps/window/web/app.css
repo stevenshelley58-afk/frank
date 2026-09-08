@@ -2288,9 +2288,9 @@ a { color: inherit; text-decoration: none; }
 .ad-review-detail-head { padding-bottom: 12px; }
 .ad-review-detail-head h3 { font-size: 18px; }
 .ad-review-detail-head p, .ad-review-hero-score { display: none; }
-.ad-review-workspace { display: grid; grid-template-columns: minmax(0,1fr) 300px; margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; overflow: hidden; background: white; }
+.ad-review-workspace { display: grid; grid-template-columns: minmax(0,1fr) 300px; margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; overflow: clip; background: white; }
 .ad-review-canvas-panel { min-width: 0; padding: 16px; }
-.ad-review-workspace .ad-review-toolbar { display: flex; justify-content: space-between; align-items: center; margin: 0; gap: 12px; }
+.ad-review-workspace .ad-review-toolbar { position: sticky; top: 0; z-index: 4; display: flex; justify-content: space-between; align-items: center; margin: 0; padding-block: 8px; gap: 12px; background: #fff; }
 .ad-annotate-button { min-height: 42px; padding: 10px 20px; border-radius: 8px; background: #111; color: #fff; font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer; }
 .ad-annotate-button[aria-pressed="true"] { outline: 2px solid #111; outline-offset: 3px; }
 .ad-annotate-button:disabled { opacity: .45; cursor: not-allowed; }
@@ -2319,9 +2319,10 @@ a { color: inherit; text-decoration: none; }
 .ad-review-history > summary, .ad-review-secondary > summary { cursor: pointer; font-size: 13px; font-weight: 500; padding: 4px 0; }
 .ad-review-history .ad-review-before-after { grid-template-columns: 1fr; }
 .ad-review-secondary .ad-review-compare-grid img { max-width: 100%; max-height: 500px; object-fit: contain; }
-.ad-review-actions > a.ad-primary { width: auto; display: inline-flex; padding: 10px 16px; }
+.ad-review-actions { position: static; margin: 26px 0 0; padding: 14px 0; }
+.ad-review-actions > a.ad-primary { width: auto; justify-self: start; display: inline-flex; padding: 10px 16px; }
 @media(max-width:1100px) { .ad-review-layout { grid-template-columns: 170px minmax(0,1fr); } .ad-review-workspace { grid-template-columns: minmax(0,1fr) 270px; } }
-@media(max-width:850px) { .ad-review-layout { grid-template-columns: 1fr; } .ad-review-list-panel { border-right: 0; } .ad-review-workspace { grid-template-columns: minmax(0,1fr); } .ad-review-comment-panel { border-left: 0; border-top: 1px solid var(--line); } .ad-review-primary-artwork .ad-review-image-stage > img { max-height: 480px; } .ad-review-detail { padding: 14px; } }
+@media(max-width:850px) { .ad-review-layout { grid-template-columns: 1fr; } .ad-review-list-panel { border-right: 0; } .ad-review-workspace { grid-template-columns: minmax(0,1fr); } .ad-review-comment-panel { border-left: 0; border-top: 1px solid var(--line); } .ad-review-primary-artwork .ad-review-image-stage > img { max-height: max(180px,calc(100dvh - 660px)); } .ad-review-detail { padding: 14px; } }
 
 .ad-review-list-panel .ad-section-heading { flex-direction: column; align-items: flex-start; gap: 10px; }
 .ad-review-list-panel .ad-section-heading h3 { font-size: 16px; }

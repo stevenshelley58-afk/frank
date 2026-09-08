@@ -20,9 +20,9 @@ class Fixture:
     def __init__(self):
         self.revision=1; self.history=[record(1)]; self.posts=[]; self.events=0
         previews=[{"placement":p,"kind":kind,"url":f"/fixtures/{p}.svg"} for p in ("feed","story") for kind in ("qa-source-filled","final-neutral-shippable")]
-        self.run={"id":"fixture-run","project_id":"fixture-project","title":"Fixture review","status":"ready_for_review","review_status":"ready_for_review","updated_at":"2026-09-08T00:00:00Z", "output":{"review_summary":{"status":"ready_for_review","previews":previews,"source":{"url":"/fixtures/feed.svg"},"scores":{"overall":9.9},"smoke_test":{"passed":True}}}}
+        self.run={"id":"fixture-run","project_id":"fixture-project","title":"Fixture review","status":"ready_for_review","updated_at":1788825600, "output":{"review_summary":{"status":"ready_for_review","previews":previews,"source":{"url":"/fixtures/feed.svg"},"scores":{"overall":9.9},"smoke_test":{"passed":True}}}}
     def complete(self):
-        self.run["status"]="ready_for_review"; self.run["review_status"]="ready_for_review"
+        self.run["status"]="ready_for_review"; self.run["updated_at"]+=1
         last=self.history[-1]; self.history[-1]=record(last["revision"],last["message"],annotations=last["annotations"])
     def api(self, route):
         path=urlsplit(route.request.url).path
@@ -43,7 +43,7 @@ class Fixture:
             assert body["project_id"] == "fixture-project" and body["expected_revision"] == self.revision
             assert body["idempotency_key"]
             if self.run["status"] != "ready_for_review": reply({"error":{"message":"Revision already running"}},409); return
-            self.revision+=1; self.run["status"]="queued"; self.run["review_status"]="revision_requested"
+            self.revision+=1; self.run["status"]="queued"; self.run["updated_at"]+=1
             item=record(self.revision,body.get("message","Restore previous revision"),"pending",body.get("annotations",[])); self.history.append(item)
             reply({"status":"queued","current_revision":self.revision,"review_revision":item},202)
         elif path.endswith("/events"):
@@ -70,8 +70,8 @@ def draw(page):
     page.mouse.move(box["x"]+box["width"]*.55,box["y"]+box["height"]*.4,steps=5); page.mouse.up()
     expect(page.locator(".ad-review-annotation-box")).to_have_count(1)
 
-def journey(browser,url,output,name,width):
-    context=browser.new_context(viewport={"width":width,"height":900},reduced_motion="reduce")
+def journey(browser,url,output,name,width,height=900):
+    context=browser.new_context(viewport={"width":width,"height":height},reduced_motion="reduce")
     page=context.new_page(); fixture=Fixture(); checks=[]; errors=[]
     page.on("pageerror",lambda error:errors.append(str(error)))
     page.route("**/api/**",fixture.api); page.route("**/fixtures/**",fixture.api)
@@ -107,6 +107,16 @@ def journey(browser,url,output,name,width):
             assert bounds and footer and bounds["y"]+bounds["height"] <= footer["y"]+1, (bounds,footer)
             assert annotate.bounding_box()["y"] >= 0
         checks.append("explicit annotation mode, Escape, click-to-mark and focused correction field")
+        detail = page.locator('.ad-review-detail')
+        detail.evaluate('el => { el.scrollTop = 130; }')
+        button_bounds = annotate.bounding_box()
+        detail_bounds = detail.bounding_box()
+        assert button_bounds and detail_bounds and button_bounds['y'] >= detail_bounds['y'] - 1, (button_bounds, detail_bounds)
+        assert detail.evaluate('el => el.scrollWidth <= el.clientWidth + 1'), 'Review pane overflows horizontally'
+        if width > 850:
+            assert annotate.evaluate('el => { const r=el.getBoundingClientRect(); return el.contains(document.elementFromPoint(r.x+r.width/2,r.y+r.height/2)); }'), 'Annotation toolbar is obscured after scrolling'
+        detail.evaluate('el => { el.scrollTop = 0; }')
+        checks.append('annotation toolbar remains reachable after scrolling, without horizontal overflow')
         page.screenshot(path=str(output.parent/f"annotation-workspace-{name}-ready.png"),full_page=True)
         draw(page); page.locator(".ad-review-annotation-comments input").fill("Move this headline lower")
         page.screenshot(path=str(output.parent/f"annotation-workspace-{name}-marked.png"),full_page=True)
@@ -127,13 +137,24 @@ def journey(browser,url,output,name,width):
         assert area["placement"]=="feed" and area["message"]=="Move this headline lower"
         assert abs(area["x"]-.15)<.02 and abs(area["width"]-.4)<.02
         checks.append("annotated correction queued once with correct coordinates")
-        fixture.complete(); page.reload(wait_until="domcontentloaded"); select_review(page)
+        expect(page.get_by_role('button', name='Approve & Publish Template', exact=True)).to_have_count(0)
+        fixture.complete()
+        expect(composer).to_be_enabled(timeout=15000)
+        expect(page.locator('.ad-review-row')).to_have_count(1)
+        expect(page.locator('.ad-review-actions')).not_to_contain_text('This review is now running')
+        checks.append('annotated correction completion restores review without refresh')
         expect(page.locator(".ad-review-chat-thread")).to_contain_text("Keep everything else unchanged")
         page.locator(".ad-review-history > summary").click()
         page.locator('[data-testid="review-undo"]').click(); expect(composer).to_be_disabled()
         assert fixture.posts[-1][0].endswith("/revisions/undo") and fixture.revision==3
         checks.append("saved history survives reload and undo queues a new revision")
-        fixture.complete(); page.reload(wait_until="domcontentloaded"); select_review(page)
+        fixture.complete()
+        expect(composer).to_be_enabled(timeout=15000)
+        expect(page.locator('.ad-review-row')).to_have_count(1)
+        expect(page.locator('.ad-review-actions')).not_to_contain_text('This review is now running')
+        expect(page.locator('[data-testid="review-annotate"]')).to_be_enabled()
+        checks.append('completed correction unlocks the same review without a page refresh')
+        page.reload(wait_until="domcontentloaded"); select_review(page)
         composer.fill("Correct the date only"); page.locator('[data-testid="review-chat-send"]').click()
         expect(composer).to_be_disabled(); assert fixture.posts[-1][1]["annotations"]==[]
         checks.append("text-only correction and processing lock")
@@ -152,7 +173,7 @@ def main():
     ARTWORK_DIR = args.artwork_dir
     args.output.parent.mkdir(parents=True,exist_ok=True)
     with sync_playwright() as pw:
-        browser=pw.chromium.launch(); journeys={n:journey(browser,args.url.rstrip("/"),args.output,n,w) for n,w in (("desktop",1280),("mobile",390))}; browser.close()
+        browser=pw.chromium.launch(); journeys={n:journey(browser,args.url.rstrip("/"),args.output,n,w,h) for n,w,h in (("desktop",1280,900),("mobile",390,900),("wide",2560,1366))}; browser.close()
     receipt={"schema":"frank.review-chat-browser/v1","fixture_based":True,"provider_calls":False,"publishing":False,"captured_at":datetime.now(timezone.utc).isoformat(),"journeys":journeys,"status":"pass" if all(x["status"]=="pass" for x in journeys.values()) else "fail"}
     args.output.write_text(json.dumps(receipt,indent=2)+"\n"); print(json.dumps(receipt)); return 0 if receipt["status"]=="pass" else 1
 if __name__=="__main__": raise SystemExit(main())

@@ -31,11 +31,11 @@ export function compareRunRecency(left, right) {
 }
 
 export function adTemplateGeneratorReviewState(run) {
-  return cleanPart(
-    run?.review_status
-      || run?.output?.review_summary?.status
-      || run?.status,
-  ).replaceAll("-", "_");
+  // Hermes' run status is the lifecycle authority. Review-summary status is
+  // recorded evidence and can describe a prior revision, so it must not make
+  // a queued or running run editable. An explicit review_status remains the
+  // supported override when Hermes supplies one.
+  return cleanPart(run?.review_status || run?.status).replaceAll("-", "_");
 }
 
 export function isReadyForAdTemplateGeneratorReview(run) {
@@ -159,10 +159,22 @@ export function mergeAdTemplateGeneratorRun(previous, incoming) {
     ? { ...next, ...current }
     : { ...current, ...next };
   if (incomingIsStale) {
-    if ((STATUS_RANK[next.status] ?? -1) > (STATUS_RANK[current.status] ?? -1)) topLevel.status = next.status;
+    // A delayed snapshot cannot advance a run merely because its status has a
+    // higher display rank. Hermes timestamps, rather than status ordering,
+    // establish the authoritative revision. Equal timestamps retain the
+    // existing terminal-summary tie break used by compact list responses.
+    if (nextUpdated === currentUpdated && (STATUS_RANK[next.status] ?? -1) > (STATUS_RANK[current.status] ?? -1)) topLevel.status = next.status;
     if ((STAGE_RANK[next.stage] ?? -1) > (STAGE_RANK[current.stage] ?? -1)) topLevel.stage = next.stage;
     topLevel.progress = Math.max(Number(current.progress || 0), Number(next.progress || 0));
     topLevel.updated_at = current.updated_at || next.updated_at || 0;
+  }
+  // revision_requested is only a local, optimistic marker. Hermes does not
+  // return it, so let an equally or more recent canonical response remove it.
+  if (cleanPart(current.review_status).replaceAll("-", "_") === "revision_requested"
+    && !cleanPart(next.review_status)
+    && cleanPart(next.status)
+    && nextUpdated >= currentUpdated) {
+    delete topLevel.review_status;
   }
   const currentOutput = objectValue(current.output);
   const nextOutput = objectValue(next.output);

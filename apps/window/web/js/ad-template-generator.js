@@ -1,5 +1,5 @@
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260906-ad-template-generator-v1";
-import { groupAdTemplateGeneratorRuns, mergeAdTemplateGeneratorRun, mergeAdTemplateGeneratorRunList, readyAdTemplateGeneratorReviewRuns, runListRenderSignature, runTimestamp } from "./ad-template-generator-state.js?v=20260905-ready-review-v1";
+import { adTemplateGeneratorReviewState, groupAdTemplateGeneratorRuns, mergeAdTemplateGeneratorRun, mergeAdTemplateGeneratorRunList, readyAdTemplateGeneratorReviewRuns, runListRenderSignature, runTimestamp } from "./ad-template-generator-state.js?v=20260908-review-stability-v3";
 import { AD_TEMPLATE_GENERATOR_BRIEF_MAX_CHARACTERS, adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260904-brief-roundtrip-v1";
 import { approveAdTemplateGeneratorTemplate, cancelAdTemplateGeneratorRun, discardAdTemplateGeneratorTemplate, getAdTemplateGeneratorRun, listAdTemplateGeneratorRuns, requestAdTemplateGeneratorTemplateChanges, retryAdTemplateGeneratorRun, postAdReviewMessage, getAdReviewRevisions, undoAdReviewRevision } from "./ad-template-generator-api.js?v=20260908-review-chat-v1";
 import { placementScore, reviewArtifactPurpose, reviewModelProfile, reviewOverallScore, reusableValidationChecks, selectMetaPreview, selectReusableReviewArtifact, selectFaithfulReviewArtifact, selectReviewArtifact } from "./ad-template-generator-review.js?v=20260905-ready-review-v1";
@@ -33,6 +33,7 @@ let selectedFiles = [];
 let graphMountPromise = null;
 let graphMountRevision = 0;
 let batchStarting = false;
+
 let runRefreshPending = false;
 const localRunInputs = new Map();
 const previewUrls = new Set();
@@ -532,8 +533,14 @@ async function refreshRuns() {
   const incoming = await listAdTemplateGeneratorRuns({ projectId, limit: 100 });
   if (refreshRevision !== runListRevision) return;
   const previousSignature = runListRenderSignature(runs);
+  const previousRuns = runs;
   runs = mergeAdTemplateGeneratorRunList(runs, incoming);
   if (runListRenderSignature(runs) !== previousSignature) renderRuns();
+  const previousReview = previousRuns.find((run) => run.id === selectedReviewRunId);
+  const refreshedReview = runs.find((run) => run.id === selectedReviewRunId);
+  if (refreshedReview && previousReview && adTemplateGeneratorReviewState(refreshedReview) !== adTemplateGeneratorReviewState(previousReview)) {
+    renderReviewDetail(refreshedReview);
+  }
   renderReviewQueue();
 }
 
@@ -966,7 +973,8 @@ function appendReviewChat(parent, run) {
     controls();
   };
   const load = async () => {
-    state.textContent = "Loading saved review…"; controls();
+    if (!latest) state.textContent = "Loading saved review…";
+    controls();
     try {
       const data = await getAdReviewRevisions(run.id, run.project_id);
       if (!section.isConnected) return;
@@ -1018,7 +1026,7 @@ function appendReviewActions(parent, run) {
   const status = document.createElement("p");
   status.setAttribute("role", "status");
   status.textContent = reviewActionMessage || "Approval publishes this reviewed template to Blockwise.";
-  const currentStatus = clean(run.review_status || run.output?.review_summary?.status || run.status).toLowerCase().replaceAll("-", "_");
+  const currentStatus = adTemplateGeneratorReviewState(run);
   if (currentStatus !== "ready_for_review") {
     status.textContent = reviewActionMessage || `This review is now ${runStatusLabel(currentStatus).toLowerCase()}.`;
     section.append(status);
@@ -1484,9 +1492,20 @@ function connectRunEvents(run) {
   };
   const redraw = () => {
     const current = currentRun();
+    const focused = globalThis.document?.activeElement;
+    const focusKey = focused?.dataset?.testid || "";
+    const selectionStart = focused?.selectionStart;
+    const selectionEnd = focused?.selectionEnd;
     if (selectedReviewRunId === run.id) renderReviewDetail(current);
     else renderRunDetail(current);
     renderReviewQueue();
+    if (focusKey) {
+      const replacement = globalThis.document?.querySelector('[data-testid="' + focusKey + '"]');
+      if (replacement && !replacement.disabled) {
+        replacement.focus();
+        if (typeof selectionStart === "number" && typeof replacement.setSelectionRange === "function") replacement.setSelectionRange(selectionStart, selectionEnd ?? selectionStart);
+      }
+    }
   };
   const connect = () => {
     eventReconnectTimer = null;
