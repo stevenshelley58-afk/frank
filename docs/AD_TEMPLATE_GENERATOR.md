@@ -60,7 +60,37 @@ The five 9.8 gates, font-family exemption, reusable tests and independent final
 reviews remain unchanged. Hermes evaluation policy is now version 10, release
 `dc5e088681f4b8ec23d7ffdaf4d599e89dfa16e3`; all 269 generator tests passed.
 
+## Meta full-bleed outer canvas
+
+Steven additionally requested square outer corners for Meta artwork. Both Feed
+and Story must fill the entire opaque rectangular canvas: no rounded outer-card
+mask, white corner cutouts, transparent corners or copied preview/device frame.
+Edge-filling hero photos and footer panels must meet the outer corners squarely.
+Interior rounded elements that are genuinely part of the design may remain.
+This intentional source exception must not reduce likeness/effects scores or
+be reversed by repairs. Outer cutouts/frame artifacts block the obvious-error
+check. The no-embedded-CTA policy and five 9.8 gates remain unchanged.
+Implemented by Hermes evaluation policy 11, release
+`4758d83a8c1c703801a73112ce9c4c0e790e07f2`; all 269 generator tests passed.
+
 ## Readiness evidence
+
+
+### Full-bleed Meta revision passed 8 September 2026
+
+Run trun_cf767d809b8c438497a1e9bc9676ea80 completed its square-corner revision
+under Hermes 4758d83a8c1c703801a73112ce9c4c0e790e07f2 (evaluation policy 11),
+with existing Blockwise de606ac66 and renderer a009543dd unchanged. Its first
+revised candidate passed comparator iteration 18. A supported retry recovered
+one Meta HTTP 500 without changing the artwork. Both independent final reviews,
+all four reusable scenarios, quarantined four-asset import and matching smoke
+passed; the final status is ready_for_review. Every scored section >=9.85,
+issues=[], no_obvious_errors=true; the serving first50 quality predicate passes.
+Pixel inspection confirms fully opaque Feed 1080x1350 and Story 1080x1920,
+photo-filled top corners and dark footer-filled bottom corners, no white corner
+cutouts, zero outer radii and no image CTA layers. The batch remains unstarted;
+nothing was activated/published. Previous Hermes dc5e088681 release and selector
+backup /srv/hermes/backups/ad-template-feedback-20260908-4758d83a8c are retained.
 
 ### Meta-native CTA revision passed 8 September 2026
 
