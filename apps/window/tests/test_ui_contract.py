@@ -1,5 +1,7 @@
 from pathlib import Path
+import json
 import re
+import struct
 import unittest
 
 
@@ -7,6 +9,41 @@ WEB = Path(__file__).resolve().parents[1] / "web"
 
 
 class UiContractTest(unittest.TestCase):
+    def test_window_is_an_installable_web_app(self):
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        manifest = json.loads((WEB / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertIn('<link rel="manifest" href="/manifest.json">', html)
+        self.assertIn('<meta name="theme-color" content="#FFFFFF">', html)
+        self.assertIn('<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">', html)
+        self.assertEqual(manifest["id"], "/")
+        self.assertEqual(manifest["name"], "Frank")
+        self.assertEqual(manifest["short_name"], "Frank")
+        self.assertEqual(manifest["start_url"], "/")
+        self.assertEqual(manifest["scope"], "/")
+        self.assertEqual(manifest["display"], "standalone")
+        self.assertEqual(manifest["background_color"], "#FFFFFF")
+        self.assertEqual(manifest["theme_color"], "#FFFFFF")
+
+        icons = {icon["src"]: icon for icon in manifest["icons"]}
+        expected = {
+            "/brand/icon-192.png": (192, 192, "any"),
+            "/brand/icon-512.png": (512, 512, "any"),
+            "/brand/icon-maskable-512.png": (512, 512, "maskable"),
+        }
+        self.assertEqual(set(icons), set(expected))
+        for source, (width, height, purpose) in expected.items():
+            icon = icons[source]
+            self.assertEqual(icon["sizes"], f"{width}x{height}")
+            self.assertEqual(icon["type"], "image/png")
+            self.assertEqual(icon["purpose"], purpose)
+            data = (WEB / source.removeprefix("/")).read_bytes()
+            self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertEqual(struct.unpack(">II", data[16:24]), (width, height))
+
+        touch = (WEB / "brand" / "apple-touch-icon.png").read_bytes()
+        self.assertEqual(struct.unpack(">II", touch[16:24]), (180, 180))
+
     def test_project_memory_inspector_uses_hindsight_provider_truth(self):
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
         inspector = (WEB / "js" / "memory-inspector.js").read_text(encoding="utf-8")

@@ -32,3 +32,11 @@ The deployment preserves data, builds the Window image, performs a short
 atomic cutover, and checks container health. Follow
 [docs/FRANK_RELEASE_RUNBOOK.md](docs/FRANK_RELEASE_RUNBOOK.md) for the full
 release and browser-acceptance procedure.
+
+## Install the Window
+
+Frank includes a web app manifest and branded icons. Chrome and Edge can
+install `https://frank.fail` as an app, which gives Frank its own launcher icon
+and a standalone window while keeping the same authenticated HTTPS origin.
+Frank intentionally has no offline data cache: an installed Window continues
+to use the live Frank and Hermes services.
