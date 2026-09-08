@@ -224,6 +224,7 @@ const LAUNCH_PROVIDER_NAMES = Object.freeze({
   stalwart: "Stalwart mail",
   mautic: "Mautic CRM",
   chatwoot: "Chatwoot inbox",
+  mailflare: "Mailflare inbox",
   ga4: "Google Analytics 4",
   clarity: "Microsoft Clarity",
 });
@@ -343,10 +344,20 @@ function mountLaunchDesk(el) {
 
   const renderCards = (readiness = {}, emailTools = {}) => {
     const chatwoot = launchProvider(readiness, "chatwoot");
+    const mailflare = launchProvider(readiness, "mailflare");
     const mautic = launchProvider(readiness, "mautic");
     const ga4 = launchProvider(readiness, "ga4");
     const clarity = launchProvider(readiness, "clarity");
     const resendReady = emailTools.resend?.status === "ready";
+    const mailflareConfigured = mailflare.configured && Boolean(mailflare.base_url);
+    const mailflareReady = mailflare.verified && Boolean(mailflare.base_url);
+    const chatwootReady = chatwoot.verified && Boolean(chatwoot.base_url);
+    const inboxReady = mailflareReady || chatwootReady;
+    const inboxLinks = [
+      ...(mailflareConfigured ? [[mailflareReady ? "Open Mailflare" : "Open Mailflare setup", mailflare.base_url]] : []),
+      ...(chatwootReady ? [["Open shared inbox", chatwoot.base_url]] : []),
+      ["Read delivery logs", "https://resend.com/emails/receiving"],
+    ];
     summary.textContent = "Customer email and outreach stay separate";
     grid.replaceChildren(
       launchCard({
@@ -357,11 +368,11 @@ function mountLaunchDesk(el) {
         setupLabel: "CRM connection settings",
       }),
       launchCard({
-        eyebrow: "02 - incoming email", title: "Inbox", providers: [chatwoot], ready: chatwoot.verified,
-        label: chatwoot.verified ? "Connected" : "Mail viewer available",
-        copy: "Read and reply to conversations in Chatwoot.",
-        blocker: "Incoming mail is viewable in Resend. A shared inbox with compose and reply is not connected yet.",
-        links: [...(chatwoot.base_url ? [["Open shared inbox", chatwoot.base_url]] : []), ["Read incoming email", "https://resend.com/emails/receiving"]],
+        eyebrow: "02 - incoming email", title: "Inbox", providers: [mailflare, chatwoot], ready: inboxReady,
+        label: mailflareReady ? "Connected" : chatwootReady ? "Support connected" : mailflareConfigured ? "Verify Mailflare" : "Mail viewer available",
+        copy: mailflareReady ? "Read and reply to conversations in Mailflare." : "Read and reply to support conversations in Chatwoot.",
+        blocker: mailflareConfigured ? "Mailflare is configured but still needs verification. Resend remains available for incoming delivery logs." : "Incoming mail is viewable in Resend. Connect Mailflare for a shared inbox with compose and reply.",
+        links: inboxLinks,
       }),
       launchCard({
         eyebrow: "03 - outgoing email", title: "Sent email", providers: [], ready: resendReady,

@@ -53,7 +53,7 @@ MAX_WIDGETS_PER_HOME = 25
 ENTITY_KINDS = {"project", "tool", "agent", "service"}
 WIDGET_SIZES = {"small", "medium", "wide"}
 CONNECTION_STATUSES = {"setup_needed", "connected", "verified", "error"}
-CONNECTION_PROVIDERS = {"resend", "stripe", "activepieces", "mcp", "api", "mautic", "chatwoot", "stalwart"}
+CONNECTION_PROVIDERS = {"resend", "stripe", "activepieces", "mcp", "api", "mautic", "chatwoot", "mailflare", "stalwart"}
 CONNECTION_SCOPES = {"global", *ENTITY_KINDS}
 CONNECTION_FIELDS = {
     "provider", "name", "scope_kind", "scope_id", "status", "connection_ref",
@@ -280,6 +280,11 @@ CONNECTION_CATALOG = [
         "provider": "chatwoot", "title": "Chatwoot", "description": "Open-source customer enquiries and support.",
         "capabilities": ["support.conversations.read", "support.conversations.status"], "setup_mode": "provider",
         "open_source": True, "license": "MIT",
+    },
+    {
+        "provider": "mailflare", "title": "Mailflare", "description": "Shared inbox for human email conversations.",
+        "capabilities": ["email.receive", "email.compose", "email.reply"], "setup_mode": "provider",
+        "note": "Human inbox and replies; Resend remains the transactional delivery log.",
     },
     {
         "provider": "stalwart", "title": "Stalwart", "description": "Open-source transactional email.",

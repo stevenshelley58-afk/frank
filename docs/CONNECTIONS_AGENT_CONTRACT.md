@@ -6,9 +6,10 @@ loop. Hermes remains the sole brain and executor.
 
 ## CRM and support projection (additive)
 
-For the Blockwise launch, Mautic (GPL) is the CRM/campaign authority and
-Chatwoot (MIT) is the customer-enquiry/support authority. Frank accepts only
-provider-neutral connection metadata (`provider: mautic|chatwoot`) and opaque
+For the Blockwise launch, Mautic (GPL) is the CRM/campaign authority, Chatwoot
+(MIT) is the customer-enquiry/support authority, and Mailflare is the human
+inbox authority for incoming mail and replies. Frank accepts only
+provider-neutral connection metadata (`provider: mautic|chatwoot|mailflare`) and opaque
 `credential_ref`/`connection_ref` values. `GET /api/providers/readiness` reports
 `unconfigured`, `configured`, `ready`, or `error`; a URL alone never implies
 configured or verified. These are operator/Hermes projection inputs; Frank
@@ -23,6 +24,7 @@ and an HTTPS `url` on the configured Chatwoot origin. Frank exposes this read-on
 for malformed or unknown-state data. Frank never accepts provider tokens,
 message bodies, or writes to Mautic/Chatwoot. Provider execution and receipt
 schemas remain Hermes-owned.
+Resend remains a transactional delivery and receipt log, not the shared inbox.
 
 ## Existing compatibility surface
 

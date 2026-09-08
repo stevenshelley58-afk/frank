@@ -1121,6 +1121,11 @@ def email_tools():
             "mcp_status": _connector_status("RESEND_MCP_STATUS"),
             "url": "https://resend.com/emails",
         },
+        "mailflare": {
+            "role": "human_inbox",
+            "status": _connector_status("MAILFLARE_CONNECTOR_STATUS"),
+            "url": _safe_provider_url(os.environ.get("MAILFLARE_BASE_URL", "")),
+        },
         "mautic": {
             # A URL is configuration metadata, not proof that Hermes verified it.
             "status": _connector_status("MAUTIC_CONNECTOR_STATUS"),
@@ -1162,6 +1167,7 @@ def providers_readiness():
         "stalwart": ("STALWART_CONNECTOR_STATUS", "STALWART_BASE_URL"),
         "mautic": ("MAUTIC_CONNECTOR_STATUS", "MAUTIC_BASE_URL"),
         "chatwoot": ("CHATWOOT_CONNECTOR_STATUS", "CHATWOOT_BASE_URL"),
+        "mailflare": ("MAILFLARE_CONNECTOR_STATUS", "MAILFLARE_BASE_URL"),
         # Analytics tools are intentionally represented only by their recorded
         # connector state. A dashboard URL or a tracking snippet is never
         # treated as proof that the property is collecting data.
