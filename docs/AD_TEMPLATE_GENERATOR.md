@@ -46,7 +46,34 @@ approval does not grant permission for unrelated provider publishing.
 Never infer acceptance from an overall score, a missing decision, partial
 evidence or a UI fallback. Never overwrite recorded scores to meet this policy.
 
+## Meta-native CTA policy
+
+Steven requested on 8 September 2026 that Meta supply the clickable CTA outside
+the uploaded image. Feed and Story artwork must not contain embedded CTA buttons,
+their labels or button-only styling, even when present in the source reference.
+Remove unused image-CTA inputs, but preserve native publishing CTA metadata.
+Informational website/contact details and offer copy remain; locally rebalance
+the vacated button area and remove orphan button dividers without redesigning
+unrelated content. Reviewers must not restore or penalize this intentional source
+omission. A remaining embedded CTA button blocks the overall obvious-error check.
+The five 9.8 gates, font-family exemption, reusable tests and independent final
+reviews remain unchanged. Hermes evaluation policy is now version 10, release
+`dc5e088681f4b8ec23d7ffdaf4d599e89dfa16e3`; all 269 generator tests passed.
+
 ## Readiness evidence
+
+### Meta-native CTA revision passed 8 September 2026
+
+The same canary run completed its CTA-free revision under Hermes `dc5e088681`
+and Blockwise `de606ac66`, evaluation policy 10. The revised Feed and Story have
+no embedded CTA button, retain native Meta CTA metadata and website details,
+and passed all five section gates at >=9.85 plus the no-obvious-errors check.
+Both independent reviewers, all four reusable scenarios, quarantined four-asset
+import and matching smoke test passed (events 426/428/430/431). The serving
+first50 quality predicate passes; the batch remains unstarted. Revision cleanup
+was fixed and verified through compiled import/smoke/discard plus actual object
+absence before the final production import. No template was activated/published.
+
 
 ### Complete successful handoff observed 8 September 2026
 
