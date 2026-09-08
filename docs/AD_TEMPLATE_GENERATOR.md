@@ -76,6 +76,23 @@ chat call, not this Meta run. No Meta balance failure, full live handoff or fast
 convergence is established. The first-50 batch remains unstarted.
 Detailed dated evidence is Hermes docs/ad-template-prompt-review-20260908.md.
 
+### Subsequent live generation attempt, 8 September 2026
+
+The same improved-prompt sample later completed Meta source analysis, built
+both placements and generated its demo photographs. Review-feedback and
+semantic-colour-target fixes deployed in Hermes
+`2fb98a5a0f125cfa82d9be6f2b6bdf0ad0fc46e0` at 05:19:11 UTC, preserving the
+renderer, frozen provider policy, 9.8 gate and retry budgets. All 220 generator
+tests passed, but those tests are not live acceptance.
+
+The fifth main comparison scored 9.9 across all sections and four reusable
+scenarios passed. The run nevertheless failed after three independent final
+review rounds: distorted Story gallery photos, corner/mask differences and
+text positioning remained. Manual inspection confirmed the photographic
+distortion. No full handoff or approval occurred, and the first-50 batch is
+still unstarted. See Hermes `docs/ad-template-review-feedback-20260908.md`
+for exact run, deployment, cost and failure evidence.
+
 ## Run control
 
 Use Frank's `/ad-template-generator` page for upload, generation, evidence,
