@@ -9,6 +9,7 @@ import { ModelSelector } from "./chat/model-selector.js";
 import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/turn-stream.js";
 import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
 import { mountAdTemplateGenerator, setAdTemplateGeneratorActive } from "./ad-template-generator.js?v=20260908-review-stability-v3";
+import { mountBlogStudio } from "./blog-studio.js?v=20260831-blog-studio-v1";
 import { mountAdRadar, unmountAdRadar } from "./ad-radar.js?v=20260831-observation-timeline-v1";
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
@@ -32,6 +33,7 @@ const TITLES = {
   tools: ["Tools", "Start a factory, watch its trace"],
   "ad-template-generator": ["Ad Template Generator", "Source image → ad template"],
   "ad-db": ["Ad database", "Verified ad archive and collection evidence"],
+  "blog-studio": ["Blog Studio", "Topic or sources → QA-verified article"],
   "ad-radar": ["Ad Radar", "Public creative observation and evidence"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
@@ -85,6 +87,8 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   setAdTemplateGeneratorActive(id === "ad-template-generator");
   if (id === "ad-db") mountAdDb();
   setAdDbActive(id === "ad-db");
+  if (id === "blog-studio") mountBlogStudio();
+  window.dispatchEvent(new CustomEvent("frank:view-changed", { detail: { id } }));
   if (id === "ad-radar") void mountAdRadar();
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
@@ -200,6 +204,10 @@ const openAdTemplateGenerator = () => {
 window.addEventListener("frank:ad-template-generator", openAdTemplateGenerator);
 window.addEventListener("frank:ad-studio", openAdTemplateGenerator);
 
+window.addEventListener("frank:blog-studio", () => {
+  show("blog-studio");
+  mountBlogStudio();
+});
 window.addEventListener("frank:ad-radar", () => {
   show("ad-radar");
   void mountAdRadar();
@@ -324,6 +332,36 @@ const startAdTemplateGeneratorRun = (event) => {
 };
 window.addEventListener("frank:ad-template-generator-run", startAdTemplateGeneratorRun);
 window.addEventListener("frank:ad-studio-run", startAdTemplateGeneratorRun);
+
+window.addEventListener("frank:blog-studio-run", (event) => {
+  const detail = event.detail || {};
+  void (async () => {
+    const files = Array.isArray(detail.files) ? detail.files.filter((file) => file instanceof File) : [];
+    const projectId = String(detail.projectId || "").trim();
+    const topic = String(detail.topic || "").replace(/\s+/g, " ").trim();
+    if (!projectId) throw new Error("Choose a project.");
+    const uploaded = await uploadFiles(files.map((file) => ({ file, path: file.webkitRelativePath || file.name })));
+    if (uploaded.length !== files.length) throw new Error("One or more evidence files were not accepted.");
+    const response = await fetch("/api/blog-studio/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        job_name: String(detail.jobName || topic).replace(/\s+/g, " ").trim().slice(0, 120),
+        topic: topic,
+        source_text: String(detail.sourceText || "").trim(),
+        source_urls: Array.isArray(detail.sourceUrls) ? detail.sourceUrls.map((url) => String(url).trim()).filter(Boolean) : [],
+        attachments: uploaded.map(attachmentPayload),
+        direction: detail.direction && typeof detail.direction === "object" ? detail.direction : {},
+        outputs: detail.outputs && typeof detail.outputs === "object" ? detail.outputs : {},
+        client_request_id: String(detail.clientRequestId || "").trim(),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.run?.id) throw new Error(data.error || "Hermes did not start the content run.");
+    detail.resolve?.({ run: data.run });
+  })().catch((error) => detail.reject?.(error));
+});
 
 /* ---------------- chat — window only, Hermes thinks ---------------- */
 
