@@ -9,6 +9,7 @@ import { ModelSelector } from "./chat/model-selector.js";
 import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/turn-stream.js";
 import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
 import { mountAdTemplateGenerator, setAdTemplateGeneratorActive } from "./ad-template-generator.js?v=20260908-review-stability-v3";
+import { mountAdRadar, unmountAdRadar } from "./ad-radar.js?v=20260831-observation-timeline-v1";
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
 import { pathForView, routeForPath } from "./view-routing.js?v=20260906-ad-template-generator-v1";
@@ -31,6 +32,7 @@ const TITLES = {
   tools: ["Tools", "Start a factory, watch its trace"],
   "ad-template-generator": ["Ad Template Generator", "Source image → ad template"],
   "ad-db": ["Ad database", "Verified ad archive and collection evidence"],
+  "ad-radar": ["Ad Radar", "Public creative observation and evidence"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
   connections: ["Connections", "Recorded provider setup and capabilities"],
@@ -52,6 +54,7 @@ function syncViewLocation(id, detail = {}) {
 }
 
 function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}) {
+  if (id !== "ad-radar") unmountAdRadar();
   const editorWasOpen = closeHomeEditors({ restoreFocus: false });
   if (id !== "project" && id !== "entity-home") clearHomeActions();
   const [title, sub] = TITLES[id] || TITLES.hub;
@@ -82,6 +85,7 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   setAdTemplateGeneratorActive(id === "ad-template-generator");
   if (id === "ad-db") mountAdDb();
   setAdDbActive(id === "ad-db");
+  if (id === "ad-radar") void mountAdRadar();
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
@@ -195,6 +199,11 @@ const openAdTemplateGenerator = () => {
 };
 window.addEventListener("frank:ad-template-generator", openAdTemplateGenerator);
 window.addEventListener("frank:ad-studio", openAdTemplateGenerator);
+
+window.addEventListener("frank:ad-radar", () => {
+  show("ad-radar");
+  void mountAdRadar();
+});
 
 function openPathView() {
   const query = new URLSearchParams(window.location.search);

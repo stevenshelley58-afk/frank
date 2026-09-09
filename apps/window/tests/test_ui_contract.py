@@ -217,6 +217,36 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('.ad-source-clear', styles)
         self.assertIn('.ad-drop:hover, .ad-drop.is-drag', styles)
 
+    def test_ad_radar_is_a_dedicated_project_scoped_hermes_surface(self):
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
+        radar = (WEB / "js" / "ad-radar.js").read_text(encoding="utf-8")
+        styles = (WEB / "ad-radar.css").read_text(encoding="utf-8")
+        widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
+
+        self.assertIn('data-view="ad-radar"', html)
+        self.assertIn('aria-label="Ad Radar"', html)
+        self.assertIn('data-radar-tab="timeline"', html)
+        self.assertIn('data-radar-tab="library"', html)
+        self.assertIn('data-radar-tab="runs"', html)
+        self.assertIn('data-radar-tab="control"', html)
+        self.assertIn('id="radar-inspector"', html)
+        self.assertIn('id="radar-compare"', html)
+        self.assertIn('Hermes owns execution', html)
+        self.assertIn('emit("frank:ad-radar")', widgets)
+        self.assertIn('window.addEventListener("frank:ad-radar"', app)
+        self.assertIn('unmountAdRadar()', app)
+        self.assertIn('/api/ad-radar/runs?project_id=', radar)
+        self.assertIn('new EventSource', radar)
+        self.assertIn('export function unmountAdRadar()', radar)
+        self.assertIn('const EVENT_LIMIT = 300', radar)
+        self.assertIn('run.status === "paused"', radar)
+        self.assertIn('runAction("resume", {})', radar)
+        self.assertNotIn('localStorage', radar)
+        self.assertIn('.radar-observation', styles)
+        self.assertIn('--radar-inspector: 420px', styles)
+        self.assertNotIn('linear-gradient', styles)
+
     def test_explorer_remains_one_pinnable_vps_tree(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         script = (WEB / "js" / "app.js").read_text(encoding="utf-8")
@@ -373,7 +403,7 @@ class UiContractTest(unittest.TestCase):
         rail_views = re.findall(r'<button class="rail-item[^>]*data-view="([^"]+)"', html)
         self.assertEqual(
             rail_views,
-            ["hub", "tools", "files", "ad-template-generator", "ad-db", "trace", "releases", "live", "map", "control", "ops"],
+            ["hub", "tools", "files", "ad-template-generator", "ad-db", "ad-radar", "trace", "releases", "live", "map", "control", "ops"],
         )
         self.assertIn('id="project-nav"', html)
         self.assertIn('id="new-project"', html)
