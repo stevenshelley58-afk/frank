@@ -9,6 +9,15 @@ unassigned sessions in that profile. Blockwise, Merrypaws, Elf & Wonder,
 Pavone, and future bodies of work are projects/workspaces within the same
 profile; they are never separate Hermes profiles.
 
+## Model-provider routing
+
+Steven's 8 September 2026 direction is to use DeepSeek models through
+Concentrate, not a direct DeepSeek account. Keep the direct Hermes provider
+disabled and its credential absent from active stores. Changing chat routing
+does not change frozen Ad Template Generator routes or approval gates.
+Dated configuration, migration and verification evidence is recorded in
+[the routing change record](evidence/deepseek-concentrate-20260908.md).
+
 ## Mini Frank hierarchy
 
 Mini Frank is an independent peer project boundary in the shared Hermes profile,

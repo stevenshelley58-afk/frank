@@ -19,6 +19,7 @@ import { mountControl } from "./control.js?v=20260830-step5";
 import { mountOps } from "./ops.js?v=20260904-ops-v1";
 import { isBlockwiseOperationsPreview } from "./blockwise-operations-preview.js";
 import { mountOperationsTool, operationsTool } from "./operations-tools.js";
+import { createMiniServiceRequestsPanel } from "./mini-service-requests.js?v=20260906-mini-operator-v1";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -63,6 +64,7 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
+  if (id !== "project") miniOperatorPanel.setActive(false);
   if (syncHistory) syncViewLocation(id, routeDetail);
   const more = $("#more-nav");
   if (more && ["trace", "releases", "live", "map", "control", "ops"].includes(id)) more.open = true;
@@ -84,6 +86,7 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
 }
 
 let currentProject = { id: "blockwise", name: "Blockwise" };
+const miniOperatorPanel = createMiniServiceRequestsPanel($("#mini-service-requests"));
 
 function renderProjectNav() {
   const nav = $("#project-nav");
@@ -122,6 +125,7 @@ function showProject(id, options = {}) {
   document.body.classList.toggle("blockwise-operations-preview", id === "blockwise" && isBlockwiseOperationsPreview());
   show("project", { ...options, routeDetail: { projectId: id } });
   openProjectHome(currentProject);
+  miniOperatorPanel.setActive(id === "mini-frank");
   return true;
 }
 
@@ -193,6 +197,10 @@ window.addEventListener("frank:ad-template-generator", openAdTemplateGenerator);
 window.addEventListener("frank:ad-studio", openAdTemplateGenerator);
 
 function openPathView() {
+  const query = new URLSearchParams(window.location.search);
+  if (query.get("project") === "mini-frank" && query.get("panel") === "mini-service-requests") {
+    if (showProject("mini-frank", { syncHistory: false })) return;
+  }
   if (isBlockwiseOperationsPreview()) {
     showProject("blockwise", { syncHistory: false });
     return;

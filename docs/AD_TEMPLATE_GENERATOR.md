@@ -46,6 +46,38 @@ approval does not grant permission for unrelated provider publishing.
 Never infer acceptance from an overall score, a missing decision, partial
 evidence or a UI fallback. Never overwrite recorded scores to meet this policy.
 
+## Ad Output QA
+
+Steven requested a reusable production-error review skill and process integration
+on 8 September 2026. The Hermes release bundles
+`skills/creative/ad-output-qa/SKILL.md` and its compact review checklist. The
+checklist guides the existing reviewers; it is not an additional agent loop or
+a replacement for this guide's acceptance and publishing policy.
+
+Reliable measured output failures must prevent successful generation handoff,
+even when model scores are high. Use the existing bounded repair/recheck process
+and rerender before deciding that a correction worked. Record the exact candidate,
+placement and evidence. Missing or unsupported measurements are explicitly unknown,
+not measured passes; visually inspect those regions without guessing repairs.
+
+The review covers visible label centering, text clipping/overlap/padding and
+legibility, image distortion/cropping, reusable content and the existing Meta
+exceptions. A checklist item is not necessarily machine-enforced: evidence must
+distinguish executable checks from visual judgment. Informational badges remain
+allowed; intentional left alignment and interior rounded elements are not defects.
+No existing ad is changed or approved merely by installing the skill.
+See dated release evidence before treating this requirement as deployed behavior.
+
+Deployment observed 8 September 2026: Hermes
+`57d8ce6eb3410516cbdfefe6c68976d83c2bb8e5`, with authenticated health and the
+settled import path verified. All 302 generator/skill tests passed, including a
+fresh final-render defect blocking the actual import call despite two 9.9
+reviews. The deployed checker rejected the saved misaligned label example;
+hashes confirmed its original candidate and images were unchanged. Existing
+historical readiness was not rewritten; new generation and revision handoffs
+use the gate. The current ad still needs its separate correction/review.
+No template was published, no first-50 batch started, and Blockwise was unchanged.
+Detailed evidence is in Hermes `docs/ad-output-qa-20260908.md`.
 ## Meta-native CTA policy
 
 Steven requested on 8 September 2026 that Meta supply the clickable CTA outside

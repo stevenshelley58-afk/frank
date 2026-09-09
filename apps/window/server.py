@@ -34,6 +34,7 @@ from project_store import ProjectStore, ProjectStoreError
 import vault_broker
 import control_plane_view
 import ops_projections
+import mini_operator
 import customer_ops_actions
 from graph.provider import (
     ReadOnlyProvider,
@@ -4059,23 +4060,31 @@ app.register_blueprint(create_memory_blueprint(MemoryInspector(
 )))
 
 
-app.register_blueprint(mini_frank.create_blueprint(
-    data_root=_mini_data_root(),
-    project_view_root=_mini_preview_root(),
-    legacy_project_root=_mini_legacy_root(),
-    project_getter=_project_store.get_project,
-    session_creator=_create_project_session,
-    hermes_request=hermes_request,
-    hermes_chat_stream=_hermes_chat_stream,
-    # Hermes runs on the VPS host, while Frank writes through the /data
-    # container mount. The shared upload root already names that host path.
-    hermes_data_root=HERMES_UPLOAD_ROOT.parent,
-    # Keep claim links stable across restarts when a dedicated Mini key has not
-    # yet been provisioned. HERMES_KEY is already a persistent server secret.
-    rate_limit_key=os.environ.get("MINI_RATE_LIMIT_KEY", "").strip() or HERMES_KEY,
-    free_project_limit=int(os.environ.get("MINI_FREE_PROJECT_LIMIT", "1")),
-    start_reconciler=True,
-))
+MINI_PEER_MODE = os.environ.get("MINI_PEER_MODE", "0") == "1"
+
+if not MINI_PEER_MODE:
+    app.register_blueprint(mini_frank.create_blueprint(
+        data_root=_mini_data_root(),
+        project_view_root=_mini_preview_root(),
+        legacy_project_root=_mini_legacy_root(),
+        project_getter=_project_store.get_project,
+        session_creator=_create_project_session,
+        hermes_request=hermes_request,
+        hermes_chat_stream=_hermes_chat_stream,
+        # Hermes runs on the VPS host, while Frank writes through the /data
+        # container mount. The shared upload root already names that host path.
+        hermes_data_root=HERMES_UPLOAD_ROOT.parent,
+        # Keep claim links stable across restarts when a dedicated Mini key has not
+        # yet been provisioned. HERMES_KEY is already a persistent server secret.
+        rate_limit_key=os.environ.get("MINI_RATE_LIMIT_KEY", "").strip() or HERMES_KEY,
+        free_project_limit=int(os.environ.get("MINI_FREE_PROJECT_LIMIT", "1")),
+        start_reconciler=True,
+    ))
+
+else:
+    # Peer mode has one reader/writer: the dedicated Mini service. Do not start
+    # the embedded reconciler or register its overlapping API routes.
+    app.register_blueprint(mini_operator.create_blueprint())
 
 
 @app.get("/mini-frank")
