@@ -1934,6 +1934,15 @@ a { color: inherit; text-decoration: none; }
 .ad-review-segments button.is-on { background: var(--bg); color: var(--ink); box-shadow: 0 1px 3px rgb(0 0 0 / 7%); }
 .ad-review-viewport { min-height: 480px; max-height: 720px; display: grid; place-items: center; margin-top: 10px; overflow: auto; border: 1px solid #2b2b2b; border-radius: 10px; padding: 22px; background-color: #171819; background-image: linear-gradient(45deg, #1d1e20 25%, transparent 25%), linear-gradient(-45deg, #1d1e20 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #1d1e20 75%), linear-gradient(-45deg, transparent 75%, #1d1e20 75%); background-position: 0 0, 0 6px, 6px -6px, -6px 0; background-size: 12px 12px; }
 .ad-review-viewport img { display: block; background: #fff; box-shadow: 0 12px 36px rgb(0 0 0 / 24%); }
+.ad-review-image-stage { position: relative; display: inline-block; max-width: 100%; line-height: 0; }
+.ad-review-image-stage > img { display: block; max-width: 100%; height: auto; background: #fff; box-shadow: 0 12px 36px rgb(0 0 0 / 24%); }
+.ad-review-annotation-layer { position: absolute; inset: 0; cursor: crosshair; }
+.ad-review-annotation-box { position: absolute; border: 2px solid var(--mark); background: rgb(229 60 31 / 12%); box-sizing: border-box; line-height: 1; }
+.ad-review-annotation-box > span { position: absolute; top: -1px; left: -1px; min-width: 17px; padding: 3px 4px; background: var(--mark); color: #fff; font-size: 9px; font-weight: 650; }
+.ad-review-annotation-remove { position: absolute; top: -12px; right: -12px; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: #fff; font-size: 15px; line-height: 1; }
+.ad-review-annotation-remove:hover, .ad-review-annotation-remove:focus-visible { background: var(--mark); }
+.ad-review-annotation-hint { width: 100%; margin-top: 8px; color: #c7c7c7; font-size: 10px; line-height: 1.4; text-align: center; }
+
 .ad-review-viewport.is-fit img { width: auto; max-width: 100%; height: auto; max-height: 670px; object-fit: contain; }
 .ad-review-viewport.is-actual { place-items: start; }
 .ad-review-viewport.is-actual img { width: auto; max-width: none; height: auto; }
@@ -2240,4 +2249,91 @@ a { color: inherit; text-decoration: none; }
 @media (max-width: 760px) {
   .ad-workflow-steps { grid-template-columns: repeat(2, minmax(0, 1fr)); padding-inline: 14px; }
   .ad-review-compare-grid { grid-template-columns: 1fr; }
+}
+.ad-review-annotation-comments { display: grid; gap: 6px; width: min(100%, 520px); margin-top: 8px; }
+.ad-review-annotation-comments label { display: grid; grid-template-columns: 48px minmax(0, 1fr); align-items: center; gap: 6px; color: #c7c7c7; font-size: 10px; }
+.ad-review-annotation-comments input { min-height: 30px; padding: 5px 8px; border: 1px solid #555; border-radius: 6px; background: #252627; color: #fff; font-size: 11px; }
+.ad-review-chat { margin-top: 26px; padding-top: 18px; border-top: 1px solid var(--line); }
+.ad-review-chat-thread { display: grid; gap: 8px; max-height: 220px; margin-top: 12px; overflow: auto; }
+.ad-review-chat-thread article { padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.ad-review-chat-thread strong { font-size: 10px; }
+.ad-review-chat-thread p { margin-top: 4px; color: var(--mute); font-size: 11px; white-space: pre-wrap; }
+.ad-review-chat-thread small { display: block; margin-top: 5px; color: var(--faint); font-size: 9px; }
+.ad-review-chat-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: end; gap: 10px; margin-top: 12px; }
+.ad-review-chat-form label { display: grid; gap: 5px; color: var(--mute); font-size: 10px; }
+.ad-review-chat-form textarea { width: 100%; padding: 9px 10px; border: 1px solid var(--line); border-radius: 8px; resize: vertical; font-size: 12px; }
+.ad-review-chat > .ad-text-button { margin-top: 8px; }
+@media (max-width: 720px) { .ad-review-chat-form { grid-template-columns: 1fr; } }
+.ad-review-annotation-layer[data-drawing="true"]::after { content: ""; position: absolute; left: var(--draft-left); top: var(--draft-top); width: var(--draft-width); height: var(--draft-height); border: 2px dashed var(--mark); background: rgb(229 60 31 / 8%); pointer-events: none; }
+.ad-review-revisions > select { min-height: 34px; margin-top: 10px; padding: 5px 9px; border: 1px solid var(--line); border-radius: 7px; background: var(--card); font-size: 11px; }
+.ad-review-before-after { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 10px; }
+.ad-review-before-after figure { min-width: 0; }
+.ad-review-before-after img, .ad-review-before-after .ad-review-artifact-missing { width: 100%; height: 260px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); object-fit: contain; }
+.ad-review-before-after figcaption { padding-top: 6px; color: var(--faint); font-size: 10px; }
+@media (max-width: 720px) { .ad-review-before-after { grid-template-columns: 1fr; } }
+
+.ad-review-annotation-layer { touch-action: none; }
+.ad-review-before-after img { display: block; width: 100%; height: auto; }
+.ad-review-chat { min-width: 0; }
+.ad-review-chat textarea { width: 100%; box-sizing: border-box; }
+
+.ad-review-snapshot-stage { position: relative; }
+.ad-review-saved-area { position: absolute; border: 2px solid var(--mark); color: var(--mark); font-size: 12px; pointer-events: none; box-sizing: border-box; }
+
+.ad-review-before-after img, .ad-review-image-stage > img { border-radius: 0; }
+
+/* The final artwork is the primary review surface; evidence stays secondary. */
+.ad-review-layout { grid-template-columns: minmax(180px,220px) minmax(0,1fr); }
+.ad-review-detail { padding: 18px 22px; }
+.ad-review-detail-head { padding-bottom: 12px; }
+.ad-review-detail-head h3 { font-size: 18px; }
+.ad-review-detail-head p, .ad-review-hero-score { display: none; }
+.ad-review-workspace { display: grid; grid-template-columns: minmax(0,1fr) 300px; margin-top: 14px; border: 1px solid var(--line); border-radius: 12px; overflow: clip; background: white; }
+.ad-review-canvas-panel { min-width: 0; padding: 16px; }
+.ad-review-workspace .ad-review-toolbar { position: sticky; top: 0; z-index: 4; display: flex; justify-content: space-between; align-items: center; margin: 0; padding-block: 8px; gap: 12px; background: #fff; }
+.ad-annotate-button { min-height: 42px; padding: 10px 20px; border-radius: 8px; background: #111; color: #fff; font-size: 14px; font-weight: 600; white-space: nowrap; cursor: pointer; }
+.ad-annotate-button[aria-pressed="true"] { outline: 2px solid #111; outline-offset: 3px; }
+.ad-annotate-button:disabled { opacity: .45; cursor: not-allowed; }
+.ad-annotate-button:focus-visible { outline: 3px solid #666; outline-offset: 3px; }
+.ad-annotation-instruction { min-height: 20px; margin: 12px 0; font-size: 12px; color: #666; }
+.ad-review-primary-artwork { padding: 0; margin: 0; border: 0; }
+.ad-review-artwork-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+.ad-review-primary-artwork .ad-review-viewport { min-height: 0; max-height: none; height: auto; margin: 0; padding: 16px; overflow: visible; background: #fff; border: 1px solid #ececec; border-radius: 4px; }
+.ad-review-primary-artwork .ad-review-image-stage { display: block; width: fit-content; max-width: 100%; margin: auto; }
+.ad-review-primary-artwork .ad-review-image-stage > img { display: block; width: auto; max-width: 100%; height: auto; max-height: max(200px,calc(100dvh - 580px)); object-fit: contain; box-shadow: none; }
+.ad-review-comment-panel { min-width: 0; padding: 20px; border-left: 1px solid var(--line); }
+.ad-review-comment-panel > h3 { margin: 0 0 16px; font-size: 16px; }
+.ad-review-comment-panel .ad-review-chat { margin: 0; padding: 0; border: 0; }
+.ad-review-comment-panel .ad-review-chat > h3 { display: none; }
+.ad-review-comment-panel .ad-review-chat > p { margin: 0 0 12px; font-size: 12px; color: #666; }
+.ad-review-comment-panel .ad-review-chat-form { display: flex; flex-direction: column; align-items: stretch; gap: 12px; margin: 0; }
+.ad-review-comment-panel .ad-review-chat-form label { font-size: 13px; gap: 8px; }
+.ad-review-comment-panel .ad-review-chat-form textarea { min-height: 120px; font-size: 14px; line-height: 1.5; }
+.ad-review-comment-panel .ad-review-chat-form button { min-height: 42px; font-size: 13px; }
+.ad-review-comment-panel .ad-review-annotation-comments { width: 100%; margin: 0 0 20px; }
+.ad-review-comment-panel .ad-review-area-field { display: grid; grid-template-columns: 1fr auto; padding: 12px; border: 1px solid #ddd; border-radius: 8px; color: #111; gap: 8px; }
+.ad-review-area-field > span { grid-column: 1; font-size: 12px; font-weight: 600; }
+.ad-review-comment-panel .ad-review-area-field input { grid-column: 1 / -1; grid-row: 2; background: #fff; color: #111; border: 1px solid #ddd; font-size: 13px; min-height: 40px; }
+.ad-review-area-field button { grid-column: 2; grid-row: 1; background: none; font-size: 11px; color: #666; }
+.ad-review-history, .ad-review-secondary { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+.ad-review-history > summary, .ad-review-secondary > summary { cursor: pointer; font-size: 13px; font-weight: 500; padding: 4px 0; }
+.ad-review-history .ad-review-before-after { grid-template-columns: 1fr; }
+.ad-review-secondary .ad-review-compare-grid img { max-width: 100%; max-height: 500px; object-fit: contain; }
+.ad-review-actions { position: static; margin: 26px 0 0; padding: 14px 0; }
+.ad-review-actions > a.ad-primary { width: auto; justify-self: start; display: inline-flex; padding: 10px 16px; }
+@media(max-width:1100px) { .ad-review-layout { grid-template-columns: 170px minmax(0,1fr); } .ad-review-workspace { grid-template-columns: minmax(0,1fr) 270px; } }
+@media(max-width:850px) { .ad-review-layout { grid-template-columns: 1fr; } .ad-review-list-panel { border-right: 0; } .ad-review-workspace { grid-template-columns: minmax(0,1fr); } .ad-review-comment-panel { border-left: 0; border-top: 1px solid var(--line); } .ad-review-primary-artwork .ad-review-image-stage > img { max-height: max(180px,calc(100dvh - 660px)); } .ad-review-detail { padding: 14px; } }
+
+.ad-review-list-panel .ad-section-heading { flex-direction: column; align-items: flex-start; gap: 10px; }
+.ad-review-list-panel .ad-section-heading h3 { font-size: 16px; }
+.ad-review-list-panel .ad-live-state { white-space: nowrap; }
+
+@media(max-width:850px) {
+  .ad-review-list-panel { padding: 10px 14px; max-height: 90px; border-bottom: 1px solid var(--line); }
+  .ad-review-list-panel .ad-section-heading { display: none; }
+  .ad-review-list { margin-top: 0; }
+  .ad-review-row { grid-template-columns: 32px minmax(0,1fr); padding: 5px; }
+  .ad-review-row > img, .ad-review-row-missing { width: 32px; height: 40px; }
+  .ad-review-row time { display: none; }
+  .ad-review-workspace .ad-review-toolbar { flex-wrap: wrap; }
 }

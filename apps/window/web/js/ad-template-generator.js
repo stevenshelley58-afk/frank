@@ -1,8 +1,9 @@
 import { blockwiseTemplateUrl } from "./view-routing.js?v=20260906-ad-template-generator-v1";
-import { groupAdTemplateGeneratorRuns, mergeAdTemplateGeneratorRun, mergeAdTemplateGeneratorRunList, readyAdTemplateGeneratorReviewRuns, runListRenderSignature, runTimestamp } from "./ad-template-generator-state.js?v=20260905-ready-review-v1";
+import { adTemplateGeneratorReviewState, groupAdTemplateGeneratorRuns, mergeAdTemplateGeneratorRun, mergeAdTemplateGeneratorRunList, readyAdTemplateGeneratorReviewRuns, runListRenderSignature, runTimestamp } from "./ad-template-generator-state.js?v=20260908-review-stability-v3";
 import { AD_TEMPLATE_GENERATOR_BRIEF_MAX_CHARACTERS, adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260904-brief-roundtrip-v1";
-import { approveAdTemplateGeneratorTemplate, cancelAdTemplateGeneratorRun, discardAdTemplateGeneratorTemplate, getAdTemplateGeneratorRun, listAdTemplateGeneratorRuns, requestAdTemplateGeneratorTemplateChanges, retryAdTemplateGeneratorRun } from "./ad-template-generator-api.js?v=20260906-retry-contract-v1";
+import { approveAdTemplateGeneratorTemplate, cancelAdTemplateGeneratorRun, discardAdTemplateGeneratorTemplate, getAdTemplateGeneratorRun, listAdTemplateGeneratorRuns, requestAdTemplateGeneratorTemplateChanges, retryAdTemplateGeneratorRun, postAdReviewMessage, getAdReviewRevisions, undoAdReviewRevision } from "./ad-template-generator-api.js?v=20260908-review-chat-v1";
 import { placementScore, reviewArtifactPurpose, reviewModelProfile, reviewOverallScore, reusableValidationChecks, selectMetaPreview, selectReusableReviewArtifact, selectFaithfulReviewArtifact, selectReviewArtifact } from "./ad-template-generator-review.js?v=20260905-ready-review-v1";
+import { normalizeRect, pointerToNormalized, safeAnnotationText, serializeAnnotations } from "./ad-review-annotations.js?v=20260908-review-annotations-v1";
 
 const TOOL_ID = "ad-template-generator";
 const $ = (selector, root = document) => root.querySelector(selector);
@@ -16,8 +17,14 @@ let selectedReviewRunId = "";
 let reviewPlacement = "feed";
 let reviewView = "template";
 let reviewZoom = "fit";
+let reviewAnnotating = false;
 let reviewActionPending = false;
 let reviewActionMessage = "";
+const reviewDraftAnnotations = new Map();
+const reviewDraftText = new Map();
+const reviewRevisionState = new Map();
+const reviewRequestKeys = new Map();
+const reviewInFlight = new Set();
 let runSelectionRevision = 0;
 let runListRevision = 0;
 let selectedStage = null;
@@ -26,6 +33,7 @@ let selectedFiles = [];
 let graphMountPromise = null;
 let graphMountRevision = 0;
 let batchStarting = false;
+
 let runRefreshPending = false;
 const localRunInputs = new Map();
 const previewUrls = new Set();
@@ -525,8 +533,14 @@ async function refreshRuns() {
   const incoming = await listAdTemplateGeneratorRuns({ projectId, limit: 100 });
   if (refreshRevision !== runListRevision) return;
   const previousSignature = runListRenderSignature(runs);
+  const previousRuns = runs;
   runs = mergeAdTemplateGeneratorRunList(runs, incoming);
   if (runListRenderSignature(runs) !== previousSignature) renderRuns();
+  const previousReview = previousRuns.find((run) => run.id === selectedReviewRunId);
+  const refreshedReview = runs.find((run) => run.id === selectedReviewRunId);
+  if (refreshedReview && previousReview && adTemplateGeneratorReviewState(refreshedReview) !== adTemplateGeneratorReviewState(previousReview)) {
+    renderReviewDetail(refreshedReview);
+  }
   renderReviewQueue();
 }
 
@@ -721,64 +735,101 @@ function appendMetaPreviews(parent, summary) {
 }
 
 function appendReviewEvidence(parent, run, summary) {
-  const section = document.createElement("section");
-  section.className = "ad-review-section ad-review-evidence";
-  const heading = document.createElement("div");
-  heading.className = "ad-inline-heading";
-  heading.innerHTML = "<strong>3. Compare visual evidence</strong><span>Faithful reconstruction and reusable template are separate recorded artifacts.</span>";
-  const toolbar = document.createElement("div");
-  toolbar.className = "ad-review-toolbar";
-  const placements = document.createElement("div");
-  placements.className = "ad-review-segments";
-  placements.setAttribute("aria-label", "Placement");
-  placements.append(
-    makeSegment("Feed", "feed", reviewPlacement, (value) => { reviewPlacement = value; renderReviewDetail(run); }),
-    makeSegment("Story", "story", reviewPlacement, (value) => { reviewPlacement = value; renderReviewDetail(run); }),
-  );
-  const views = document.createElement("div");
-  views.className = "ad-review-segments ad-review-views";
-  views.setAttribute("aria-label", "Evidence view");
-  for (const [label, value] of [["Source", "source"], ["Template", "template"], ["Overlay", "overlay"], ["Difference", "difference"]]) {
-    views.append(makeSegment(label, value, reviewView, (next) => { reviewView = next; renderReviewDetail(run); }));
+  const grid = document.createElement("div"); grid.className = "ad-review-compare-grid";
+  for (const [label, artifact] of [["Source", selectReviewArtifact(summary, reviewPlacement, "source")], ["Faithful reconstruction", selectFaithfulReviewArtifact(summary, reviewPlacement)]]) {
+    const figure = document.createElement("figure");
+    const title = document.createElement("figcaption"); title.textContent = label;
+    figure.append(title); appendReviewImage(figure, artifact, label); grid.append(figure);
   }
-  const zoom = document.createElement("div");
-  zoom.className = "ad-review-segments";
-  zoom.setAttribute("aria-label", "Zoom");
-  zoom.append(
-    makeSegment("Fit", "fit", reviewZoom, (value) => { reviewZoom = value; renderReviewDetail(run); }),
-    makeSegment("100%", "actual", reviewZoom, (value) => { reviewZoom = value; renderReviewDetail(run); }),
-  );
-  toolbar.append(placements, views, zoom);
-  section.append(heading, toolbar);
-
-  const selectedArtifact = reviewView === "template" ? selectFaithfulReviewArtifact(summary, reviewPlacement) : selectReviewArtifact(summary, reviewPlacement, reviewView);
-  const reusable = selectReusableReviewArtifact(summary, reviewPlacement);
-  if (reviewView === "template") {
-    const compare = document.createElement("div");
-    compare.className = "ad-review-compare-grid";
-    const cards = [
-      ["Faithful reconstruction", selectedArtifact, "Source-filled QA evidence for comparison only. Source pixels do not ship."],
-      ["Reusable template", reusable, "Neutral editable artifact intended for Blockwise."],
-    ];
-    cards.forEach(([label, artifact, description]) => {
-      const card = document.createElement("article");
-      card.className = "ad-review-compare-card";
-      const title = document.createElement("strong"); title.textContent = label;
-      const note = document.createElement("span"); note.textContent = description;
-      const viewport = document.createElement("div"); viewport.className = "ad-review-viewport is-" + reviewZoom;
-      appendReviewImage(viewport, artifact, label);
-      card.append(title, note, viewport);
-      compare.append(card);
-    });
-    section.append(compare);
-  } else {
-    const viewport = document.createElement("div");
-    viewport.className = "ad-review-viewport is-" + reviewZoom;
-    appendReviewImage(viewport, selectedArtifact, reviewView.replace(/^./, (value) => value.toUpperCase()));
-    section.append(viewport);
-  }
-  parent.append(section);
+  parent.append(grid);
 }
+
+function createAnnotatedViewport(run, artifact, label, placement, { enabled = false } = {}) {
+  const viewport = document.createElement("div"); viewport.className = "ad-review-viewport ad-review-annotated-viewport";
+  const stage = document.createElement("div"); stage.className = "ad-review-image-stage";
+  const comments = document.createElement("div"); comments.className = "ad-review-annotation-comments";
+  if (!artifact?.url) { appendReviewImage(stage, artifact, label); viewport.append(stage, comments); return viewport; }
+  const image = document.createElement("img"); image.src = artifact.url; image.alt = `${label} for ${placement} placement`; image.draggable = false; stage.append(image);
+  const overlay = document.createElement("div"); overlay.className = "ad-review-annotation-layer";
+  overlay.setAttribute("aria-label", `${placement} annotation canvas`);
+  overlay.style.pointerEvents = enabled && reviewAnnotating ? "auto" : "none";
+  stage.append(overlay);
+  const key = `${run.id}:${placement}`;
+  let annotations = serializeAnnotations(reviewDraftAnnotations.get(key) || []);
+  const draw = () => {
+    overlay.replaceChildren(); comments.replaceChildren();
+    annotations.forEach((annotation, index) => {
+      const box = document.createElement("div"); box.className = "ad-review-annotation-box"; box.dataset.testid = "draft-annotation";
+      Object.assign(box.style, {left:`${annotation.x*100}%`, top:`${annotation.y*100}%`, width:`${annotation.width*100}%`, height:`${annotation.height*100}%`});
+      const number = document.createElement("span"); number.textContent = String(index+1); box.append(number); overlay.append(box);
+      const field = document.createElement("label"); field.className = "ad-review-area-field";
+      const heading = document.createElement("span"); heading.textContent = `${placement === "feed" ? "Feed" : "Story"} · Area ${index+1}`;
+      const input = document.createElement("input"); input.maxLength = 200; input.value = annotation.comment || ""; input.disabled = !enabled;
+      input.dataset.annotationIndex = String(index); input.placeholder = "What should change here?";
+      input.addEventListener("input", () => { annotation.comment = input.value; reviewDraftAnnotations.set(key, annotations); });
+      const remove = document.createElement("button"); remove.type = "button"; remove.textContent = "Remove"; remove.disabled = !enabled;
+      remove.setAttribute("aria-label", `Remove annotation ${index+1}`);
+      remove.addEventListener("click", () => { annotations.splice(index,1); reviewDraftAnnotations.set(key,annotations); draw(); });
+      field.append(heading,input,remove); comments.append(field);
+    });
+    comments.hidden = annotations.length === 0;
+  };
+  draw();
+  if (enabled) {
+    let start = null;
+    const clear = event => { start = null; overlay.removeAttribute("data-drawing"); if (overlay.hasPointerCapture?.(event.pointerId)) overlay.releasePointerCapture(event.pointerId); };
+    overlay.addEventListener("pointerdown", event => {
+      if (!reviewAnnotating || event.button !== 0 || event.target !== overlay) return;
+      if ([...reviewDraftAnnotations.entries()].filter(([id]) => id.startsWith(`${run.id}:`)).reduce((sum,[,items]) => sum+items.length,0) >= 8) return;
+      event.preventDefault(); start = pointerToNormalized(event,viewport,image); overlay.setPointerCapture(event.pointerId);
+    });
+    overlay.addEventListener("pointermove", event => {
+      if (!start) return;
+      const point = pointerToNormalized(event,viewport,image); if (!point) return;
+      const rect = normalizeRect(start,point);
+      for (const [name,value] of Object.entries({left:rect.x,top:rect.y,width:rect.width,height:rect.height})) overlay.style.setProperty(`--draft-${name}`,`${value*100}%`);
+      overlay.dataset.drawing = "true";
+    });
+    overlay.addEventListener("pointercancel", clear);
+    overlay.addEventListener("pointerup", event => {
+      if (!start) return;
+      const origin = start, end = pointerToNormalized(event,viewport,image); clear(event); if (!end) return;
+      let rect = normalizeRect(origin,end);
+      if (rect.width < .01 && rect.height < .01) rect = {x:Math.max(0,Math.min(.88,end.x-.06)),y:Math.max(0,Math.min(.92,end.y-.04)),width:.12,height:.08};
+      if (rect.width < .005 || rect.height < .005) return;
+      annotations.push({...rect,comment:""}); reviewDraftAnnotations.set(key,annotations); draw();
+      comments.querySelector(`input[data-annotation-index="${annotations.length-1}"]`)?.focus();
+    });
+  }
+  viewport.append(stage,comments); return viewport;
+}
+
+function appendReviewWorkspace(parent, run, summary) {
+  const workspace = document.createElement("div"); workspace.className = "ad-review-workspace";
+  const canvas = document.createElement("section"); canvas.className = "ad-review-canvas-panel";
+  const toolbar = document.createElement("div"); toolbar.className = "ad-review-toolbar";
+  const placements = document.createElement("div"); placements.className = "ad-review-segments"; placements.setAttribute("aria-label","Placement");
+  for (const place of ["feed","story"]) placements.append(makeSegment(place === "feed" ? "Feed" : "Story",place,reviewPlacement,value => {reviewPlacement=value;renderReviewDetail(run);}));
+  const annotate = document.createElement("button"); annotate.type = "button"; annotate.className = "ad-annotate-button"; annotate.dataset.testid = "review-annotate";
+  annotate.textContent = reviewAnnotating ? "✓ Done annotating" : "+ Annotate"; annotate.setAttribute("aria-pressed", String(reviewAnnotating));
+  const editable = run.status === "ready_for_review" && !reviewInFlight.has(run.id);
+  annotate.disabled = !editable;
+  annotate.addEventListener("click", () => { reviewAnnotating = !reviewAnnotating; renderReviewDetail(run); document.querySelector('[data-testid="review-annotate"]')?.focus(); });
+  toolbar.append(placements,annotate);
+  const instruction = document.createElement("p"); instruction.className = "ad-annotation-instruction"; instruction.setAttribute("role","status");
+  instruction.textContent = !editable ? "Editing is locked for this run." : reviewAnnotating ? "Click a spot or drag a box on the ad. Then describe the correction." : "Choose Annotate to mark a change on the ad.";
+  const card = document.createElement("article"); card.className = "ad-review-compare-card ad-review-primary-artwork";
+  const label = document.createElement("strong"); label.textContent = "Reusable template"; label.className = "ad-review-artwork-label";
+  const viewport = createAnnotatedViewport(run,selectReusableReviewArtifact(summary,reviewPlacement),"Reusable template",reviewPlacement,{enabled:editable});
+  card.append(label,viewport); canvas.append(toolbar,instruction,card);
+  const side = document.createElement("aside"); side.className = "ad-review-comment-panel";
+  const title = document.createElement("h3"); title.textContent = "Corrections"; side.append(title);
+  const comments = viewport.querySelector(".ad-review-annotation-comments"); if (comments) side.append(comments);
+  appendReviewChat(side,run);
+  workspace.append(canvas,side); parent.append(workspace);
+  workspace.addEventListener("keydown",event => { if (event.key === "Escape" && reviewAnnotating) {reviewAnnotating=false;renderReviewDetail(run); document.querySelector('[data-testid="review-annotate"]')?.focus();} });
+}
+
 function appendRecordedDetails(parent, run, summary) {
   const grid = document.createElement("div");
   grid.className = "ad-review-record-grid";
@@ -823,13 +874,159 @@ function appendRecordedDetails(parent, run, summary) {
   parent.append(layerSection);
 }
 
+function reviewIdempotencyKey() { return globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`; }
+function revisionRequestKey(runId, action, payload) {
+  const fingerprint = JSON.stringify(payload);
+  const id = `${runId}:${action}`;
+  let saved = reviewRequestKeys.get(id);
+  if (!saved || saved.fingerprint !== fingerprint) {
+    saved = { fingerprint, key: reviewIdempotencyKey() };
+    reviewRequestKeys.set(id, saved);
+  }
+  return saved.key;
+}
+
+function appendRevisionEvidence(parent, run, records) {
+  if (!records.length) return;
+  const section = document.createElement("section"); section.className = "ad-review-revisions";
+  const title = document.createElement("h4"); title.textContent = "Before and after";
+  const select = document.createElement("select"); select.setAttribute("aria-label", "Revision to compare");
+  records.forEach((item, index) => select.append(new Option(`Revision ${item.revision}`, String(index))));
+  select.value = String(records.length - 1);
+  const grid = document.createElement("div"); grid.className = "ad-review-before-after";
+  const draw = () => {
+    grid.replaceChildren();
+    const item = records[Number(select.value)];
+    for (const label of ["before", "after"]) {
+      const figure = document.createElement("figure");
+      const caption = document.createElement("figcaption"); caption.textContent = `${label === "before" ? "Before" : "After"} · ${reviewPlacement === "feed" ? "Feed" : "Story"}`;
+      figure.append(caption);
+      const name = item?.[label]?.[reviewPlacement];
+      if (typeof name === "string" && /^rrev_[a-f0-9]{32}-(before|after)-(feed|story)\.png$/.test(name)) {
+        const image = document.createElement("img");
+        image.src = `/api/ad-template-generator/runs/${encodeURIComponent(run.id)}/artifacts/${encodeURIComponent(name)}`;
+        image.alt = `${caption.textContent}, revision ${item.revision}`;
+        image.dataset.reviewSnapshot = label;
+        const frame = document.createElement("div"); frame.className = "ad-review-snapshot-stage"; frame.append(image);
+        if (label === "before") (item.annotations || []).filter(area => area.placement === reviewPlacement).forEach((area, index) => {
+          const mark = document.createElement("span"); mark.className = "ad-review-saved-area"; mark.textContent = String(index + 1);
+          mark.style.left = `${area.x * 100}%`; mark.style.top = `${area.y * 100}%`;
+          mark.style.width = `${area.width * 100}%`; mark.style.height = `${area.height * 100}%`;
+          mark.title = area.message || item.message; frame.append(mark);
+        });
+        figure.append(frame);
+      } else {
+        const note = document.createElement("p"); note.textContent = label === "after" ? "Available when revision checks pass." : "Snapshot unavailable.";
+        figure.append(note);
+      }
+      grid.append(figure);
+    }
+  };
+  select.addEventListener("change", draw);
+  section.append(title, select, grid); parent.append(section); draw();
+}
+
+function appendReviewChat(parent, run) {
+  const section = document.createElement("section"); section.className = "ad-review-chat"; section.dataset.testid = "review-chat";
+  const heading = document.createElement("h3"); heading.textContent = "Review chat";
+  const state = document.createElement("p"); state.setAttribute("role", "status");
+  const thread = document.createElement("div"); thread.className = "ad-review-chat-thread"; thread.setAttribute("aria-live", "polite");
+  const evidence = document.createElement("div");
+  const form = document.createElement("form"); form.className = "ad-review-chat-form";
+  const label = document.createElement("label"); label.textContent = "What should change?";
+  const input = document.createElement("textarea"); input.rows = 3; input.maxLength = 1200; input.dataset.testid = "review-chat-input";
+  input.placeholder = "Describe a correction, or annotate the ad.";
+  input.value = reviewDraftText.get(run.id) || "";
+  input.addEventListener("input", () => { reviewDraftText.set(run.id, input.value); input.setCustomValidity(""); });
+  label.append(input);
+  const send = document.createElement("button"); send.type = "submit"; send.className = "ad-primary"; send.textContent = "Send correction"; send.dataset.testid = "review-chat-send";
+  const undo = document.createElement("button"); undo.type = "button"; undo.className = "ad-text-button"; undo.textContent = "Undo last revision"; undo.dataset.testid = "review-undo";
+  form.append(label, send); const history = document.createElement("details"); history.className = "ad-review-history";
+  const historyLabel = document.createElement("summary"); historyLabel.textContent = "Previous corrections"; history.append(historyLabel,thread,evidence,undo);
+  section.append(heading,state,form,history); parent.append(section);
+  let loaded = false;
+  let latest = reviewRevisionState.get(run.id);
+  const currentStatus = () => (runs.find(item => item.id === run.id) || run).status;
+  const readyForEdit = () => loaded && currentStatus() === "ready_for_review" && !reviewInFlight.has(run.id);
+  const controls = () => {
+    const ready = readyForEdit(); input.disabled = !ready; send.disabled = !ready;
+    undo.hidden = !latest?.revisions?.some(item => item.revision === latest.current_revision && item.status === "ready_for_review");
+    undo.disabled = !ready;
+  };
+  const drawHistory = data => {
+    latest = data; reviewRevisionState.set(run.id, data);
+    thread.replaceChildren(); evidence.replaceChildren();
+    const records = Array.isArray(data.revisions) ? data.revisions : [];
+    if (!records.length) thread.textContent = "No corrections yet.";
+    for (const record of records) {
+      const row = document.createElement("article"); row.dataset.testid = "review-comment-item";
+      const body = document.createElement("p"); body.textContent = record.message || "Marked-area correction";
+      const status = document.createElement("small");
+      status.textContent = ({pending: "Revision queued or running", ready_for_review: "Checks passed. Ready for review", failed: "Revision needs attention", cancelled: "Revision cancelled"})[record.status] || record.status;
+      row.append(body, status);
+      for (const area of record.annotations || []) {
+        const note = document.createElement("p"); note.textContent = `${area.placement === "story" ? "Story" : "Feed"} area: ${area.message || "See correction above"}`; row.append(note);
+      }
+      thread.append(row);
+    }
+    appendRevisionEvidence(evidence, run, records);
+    controls();
+  };
+  const load = async () => {
+    if (!latest) state.textContent = "Loading saved review…";
+    controls();
+    try {
+      const data = await getAdReviewRevisions(run.id, run.project_id);
+      if (!section.isConnected) return;
+      loaded = true; drawHistory(data);
+      state.textContent = currentStatus() === "ready_for_review" ? "Corrections run through the template checks before approval." : "Editing is locked while this run is processing or already approved.";
+    } catch (error) {
+      state.textContent = error.message || "Review history is unavailable. Reload to try again.";
+    }
+    controls();
+  };
+  const submit = async action => {
+    if (!readyForEdit()) return;
+    const message = safeAnnotationText(input.value);
+    const annotations = ["feed", "story"].flatMap(placement => serializeAnnotations(reviewDraftAnnotations.get(`${run.id}:${placement}`) || []).map(({comment, ...rect}) => ({...rect, placement, message: comment})));
+    if (action === "message" && ((!message && !annotations.some(a => a.message)) || annotations.length > 8)) {
+      input.setCustomValidity(annotations.length > 8 ? "Use at most eight marked areas across Feed and Story." : "Describe the correction or add a comment to a marked area."); input.reportValidity(); return;
+    }
+    const payload = {runId: run.id, projectId: run.project_id, expectedRevision: latest.current_revision};
+    if (action === "message") Object.assign(payload, {message, annotations});
+    payload.idempotencyKey = revisionRequestKey(run.id, action, payload);
+    reviewInFlight.add(run.id); controls(); state.textContent = "Sending correction…";
+    try {
+      const result = await (action === "message" ? postAdReviewMessage(payload) : undoAdReviewRevision(payload));
+      reviewRequestKeys.delete(`${run.id}:${action}`);
+      if (action === "message") {
+        reviewDraftText.delete(run.id);
+        for (const placement of ["feed", "story"]) reviewDraftAnnotations.delete(`${run.id}:${placement}`);
+      }
+      runs = runs.map(item => item.id === run.id ? {...item, status: result.status || "queued", review_status: "revision_requested"} : item);
+      const detail = await getAdTemplateGeneratorRun(run.id).catch(() => null);
+      if (detail) runs = runs.map(item => item.id === run.id ? mergeAdTemplateGeneratorRun(item, detail) : item);
+      reviewInFlight.delete(run.id);
+      const current = runs.find(item => item.id === run.id) || run;
+      renderReviewDetail(current); connectRunEvents(current);
+    } catch (error) {
+      state.textContent = error.message || "Could not confirm the correction. Retry sends the same request safely.";
+      reviewInFlight.delete(run.id); controls();
+    }
+  };
+  form.addEventListener("submit", event => { event.preventDefault(); void submit("message"); });
+  undo.addEventListener("click", () => void submit("undo"));
+  if (latest) drawHistory(latest);
+  void load();
+}
+
 function appendReviewActions(parent, run) {
   const section = document.createElement("section");
   section.className = "ad-review-actions";
   const status = document.createElement("p");
   status.setAttribute("role", "status");
   status.textContent = reviewActionMessage || "Approval publishes this reviewed template to Blockwise.";
-  const currentStatus = clean(run.review_status || run.output?.review_summary?.status || run.status).toLowerCase().replaceAll("-", "_");
+  const currentStatus = adTemplateGeneratorReviewState(run);
   if (currentStatus !== "ready_for_review") {
     status.textContent = reviewActionMessage || `This review is now ${runStatusLabel(currentStatus).toLowerCase()}.`;
     section.append(status);
@@ -875,18 +1072,7 @@ function appendReviewActions(parent, run) {
   };
 
   approve.addEventListener("click", () => void act(() => approveAdTemplateGeneratorTemplate(run.id), "Publishing…"));
-  request.addEventListener("click", () => {
-    formHost.replaceChildren();
-    const form = document.createElement("form");
-    const label = document.createElement("label"); label.textContent = "What must change?";
-    const textarea = document.createElement("textarea"); textarea.required = true; textarea.maxLength = 2000; textarea.rows = 4; textarea.placeholder = "Be specific about the visual difference to correct.";
-    label.append(textarea);
-    const row = document.createElement("div");
-    const cancel = document.createElement("button"); cancel.type = "button"; cancel.className = "ad-text-button"; cancel.textContent = "Cancel"; cancel.addEventListener("click", () => formHost.replaceChildren());
-    const submit = document.createElement("button"); submit.type = "submit"; submit.className = "ad-primary"; submit.textContent = "Send changes";
-    row.append(cancel, submit); form.append(label, row); formHost.append(form); textarea.focus();
-    form.addEventListener("submit", (event) => { event.preventDefault(); const instructions = clean(textarea.value); if (instructions) void act(() => requestAdTemplateGeneratorTemplateChanges(run.id, instructions), "Sending changes…"); });
-  });
+  request.addEventListener("click", () => $("[data-testid=review-chat-input]")?.focus());
   discard.addEventListener("click", () => {
     formHost.replaceChildren();
     const form = document.createElement("form");
@@ -917,10 +1103,10 @@ function renderReviewDetail(run, { loading = false } = {}) {
   copy.append(eyebrow, title, source);
   const score = document.createElement("div"); score.className = "ad-review-hero-score"; score.innerHTML = `<strong>${reviewScoreLabel(reviewOverallScore(review))}</strong><span>likeness</span>`;
   heading.append(copy, score); detail.append(heading);
-  appendReviewFacts(detail, review);
-  appendReviewEvidence(detail, run, review);
-  appendMetaPreviews(detail, review);
-  appendRecordedDetails(detail, run, review);
+  appendReviewWorkspace(detail, run, review);
+  const checks = document.createElement("details"); checks.className = "ad-review-secondary";
+  const checksTitle = document.createElement("summary"); checksTitle.textContent = "Comparison and quality checks"; checks.append(checksTitle);
+  appendReviewFacts(checks,review); appendReviewEvidence(checks,run,review); appendMetaPreviews(checks,review); appendRecordedDetails(checks,run,review); detail.append(checks);
   appendReviewActions(detail, run);
 }
 
@@ -1168,7 +1354,7 @@ function renderRunDetail(run) {
   renderEventViews();
 }
 
-const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "provider.attempt", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "builder.escalated", "final-review.started", "final-review.completed", "template.ready_for_review", "template.revision_requested", "template.approved", "template.discarded", "smoke.completed", "template.imported"];
+const EVENT_KINDS = ["command.accepted", "run.recovered", "run.interrupted", "run.failed", "run.cancelled", "stage.started", "tool.started", "tool.completed", "provider.attempt", "subagent.start", "subagent.complete", "iteration.started", "iteration.rendered", "iteration.compared", "iteration.revised", "builder.escalated", "final-review.started", "final-review.completed", "template.ready_for_review", "template.revision_requested", "template.approved", "template.discarded", "smoke.completed", "template.imported", "template.ready-for-review", "template.published"];
 
 const SAFE_TOOL_LABELS = {
   terminal: "Builder action",
@@ -1287,54 +1473,94 @@ function mergeIterationEvent(run, item) {
   run.output.iterations = records.sort((a, b) => Number(a.iteration) - Number(b.iteration));
 }
 
+const QUIET_RUN_STATUSES = new Set(["ready_for_review", "completed", "approved", "published", "active", "failed", "cancelled", "discarded", "blocked"]);
+const REFRESH_RUN_EVENTS = new Set(["run.failed", "run.cancelled", "template.ready_for_review", "template.ready-for-review", "template.revision_requested", "template.approved", "template.published", "template.discarded", "smoke.completed", "template.smoke-tested", "template.imported"]);
+function runNeedsEvents(run) {
+  return !QUIET_RUN_STATUSES.has(String(run?.status || "").toLowerCase().replaceAll("-", "_"));
+}
+
 function connectRunEvents(run) {
-  eventStream?.close();
-  if (eventReconnectTimer) window.clearTimeout(eventReconnectTimer);
-  eventReconnectTimer = null;
+  stopRunEvents();
   runEvents = [...(runEventCache.get(run.id) || [])];
   renderEventViews();
+  const selection = runSelectionRevision;
+  const stillSelected = () => active && selectedRunId === run.id && selection === runSelectionRevision;
+  const currentRun = () => runs.find((candidate) => candidate.id === run.id) || run;
+  const showStatus = (message) => {
+    const state = $(selectedReviewRunId === run.id ? "#ad-review-live-state" : "#ad-live-state");
+    if (state) state.textContent = message || runStatusLabel(currentRun().status);
+  };
+  const redraw = () => {
+    const current = currentRun();
+    const focused = globalThis.document?.activeElement;
+    const focusKey = focused?.dataset?.testid || "";
+    const selectionStart = focused?.selectionStart;
+    const selectionEnd = focused?.selectionEnd;
+    if (selectedReviewRunId === run.id) renderReviewDetail(current);
+    else renderRunDetail(current);
+    renderReviewQueue();
+    if (focusKey) {
+      const replacement = globalThis.document?.querySelector('[data-testid="' + focusKey + '"]');
+      if (replacement && !replacement.disabled) {
+        replacement.focus();
+        if (typeof selectionStart === "number" && typeof replacement.setSelectionRange === "function") replacement.setSelectionRange(selectionStart, selectionEnd ?? selectionStart);
+      }
+    }
+  };
   const connect = () => {
-    if (!active || selectedRunId !== run.id) return;
+    eventReconnectTimer = null;
+    if (!stillSelected()) return;
+    if (!runNeedsEvents(currentRun())) { showStatus(); return; }
     const cursor = runEvents.reduce((last, item) => Math.max(last, Number(item.sequence ?? -1)), -1);
     const stream = new EventSource(`/api/ad-template-generator/runs/${encodeURIComponent(run.id)}/events?after=${encodeURIComponent(cursor)}`);
     eventStream = stream;
-  const receive = (event) => {
-    try {
-      if (!active || eventStream !== stream || selectedRunId !== run.id) return;
-      const item = JSON.parse(event.data);
+    const reconcile = async () => {
+      try {
+        const detail = await getAdTemplateGeneratorRun(run.id);
+        if (!stillSelected() || eventStream !== stream || !detail) return;
+        run = mergeAdTemplateGeneratorRun(currentRun(), detail);
+        runs = runs.map((candidate) => candidate.id === run.id ? run : candidate);
+        redraw();
+        if (!runNeedsEvents(run)) { stopRunEvents(); showStatus(); }
+      } catch { /* Retain the recorded view and retry on the next connection. */ }
+    };
+    const receive = (event) => {
+      if (!stillSelected() || eventStream !== stream) return;
+      let item;
+      try { item = JSON.parse(event.data); } catch { return; }
       if (!runEvents.some((existing) => existing.sequence === item.sequence)) {
         runEvents.push(item);
         runEvents.sort((left, right) => Number(left.sequence || 0) - Number(right.sequence || 0));
         runEventCache.set(run.id, [...runEvents]);
       }
-      run = mergeAdTemplateGeneratorRun(runs.find((candidate) => candidate.id === run.id), run);
+      run = currentRun();
       if (["iteration.rendered", "iteration.compared"].includes(item.kind)) mergeIterationEvent(run, item);
       if (item.kind === "stage.started" && item.node_id) {
         run.stage = canonicalStage(item.node_id);
         run.progress = Math.max(Number(run.progress || 0), Math.max(0, PIPELINE_STAGES.indexOf(run.stage)) / PIPELINE_STAGES.length);
       }
       runs = runs.map((candidate) => candidate.id === run.id ? run : candidate);
-      if (selectedReviewRunId === run.id) renderReviewDetail(run);
-      else renderRunDetail(run);
-      renderReviewQueue();
-      if (["run.failed", "run.cancelled", "template.ready_for_review", "template.revision_requested", "template.approved", "template.discarded", "smoke.completed", "template.imported"].includes(item.kind)) void refreshRunsSafe().then(() => {
-        if (!active || eventStream !== stream || selectedRunId !== run.id) return;
-        const updated = runs.find((candidate) => candidate.id === run.id);
-        if (updated && selectedReviewRunId === run.id) renderReviewDetail(updated);
-        else if (updated) renderRunDetail(updated);
-      });
-    } catch { /* a keepalive contains no event data */ }
-  };
-  for (const kind of EVENT_KINDS) stream.addEventListener(kind, receive);
-  stream.onopen = () => {
-    for (const selector of ["#ad-live-state", "#ad-review-live-state"]) { const state = $(selector); if (state) state.textContent = "Live"; }
-  };
-  stream.onerror = () => {
-    if (!active || eventStream !== stream) return;
-    stream.close();
-    for (const selector of ["#ad-live-state", "#ad-review-live-state"]) { const state = $(selector); if (state) state.textContent = "Reconnecting…"; }
-    eventReconnectTimer = window.setTimeout(connect, 1_500);
-  };
+      redraw();
+      if (REFRESH_RUN_EVENTS.has(item.kind)) void reconcile();
+    };
+    for (const kind of new Set([...EVENT_KINDS, ...REFRESH_RUN_EVENTS])) stream.addEventListener(kind, receive);
+    stream.onopen = () => {
+      if (!stillSelected() || eventStream !== stream) return;
+      if (!runNeedsEvents(currentRun())) { stopRunEvents(); showStatus(); return; }
+      showStatus("Live");
+    };
+    stream.onerror = async () => {
+      if (!stillSelected() || eventStream !== stream) return;
+      stream.close();
+      // Hermes deliberately ends streams at the review/terminal boundary.
+      // Read that state before labelling a normal close as a lost connection.
+      await reconcile();
+      if (!stillSelected() || eventStream !== stream) return;
+      eventStream = null;
+      if (!runNeedsEvents(currentRun())) { showStatus(); return; }
+      showStatus("Reconnecting…");
+      eventReconnectTimer = window.setTimeout(connect, 1500);
+    };
   };
   connect();
 }

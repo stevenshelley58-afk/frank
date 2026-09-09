@@ -43,6 +43,7 @@ from graph.provider import (
     manifest_reader,
 )
 from tool_apps import discover_tool_apps
+from review_chat import ReviewChatError, hermes_review_payload, hermes_undo_payload, validate_review_message, validate_undo_body
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
 MINI_PUBLIC_ASSETS = {
@@ -425,11 +426,147 @@ def _hermes_error(err: Exception):
         message = f"Hermes returned HTTP {err.code}."
         try:
             parsed = json.loads(detail)
-            message = parsed.get("error", {}).get("message") or parsed.get("message") or message
+            error_value = parsed.get("error")
+            if isinstance(error_value, dict):
+                message = error_value.get("message") or message
+            elif isinstance(error_value, str):
+                message = error_value
+            detail_value = parsed.get("detail")
+            if isinstance(detail_value, dict):
+                message = detail_value.get("reason") or detail_value.get("message") or message
+            elif isinstance(detail_value, str):
+                message = detail_value
+            message = parsed.get("message") or message
         except (json.JSONDecodeError, AttributeError):
             pass
         return jsonify({"error": message}), err.code if 400 <= err.code < 600 else 502
     return jsonify({"error": f"Could not reach Hermes: {str(err).split(chr(10))[0][:180]}"}), 502
+
+
+_AD_DB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+_AD_DB_PAGE_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
+_AD_DB_IDEMPOTENCY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/-]{7,127}$")
+_AD_DB_QUERY_KEYS = frozenset({"q", "cursor", "limit", "advertiserPageId", "agentId", "agentName", "agencyId", "agencyName", "state", "suburb", "postcode", "locationRelation", "status"})
+
+
+def _ad_db_id(value: str) -> str:
+    if not _AD_DB_ID.fullmatch(value or ""):
+        abort(404)
+    return value
+
+
+def _ad_db_query() -> str:
+    pairs = []
+    for key, value in request.args.items(multi=True):
+        if key not in _AD_DB_QUERY_KEYS or len(value) > 240:
+            abort(400, description="unsupported Ad DB filter")
+        pairs.append((key, value))
+    return urllib.parse.urlencode(pairs)
+
+
+def _ad_db_connection() -> tuple[str, str]:
+    """Use the private Serve surface, never the generic Hermes gateway."""
+    base = os.environ.get("HERMES_SERVE_URL", "").strip().rstrip("/")
+    token = os.environ.get("HERMES_SERVE_TOKEN", "").strip()
+    if not base or not token:
+        raise RuntimeError("Hermes Ad DB connection is not configured")
+    return base, token
+
+
+def _ad_db_request(
+    path: str,
+    payload: dict | None = None,
+    *,
+    method: str | None = None,
+    timeout: float = 30,
+):
+    base, token = _ad_db_connection()
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "X-Hermes-Session-Token": token,
+    }
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    upstream_request = urllib.request.Request(
+        base + path,
+        data=data,
+        headers=headers,
+        method=method or ("GET" if data is None else "POST"),
+    )
+    with urllib.request.urlopen(upstream_request, timeout=timeout) as upstream:
+        return json.loads(upstream.read().decode("utf-8") or "{}")
+
+
+def _ad_db_public_payload(payload: object) -> object:
+    """Replace internal media routes; source URLs never reach the browser."""
+    if not isinstance(payload, dict):
+        return payload
+    result = deepcopy(payload)
+    records = result.get("items") if isinstance(result.get("items"), list) else [result]
+    for record in records:
+        if not isinstance(record, dict) or not _AD_DB_ID.fullmatch(str(record.get("id") or "")):
+            continue
+        for asset in record.get("media") if isinstance(record.get("media"), list) else []:
+            if not isinstance(asset, dict):
+                continue
+            asset_id = str(asset.get("id") or "")
+            if _AD_DB_ID.fullmatch(asset_id):
+                asset["archiveUrl"] = f"/api/ad-db/ads/{urllib.parse.quote(record['id'], safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
+            asset.pop("sourceUrl", None)
+            asset.pop("sourceURLs", None)
+    return result
+
+
+class _AdDbNoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _ad_db_media_response(ad_id: str, asset_id: str) -> Response:
+    """Stream only Hermes-authenticated archive bytes; never relay redirects."""
+    path = f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
+    base, token = _ad_db_connection()
+    headers = {
+        "Accept": "application/octet-stream",
+        "X-Hermes-Session-Token": token,
+    }
+    for name in ("Range", "If-Range", "If-None-Match"):
+        if request.headers.get(name):
+            headers[name] = request.headers[name]
+    upstream_request = urllib.request.Request(
+        base + path,
+        headers=headers,
+        method=request.method,
+    )
+    upstream = urllib.request.build_opener(_AdDbNoRedirect()).open(upstream_request, timeout=15)
+    status = getattr(upstream, "status", upstream.getcode())
+    if status not in (200, 206, 304):
+        upstream.close()
+        abort(502, description="Hermes returned an invalid archived-media response")
+    response_headers = {
+        name: value
+        for name in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified")
+        if (value := upstream.headers.get(name))
+    }
+    response_headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    if request.method == "HEAD" or status == 304:
+        upstream.close()
+        return Response(status=status, headers=response_headers)
+
+    def stream():
+        try:
+            while chunk := upstream.read(64 * 1024):
+                yield chunk
+        finally:
+            upstream.close()
+
+    return Response(
+        stream_with_context(stream()),
+        status=status,
+        headers=response_headers,
+        direct_passthrough=True,
+    )
 
 
 def _session_path(session_id: str, suffix: str = "") -> str:
@@ -986,6 +1123,11 @@ def email_tools():
             "mcp_status": _connector_status("RESEND_MCP_STATUS"),
             "url": "https://resend.com/emails",
         },
+        "mailflare": {
+            "role": "human_inbox",
+            "status": _connector_status("MAILFLARE_CONNECTOR_STATUS"),
+            "url": _safe_provider_url(os.environ.get("MAILFLARE_BASE_URL", "")),
+        },
         "mautic": {
             # A URL is configuration metadata, not proof that Hermes verified it.
             "status": _connector_status("MAUTIC_CONNECTOR_STATUS"),
@@ -1027,6 +1169,7 @@ def providers_readiness():
         "stalwart": ("STALWART_CONNECTOR_STATUS", "STALWART_BASE_URL"),
         "mautic": ("MAUTIC_CONNECTOR_STATUS", "MAUTIC_BASE_URL"),
         "chatwoot": ("CHATWOOT_CONNECTOR_STATUS", "CHATWOOT_BASE_URL"),
+        "mailflare": ("MAILFLARE_CONNECTOR_STATUS", "MAILFLARE_BASE_URL"),
         # Analytics tools are intentionally represented only by their recorded
         # connector state. A dashboard URL or a tracking snippet is never
         # treated as proof that the property is collecting data.
@@ -2917,6 +3060,76 @@ def _tool_run_path(run_id: str, suffix: str = "") -> str:
     return f"/v1/tool-runs/{urllib.parse.quote(run_id, safe='')}{suffix}"
 
 
+@app.get("/api/ad-db/runs/readiness")
+def ad_db_scan_readiness():
+    try:
+        payload = _ad_db_request("/v1/ad-db/runs/readiness", timeout=10)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(payload)
+
+
+@app.post("/api/ad-db/runs/scan")
+def ad_db_scan_create():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) - {"pageIds", "maxCredits", "idempotencyKey"}:
+        abort(400, "scan body must contain only pageIds, maxCredits, and idempotencyKey")
+    page_ids = body.get("pageIds")
+    if not isinstance(page_ids, list) or not 1 <= len(page_ids) <= 50:
+        abort(400, "pageIds must contain 1 to 50 advertiser page IDs")
+    if any(not isinstance(value, str) or not _AD_DB_PAGE_UUID.fullmatch(value) for value in page_ids):
+        abort(400, "pageIds must be UUIDs")
+    if len(set(page_ids)) != len(page_ids):
+        abort(400, "pageIds must be distinct")
+    max_credits = body.get("maxCredits", 25)
+    if isinstance(max_credits, bool) or not isinstance(max_credits, (int, float)) or not 0 < max_credits <= 25:
+        abort(400, "maxCredits must be greater than 0 and no more than 25")
+    idempotency_key = body.get("idempotencyKey")
+    if not isinstance(idempotency_key, str) or not _AD_DB_IDEMPOTENCY.fullmatch(idempotency_key):
+        abort(400, "idempotencyKey has an invalid format")
+    try:
+        payload = _ad_db_request("/v1/ad-db/runs/scan", {
+            "pageIds": page_ids,
+            "maxCredits": max_credits,
+            "idempotencyKey": idempotency_key,
+        }, method="POST", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(payload), 202
+
+
+@app.get("/api/ad-db/ads")
+@app.get("/api/ad-db/prospects")
+@app.get("/api/ad-db/runs")
+def ad_db_collection():
+    """Read-only Ad DB facade; canonical data and policy stay in Hermes."""
+    collection = request.path.rsplit("/", 1)[-1]
+    query = _ad_db_query()
+    try:
+        payload = _ad_db_request(f"/v1/ad-db/{collection}" + (f"?{query}" if query else ""), timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(_ad_db_public_payload(payload))
+
+
+@app.get("/api/ad-db/ads/<ad_id>")
+def ad_db_ad(ad_id: str):
+    ad_id = _ad_db_id(ad_id)
+    try:
+        payload = _ad_db_request(f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(_ad_db_public_payload(payload))
+
+
+@app.route("/api/ad-db/ads/<ad_id>/media/<asset_id>", methods=["GET", "HEAD"])
+def ad_db_media(ad_id: str, asset_id: str):
+    try:
+        return _ad_db_media_response(_ad_db_id(ad_id), _ad_db_id(asset_id))
+    except Exception as error:
+        return _hermes_error(error)
+
+
 @app.post("/api/ad-studio/runs")
 @app.post("/api/ad-template-generator/runs")
 def ad_template_generator_run_create():
@@ -3214,6 +3427,70 @@ def ad_template_generator_run_cancel(run_id: str):
 def ad_template_generator_run_approve(run_id: str):
     """Forward the operator's explicit template publication decision to Hermes."""
     return _proxy_ad_template_generator_action(run_id, "/approve", set())
+
+
+def _review_run_scope(run_id: str, project_id: str) -> dict:
+    run_data = hermes_request(_tool_run_path(run_id), timeout=8)
+    run = run_data.get("run") if isinstance(run_data.get("run"), dict) else run_data
+    scope = run.get("scope") if isinstance(run, dict) and isinstance(run.get("scope"), dict) else {}
+    if not _project_store.get_project(project_id) or str(scope.get("project_id") or "") != project_id:
+        abort(403, "review project scope does not match the Tool run")
+    return run
+
+
+def _review_payload_response(data):
+    return jsonify(data)
+
+
+@app.post("/api/ad-template-generator/runs/<run_id>/review-messages")
+def ad_template_generator_run_review_message(run_id: str):
+    try:
+        review = validate_review_message(request.get_json(silent=True))
+        _review_run_scope(run_id, review["project_id"])
+        data = hermes_request(_tool_run_path(run_id, "/request-changes"), hermes_review_payload(review), method="POST", timeout=15)
+        return _review_payload_response(data)
+    except ReviewChatError as error:
+        return jsonify({"error": {"message": str(error), "code": "invalid_review_message"}}), 400
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _hermes_error(error)
+
+
+@app.get("/api/ad-template-generator/runs/<run_id>/revisions")
+def ad_template_generator_run_review_revisions(run_id: str):
+    project_id = str(request.args.get("project_id") or "").strip()
+    try:
+        if not project_id: raise ReviewChatError("project_id is required")
+        _review_run_scope(run_id, project_id)
+        query = urllib.parse.urlencode({"project_id": project_id})
+        return _review_payload_response(hermes_request(_tool_run_path(run_id, "/revisions") + "?" + query, timeout=8))
+    except ReviewChatError as error:
+        return jsonify({"error": {"message": str(error), "code": "invalid_review_revisions"}}), 400
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _hermes_error(error)
+
+
+@app.post("/api/ad-template-generator/runs/<run_id>/revisions/undo")
+def ad_template_generator_run_review_undo(run_id: str):
+    try:
+        body = validate_undo_body(request.get_json(silent=True))
+        _review_run_scope(run_id, body["project_id"])
+        query = urllib.parse.urlencode({"project_id": body["project_id"]})
+        history = hermes_request(_tool_run_path(run_id, "/revisions") + "?" + query, timeout=8)
+        records = history.get("revisions") if isinstance(history, dict) else []
+        target = next((item for item in reversed(records if isinstance(records, list) else []) if isinstance(item, dict) and item.get("status") in {"ready_for_review", "completed"} and item.get("revision") == body["expected_revision"] and item.get("id")), None)
+        if target is None: raise ReviewChatError("no ready revision matches expected_revision")
+        data = hermes_request(_tool_run_path(run_id, "/request-changes"), hermes_undo_payload(body, str(target["id"])), method="POST", timeout=15)
+        return _review_payload_response(data)
+    except ReviewChatError as error:
+        return jsonify({"error": {"message": str(error), "code": "invalid_review_undo"}}), 409
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _hermes_error(error)
 
 
 @app.post("/api/ad-studio/runs/<run_id>/request-changes")

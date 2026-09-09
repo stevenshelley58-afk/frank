@@ -8,16 +8,18 @@ import { DictationController } from "./chat/dictation-controller.js";
 import { ModelSelector } from "./chat/model-selector.js";
 import { renderBlockingInput, TurnStreamController, TURN_STATES } from "./chat/turn-stream.js";
 import { escapeHtml, fmtDate, fmtSize, fmtTime, renderMd, safeUrl } from "./chat/render.js";
-import { mountAdTemplateGenerator, setAdTemplateGeneratorActive } from "./ad-template-generator.js?v=20260907-ad-template-workflow-v2";
+import { mountAdTemplateGenerator, setAdTemplateGeneratorActive } from "./ad-template-generator.js?v=20260908-review-stability-v3";
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
 import { pathForView, routeForPath } from "./view-routing.js?v=20260906-ad-template-generator-v1";
+import { mountAdDb, setAdDbActive } from "./ad-db.js?v=20260907-ad-db-v2";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
 import { mountOps } from "./ops.js?v=20260904-ops-v1";
 import { isBlockwiseOperationsPreview } from "./blockwise-operations-preview.js";
 import { mountOperationsTool, operationsTool } from "./operations-tools.js";
+import { createMiniServiceRequestsPanel } from "./mini-service-requests.js?v=20260906-mini-operator-v1";
 
 const $ = (s, r) => (r || document).querySelector(s);
 const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
@@ -28,6 +30,7 @@ const TITLES = {
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
   "ad-template-generator": ["Ad Template Generator", "Source image → ad template"],
+  "ad-db": ["Ad database", "Verified ad archive and collection evidence"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
   connections: ["Connections", "Recorded provider setup and capabilities"],
@@ -61,6 +64,7 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
+  if (id !== "project") miniOperatorPanel.setActive(false);
   if (syncHistory) syncViewLocation(id, routeDetail);
   const more = $("#more-nav");
   if (more && ["trace", "releases", "live", "map", "control", "ops"].includes(id)) more.open = true;
@@ -76,10 +80,13 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   if (id === "connections") openConnections(viewDetail);
   if (id === "ad-template-generator") mountAdTemplateGenerator();
   setAdTemplateGeneratorActive(id === "ad-template-generator");
+  if (id === "ad-db") mountAdDb();
+  setAdDbActive(id === "ad-db");
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
 let currentProject = { id: "blockwise", name: "Blockwise" };
+const miniOperatorPanel = createMiniServiceRequestsPanel($("#mini-service-requests"));
 
 function renderProjectNav() {
   const nav = $("#project-nav");
@@ -118,6 +125,7 @@ function showProject(id, options = {}) {
   document.body.classList.toggle("blockwise-operations-preview", id === "blockwise" && isBlockwiseOperationsPreview());
   show("project", { ...options, routeDetail: { projectId: id } });
   openProjectHome(currentProject);
+  miniOperatorPanel.setActive(id === "mini-frank");
   return true;
 }
 
@@ -189,6 +197,10 @@ window.addEventListener("frank:ad-template-generator", openAdTemplateGenerator);
 window.addEventListener("frank:ad-studio", openAdTemplateGenerator);
 
 function openPathView() {
+  const query = new URLSearchParams(window.location.search);
+  if (query.get("project") === "mini-frank" && query.get("panel") === "mini-service-requests") {
+    if (showProject("mini-frank", { syncHistory: false })) return;
+  }
   if (isBlockwiseOperationsPreview()) {
     showProject("blockwise", { syncHistory: false });
     return;

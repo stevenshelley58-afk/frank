@@ -213,5 +213,37 @@ class AccountsApiTest(unittest.TestCase):
         self.assertEqual(cleaned["provider"], "stalwart")
 
 
+    def test_mailflare_readiness_requires_recorded_status_and_safe_origin(self):
+        with patch.dict(os.environ, {
+            "MAILFLARE_BASE_URL": "https://Inbox.Example.test/app",
+            "MAILFLARE_CONNECTOR_STATUS": "configured",
+        }, clear=False):
+            readiness = self.client.get("/api/providers/readiness").get_json()
+            email_tools = self.client.get("/api/email-tools").get_json()
+        mailflare = next(item for item in readiness["providers"] if item["provider"] == "mailflare")
+        self.assertTrue(mailflare["configured"])
+        self.assertFalse(mailflare["verified"])
+        self.assertEqual(mailflare["base_url"], "https://inbox.example.test")
+        self.assertEqual(email_tools["mailflare"], {
+            "role": "human_inbox", "status": "configured", "url": "https://inbox.example.test",
+        })
+
+        with patch.dict(os.environ, {
+            "MAILFLARE_BASE_URL": "http://user:password@inbox.example.test/private",
+            "MAILFLARE_CONNECTOR_STATUS": "ready",
+        }, clear=False):
+            unsafe = self.client.get("/api/providers/readiness").get_json()
+        mailflare = next(item for item in unsafe["providers"] if item["provider"] == "mailflare")
+        self.assertTrue(mailflare["verified"])
+        self.assertEqual(mailflare["base_url"], "")
+
+    def test_mailflare_connection_provider_is_accepted(self):
+        import home_platform
+        self.assertIn("mailflare", home_platform.CONNECTION_PROVIDERS)
+        cleaned = home_platform._clean_connection({
+            "provider": "mailflare", "name": "Human inbox", "status": "setup_needed",
+            "capabilities": ["email.receive", "email.reply"],
+        })
+        self.assertEqual(cleaned["provider"], "mailflare")
 if __name__ == "__main__":
     unittest.main()

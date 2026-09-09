@@ -78,7 +78,6 @@ historical readiness was not rewritten; new generation and revision handoffs
 use the gate. The current ad still needs its separate correction/review.
 No template was published, no first-50 batch started, and Blockwise was unchanged.
 Detailed evidence is in Hermes `docs/ad-output-qa-20260908.md`.
-
 ## Meta-native CTA policy
 
 Steven requested on 8 September 2026 that Meta supply the clickable CTA outside
@@ -288,3 +287,69 @@ full handoff under the approved policy. Keep unapproved outputs quarantined.
 The same minimums apply at every new import boundary. Existing historical
 templates and run evidence remain readable; older scores are not retroactively
 promoted to a pass.
+
+## Review chat and annotation workflow (2026-09-08 preview)
+
+The review surface keeps the final review preview alongside a durable Hermes-backed
+conversation. The primary workspace has one production image, a prominent Annotate
+button, Feed/Story controls, and a Corrections panel. Click Annotate, then click a
+spot or drag a box. A numbered correction field receives focus. Done annotating
+or Escape exits drawing mode. Comparison and quality evidence, plus prior revision
+history, remain available in secondary disclosures. On narrow screens, corrections
+stack beneath the image and the run queue is compact.
+
+An operator can mark rectangular areas on the reusable production
+preview for either Feed or Story, add an optional comment to each marked area, or
+send text without a mark. A request accepts at most 8 areas. The message is limited
+to 1,200 characters and each area comment to 200 characters. Coordinates are
+normalized to the displayed image and remain bounded inside that placement.
+
+Browser writes are run-scoped through Frank:
+
+- `POST /api/ad-template-generator/runs/{run_id}/review-messages`
+- `GET /api/ad-template-generator/runs/{run_id}/revisions?project_id={project_id}`
+- `POST /api/ad-template-generator/runs/{run_id}/revisions/undo`
+
+Writes include the project scope, message or annotations, an optimistic
+`expected_revision`, and an idempotency key. Frank forwards the structured review
+to Hermes request-changes. Hermes owns the review history in SQLite. Each recorded
+revision exposes immutable before and after snapshots for Feed and Story. The UI
+must resolve those recorded artifact names through the run-scoped artifact route,
+not infer snapshots from a mutable latest iteration.
+
+Approval remains separate from review changes. An approved, published, or otherwise
+locked run cannot accept another review mutation. Undo creates a new checked
+revision that restores the selected prior candidate. It does not immediately alter
+an already published template. Failed, stale, busy, or uncertain writes stay
+visible to the operator and must be reconciled before retrying.
+
+### Dated preview evidence
+
+On 2026-09-08, the isolated desktop and mobile browser review flow passed 11:34
+UTC. A real production artifact copied to a temporary snapshot passed the snapshot
+contract without modifying production. This is preview evidence only, not a release
+or production verification claim.
+
+The revised annotation workspace passed isolated desktop and mobile browser checks
+on 2026-09-08, including explicit drawing mode, Escape, click-to-mark, correction
+focus, normalized placement-safe drawing, persistence, send, undo and processing
+locks. Real ad artwork was read only into fixture responses; no providers or
+publishing endpoints were invoked. This remains unreleased preview evidence.
+
+
+### Live annotation release, 8 September 2026
+
+Frank `1a2e59e269fa4a364a4ce70713ea7e41a0bae41b` and Hermes `00097034cb35ac90493969556a7ad20912a8bcf0`
+were deployed and passed health checks. Steven explicitly approved using his
+signed-in Chrome session instead of the saved-session acceptance harness.
+Live desktop and phone-sized checks confirmed mark creation, correction-field
+focus, mark removal, Escape, loaded Feed/Story images, enabled correction input,
+and settled Ready for review status with no console errors. Temporary marks were
+removed and the viewport restored. No production correction was submitted and
+nothing was approved or published. Send/revision/undo coverage remains the
+isolated fixture and backend evidence, not a production revision claim.
+
+Receipt: `/srv/frank/data/window/evidence/annotation-workspace-20260908/live-release.json`.
+Retained rollback: Frank `72b29405984a56420a26b34eb88e61bf4b340e83`,
+Hermes `/opt/releases/hermes-template-4758d83a8c`, and online SQLite/selector
+backup `/srv/hermes/backups/ad-template-review-chat-20260908-00097034cb`.

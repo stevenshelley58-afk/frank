@@ -1,13 +1,15 @@
 # Frank release runbook
 
-## Mautic and Chatwoot operator contract
+## Mautic, Chatwoot, and Mailflare operator contract
 
 Set `MAUTIC_BASE_URL` and `CHATWOOT_BASE_URL` only to HTTPS origins and leave
-both connector statuses `unconfigured` until the Hermes provider adapters have
+`MAILFLARE_BASE_URL` to the HTTPS origin of the human inbox. Leave all three
+connector statuses `unconfigured` until the Hermes provider adapters have
 verified them. Use `configured` for credentials present but verification
 pending, `ready` only after Hermes/operator verification, and `error` when
 Hermes reports a safe failure category. Frank does not receive or print any
-provider secret. Hermes may refresh the redacted support projection at
+provider secret. Mailflare is the compose/reply inbox; Resend remains the
+transactional delivery log. Hermes may refresh the redacted support projection at
 `SUPPORT_CONVERSATIONS_FILE`; validate it through
 `GET /api/support/conversations` before enabling a Blockwise support link.
 

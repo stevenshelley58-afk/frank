@@ -65,3 +65,15 @@ export function adTemplateGeneratorStartError(error) {
     invalid_hermes_response: "This image could not be started. Try again.",
   })[code] || (recorded && !recorded.startsWith("[object") ? recorded : "This image could not be started. Try again.");
 }
+
+
+async function reviewJson(path, options = {}) { return responseJson(await fetch(path, { headers: { "Content-Type": "application/json" }, ...options })); }
+export async function postAdReviewMessage({ runId, projectId, message = "", annotations = [], expectedRevision = 0, idempotencyKey }) {
+  return reviewJson(`${RUNS_ROOT}/${encodeURIComponent(runId)}/review-messages`, {method: "POST", body: JSON.stringify({project_id: projectId, message, annotations, expected_revision: expectedRevision, idempotency_key: idempotencyKey})});
+}
+export async function getAdReviewRevisions(runId, projectId) {
+  return reviewJson(`${RUNS_ROOT}/${encodeURIComponent(runId)}/revisions?project_id=${encodeURIComponent(projectId || "")}`);
+}
+export async function undoAdReviewRevision({runId, projectId, expectedRevision, idempotencyKey}) {
+  return reviewJson(`${RUNS_ROOT}/${encodeURIComponent(runId)}/revisions/undo`, {method: "POST", body: JSON.stringify({project_id: projectId, expected_revision: expectedRevision, idempotency_key: idempotencyKey})});
+}

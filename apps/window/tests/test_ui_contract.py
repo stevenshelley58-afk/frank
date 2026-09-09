@@ -1,5 +1,7 @@
 from pathlib import Path
+import json
 import re
+import struct
 import unittest
 
 
@@ -7,6 +9,41 @@ WEB = Path(__file__).resolve().parents[1] / "web"
 
 
 class UiContractTest(unittest.TestCase):
+    def test_window_is_an_installable_web_app(self):
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        manifest = json.loads((WEB / "manifest.json").read_text(encoding="utf-8"))
+
+        self.assertIn('<link rel="manifest" href="/manifest.json">', html)
+        self.assertIn('<meta name="theme-color" content="#FFFFFF">', html)
+        self.assertIn('<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">', html)
+        self.assertEqual(manifest["id"], "/")
+        self.assertEqual(manifest["name"], "Frank")
+        self.assertEqual(manifest["short_name"], "Frank")
+        self.assertEqual(manifest["start_url"], "/")
+        self.assertEqual(manifest["scope"], "/")
+        self.assertEqual(manifest["display"], "standalone")
+        self.assertEqual(manifest["background_color"], "#FFFFFF")
+        self.assertEqual(manifest["theme_color"], "#FFFFFF")
+
+        icons = {icon["src"]: icon for icon in manifest["icons"]}
+        expected = {
+            "/brand/icon-192.png": (192, 192, "any"),
+            "/brand/icon-512.png": (512, 512, "any"),
+            "/brand/icon-maskable-512.png": (512, 512, "maskable"),
+        }
+        self.assertEqual(set(icons), set(expected))
+        for source, (width, height, purpose) in expected.items():
+            icon = icons[source]
+            self.assertEqual(icon["sizes"], f"{width}x{height}")
+            self.assertEqual(icon["type"], "image/png")
+            self.assertEqual(icon["purpose"], purpose)
+            data = (WEB / source.removeprefix("/")).read_bytes()
+            self.assertEqual(data[:8], b"\x89PNG\r\n\x1a\n")
+            self.assertEqual(struct.unpack(">II", data[16:24]), (width, height))
+
+        touch = (WEB / "brand" / "apple-touch-icon.png").read_bytes()
+        self.assertEqual(struct.unpack(">II", touch[16:24]), (180, 180))
+
     def test_project_memory_inspector_uses_hindsight_provider_truth(self):
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
         inspector = (WEB / "js" / "memory-inspector.js").read_text(encoding="utf-8")
@@ -92,7 +129,8 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('window.addEventListener("popstate", openPathView)', app)
         self.assertIn('mergeAdTemplateGeneratorRunList(runs, incoming)', studio)
         self.assertIn('selectionRevision !== runSelectionRevision || selectedRunId !== runId', studio)
-        self.assertIn('eventStream !== stream || selectedRunId !== run.id', studio)
+        self.assertIn('!stillSelected() || eventStream !== stream', studio)
+        self.assertIn('selection === runSelectionRevision', studio)
         self.assertIn('const refreshRevision = ++runListRevision', studio)
         self.assertIn('if (refreshRevision !== runListRevision) return', studio)
         self.assertIn('listAdTemplateGeneratorRuns({ projectId, limit: 100 })', studio)
@@ -100,9 +138,9 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('runListRenderSignature(runs) !== previousSignature', studio)
         self.assertIn('renderModelProfile(run, detail)', studio)
         self.assertIn('ChatGPT/Codex OAuth — not OpenAI API dashboard', (WEB.parent / "server.py").read_text(encoding="utf-8"))
-        self.assertIn('/app.css?v=20260907-ad-template-workflow-v2', html)
-        self.assertIn('/js/app.js?v=20260907-ad-template-workflow-v2', html)
-        self.assertIn('./ad-template-generator.js?v=20260907-ad-template-workflow-v2', app)
+        self.assertIn('/app.css?v=20260908-review-stability-v3', html)
+        self.assertIn('/js/app.js?v=20260908-review-stability-v3', html)
+        self.assertIn('./ad-template-generator.js?v=20260908-review-stability-v3', app)
         self.assertIn('groupAdTemplateGeneratorRuns(runs)', studio)
         self.assertIn('Superseded attempts (${group.superseded.length})', studio)
         self.assertIn('What the statuses mean', html)
@@ -142,7 +180,8 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('id="ad-review-detail"', html)
         self.assertIn('Approve & Publish Template', studio)
         self.assertIn('Request Changes', studio)
-        self.assertIn('selectReviewArtifact(summary, reviewPlacement, reviewView)', studio)
+        self.assertIn('selectReviewArtifact(summary, reviewPlacement, "source")', studio)
+        self.assertIn('appendReviewWorkspace(detail, run, review)', studio)
         self.assertIn('runEventCache.set(run.id, [...runEvents])', studio)
         self.assertIn('events?after=${encodeURIComponent(cursor)}', studio)
 
@@ -319,7 +358,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn("idempotency_key: pending.idempotencyKey", ops)
         self.assertNotIn('actionButton("session_revoke", row.id', ops)
 
-    def test_entity_homes_add_tools_without_changing_the_live_rail(self):
+    def test_entity_homes_keep_the_canonical_operational_rail(self):
         html = (WEB / "index.html").read_text(encoding="utf-8")
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
@@ -334,7 +373,7 @@ class UiContractTest(unittest.TestCase):
         rail_views = re.findall(r'<button class="rail-item[^>]*data-view="([^"]+)"', html)
         self.assertEqual(
             rail_views,
-            ["hub", "tools", "files", "ad-template-generator", "trace", "releases", "live", "map", "control", "ops"],
+            ["hub", "tools", "files", "ad-template-generator", "ad-db", "trace", "releases", "live", "map", "control", "ops"],
         )
         self.assertIn('id="project-nav"', html)
         self.assertIn('id="new-project"', html)

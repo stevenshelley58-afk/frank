@@ -5,8 +5,9 @@ allowlisted paths/methods to upstream `hermes serve` on host loopback
 127.0.0.1:9119. Rules frozen by FRANK_HERMES_V021_CONTRACT:
 - upstream Host header is always forced to 127.0.0.1:9119;
 - browser `Origin` headers are rejected (no cross-site browser use);
-- the upstream session token is required on every forwarded request and is
-  passed through only as the `X-Hermes-Session-Token` header — it is never
+- the upstream session token is required for operator requests; the narrower
+  customer read token is accepted only for GET/HEAD Ad DB ad reads;
+  credentials are forwarded only in their original auth header and are never
   logged, echoed, or stored;
 - complete URLs/queries are redacted from logs;
 - no WebSocket upgrade, no raw relay beyond the allowlist.
@@ -33,6 +34,18 @@ ALLOWED: tuple[tuple[str, frozenset], ...] = (
     ("/api/model/options", frozenset({"GET"})),
     ("/api/audio/transcribe", frozenset({"POST"})),
     ("/api/sessions", frozenset({"GET", "POST", "PATCH", "DELETE"})),
+    ("/v1/ad-db", frozenset({"GET", "HEAD", "POST"})),
+)
+
+REQUEST_PASSTHROUGH_HEADERS = ("Range", "If-Range", "If-None-Match")
+RESPONSE_PASSTHROUGH_HEADERS = (
+    "Content-Type",
+    "Content-Length",
+    "Content-Range",
+    "Accept-Ranges",
+    "ETag",
+    "Last-Modified",
+    "Cache-Control",
 )
 
 
@@ -41,6 +54,17 @@ def _allowed(path: str, method: str) -> bool:
         if path == prefix or path.startswith(prefix + "/") or (prefix.endswith("*") and path.startswith(prefix[:-1])):
             return method in methods
     return False
+
+
+def _auth_headers(path: str, method: str, headers) -> dict[str, str]:
+    session_token = headers.get("X-Hermes-Session-Token", "")
+    if session_token:
+        return {"X-Hermes-Session-Token": session_token}
+    customer_token = headers.get("X-Hermes-Ad-Db-Read-Token", "")
+    is_customer_read = path == "/v1/ad-db/ads" or path.startswith("/v1/ad-db/ads/")
+    if customer_token and is_customer_read and method in {"GET", "HEAD"}:
+        return {"X-Hermes-Ad-Db-Read-Token": customer_token}
+    return {}
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -64,9 +88,9 @@ class Handler(BaseHTTPRequestHandler):
         if not _allowed(split.path, self.command):
             self._reply(404, "path not allowed")
             return
-        token = self.headers.get("X-Hermes-Session-Token", "")
-        if not token:
-            self._reply(403, "session token required")
+        auth_headers = _auth_headers(split.path, self.command, self.headers)
+        if not auth_headers:
+            self._reply(403, "private credential required")
             return
         length = int(self.headers.get("Content-Length", "0") or 0)
         body = self.rfile.read(length) if length else None
@@ -74,26 +98,34 @@ class Handler(BaseHTTPRequestHandler):
             conn = http.client.HTTPConnection(UPSTREAM_HOST, UPSTREAM_PORT, timeout=UPSTREAM_TIMEOUT)
             headers = {
                 "Host": f"{UPSTREAM_HOST}:{UPSTREAM_PORT}",
-                "X-Hermes-Session-Token": token,
                 "Accept": self.headers.get("Accept", "application/json"),
+                **auth_headers,
             }
             if length:
                 headers["Content-Type"] = self.headers.get("Content-Type", "application/json")
+            for key in REQUEST_PASSTHROUGH_HEADERS:
+                if self.headers.get(key):
+                    headers[key] = self.headers[key]
             conn.request(self.command, path, body=body, headers=headers)
             resp = conn.getresponse()
-            data = resp.read()
             self.send_response(resp.status)
-            for key in ("Content-Type",):
-                if resp.getheader(key):
-                    self.send_header(key, resp.getheader(key))
-            self.send_header("Content-Length", str(len(data)))
+            forwarded_length = False
+            for key in RESPONSE_PASSTHROUGH_HEADERS:
+                if value := resp.getheader(key):
+                    self.send_header(key, value)
+                    forwarded_length = forwarded_length or key == "Content-Length"
+            if not forwarded_length:
+                self.send_header("Connection", "close")
+                self.close_connection = True
             self.end_headers()
-            self.wfile.write(data)
+            if self.command != "HEAD" and resp.status != 304:
+                while chunk := resp.read(64 * 1024):
+                    self.wfile.write(chunk)
             conn.close()
         except (OSError, TimeoutError) as error:
             self._reply(502, f"upstream unavailable: {error}")
 
-    do_GET = do_POST = do_PATCH = do_DELETE = _proxy  # noqa: N815
+    do_GET = do_HEAD = do_POST = do_PATCH = do_DELETE = _proxy  # noqa: N815
 
     def log_message(self, fmt: str, *args) -> None:
         # Redact complete URLs/queries: log method + status only.

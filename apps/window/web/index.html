@@ -4,11 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Frank is the operator window for projects, tools and Hermes.">
+<meta name="theme-color" content="#FFFFFF">
+<meta name="apple-mobile-web-app-title" content="Frank">
 <title>Frank</title>
 <link rel="icon" href="/brand/mark.svg">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260907-ad-template-workflow-v2">
+<link rel="stylesheet" href="/app.css?v=20260908-review-stability-v3">
+<link rel="stylesheet" href="/ad-db.css?v=20260907-ad-db-v2">
 </head>
 <body>
 <div class="app">
@@ -47,6 +52,7 @@
       <button class="rail-item" data-view="tools" aria-label="Tools"><span class="glyph">⚙</span><span>Tools</span></button>
       <button class="rail-item" data-view="files" aria-label="Files"><span class="glyph">▤</span><span>Files</span></button>
       <button class="rail-item" data-view="ad-template-generator" aria-label="Ad Template Generator"><span class="glyph">▧</span><span>Ad Template Generator</span></button>
+      <button class="rail-item" data-view="ad-db" aria-label="Ad database"><span class="glyph"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><ellipse cx="9" cy="4" rx="5.5" ry="2.25"/><path d="M3.5 4v5c0 1.25 2.46 2.25 5.5 2.25s5.5-1 5.5-2.25V4M3.5 9v5c0 1.25 2.46 2.25 5.5 2.25s5.5-1 5.5-2.25V9"/></svg></span><span>Ad database</span></button>
       <details class="rail-more" id="more-nav">
         <summary>More</summary>
         <div>
@@ -140,6 +146,7 @@
           </div>
           <div class="home-context"><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
           <div class="grid home-grid" id="slot-project"></div>
+          <section class="mini-operator-panel" id="mini-service-requests" aria-labelledby="mini-service-requests-title" hidden></section>
         </div>
       </section>
 
@@ -463,6 +470,7 @@
       <section class="view operate-view" data-view="live" id="operate-live"></section>
       <section class="view operate-view" data-view="map" id="operate-map"></section>
       <section class="view operate-view" data-view="control" id="operate-control"></section>
+      <section class="view" data-view="ad-db"><div class="ad-db" id="ad-db"></div></section>
     </div>
   </main>
 </div>
@@ -510,6 +518,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260907-ad-template-workflow-v2"></script>
+<script type="module" src="/js/app.js?v=20260908-review-stability-v3"></script>
 </body>
 </html>

@@ -43,6 +43,27 @@ test("unconfigured launch exposes real email tools without invented readiness or
   assert.ok(calls.every(([, options]) => options.signal instanceof AbortSignal && options.method === undefined && options.body === undefined));
 });
 
+test("configured Mailflare becomes the Inbox link while Resend stays the delivery log", async () => {
+  const { nodes } = await render([
+    { provider: "mailflare", configured: true, verified: false, status: "configured", base_url: "https://mail.example.test" },
+  ]);
+  const links = nodes.filter((n) => n.tag === "a").map((n) => [n.textContent, n.href]);
+  assert.ok(links.some(([label, href]) => label === "Open Mailflare setup" && href === "https://mail.example.test"));
+  assert.ok(links.some(([label, href]) => label === "Read delivery logs" && href === "https://resend.com/emails/receiving"));
+  assert.ok(nodes.some((n) => n.className === "launch-desk-status" && n.textContent === "Verify Mailflare"));
+  assert.ok(!nodes.some((n) => n.className === "launch-desk-status" && n.textContent === "Connected"));
+});
+
+test("verified Mailflare is the human Inbox and never replaces Resend delivery", async () => {
+  const { nodes } = await render([
+    { provider: "mailflare", configured: true, verified: true, status: "ready", base_url: "https://mail.example.test" },
+  ]);
+  assert.ok(nodes.some((n) => n.tag === "a" && n.textContent === "Open Mailflare" && n.href === "https://mail.example.test"));
+  assert.ok(nodes.some((n) => n.tag === "a" && n.textContent === "Read delivery logs" && n.href === "https://resend.com/emails/receiving"));
+  assert.ok(nodes.some((n) => n.className === "launch-desk-status" && n.textContent === "Connected"));
+  assert.ok(nodes.some((n) => /Read and reply to conversations in Mailflare/.test(n.textContent || "")));
+});
+
 test("CRM access never incorrectly requires replacing the sender with Stalwart", async () => {
   const { nodes } = await render([{ provider: "mautic", verified: true, status: "ready", base_url: "https://crm.example.test" }]);
   assert.ok(nodes.some((n) => n.tag === "a" && n.href === "https://crm.example.test"));
