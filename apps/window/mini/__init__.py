@@ -42,6 +42,7 @@ from .knowledge import (
     KNOWLEDGE_BINDING_SCHEMA,
     industry_candidate_prompt,
     knowledge_binding,
+    queue_public_candidates,
     validate_industry_candidates,
 )
 from .results import (
