@@ -1,13 +1,13 @@
 {
   "algorithm": "sha256",
   "files": {
-    "README.md": "360f53575eee8ea21cdeabe41d431f4978c1ef92a0c9c66ff8dd71edcd1ad187",
-    "blockwise-pack.json": "d73a89b53319c17762b31d44573e2a25152ed52328a1d1dbd17182a576447301",
-    "fixtures/content-release-v1.json": "5629d796b02dab36d03ba662f39c9fd9aa63f5e89e653ce4e7c097e20357a36a",
-    "home.json": "83fea1acd0813ad65076affa96c3e2971765efbaca0025eb8908c73ce9cb7f7d",
-    "manifest.json": "04f7e9bae86dea6a7782485147d6be707cff0ce3d5b9dc99051c90cac4fff98c",
-    "release.schema.json": "b61810282bc523c131fbf8f3dc6ee3598ee01dd5fbc90dc2dc1c47ff78d27a8d",
-    "schemas.json": "b68666440830fa2b93812d63a25a6e3e5e7e746a35204424ae904721c7c2c582"
+    "README.md": "8c68575fa96fab37e7e02c78dc41c3a03c34a4f181421071338e6a802b651fa3",
+    "blockwise-pack.json": "459426187be8ca3a4d7f9283bd64dbc80a1318adf1ba32958b9ba56711bec45c",
+    "fixtures/content-release-v1.json": "c9446f5aaba300b5fb3b3b57e673c65c95a5593c608231dd800c15cd679db102",
+    "home.json": "bf4e28d5b92268f978e0fda5260e9a3ac198ff952768b6225c6b599e120347f1",
+    "manifest.json": "4753a37e42139dc5de5cb5ec949280b2fc3b84f0dc69862abb9351be31b09952",
+    "release.schema.json": "3f2bef3e9a8847741c6a4da3ca5ad9b79eeeb1edfe7ad25c285ad2c15552c217",
+    "schemas.json": "e296dde1b4b784554af726d5db835e4633b0fa37b982ceeb0a7ac792c9553846"
   },
   "schema": "schema://frank.content-factory-contract-checksums/v1"
 }
