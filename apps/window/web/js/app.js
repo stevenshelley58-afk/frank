@@ -85,6 +85,7 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   if (id === "ad-db") mountAdDb();
   setAdDbActive(id === "ad-db");
   if (id === "blog-studio") mountBlogStudio();
+  window.dispatchEvent(new CustomEvent("frank:view-changed", { detail: { id } }));
   if (editorWasOpen) $("#view-title")?.focus({ preventScroll: true });
 }
 
