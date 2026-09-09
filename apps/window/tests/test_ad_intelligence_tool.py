@@ -16,7 +16,17 @@ from ad_intelligence.core import (
     PublicMedia, PublicObservation, build_release, export_public,
 )
 from ad_intelligence.pipeline import PipelineRun, StageFailure
-from ad_intelligence.protocol import ALLOWED_ACTIONS, ALLOWED_EVENTS, validate_action, validate_event_name
+from ad_intelligence.protocol import (
+    ACTIONS_BY_OPERATION,
+    ALLOWED_ACTIONS,
+    ALLOWED_EVENTS,
+    EVENTS_BY_OPERATION,
+    LEGACY_ACTIONS,
+    LEGACY_EVENTS,
+    RECOVERY_ACTIONS,
+    validate_action,
+    validate_event_name,
+)
 
 
 class AdIntelligenceToolTest(unittest.TestCase):
@@ -85,13 +95,18 @@ class AdIntelligenceToolTest(unittest.TestCase):
 
         declarative = json.loads((Path(__file__).parents[1] / "tools" / "ad-intelligence" / "manifest.json").read_text(encoding="utf-8"))
         self.assertEqual(declarative["schema"], "schema://frank.tool-app-manifest/v1")
+        self.assertEqual(declarative["version"], "2.0.0")
         self.assertEqual(declarative["release_schema"], "schema://frank.ad-intelligence-release/v1")
         pipeline = declarative["pipelines"][0]
         self.assertEqual(pipeline["version"], "1.0.0")
-        self.assertEqual([node["id"] for node in pipeline["nodes"]][-2:], ["media-qa", "publish"])
-        self.assertEqual(len(pipeline["edges"]), 6)
-        self.assertIn("run", ALLOWED_ACTIONS)
-        self.assertIn("stage-completed", ALLOWED_EVENTS)
+        nodes = [node["id"] for node in pipeline["nodes"]]
+        self.assertEqual(nodes, list(manifest.pipeline))
+        self.assertEqual(
+            [(edge["from"], edge["to"]) for edge in pipeline["edges"]],
+            list(zip(nodes, nodes[1:])),
+        )
+        self.assertLessEqual(LEGACY_ACTIONS, ALLOWED_ACTIONS)
+        self.assertLessEqual(LEGACY_EVENTS, ALLOWED_EVENTS)
         self.assertEqual(set(declarative["hermes"]["event_kinds"]), set(ALLOWED_EVENTS))
         self.assertEqual(declarative["trace"]["schema"], "schema://frank.tool-app-trace/v1")
         self.assertEqual(set(declarative["trace"]["event_kinds"]), set(ALLOWED_EVENTS))
@@ -101,6 +116,76 @@ class AdIntelligenceToolTest(unittest.TestCase):
         self.assertEqual(release_schema["$id"], declarative["release_schema"])
         self.assertFalse(public_schema["additionalProperties"])
         self.assertFalse(release_schema["additionalProperties"])
+
+    def test_manifest_lifecycle_groups_match_protocol_allowlists(self):
+        declarative = json.loads((PACKAGE_DIR / "manifest.json").read_text(encoding="utf-8"))
+        hermes = declarative["hermes"]
+        operations = hermes["operations"]
+
+        self.assertEqual(set(operations), {"setup", "live", "library", "qa", "release"})
+        for operation, action_names in ACTIONS_BY_OPERATION.items():
+            with self.subTest(operation=operation, contract="actions"):
+                self.assertEqual(set(operations[operation]["actions"]), set(action_names))
+        for operation, event_names in EVENTS_BY_OPERATION.items():
+            with self.subTest(operation=operation, contract="events"):
+                self.assertEqual(set(operations[operation]["event_kinds"]), set(event_names))
+
+        self.assertEqual(set(hermes["actions"]), set(ALLOWED_ACTIONS))
+        self.assertEqual(set(hermes["event_kinds"]), set(ALLOWED_EVENTS))
+        self.assertEqual(set(hermes["recovery_actions"]), set(RECOVERY_ACTIONS))
+        self.assertLessEqual(RECOVERY_ACTIONS, ALLOWED_ACTIONS)
+        self.assertLessEqual(
+            {"resume", "retry-stage", "resolve-quarantine", "supersede-release"},
+            RECOVERY_ACTIONS,
+        )
+
+    def test_settings_schema_is_closed_structural_and_reference_only(self):
+        declarative = json.loads((PACKAGE_DIR / "manifest.json").read_text(encoding="utf-8"))
+        settings = declarative["settings"]
+        properties = settings["properties"]
+
+        self.assertEqual(settings["type"], "object")
+        self.assertFalse(settings["additionalProperties"])
+        self.assertLessEqual(set(settings["required"]), set(properties))
+        for name in (
+            "taxonomy", "cadence", "model_policy", "media_policy", "thresholds",
+            "retention", "approval_policy", "connection",
+        ):
+            with self.subTest(setting=name):
+                schema = properties[name]
+                self.assertEqual(schema["type"], "object")
+                self.assertFalse(schema["additionalProperties"])
+                self.assertLessEqual(set(schema["required"]), set(schema["properties"]))
+
+        source_item = properties["sources"]["items"]
+        self.assertFalse(source_item["additionalProperties"])
+        self.assertEqual(
+            set(source_item["properties"]),
+            {"source_id", "label", "kind", "enabled", "markets", "connection_id"},
+        )
+        self.assertEqual(
+            properties["connection"]["properties"]["capability"]["const"],
+            declarative["connectors"][0],
+        )
+        self.assertTrue(properties["model_policy"]["properties"]["policy_ref"]["pattern"].startswith("^policy://"))
+        self.assertTrue(properties["cadence"]["properties"]["schedule_ref"]["pattern"].startswith("^schedule://"))
+
+        schema_property_names = set()
+        queue = [settings]
+        while queue:
+            schema = queue.pop()
+            if not isinstance(schema, dict):
+                continue
+            child_properties = schema.get("properties", {})
+            schema_property_names.update(child_properties)
+            queue.extend(child_properties.values())
+            items = schema.get("items")
+            if isinstance(items, dict):
+                queue.append(items)
+        self.assertTrue({"connection_id", "policy_ref", "schedule_ref"} <= schema_property_names)
+        self.assertTrue(
+            {"password", "secret", "api_key", "access_token", "cookie", "credential"}.isdisjoint(schema_property_names)
+        )
 
     def test_run_advances_and_publishes_only_in_order(self):
         run = PipelineRun("run-1", AdIntelligenceManifest())
@@ -163,11 +248,17 @@ class AdIntelligenceToolTest(unittest.TestCase):
 
     def test_hermes_protocol_contracts(self):
         self.assertEqual(validate_action("approve-publish"), "approve-publish")
+        self.assertEqual(validate_action("retry-stage"), "retry-stage")
+        self.assertEqual(validate_action("supersede-release"), "supersede-release")
         self.assertEqual(validate_event_name("publish-completed"), "publish-completed")
+        self.assertEqual(validate_event_name("quarantine-resolved"), "quarantine-resolved")
+        self.assertEqual(validate_event_name("release-superseded"), "release-superseded")
         with self.assertRaises(ValueError): validate_action("approve_publish")
         with self.assertRaises(ValueError): validate_event_name("publish.completed")
         with self.assertRaises(ValueError): validate_action("arbitrary_execute")
         with self.assertRaises(ValueError): validate_event_name("arbitrary_event")
+        with self.assertRaises(ValueError): validate_action(None)
+        with self.assertRaises(ValueError): validate_event_name(["run-started"])
 
     def test_release_is_immutable_and_sanitized(self):
         release = self.release()

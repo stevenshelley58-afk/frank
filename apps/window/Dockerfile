@@ -39,6 +39,7 @@ COPY apps/window/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY apps/window/server.py .
 COPY apps/window/blog_studio.py .
+COPY apps/window/ad_radar.py .
 COPY apps/window/review_chat.py .
 COPY apps/window/control_plane_view.py .
 COPY apps/window/ops_projections.py .

@@ -11,6 +11,9 @@ test("Ad Template Generator has a canonical deep link and every other view retur
   assert.equal(viewForPath("/blog-studio"), "blog-studio");
   assert.equal(viewForPath("/blog-studio/"), "blog-studio");
   assert.equal(pathForView("blog-studio"), "/blog-studio");
+  assert.equal(viewForPath("/ad-radar"), "ad-radar");
+  assert.equal(viewForPath("/ad-radar/"), "ad-radar");
+  assert.equal(pathForView("ad-radar"), "/ad-radar");
   assert.equal(viewForPath("/"), "hub");
   assert.equal(viewForPath("/not-a-view"), "hub");
   assert.equal(pathForView("ad-template-generator"), "/ad-template-generator");

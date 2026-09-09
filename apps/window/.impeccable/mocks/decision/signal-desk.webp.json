@@ -1,0 +1,22 @@
+{
+  "asset": "signal-desk.webp",
+  "kind": "decision-comp",
+  "approved": false,
+  "dimensions": {
+    "width": 1440,
+    "height": 900
+  },
+  "format": "webp",
+  "generator": "OpenAI built-in image_gen",
+  "prompt": "Use case: precise-object-edit\nInput image: Image 1 is the approved base layout for the Frank Ad Radar \"Signal Desk\" desktop operator screen.\nPrimary request: Preserve the entire 1440x900-style composition, app-shell proportions, three-pane layout, pipeline ribbon, typography, icons, spacing, property-photo thumbnails, and operator density. Change only the following factual-copy and color violations.\n\n1. Red accent cleanup: remove every red or pink accent except the red slash inside the Frank mark and the single tiny selected-dot beside \"Signal Desk\" in the left rail. Convert the red/pink attention, asset-mismatch, and quarantine borders to neutral #ECECEC hairlines with #111111 text and black outline icons. Attention and quarantine must remain unmistakable through their words and outline symbols, never color alone.\n\n2. Remove invented data and claims: replace all numeric source IDs, receipt IDs, fake counts, item totals, fake dates, advertiser/page names such as \"Blockwise Homes\", \"Blockwise Realty\", or \"Blockwise Living\", \"2 receipts\", \"Showing 1-25 of 142 items\", \"all countries, all languages\", and invented rule-set names. Use concise non-claim labels instead:\n- source reference: \"public observation reference\"\n- advertiser/page: \"project-scoped advertiser\"\n- coverage: \"configured project coverage\"\n- taxonomy: \"project taxonomy revision\"\n- receipt list: \"capture receipt\", \"classification receipt\", \"media QA receipt\"\n- receipt summary: \"receipts retained\"\n- stream footer: \"stream continues\"\nKeep \"Blockwise real estate\" only as the project context, not as an advertiser or customer claim.\n\n3. Add a small neutral chip reading exactly \"synthetic preview\" beside the \"Live creative stream\" heading.\n\nKeep these important labels correctly spelled and readable: \"Frank\", \"Ad Radar\", \"Signal Desk\", \"Hermes owns execution\", \"discover\", \"resolve\", \"capture\", \"normalize\", \"classify\", \"media QA\", \"publish\", \"Run\", \"Pause\", \"Retry attention\", \"Approve publish\", \"Sources & brief\", \"Live creative stream\", \"Evidence inspector\", \"public source observation\", \"classification\", \"media QA\", \"provenance\", \"receipts\", \"quarantine\", \"approval required\".\n\nConstraints: change only the specified copy and accent colors; no new layout, no new pane, no second shell, no gradients, no glass, no tinted background, no invented names, identifiers, metrics, counts, dates, performance claims, or production status; no watermark.",
+  "provenance": {
+    "method": "Generated as a full-fidelity desktop UI comp, then edited once to remove invented values and non-brand red accents.",
+    "inputs": [
+      "PRODUCT.md",
+      "DESIGN.md",
+      "Signal Desk decision-card packet"
+    ],
+    "postprocess": "Lanczos resize to 1440x900 and WebP encode at quality 96."
+  },
+  "createdAt": "2026-08-30T21:19:38.716Z"
+}

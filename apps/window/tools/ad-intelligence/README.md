@@ -9,6 +9,11 @@ systems without changing the package's data boundaries.
 
 - The project-neutral manifest controls taxonomy, sources, cadence, classification prompt
   reference/model policy, media QA, thresholds, retention, and approval.
+- Manifest v2 makes those settings structural and closed. Sources contain public source
+  descriptors and opaque connection IDs only; model selection is an opaque policy ref;
+  schedules are interval values or schedule refs. Credentials, cookies, provider tokens,
+  executable cron text, raw prompts, and arbitrary provider configuration are not valid
+  settings. Hermes resolves approved connection and policy refs at execution time.
 - Every run follows the fixed graph: `discover -> resolve -> capture -> normalize ->
   classify -> media-qa -> publish`.
 - Retryable failures use bounded exponential backoff. Non-retryable, policy, schema, and
@@ -49,6 +54,34 @@ systems without changing the package's data boundaries.
   `trace`/`slot-trace`/`trace-view` hooks remain shared-runtime concerns; this package
   adds no graph UI, graph execution, or Tool-specific settings store.
 
+## Durable operating lifecycle
+
+The flat Hermes allowlists remain the enforcement boundary. Their operation groups make
+the rebuilt app's setup, live-run, library, QA, and release controls discoverable without
+creating five execution APIs:
+
+| Operation | Commands | Durable evidence |
+| --- | --- | --- |
+| Setup | validate and activate one immutable settings revision; test one opaque connection ref | settings validation/activation and connection-check completion events |
+| Live | run, pause/resume, retry a run or stage, cancel, and read health | run and stage transitions, retry scheduling, failures, and health snapshots |
+| Library | recapture, reclassify, recheck media, archive, or restore a creative | observation/resolution/evidence/normalization and maintenance events |
+| QA | quarantine or resolve, then approve or reject creative | classification/media receipts, quarantine transitions, and approval events |
+| Release | approve publication, verify an immutable release, or supersede it with another | publish transitions, verification, and supersession events |
+
+`run`, `retry`, `approve-publish`, `pause`, `health` and the original
+`run-started`, `stage-completed`, `run-quarantined`, `publish-completed` events are
+preserved verbatim for existing consumers. Recovery is always an explicit command and
+append-only event: retry never erases an attempt, resolving quarantine never removes its
+receipt, restore never deletes the archive event, and supersede never edits the prior
+release.
+
+Every event uses the shared Hermes event envelope and must retain project scope, run or
+subject correlation, the pinned settings revision, a timezone-bearing occurrence time,
+and relevant evidence/receipt refs. Domain event payloads may carry sanitized summaries;
+they may not carry raw captures, secrets, contact details, prompt text, private paths, or
+provider credentials. Stage-specific events use the seven manifest node IDs, so the live
+timeline and the release receipts are projections of the same durable history.
+
 Open-source make-vs-use guidance: use Playwright and its CDP connection for browser
 control, OpenTelemetry APIs/exporters for traces, and a small schema/validation library
 only if the host already standardizes on one. Build the orchestration, policy, redaction,
@@ -59,6 +92,9 @@ See `manifest.json`, `packs/blockwise-real-estate.json`, and `migration_map.md`.
 `manifest.json` follows the shared Tool contract shape conceptually: versioned tool-app
 schema, scoped settings, declarative pipeline nodes/edges, capabilities, schedules,
 thresholds, approval gates, Hermes action/event allowlists, and OTel trace metadata.
+Its tool-app version is 2.0.0 because the control lifecycle and settings schema expanded;
+the pipeline, public export, and immutable release contracts deliberately remain 1.0.0/v1
+so existing release fixtures and consumers do not change.
 `home.json` is the separate exact seven-field
 non-executable dashboard manifest.
 
