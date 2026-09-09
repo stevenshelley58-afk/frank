@@ -3,7 +3,8 @@ import "./widgets.js";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js";
 import { classifyChatStreamEvent, SseEventParser } from "./chat-stream.js";
 import { mountAdStudio } from "./ad-studio.js?v=20260831-batch-live-v1";
-import { pathForView, viewForPath } from "./view-routing.js?v=20260830-ad-studio-route-v1";
+import { mountBlogStudio } from "./blog-studio.js?v=20260903-blog-studio-v1";
+import { pathForView, viewForPath } from "./view-routing.js?v=20260903-blog-studio-v1";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
@@ -17,6 +18,7 @@ const TITLES = {
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
   "ad-studio": ["Ad Studio", "Source image → ad template"],
+  "blog-studio": ["Blog Studio", "Topic or sources → QA-verified article"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
   connections: ["Connections", "Recorded provider setup and capabilities"],
@@ -97,6 +99,7 @@ $$(".rail-item[data-view]").forEach((b) =>
       chatScrollBottom();
     }
     else if (v === "ad-studio") { show(v); mountAdStudio(); }
+    else if (v === "blog-studio") { show(v); mountBlogStudio(); }
     else { show(v); if (v === "tools") mountAll("tools", $("#slot-tools"), {}); if (v === "trace") mountAll("trace", $("#slot-trace"), {}); if (v === "releases") mountAll("releases", $("#slot-releases"), {}); }
   })
 );
@@ -145,10 +148,16 @@ window.addEventListener("frank:ad-studio", () => {
   mountAdStudio();
 });
 
+window.addEventListener("frank:blog-studio", () => {
+  show("blog-studio");
+  mountBlogStudio();
+});
+
 function openPathView() {
   const id = viewForPath(window.location.pathname);
   show(id, { syncHistory: false });
   if (id === "ad-studio") mountAdStudio();
+  if (id === "blog-studio") mountBlogStudio();
   const canonicalPath = pathForView(id);
   if (window.location.pathname !== canonicalPath) window.history.replaceState({ view: id }, "", `${canonicalPath}${window.location.search}`);
 }
@@ -240,6 +249,40 @@ window.addEventListener("frank:ad-studio-run", (event) => {
     } catch (error) {
       localSources.filter((source) => !settled.has(source.key)).forEach((source) => progress(source, "error", { error: error.message || "This image could not be started." }));
       detail.reject?.(error);
+    }
+  })();
+});
+
+window.addEventListener("frank:blog-studio-run", (event) => {
+  const detail = event.detail || {};
+  void (async () => {
+    const form = detail.form || {};
+    const projectId = String(form.projectId || "").trim();
+    const topic = String(form.topic || "").trim();
+    const direction = String(form.direction || "").trim();
+    const files = Array.isArray(form.files) ? form.files : [];
+    try {
+      if (!projectId) throw new Error("Choose a project.");
+      if (!topic && !direction && files.length < 1) throw new Error("Give a topic, source documents, or a direction.");
+      const uploaded = files.length ? await uploadFiles(files.map((file) => ({ file, path: file.name }))) : [];
+      if (files.length && uploaded.length !== files.length) throw new Error("One or more source documents were not accepted.");
+      const response = await fetch("/api/blog-studio/runs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: projectId,
+          topic,
+          direction,
+          attachments: uploaded.map(attachmentPayload),
+        }),
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Hermes did not start the run.");
+      detail.resolve?.({ run: data.run });
+      window.dispatchEvent(new CustomEvent("frank:blog-studio-created", { detail: { run: data.run } }));
+    } catch (error) {
+      if (detail.reject) detail.reject(error);
+      else addChatMsg({ role: "sys", text: error.message || "Blog Studio could not start the run.", ts: Date.now() / 1000 | 0 });
     }
   })();
 });

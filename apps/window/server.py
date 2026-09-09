@@ -1969,6 +1969,201 @@ def ad_studio_run_cancel(run_id: str):
     return _proxy_ad_studio_action(run_id, "/cancel", {"reason"})
 
 
+# --- Blog Studio: display and proxy only; Hermes owns the durable run -------
+
+BLOG_STUDIO_RUN_ID = re.compile(r"trun_[0-9a-f]{32}")
+BLOG_STUDIO_TEXT_EXTENSIONS = MappingProxyType({
+    ".md": "text/markdown", ".markdown": "text/markdown", ".txt": "text/plain",
+})
+BLOG_STUDIO_MAX_SOURCES = 5
+BLOG_STUDIO_MAX_SOURCE_BYTES = 1024 * 1024
+BLOG_STUDIO_TOPIC_MAX = 2000
+BLOG_STUDIO_DIRECTION_MAX = 2000
+BLOG_STUDIO_ACTIONS = frozenset({
+    "cancel", "resume", "rerun", "approve", "request_changes", "reject", "quarantine", "withdraw",
+})
+
+
+def _public_blog_studio_run(run: object, *, project_id: str = "") -> dict:
+    """Truthful display projection; private run data never leaves Hermes."""
+    if not isinstance(run, dict):
+        return {}
+    run_id = str(run.get("id") or run.get("run_id") or "")
+    output = run.get("output") if isinstance(run.get("output"), dict) else {}
+    safe_output_keys = ("process", "title", "brief", "evidence", "package", "qa", "release")
+    safe_output = {key: output[key] for key in safe_output_keys if key in output}
+    return {
+        "id": run_id,
+        "status": str(run.get("status") or ""),
+        "stage": str(run.get("stage") or ""),
+        "progress": run.get("progress"),
+        "title": str(output.get("title") or ""),
+        "project_id": str((run.get("scope") or {}).get("project_id") or project_id or ""),
+        "created_at": run.get("created_at"),
+        "updated_at": run.get("updated_at"),
+        "attention": bool(run.get("attention")),
+        "error": str(run.get("error") or "")[:600],
+        "output": safe_output,
+    }
+
+
+def _validate_blog_studio_source(attachment: dict) -> dict:
+    suffix = Path(str(attachment.get("name") or "")).suffix.lower()
+    if suffix not in BLOG_STUDIO_TEXT_EXTENSIONS:
+        abort(400, f"{attachment.get('name') or 'source'} is not a supported text document (.md, .markdown, .txt)")
+    if not attachment.get("size") or int(attachment["size"]) > BLOG_STUDIO_MAX_SOURCE_BYTES:
+        abort(413, f"{attachment.get('name') or 'source'} exceeds the 1 MB source limit")
+    target = _upload_target(str(attachment.get("id") or ""))
+    if target is None or not target.is_file():
+        abort(400, "source document is no longer available")
+    if target.is_symlink() or not target.stat().st_size:
+        abort(400, "source document is not a readable file")
+    return attachment
+
+
+@app.post("/api/blog-studio/runs")
+def blog_studio_run_create():
+    """Start one durable content-factory run in Hermes."""
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        abort(400, "request body must be an object")
+    project_id = _clean_project_id(body.get("project_id")) if body.get("project_id") else ""
+    project = _project_store.get_project(project_id) if project_id else None
+    if not project:
+        abort(404, "project not found")
+    topic = str(body.get("topic") or "").strip()
+    direction = str(body.get("direction") or "").strip()
+    if len(topic) > BLOG_STUDIO_TOPIC_MAX or len(direction) > BLOG_STUDIO_DIRECTION_MAX:
+        abort(400, "topic and direction must stay under 2000 characters")
+    raw_attachments = body.get("attachments")
+    attachments = _clean_atts(raw_attachments) if isinstance(raw_attachments, list) else []
+    if len(attachments) > BLOG_STUDIO_MAX_SOURCES:
+        abort(413, f"choose no more than {BLOG_STUDIO_MAX_SOURCES} source documents")
+    for attachment in attachments:
+        _validate_blog_studio_source(attachment)
+    if not topic and not direction and not attachments:
+        abort(400, "give a topic, source documents, or a direction")
+
+    payload: dict = {}
+    if topic:
+        payload["topic"] = topic
+    if direction:
+        payload["direction"] = direction
+    if attachments:
+        payload["sources"] = [{"name": str(item["name"]), "path": str(item["hermes_path"])} for item in attachments]
+    request_payload = {
+        "schema": "schema://hermes.tool-run-command/v1",
+        "request_id": f"req_{secrets.token_hex(16)}",
+        "tool_id": "content-factory",
+        "action": "run",
+        "scope": {"project_id": project_id},
+        "payload": payload,
+        "idempotency_key": f"content-factory:{secrets.token_hex(16)}",
+    }
+    try:
+        data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=8)
+    except Exception as error:
+        return _hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    run_id = str(run.get("id") or run.get("run_id") or "")
+    if not BLOG_STUDIO_RUN_ID.fullmatch(run_id):
+        return jsonify({"error": "Hermes did not return a valid Tool run id."}), 502
+    return jsonify({"run": _public_blog_studio_run(run, project_id=project_id)}), 202
+
+
+@app.get("/api/blog-studio/runs")
+def blog_studio_run_list():
+    query = urllib.parse.urlencode({
+        "tool_id": "content-factory",
+        "project_id": str(request.args.get("project_id") or ""),
+        "limit": min(200, max(1, request.args.get("limit", type=int) or 100)),
+    })
+    try:
+        data = hermes_request(f"/v1/tool-runs?{query}", timeout=8)
+    except Exception as error:
+        return _hermes_error(error)
+    raw_runs = data.get("runs") if isinstance(data.get("runs"), list) else data.get("data", [])
+    return jsonify({"runs": [_public_blog_studio_run(item) for item in raw_runs if isinstance(item, dict)]})
+
+
+@app.get("/api/blog-studio/runs/<run_id>")
+def blog_studio_run_get(run_id: str):
+    if not BLOG_STUDIO_RUN_ID.fullmatch(run_id):
+        abort(404)
+    try:
+        data = hermes_request(_tool_run_path(run_id), timeout=8)
+    except Exception as error:
+        return _hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    return jsonify({"run": _public_blog_studio_run(run)})
+
+
+@app.get("/api/blog-studio/runs/<run_id>/events")
+def blog_studio_run_events(run_id: str):
+    if not BLOG_STUDIO_RUN_ID.fullmatch(run_id):
+        abort(404)
+    after = request.args.get("after", type=int)
+    if after is None:
+        try:
+            after = int(request.headers.get("Last-Event-ID") or 0)
+        except ValueError:
+            after = 0
+    url = hermes_base() + _tool_run_path(run_id, "/events") + "?" + urllib.parse.urlencode({"after": max(-1, after)})
+
+    def generate():
+        headers = {"Accept": "text/event-stream"}
+        if HERMES_KEY:
+            headers["Authorization"] = f"Bearer {HERMES_KEY}"
+        try:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=75) as response:
+                for line in response:
+                    yield line
+        except (urllib.error.URLError, TimeoutError):
+            yield b"event: disconnected\ndata: {}\n\n"
+
+    return Response(stream_with_context(generate()), mimetype="text/event-stream", headers=_sse_headers())
+
+
+@app.get("/api/blog-studio/runs/<run_id>/artifacts/<name>")
+def blog_studio_run_artifact(run_id: str, name: str):
+    if not BLOG_STUDIO_RUN_ID.fullmatch(run_id) or not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", name):
+        abort(404)
+    url = hermes_base() + _tool_run_path(run_id, f"/artifacts/{urllib.parse.quote(name, safe='')}")
+    headers = {"Accept": "text/markdown,text/plain,application/json"}
+    if HERMES_KEY:
+        headers["Authorization"] = f"Bearer {HERMES_KEY}"
+    try:
+        upstream = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=15)
+        data = upstream.read(5 * 1024 * 1024 + 1)
+        if len(data) > 5 * 1024 * 1024:
+            abort(413)
+        return Response(data, mimetype=upstream.headers.get_content_type(), headers={"Cache-Control": "private, no-store"})
+    except Exception as error:
+        return _hermes_error(error)
+
+
+@app.post("/api/blog-studio/runs/<run_id>/action")
+def blog_studio_run_action(run_id: str):
+    """Proxy the closed content-factory action set; unknown keys are rejected."""
+    if not BLOG_STUDIO_RUN_ID.fullmatch(run_id):
+        abort(404)
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        abort(400, "invalid action")
+    allowed_keys = {"action", "package_sha256", "feedback", "stage"}
+    if any(key not in allowed_keys for key in body):
+        abort(400, "invalid action")
+    if body.get("action") not in BLOG_STUDIO_ACTIONS:
+        abort(400, "unsupported action")
+    try:
+        data = hermes_request(_tool_run_path(run_id, "/action"), body, method="POST", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    return jsonify({"ok": True, "run": _public_blog_studio_run(run)})
+
+
 def _hermes_chat_stream(chat_id: str, payload: dict, *, read_timeout: float | None = None):
     """Yield one authoritative Hermes session turn as raw SSE lines."""
     url = hermes_base() + _session_path(chat_id, "/chat/stream")

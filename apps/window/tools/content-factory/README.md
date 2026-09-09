@@ -37,3 +37,41 @@ data, immutable settings revisions, and Hermes envelopes only; it does not add
 a graph UI, graph execution, or a tool-specific settings store. OTel
 GenAI-style spans/events remain the trace interchange, including the existing
 trace, slot-trace, and trace-view hooks.
+
+## Implemented Hermes runtime contract (Blog Studio, tool id `content-factory`)
+
+Hermes implements this package's lifecycle as a durable tool run. The runtime
+contract below is what Frank's `/blog-studio` surface and the Hermes
+`skills/blog-studio` skill both rely on; it is pinned by
+`contract-checksums.json`.
+
+- Stages (fixed order): `source → research → brief → draft → edit → package →
+  qa → human-approval → release`.
+- Closed action set: `run, cancel, resume, rerun, approve, request_changes,
+  reject, quarantine, withdraw`.
+- Run statuses: `queued, running, blocked, waiting_review, quarantined,
+  completed, failed, rejected, cancelling, cancelled`. `waiting_review` is the
+  human gate; `quarantined` sets a run aside without discarding it.
+- Event allowlist (exactly 28 kinds): `command.accepted, command.queued,
+  command.cancel-requested, run.recovered, run.interrupted, run.failed,
+  run.cancelled, run.approved, run.rejected, run.quarantined, stage.started,
+  stage.completed, checkpoint.invalidated, rerun.queued, source.accepted,
+  research.evidence, brief.ready, draft.ready, edit.ready, package.pinned,
+  qa.passed, qa.failed, review.requested, changes.requested,
+  release.published, release.withdrawn, tool.started, tool.completed`. Other
+  kinds are rejected, never projected.
+- Stage tool isolation: `research` may use only `web_search` and
+  `web_extract`; `source` and every other model stage have no tools.
+- Run inputs are closed: optional `topic` (≤2000 chars), `direction`
+  (≤2000 chars), and 1–5 source documents (`.md`, `.markdown`, `.txt`,
+  ≤1 MB each); at least one is required.
+- Deterministic QA is computed only from stored artifact bytes: package
+  manifest re-verification, title heading, word bounds (150–8000), unsafe
+  markup rejection, and citation URLs must match persisted research evidence.
+- Release pinning: on QA pass the run enters `waiting_review` with a package
+  manifest (per-file sha256 + package digest). Approval requires the exact
+  reviewed digest and releases exactly those bytes atomically. Release and
+  withdrawal are idempotent; withdrawal records a public tombstone.
+- Public artifact projection: `final.md`, `draft.md`, `manifest.json`
+  (package manifest), and `release.json` (release receipt). Sources, state,
+  and staging are never served.

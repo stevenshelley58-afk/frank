@@ -8,7 +8,7 @@
 <link rel="icon" href="/brand/mark.svg">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260831-ad-studio-batch">
+<link rel="stylesheet" href="/app.css?v=20260903-blog-studio-v1">
 </head>
 <body>
 <div class="app">
@@ -45,6 +45,7 @@
       <button class="rail-item" data-view="files" aria-label="Files"><span class="glyph">▤</span><span>Files</span></button>
       <button class="rail-item" data-view="tools" aria-label="Tools"><span class="glyph">⚙</span><span>Tools</span></button>
       <button class="rail-item" data-view="ad-studio" aria-label="Ad Studio"><span class="glyph">▧</span><span>Ad Studio</span></button>
+      <button class="rail-item" data-view="blog-studio" aria-label="Blog Studio"><span class="glyph">✎</span><span>Blog Studio</span></button>
       <button class="rail-item" data-view="trace" aria-label="Trace"><span class="glyph">◉</span><span>Trace</span></button>
       <button class="rail-item" data-view="releases" aria-label="Releases"><span class="glyph">✓</span><span>Releases</span></button>
     </div>
@@ -249,6 +250,79 @@
         </div>
       </section>
 
+      <section class="view" data-view="blog-studio" aria-labelledby="blog-studio-heading">
+        <div class="blog-studio" id="blog-studio">
+          <header class="blog-studio-head">
+            <div><h2 id="blog-studio-heading">Blog Studio</h2><p>Turn a topic, source documents, or a direction into a QA-verified article, released only on your approval.</p></div>
+            <span class="blog-studio-owner">Runs on Hermes</span>
+          </header>
+          <nav class="blog-studio-tabs" role="tablist" aria-label="Blog Studio sections">
+            <button type="button" class="is-on" id="blog-tab-run" role="tab" aria-selected="true" aria-controls="blog-panel-run" data-blog-tab="run">Create</button>
+            <button type="button" id="blog-tab-runs" role="tab" aria-selected="false" aria-controls="blog-panel-runs" data-blog-tab="runs">Runs</button>
+            <button type="button" id="blog-tab-pipeline" role="tab" aria-selected="false" aria-controls="blog-panel-pipeline" data-blog-tab="pipeline">How it works</button>
+          </nav>
+
+          <div class="blog-studio-panel is-on" id="blog-panel-run" role="tabpanel" aria-labelledby="blog-tab-run" data-blog-panel="run">
+            <form class="blog-run-form" id="blog-run-form">
+              <div class="blog-section-heading"><div><h3>Start a blog run</h3><p>Give Hermes a topic, source documents, or a direction — at least one.</p></div><span id="blog-run-mode">Choose a topic, sources, or a direction</span></div>
+              <input type="file" id="blog-source-files" accept=".md,.markdown,.txt" multiple hidden>
+              <button type="button" class="blog-drop" id="blog-source-drop">
+                <span class="blog-drop-mark" aria-hidden="true">+</span>
+                <strong>Choose source documents</strong>
+                <small>Click to browse — up to 5 text files (.md, .markdown, .txt), 1 MB each. Optional.</small>
+              </button>
+              <ul class="blog-source-list" id="blog-source-list" aria-label="Source document queue"></ul>
+              <div class="blog-form-pair">
+                <label>Project<select id="blog-run-project" required><option value="">Loading projects…</option></select></label>
+                <label>Topic <span>optional</span><input id="blog-run-topic" maxlength="2000" placeholder="Why local-first software wins"></label>
+              </div>
+              <label>Direction <span>optional</span><textarea id="blog-run-direction" maxlength="2000" rows="4" placeholder="Angle, audience, tone, or anything the article must do."></textarea></label>
+              <div class="blog-submit-row"><p id="blog-run-error" role="status" hidden></p><button type="submit" class="blog-primary" id="blog-run-submit" disabled>Start run</button></div>
+            </form>
+            <aside class="blog-run-guide" aria-label="Pipeline summary">
+              <h3>Nine stages. One human gate.</h3>
+              <ol><li><strong>Read and research</strong><span>Hermes verifies sources; the research role may use only web search and extraction.</span></li><li><strong>Brief, draft, edit</strong><span>Later roles have no tools at all — they reason only from persisted work.</span></li><li><strong>Deterministic QA</strong><span>Quality is computed from the stored bytes: structure, word bounds, unsafe markup, and citation-backed evidence.</span></li><li><strong>Your approval</strong><span>Approval releases the exact reviewed bytes; withdrawal records a public tombstone.</span></li></ol>
+            </aside>
+          </div>
+
+          <div class="blog-studio-panel" id="blog-panel-runs" role="tabpanel" aria-labelledby="blog-tab-runs" data-blog-panel="runs" hidden>
+            <div class="blog-runs-layout">
+              <section class="blog-runs-list-panel"><div class="blog-section-heading"><div><h3>Run history</h3><p>Durable runs recorded by Hermes.</p></div></div><div class="blog-runs-list" id="blog-runs-list"></div></section>
+              <section class="blog-run-detail" id="blog-run-detail"><div class="blog-empty"><strong>Select a run</strong><span>Open a run to inspect its stages, evidence, QA and release proof.</span></div></section>
+            </div>
+            <div class="blog-run-actions" id="blog-run-actions" hidden></div>
+          </div>
+
+          <div class="blog-studio-panel" id="blog-panel-pipeline" role="tabpanel" aria-labelledby="blog-tab-pipeline" data-blog-panel="pipeline" hidden>
+            <div class="blog-pipeline-toolbar">
+              <div><h3>How Blog Studio works</h3><p>Frank starts the run. This view shows what Hermes actually did.</p></div>
+              <div class="blog-pipeline-controls"><label>Project<select id="blog-pipeline-project"></select></label><label>Inspect run<select id="blog-pipeline-run"><option value="">No run selected</option></select></label></div>
+            </div>
+            <section class="blog-system-map" aria-label="Blog Studio architecture">
+              <div><strong>Frank</strong><span>Starts the run and shows its progress.</span></div><i aria-hidden="true"></i>
+              <div><strong>Hermes</strong><span>Owns the durable run, checkpoints and events.</span></div><i aria-hidden="true"></i>
+              <div><strong>Stage isolation</strong><span>Research gets web tools only; every other stage has none.</span></div><i aria-hidden="true"></i>
+              <div><strong>Immutable release</strong><span>Approval pins and releases the reviewed bytes exactly.</span></div>
+            </section>
+            <section class="blog-stage-law" aria-label="Quality rule">
+              <div><strong>Persist</strong><span>Every stage checkpoint</span></div><b aria-hidden="true">→</b><div><strong>Verify</strong><span>QA from stored bytes only</span></div><b aria-hidden="true">→</b><div><strong>Review</strong><span>Human gate before release</span></div><b aria-hidden="true">→</b><div><strong>Release</strong><span>Exact reviewed bytes</span></div>
+            </section>
+          </div>
+
+          <div class="blog-drawer-backdrop" id="blog-drawer-backdrop" hidden></div>
+          <aside class="blog-feedback-drawer" id="blog-feedback-drawer" role="dialog" aria-modal="true" aria-labelledby="blog-feedback-heading" hidden>
+            <h3 id="blog-feedback-heading">Request changes</h3>
+            <p>Tell Hermes what to change. Later stages restart from edit; QA runs again.</p>
+            <label>Feedback<textarea id="blog-feedback-text" maxlength="4000" rows="6" placeholder="Tighten the intro, add a counterexample…"></textarea></label>
+            <p class="blog-feedback-error" id="blog-feedback-error" role="alert"></p>
+            <div class="blog-drawer-actions">
+              <button type="button" class="blog-secondary" id="blog-feedback-cancel">Cancel</button>
+              <button type="button" class="blog-primary" id="blog-feedback-submit">Send change request</button>
+            </div>
+          </aside>
+        </div>
+      </section>
+
       <section class="view" data-view="entity-home">
         <div class="home-surface">
           <div class="entity-home-heading"><div><span class="home-kicker" id="entity-home-kind">Tool</span><h2 id="entity-home-name">Home</h2></div><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
@@ -442,6 +516,6 @@
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260831-batch-live-v1"></script>
+<script type="module" src="/js/app.js?v=20260903-blog-studio-v1"></script>
 </body>
 </html>

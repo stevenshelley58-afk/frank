@@ -1,0 +1,13 @@
+{
+  "algorithm": "sha256",
+  "files": {
+    "README.md": "360f53575eee8ea21cdeabe41d431f4978c1ef92a0c9c66ff8dd71edcd1ad187",
+    "blockwise-pack.json": "d73a89b53319c17762b31d44573e2a25152ed52328a1d1dbd17182a576447301",
+    "fixtures/content-release-v1.json": "5629d796b02dab36d03ba662f39c9fd9aa63f5e89e653ce4e7c097e20357a36a",
+    "home.json": "83fea1acd0813ad65076affa96c3e2971765efbaca0025eb8908c73ce9cb7f7d",
+    "manifest.json": "04f7e9bae86dea6a7782485147d6be707cff0ce3d5b9dc99051c90cac4fff98c",
+    "release.schema.json": "b61810282bc523c131fbf8f3dc6ee3598ee01dd5fbc90dc2dc1c47ff78d27a8d",
+    "schemas.json": "b68666440830fa2b93812d63a25a6e3e5e7e746a35204424ae904721c7c2c582"
+  },
+  "schema": "schema://frank.content-factory-contract-checksums/v1"
+}

@@ -205,7 +205,7 @@ class UiContractTest(unittest.TestCase):
         styles = (WEB / "app.css").read_text(encoding="utf-8")
 
         rail_views = re.findall(r'<button class="rail-item[^>]*data-view="([^"]+)"', html)
-        self.assertEqual(rail_views, ["hub", "files", "tools", "ad-studio", "trace", "releases"])
+        self.assertEqual(rail_views, ["hub", "files", "tools", "ad-studio", "blog-studio", "trace", "releases"])
         self.assertIn('id="project-nav"', html)
         self.assertIn('id="new-project"', html)
         self.assertIn('id="new-project-dialog"', html)
@@ -382,6 +382,58 @@ class UiContractTest(unittest.TestCase):
             source = path.read_text(encoding="utf-8")
             for marker in markers:
                 self.assertNotIn(marker, source, path)
+
+
+class BlogStudioContractTest(unittest.TestCase):
+    def test_blog_studio_route_and_view_wiring(self):
+        routing = (WEB / "js" / "view-routing.js").read_text(encoding="utf-8")
+        html = (WEB / "index.html").read_text(encoding="utf-8")
+        app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
+        styles = (WEB / "app.css").read_text(encoding="utf-8")
+
+        self.assertIn('BLOG_STUDIO_PATH = "/blog-studio"', routing)
+        self.assertIn('if (pathname === BLOG_STUDIO_PATH || pathname === `${BLOG_STUDIO_PATH}/`) return "blog-studio";', routing)
+        self.assertIn('if (view === "blog-studio") return BLOG_STUDIO_PATH;', routing)
+        self.assertIn('data-view="blog-studio"', html)
+        self.assertIn('aria-label="Blog Studio"', html)
+        self.assertIn('data-blog-tab="run"', html)
+        self.assertIn('data-blog-tab="runs"', html)
+        self.assertIn('data-blog-tab="pipeline"', html)
+        self.assertIn('id="blog-feedback-drawer"', html)
+        self.assertIn('role="dialog"', html)
+        self.assertIn('aria-modal="true"', html)
+        self.assertIn('id="blog-drawer-backdrop"', html)
+        self.assertIn('blog-studio.js', app)
+        self.assertIn("mountBlogStudio", app)
+        self.assertIn('"blog-studio": ["Blog Studio"', app)
+        self.assertIn('window.addEventListener("frank:blog-studio"', app)
+        self.assertIn('window.addEventListener("frank:blog-studio-run"', app)
+        self.assertIn('"/api/blog-studio/runs"', app)
+        self.assertIn(".blog-studio {", styles)
+        self.assertIn(".blog-feedback-drawer {", styles)
+        # Ad Studio surfaces stay untouched by the Blog Studio work.
+        self.assertNotIn("ad-studio-picker.css", html)
+
+    def test_blog_studio_module_contract(self):
+        studio = (WEB / "js" / "blog-studio.js").read_text(encoding="utf-8")
+
+        self.assertIn('const TOOL_ID = "content-factory"', studio)
+        self.assertIn("/api/blog-studio/runs", studio)
+        self.assertIn("EventSource(", studio)
+        self.assertIn("closeFeedbackDrawer({ restoreFocus = true } = {})", studio)
+        self.assertIn("drawerKeydown", studio)
+        self.assertIn('event.key === "Escape"', studio)
+        self.assertIn("sectionObserver", studio)
+        self.assertIn("eventStream", studio)
+        self.assertNotIn("localStorage", studio)
+        self.assertIn("Choose a topic, sources, or a direction", studio)
+        self.assertIn("EVENT_LIMIT", studio)
+        self.assertIn("redactOperatorText", studio)
+
+    def test_blog_studio_approval_copy_is_exact(self):
+        studio = (WEB / "js" / "blog-studio.js").read_text(encoding="utf-8")
+        self.assertIn("Approve and release the exact reviewed bytes", studio)
+        self.assertIn('package_sha256: clean(run.output?.package?.sha256)', studio)
 
 
 if __name__ == "__main__":

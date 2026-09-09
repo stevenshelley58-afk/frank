@@ -211,6 +211,27 @@ class ContentFactoryToolTests(unittest.TestCase):
         self.assertEqual(tombstone["release_hash"], release["release_hash"])
         self.assertNotIn("withdrawn_at", release)
 
+    def test_contract_checksum_manifest_pins_the_release_package(self):
+        import hashlib
+
+        checksums = self.load_json("contract-checksums.json")
+        self.assertEqual(checksums["schema"], "schema://frank.content-factory-contract-checksums/v1")
+        self.assertEqual(checksums["algorithm"], "sha256")
+        self.assertIn("README.md", checksums["files"])
+        self.assertIn("release.schema.json", checksums["files"])
+        for name, digest in checksums["files"].items():
+            actual = hashlib.sha256((TOOL_DIR / name).read_bytes()).hexdigest()
+            self.assertEqual(actual, digest, f"contract drift in {name}")
+
+    def test_readme_documents_the_implemented_runtime_contract(self):
+        readme = (TOOL_DIR / "README.md").read_text(encoding="utf-8")
+        self.assertIn("source → research → brief → draft → edit → package →", readme)
+        self.assertIn("run, cancel, resume, rerun, approve, request_changes,", readme)
+        self.assertIn("web_search", readme)
+        self.assertIn("exactly 28 kinds", readme)
+        self.assertIn("waiting_review", readme)
+        self.assertIn("Deterministic QA is computed only from stored artifact bytes", readme)
+
 
 if __name__ == "__main__":
     unittest.main()
