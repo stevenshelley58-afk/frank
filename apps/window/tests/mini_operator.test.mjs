@@ -68,6 +68,7 @@ test("Mini requests are literal text and status actions persist through the same
   await select.listeners.change();
   assert.equal(JSON.parse(calls.at(-1).options.body).status, "contacted");
   assert.match(allText(host), /Saved as Contacted/);
+  panel.setActive(false);
 });
 
 test("manual refresh works and 401/503 are visible errors rather than empty states", async () => {
@@ -92,6 +93,7 @@ test("manual refresh works and 401/503 are visible errors rather than empty stat
   assert.match(allText(host), /unavailable.*Mini connection/);
   await panel.refresh();
   assert.match(allText(host), /No service requests need follow-up/);
+  panel.setActive(false);
 });
 
 test("a new refresh aborts the overlapping request and hidden panels stop fetching", async () => {
