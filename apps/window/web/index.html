@@ -4,12 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="description" content="Frank is the operator window for projects, tools and Hermes.">
+<meta name="theme-color" content="#FFFFFF">
+<meta name="apple-mobile-web-app-title" content="Frank">
 <title>Frank</title>
 <link rel="icon" href="/brand/mark.svg">
+<link rel="apple-touch-icon" href="/brand/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.json">
 <link rel="stylesheet" href="/tokens.css">
 <link rel="stylesheet" href="/dashboard/dashboard-vendor.css?v=20260817-signal-board">
-<link rel="stylesheet" href="/app.css?v=20260830-ad-studio">
-<link rel="stylesheet" href="/ad-studio-picker.css?v=20260830-source-dialog">
+<link rel="stylesheet" href="/app.css?v=20260908-review-stability-v3">
+<link rel="stylesheet" href="/ad-db.css?v=20260907-ad-db-v2">
 <link rel="stylesheet" href="/ad-radar.css?v=20260831-observation-timeline-v1">
 </head>
 <body><!--
@@ -31,7 +35,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
     <div class="rail-group">
       <div class="lbl">Workspace</div>
-      <button class="rail-item is-on" data-view="hub" aria-label="Hub"><span class="dot"></span><span>Hub</span></button>
+      <button class="rail-item is-on" data-view="hub" aria-label="Home"><span class="dot"></span><span>Home</span></button>
       <div class="chat-nav-head">
         <span>Chats</span>
         <button type="button" id="new-chat" aria-label="Start a new chat" title="New chat">
@@ -46,16 +50,28 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
         </button>
       </div>
       <div class="project-nav" id="project-nav" aria-label="Projects"></div>
+      <div class="project-nav-head" id="archived-projects-head" hidden><span>Archived</span></div>
+      <div class="project-nav" id="archived-project-nav" aria-label="Archived projects"></div>
     </div>
 
     <div class="rail-group">
       <div class="lbl">Window</div>
-      <button class="rail-item" data-view="files" aria-label="Files"><span class="glyph">▤</span><span>Files</span></button>
       <button class="rail-item" data-view="tools" aria-label="Tools"><span class="glyph">⚙</span><span>Tools</span></button>
-      <button class="rail-item" data-view="ad-studio" aria-label="Ad Studio"><span class="glyph">▧</span><span>Ad Studio</span></button>
+      <button class="rail-item" data-view="files" aria-label="Files"><span class="glyph">▤</span><span>Files</span></button>
+      <button class="rail-item" data-view="ad-template-generator" aria-label="Ad Template Generator"><span class="glyph">▧</span><span>Ad Template Generator</span></button>
+      <button class="rail-item" data-view="ad-db" aria-label="Ad database"><span class="glyph"><svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" aria-hidden="true"><ellipse cx="9" cy="4" rx="5.5" ry="2.25"/><path d="M3.5 4v5c0 1.25 2.46 2.25 5.5 2.25s5.5-1 5.5-2.25V4M3.5 9v5c0 1.25 2.46 2.25 5.5 2.25s5.5-1 5.5-2.25V9"/></svg></span><span>Ad database</span></button>
       <button class="rail-item" data-view="ad-radar" aria-label="Ad Radar"><span class="dot"></span><span>Ad Radar</span></button>
-      <button class="rail-item" data-view="trace" aria-label="Trace"><span class="glyph">◉</span><span>Trace</span></button>
-      <button class="rail-item" data-view="releases" aria-label="Releases"><span class="glyph">✓</span><span>Releases</span></button>
+      <details class="rail-more" id="more-nav">
+        <summary>More</summary>
+        <div>
+          <button class="rail-item" data-view="trace"><span class="glyph">◉</span><span>Trace</span></button>
+          <button class="rail-item" data-view="releases"><span class="glyph">✓</span><span>Releases</span></button>
+          <button class="rail-item" data-view="live"><span>Live</span></button>
+          <button class="rail-item" data-view="map"><span>Map</span></button>
+          <button class="rail-item" data-view="control"><span>Control</span></button>
+          <button class="rail-item" data-view="ops"><span>Customer Ops</span></button>
+        </div>
+      </details>
     </div>
 
     <div class="rail-foot">Frank — window only.<br>Hermes does the thinking.</div>
@@ -63,13 +79,8 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
 
   <main class="main">
     <header class="topbar">
-      <h1 id="view-title" tabindex="-1">Hub</h1>
+      <h1 id="view-title" tabindex="-1">Home</h1>
       <span class="sub" id="view-sub"></span>
-      <nav class="operate-tabs" aria-label="Operate modes">
-        <button type="button" class="operate-tab" data-view="live">Live</button>
-        <button type="button" class="operate-tab" data-view="map">Map</button>
-        <button type="button" class="operate-tab" data-view="control">Control</button>
-      </nav>
       <div class="right" id="top-actions"></div>
     </header>
 
@@ -130,7 +141,7 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
         <div class="home-surface">
           <div class="project-dashboard-heading">
             <div>
-              <span class="project-dashboard-kicker"><i id="project-dashboard-dot"></i>Project · live signal</span>
+              <span class="project-dashboard-kicker"><i id="project-dashboard-dot"></i><span id="project-dashboard-mode">Project · live signal</span></span>
               <h2 id="project-dashboard-name">Project</h2>
               <p id="project-dashboard-blurb">Project workspace.</p>
             </div>
@@ -138,10 +149,12 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
               <span class="project-dashboard-status" id="project-dashboard-status">Loading status</span>
               <span class="project-dashboard-setup" id="project-dashboard-setup">Checking setup</span>
               <a class="project-dashboard-open" id="project-dashboard-open" target="_blank" rel="noopener noreferrer" hidden>Open app ↗</a>
+              <button type="button" class="project-dashboard-open" id="project-settings-open">Settings</button>
             </div>
           </div>
           <div class="home-context"><span data-home-status aria-live="polite">Loading live widget connections…</span></div>
           <div class="grid home-grid" id="slot-project"></div>
+          <section class="mini-operator-panel" id="mini-service-requests" aria-labelledby="mini-service-requests-title" hidden></section>
         </div>
       </section>
 
@@ -181,66 +194,113 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
       </section>
 
       <section class="view" data-view="tools"><div class="grid" id="slot-tools"></div></section>
-      <section class="view" data-view="ad-studio" aria-labelledby="ad-studio-heading">
-        <div class="ad-studio" id="ad-studio">
-          <header class="ad-studio-head">
-            <div><h2 id="ad-studio-heading">Ad Studio</h2><p>Turn a source image into a Feed and native Story template.</p></div>
-            <span class="ad-studio-owner">Runs on Hermes</span>
+      <section class="view" data-view="ad-template-generator" aria-labelledby="ad-template-generator-heading">
+        <div class="ad-template-generator" id="ad-template-generator">
+          <header class="ad-template-generator-head">
+            <div><h2 id="ad-template-generator-heading">Ad Template Generator</h2><p>Upload once, compare the evidence, then edit or approve the reusable template.</p></div>
+            <span class="ad-template-generator-owner">Runs on Hermes</span>
           </header>
-          <nav class="ad-studio-tabs" role="tablist" aria-label="Ad Studio sections">
-            <button type="button" class="is-on" id="ad-tab-run" role="tab" aria-selected="true" aria-controls="ad-panel-run" data-ad-tab="run">Create</button>
+          <ol class="ad-workflow-steps" aria-label="Ad template workflow"><li><span>1</span><strong>Upload</strong><small>Add source images</small></li><li><span>2</span><strong>Generate</strong><small>Hermes builds both placements</small></li><li><span>3</span><strong>Compare</strong><small>Check faithful evidence</small></li><li><span>4</span><strong>Edit / approve</strong><small>Finish in Blockwise</small></li></ol>
+          <nav class="ad-template-generator-tabs" role="tablist" aria-label="Ad Template Generator sections">
+            <button type="button" class="is-on" id="ad-tab-run" role="tab" aria-selected="true" aria-controls="ad-panel-run" data-ad-tab="run">Upload and generate</button>
             <button type="button" id="ad-tab-runs" role="tab" aria-selected="false" aria-controls="ad-panel-runs" data-ad-tab="runs">Runs</button>
+            <button type="button" id="ad-tab-review" role="tab" aria-selected="false" aria-controls="ad-panel-review" data-ad-tab="review">Compare and approve <span class="ad-review-count" id="ad-review-count" hidden>0</span></button>
             <button type="button" id="ad-tab-pipeline" role="tab" aria-selected="false" aria-controls="ad-panel-pipeline" data-ad-tab="pipeline">How it works</button>
           </nav>
 
-          <div class="ad-studio-panel is-on" id="ad-panel-run" role="tabpanel" aria-labelledby="ad-tab-run" data-ad-panel="run">
+          <div class="ad-template-generator-panel is-on" id="ad-panel-run" role="tabpanel" aria-labelledby="ad-tab-run" data-ad-panel="run">
             <form class="ad-run-form" id="ad-run-form">
-              <div class="ad-section-heading"><div><h3>Source image → ad template</h3><p>Choose a source image for a live Hermes run.</p></div><span id="ad-run-mode">Single</span></div>
-              <input type="file" id="ad-source-files" accept="image/*" hidden>
+              <div class="ad-section-heading"><div><h3>1. Upload source images</h3><p>Add up to 20 images. Each image becomes its own durable Run.</p></div><span id="ad-run-mode">No images</span></div>
+              <section class="ad-model-control" aria-labelledby="ad-model-heading">
+                <div class="ad-model-primary">
+                  <label for="ad-model-builder"><strong id="ad-model-heading">Generation model</strong><span>Only for these Ad Template Generator runs</span></label>
+                  <select id="ad-model-builder" aria-describedby="ad-model-status" disabled><option>Loading Hermes models…</option></select>
+                </div>
+                <details class="ad-model-advanced" id="ad-model-advanced">
+                  <summary>Advanced model roles</summary>
+                  <div class="ad-model-grid">
+                    <label>Photo assets<select id="ad-model-photo-assets" disabled></select></label>
+                    <label>Iteration comparator<select id="ad-model-comparator" disabled></select></label>
+                    <label>Completion reviewer A<select id="ad-model-reviewer-a" disabled></select></label>
+                    <label>Completion reviewer B<select id="ad-model-reviewer-b" disabled></select></label>
+                    <label>Stall diagnosis<select id="ad-model-diagnosis" disabled></select></label>
+                  </div>
+                </details>
+                <p class="ad-model-status" id="ad-model-status" role="status">Reading verified vision models from Hermes…</p>
+              </section>
+              <input type="file" id="ad-source-files" accept="image/*" multiple hidden>
               <button type="button" class="ad-drop" id="ad-drop">
                 <span class="ad-drop-mark" aria-hidden="true">+</span>
-                <strong>Choose a source image</strong>
-                <small>Choose from this device, or drop an image here.</small>
+                <strong>Choose source images</strong>
+                <small>Click to browse, or drop up to 20 images here.</small>
               </button>
-              <div class="ad-source-preview" id="ad-source-preview" aria-live="polite"></div>
+              <div class="ad-source-preview" id="ad-source-preview" aria-live="polite" aria-label="Source image queue"></div>
               <div class="ad-form-pair">
                 <label>Project<select id="ad-run-project" required><option value="">Loading projects…</option></select></label>
-                <label>Job name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
+                <label>Run name<input id="ad-run-name" maxlength="70" placeholder="August product ads"></label>
               </div>
-              <label>Brief <span>optional</span><textarea id="ad-run-brief" maxlength="800" rows="4" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea></label>
-              <div class="ad-submit-row"><p id="ad-run-status" role="status">Hermes will run this as a background job. It will not open or interrupt a Hub chat.</p><button type="submit" class="ad-primary" id="ad-run-submit">Run job</button></div>
+              <label>Brief <span>optional</span><textarea id="ad-run-brief" rows="4" aria-describedby="ad-run-brief-limit" placeholder="What should change, what must stay, and which copy or assets to use?"></textarea><small class="ad-brief-limit" id="ad-run-brief-limit">Up to 4,000 characters · 0 used</small></label>
+              <div class="ad-submit-row"><p id="ad-run-status" role="status">Add one or more images. Each image becomes its own Run.</p><button type="submit" class="ad-primary" id="ad-run-submit" disabled>Start runs</button></div>
             </form>
             <aside class="ad-run-guide" aria-label="Generation summary">
-              <h3>One source. A live template run.</h3>
-              <ol><li><strong>Read the design</strong><span>Hermes analyses the source design.</span></li><li><strong>Build editable layers</strong><span>The builder starts cheap, creates separate Feed and Story documents, and switches automatically to the stronger builder after a regression or two consecutive gains below 0.5.</span></li><li><strong>Render, score, improve</strong><span>One comparator runs per iteration. A score below 9.5 triggers another revision.</span></li><li><strong>Finish automatically</strong><span>After the comparator passes, two final reviewers run automatically.</span></li></ol>
+              <h3>Source-matched templates. One source per Run.</h3>
+              <ol>
+                <li><strong>Measure a fixed target</strong><span>Hermes measures geometry, colour, type, imagery, shading and effects deterministically.</span></li>
+                <li><strong>Build editable placements</strong><span>The builder creates editable Feed and Story templates from the measured source.</span></li>
+                <li><strong>Refine the best candidate</strong><span>Each edit uses the source, best editable template and matching previews. Equal or worse results are discarded; after five attempts without improvement, a frontier model diagnoses the stall once.</span></li>
+                <li><strong>Review, then approve manually</strong><span>After at most 16 comparisons, the final reviewer gate and Blockwise smoke test send a passing template to your Ready for Review queue.</span></li>
+              </ol>
               <button type="button" class="ad-text-button" data-ad-open-pipeline>See the full lifecycle</button>
             </aside>
           </div>
 
-          <div class="ad-studio-panel" id="ad-panel-runs" role="tabpanel" aria-labelledby="ad-tab-runs" data-ad-panel="runs" hidden>
+          <div class="ad-template-generator-panel" id="ad-panel-runs" role="tabpanel" aria-labelledby="ad-tab-runs" data-ad-panel="runs" hidden>
             <div class="ad-runs-layout">
-              <section class="ad-runs-list-panel"><div class="ad-section-heading"><div><h3>Run history</h3><p>Durable jobs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div><div class="ad-runs-list" id="ad-runs-list"></div></section>
+              <section class="ad-runs-list-panel">
+                <div class="ad-section-heading"><div><h3>Run history</h3><p>Saved runs recorded by Hermes.</p></div><span class="ad-live-state" id="ad-live-state">Live</span></div>
+                <details class="ad-run-status-guide">
+                  <summary>What the statuses mean</summary>
+                  <dl>
+                    <div><dt>Running</dt><dd>Hermes is building or reviewing the current run.</dd></div>
+                    <div><dt>Complete</dt><dd>The run finished and its artifacts remain available.</dd></div>
+                    <div><dt>Failed</dt><dd>The run stopped before completion; open it for the recorded failure.</dd></div>
+                    <div><dt>Cancelled</dt><dd>The run was deliberately stopped and its evidence was retained.</dd></div>
+                    <div><dt>Superseded</dt><dd>An older failed or cancelled attempt kept after a newer attempt became current.</dd></div>
+                  </dl>
+                </details>
+                <div class="ad-runs-list" id="ad-runs-list"></div>
+              </section>
               <section class="ad-run-detail" id="ad-run-detail"><div class="ad-empty"><strong>Select a run</strong><span>Open a run to inspect every iteration, comparator score and final review.</span></div></section>
             </div>
           </div>
 
-          <div class="ad-studio-panel" id="ad-panel-pipeline" role="tabpanel" aria-labelledby="ad-tab-pipeline" data-ad-panel="pipeline" hidden>
+          <div class="ad-template-generator-panel" id="ad-panel-review" role="tabpanel" aria-labelledby="ad-tab-review" data-ad-panel="review" hidden>
+            <div class="ad-review-layout">
+              <section class="ad-review-list-panel">
+                <div class="ad-section-heading"><div><h3>3. Compare, then edit or approve</h3><p>Passed automated QA and waiting for your decision.</p></div><span class="ad-live-state" id="ad-review-live-state">Live</span></div>
+                <div class="ad-review-list" id="ad-review-list" aria-live="polite"></div>
+              </section>
+              <section class="ad-review-detail" id="ad-review-detail"><div class="ad-empty"><strong>Select a template</strong><span>Compare the source and finished placements before publishing it to Blockwise.</span></div></section>
+            </div>
+          </div>
+
+          <div class="ad-template-generator-panel" id="ad-panel-pipeline" role="tabpanel" aria-labelledby="ad-tab-pipeline" data-ad-panel="pipeline" hidden>
             <div class="ad-pipeline-toolbar">
               <div><h3>How template generation works</h3><p>Frank starts the run. This view shows what Hermes actually did.</p></div>
               <div class="ad-pipeline-controls"><label>Project<select id="ad-pipeline-project"></select></label><label>Inspect run<select id="ad-pipeline-run"><option value="">No run selected</option></select></label></div>
             </div>
             <section class="ad-process-monitors" aria-label="Implementation monitors">
-              <div><strong>Architecture</strong><span id="ad-archify-status">Checking Archify artifact&</span><a id="ad-archify-link" href="/api/ad-studio/architecture/artifact" target="_blank" rel="noreferrer" hidden>Open diagram</a></div>
+              <div><strong>Architecture</strong><span id="ad-archify-status">Checking Archify artifact&</span><a id="ad-archify-link" href="/api/ad-template-generator/architecture/artifact" target="_blank" rel="noreferrer" hidden>Open diagram</a></div>
               <div><strong>Implementation activity</strong><span id="ad-agenttrail-status">Checking AgentTrail board&</span><pre id="ad-agenttrail-board" hidden></pre></div>
             </section>
             <section class="ad-system-map" aria-label="Frank generation architecture">
-              <div><strong>Frank</strong><span>Starts the run and shows its progress.</span></div><i aria-hidden="true"></i>
+              <div><strong>Frank</strong><span>Starts the run, shows Hermes progress and records your manual decision.</span></div><i aria-hidden="true"></i>
               <div><strong>Hermes</strong><span>Owns the durable run and events.</span></div><i aria-hidden="true"></i>
-              <div><strong>Template Builder</strong><span>Creates editable Feed and native Story layers.</span></div><i aria-hidden="true"></i>
-              <div><strong>Blockwise</strong><span>Imports the finished template into Blockwise.</span></div>
+              <div><strong>Builder</strong><span>Builds editable Feed and Story layers, then refines the best measured candidate.</span></div><i aria-hidden="true"></i>
+              <div><strong>Blockwise</strong><span>Smoke-tests the candidate and holds it in quarantine until you approve and publish.</span></div>
             </section>
             <section class="ad-iteration-law" aria-label="Quality iteration rule">
-              <div><strong>Render</strong><span>Feed + native Story</span></div><b aria-hidden="true">→</b><div><strong>Compare</strong><span>One comparison per iteration</span></div><b aria-hidden="true">→</b><div><strong>Revise</strong><span>Below 9.5 loops automatically</span></div><b aria-hidden="true">↻</b><div><strong>Final review</strong><span>Two fresh reviews at completion</span></div><b aria-hidden="true">→</b><div><strong>Accept</strong><span>Both scores must reach 9.5</span></div>
+              <div><strong>Measure</strong><span>Deterministic source target</span></div><b aria-hidden="true">→</b><div><strong>Build</strong><span>Editable Feed + Story</span></div><b aria-hidden="true">→</b><div><strong>Compare + refine</strong><span>Keep only the best candidate</span></div><b aria-hidden="true">↻</b><div><strong>Final reviewer gate</strong><span>Recorded quality decision</span></div><b aria-hidden="true">→</b><div><strong>Your review</strong><span>Approve, revise or discard</span></div>
             </section>
             <div class="ad-pipeline-layout">
               <section class="ad-pipeline-canvas"><div class="ad-declared-label"><strong>Declared lifecycle</strong><span>The route Frank promises before a run begins.</span></div><div id="ad-pipeline-graph"></div></section>
@@ -258,13 +318,6 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
         </div>
       </section>
 
-      <dialog class="ad-source-dialog" id="ad-source-dialog" aria-labelledby="ad-source-dialog-title">
-        <div class="ad-source-dialog-shell">
-          <header><div><h2 id="ad-source-dialog-title">Choose one source image</h2></div><button type="button" class="ad-source-close" id="ad-source-close" aria-label="Close">&times;</button></header>
-          <section class="ad-source-local"><div><strong>This device</strong><span>Select the source image to turn into Feed + Story.</span></div><button type="button" class="ad-source-device" id="ad-source-device">Choose image</button></section>
-          <footer><button type="button" class="ad-source-cancel" id="ad-source-cancel">Cancel</button></footer>
-        </div>
-      </dialog>
       <section class="view" data-view="ad-radar" aria-labelledby="radar-surface-title">
         <div class="radar" id="ad-radar">
           <header class="radar-commandbar">
@@ -526,9 +579,12 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
       </section>
       <section class="view" data-view="trace"><div class="grid" id="slot-trace"></div></section>
       <section class="view" data-view="releases"><div class="grid" id="slot-releases"></div></section>
+      <section class="view" data-view="operations-tool" id="operations-tool"></section>
+      <section class="view operate-view" data-view="ops" id="operate-ops"></section>
       <section class="view operate-view" data-view="live" id="operate-live"></section>
       <section class="view operate-view" data-view="map" id="operate-map"></section>
       <section class="view operate-view" data-view="control" id="operate-control"></section>
+      <section class="view" data-view="ad-db"><div class="ad-db" id="ad-db"></div></section>
     </div>
   </main>
 </div>
@@ -548,11 +604,23 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
     <div class="project-dialog-actions"><button type="button" id="new-project-cancel">Cancel</button><button type="submit" class="primary" id="new-project-submit">Create project</button></div>
   </form>
 </dialog>
+<dialog class="project-dialog" id="project-settings-dialog" aria-labelledby="project-settings-title">
+  <form id="project-settings-form" autocomplete="off">
+    <div class="project-dialog-head"><div><span>Project</span><h2 id="project-settings-title">Project settings</h2></div><button type="button" id="project-settings-close" aria-label="Close project settings">×</button></div>
+    <p class="project-dialog-intro" id="project-settings-note">Update the project details shown in Frank.</p>
+    <label>Name<input id="project-settings-name" maxlength="80" required></label>
+    <label>Description<textarea id="project-settings-blurb" maxlength="240" rows="4"></textarea></label>
+    <label>Live app <span>optional</span><input id="project-settings-live" type="url" maxlength="500" placeholder="https://example.com"></label>
+    <div class="project-dialog-error" id="project-settings-error" role="alert"></div>
+    <div class="project-dialog-actions"><button type="button" id="project-settings-archive">Archive</button><button type="submit" class="primary" id="project-settings-save">Save</button></div>
+  </form>
+</dialog>
 <div class="ctx" id="ctx" hidden>
   <button type="button" data-act="open">Open</button>
   <button type="button" data-act="preview">Preview</button>
   <button type="button" data-act="download">Download</button>
   <button type="button" data-act="copy">Copy path</button>
+  <button type="button" data-act="attach">Attach to chat</button>
   <button type="button" data-act="pin" id="ctx-pin">Pin</button>
   <button type="button" data-act="refresh">Refresh</button>
 </div>
@@ -564,6 +632,6 @@ FINISH: unreviewed and undocumented is unfinished; this build ends with the fini
   <div class="media-stage" id="media-stage"></div>
 </div>
 <script src="/dashboard/dashboard-vendor.js?v=20260817-signal-board"></script>
-<script type="module" src="/js/app.js?v=20260831-ad-radar-v1"></script>
+<script type="module" src="/js/app.js?v=20260908-review-stability-v3"></script>
 </body>
 </html>

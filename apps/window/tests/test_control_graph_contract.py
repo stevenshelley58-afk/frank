@@ -10,7 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from graph.control_contract import ControlContractError, _resolve_repository_root, _validate_graph, derive_graph_revision, graph_from_collector_receipt, materialize_control_graph, reconcile_assertions
 from graph.control_store import ControlGraphStore
 from graph.control_provider import ControlProvider
-from scripts.generate_control_maps import MAX_RECEIPT_BYTES, _default_run_key, _resolve_graph, _write_receipt
+from scripts.generate_control_maps import MAX_RECEIPT_BYTES, _default_run_key, _resolve_graph, _with_assertion_titles, _write_receipt
 
 DECLARED = {"nodes": [{"id": "service:frank-window", "kind": "service", "version": "1"}], "relationships": []}
 OBSERVED = {"nodes": [{"id": "service:frank-window", "kind": "service", "version": "2"}, {"name": "mystery"}], "relationships": []}
@@ -120,18 +120,32 @@ class ControlGraphContractTest(unittest.TestCase):
 
     def test_map_generator_resolves_only_a_hash_verified_store_pointer(self):
         with tempfile.TemporaryDirectory() as tmp:
+            declared = copy.deepcopy(DECLARED)
+            declared["nodes"][0]["title"] = "Frank Window"
             store = ControlGraphStore(Path(tmp)); graph, assertions, manifest = materialize_control_graph(
-                DECLARED, {"nodes": [{"id": "service:frank-window", "kind": "service", "version": "1"}], "relationships": []},
+                declared, {"nodes": [{"id": "service:frank-window", "kind": "service", "version": "1"}], "relationships": []},
             )
             revision = graph["graph_revision"]
             store.write_generation(revision, graph, assertions, manifest); store.advance_current(revision)
             pointer = Path(tmp) / "graph" / "current.json"
-            self.assertEqual(_resolve_graph(pointer)["graph_revision"], revision)
+            resolved = _resolve_graph(pointer)
+            self.assertEqual(resolved["graph_revision"], revision)
+            self.assertEqual(next(node for node in resolved["nodes"] if node["id"] == "service:frank-window")["title"], "Frank Window")
             tampered = json.loads(pointer.read_text(encoding="utf-8"))
             tampered["manifest_hash"] = "sha256:" + "0" * 64
             pointer.write_text(json.dumps(tampered), encoding="utf-8")
             with self.assertRaises(RuntimeError):
                 _resolve_graph(pointer)
+
+    def test_map_title_join_ignores_non_human_shebang_assertions(self):
+        graph = {"nodes": [{"id": "hook:deploy", "kind": "hook"}, {"id": "project:frank", "kind": "project"}]}
+        assertions = {"assertions": [
+            {"subject_id": "hook:deploy", "scope_id": "hook:deploy", "predicate": "title", "value": "!/usr/bin/env bash"},
+            {"subject_id": "project:frank", "scope_id": "project:frank", "predicate": "title", "value": "  Frank   control plane  "},
+        ]}
+        enriched = _with_assertion_titles(graph, assertions)
+        self.assertNotIn("title", enriched["nodes"][0])
+        self.assertEqual(enriched["nodes"][1]["title"], "Frank control plane")
 
     def test_map_generator_default_run_key_is_deterministic_and_canonical(self):
         revision = "g_" + "a" * 64

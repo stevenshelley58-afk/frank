@@ -9,6 +9,21 @@ import {
   normalizeGuideCard,
   normalizeGuideIntent,
 } from "./mini_guide.mjs";
+import {
+  PROJECT_REFRESH_CONCURRENCY,
+  canPersistProjectRefresh,
+  isCurrentProjectAccess,
+  jobNextAction,
+  jobRenderPolicy,
+  mapWithConcurrency,
+  ownerReturnEvent,
+  receiptViewModel,
+  reconcileProjectRefresh,
+  workFreshness,
+  workNextAction,
+  workRowAccessibleName,
+  workStatusLabel,
+} from "./mini_projects.mjs";
 
 (function () {
   "use strict";
@@ -24,8 +39,6 @@ import {
   const STATUS_POLL_BASE_MS = 8000;
   const STATUS_POLL_HIDDEN_MS = 30000;
   const STATUS_POLL_OFFLINE_MS = 60000;
-  // Keep this client-only delivery change instantly reversible while it is evaluated.
-  const ENABLE_QUIET_STREAM_DELIVERY = true;
   // Guide replies are shown only when complete. This keeps drafting and tool activity
   // out of a customer conversation while preserving the server's final answer.
   const BUFFER_GUIDE_REPLIES_UNTIL_COMPLETE = true;
@@ -142,13 +155,9 @@ import {
     serviceOptions: null,
     editingShareId: "",
     dialogTriggers: new Map(),
+    projectStoreRevision: 0,
   };
   state.accountClaim = readAccountClaim();
-
-  if (!ENABLE_QUIET_STREAM_DELIVERY) {
-    messages.setAttribute("aria-live", "polite");
-    messages.setAttribute("aria-relevant", "additions text");
-  }
 
   const api = createMiniApi();
   const sharedCommentReplay = createReplayKeyTracker(mutationKey);
@@ -324,42 +333,6 @@ import {
     }
   }
 
-  function jobNextAction(job) {
-    if (!job) return "Open this work to see where things are up to.";
-    if (job.stage === "ready") return "Open the result or ask for a change.";
-    if (job.stage === "needs_attention") return job.retry_available ? "There is one thing to try again." : "There is one thing to review.";
-    if (job.stage === "queued") return "Your solution is queued.";
-    if (job.stage === "checking") return "Giving it a final check.";
-    if (job.stage === "working") return "We’re putting it together.";
-    return "Open this work to see what happens next.";
-  }
-
-  function hasTimestamp(value) {
-    return Number(value) > 0;
-  }
-
-  function receiptNow(stage) {
-    if (stage === "needs_attention") return "Needs you";
-    if (["queued", "working", "checking"].includes(stage)) return "Working";
-    if (stage === "ready") return "Ready to use";
-    return "Saved";
-  }
-
-  // This pure view model deliberately knows nothing about a job's tokens,
-  // transcript, files, title, progress, or result contents.
-  function receiptViewModel(job) {
-    const stage = cleanText(job && job.stage, 80);
-    const ready = stage === "ready" && Boolean(job && job.result);
-    return {
-      aim: cleanText(job && job.problem, 400) || "Not recorded",
-      now: receiptNow(stage),
-      next: jobNextAction(job),
-      updated: hasTimestamp(job && job.updated_at) ? formatDateTime(job.updated_at) : "",
-      availability: hasTimestamp(job && job.available_until) ? formatDate(job.available_until) : "",
-      ready,
-    };
-  }
-
   function receiptMarkup(view) {
     const rows = [
       ["Aim", esc(view.aim)],
@@ -373,7 +346,7 @@ import {
 
   function renderReceipt(job) {
     if (!projectReceipt || !projectReceiptDetails || !state.current || !job) return;
-    projectReceiptDetails.innerHTML = receiptMarkup(receiptViewModel(job));
+    projectReceiptDetails.innerHTML = receiptMarkup(receiptViewModel(job, { formatDate, formatDateTime }));
     projectReceipt.hidden = false;
   }
 
@@ -381,95 +354,6 @@ import {
     if (!projectReceipt || !projectReceiptDetails) return;
     projectReceipt.hidden = true;
     projectReceiptDetails.replaceChildren();
-  }
-
-  function ownerReturnEvent(prior, job) {
-    if (!prior || !prior.last_opened_stage) return "";
-    const wasReadyWithResult = prior.last_opened_stage === "ready" && Boolean(prior.last_opened_had_result);
-    const isReadyWithResult = job && job.stage === "ready" && Boolean(job.result);
-    if (isReadyWithResult && !wasReadyWithResult) return "ready";
-    if (job && job.stage === "needs_attention" && prior.last_opened_stage !== "needs_attention") return "needs_attention";
-    return "";
-  }
-
-  function workStatusLabel(item, labels) {
-    if (item.return_event === "ready") return "Ready since you last opened it";
-    if (item.return_event === "needs_attention") return "Needs you since you last opened it";
-    return item.refresh_status === "unavailable" ? labels.unavailable : (labels[item.stage] || "Saved");
-  }
-
-  function workNextAction(item) {
-    return item.refresh_status === "unavailable"
-      ? "Try opening this work again when you are online."
-      : jobNextAction(item);
-  }
-
-  function workRowAccessibleName(item, labels) {
-    const title = cleanText(item.title, 180) || "Your solution";
-    return cleanText(`Open ${title}. ${workStatusLabel(item, labels)}. Next: ${workNextAction(item)}`, 500);
-  }
-
-  function jobRenderPolicy(source) {
-    return {
-      focusReceipt: source === "work",
-      scrollToEnd: source === "start",
-    };
-  }
-
-  // Deterministic fixtures are available to browser QA with
-  // ?qa=return-receipt-fixtures. They cover the local-only return signal,
-  // receipt redaction, and the focus/scroll policy without touching storage.
-  const RETURN_RECEIPT_FIXTURES = Object.freeze({
-    transitions: [
-      [{ last_opened_stage: "working", last_opened_had_result: false }, { stage: "ready", result: {} }, "ready"],
-      [{ last_opened_stage: "ready", last_opened_had_result: false }, { stage: "ready", result: {} }, "ready"],
-      [{ last_opened_stage: "ready", last_opened_had_result: true }, { stage: "ready", result: {} }, ""],
-      [{ last_opened_stage: "working", last_opened_had_result: false }, { stage: "needs_attention" }, "needs_attention"],
-      [{ last_opened_stage: "needs_attention", last_opened_had_result: false }, { stage: "needs_attention" }, ""],
-      [null, { stage: "ready", result: {} }, ""],
-    ],
-    receipt: {
-      job: {
-        problem: "Stop chasing quote follow-ups",
-        stage: "ready",
-        result: {},
-        next_action: "Open the result.",
-        updated_at: 1735689600,
-        available_until: 1738368000,
-        claim: "must-not-appear",
-        conversation: "must-not-appear",
-        attachments: "must-not-appear",
-      },
-      forbidden: ["must-not-appear", "claim", "conversation", "attachments"],
-    },
-  });
-
-  function returnReceiptFixtureFailures() {
-    const failures = [];
-    RETURN_RECEIPT_FIXTURES.transitions.forEach(([prior, job, expected], index) => {
-      if (ownerReturnEvent(prior, job) !== expected) failures.push(`transition-${index}`);
-    });
-    const receipt = receiptMarkup(receiptViewModel(RETURN_RECEIPT_FIXTURES.receipt.job));
-    if (RETURN_RECEIPT_FIXTURES.receipt.forbidden.some((value) => receipt.includes(value))) failures.push("receipt-redaction");
-    if (!receipt.includes('href="#current-result"')) failures.push("receipt-result-link");
-    if (!jobRenderPolicy("work").focusReceipt || jobRenderPolicy("work").scrollToEnd) failures.push("work-focus-policy");
-    if (jobRenderPolicy("direct").focusReceipt || jobRenderPolicy("direct").scrollToEnd) failures.push("direct-focus-policy");
-    if (jobRenderPolicy("poll").focusReceipt || jobRenderPolicy("poll").scrollToEnd) failures.push("poll-scroll-policy");
-    if (!jobRenderPolicy("start").scrollToEnd) failures.push("start-scroll-policy");
-    const workLabels = { ready: "Ready", unavailable: "Couldn’t update just now" };
-    const workName = workRowAccessibleName({
-      title: "Quote follow-up",
-      stage: "ready",
-      result: {},
-      return_event: "ready",
-      refresh_status: "live",
-      next_action: "Open the result.",
-    }, workLabels);
-    if (!workName.includes("Quote follow-up") || !workName.includes("Ready since you last opened it") || !workName.includes("Open the result.")) failures.push("work-row-accessible-name");
-    if (jobNextAction({ stage: "queued" }) !== "Your solution is queued.") failures.push("queued-next-action");
-    if (jobNextAction({ stage: "working" }) !== "We’re putting it together.") failures.push("working-next-action");
-    if (jobNextAction({ stage: "needs_attention", retry_available: false }) !== "There is one thing to review.") failures.push("attention-next-action");
-    return failures;
   }
 
   function jobCanDelete(job) {
@@ -521,8 +405,10 @@ import {
   }
 
   function safeUrl(value) {
+    const raw = String(value || "").trim();
+    if (!raw) return "";
     try {
-      const url = new URL(String(value || ""), location.origin);
+      const url = new URL(raw, location.origin);
       const sameOrigin = url.origin === location.origin;
       if (!sameOrigin) return "";
       if (url.username || url.password) return "";
@@ -566,33 +452,57 @@ import {
     return state.transcript.map((item) => ({ role: item.role, text: item.text })).filter((item) => item.text);
   }
 
-  function projects() {
+  function projectStoreRaw() {
     try {
-      const parsed = JSON.parse(localStorage.getItem(PROJECT_STORE) || "[]");
+      return localStorage.getItem(PROJECT_STORE) || "[]";
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function projectsFromRaw(raw) {
+    try {
+      const parsed = JSON.parse(raw || "[]");
       if (!Array.isArray(parsed)) return [];
-      return parsed.filter((item) => item && validId(item.id) && validClaim(item.claim)).map((item) => {
-        const { return_event: _storedReturnEvent, ...project } = item;
-        const baseline = cleanText(item.last_opened_stage, 80)
-          ? {
-            last_opened_stage: cleanText(item.last_opened_stage, 80),
-            last_opened_had_result: Boolean(item.last_opened_had_result),
-          }
-          : {};
-        return {
-          ...project,
-          ...baseline,
-          transcript: cleanTranscript(item.transcript),
-        };
-      });
+      return parsed
+        .filter((item) => item && validId(item.id) && validClaim(item.claim))
+        .map((item) => {
+          const { return_event: _storedReturnEvent, ...project } = item;
+          const baseline = cleanText(item.last_opened_stage, 80)
+            ? {
+              last_opened_stage: cleanText(item.last_opened_stage, 80),
+              last_opened_had_result: Boolean(item.last_opened_had_result),
+            }
+            : {};
+          return {
+            ...project,
+            ...baseline,
+            refresh_status: "saved",
+            refresh_error: "",
+            transcript: cleanTranscript(item.transcript),
+          };
+        });
     } catch (_error) {
       return [];
     }
   }
 
-  function saveProject(job, claim, transcriptOverride = null, options = {}) {
-    if (!job || !validId(job.id) || !validClaim(claim)) return false;
-    const prior = projects().find((item) => item.id === job.id);
-    const list = projects().filter((item) => item.id !== job.id);
+  function projects() {
+    return projectsFromRaw(projectStoreRaw());
+  }
+
+  function persistProjects(list, notifyOnFailure = false) {
+    try {
+      localStorage.setItem(PROJECT_STORE, JSON.stringify(list.slice(0, 50)));
+      state.projectStoreRevision += 1;
+      return true;
+    } catch (_error) {
+      if (notifyOnFailure) notify("Your work is ready. Keep this page open so you can come back to it.");
+      return false;
+    }
+  }
+
+  function savedProjectFromJob(job, claim, prior, transcriptOverride = null, options = {}) {
     const openedBaseline = options.recordOpened
       ? {
         last_opened_stage: cleanText(job.stage, 80) || "saved",
@@ -604,7 +514,7 @@ import {
           last_opened_had_result: Boolean(prior.last_opened_had_result),
         }
         : {});
-    list.unshift({
+    return {
       id: job.id,
       claim,
       title: job.title || (job.result && job.result.title) || "Your solution",
@@ -619,20 +529,25 @@ import {
       ...openedBaseline,
       transcript: Array.isArray(transcriptOverride)
         ? cleanTranscript(transcriptOverride)
-        : state.transcript.length ? cleanTranscript(state.transcript) : cleanTranscript(prior && prior.transcript),
-    });
-    try {
-      localStorage.setItem(PROJECT_STORE, JSON.stringify(list.slice(0, 50)));
-      return true;
-    } catch (_error) {
-      notify("Your work is ready. Keep this page open so you can come back to it.");
-      return false;
-    }
+        : state.transcript.length
+          ? cleanTranscript(state.transcript)
+          : cleanTranscript(prior && prior.transcript),
+    };
+  }
+
+  function saveProject(job, claim, transcriptOverride = null, options = {}) {
+    if (!job || !validId(job.id) || !validClaim(claim)) return false;
+    const saved = projects();
+    const prior = saved.find((item) => item.id === job.id);
+    const next = [
+      savedProjectFromJob(job, claim, prior, transcriptOverride, options),
+      ...saved.filter((item) => item.id !== job.id),
+    ];
+    return persistProjects(next, true);
   }
 
   function forgetProject(id) {
-    try { localStorage.setItem(PROJECT_STORE, JSON.stringify(projects().filter((item) => item.id !== id))); }
-    catch (_error) { /* Keep the stale local entry rather than affecting anything else. */ }
+    persistProjects(projects().filter((item) => item.id !== id));
   }
 
   function saveDraft() {
@@ -863,12 +778,11 @@ import {
   }
 
   function setLatestPending(value) {
-    state.newReplyPending = ENABLE_QUIET_STREAM_DELIVERY && Boolean(value);
+    state.newReplyPending = Boolean(value);
     jumpToLatestButton.hidden = !(state.newReplyPending || document.activeElement === jumpToLatestButton);
   }
 
   function jumpToLatest() {
-    if (!ENABLE_QUIET_STREAM_DELIVERY) return;
     scrollStreamToEnd();
     state.followingLatest = true;
     setLatestPending(false);
@@ -1506,11 +1420,6 @@ import {
       if (!streamMessage || generation !== state.generation) return;
       const textNode = streamMessage.querySelector(".message-text");
       if (!textNode) return;
-      if (!ENABLE_QUIET_STREAM_DELIVERY) {
-        textNode.textContent = value;
-        scrollToEnd();
-        return;
-      }
       const follow = followAtStart || (state.followingLatest && streamAtEnd());
       textNode.textContent = value;
       if (follow) {
@@ -1542,10 +1451,6 @@ import {
         streamMessage = startStreamMessage();
         state.followingLatest = followAtStart;
         paintStreamText(partial, followAtStart);
-        return;
-      }
-      if (!ENABLE_QUIET_STREAM_DELIVERY) {
-        paintStreamText(partial);
         return;
       }
       pendingStreamText = partial;
@@ -1603,11 +1508,11 @@ import {
     const finalText = assistantMessage.querySelector(".message-text");
     finalText.removeAttribute("aria-live");
     setReplyAnnouncement("Frank’s reply is ready.");
-    const finalFollowAtEnd = ENABLE_QUIET_STREAM_DELIVERY && state.followingLatest && streamAtEnd();
-    if (ENABLE_QUIET_STREAM_DELIVERY && !finalFollowAtEnd) setLatestPending(true);
+    const finalFollowAtEnd = state.followingLatest && streamAtEnd();
+    if (!finalFollowAtEnd) setLatestPending(true);
     recordAssistant(reply);
     state.guideVersion = guideVersion;
-    attachGuideOutcome(assistantMessage, guideCard, { quietStream: ENABLE_QUIET_STREAM_DELIVERY, followAtEnd: finalFollowAtEnd });
+    attachGuideOutcome(assistantMessage, guideCard, { quietStream: true, followAtEnd: finalFollowAtEnd });
     setBusy(false);
     saveDraft();
   }
@@ -2608,27 +2513,30 @@ import {
   function pollLaterWithDelay(delay) {
     stopPolling();
     const generation = state.generation;
-    const job = state.current && state.current.job;
+    const access = state.current && { id: state.current.id, claim: state.current.claim };
+    if (!access) return;
+    const job = state.current.job;
     const stageDelay = job && job.stage === "checking" ? 5000 : job && job.stage === "working" ? STATUS_POLL_BASE_MS : STATUS_POLL_BASE_MS * 1.5;
     const backoff = Math.min(60000, stageDelay * (2 ** Math.min(state.pollFailures, 3)));
     const wait = delay == null
       ? (!navigator.onLine ? STATUS_POLL_OFFLINE_MS : (document.hidden ? STATUS_POLL_HIDDEN_MS : backoff))
       : delay;
     state.timer = setTimeout(async () => {
-      if (generation !== state.generation || !state.current) return;
+      if (!isCurrentProjectAccess(state.current, access, generation, state.generation)) return;
       if (!navigator.onLine) {
         pollLaterWithDelay(STATUS_POLL_OFFLINE_MS);
         return;
       }
       try {
-        const body = await api.readJob(state.current);
-        if (generation !== state.generation || !state.current) return;
+        const body = await api.readJob(access);
+        if (!isCurrentProjectAccess(state.current, access, generation, state.generation)) return;
         rememberAccountClaim(cleanText(body && body.account_claim_token, 300));
         state.pollFailures = 0;
         renderJobUpdate(body.job);
       } catch (error) {
+        if (!isCurrentProjectAccess(state.current, access, generation, state.generation)) return;
         if (error.status === 404) {
-          forgetProject(state.current.id);
+          forgetProject(access.id);
           history.replaceState(null, "", location.pathname + location.search);
           newConversation(false);
           addMessage("assistant", "I couldn’t open that link. It may no longer be available.");
@@ -2770,10 +2678,8 @@ import {
       const savedAccess = projects().find((item) => item.id === access.id);
       if (error.status === 404 && (!savedAccess || savedAccess.claim === access.claim)) forgetProject(access.id);
       history.replaceState(null, "", location.pathname + location.search);
-      state.current = null;
+      newConversation(false);
       addMessage("assistant", error.status === 404 ? "I couldn’t open that link. It may no longer be available." : "I couldn’t open your work just now.");
-      setComposer({ placeholder: "Start with a new problem…", hint: "Your other work has not been changed.", attachments: true });
-      state.phase = "problem";
     }
   }
 
@@ -2825,26 +2731,32 @@ import {
   }
 
   async function refreshProjects() {
-    const list = projects();
-    if (!list.length) return list;
-    const refreshed = await Promise.all(list.map(async (item) => {
+    const raw = projectStoreRaw();
+    const snapshot = projectsFromRaw(raw);
+    if (!snapshot.length) return snapshot;
+    const revision = state.projectStoreRevision;
+    const outcomes = await mapWithConcurrency(snapshot, PROJECT_REFRESH_CONCURRENCY, async (item) => {
       try {
         const body = await api.readJob({ id: item.id, claim: item.claim });
         rememberAccountClaim(cleanText(body && body.account_claim_token, 300));
-        const job = body && body.job;
-        if (!job) throw new MiniApiError("Work update unavailable");
-        const returnEvent = ownerReturnEvent(item, job);
-        saveProject(job, item.claim, item.transcript);
-        return { ...item, ...job, refresh_status: "live", refresh_error: "", next_action: jobNextAction(job), return_event: returnEvent };
+        if (!body || !body.job) throw new MiniApiError("Work update unavailable");
+        return { kind: "live", job: body.job, returnEvent: ownerReturnEvent(item, body.job) };
       } catch (error) {
-        if (error.status === 404) {
-          forgetProject(item.id);
-          return null;
-        }
-        return { ...item, refresh_status: "unavailable", refresh_error: "Couldn’t update just now." };
+        return error.status === 404 ? { kind: "missing" } : { kind: "unavailable" };
       }
-    }));
-    return refreshed.filter(Boolean);
+    });
+    const refreshed = reconcileProjectRefresh(
+      snapshot,
+      outcomes,
+      (prior, job) => savedProjectFromJob(job, prior.claim, prior, prior.transcript),
+    );
+    const unchanged = canPersistProjectRefresh(
+      { revision, raw },
+      { revision: state.projectStoreRevision, raw: projectStoreRaw() },
+    );
+    if (!unchanged) return projects();
+    persistProjects(refreshed.stored);
+    return refreshed.display;
   }
 
   function renderWorkList(list = projects()) {
@@ -2861,8 +2773,9 @@ import {
       <strong>${esc(item.title || "Your solution")}</strong><small class="work-status${item.return_event ? " work-return-cue" : ""}">${esc(workStatusLabel(item, labels))}</small>
       <span>${esc(item.problem || "Private work")}</span>
       <small class="work-meta">Updated ${esc(formatDateTime(item.updated_at || item.created_at))}${item.available_until ? ` · Available until ${esc(formatDate(item.available_until))}` : ""}</small>
+      <small class="work-freshness${item.refresh_status === "unavailable" ? " is-stale" : ""}>${esc(workFreshness(item))}</small>
       <small class="work-next">Next: ${esc(workNextAction(item))}</small>
-    </button>`).join("") : `<div class="empty-work"><strong>Nothing here yet.</strong><p>Saved work from here will appear here.</p></div>`;
+    </button>`).join("") : `<div class="empty-work"><strong>Nothing here yet.</strong><p>Projects saved in this browser appear here.</p></div>`;
   }
 
   async function openWork() {
@@ -3264,7 +3177,6 @@ import {
   });
 
   thread.addEventListener("scroll", () => {
-    if (!ENABLE_QUIET_STREAM_DELIVERY) return;
     state.followingLatest = streamAtEnd();
     if (state.followingLatest) setLatestPending(false);
   }, { passive: true });
@@ -3408,9 +3320,6 @@ import {
     }
   }).catch(() => {});
 
-  if (new URLSearchParams(location.search).get("qa") === "return-receipt-fixtures") {
-    window.__miniFrankReturnReceiptFixtureFailures = returnReceiptFixtureFailures();
-  }
 
   const initialPublicAccess = publicAccessFromHash();
   const initialAccess = accessFromHash();

@@ -1,12 +1,17 @@
 """Fail-closed Hermes action dispatch boundary (no local execution)."""
 from __future__ import annotations
 import json, os, re, urllib.parse, urllib.request
+from pathlib import Path
 from typing import Any, Mapping
 import yaml
 
 class DispatchError(ValueError): pass
 _KEY = re.compile(r"^[A-Za-z0-9_-]{8,128}$")
 _ID = re.compile(r"^[a-z][a-z0-9_-]{1,127}$")
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 def _origin(value: str) -> str:
     p=urllib.parse.urlsplit(value)
@@ -15,7 +20,7 @@ def _origin(value: str) -> str:
 
 class HermesDispatcher:
     def __init__(self, config_path, *, opener=None, timeout=30):
-        self.config_path=config_path; self.opener=opener or urllib.request.urlopen; self.timeout=max(1,min(60,int(timeout)))
+        self.config_path=config_path; self.opener=opener or urllib.request.build_opener(_NoRedirect()).open; self.timeout=max(1,min(60,int(timeout)))
     def _actions(self):
         with open(self.config_path, encoding="utf-8") as f: value=yaml.safe_load(f)
         rows=value.get("actions",[]) if isinstance(value,Mapping) else []
@@ -35,7 +40,19 @@ class HermesDispatcher:
             if spec.get("type")=="enum" and arguments[key] not in spec.get("values",[]): raise DispatchError("invalid enum argument")
         origin=_origin(os.environ.get("HERMES_ENDPOINT","")); payload=json.dumps({"action_id":action_id,"target_id":target_id,"arguments":dict(arguments),"operator_attestation":attestation},separators=(",",":"),ensure_ascii=False).encode()
         if len(payload)>128*1024: raise DispatchError("action body exceeds bound")
-        req=urllib.request.Request(origin+"/v1/control/actions",data=payload,method="POST",headers={"Content-Type":"application/json","Accept":"application/json"})
+        api_key = os.environ.get("HERMES_API_KEY", "").strip()
+        api_key_file = os.environ.get("HERMES_API_KEY_FILE", "").strip()
+        if api_key_file:
+            key_path = Path(api_key_file)
+            if key_path.is_symlink() or not key_path.is_file() or key_path.stat().st_size > 4096:
+                raise DispatchError("Hermes credential file is unavailable")
+            try:
+                api_key = key_path.read_text(encoding="utf-8").strip()
+            except (OSError, UnicodeError) as error:
+                raise DispatchError("Hermes credential file is unavailable") from error
+        if not api_key:
+            raise DispatchError("Hermes credential is not configured")
+        req=urllib.request.Request(origin+"/v1/control/actions",data=payload,method="POST",headers={"Content-Type":"application/json","Accept":"application/json","Authorization":"Bearer "+api_key})
         try:
             with self.opener(req,timeout=self.timeout) as response:
                 final_url = response.geturl() if hasattr(response, "geturl") else origin + "/v1/control/actions"
@@ -49,4 +66,8 @@ class HermesDispatcher:
         except DispatchError: raise
         except Exception as e: raise DispatchError("Hermes is unavailable; action remains a preview") from e
         if not isinstance(result,Mapping): raise DispatchError("Hermes returned invalid receipt")
-        return {k:result[k] for k in ("status","receipt_id","rollback_action_id","idempotency_key","preview") if k in result}
+        allowed = ("schema","status","receipt_id","action_id","target_id","correlation_id","rollback_action_id","idempotency_key","preview","applies")
+        for key in allowed:
+            if key in result and not isinstance(result[key], (str, bool, type(None))):
+                raise DispatchError("Hermes returned an invalid receipt field")
+        return {k:result[k] for k in allowed if k in result}

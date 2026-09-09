@@ -1,0 +1,34 @@
+id: receipt:ad-template-builder/runtime-consumption-20260831-001
+kind: ad_template_builder_runtime_consumption
+subject_ids:
+  - capability:frank/ad-template-builder
+  - project:blockwise
+  - runtime:hermes-default
+producer: runtime:hermes-default
+source_revision_set:
+  project:frank: 366f4bacad6294261a57751289121193ac162b08
+  project:blockwise-release-contract: 21a192cd242029c4c35d406734a62cb0591590a1
+deployed_revision_set:
+  service:frank-window: 366f4bacad6294261a57751289121193ac162b08
+  service:blockwise-app: a8beeff
+captured_at: "2026-08-30T21:55:02Z"
+fresh_until: null
+outcome: pass
+evidence_uris:
+  - runtime://frank-window/api/ad-studio/runs
+  - runtime://hermes/tool-runs/trun_314a002242f745fea55086e24f87d298
+redaction: secret_filtered
+schema: frank.ad-template-builder-runtime-consumption/v1
+facts:
+  endpoint: http://127.0.0.1:18080/api/ad-studio/runs
+  tool_id: ad-template-generator
+  run_id: trun_314a002242f745fea55086e24f87d298
+  project_id: blockwise
+  status: completed
+  stage: live
+  observed_stages: [source, build, render, compare, final-check, live]
+  final_review: accepted
+  import:
+    status: imported
+    template_id: just-listed-source-match-006
+    template_url: https://blockwise.sale/ad-studio/templates/just-listed-source-match-006

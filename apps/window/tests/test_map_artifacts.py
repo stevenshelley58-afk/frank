@@ -31,6 +31,8 @@ def manifest(projection="projection:vps/world", generation="generation:vps-world
         "freshness": "fresh",
         "stale_reason": None,
         "stable_id_map": {"service:frank-window": "n_aaaaaaaaaaaaaaaa"},
+        "relationship_count": 1,
+        "rendered_relationship_count": 1,
         "status": "generated",
     }
     value.update(extra)

@@ -2,3 +2,4 @@ schema_version: 1
 aliases: []
 external_mappings:
   - {id: mapping:agenttrail/frank, canonical_id: project:frank, destination_authority: agenttrail, destination_id_or_path: /projects/only-process-frank, source_revision: 5b97cf3cef548a0c668731e7f569fa36c14832f2, owner_id: project:frank, evidence_receipt_id: receipt:agenttrail/frame-proof-20260830-001, confidence: high, status: verified, valid_until: null}
+  - {id: mapping:ad-template-builder/blockwise, canonical_id: capability:frank/ad-template-builder, destination_authority: runtime, destination_id_or_path: project:blockwise, source_revision: 366f4bacad6294261a57751289121193ac162b08, owner_id: project:frank, evidence_receipt_id: receipt:ad-template-builder/runtime-consumption-20260831-001, confidence: high, status: verified, valid_until: null}

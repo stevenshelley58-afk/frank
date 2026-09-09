@@ -29,7 +29,9 @@ class HindsightMemoryInfraTests(unittest.TestCase):
         self.assertEqual(config["bank_id"], "steven-unassigned")
         self.assertEqual(config["bank_id_template"], "steven-{workspace}")
         self.assertTrue(config["auto_recall"])
-        self.assertTrue(config["auto_retain"])
+        # v0.21 contract: retention becomes curated (memory-admission adapter
+        # + explicit Memory-view promotions); automatic per-turn retain is off.
+        self.assertFalse(config["auto_retain"])
         # Hindsight 0.6.1 persists only HINDSIGHT_API_* profile settings. An
         # explicit idle_timeout becomes HINDSIGHT_EMBED_DAEMON_IDLE_TIMEOUT,
         # is dropped on save, and makes Hermes restart the healthy daemon on

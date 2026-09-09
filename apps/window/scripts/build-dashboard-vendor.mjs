@@ -16,6 +16,7 @@ await build({
   globalName: "FrankDashboardVendor",
   target: "es2020",
   outfile: resolve(outputRoot, "dashboard-vendor.js"),
+  minify: true,
   sourcemap: false,
   legalComments: "eof",
 });

@@ -50,13 +50,13 @@ class ArchifyAdapterTest(unittest.TestCase):
         self.assertTrue(all(component["id"].startswith("n_") for component in first["components"]))
         self.assertNotIn("status", json.dumps(first))
 
-    def test_world_projection_preserves_unknown_observed_nodes(self):
+    def test_world_projection_keeps_topology_and_leaves_unclassified_findings_in_control(self):
         base_nodes = [dict(node, evidence_receipt_ids=[]) for node in GRAPH["nodes"]]
-        graph = dict(GRAPH, nodes=base_nodes + [{"id": "finding:observed-only/mystery", "kind": "observed-only/unclassified", "name": "mystery"}])
+        graph = dict(GRAPH, nodes=base_nodes + [{"id": "finding:observed-only/mystery", "kind": "observed-only/unclassified", "name": "mystery", "layer": "observed"}])
         diagram, metadata = graph_to_archify(graph, "projection:vps/world", required_coverage=["workloads", "evidence_producers"])
-        self.assertIn("finding:observed-only/mystery", metadata["stable_id_map"])
+        self.assertNotIn("finding:observed-only/mystery", metadata["stable_id_map"])
         self.assertEqual(metadata["coverage"]["missing"], ["evidence_producers"])
-        self.assertEqual(len(diagram["components"]), len(graph["nodes"]))
+        self.assertEqual(len(diagram["components"]), len(base_nodes))
 
     def test_many_long_ids_use_bounded_labels_and_retain_full_identity_metadata(self):
         nodes = [
@@ -79,7 +79,7 @@ class ArchifyAdapterTest(unittest.TestCase):
         self.assertEqual(diagram["connections"], [])
         self.assertEqual(metadata["relationship_count"], 244)
         self.assertEqual(metadata["rendered_relationship_count"], 0)
-        self.assertEqual(metadata["exclusions"], ["relationships_render_in_control_graph"])
+        self.assertEqual(metadata["exclusions"], ["additional_relationships_in_control"])
         self.assertEqual(set(metadata["stable_id_map"]), {node["id"] for node in nodes})
         self.assertEqual(set(metadata["display_labels"]), set(metadata["stable_id_map"]))
 
@@ -95,14 +95,62 @@ class ArchifyAdapterTest(unittest.TestCase):
         self.assertTrue(all(component["size"] == [98, 26] for component in diagram["components"]))
         self.assertEqual(metadata["rendered_relationship_count"], 0)
 
+    def test_compact_overview_uses_canonical_names_not_ordinals(self):
+        nodes = [
+            {"id": "capability:frank-search", "kind": "capability", "title": "Search the knowledge base"},
+            {"id": "hook:window-submit", "kind": "hook", "name": "Submit to Frank Window"},
+        ] + [
+            {"id": f"service:frank-worker-{index:02d}", "kind": "service"}
+            for index in range(12)
+        ]
+        diagram, metadata = graph_to_archify(
+            {"graph_revision": GRAPH["graph_revision"], "nodes": nodes, "edges": []},
+            "projection:vps/world",
+        )
+        labels = metadata["display_labels"]
+        self.assertTrue(labels["capability:frank-search"]["label"].startswith("Search the knowledg"))
+        self.assertTrue(labels["hook:window-submit"]["label"].startswith("Submit to Frank"))
+        self.assertNotIn("cap 001", {item["label"] for item in labels.values()})
+        self.assertEqual(metadata["display_labels"]["capability:frank-search"]["archify_id"], diagram["components"][0]["id"])
+
+    def test_file_backed_fallbacks_use_distinctive_names(self):
+        nodes = [
+            {"id": "app:frank/tools/ad-intelligence/home-json-7de40ad489db", "kind": "app"},
+            {"id": "hook:frank/apps/window/infra/knowledge/generate-mini-frank-sh-b3a4883e9723", "kind": "hook"},
+            {"id": "template:frank/knowledge/sources/manifests/frank-memory-contract-json-5b89ca722691", "kind": "template"},
+        ]
+        diagram, _ = graph_to_archify({"graph_revision": GRAPH["graph_revision"], "nodes": nodes}, "projection:vps/world")
+        self.assertEqual(
+            [component["label"] for component in diagram["components"]],
+            ["Ad Intelligence Home", "Generate Mini Frank", "Frank Memory Contract"],
+        )
+
+    def test_large_overview_keeps_authored_labels_instead_of_type_indexes(self):
+        nodes = [
+            {"id": "capability:hermes-operator", "kind": "capability", "title": "Hermes operator controls"},
+            {"id": "host:production-vps", "kind": "host", "title": "Production VPS"},
+            *({"id": f"service:worker-{index:02d}", "kind": "service", "title": f"Worker {index:02d}"} for index in range(12)),
+        ]
+        graph = {"graph_revision": GRAPH["graph_revision"], "nodes": nodes}
+        diagram, metadata = graph_to_archify(graph, "projection:vps/world")
+        labels = [component["label"] for component in diagram["components"]]
+        self.assertIn("Hermes operator", labels[0])
+        self.assertIn("Production VPS", labels[1])
+        self.assertNotIn("cap 001", labels)
+        self.assertNotIn("hoo 002", labels)
+        self.assertTrue(all(component["sublabel"] for component in diagram["components"]))
+        self.assertEqual(set(metadata["display_labels"]), {node["id"] for node in nodes})
+
     def test_multirow_projection_uses_first_screen_overview(self):
         nodes = [{"id": f"service:blockwise-{index:02d}", "kind": "service"} for index in range(14)]
         edges = [{"id": "edge:blockwise", "from": nodes[0]["id"], "to": nodes[-1]["id"]}]
         graph = {"graph_revision": GRAPH["graph_revision"], "nodes": nodes, "edges": edges}
         diagram, metadata = graph_to_archify(graph, "projection:blockwise/runtime")
-        self.assertEqual(diagram["layout"]["cols"], 12)
-        self.assertEqual(diagram["connections"], [])
-        self.assertEqual(metadata["exclusions"], ["relationships_render_in_control_graph"])
+        self.assertEqual(diagram["layout"]["cols"], 8)
+        self.assertEqual(diagram["components"][0]["size"], [155, 44])
+        self.assertLessEqual(max(component["pos"][1] for component in diagram["components"]), 550)
+        self.assertEqual(len(diagram["connections"]), 1)
+        self.assertEqual(metadata["exclusions"], [])
 
     def test_build_metadata_contains_revisions_and_input_hash(self):
         result = build_projection(GRAPH, "projection:frank/architecture", source_revisions={"repo:frank": "a" * 40}, deployed_revisions={"release:frank": "b" * 40})
@@ -114,6 +162,49 @@ class ArchifyAdapterTest(unittest.TestCase):
         receipt = {"checks": [{"name": name, "ok": True} for name in SHOWCASE_CHECKS]}
         self.assertEqual(showcase_check_results(receipt), {name: True for name in SHOWCASE_CHECKS})
         self.assertFalse(all(showcase_check_results({"checks": []}).values()))
+
+    def test_architecture_keeps_parallel_connections_and_hydrated_copy(self):
+        graph = {
+            "graph_revision": GRAPH["graph_revision"],
+            "nodes": [
+                {"id": "service:frank-window", "kind": "service", "title": "Frank Window", "sublabel": "UI + run monitor"},
+                {"id": "route:frank-public", "kind": "route", "title": "Authenticated public route"},
+                {"id": "route:frank-loopback", "kind": "route", "title": "Loopback route"},
+            ],
+            "edges": [
+                {"id": "edge:window/public", "from": "service:frank-window", "to": "route:frank-public", "relationship": "exposes"},
+                {"id": "edge:window/loopback", "from": "service:frank-window", "to": "route:frank-loopback", "relationship": "exposes"},
+            ],
+        }
+        diagram, metadata = graph_to_archify(graph, "projection:ad-template-builder/architecture")
+        self.assertEqual(len(diagram["connections"]), 2)
+        self.assertEqual({item["label"] for item in diagram["connections"]}, {"exposes"})
+        window = next(item for item in diagram["components"] if item["label"] == "Frank Window")
+        self.assertEqual(window["sublabel"], "UI + run monitor")
+        self.assertEqual(metadata["relationship_count"], metadata["rendered_relationship_count"])
+
+    def test_workflow_projection_uses_pinned_workflow_shape(self):
+        diagram, metadata = graph_to_archify(GRAPH, "projection:ad-template-builder/workflow")
+        self.assertEqual(diagram["diagram_type"], "workflow")
+        self.assertTrue(diagram["lanes"])
+        self.assertTrue(diagram["phases"])
+        self.assertEqual(len(diagram["edges"]), len(GRAPH["edges"]))
+        self.assertGreaterEqual(len(diagram["mainPath"]), 2)
+        self.assertEqual(metadata["relationship_count"], len(GRAPH["edges"]))
+
+    def test_architecture_adds_truthful_boundaries_views_and_cards(self):
+        graph = {
+            "graph_revision": GRAPH["graph_revision"],
+            "nodes": [
+                {"id": "project:frank", "kind": "project", "title": "Frank"},
+                {"id": "service:frank-window", "kind": "service", "title": "Frank Window"},
+            ],
+            "edges": [{"id": "edge:frank/contains-window", "from": "project:frank", "to": "service:frank-window", "relationship": "contains"}],
+        }
+        diagram, _ = graph_to_archify(graph, "projection:ad-template-builder/architecture")
+        self.assertEqual(diagram["boundaries"][0]["wraps"], [next(item["id"] for item in diagram["components"] if item["label"] == "Frank Window")])
+        self.assertGreaterEqual(len(diagram["meta"]["views"]), 1)
+        self.assertTrue(diagram["cards"])
 
 
 if __name__ == "__main__":

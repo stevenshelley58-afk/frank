@@ -40,27 +40,25 @@ Hermes state.
 ## Graph and inspection boundaries
 
 Domain Tools own and version their manifests, pipeline nodes and edges,
-immutable settings revisions, and Hermes envelopes. A later
-`ToolManifestAdapter` projects those domain-owned declarations to the shared
-`schema://frank.graph/v1` shape. Its final field mapping and spec path remain
-an integration dependency and are intentionally not guessed here.
+immutable settings revisions, and Hermes envelopes. The implemented
+`normalize_manifest(...)` function in `apps/window/graph/contract.py`
+validates and normalizes those declarations into disposable
+`schema://frank.graph/v1` read models; `TOOL_MANIFEST_ADAPTER` in
+`graph/blueprint.py` publishes the `tool-manifest` registration. The
+normalized graph is never a canonical Tool definition and the normalizer never
+executes a Tool.
 
-The sole graph renderer is maxGraph (Apache-2.0). CodeMirror 6 is reserved for
-prompt/instruction inspection, and vanilla-jsoneditor plus Ajv is reserved for
-schema-backed payload editing. This contract adds no graph UI, graph execution,
-or tool-specific settings store. Existing trace, slot-trace, and trace-view
-hooks remain the interchange/presentation integration points; the generic
-event envelopes here do not replace them. OTel GenAI-style spans/events are
-the intended trace interchange mapping.
-
-## Reuse choices
-
-The contract follows JSON Schema conventions (`schema`, `type`, `properties`,
-and versioned URIs) without adding a runtime dependency to the lightweight
-Window. Trace/event fields borrow the portable OpenTelemetry shape—stable
-request identity, sequence, timestamp, status, and structured data—without
-claiming to be an OTLP exporter. A future adapter can map these envelopes to
-OpenTelemetry or Hermes transport types without changing the manifest.
+Graph views use the renderer that fits their bounded, read-only projection:
+maxGraph for the workbench and diagram editing surface, G6 and Sigma for
+network exploration, and Mermaid for compact declarative diagrams. None of
+these renderers executes a Tool or becomes a source of graph truth. CodeMirror
+6 is reserved for prompt/instruction inspection, and vanilla-jsoneditor plus
+Ajv is reserved for schema-backed payload editing. The Window already pins
+`jsonschema` and `rfc8785` for schema validation and canonical graph/manifest
+digests. Existing trace, slot-trace, and trace-view hooks remain the
+interchange/presentation integration points; generic event envelopes do not
+replace them. OTel GenAI-style spans/events are the intended trace interchange
+mapping.
 
 Example manifest shape:
 

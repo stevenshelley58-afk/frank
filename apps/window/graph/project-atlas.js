@@ -40,7 +40,7 @@ const DOMAIN_HINTS = [
     /\b(failure|check|fixture|assertion|acceptance)\b/i,
   ] },
   { name: "Creative production", patterns: [
-    /\b(ad studio|ad library|creative|campaign|advert\w*|image|video|media|render|generation|meta)\b/i,
+    /\b(ad template generator|ad studio|ad library|creative|campaign|advert\w*|image|video|media|render|generation|meta)\b/i,
     /\b(asset|template|shot|scene|composition)\b/i,
   ] },
   { name: "Product & purpose", patterns: [

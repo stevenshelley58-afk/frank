@@ -81,13 +81,20 @@ def _run_viewport(browser: Any, base_url: str, evidence_root: Path, name: str, v
         _navigate(page, base_url, "/mini-frank")
         outcomes["mini_frank_preserved"] = bool(page.evaluate("localStorage.getItem('frank-acceptance-preservation') === '1'"))
         _navigate(page, base_url, "/live")
+        # The AgentTrail iframe appears after the live-source fetch resolves.
+        page.locator("iframe.live-frame").first.wait_for(timeout=20000)
         outcomes["live_navigation"] = page.locator("iframe.live-frame").count() == 1
         _navigate(page, base_url, "/map")
+        # Map rows render only after /api/control/projections resolves; wait
+        # for the real fetch to paint instead of racing it with count().
+        page.locator(".map-row").first.wait_for(timeout=20000)
         _click(page, ".map-row", "validated map projection")
         frame = page.locator("iframe.map-frame").first
         outcomes["map_navigation"] = frame.count() == 1
         outcomes["map_artifact"] = "/api/control/maps/artifact?projection_id=" in str(frame.get_attribute("src"))
         _navigate(page, base_url, "/control")
+        # Control rows render after the overview fetch; wait like a real user.
+        page.locator(".control-row").first.wait_for(timeout=20000)
         records = page.locator(".control-row")
         outcomes["control_navigation"] = records.count() > 0
         if not outcomes["control_navigation"]:

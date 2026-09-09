@@ -9,46 +9,33 @@ unassigned sessions in that profile. Blockwise, Merrypaws, Elf & Wonder,
 Pavone, and future bodies of work are projects/workspaces within the same
 profile; they are never separate Hermes profiles.
 
+## Model-provider routing
+
+Steven's 8 September 2026 direction is to use DeepSeek models through
+Concentrate, not a direct DeepSeek account. Keep the direct Hermes provider
+disabled and its credential absent from active stores. Changing chat routing
+does not change frozen Ad Template Generator routes or approval gates.
+Dated configuration, migration and verification evidence is recorded in
+[the routing change record](evidence/deepseek-concentrate-20260908.md).
+
 ## Mini Frank hierarchy
 
-Mini Frank is `project:mini-frank` inside this same Frank source, Window
-runtime, control boundary, Hermes profile, and release. Its public route is the
-thin client at `/mini-frank/`; it renders state and submits typed requests but
-does not reason, select models, run tools, or maintain its own skills, rules,
-policies, memory service, repository, or control plane. Hermes is the only
-brain for intake, research, building, revisions, and tool execution.
+Mini Frank is an independent peer project boundary in the shared Hermes profile,
+not a Frank feature. It has isolated customer account and job scopes; private
+scoped memory remains separate, while shared Hermes execution and centrally
+maintained capabilities are reached only through explicit project-scoped
+bindings.
 
-Customer work is subordinate to the Mini project:
+The intended Mini public surface is a standalone staged application. It has not
+cut over: the public Mini route is still served by Frank's `apps/window` image.
+Do not infer a separate deployed runtime or claim a completed cutover from the
+staged standalone work, especially while concurrent Mini edits remain dirty.
+The remaining `/projects/mini-frank/customer-projects` path is legacy customer
+data, retained only for safe migration or retention work.
 
-```text
-project:mini-frank
-└── account:mini-frank/<account-id>
-    └── job:mini-frank/<account-id>/<job-id>
-        └── revisions, runs, artifacts, shares and service requests
-```
-
-These are stable scopes in Frank, not extra checkouts or Hermes profiles. Mini
-uses centrally versioned Frank capabilities and deterministic policies through
-project-scoped bindings. Shared Hermes skills remain in the one central skills
-library and are executed only by Hermes; a Mini binding never copies their
-implementation.
-
-Mini currently ships in the central `apps/window` image on Frank's main VPS.
-Moving its public edge to another VPS later must be a deployment-adapter change
-against the same committed Frank revision, not a fork of its source or state.
-The retired `/projects/mini-frank` checkout is not a product source. Only its
-`customer-projects` directory remains mounted as narrowly scoped legacy data
-so retention and migration cleanup can preserve or erase old customer work
-safely; the retired `site` directory is never mounted or served.
-
-The sole product source is `apps/window`. The previous Next.js/API platform,
-databases, caches, embedded skills, agent harnesses, and alternate preview
-applications were retired because they duplicated Hermes or produced multiple
-competing versions of Frank.
-
-The Window may grow through modular visual widgets, but those widgets remain
-views and controls over authoritative VPS or Hermes capabilities. They must not
-become independent brains or duplicate source/data owned elsewhere.
+The shared skills library remains central and runs only through Hermes.
+Approved references are a separate, scoped reference boundary; they do not
+merge private memory, copy implementation, or create a second agent loop.
 
 ## Homes, widgets, and connections
 
@@ -65,27 +52,61 @@ contract; tool and agent homes open inside the existing content pane.
   or arbitrary provider calls.
 - Connections is a catalog and control surface. Frank stores provider, scope,
   capabilities, recorded status, and opaque connection/vault references only.
-- OpenBao is the credential boundary, Activepieces CE is the preferred broad
-  connector/workflow runtime, and Hermes remains the policy/execution boundary.
-  Provider systems remain authoritative.
+- One shared Inbox, Calendar, Notifications, and CRM is the target surface,
+  with project-filtered views rather than per-project copies. It does not claim
+  provider integrations that are not yet implemented and verified.
+- Infisical CE is the credential boundary, Activepieces CE is the preferred
+  broad connector/workflow runtime, and Hermes remains the policy/execution
+  boundary. Provider systems remain authoritative.
 
-## VPS layout
+## VPS structure and guardrails
 
-| Responsibility | Path |
-| --- | --- |
-| Frank source | `/projects/frank` |
-| External project workspaces | `/projects/<slug>` |
-| Window data | `/srv/frank/data/window` |
-| Window secrets | `/srv/frank/secrets/window.env` |
-| Shared skills | `/srv/skills` |
-| Hermes state | `/home/hermes/.hermes` |
+This is a role-based layout, not a claim that every child of `/projects` is a
+canonical project. Current canonical project sources use `/projects/<slug>`;
+release snapshots, worktrees, canaries, and historical checkouts are separate
+roles and must be reference-audited before archival or deletion.
 
-The Window container sees only its explicit read-only mounts through the
-virtual `/vps` tree. Hindsight and Hermes state are never mounted into Frank.
+| Role | Current location | Boundary |
+| --- | --- | --- |
+| Canonical Frank source | `/projects/frank` | Version-controlled product source only. |
+| Canonical project source | `/projects/<slug>` | One project boundary per slug, including Mini. |
+| Shared skills | `/srv/skills` | Reusable capability library, not project-private data. |
+| Hermes profile/runtime state | `/home/hermes/.hermes` | One shared Hermes runtime/profile. |
+| Hermes secrets | `/srv/hermes/secrets` | Private service state, outside source control. |
+| Hindsight provider data | `/home/hermes/.pg0/instances/hindsight-embed-hermes/data` | Native provider-managed state; do not move merely to standardise paths. |
+| Frank private data, secrets, and backups | `/srv/frank/data`, `/srv/frank/secrets`, `/srv/frank/backups` | Per-service state, outside source control. |
+| Derived project knowledge | `/srv/frank/data/window/knowledge/<slug>` | Rebuildable projection, not a second shared semantic database. |
 
-The authoritative memory design is [MEMORY.md](MEMORY.md): one Hindsight
-service in Hermes' `default` profile, with private project/account/job scopes
-and a separately approved, provenance-bearing industry knowledge scope.
+The active Hermes services are `hermes-gateway.service` and
+`hermes-serve.service`, both operating as `hermes` from
+`/home/hermes/.hermes`; `frank-serve-bridge.service` is the narrow Frank
+bridge. Hindsight is one semantic-memory service with isolated project,
+account, and job scopes. A shared reference is not permission to merge private
+memory, duplicate project context, or add a second brain.
+
+The Window container sees only explicit read-only project mounts through
+`/vps`; its writable data and preview mounts are service state, not source.
+The authoritative memory design is [MEMORY.md](MEMORY.md).
+
+### Current exceptions
+
+- `/projects` contains mixed release and worktree directories. Classify each
+  against active deployment references and backup retention before cleanup.
+- Active Blockwise Compose references span two live release paths. The currently
+  bound Caddy and database-init files are content-identical, so this is a
+  cleanup/reference hazard rather than evidence of a broken runtime.
+- Frank still has the writable legacy Mini `customer-projects` bind. Back it
+  up, reference-audit it, and migrate it to an approved private state root
+  before any removal; do not delete it blindly.
+
+These guardrails apply when cleanup resumes: retain current runtime paths,
+avoid mass moves, version-control nonsecret deployment configuration and
+runbooks, and keep credentials and private runtime state outside Git.
+
+This source revision supports project creation, listing, metadata editing,
+archive, and restore. Archive preserves files, sessions, and running work.
+The approved release pointer and live health response identify which source
+revision is deployed; a working branch is not deployment evidence.
 
 ## Creating projects
 

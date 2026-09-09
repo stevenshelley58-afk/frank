@@ -1,10 +1,13 @@
 # Frank
 
-Frank is Steven’s visual Window and Hub on the VPS. Hermes is the brain.
+Frank is Steven's visual Window and Hub on the VPS. Hermes is the brain: it
+owns reasoning, model selection, tools, skills, memory, sessions, and
+execution. Frank renders and forwards work; it does not duplicate Hermes
+state.
 
-There is one implementation: [`apps/window`](apps/window). It provides the
-Hub chat, VPS file explorer, project surfaces, tools, traces, and releases,
-while forwarding thinking and tool work to Hermes.
+There is one application source: [apps/window](apps/window). Start with
+[docs/README.md](docs/README.md), then use [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)
+for verification and supported extensions.
 
 ## Production
 
@@ -18,13 +21,22 @@ while forwarding thinking and tool work to Hermes.
 Deployments originate from a committed Git revision:
 
 ```bash
+cd /projects/frank/apps/window
+npm ci --ignore-scripts
+npm run verify
 cd /projects/frank
-git pull --ff-only
 bash apps/window/deploy.sh
 ```
 
 The deployment preserves data, builds the Window image, performs a short
-atomic cutover, and checks container health.
+atomic cutover, and checks container health. Follow
+[docs/FRANK_RELEASE_RUNBOOK.md](docs/FRANK_RELEASE_RUNBOOK.md) for the full
+release and browser-acceptance procedure.
 
-Hermes memory is deployed separately because it belongs to the brain, not the
-Window. See [`docs/MEMORY.md`](docs/MEMORY.md).
+## Install the Window
+
+Frank includes a web app manifest and branded icons. Chrome and Edge can
+install `https://frank.fail` as an app, which gives Frank its own launcher icon
+and a standalone window while keeping the same authenticated HTTPS origin.
+Frank intentionally has no offline data cache: an installed Window continues
+to use the live Frank and Hermes services.

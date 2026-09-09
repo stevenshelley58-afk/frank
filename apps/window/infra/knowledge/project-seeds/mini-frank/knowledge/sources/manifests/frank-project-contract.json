@@ -1,1 +1,12 @@
-{"schema":"schema://mini-frank.source/v1","id":"src-frank-project-contract","title":"Frank project contract","kind":"local-file","locator":"docs/PROJECT.md","revision":"1604946b5e1b316e8c13331ede4bbf381fbcaca1","sha256":"b907ab35124db81e091b5053f7a256d7b8a0ca30e58afd504bb204435fa6c19b","tier":"A","verified_at":"2026-08-30","retention_rights":"repository-owned"}
+{
+  "schema": "schema://mini-frank.source/v1",
+  "id": "src-frank-project-contract",
+  "title": "Frank project contract",
+  "kind": "local-file",
+  "locator": "docs/PROJECT.md",
+  "revision": "sha256:c353aaeb46943a45a7cba700edec494fda28a24bc4ede069e1509c8b6d6cb290",
+  "sha256": "c353aaeb46943a45a7cba700edec494fda28a24bc4ede069e1509c8b6d6cb290",
+  "tier": "A",
+  "verified_at": "2026-09-06",
+  "retention_rights": "repository-owned"
+}

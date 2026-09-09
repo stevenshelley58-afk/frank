@@ -104,3 +104,12 @@ A widget is a white card with a hairline border and an isolated failure state. R
 - Don't add a second brain, scheduler, or memory store.
 - Don't tint the background.
 - Don't invent metrics.
+
+## Current route and performance notes
+
+The current Window keeps the existing one-viewport rail and content-pane route
+model. Graph workbench code is built separately and its browser validation is
+separate from the non-browser verification runner. Cleanup measurements on
+2026-09-05 reduced the minified graph workbench bundle from 12,232,201 to
+5,570,436 bytes and the dashboard bundle from 1,587,380 to 600,235 bytes.
+Lazy graph loading remains a planned frontend improvement, not a shipped claim.

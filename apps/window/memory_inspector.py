@@ -302,10 +302,11 @@ def _code_pages(root: Path | None, project: dict) -> list[dict]:
 
 
 class MemoryInspector:
-    def __init__(self, project_loader: Callable[[str], dict | None], client: HindsightClient, knowledge_root: Path | None = None):
+    def __init__(self, project_loader: Callable[[str], dict | None], client: HindsightClient, knowledge_root: Path | None = None, global_bank_id: str | None = None):
         self.project_loader = project_loader
         self.client = client
         self.knowledge_root = knowledge_root
+        self.global_bank_id = global_bank_id
 
     def project(self, project_id: str) -> dict:
         project = self.project_loader(project_id)
@@ -424,6 +425,48 @@ class MemoryInspector:
         result = self.client.request("DELETE", _path(bank_id, f"/documents/{urllib.parse.quote(document_id, safe='')}"))
         return {"ok": True, "schema": SCHEMA, "bank_id": bank_id, "document_id": document_id, "result": result}
 
+    def promote_document_global(self, project: dict, document_id: str, confirmation: str, idempotency_key: str) -> dict:
+        """Explicit "Remember everywhere" promotion into the global operator scope.
+
+        Requires exact confirmation and a stable idempotency key. Provenance
+        records the origin bank and document so the promoted copy is always
+        traceable; Hindsight re-extracts in the global bank. Never called on
+        arbitrary chat prose.
+        """
+        if not self.global_bank_id:
+            abort(503, "global memory scope is not configured")
+        document_id = _resource_id(document_id, "document id")
+        if confirmation != f"PROMOTE {document_id}":
+            abort(409, "exact promotion confirmation is required")
+        idempotency_key = _resource_id(idempotency_key, "idempotency key")
+        source = self.document(project, document_id)
+        content = str(source.get("document", {}).get("content") or "").strip()
+        if not content:
+            abort(409, "source document has no content to promote")
+        origin_bank = source.get("bank_id")
+        payload = {
+            "items": [{
+                "content": content,
+                "context": "Global operator preference promoted from project memory in Frank",
+                "document_id": f"admitted-promoted-{idempotency_key}",
+                "metadata": {
+                    "source": "frank-memory-promotion",
+                    "origin_bank": origin_bank,
+                    "origin_document": document_id,
+                    "attributed_to": "steven",
+                },
+                "tags": ["admitted", "global-preference"],
+                "update_mode": "replace",
+            }],
+            "async": False,
+        }
+        result = self.client.request("POST", _path(self.global_bank_id, "/memories"), payload, timeout=120)
+        return {
+            "ok": True, "schema": SCHEMA, "origin_bank": origin_bank, "origin_document": document_id,
+            "global_bank_id": self.global_bank_id, "promoted_document_id": f"admitted-promoted-{idempotency_key}",
+            "result": result,
+        }
+
     def recall(self, project: dict, query: str) -> dict:
         bank_id = _bank_id(project)
         query = _text(query, 600)
@@ -451,6 +494,18 @@ class MemoryInspector:
             "results": results,
             "trace": value.get("trace") if isinstance(value.get("trace"), dict) else {},
         }
+
+
+def _require_same_origin_json() -> None:
+    """Strict same-origin + JSON content type for memory mutations."""
+    origin = request.headers.get("Origin", "").rstrip("/")
+    if not origin:
+        abort(403, "same-origin request required")
+    base = request.host_url.rstrip("/")
+    if origin != base:
+        abort(403, "cross-origin memory mutation refused")
+    if not (request.content_type or "").startswith("application/json"):
+        abort(415, "JSON content type required")
 
 
 def create_blueprint(inspector: MemoryInspector) -> Blueprint:
@@ -488,5 +543,18 @@ def create_blueprint(inspector: MemoryInspector) -> Blueprint:
         if not isinstance(body, dict) or set(body) - {"confirmation"}:
             abort(400, "unsupported forget fields")
         return jsonify(inspector.forget_document(inspector.project(project_id), document_id, str(body.get("confirmation") or "")))
+
+    @api.post("/api/projects/<project_id>/memory/documents/<document_id>/promote-global")
+    def memory_document_promote_global(project_id: str, document_id: str):
+        _require_same_origin_json()
+        body = request.get_json(silent=True) or {}
+        if not isinstance(body, dict) or set(body) - {"confirmation", "idempotency_key"}:
+            abort(400, "unsupported promotion fields")
+        return jsonify(
+            inspector.promote_document_global(
+                inspector.project(project_id), document_id,
+                str(body.get("confirmation") or ""), str(body.get("idempotency_key") or ""),
+            )
+        )
 
     return api

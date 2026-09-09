@@ -1,5 +1,18 @@
 # Frank release runbook
 
+## Mautic, Chatwoot, and Mailflare operator contract
+
+Set `MAUTIC_BASE_URL` and `CHATWOOT_BASE_URL` only to HTTPS origins and leave
+`MAILFLARE_BASE_URL` to the HTTPS origin of the human inbox. Leave all three
+connector statuses `unconfigured` until the Hermes provider adapters have
+verified them. Use `configured` for credentials present but verification
+pending, `ready` only after Hermes/operator verification, and `error` when
+Hermes reports a safe failure category. Frank does not receive or print any
+provider secret. Mailflare is the compose/reply inbox; Resend remains the
+transactional delivery log. Hermes may refresh the redacted support projection at
+`SUPPORT_CONVERSATIONS_FILE`; validate it through
+`GET /api/support/conversations` before enabling a Blockwise support link.
+
 This is the Frank-owned release order for the Connections and private vault
 integration. It is executed only after the Frank revision, Hermes plugin
 contract, broker route/port, and Infisical bundle have been reviewed together.
@@ -75,9 +88,30 @@ off until the Hermes plugin, broker, and vault checks below are live.
 
 6. **Deploy Frank.** Run `apps/window/deploy.sh` for the exact committed SHA.
    The deploy installs/verifies all host control-plane units and creates
-   `/srv/frank/backups/control-plane` as a root-owned `0750` directory. A fresh
-   install (or an invalid/missing current release pointer) leaves every timer
-   stopped and disabled; a routine deploy preserves timers only when the
+   `/srv/frank/backups/control-plane` as a root-owned `0750` directory.
+   When the canonical checkout contains another agent's unrelated edits, deploy
+   a verified merged commit without touching that work:
+
+   ```sh
+   /projects/frank/apps/window/deploy.sh --revision <full-40-character-SHA>
+   ```
+
+   This mode accepts only a commit reachable from `origin/main`, builds solely
+   from a private `git archive` of that commit, and removes that package on all
+   exits. Gitlinked AgentTrail and Archify inputs are expanded by archiving the
+   exact commits pinned by the selected parent revision from their local object
+   databases; submodule worktree contents and current HEADs are never copied.
+   Missing pinned objects, unexpected gitlinks, and nested submodules abort the
+   release before build. The normal no-argument deploy keeps its strict
+   clean-worktree rule.
+   The Caddy file is copied and byte-verified into a revision-pinned release
+   artifact before Compose starts, so no live bind mount targets the temporary
+   archive. Durable host hooks continue to run from the canonical checkout only
+   after their scripts, imported modules, units, and governance inputs are
+   verified identical to the selected SHA; a mismatch aborts before live state
+   changes.
+   A fresh install (or an invalid/missing current release pointer) leaves every
+   timer stopped and disabled; a routine deploy preserves timers only when the
    existing production current pointer and immutable release record validate.
    It validates the secret boundary, derives a Caddy env file containing only
    basic-auth settings, and uses the existing private basic-auth hash solely

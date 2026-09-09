@@ -11,9 +11,9 @@ projections:
     type: data_flow
     mandatory: false
     status: not_generated
-    missing_evidence: [active_deployed_runtime_consumption_receipt]
+    missing_evidence: [verified_stores, verified_retention]
     must_show: [inputs, stores, generated_assets, retention, verified_consumers]
-    exclusions: [unverified_blockwise_consumes_edge]
+    exclusions: [private_inputs, unverified_retention]
 manifest_contract:
   required_fields: [projection_id, graph_revision, generation_id, source_revisions, deployed_revisions, generated_at, coverage, exclusions, archify_version, archify_hash, validation_receipt_id, artifact_hash, prior_passing_manifest, freshness, stale_reason]
   conditional_fields: [status, missing_evidence]

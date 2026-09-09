@@ -1,21 +1,21 @@
 id: capability:frank/ad-template-builder
 kind: template
-title: Ad Template Builder
+title: Ad Template Generator
 eli5: Builds validated ad templates from approved inputs.
 why_it_exists: Canonical Frank-owned workflow for repeatable ad artifacts.
 benefits: [repeatable builds, validation receipts]
-tradeoffs: [runtime consumer evidence is incomplete]
+tradeoffs: [data stores and retention are not yet verified]
 applies_when: [approved template request]
 does_not_apply_when: [private customer material, unapproved source]
 scope_ids: [project:frank]
-source_locator: apps/window/archify/ad-template-process.json
-source_revision: 366f4bacad6294261a57751289121193ac162b08
-content_hash: sha256:53815818f4b5416d97aee413e172cab2cfc4f5cce292f7ab5ef4a0b0d34267a6
+source_locator: apps/window/web/js/ad-template-generator.js
+source_revision: 781a4a5a8b3cd2dedaac6898e496e0915e45e33a
+content_hash: sha256:b23773d41a3ddc774f23d7447e92b6ddcb90161727553564c01347d5f2d5c41a
 authority_tier: repo
 enforcement: ci
 state_axes: {lifecycle: approved, trust: reviewed, installation: installed, enablement: disabled, production_authority: none}
 retirement_assessment: retain
 replacement_ids: []
 consolidation_group: ad-template
-evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001]
+evidence_receipt_ids: [receipt:baseline/frank-vps-20260830-001, receipt:ad-template-builder/runtime-consumption-20260831-001]
 oss_decision_id: receipt:oss-decision/custom-adapters

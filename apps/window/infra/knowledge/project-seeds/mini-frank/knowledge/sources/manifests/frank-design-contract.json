@@ -1,1 +1,12 @@
-{"schema":"schema://mini-frank.source/v1","id":"src-frank-design-contract","title":"Frank Window design contract","kind":"local-file","locator":"apps/window/DESIGN.md","revision":"300d40a9e167f27d7083a9848d5a264fd97fff42","sha256":"54fb0c9b7ce200997622f45a3cf41ce1f65c20d7d492ef5fcd1b24c1671f82e0","tier":"A","verified_at":"2026-08-22","retention_rights":"repository-owned"}
+{
+  "schema": "schema://mini-frank.source/v1",
+  "id": "src-frank-design-contract",
+  "title": "Frank Window design contract",
+  "kind": "local-file",
+  "locator": "apps/window/DESIGN.md",
+  "revision": "sha256:d01aa43f974d45f99e86616202f6a0d3d1faa4ffc1e19df9e5a708b668b3a469",
+  "sha256": "d01aa43f974d45f99e86616202f6a0d3d1faa4ffc1e19df9e5a708b668b3a469",
+  "tier": "A",
+  "verified_at": "2026-09-05",
+  "retention_rights": "repository-owned"
+}

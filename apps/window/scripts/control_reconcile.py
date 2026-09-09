@@ -708,10 +708,16 @@ def _revision_sets(facts: Mapping[str, Any]) -> tuple[dict[str, str], dict[str, 
         if value:
             source = value
             break
-    deployed = exact(revision.get("approved"))
+    approved = revision.get("approved")
+    # Approved deployment identity remains valid evidence during checkout drift.
+    deployed = None
+    if isinstance(approved, Mapping):
+        value = approved.get("value")
+        if isinstance(value, str) and re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value):
+            deployed = value
     # The schema deliberately requires an explicit value even when the host
     # did not expose a revision; "unknown" is typed uncertainty, not a claim.
-    return ({"project:frank": source or "unknown"}, {"project:frank": deployed or source or "unknown"})
+    return ({"project:frank": source or "unknown"}, {"project:frank": deployed or "unknown"})
 
 
 def _receipt_envelope(scope: str, run_id: str, captured_at: str, outcome: str,
@@ -906,7 +912,9 @@ class Collector:
             approved_record = clean.get("revision", {}).get("approved", {}) \
                 if isinstance(clean.get("revision"), Mapping) else {}
             approved_value = approved_record.get("value") \
-                if isinstance(approved_record, Mapping) and approved_record.get("status") == "ready" else None
+                if isinstance(approved_record, Mapping) and re.fullmatch(
+                    r"[0-9a-f]{40}", str(approved_record.get("value", ""))
+                ) else None
             production_full = (
                 scope == "full" and self.sources is None and self.input_root is None
             )

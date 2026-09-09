@@ -13,6 +13,8 @@ import time
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+import yaml
+
 
 MAX_RECEIPT_BYTES = 1024 * 1024
 
@@ -77,6 +79,48 @@ def _regular_json(path: Path) -> Mapping[str, Any]:
     return value
 
 
+def _with_assertion_titles(graph: Mapping[str, Any], assertions: Mapping[str, Any]) -> Mapping[str, Any]:
+    """Join hash-verified, presentation-safe titles onto transient map nodes."""
+    raw_assertions = assertions.get("assertions", ())
+    if not isinstance(raw_assertions, list):
+        raise RuntimeError("graph assertions are malformed")
+    embedded_assertions = graph.get("assertions")
+    if embedded_assertions is not None and embedded_assertions != raw_assertions:
+        raise RuntimeError("graph assertion bundle mismatch")
+    raw_nodes = graph.get("nodes", ())
+    if not isinstance(raw_nodes, list):
+        raise RuntimeError("graph nodes are malformed")
+    node_ids = {str(node["id"]) for node in raw_nodes if isinstance(node, Mapping) and isinstance(node.get("id"), str)}
+    titles: dict[str, tuple[int, str]] = {}
+    for assertion in raw_assertions:
+        if not isinstance(assertion, Mapping) or assertion.get("predicate") != "title":
+            continue
+        subject, scope, value = assertion.get("subject_id"), assertion.get("scope_id"), assertion.get("value")
+        if not isinstance(subject, str) or subject not in node_ids or subject != scope or not isinstance(value, str):
+            continue
+        if any(ord(char) < 32 for char in value):
+            continue
+        title = re.sub(r"\s+", " ", value).strip()
+        # Inventory parsers sometimes expose an executable's shebang as its
+        # title.  That is verified source data, but it is not a useful label.
+        if not title or len(title) > 160 or title.startswith(("#!", "!/usr/bin/")):
+            continue
+        rank = {"declared": 2, "observed": 1}.get(str(assertion.get("layer", "")), 0)
+        current = titles.get(subject)
+        if current is not None and current[0] == rank and current[1] != title:
+            raise RuntimeError("graph contains conflicting title assertions")
+        if current is None or rank > current[0]:
+            titles[subject] = (rank, title)
+    enriched = dict(graph)
+    enriched["nodes"] = [
+        dict(node, title=titles[str(node["id"])][1])
+        if isinstance(node, Mapping) and isinstance(node.get("id"), str) and str(node["id"]) in titles
+        else dict(node) if isinstance(node, Mapping) else node
+        for node in raw_nodes
+    ]
+    return enriched
+
+
 def _resolve_graph(path: Path) -> Mapping[str, Any]:
     """Resolve a current pointer through the canonical hash-verifying store."""
     pointer = _regular_json(path)
@@ -90,10 +134,50 @@ def _resolve_graph(path: Path) -> Mapping[str, Any]:
         snapshot = ControlGraphStore(path.parent.parent).read_snapshot()
     except (OSError, ValueError, ControlContractError) as error:
         raise RuntimeError("graph current pointer failed hash verification") from error
-    graph = snapshot.get("graph")
-    if not isinstance(graph, Mapping):
+    graph, assertions = snapshot.get("graph"), snapshot.get("assertions")
+    if not isinstance(graph, Mapping) or not isinstance(assertions, Mapping):
         raise RuntimeError("graph current snapshot is malformed")
-    return graph
+    return _with_assertion_titles(graph, assertions)
+
+
+def _projection_proof(repository_root: Path) -> tuple[list[Mapping[str, Any]], Mapping[str, Any]]:
+    """Load the checked-in, receipt-bound Ad consumer proof for map projection."""
+    control = repository_root / "governance" / "control-plane"
+    aliases_path = control / "aliases.yaml"
+    context_path = control / "build-context.yaml"
+    if any(path.is_symlink() or not path.is_file() for path in (aliases_path, context_path)):
+        raise RuntimeError("projection evidence declarations are unavailable")
+    try:
+        aliases = yaml.safe_load(aliases_path.read_text(encoding="utf-8"))
+        context = yaml.safe_load(context_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, yaml.YAMLError) as error:
+        raise RuntimeError("projection evidence declarations are malformed") from error
+    mappings = aliases.get("external_mappings", ()) if isinstance(aliases, Mapping) else ()
+    status = context.get("evidence_status", {}) if isinstance(context, Mapping) else {}
+    mapping = next(
+        (
+            item for item in mappings
+            if isinstance(item, Mapping)
+            and item.get("id") == "mapping:ad-template-builder/blockwise"
+            and item.get("status") == "verified"
+        ),
+        None,
+    )
+    source_receipt = status.get("ad_template_builder_source_contract_receipt")
+    runtime_receipt = status.get("ad_template_builder_runtime_consumption_receipt")
+    if (
+        mapping is None
+        or status.get("ad_template_builder_source_contract") != "present"
+        or status.get("ad_template_builder_blockwise_runtime_consumption") != "verified"
+        or not isinstance(source_receipt, str)
+        or not isinstance(runtime_receipt, str)
+        or mapping.get("evidence_receipt_id") != runtime_receipt
+    ):
+        return [], {}
+    return [dict(mapping)], {
+        "source_contract": {"receipt_id": source_receipt},
+        "active_runtime": {"receipt_id": runtime_receipt},
+    }
 
 
 def _write_receipt(path: Path, rendered: str) -> None:
@@ -149,6 +233,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         from graph.map_pipeline import generate_maps
 
         graph = _resolve_graph(args.graph)
+        mappings, evidence = _projection_proof(root)
+        graph = dict(graph, projection_mappings=mappings, projection_evidence=evidence)
         graph_revision = graph.get("graph_revision", graph.get("revision", "unknown"))
         run_key = args.run_key or _default_run_key(graph_revision)
         adapter = ArchifyAdapter()
