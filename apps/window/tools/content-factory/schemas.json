@@ -1,14 +1,53 @@
 {
-  "trace_record": {"required": ["trace_id", "span_id", "stage", "model_ref", "prompt_hash", "cost", "artifact_refs", "evidence_refs", "review_decision"], "otel": "genai-style-spans-events", "preserve_hooks": ["trace", "slot-trace", "trace-view"]},
-  "public_article_release": {"required": ["schema", "tool_id", "project_id", "workspace_id", "settings_revision", "pipeline_id", "pipeline_version", "consumer_compatibility", "release_id", "content_id", "version", "immutable", "status", "qa_receipt", "approval_receipt", "provenance", "sanitization_receipts", "published_at", "body", "media", "seo", "release_hash"], "schema": "schema://frank.content-factory-release/v1", "hash_canonicalization": "RFC8785", "required_artifact_checksums": ["body", "seo", "media:<media.id>"], "sanitization_receipts": ["pii_scan", "secret_scan"], "excluded_at_any_depth": ["prompts", "raw_outputs", "private_notes", "internal", "secret_refs", "model_input", "pii", "email", "phone", "address", "date_of_birth", "customer_id", "reviewer"]},
-  "review_decision": {"required": ["decision", "receipt_ref", "evidence_refs", "decided_at"], "decisions": ["approve", "reject", "request_changes", "quarantine"]},
-  "widget_contracts": {
-    "health": {"required": ["status", "last_event_at", "hermes_ref"], "known_statuses": ["healthy", "degraded", "blocked"]},
-    "queue": {"required": ["queued", "running", "waiting_review", "failed", "quarantined"]},
-    "cost": {"required": ["currency", "total", "by_stage", "period"]},
-    "review": {"required": ["pending_count", "items", "approval_actions"]}
+  "public_run_request": {
+    "required": ["project_id", "content_id", "source_bundle", "direction", "outputs"],
+    "optional": ["job_name", "topic", "project_context"],
+    "additional_properties": false,
+    "source_bundle": {
+      "fields": ["pasted_text", "text", "text_length", "urls", "attachments"],
+      "requires_material_unless_directed": true
+    },
+    "direction": {
+      "fields": ["audience", "outcome", "cta", "locale", "must_include", "must_avoid", "slug"]
+    },
+    "outputs": {
+      "fields": ["length", "research_mode", "media", "companions", "publication_target_id"],
+      "length": ["concise", "standard", "deep"],
+      "research_mode": ["source-only", "verify-enrich"],
+      "media": ["none", "briefs", "generate"],
+      "companions": ["email", "social"]
+    },
+    "execution_owner": "hermes"
   },
-  "hermes_actions": ["run", "resume", "rerun", "withdraw"],
-  "hermes_event_kinds": ["stage-completed", "review-requested", "release-immutable", "quarantined", "withdrawn"],
-  "graph_projection": {"schema": "schema://frank.graph/v1", "adapter": "ToolManifestAdapter", "pipeline_ref": "content-factory-pipeline", "domain_owns": ["manifest", "nodes", "edges", "immutable-settings-revisions", "hermes-envelopes"], "domain_does_not_own": ["graph-ui", "graph-execution", "settings-store"]}
+  "trace_record": {
+    "required": ["trace_id", "span_id", "stage", "artifact_refs", "evidence_refs", "qa_decision", "approval_decision", "release_hash"],
+    "otel": "genai-style-spans-events",
+    "preserve_hooks": ["trace", "slot-trace", "trace-view"]
+  },
+  "public_article_release": {
+    "required": ["schema", "tool_id", "project_id", "workspace_id", "settings_revision", "pipeline_id", "pipeline_version", "consumer_compatibility", "release_id", "content_id", "version", "immutable", "status", "qa_receipt", "approval_receipt", "provenance", "sanitization_receipts", "published_at", "body", "media", "seo", "release_hash"],
+    "schema": "schema://frank.content-factory-release/v1",
+    "hash_canonicalization": "RFC8785",
+    "required_artifact_checksums": ["body", "seo", "media:<media.id>"],
+    "sanitization_receipts": ["pii_scan", "secret_scan"],
+    "excluded_at_any_depth": ["prompts", "raw_outputs", "private_notes", "internal", "secret_refs", "model_input", "pii", "email", "phone", "address", "date_of_birth", "customer_id", "reviewer"]
+  },
+  "review_decision": {
+    "required": ["decision", "receipt_ref", "artifact_versions", "evidence_refs", "decided_at"],
+    "decisions": ["approve", "reject", "request_changes", "quarantine"]
+  },
+  "release_gate": {
+    "requires": ["qa_pass", "human_approval", "provenance", "sanitization_receipts", "artifact_checksums"],
+    "immutable": true,
+    "withdrawal": "signed-tombstone"
+  },
+  "hermes_actions": ["run", "cancel", "resume", "rerun", "approve", "request_changes", "reject", "quarantine", "withdraw"],
+  "hermes_event_kinds": ["command.accepted", "command.queued", "run.started", "run.recovered", "run.interrupted", "run.resumed", "run.rerun", "run.completed", "run.failed", "run.cancelled", "run.quarantined", "stage.started", "stage.completed", "artifact.created", "review.requested", "review.recorded", "review.approved", "review.changes-requested", "review.rejected", "provider.attempt", "provider.fallback", "tool.started", "tool.completed", "subagent.start", "subagent.complete", "release.created", "release.published", "release.withdrawn"],
+  "graph_projection": {
+    "schema": "schema://frank.graph/v1",
+    "adapter": "ToolManifestAdapter",
+    "pipeline_ref": "blog-studio-v2",
+    "domain_owns": ["manifest", "nodes", "edges", "immutable-settings-revisions", "hermes-envelopes"],
+    "domain_does_not_own": ["graph-ui", "graph-execution", "settings-store"]
+  }
 }

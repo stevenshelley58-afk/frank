@@ -3,12 +3,15 @@ import test from "node:test";
 
 import { blockwiseTemplateUrl, pathForView, viewForPath } from "../web/js/view-routing.js";
 
-test("Ad Studio has a canonical deep link and every other view returns home", () => {
+test("Studio apps have canonical deep links and every other view returns home", () => {
   assert.equal(viewForPath("/ad-studio"), "ad-studio");
   assert.equal(viewForPath("/ad-studio/"), "ad-studio");
+  assert.equal(viewForPath("/blog-studio"), "blog-studio");
+  assert.equal(viewForPath("/blog-studio/"), "blog-studio");
   assert.equal(viewForPath("/"), "hub");
   assert.equal(viewForPath("/not-a-view"), "hub");
   assert.equal(pathForView("ad-studio"), "/ad-studio");
+  assert.equal(pathForView("blog-studio"), "/blog-studio");
   assert.equal(pathForView("tools"), "/");
 });
 

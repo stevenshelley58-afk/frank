@@ -148,6 +148,17 @@ define({
 });
 
 define({
+  id: "factory-blog", title: "Blog Studio", surfaces: ["tools"],
+  description: "Run evidence-backed articles from source to human-approved release.",
+  mount(el) {
+    const actions = toolIntro(el, "Create an editorial contract, inspect durable stage evidence, and record the release decision.");
+    actionButton(actions, "Open studio", () => emit("frank:blog-studio"));
+    actionButton(actions, "Tool home", () => emit("frank:entity-home", { kind: "tool", id: "content-factory", name: "Content Factory" }), "tool-secondary");
+    statusText(actions, "/frank/tools/content-factory");
+  },
+});
+
+define({
   id: "hermes-tool", title: "Hermes", surfaces: ["tools"],
   description: "Home for the sole Frank brain.",
   mount(el) {

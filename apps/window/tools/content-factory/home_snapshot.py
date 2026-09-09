@@ -1,4 +1,4 @@
-"""Truthful read-only home projection for Content Factory runtime state."""
+"""Truthful read-only home projection for Blog Studio runtime state."""
 
 from __future__ import annotations
 
@@ -19,11 +19,34 @@ _PRIVATE_VALUE = re.compile(
     re.IGNORECASE,
 )
 _EVENT_STATUS = {
-    "stage-completed": "running",
-    "review-requested": "awaiting_approval",
-    "release-immutable": "completed",
-    "quarantined": "quarantined",
-    "withdrawn": "completed",
+    "command.accepted": "queued",
+    "command.queued": "queued",
+    "run.started": "running",
+    "run.recovered": "running",
+    "run.interrupted": "running",
+    "run.resumed": "running",
+    "run.rerun": "running",
+    "run.completed": "completed",
+    "run.failed": "failed",
+    "run.cancelled": "cancelled",
+    "run.quarantined": "quarantined",
+    "stage.started": "running",
+    "stage.completed": "running",
+    "artifact.created": "running",
+    "review.requested": "awaiting_approval",
+    "review.recorded": "running",
+    "review.approved": "running",
+    "review.changes-requested": "changes_requested",
+    "review.rejected": "rejected",
+    "provider.attempt": "running",
+    "provider.fallback": "running",
+    "tool.started": "running",
+    "tool.completed": "running",
+    "subagent.start": "running",
+    "subagent.complete": "running",
+    "release.created": "running",
+    "release.published": "completed",
+    "release.withdrawn": "withdrawn",
 }
 _EVENT_PAYLOAD_FIELDS = ("run_id", "content_id", "stage", "release_id")
 _PRIVATE_REF = re.compile(r"^(?:openbao|vault|secret|file):", re.IGNORECASE)
@@ -83,7 +106,7 @@ def _event_projection(event: Mapping[str, Any]) -> dict[str, Any]:
     if set(event) != {"kind", "event_kind", "correlation_id", "payload"}:
         raise ValueError("runtime content event must contain the exact package event fields")
     if event.get("kind") != "event" or event.get("event_kind") not in EVENT_KINDS:
-        raise ValueError("runtime content event is not declared by Content Factory")
+        raise ValueError("runtime content event is not declared by Blog Studio")
     payload = event.get("payload")
     if not isinstance(payload, Mapping):
         raise TypeError("runtime content event payload must be a mapping")
@@ -134,7 +157,7 @@ def build_home_snapshot(runtime_state: Mapping[str, Any] | None = None) -> dict[
             "schema": SNAPSHOT_SCHEMA,
             "tool_id": HOME_PROFILE["id"],
             "status": "unavailable",
-            "summary": "Content Factory runtime state is unavailable.",
+            "summary": "Blog Studio runtime state is unavailable.",
             "overview": deepcopy(overview),
             "connections": deepcopy(_connection_snapshot()),
             "current_work": dict(unavailable),
@@ -163,7 +186,7 @@ def build_home_snapshot(runtime_state: Mapping[str, Any] | None = None) -> dict[
         output_items.append(output)
         receipt_items.extend(receipts)
 
-    attention = any(item["status"] in {"awaiting_approval", "quarantined"} for item in work_items)
+    attention = any(item["status"] in {"awaiting_approval", "changes_requested", "rejected", "failed", "quarantined"} for item in work_items)
     has_state = bool(work_items or output_items or receipt_items)
     status = "attention" if attention else ("ready" if has_state else "empty")
     summary = "Content work needs attention." if attention else ("Runtime work or releases are recorded." if has_state else "Runtime is connected; no work or releases are recorded.")

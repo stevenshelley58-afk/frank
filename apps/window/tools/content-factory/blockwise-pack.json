@@ -1,80 +1,132 @@
 {
-  "id": "blockwise-content-factory-pack",
+  "id": "blockwise-blog-studio-v2",
   "kind": "content-factory-project-pack",
-  "version": "1.1.0",
+  "version": "2.0.0",
   "project_id": "blockwise",
-  "manifest_ref": "content-factory@1.1.0",
-  "process_graph_ref": "content-factory-pipeline",
-  "source_evidence": {
-    "orchestrator": "hermes/tools/research-runtime/bin/content-engine.mjs",
-    "contracts": "src/lib/content-engine/contracts.ts",
-    "queue": "src/lib/content-engine/queue.ts",
-    "repository": "src/lib/content-engine/repository.ts",
-    "skill_root": "hermes/skills"
-  },
-  "prompt_refs": {
-    "research": {"ref": "blockwise-topic-researcher", "version": "pack-current"},
-    "brief": {"ref": "blockwise-content-strategist", "version": "pack-current"},
-    "draft": {"ref": "blockwise-blog-writer", "version": "pack-current"},
-    "edit": {"ref": "blockwise-blog-editor", "version": "pack-current"},
-    "format": {"ref": "blockwise-blog-formatter", "version": "pack-current"},
-    "seo": {"ref": "blockwise-seo-schema-builder", "version": "pack-current"},
-    "media": {"ref": "blockwise-image-brief-writer", "version": "pack-current"},
-    "web": {"ref": "blockwise-page-builder", "version": "pack-current"},
-    "social": {"ref": "blockwise-social-post-generator", "version": "pack-current"},
-    "ads": {"ref": "blockwise-lead-ad-generator", "version": "pack-current"},
-    "instant-forms": {"ref": "blockwise-instant-form-generator", "version": "pack-current"},
-    "compliance": {"ref": "blockwise-compliance-reviewer", "version": "pack-current"},
-    "human-approval": {"ref": "blockwise-agent-reviewer", "version": "pack-current"},
-    "release": {"ref": "blockwise-artifact-packager", "version": "pack-current"}
-  },
-  "tone_style": {"tone": "direct, expert, no hype", "style": "practical authority", "locale": "en-AU"},
-  "channels": ["web", "email", "social", "ads", "instant-forms"],
-  "model_policy": {"capability": "stage-specific", "policy_ref": "hermes-content-model-policies", "fallback_refs": ["fast_low_cost", "best_json"]},
-  "thresholds": {"word_count": {"min": 500, "max": 2600}, "media": {"alt_text_required": true, "negative_prompt_required": true}, "seo": {"title_max": 60, "description_max": 160, "canonical_required": true}, "compliance": {"unsupported_claims": "block", "risk_flags": "human-review"}},
-  "approvals": {"required": true, "roles": ["operator"], "actions": ["approve_blog", "approve_images", "approve_social", "approve_ad", "request_changes"]},
-  "schedule": {"hermes_schedule_ref": "hermes://schedules/content-factory", "timezone": "Australia/Perth", "window": {"mode": "current-hermes-scheduler"}},
-  "publication_targets": [
-    {"channel": "web", "connection_id": "blockwise-web", "target_id": "blog"},
-    {"channel": "social", "connection_id": "blockwise-social", "target_id": "organic-content"},
-    {"channel": "ads", "connection_id": "blockwise-ads", "target_id": "lead-campaigns"},
-    {"channel": "instant-forms", "connection_id": "blockwise-ads", "target_id": "instant-forms"}
-  ],
-  "current_content_engine_map": {
-    "research": ["blockwise-topic-researcher"],
-    "brief": ["blockwise-content-strategist"],
-    "blog": ["blockwise-blog-writer", "blockwise-blog-editor", "blockwise-blog-formatter"],
-    "seo": ["blockwise-seo-schema-builder"],
-    "images": ["blockwise-image-brief-writer", "blockwise-image-generator", "blockwise-image-reviewer"],
-    "page": ["blockwise-page-builder", "blockwise-page-resolver"],
-    "social": ["blockwise-social-post-generator"],
-    "ads": ["blockwise-lead-ad-generator", "blockwise-ad-classifier", "adstudio-template-builder"],
-    "instant_forms": ["blockwise-instant-form-generator"],
-    "review": ["blockwise-compliance-reviewer", "blockwise-agent-reviewer", "blockwise-artifact-packager"],
-    "non_blog_shared_consumers": ["blockwise-image-generator", "blockwise-image-reviewer", "blockwise-ad-classifier", "adstudio-template-builder", "blockwise-page-resolver", "blockwise-location-ad-search", "blockwise-ad-collector"]
-  },
-  "migration_map": {
-    "operator_ui": ["src/app/(operator)/operator/content-runs/page.tsx", "src/app/(operator)/operator/content-runs/[id]/page.tsx", "src/app/(operator)/operator/content-prompts/page.tsx", "src/components/operator/content-runs/content-prompt-editor.tsx", "src/components/operator/content-runs/content-run-console.tsx", "src/components/operator/content-runs/content-run-review.tsx"],
-    "operator_api": ["src/app/api/operator/content-runs/route.ts", "src/app/api/operator/content-runs/[id]/approval/route.ts", "src/app/api/operator/content-runs/[id]/rerun/route.ts", "src/app/api/operator/content-prompts/route.ts", "src/app/api/operator/content-prompts/[id]/route.ts", "src/app/api/operator/content-prompts/[id]/test/route.ts"],
-    "operator_lib": ["src/lib/content-engine/contracts.ts", "src/lib/content-engine/index.ts", "src/lib/content-engine/queue.ts", "src/lib/content-engine/repository.ts"],
-    "tests": ["tests/content-engine/migration.test.ts", "tests/content-engine/queue.test.ts", "tests/content-engine/supervisor-fast-lane.test.ts", "tests/content-engine/transcript-input.test.ts", "tests/research-engine/hermes-content-engine.test.ts"],
-    "hermes_runtime": ["hermes/tools/research-runtime/bin/content-engine.mjs", "hermes/skills/blockwise-content-run-orchestrator/SKILL.md"],
-    "skill_groups": {
-      "blog": ["blockwise-topic-researcher", "blockwise-content-strategist", "blockwise-blog-writer", "blockwise-blog-editor", "blockwise-blog-formatter", "blockwise-seo-schema-builder"],
-      "media": ["blockwise-image-brief-writer", "blockwise-image-generator", "blockwise-image-reviewer"],
-      "page": ["blockwise-page-builder", "blockwise-page-resolver"],
-      "social": ["blockwise-social-post-generator"],
-      "ads": ["blockwise-lead-ad-generator", "blockwise-ad-classifier", "adstudio-template-builder"],
-      "instant_forms": ["blockwise-instant-form-generator"],
-      "review": ["blockwise-compliance-reviewer", "blockwise-agent-reviewer", "blockwise-artifact-packager"]
+  "manifest_ref": "content-factory@2.0.0",
+  "process_graph_ref": "blog-studio-v2",
+  "request_defaults": {
+    "direction": {
+      "audience": "Australian real-estate operators",
+      "outcome": "Publish a useful, source-faithful field guide that earns its commercial next step.",
+      "cta": "Create three ads free",
+      "locale": "en-AU",
+      "must_include": "Evidence for externally verifiable claims and visible attribution for third-party frameworks.",
+      "must_avoid": "Copied source phrasing, invented certainty, unsupported statistics, fake case studies, generic hype, and unearned frameworks.",
+      "slug": ""
     },
-    "public_content_tables": ["prompt_sets", "prompt_templates", "prompt_set_items", "content_runs", "content_artifacts", "prompt_runs", "content_reviews", "operator_approvals"],
-    "data_policy": {"row_counts_before_adopt": true, "adopt_only_after_row_count_match": true, "preserve_schema_history": true, "migration_mode": "adopt-existing-data-no-destructive-rewrite"}
+    "outputs": {
+      "length": "deep",
+      "research_mode": "verify-enrich",
+      "media": "briefs",
+      "companions": ["email", "social"],
+      "publication_target_id": "blockwise-guides"
+    }
   },
-  "reuse_notes": {
-    "reuse": ["stage prompt references and model policy IDs", "artifact types and prompt/model provenance", "queue dedupe and resume-from-step semantics", "review action names", "existing Blockwise operator/API/lib contracts and tables after row-count verification"],
-    "hermes_owned": ["execution, model selection, tool calls, scheduling, queue claiming, persistence, publication side effects, memory, secrets, Connections/vault resolution"],
-    "do_not_rebuild": ["content-engine orchestrator", "LLM provider client", "Hermes scheduler/queue", "image generation", "page builder", "ad or instant-form publisher", "Frank UI widgets"],
-    "shared_skill_hold": "Retain image/page/ad skills until their non-blog product consumers have migrated."
+  "approvals": {
+    "required": true,
+    "role": "operator",
+    "actions": ["approve", "request_changes", "reject", "quarantine"],
+    "binds_artifact_versions": true
+  },
+  "release": {
+    "immutable": true,
+    "requires": ["qa_pass", "human_approval"],
+    "schema_ref": "schema://frank.content-factory-release/v1",
+    "withdrawal_mode": "signed-tombstone"
+  },
+  "publication_targets": [
+    {"output": "article", "connection_id": "blockwise-web", "target_id": "guides"},
+    {"output": "social-companion", "connection_id": "blockwise-social", "target_id": "organic-content"},
+    {"output": "email-companion", "connection_id": "blockwise-email", "target_id": "newsletter"}
+  ],
+  "legacy_source": {
+    "repository_ref": "project:blockwise",
+    "last_complete_revision": "8cf9215add735f5bac1d14eece3b38de2ff93e37",
+    "operator_surface_removed_by": "3b744748c455974578d32b805bd80b8b43c1f9ad",
+    "remaining_test_removed_by": "b7ac466f",
+    "historical_operator_ui": [
+      "src/app/(operator)/operator/content-runs/page.tsx",
+      "src/app/(operator)/operator/content-runs/[id]/page.tsx",
+      "src/app/(operator)/operator/content-prompts/page.tsx",
+      "src/components/operator/content-runs/content-prompt-editor.tsx",
+      "src/components/operator/content-runs/content-run-console.tsx",
+      "src/components/operator/content-runs/content-run-review.tsx"
+    ],
+    "historical_operator_api": [
+      "src/app/api/operator/content-runs/route.ts",
+      "src/app/api/operator/content-runs/[id]/approval/route.ts",
+      "src/app/api/operator/content-runs/[id]/rerun/route.ts",
+      "src/app/api/operator/content-prompts/route.ts",
+      "src/app/api/operator/content-prompts/[id]/route.ts",
+      "src/app/api/operator/content-prompts/[id]/test/route.ts"
+    ],
+    "historical_library": [
+      "src/lib/content-engine/contracts.ts",
+      "src/lib/content-engine/index.ts",
+      "src/lib/content-engine/queue.ts",
+      "src/lib/content-engine/repository.ts"
+    ],
+    "surviving_evidence": [
+      "hermes/tools/research-runtime/bin/content-engine.mjs",
+      "hermes/skills/blockwise-content-run-orchestrator/SKILL.md",
+      "supabase/migrations/202606040003_content_to_lead_engine.sql",
+      "supabase/migrations/202607190003_transcript_blog_prompt_v2.sql",
+      "supabase/migrations/202607220001_content_guide_prompt_v3.sql"
+    ]
+  },
+  "adoption": {
+    "reuse": [
+      "source-fidelity editorial rules",
+      "append-only artifact and provenance history",
+      "queue dedupe and resume-from-stage semantics",
+      "explicit review decisions",
+      "immutable release receipts"
+    ],
+    "replace": [
+      "legacy stage runner",
+      "legacy operator screens and routes",
+      "implicit review scoring",
+      "artifact-type collisions",
+      "non-gating approvals"
+    ],
+    "public_content_tables": [
+      "prompt_sets",
+      "prompt_templates",
+      "prompt_set_items",
+      "content_runs",
+      "content_artifacts",
+      "prompt_runs",
+      "content_reviews",
+      "operator_approvals"
+    ],
+    "data_policy": {
+      "row_counts_before_adopt": true,
+      "adopt_only_after_row_count_match": true,
+      "preserve_schema_history": true,
+      "migration_mode": "adopt-existing-data-no-destructive-rewrite"
+    }
+  },
+  "hermes_boundary": {
+    "owner": "hermes",
+    "owns": [
+      "reasoning",
+      "execution",
+      "stage instructions",
+      "capability routing",
+      "tool calls",
+      "research",
+      "scheduling and queue claims",
+      "persistence",
+      "publication side effects",
+      "memory",
+      "secrets and Connections resolution"
+    ],
+    "frank_owns": [
+      "closed run-request forwarding",
+      "safe run and artifact projection",
+      "review decision forwarding",
+      "declarative graph display"
+    ]
   }
 }

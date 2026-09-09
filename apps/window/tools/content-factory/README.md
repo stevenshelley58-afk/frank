@@ -18,6 +18,8 @@ Completed public releases require a passing QA receipt, human approval,
 provenance/checksums, sanitization receipts, and an immutable release hash.
 Structured artifact and release hashes use SHA-256 over RFC 8785 canonical
 JSON; the release hash is computed before the `release_hash` field is added.
+Frank projects runtime state through allowlists and never exposes source
+bodies, hidden execution state, credentials, or private provenance material.
 `release.schema.json` is the closed machine-readable public contract, and
 `fixtures/content-release-v1.json` is the golden producer-consumer payload.
 

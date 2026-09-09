@@ -21,7 +21,7 @@ class ContentFactoryToolTests(unittest.TestCase):
             "release_id": "release-1", "content_id": "content-1", "version": 1, "immutable": True,
             "schema": "schema://frank.content-factory-release/v1", "tool_id": "content-factory",
             "project_id": "blockwise", "workspace_id": "123e4567-e89b-42d3-a456-426614174000", "settings_revision": 3,
-            "pipeline_id": "content-factory-pipeline", "pipeline_version": "1.0.0", "consumer_compatibility": ["article-release-v1"],
+            "pipeline_id": "blog-studio-v2", "pipeline_version": "2.0.0", "consumer_compatibility": ["article-release-v1"],
             "status": "published", "channel": "web", "title": "A public article",
             "body": body,
             "media": [{"id": "hero-1", "url": "https://cdn.example/hero.png", "alt_text": "Article hero", "checksum": checksum}],
@@ -33,10 +33,43 @@ class ContentFactoryToolTests(unittest.TestCase):
             "published_at": "2026-08-14T00:00:00Z",
         }
 
+    def valid_run_request(self):
+        return {
+            "project_id": "blockwise",
+            "content_id": "content-1",
+            "job_name": "A useful field guide",
+            "topic": "Why local evidence creates a better seller conversation",
+            "source_bundle": {
+                "text": "Source material",
+                "text_length": 15,
+                "urls": [{"url": "https://example.com/source", "title": "Source"}],
+                "attachments": [],
+            },
+            "direction": {
+                "audience": "Australian real-estate operators",
+                "outcome": "Understand the decision",
+                "cta": "Create three ads free",
+                "locale": "en-AU",
+                "must_include": "Evidence",
+                "must_avoid": "Unsupported certainty",
+                "slug": "local-evidence",
+            },
+            "outputs": {
+                "length": "deep",
+                "research_mode": "verify-enrich",
+                "media": "briefs",
+                "companions": ["email", "social"],
+                "publication_target_id": "blockwise-guides",
+            },
+            "project_context": "Resolved project context",
+        }
+
     def test_home_manifest_is_exactly_seven_declarative_fields(self):
         manifest = self.load_json("home.json")
         self.assertEqual(set(manifest), {"id", "name", "kind", "blurb", "capabilities", "default_widget_ids", "connection_capabilities"})
         self.assertEqual(manifest["kind"], "tool")
+        self.assertEqual(manifest["id"], "content-factory")
+        self.assertEqual(manifest["name"], "Blog Studio")
         self.assertEqual(manifest["default_widget_ids"], [])
         self.assertEqual(manifest["connection_capabilities"], [])
 
@@ -44,44 +77,108 @@ class ContentFactoryToolTests(unittest.TestCase):
         manifest = self.load_json("manifest.json")
         self.assertEqual(manifest["schema"], content_factory.MANIFEST_SCHEMA)
         self.assertEqual(manifest, content_factory.CONTENT_FACTORY_MANIFEST)
-        self.assertEqual(manifest["pipelines"][0]["id"], "content-factory-pipeline")
+        self.assertEqual(manifest["version"], "2.0.0")
+        self.assertEqual(manifest["pipelines"][0]["id"], "blog-studio-v2")
+        self.assertEqual(
+            [node["id"] for node in manifest["pipelines"][0]["nodes"]],
+            ["source", "research", "brief", "draft", "edit", "package", "qa", "human-approval", "immutable-release"],
+        )
         self.assertEqual(manifest["pipelines"][0], content_factory.PROCESS_GRAPH)
         self.assertEqual(content_factory.validate_process_graph(manifest["pipelines"][0]), [])
         self.assertEqual(content_factory.validate_process_graph({**content_factory.PROCESS_GRAPH, "edges": content_factory.PROCESS_GRAPH["edges"] + [{"from": "immutable-release", "to": "source"}]}), ["graph:cycle", "graph:must-match-fixed-process-graph"])
 
-    def test_pack_uses_connections_ids_and_contains_full_migration_map(self):
+    def test_taxonomy_and_gates_match_blog_studio_v2(self):
+        manifest = self.load_json("manifest.json")
+        self.assertEqual(set(content_factory.ARTIFACT_TAXONOMY), {
+            "source", "research", "brief", "draft", "edit", "package", "qa",
+            "human-approval", "immutable-release",
+        })
+        self.assertIn("qa_report", content_factory.ARTIFACT_TAXONOMY["qa"])
+        self.assertIn("approval_receipt", content_factory.ARTIFACT_TAXONOMY["human-approval"])
+        self.assertIn("article_release", content_factory.ARTIFACT_TAXONOMY["immutable-release"])
+        gates = {gate["id"]: gate for gate in manifest["approval_gates"]}
+        self.assertEqual(set(gates), {"qa", "human-approval", "immutable-release"})
+        self.assertEqual(set(gates["immutable-release"]["requires"]), {"qa", "human-approval"})
+        self.assertEqual(set(gates["human-approval"]["actions"]), {"approve", "request_changes", "reject", "quarantine"})
+        self.assertEqual(
+            set(manifest["hermes"]["event_kinds"]),
+            {
+                "command.accepted", "command.queued", "run.started", "run.recovered",
+                "run.interrupted", "run.resumed", "run.rerun", "run.completed",
+                "run.failed", "run.cancelled", "run.quarantined", "stage.started",
+                "stage.completed", "artifact.created", "review.requested",
+                "review.recorded", "review.approved", "review.changes-requested",
+                "review.rejected", "provider.attempt", "provider.fallback",
+                "tool.started", "tool.completed", "subagent.start", "subagent.complete",
+                "release.created", "release.published", "release.withdrawn",
+            },
+        )
+        encoded = json.dumps(manifest).lower()
+        self.assertNotIn('"prompt_refs"', encoded)
+        self.assertNotIn('"model_policy"', encoded)
+
+    def test_pack_uses_connections_ids_and_revision_pinned_legacy_adoption(self):
         pack = self.load_json("blockwise-pack.json")
         self.assertEqual(content_factory.validate_pack(pack), [])
         self.assertTrue(all("connection_id" in target and "target_id" in target for target in pack["publication_targets"]))
         self.assertNotIn("secret-ref", json.dumps(pack["publication_targets"]))
-        migration = pack["migration_map"]
-        for key in ("operator_ui", "operator_api", "operator_lib", "tests", "hermes_runtime", "skill_groups", "public_content_tables", "data_policy"):
-            self.assertIn(key, migration)
-        self.assertEqual(migration["public_content_tables"], ["prompt_sets", "prompt_templates", "prompt_set_items", "content_runs", "content_artifacts", "prompt_runs", "content_reviews", "operator_approvals"])
-        self.assertTrue(migration["data_policy"]["adopt_only_after_row_count_match"])
+        self.assertEqual(pack["process_graph_ref"], "blog-studio-v2")
+        self.assertEqual(pack["legacy_source"]["last_complete_revision"], "8cf9215add735f5bac1d14eece3b38de2ff93e37")
+        self.assertTrue(pack["adoption"]["data_policy"]["adopt_only_after_row_count_match"])
+        encoded = json.dumps(pack).lower()
+        self.assertNotIn('"prompt_refs"', encoded)
+        self.assertNotIn('"model_policy"', encoded)
 
-    def test_run_request_requires_versioned_stage_prompts(self):
-        request = {"project_id": "blockwise", "content_id": "content-1", "pack_ref": "blockwise-content-factory-pack", "channels": ["web"], "model_policy": {}, "thresholds": {}, "prompt_refs": {"draft": {"ref": "writer"}}}
-        self.assertIn("prompt_refs:each-stage-needs-ref-and-version", content_factory.validate_run_request(request))
+    def test_run_request_is_closed_and_leaves_orchestration_to_hermes(self):
+        request = self.valid_run_request()
+        self.assertEqual(content_factory.validate_run_request(request), [])
+
+        legacy = {**request, "pack_ref": "legacy", "prompt_refs": {}, "model_policy": {}}
+        errors = content_factory.validate_run_request(legacy)
+        self.assertIn("unsupported:pack_ref", errors)
+        self.assertIn("unsupported:prompt_refs", errors)
+        self.assertIn("unsupported:model_policy", errors)
+        self.assertIn("orchestration:hermes-owned", errors)
+
+        hidden = self.valid_run_request()
+        hidden["direction"]["model"] = "private-router"
+        self.assertIn("orchestration:hermes-owned", content_factory.validate_run_request(hidden))
+
+        topic_only = self.valid_run_request()
+        topic_only["source_bundle"] = {}
+        self.assertEqual(content_factory.validate_run_request(topic_only), [])
+
+    def test_run_request_validates_structured_outputs_and_source_bundle(self):
+        bad = self.valid_run_request()
+        bad["outputs"] = {"length": "novel", "companions": ["ads"]}
+        bad["source_bundle"] = {"urls": ["https://example.com/source?access_token=secret"]}
+        errors = content_factory.validate_run_request(bad)
+        self.assertIn("outputs:length-unsupported", errors)
+        self.assertIn("outputs:companions-unsupported", errors)
+        self.assertTrue(any("token-like query" in error for error in errors))
 
     def test_commands_and_events_are_allowlisted_and_safe(self):
-        command = content_factory.build_command("run", {"run_id": "run-1"}, "correlation-1")
-        event = content_factory.build_event("stage-completed", {"stage": "draft"}, "correlation-1")
+        command = content_factory.build_command("run", self.valid_run_request(), "correlation-1")
+        event = content_factory.build_event("stage.completed", {"stage": "draft"}, "correlation-1")
         self.assertEqual(command["kind"], "command")
         self.assertEqual(event["kind"], "event")
         self.assertEqual(command["action"], "run")
-        self.assertEqual(event["event_kind"], "stage-completed")
+        self.assertEqual(event["event_kind"], "stage.completed")
+        review_command = content_factory.build_command("request_changes", {"run_id": "run-1"}, "correlation-1")
+        self.assertEqual(review_command["action"], "request_changes")
         with self.assertRaises(ValueError):
             content_factory.build_command("arbitrary-execute", {}, "correlation-1")
         with self.assertRaises(ValueError):
-            content_factory.build_event("stage-completed", {"html": "<script>"}, "correlation-1")
+            content_factory.build_command("run", {"project_id": "blockwise"}, "correlation-1")
+        with self.assertRaises(ValueError):
+            content_factory.build_event("stage.completed", {"html": "<script>"}, "correlation-1")
 
     def test_public_release_requires_approval_and_provenance(self):
         release = content_factory.public_release(self.valid_release())
         self.assertTrue(release["immutable"])
         self.assertEqual(release["provenance"]["artifact_checksums"]["body"], "e3c8a183c1ea4ac90727ae984b3ff7d97f0e3bd386523970adbc3f6a30874d7f")
         self.assertEqual(release["provenance"]["artifact_checksums"]["seo"], "26fa6a3578413037c4f44f88247ed69dedc71e3c0727ea589aa3e0c318486791")
-        self.assertEqual(release["release_hash"], "ac0f1819a79b3c42ab604f4092b6bcb2928cb312462062e2416334cfb447a803")
+        self.assertEqual(release["release_hash"], "aa3f56db298d16fac0f4e2d9d00d9c9c88de20d53c3dce457b7bc8b12c47309a")
         fixture = self.load_json("fixtures/content-release-v1.json")
         self.assertEqual(release, fixture)
         missing_approval = self.valid_release()

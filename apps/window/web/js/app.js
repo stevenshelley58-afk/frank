@@ -52,6 +52,7 @@ function show(id, { syncHistory = true } = {}) {
   if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
   if (syncHistory) syncViewLocation(id);
   $$(".operate-tab").forEach((button) => button.classList.toggle("is-on", button.dataset.view === id));
+  window.dispatchEvent(new CustomEvent("frank:view-changed", { detail: { id } }));
   if (id === "live") void mountLive($("#operate-live"));
   if (id === "map") void mountMap($("#operate-map"));
   if (id === "control") void mountControl($("#operate-control"));
@@ -285,6 +286,36 @@ window.addEventListener("frank:blog-studio-run", (event) => {
       else addChatMsg({ role: "sys", text: error.message || "Blog Studio could not start the run.", ts: Date.now() / 1000 | 0 });
     }
   })();
+});
+
+window.addEventListener("frank:blog-studio-run", (event) => {
+  const detail = event.detail || {};
+  void (async () => {
+    const files = Array.isArray(detail.files) ? detail.files.filter((file) => file instanceof File) : [];
+    const projectId = String(detail.projectId || "").trim();
+    const topic = String(detail.topic || "").replace(/\s+/g, " ").trim();
+    if (!projectId) throw new Error("Choose a project.");
+    const uploaded = await uploadFiles(files.map((file) => ({ file, path: file.webkitRelativePath || file.name })));
+    if (uploaded.length !== files.length) throw new Error("One or more evidence files were not accepted.");
+    const response = await fetch("/api/blog-studio/runs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        project_id: projectId,
+        job_name: String(detail.jobName || topic).replace(/\s+/g, " ").trim().slice(0, 120),
+        topic: topic,
+        source_text: String(detail.sourceText || "").trim(),
+        source_urls: Array.isArray(detail.sourceUrls) ? detail.sourceUrls.map((url) => String(url).trim()).filter(Boolean) : [],
+        attachments: uploaded.map(attachmentPayload),
+        direction: detail.direction && typeof detail.direction === "object" ? detail.direction : {},
+        outputs: detail.outputs && typeof detail.outputs === "object" ? detail.outputs : {},
+        client_request_id: String(detail.clientRequestId || "").trim(),
+      }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.run?.id) throw new Error(data.error || "Hermes did not start the content run.");
+    detail.resolve?.({ run: data.run });
+  })().catch((error) => detail.reject?.(error));
 });
 
 function escapeHtml(s) {
