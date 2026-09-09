@@ -368,7 +368,7 @@ _CURATED_ARCHITECTURES: dict[str, dict[str, Any]] = {
             ("project:frank", "Frank", 510, 145),
             ("service:frank-caddy", "Frank Edge", 0, 300),
             ("service:frank-window", "Frank Window", 170, 300),
-            ("component:frank/ad-studio", "Ad Studio", 340, 300),
+            ("component:frank/ad-studio", "Ad Template Generator", 340, 300),
             ("runtime:hermes-default", "Hermes", 510, 300),
             ("service:infisical", "Infisical", 680, 300),
             ("capability:frank/ad-template-builder", "Ad Builder", 850, 300),
@@ -873,7 +873,7 @@ _AD_GATE_EDGE_ID = "edge:ad-template-builder/final-review-gate"
 _AD_REVISION_EDGE_ID = "edge:ad-template-builder/compare-revises-render"
 _AD_CONSUMER_EDGE_ID = "edge:ad-template-builder/live-consumes-blockwise"
 _AD_PRESENTATION = {
-    "component:frank/ad-studio": ("Ad Studio", "request + run monitor", "frontend", "FRANK"),
+    "component:frank/ad-studio": ("Ad Template Generator", "request + run monitor", "frontend", "FRANK"),
     "route:hermes-tool-runs": ("Tool-run API", "typed command + events", "security", "BOUNDARY"),
     "runtime:hermes-default": ("Hermes", "production authority", "backend", "HERMES"),
     "tool:ad-template-generator": ("Generator", "ad-template-generator", "backend", "TOOL"),
@@ -989,7 +989,7 @@ def _ad_architecture_diagram(
         "boundaries": [{"kind": "security-group", "label": "Hermes production execution boundary", "wraps": [id_map[value] for value in hermes_ids], "pad": 20}],
         "connections": connections,
         "cards": [
-            {"dot": "cyan", "title": "Runtime Contract", "items": ["Ad Studio submits a typed Hermes tool-run command", "Hermes is the production execution authority", "ad-template-generator owns the build stages"]},
+            {"dot": "cyan", "title": "Runtime Contract", "items": ["Ad Template Generator submits a typed Hermes tool-run command", "Hermes is the production execution authority", "ad-template-generator owns the build stages"]},
             {"dot": "amber", "title": "Iterative Production", "items": ["Source is analyzed into a layered composition", "Feed and Story render as separate editable layouts", "Comparison can return the design for revision"]},
             {"dot": "emerald", "title": "Release Evidence", "items": ["Final review must be accepted", "Deterministic checks protect subject invariance", "A completed live run was imported by Blockwise"]},
         ],
@@ -1019,7 +1019,7 @@ def _ad_workflow_diagram(
         "component:frank/ad-template-builder/final-check": ("review", 5, 56),
     }
     workflow_copy = {
-        "component:frank/ad-studio": ("Ad Studio", "frontend"),
+        "component:frank/ad-studio": ("Ad Template Generator", "frontend"),
         "project:blockwise": ("Blockwise", "backend"),
         "route:hermes-tool-runs": ("Tool-run API", "security"),
         "runtime:hermes-default": ("Hermes", "backend"),

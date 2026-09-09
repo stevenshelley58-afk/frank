@@ -1,1 +1,12 @@
-{"schema":"schema://mini-frank.source/v1","id":"src-frank-memory-contract","title":"Frank memory contract","kind":"local-file","locator":"docs/MEMORY.md","revision":"363e0177459e94d509410c21c82f9c898f032c06","sha256":"c1c0c65008e1d7db707935a2bf9ca01ab0530ccf3493572c77b57c658d0c0c5d","tier":"A","verified_at":"2026-08-30","retention_rights":"repository-owned"}
+{
+  "schema": "schema://mini-frank.source/v1",
+  "id": "src-frank-memory-contract",
+  "title": "Frank memory contract",
+  "kind": "local-file",
+  "locator": "docs/MEMORY.md",
+  "revision": "sha256:18f11734cbc194e63c0f05ee75e1779f4dcb42f901d14a614ac72326c56bcd1d",
+  "sha256": "18f11734cbc194e63c0f05ee75e1779f4dcb42f901d14a614ac72326c56bcd1d",
+  "tier": "A",
+  "verified_at": "2026-09-05",
+  "retention_rights": "repository-owned"
+}

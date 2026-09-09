@@ -3,7 +3,19 @@
   "name": "Mail",
   "kind": "tool",
   "blurb": "Read provider-neutral threads, messages, cursors, and delivery receipts.",
-  "capabilities": ["thread-sync", "message-history", "delivery-receipts", "reply-classification"],
-  "default_widget_ids": [],
-  "connection_capabilities": ["mail-read", "mail-receipts", "mail-events"]
+  "capabilities": [
+    "thread-sync",
+    "message-history",
+    "delivery-receipts",
+    "reply-classification"
+  ],
+  "default_widget_ids": [
+    "connections-summary",
+    "provider-coverage"
+  ],
+  "connection_capabilities": [
+    "mail-read",
+    "mail-receipts",
+    "mail-events"
+  ]
 }

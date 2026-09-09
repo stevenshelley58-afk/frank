@@ -1,4 +1,6 @@
 import { define } from "./registry.js";
+import { isBlockwiseOperationsPreview } from "./blockwise-operations-preview.js";
+import { OPERATIONS_TOOLS } from "./operations-tools.js";
 
 function emit(name, detail) {
   window.dispatchEvent(new CustomEvent(name, { detail }));
@@ -79,10 +81,10 @@ define({
 });
 
 define({
-  id: "account-manager", title: "Accounts", surfaces: ["tools"],
-  description: "Customer and service-account directory.",
+  id: "account-manager", title: "Accounts & access", surfaces: ["tools"],
+  description: "Authentication, roles, and service-account records.",
   mount(el) {
-    const actions = toolIntro(el, "Customer directory with recorded auth and billing state. Provider actions connect through Hermes later.");
+    const actions = toolIntro(el, "Manage access, workspace roles, authentication state, and service identities without duplicating the customer CRM.");
     actionButton(actions, "Open accounts", () => emit("frank:view", "accounts"));
     actionButton(actions, "Home", () => emit("frank:entity-home", { kind: "tool", id: "accounts", name: "Accounts" }), "tool-secondary");
     const state = statusText(actions);
@@ -117,32 +119,52 @@ define({
 });
 
 define({
-  id: "campaigns", title: "Campaigns · Mautic", surfaces: ["tools"],
-  description: "Campaign and audience control surface.",
+  id: "campaigns", title: "Email flows", surfaces: ["tool-catalog"],
+  description: "Lifecycle messages, audiences, consent, and delivery health.",
   mount(el) {
-    const actions = toolIntro(el, "Mautic owns campaigns and audiences. Resend is the selected delivery provider.");
-    actionButton(actions, "Home", () => emit("frank:entity-home", { kind: "tool", id: "campaigns", name: "Campaigns" }));
+    const actions = toolIntro(el, "Mautic owns campaigns and audiences. Stalwart is the open-source sending path.");
+    actionButton(actions, "Open email flows", () => emit("frank:operations-tool", { id: "email-flows", name: "Email flows" }));
     const state = statusText(actions, "Checking setup…");
-    fetch("/api/email-tools")
-      .then((response) => response.ok ? response.json() : Promise.reject(new Error("email tools unavailable")))
-      .then((data) => {
+    if (isBlockwiseOperationsPreview()) {
+      state.textContent = "Preview data · Mautic + Stalwart";
+      return;
+    }
+    Promise.all([
+      fetch("/api/email-tools").then((response) => response.ok ? response.json() : Promise.reject(new Error("email tools unavailable"))),
+      fetch("/api/connections").then((response) => response.ok ? response.json() : Promise.reject(new Error("connections unavailable"))),
+    ])
+      .then(([data, connectionData]) => {
         const mautic = data.mautic || {};
-        const resend = data.resend || {};
+        const stalwart = (connectionData.connections || []).find((item) => item.provider === "stalwart") || {};
         if (mautic.status !== "unconfigured" && String(mautic.url || "").startsWith("https://")) actionLink(actions, "Open Mautic", mautic.url);
-        const statusLabel = (status) => ({ ready: "ready", configured: "configured", error: "needs attention" })[status] || "setup needed";
-        state.textContent = `Mautic ${statusLabel(mautic.status)} · Resend ${statusLabel(resend.status)}`;
+        const statusLabel = (value) => ({ ready: "ready", verified: "verified", configured: "configured", error: "needs attention" })[value] || "setup needed";
+        state.textContent = `Mautic ${statusLabel(mautic.status)} · Stalwart ${statusLabel(stalwart.status)}`;
       })
       .catch(() => { state.textContent = "Setup status unavailable"; });
   },
 });
 
+for (const tool of OPERATIONS_TOOLS.filter((item) => !["email-flows", "connections"].includes(item.id))) {
+  define({
+    id: `operations-${tool.id}`,
+    title: tool.name,
+    surfaces: ["tool-catalog"],
+    description: tool.description,
+    mount(el) {
+      const actions = toolIntro(el, tool.description);
+      actionButton(actions, `Open ${tool.name.toLowerCase()}`, () => emit("frank:operations-tool", { id: tool.id, name: tool.name }));
+      statusText(actions, isBlockwiseOperationsPreview() ? `Preview data · ${tool.provider}` : `Ready to connect · ${tool.provider}`);
+    },
+  });
+}
+
 define({
-  id: "factory-ad", title: "Ad Studio", surfaces: ["tools"],
+  id: "factory-ad", title: "Ad Template Generator", surfaces: ["tools"],
   description: "Run source images through the ad-template pipeline and inspect each job.",
   mount(el) {
     const actions = toolIntro(el, "Run one image or a batch, inspect the work, and request pipeline changes through Hermes.");
-    actionButton(actions, "Open studio", () => emit("frank:ad-studio"));
-    actionButton(actions, "Tool home", () => emit("frank:entity-home", { kind: "tool", id: "ad-template-generator", name: "Ad Studio" }), "tool-secondary");
+    actionButton(actions, "Open generator", () => emit("frank:ad-template-generator"));
+    actionButton(actions, "Tool home", () => emit("frank:entity-home", { kind: "tool", id: "ad-template-generator", name: "Ad Template Generator" }), "tool-secondary");
     statusText(actions, "/frank/tools/ad-template-generator");
   },
 });
@@ -208,4 +230,206 @@ define({
     text.textContent = "Nothing signed yet. Signed provider releases will appear here.";
     el.append(text);
   },
+});
+const LAUNCH_PROVIDER_NAMES = Object.freeze({
+  stalwart: "Stalwart mail",
+  mautic: "Mautic CRM",
+  chatwoot: "Chatwoot inbox",
+  mailflare: "Mailflare inbox",
+  ga4: "Google Analytics 4",
+  clarity: "Microsoft Clarity",
+});
+
+function launchElement(tag, className = "", text = "") {
+  const element = document.createElement(tag);
+  if (className) element.className = className;
+  if (text) element.textContent = text;
+  return element;
+}
+
+function launchStyles() {
+  if (document.getElementById("launch-desk-styles")) return;
+  const style = document.createElement("style");
+  style.id = "launch-desk-styles";
+  style.textContent = `
+    .launch-tools-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); align-content: start; max-width: 1200px; width: 100%; margin-inline: auto; padding: 24px; }
+    .launch-tools-grid .launch-desk-shell { grid-column: 1 / -1; order: -1; padding: 0; }
+    .launch-desk-shell > h3 { display: none; }
+    .launch-desk { padding: 28px; }
+    .launch-desk-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; padding-bottom: 22px; border-bottom: 1px solid var(--line); }
+    .launch-desk-kicker { color: var(--mute); font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+    .launch-desk h2 { margin-top: 6px; color: var(--ink); font-size: 30px; font-weight: 500; letter-spacing: -.04em; }
+    .launch-desk-head p { max-width: 590px; margin-top: 8px; color: var(--mute); font-size: 13px; line-height: 1.55; }
+    .launch-desk-summary { flex: 0 0 auto; border: 1px solid var(--line); border-radius: var(--r-pill); padding: 8px 11px; color: var(--mute); font-size: 11px; white-space: nowrap; }
+    .launch-desk-summary[data-tone="ready"], .launch-desk-status[data-tone="ready"] { color: var(--ink); }
+    .launch-desk-summary[data-tone="blocked"], .launch-desk-status[data-tone="blocked"] { color: var(--mute); }
+    .launch-desk-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-top: 18px; }
+    .launch-desk-card { min-width: 0; min-height: 186px; padding: 17px; border: 1px solid var(--line); border-radius: var(--r); background: var(--card); }
+    .launch-desk-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+    .launch-desk-card h3 { margin-top: 4px; color: var(--ink); font-size: 16px; font-weight: 500; letter-spacing: -.02em; }
+    .launch-desk-card p { margin-top: 10px; color: var(--mute); font-size: 12px; line-height: 1.55; }
+    .launch-desk-status { flex: 0 0 auto; border-radius: var(--r-pill); background: var(--chip); padding: 4px 7px; color: var(--mute); font-size: 10px; white-space: nowrap; }
+    .launch-desk-provider-list { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 14px; }
+    .launch-desk-provider { border: 1px solid var(--line); border-radius: var(--r-pill); padding: 4px 7px; color: var(--mute); font-size: 10px; }
+    .launch-desk-provider[data-state="ready"] { color: var(--ink); border-color: #dfece4; }
+    .launch-desk-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+    .launch-desk-actions .tool-link, .launch-desk-actions .tool-secondary { margin: 0; }
+    .launch-desk-note { grid-column: 1 / -1; padding: 14px 17px; border-left: 2px solid var(--ink); color: var(--mute); font-size: 12px; line-height: 1.55; }
+    @media (max-width: 760px) {
+      .launch-tools-grid { padding: 14px; grid-template-columns: minmax(0, 1fr); }
+      .launch-desk { padding: 20px; }
+      .launch-desk-head { align-items: flex-start; flex-direction: column; gap: 12px; }
+      .launch-desk-grid { grid-template-columns: 1fr; }
+      .launch-desk-note { grid-column: auto; }
+    }`;
+  document.head.append(style);
+}
+
+function launchProvider(readiness, id) {
+  return (readiness.providers || []).find((item) => item.provider === id) || {
+    provider: id, status: "unconfigured", verified: false, base_url: "",
+  };
+}
+
+function launchProviderChip(provider) {
+  const chip = launchElement("span", "launch-desk-provider", LAUNCH_PROVIDER_NAMES[provider.provider] || provider.provider);
+  chip.dataset.state = provider.verified ? "ready" : provider.status || "unconfigured";
+  chip.title = provider.verified ? "Verified" : provider.status === "configured" ? "Configured; verification is still required" : "Not configured";
+  return chip;
+}
+
+function launchExternal(actions, label, url) {
+  if (!url) return;
+  const link = launchElement("a", "tool-link", label);
+  link.href = url;
+  link.target = "_blank";
+  link.rel = "noopener noreferrer";
+  actions.append(link);
+}
+
+function launchSetupAction(actions, label) {
+  const button = launchElement("button", "tool-secondary", label);
+  button.type = "button";
+  button.addEventListener("click", () => emit("frank:connections"));
+  actions.append(button);
+}
+
+function launchCard({ eyebrow, title, copy, providers, ready, blocker, links = [], setupLabel, label }) {
+  const card = launchElement("section", "launch-desk-card");
+  const top = launchElement("div", "launch-desk-card-top");
+  const heading = launchElement("div");
+  heading.append(launchElement("span", "launch-desk-kicker", eyebrow), launchElement("h3", "", title));
+  const status = launchElement("span", "launch-desk-status", label || (ready ? "Connected" : "Setup needed"));
+  status.dataset.tone = ready ? "ready" : "blocked";
+  top.append(heading, status);
+  card.append(top, launchElement("p", "", ready ? copy : blocker));
+  const providerList = launchElement("div", "launch-desk-provider-list");
+  providers.forEach((provider) => providerList.append(launchProviderChip(provider)));
+  card.append(providerList);
+  const actions = launchElement("div", "launch-desk-actions");
+  links.forEach(([label, url]) => launchExternal(actions, label, url));
+  if (!ready && setupLabel) launchSetupAction(actions, setupLabel);
+  card.append(actions);
+  return card;
+}
+
+function mountLaunchDesk(el) {
+  launchStyles();
+  el.closest(".grid")?.classList.add("launch-tools-grid");
+  el.closest(".w-card")?.classList.add("launch-desk-shell");
+  el.replaceChildren();
+
+  const desk = launchElement("div", "launch-desk");
+  const heading = launchElement("header", "launch-desk-head");
+  const copy = launchElement("div");
+  copy.append(
+    launchElement("span", "launch-desk-kicker", "Blockwise"),
+    launchElement("h2", "", "Launch essentials"),
+    launchElement("p", "", "Contacts, email and website insights. Open the real apps below; a dashboard link does not mean its automation is switched on.")
+  );
+  const summary = launchElement("span", "launch-desk-summary", "Checking launch setup...");
+  heading.append(copy, summary);
+  const grid = launchElement("div", "launch-desk-grid");
+  desk.append(heading, grid);
+  el.append(desk);
+
+  const renderCards = (readiness = {}, emailTools = {}) => {
+    const chatwoot = launchProvider(readiness, "chatwoot");
+    const mailflare = launchProvider(readiness, "mailflare");
+    const mautic = launchProvider(readiness, "mautic");
+    const ga4 = launchProvider(readiness, "ga4");
+    const clarity = launchProvider(readiness, "clarity");
+    const resendReady = emailTools.resend?.status === "ready";
+    const mailflareConfigured = mailflare.configured && Boolean(mailflare.base_url);
+    const mailflareReady = mailflare.verified && Boolean(mailflare.base_url);
+    const chatwootReady = chatwoot.verified && Boolean(chatwoot.base_url);
+    const inboxReady = mailflareReady || chatwootReady;
+    const inboxLinks = [
+      ...(mailflareConfigured ? [[mailflareReady ? "Open Mailflare" : "Open Mailflare setup", mailflare.base_url]] : []),
+      ...(chatwootReady ? [["Open shared inbox", chatwoot.base_url]] : []),
+      ["Read delivery logs", "https://resend.com/emails/receiving"],
+    ];
+    summary.textContent = "Customer email and outreach stay separate";
+    grid.replaceChildren(
+      launchCard({
+        eyebrow: "01 - contacts", title: "CRM", providers: [mautic], ready: mautic.verified,
+        copy: "Open Mautic to manage contacts, segments and campaigns.",
+        blocker: "Mautic is not connected. Existing Blockwise customer records are separate from a prospect CRM.",
+        links: [...(mautic.base_url ? [["Open Mautic", mautic.base_url]] : []), ["Customer records", "https://blockwise.sale/operator/customers"]],
+        setupLabel: "CRM connection settings",
+      }),
+      launchCard({
+        eyebrow: "02 - incoming email", title: "Inbox", providers: [mailflare, chatwoot], ready: inboxReady,
+        label: mailflareReady ? "Connected" : chatwootReady ? "Support connected" : mailflareConfigured ? "Verify Mailflare" : "Mail viewer available",
+        copy: mailflareReady ? "Read and reply to conversations in Mailflare." : "Read and reply to support conversations in Chatwoot.",
+        blocker: mailflareConfigured ? "Mailflare is configured but still needs verification. Resend remains available for incoming delivery logs." : "Incoming mail is viewable in Resend. Connect Mailflare for a shared inbox with compose and reply.",
+        links: inboxLinks,
+      }),
+      launchCard({
+        eyebrow: "03 - outgoing email", title: "Sent email", providers: [], ready: resendReady,
+        label: resendReady ? "Delivery verified" : "Check delivery",
+        copy: "Review delivery results for Blockwise customer and account emails. This is a delivery log, not a compose screen.",
+        blocker: "Review sent messages and delivery results in Resend. Signup email and queued welcome email use different sending paths.",
+        links: [["Open sent email", "https://resend.com/emails"], ["Sender domains", "https://resend.com/domains"]],
+      }),
+      launchCard({
+        eyebrow: "04 - captured email", title: "Signup follow-ups", providers: [], ready: false,
+        label: "Launch checks required",
+        blocker: "Capture → save consent → welcome email → helpful follow-up. Blockwise owns the welcome queue; the native flow builder is available, but nurture flows are not connected or active yet.",
+        links: [["Open flow builder", "https://resend.com/automations"], ...(mautic.base_url ? [["Mautic campaigns", mautic.base_url]] : [])],
+      }),
+      launchCard({
+        eyebrow: "05 - cold outreach", title: "Review before sending", providers: [], ready: false,
+        label: "Not active",
+        blocker: "Document a lawful audience → draft a personal introduction → approve → use a permitted sender. Stop on reply, bounce or unsubscribe. Resend prohibits cold outreach; no campaign is active here.",
+        links: [["Consent requirements", "https://www.acma.gov.au/avoid-sending-spam"]],
+      }),
+      launchCard({
+        eyebrow: "06 - website insights", title: "Google Analytics + Clarity", providers: [ga4, clarity],
+        ready: ga4.verified && clarity.verified,
+        copy: "Google Analytics shows traffic and conversions. Clarity shows heatmaps and session recordings.",
+        blocker: "Finish the Blockwise GA4 property and Clarity project. Tracking stays off until real IDs are installed and the visitor allows analytics.",
+        links: [[ga4.verified ? "Open Google Analytics" : "Google Analytics setup", "https://analytics.google.com/analytics/web/"], [clarity.verified ? "Open Clarity" : "Clarity setup", "https://clarity.microsoft.com/projects"]],
+      }),
+      launchElement("p", "launch-desk-note", "Nothing on this page sends an email or starts a campaign. Customer follow-ups require consent; cold outreach needs its own approved audience and permitted sender.")
+    );
+  };
+  // Keep navigation usable even if a status endpoint stalls or is unavailable.
+  renderCards();
+  summary.textContent = "Checking launch setup...";
+  Promise.all([
+    fetch("/api/providers/readiness", { signal: AbortSignal.timeout(8000) }).then((response) => response.ok ? response.json() : Promise.reject(new Error("provider readiness unavailable"))),
+    fetch("/api/email-tools", { signal: AbortSignal.timeout(8000) }).then((response) => response.ok ? response.json() : Promise.reject(new Error("email tools unavailable"))),
+  ]).then(([readiness, emailTools]) => renderCards(readiness, emailTools)).catch(() => {
+    summary.textContent = "Launch status unavailable";
+    summary.dataset.tone = "blocked";
+    grid.append(launchElement("p", "launch-desk-note", "Setup status could not be read. No service is assumed connected. Direct app links remain available."));
+    actionButton(grid, "Try again", () => mountLaunchDesk(el), "tool-secondary");
+  });
+}
+
+define({
+  id: "blockwise-launch-desk", title: "Blockwise launch", surfaces: ["tools"],
+  description: "A factual launch checklist for Blockwise customer operations.",
+  mount: mountLaunchDesk,
 });

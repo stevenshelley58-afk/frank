@@ -5,6 +5,7 @@
   "scripts": {
     "build:dashboard": "node scripts/build-dashboard-vendor.mjs",
     "build:graph": "node scripts/build-graph-workbench.mjs",
+    "verify": "bash scripts/verify.sh",
     "test:graph": "node --test tests/graph_client.test.mjs",
     "test:mini": "node --test tests/mini_stream.test.mjs",
     "test:graph:browser": "npm run build:graph && node --test tests/graph_browser.test.mjs"

@@ -1,4 +1,4 @@
-import { mountGraphWorkbench, renderMermaid } from "../graph/graph-workbench.bundle.js";
+const graphModule = () => import("../graph/graph-workbench.bundle.js");
 
 const SCHEMA = "schema://frank.memory-inspector/v1";
 
@@ -69,10 +69,12 @@ function knowledgeContent(content) {
           const diagram = element("div", "project-knowledge-diagram");
           diagram.setAttribute("aria-label", "Architecture diagram");
           article.append(diagram);
-          void renderMermaid(diagram, definition).catch(() => {
-            diagram.classList.add("project-knowledge-code");
-            diagram.textContent = definition;
-          });
+          void graphModule()
+            .then(({ renderMermaid }) => diagram.isConnected ? renderMermaid(diagram, definition) : undefined)
+            .catch(() => {
+              diagram.classList.add("project-knowledge-code");
+              diagram.textContent = definition;
+            });
         } else {
           article.append(element("pre", "project-knowledge-code", definition));
         }
@@ -175,6 +177,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   let disposed = false;
   let snapshot = null;
   let graphHandle = null;
+  let graphRenderRevision = 0;
   let activeTab = "overview";
 
   host.classList.remove("home-grid", "project-signal-grid", "grid-stack", "project-grid-fallback");
@@ -214,7 +217,12 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     activeTab = id;
     for (const [key, value] of panels) value.hidden = key !== id;
     for (const [key, value] of tabButtons) value.setAttribute("aria-selected", key === id ? "true" : "false");
-    if (id === "map" && snapshot) renderKnowledgeGraph(snapshot);
+    if (id !== "map") {
+      graphRenderRevision += 1;
+      graphHandle?.destroy?.();
+      graphHandle = null;
+    }
+    if (id === "map" && snapshot) void renderKnowledgeGraph(snapshot);
   }
   for (const [id, label] of [["overview", "Overview"], ["rules", "Rules & facts"], ["architecture", "How it works"], ["map", "Project atlas"], ["memory", "Memory activity"]]) {
     const button = control(label, () => selectTab(id), "project-knowledge-tab");
@@ -284,9 +292,10 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   editorText.style.marginTop = "10px";
   const editorActions = element("div", "connection-row-actions");
   const saveButton = control("Save correction", () => {}, "home-action home-action-primary");
+  const promoteButton = control("Remember everywhere", () => {}, "home-inline-button");
   const forgetButton = control("Forget source", () => {}, "home-inline-button danger-text");
   const closeButton = control("Close source", () => { editorSection.hidden = true; }, "home-inline-button");
-  editorActions.append(saveButton, forgetButton, closeButton);
+  editorActions.append(saveButton, promoteButton, forgetButton, closeButton);
   editorSection.append(editorHeading, editorStatus, editorText, editorActions);
 
   const activitySection = element("section", "connections-section");
@@ -297,21 +306,32 @@ export function mountMemoryInspector({ host, project, setStatus }) {
   shell.append(main);
   host.append(shell);
 
+  function renderKnowledgeGraphError(error) {
+    if (disposed || activeTab !== "map" || !graphHost.isConnected) return;
+    graphHost.replaceChildren(element("p", "home-error", error.message || "Project atlas unavailable."));
+  }
+
   function renderKnowledgeGraph(value) {
+    const revision = ++graphRenderRevision;
     graphHandle?.destroy?.();
     graphHandle = null;
     const graph = value.entity_graph || {};
     if (!graph.nodes?.length) {
       graphHost.replaceChildren(element("p", "connection-empty", "No entity relationships have been extracted for this project yet."));
-      return;
+      return Promise.resolve();
     }
-    graphHandle = mountGraphWorkbench(graphHost, {
-      kind: "project",
-      entityId: project.id,
-      lens: "project.knowledge",
-      title: `${project.name || project.id} project atlas`,
-      load: async () => knowledgeGraphSnapshot(graph, project),
-      validate: (loaded) => loaded,
+    return graphModule().then(({ mountGraphWorkbench }) => {
+      if (disposed || revision !== graphRenderRevision || activeTab !== "map" || !graphHost.isConnected || snapshot !== value) return;
+      graphHandle = mountGraphWorkbench(graphHost, {
+        kind: "project",
+        entityId: project.id,
+        lens: "project.knowledge",
+        title: `${project.name || project.id} project atlas`,
+        load: async () => knowledgeGraphSnapshot(graph, project),
+        validate: (loaded) => loaded,
+      });
+    }).catch((error) => {
+      if (revision === graphRenderRevision) renderKnowledgeGraphError(error);
     });
   }
 
@@ -390,7 +410,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     activity.forEach((item) => activityList.append(activityRow(item)));
     if (!activityList.childElementCount) activityList.append(element("p", "connection-empty", "No provider activity has been recorded yet."));
     setStatus(`Hindsight bank ${provider.bank_id} · ${Number(counts.memories || 0)} memories · ${Number(counts.failed || 0)} failures`, Number(counts.failed || 0) ? "error" : "success");
-    if (activeTab === "map") renderKnowledgeGraph(value);
+    if (activeTab === "map") void renderKnowledgeGraph(value);
   }
 
   async function refresh() {
@@ -410,6 +430,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     editorStatus.textContent = "Loading retained source…";
     editorText.value = "";
     saveButton.disabled = true;
+    promoteButton.disabled = true;
     forgetButton.disabled = true;
     try {
       const value = await requestJson(`/api/projects/${projectId}/memory/documents/${encodeURIComponent(source.id)}`, { signal: controller.signal });
@@ -417,6 +438,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
       editorText.value = value.document?.content || "";
       editorStatus.textContent = `${source.memory_count} derived facts · source ${source.id}`;
       saveButton.disabled = false;
+      promoteButton.disabled = false;
       forgetButton.disabled = false;
       saveButton.onclick = async () => {
         saveButton.disabled = true;
@@ -430,6 +452,22 @@ export function mountMemoryInspector({ host, project, setStatus }) {
         } catch (error) {
           editorStatus.textContent = error.message || "Correction failed.";
         } finally { saveButton.disabled = false; }
+      };
+      promoteButton.onclick = async () => {
+        const destination = "the global operator scope (remembered in every project)";
+        if (!window.confirm(`Remember this source everywhere? Its content and provenance (source ${source.id}) will be promoted to ${destination}. You can forget it later.`)) return;
+        promoteButton.disabled = true;
+        editorStatus.textContent = "Promoting to the global scope…";
+        try {
+          const idempotencyKey = `${projectId}-${source.id}-${Date.now()}`;
+          const result = await requestJson(`/api/projects/${projectId}/memory/documents/${encodeURIComponent(source.id)}/promote-global`, {
+            method: "POST",
+            body: JSON.stringify({ confirmation: `PROMOTE ${source.id}`, idempotency_key: idempotencyKey }),
+          });
+          editorStatus.textContent = `Promoted to ${result.global_bank_id} (from ${result.origin_bank} · ${result.origin_document}). Hindsight re-extracted it globally.`;
+        } catch (error) {
+          editorStatus.textContent = error.message || "Promotion failed.";
+        } finally { promoteButton.disabled = false; }
       };
       forgetButton.onclick = async () => {
         if (!window.confirm(`Forget this retained source and its ${source.memory_count} derived facts? This cannot be undone.`)) return;
@@ -480,6 +518,7 @@ export function mountMemoryInspector({ host, project, setStatus }) {
     refresh,
     dispose() {
       disposed = true;
+      graphRenderRevision += 1;
       controller.abort();
       graphHandle?.destroy?.();
       graphHandle = null;

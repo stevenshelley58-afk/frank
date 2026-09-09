@@ -1,0 +1,78 @@
+{
+  "version": "0.21.0",
+  "release_date": "2026.8.31",
+  "config_version": 34,
+  "latest_config_version": 39,
+  "can_update_hermes": true,
+  "gateway_running": true,
+  "gateway_state": "running",
+  "gateway_platforms": {
+    "api_server": {
+      "state": "connected",
+      "error_code": null,
+      "error_message": null,
+      "updated_at": "2026-09-03T11:42:47.543246+00:00"
+    }
+  },
+  "gateway_exit_reason": null,
+  "gateway_updated_at": "2026-09-03T11:42:47.547843+00:00",
+  "active_agents": 0,
+  "gateway_busy": false,
+  "gateway_drainable": true,
+  "restart_drain_timeout": 0.0,
+  "active_sessions": 2,
+  "auth_required": false,
+  "auth_providers": [
+    "basic"
+  ],
+  "auth_flows": [],
+  "nous_session_valid": "unknown",
+  "components": {
+    "gateway": {
+      "status": "ok",
+      "state": "running"
+    },
+    "dashboard": {
+      "status": "ok",
+      "recent_unhandled_errors": 0,
+      "last_error_at": null,
+      "selftest": "ok"
+    },
+    "storage": {
+      "status": "ok"
+    },
+    "platforms": {
+      "status": "ok",
+      "configured": 1,
+      "connected": 1
+    }
+  },
+  "overall": "ok",
+  "memory": {
+    "pressure": "ok",
+    "gateway_rss_mb": 245,
+    "system_total_mb": 32094,
+    "system_available_mb": 17832,
+    "swap_used_mb": 0,
+    "sampled_at": "2026-09-03T11:54:48.333753+00:00",
+    "last_boot_unclean": false,
+    "last_boot_suspected_oom": false,
+    "boot_id": "2026-09-03T11:42:47.169559+00:00"
+  },
+  "disk": {
+    "pressure": "ok",
+    "total_mb": 395699,
+    "free_mb": 177448,
+    "used_percent": 55.2
+  },
+  "profiles": [],
+  "gateway_mode": "single",
+  "gateways": [
+    {
+      "profile": "default",
+      "ports": {
+        "api_server": 18642
+      }
+    }
+  ]
+}

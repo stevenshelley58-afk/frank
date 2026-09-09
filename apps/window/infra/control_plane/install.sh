@@ -20,6 +20,12 @@ fi
   echo "then rerun this installer; do not continue with partially installed units" >&2
   exit 1
 }
+if [[ -n "${FRANK_EXPECTED_REVISION:-}" ]]; then
+  expected="$(git -C /projects/frank rev-parse --verify --end-of-options "${FRANK_EXPECTED_REVISION}^{commit}")" || { echo "invalid expected immutable revision" >&2; exit 1; }
+  [[ "$expected" == "$FRANK_EXPECTED_REVISION" ]] || { echo "expected immutable revision must be a full SHA" >&2; exit 1; }
+  git -C /projects/frank diff --quiet "$expected" -- apps/window/infra/control_plane apps/window/infra/cleanup apps/window/infra/discovery apps/window/infra/evaluations apps/window/infra/retention apps/window/scripts apps/window/graph governance/control-plane || { echo "canonical control-plane hook differs from expected immutable revision" >&2; exit 1; }
+  [[ -z "$(git -C /projects/frank ls-files --others --exclude-standard -- apps/window/infra/control_plane apps/window/infra/cleanup apps/window/infra/discovery apps/window/infra/evaluations apps/window/infra/retention apps/window/scripts apps/window/graph governance/control-plane)" ]] || { echo "canonical control-plane hook closure has untracked inputs" >&2; exit 1; }
+fi
 
 source_dir="/projects/frank/apps/window/infra/control_plane"
 unit_dir="/etc/systemd/system"

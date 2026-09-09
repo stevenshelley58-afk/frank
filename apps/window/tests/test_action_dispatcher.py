@@ -43,11 +43,13 @@ class DispatcherTests(unittest.TestCase):
         self.path = Path(self.tmp.name) / "actions.yaml"
         self.path.write_text(YAML, encoding="utf-8")
         os.environ["HERMES_ENDPOINT"] = "https://hermes.example"
+        os.environ["HERMES_API_KEY"] = "dispatcher-test-key"
         self.args = {"mode": "fast", "idempotency_key": "abcdefgh"}
 
     def tearDown(self):
         self.tmp.cleanup()
         os.environ.pop("HERMES_ENDPOINT", None)
+        os.environ.pop("HERMES_API_KEY", None)
 
     def dispatch(self, opener=lambda req, timeout: Response()):
         return HermesDispatcher(self.path, opener=opener).dispatch(

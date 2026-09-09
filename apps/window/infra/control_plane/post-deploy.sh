@@ -9,6 +9,15 @@ repo="/projects/frank"
   echo "canonical Frank checkout is unavailable" >&2
   exit 1
 }
+if [[ -n "${FRANK_EXPECTED_REVISION:-}" ]]; then
+  expected="$(git -C "$repo" rev-parse --verify --end-of-options "${FRANK_EXPECTED_REVISION}^{commit}")" \
+    || { echo "invalid expected immutable revision" >&2; exit 1; }
+  [[ "$expected" == "$FRANK_EXPECTED_REVISION" ]] || { echo "expected immutable revision must be a full SHA" >&2; exit 1; }
+  git -C "$repo" diff --quiet "$expected" -- apps/window/infra/control_plane apps/window/scripts apps/window/graph governance/control-plane \
+    || { echo "canonical post-deploy hook differs from expected immutable revision" >&2; exit 1; }
+  [[ -z "$(git -C "$repo" ls-files --others --exclude-standard -- apps/window/infra/control_plane apps/window/scripts apps/window/graph governance/control-plane)" ]] \
+    || { echo "canonical post-deploy hook closure has untracked inputs" >&2; exit 1; }
+fi
 /usr/bin/python3 "$repo/apps/window/scripts/control_reconcile.py" post_deploy
 
 # Promotion is deliberately opt-in: a deploy remains healthy when no validated

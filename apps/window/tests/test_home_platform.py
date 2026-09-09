@@ -462,6 +462,14 @@ class HomePlatformApiTest(unittest.TestCase):
         saved = self.client.put("/api/homes/tool/connections", json={"expected_revision": 0, "instances": bound})
         self.assertEqual(saved.status_code, 200, saved.get_json())
 
+    def test_mail_home_uses_shared_connection_setup_widgets(self):
+        home = self.client.get("/api/homes/tool/mail").get_json()
+        ids = [item["widget_id"] for item in home["instances"]]
+        self.assertEqual(ids, ["connections-summary", "provider-coverage"])
+        summary = self.client.get("/api/homes/tool/mail/widgets/connections-summary-1").get_json()
+        self.assertEqual(summary["status"], "setup_needed")
+        self.assertEqual(summary["links"][0]["target"], {"view": "connections", "action": "add"})
+
     def test_empty_connections_widget_opens_the_add_flow(self):
         summary = self.client.get("/api/homes/tool/connections/widgets/connections-summary-1").get_json()
         self.assertEqual(summary["links"][0]["target"], {"view": "connections", "action": "add"})

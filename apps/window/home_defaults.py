@@ -58,6 +58,10 @@ ENTITY_DEFAULT_WIDGET_IDS: dict[str, tuple[str, ...]] = {
         "connection-attention",
         "provider-coverage",
     ),
+    "tool:mail": (
+        "connections-summary",
+        "provider-coverage",
+    ),
     "tool:accounts": (
         "entity-overview",
         "accounts-summary",

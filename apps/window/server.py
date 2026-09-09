@@ -20,9 +20,11 @@ from copy import deepcopy
 import urllib.error
 import urllib.parse
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 
 from flask import Flask, Response, abort, jsonify, redirect, request, send_file, send_from_directory, stream_with_context
+from werkzeug.exceptions import HTTPException
 
 import home_platform
 import home_defaults
@@ -32,6 +34,9 @@ from memory_inspector import HindsightClient, MemoryInspector, create_blueprint 
 from project_store import ProjectStore, ProjectStoreError
 import vault_broker
 import control_plane_view
+import ops_projections
+import mini_operator
+import customer_ops_actions
 from graph.provider import (
     ReadOnlyProvider,
     ProviderUnavailable,
@@ -39,6 +44,7 @@ from graph.provider import (
     manifest_reader,
 )
 from tool_apps import discover_tool_apps
+from review_chat import ReviewChatError, hermes_review_payload, hermes_undo_payload, validate_review_message, validate_undo_body
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
 MINI_PUBLIC_ASSETS = {
@@ -64,8 +70,12 @@ LEGACY_MINI_ASSETS = {
 CHAT_DIR = Path(os.environ.get("CHAT_STORE_DIR", "/data"))
 UPLOAD_DIR = CHAT_DIR / "uploads"
 ACCOUNTS_FILE = Path(os.environ.get("ACCOUNTS_STORE_FILE", str(CHAT_DIR / "accounts.json")))
+SUPPORT_CONVERSATIONS_FILE = Path(os.environ.get("SUPPORT_CONVERSATIONS_FILE", str(CHAT_DIR / "support-conversations.json")))
 PROJECTS_FILE = Path(os.environ.get("PROJECTS_STORE_FILE", str(CHAT_DIR / "projects.json")))
 DATA_DIR = CHAT_DIR
+TEMPLATE_RELEASE_ROOT = Path(os.environ.get(
+    "AD_TEMPLATE_GENERATOR_RELEASE_ROOT", "/data/releases/ad-template-generator"
+)).resolve()
 
 
 def _mini_data_root() -> Path:
@@ -94,16 +104,25 @@ def _mini_legacy_root() -> Path | None:
 HERMES_UPLOAD_ROOT = Path(os.environ.get("HERMES_SHARED_UPLOAD_ROOT", "/frank/window/data/uploads"))
 MAX_UPLOAD_BYTES = int(os.environ.get("MAX_UPLOAD_BYTES", str(250 * 1024 * 1024)))
 MAX_INLINE_IMAGE_BYTES = int(os.environ.get("MAX_INLINE_IMAGE_BYTES", str(6 * 1024 * 1024)))
-AD_STUDIO_MAX_SOURCES = min(50, max(1, int(os.environ.get("AD_STUDIO_MAX_SOURCES", "20"))))
-AD_STUDIO_MAX_SOURCE_BYTES = min(
+def _ad_template_generator_env(suffix: str, default: str) -> str:
+    canonical = f"AD_TEMPLATE_GENERATOR_{suffix}"
+    legacy = f"AD_STUDIO_{suffix}"
+    return os.environ.get(canonical, os.environ.get(legacy, default))
+
+
+AD_TEMPLATE_GENERATOR_MAX_SOURCES = min(50, max(1, int(_ad_template_generator_env("MAX_SOURCES", "20"))))
+AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES = min(
     MAX_UPLOAD_BYTES,
-    max(1, int(os.environ.get("AD_STUDIO_MAX_SOURCE_BYTES", str(25 * 1024 * 1024)))),
+    max(1, int(_ad_template_generator_env("MAX_SOURCE_BYTES", str(25 * 1024 * 1024)))),
 )
-AD_STUDIO_MAX_BATCH_BYTES = min(
+AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES = min(
     MAX_UPLOAD_BYTES,
-    max(AD_STUDIO_MAX_SOURCE_BYTES, int(os.environ.get("AD_STUDIO_MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
+    max(AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES, int(_ad_template_generator_env("MAX_BATCH_BYTES", str(100 * 1024 * 1024)))),
 )
-HERMES_URL = os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642").rstrip("/")
+AD_TEMPLATE_GENERATOR_MAX_BRIEF_CHARACTERS = 4000
+# HERMES_ENDPOINT is the canonical dispatcher contract; retain the legacy
+# variable only as an explicit compatibility fallback for older deployments.
+HERMES_URL = os.environ.get("HERMES_ENDPOINT", os.environ.get("HERMES_API_URL", "http://172.16.1.1:8642")).rstrip("/")
 HERMES_KEY = os.environ.get("HERMES_API_KEY", "")
 HERMES_PROFILE = os.environ.get("HERMES_PROFILE", "default")
 HINDSIGHT_URL = os.environ.get("HINDSIGHT_API_URL", "http://172.16.1.1:9178").rstrip("/")
@@ -120,14 +139,6 @@ ROOTS = {
     "vps": Path(os.environ.get("VPS_ROOT", "/vps")),
 }
 SKIP = {".git", "node_modules", ".next", "__pycache__", ".turbo", "dist"}
-CURATED_MODELS = [
-    {"id": "qwen3.8-max", "provider": "custom", "note": "default"},
-    {"id": "deepseek-v4-flash", "provider": "deepseek", "note": "fast · cheap"},
-    {"id": "deepseek-v4-pro", "provider": "deepseek", "note": "stronger"},
-    {"id": "grok-4.6", "provider": "xai", "note": "escalate"},
-    {"id": "gpt-5.6-sol", "provider": "custom", "note": "escalate"},
-    {"id": "claude-fable-5", "provider": "custom", "note": "escalate"},
-]
 
 app = Flask(__name__, static_folder=None)
 app.config["MAX_CONTENT_LENGTH"] = MAX_UPLOAD_BYTES
@@ -157,11 +168,29 @@ ACCOUNT_MODES = {"selfserve", "managed", "internal"}
 ACCOUNT_ENVIRONMENTS = {"test", "live"}
 AUTH_STATUSES = {"not_connected", "invited", "active", "suspended", "closed"}
 BILLING_STATUSES = {"not_connected", "trial", "active", "past_due", "canceled"}
-AD_STUDIO_RUN_ID = re.compile(r"trun_[0-9a-f]{32}")
-AD_STUDIO_PLACEMENTS = {"square", "portrait", "story"}
-AD_STUDIO_IMAGE_EXTENSIONS = {
+AD_TEMPLATE_GENERATOR_RUN_ID = re.compile(r"trun_[0-9a-f]{32}")
+AD_TEMPLATE_GENERATOR_PLACEMENTS = {"square", "portrait", "story"}
+AD_TEMPLATE_GENERATOR_IMAGE_EXTENSIONS = {
     ".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg",
     ".png", ".tif", ".tiff", ".webp",
+}
+TEMPLATE_RELEASE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
+TEMPLATE_RELEASE_EXTENSIONS = {
+    ".json", ".png", ".webp", ".jpg", ".jpeg", ".woff", ".woff2", ".ttf", ".otf",
+}
+TEMPLATE_RELEASE_MAX_BYTES = int(os.environ.get(
+    "AD_TEMPLATE_GENERATOR_RELEASE_MAX_BYTES", str(100 * 1024 * 1024)
+))
+TEMPLATE_RELEASE_MIME_TYPES = {
+    ".json": "application/json",
+    ".png": "image/png",
+    ".webp": "image/webp",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
+    ".woff": "font/woff",
+    ".woff2": "font/woff2",
+    ".ttf": "font/ttf",
+    ".otf": "font/otf",
 }
 ACCOUNT_FIELDS = {
     "project_id", "kind", "name", "identity", "provider", "purpose",
@@ -185,6 +214,7 @@ SECRET_VALUE_PATTERNS = (
     re.compile(r"\beyJ[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{12,}\.[A-Za-z0-9_-]{8,}\b"),
 )
 CONNECTOR_STATUSES = {"unconfigured", "configured", "ready", "error"}
+SUPPORT_CONVERSATION_STATUSES = {"open", "pending", "snoozed", "resolved", "closed"}
 EXTERNAL_REFERENCE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]{0,239}$")
 DEFAULT_PROJECTS = [
     {
@@ -214,8 +244,8 @@ DEFAULT_PROJECTS = [
         "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },
     {
-        "id": "mini-frank", "name": "Frank", "root": "mini-frank",
-        "blurb": "Frank project workspace.",
+        "id": "mini-frank", "name": "Mini Frank", "root": "mini-frank",
+        "blurb": "Mini Frank project workspace.",
         "capabilities": ["repository.activity", "repository.summary", "project.files", "accounts.directory", "connections.read", "analytics.setup"],
         "default_widgets": list(home_defaults.PROJECT_DEFAULT_WIDGET_IDS),
     },
@@ -397,11 +427,147 @@ def _hermes_error(err: Exception):
         message = f"Hermes returned HTTP {err.code}."
         try:
             parsed = json.loads(detail)
-            message = parsed.get("error", {}).get("message") or parsed.get("message") or message
+            error_value = parsed.get("error")
+            if isinstance(error_value, dict):
+                message = error_value.get("message") or message
+            elif isinstance(error_value, str):
+                message = error_value
+            detail_value = parsed.get("detail")
+            if isinstance(detail_value, dict):
+                message = detail_value.get("reason") or detail_value.get("message") or message
+            elif isinstance(detail_value, str):
+                message = detail_value
+            message = parsed.get("message") or message
         except (json.JSONDecodeError, AttributeError):
             pass
         return jsonify({"error": message}), err.code if 400 <= err.code < 600 else 502
     return jsonify({"error": f"Could not reach Hermes: {str(err).split(chr(10))[0][:180]}"}), 502
+
+
+_AD_DB_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+_AD_DB_PAGE_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
+_AD_DB_IDEMPOTENCY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9:._/-]{7,127}$")
+_AD_DB_QUERY_KEYS = frozenset({"q", "cursor", "limit", "advertiserPageId", "agentId", "agentName", "agencyId", "agencyName", "state", "suburb", "postcode", "locationRelation", "status"})
+
+
+def _ad_db_id(value: str) -> str:
+    if not _AD_DB_ID.fullmatch(value or ""):
+        abort(404)
+    return value
+
+
+def _ad_db_query() -> str:
+    pairs = []
+    for key, value in request.args.items(multi=True):
+        if key not in _AD_DB_QUERY_KEYS or len(value) > 240:
+            abort(400, description="unsupported Ad DB filter")
+        pairs.append((key, value))
+    return urllib.parse.urlencode(pairs)
+
+
+def _ad_db_connection() -> tuple[str, str]:
+    """Use the private Serve surface, never the generic Hermes gateway."""
+    base = os.environ.get("HERMES_SERVE_URL", "").strip().rstrip("/")
+    token = os.environ.get("HERMES_SERVE_TOKEN", "").strip()
+    if not base or not token:
+        raise RuntimeError("Hermes Ad DB connection is not configured")
+    return base, token
+
+
+def _ad_db_request(
+    path: str,
+    payload: dict | None = None,
+    *,
+    method: str | None = None,
+    timeout: float = 30,
+):
+    base, token = _ad_db_connection()
+    data = None if payload is None else json.dumps(payload).encode("utf-8")
+    headers = {
+        "Accept": "application/json",
+        "X-Hermes-Session-Token": token,
+    }
+    if data is not None:
+        headers["Content-Type"] = "application/json"
+    upstream_request = urllib.request.Request(
+        base + path,
+        data=data,
+        headers=headers,
+        method=method or ("GET" if data is None else "POST"),
+    )
+    with urllib.request.urlopen(upstream_request, timeout=timeout) as upstream:
+        return json.loads(upstream.read().decode("utf-8") or "{}")
+
+
+def _ad_db_public_payload(payload: object) -> object:
+    """Replace internal media routes; source URLs never reach the browser."""
+    if not isinstance(payload, dict):
+        return payload
+    result = deepcopy(payload)
+    records = result.get("items") if isinstance(result.get("items"), list) else [result]
+    for record in records:
+        if not isinstance(record, dict) or not _AD_DB_ID.fullmatch(str(record.get("id") or "")):
+            continue
+        for asset in record.get("media") if isinstance(record.get("media"), list) else []:
+            if not isinstance(asset, dict):
+                continue
+            asset_id = str(asset.get("id") or "")
+            if _AD_DB_ID.fullmatch(asset_id):
+                asset["archiveUrl"] = f"/api/ad-db/ads/{urllib.parse.quote(record['id'], safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
+            asset.pop("sourceUrl", None)
+            asset.pop("sourceURLs", None)
+    return result
+
+
+class _AdDbNoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def _ad_db_media_response(ad_id: str, asset_id: str) -> Response:
+    """Stream only Hermes-authenticated archive bytes; never relay redirects."""
+    path = f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}/media/{urllib.parse.quote(asset_id, safe='')}"
+    base, token = _ad_db_connection()
+    headers = {
+        "Accept": "application/octet-stream",
+        "X-Hermes-Session-Token": token,
+    }
+    for name in ("Range", "If-Range", "If-None-Match"):
+        if request.headers.get(name):
+            headers[name] = request.headers[name]
+    upstream_request = urllib.request.Request(
+        base + path,
+        headers=headers,
+        method=request.method,
+    )
+    upstream = urllib.request.build_opener(_AdDbNoRedirect()).open(upstream_request, timeout=15)
+    status = getattr(upstream, "status", upstream.getcode())
+    if status not in (200, 206, 304):
+        upstream.close()
+        abort(502, description="Hermes returned an invalid archived-media response")
+    response_headers = {
+        name: value
+        for name in ("Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified")
+        if (value := upstream.headers.get(name))
+    }
+    response_headers["Cache-Control"] = "private, max-age=31536000, immutable"
+    if request.method == "HEAD" or status == 304:
+        upstream.close()
+        return Response(status=status, headers=response_headers)
+
+    def stream():
+        try:
+            while chunk := upstream.read(64 * 1024):
+                yield chunk
+        finally:
+            upstream.close()
+
+    return Response(
+        stream_with_context(stream()),
+        status=status,
+        headers=response_headers,
+        direct_passthrough=True,
+    )
 
 
 def _session_path(session_id: str, suffix: str = "") -> str:
@@ -478,12 +644,25 @@ def _public_hermes_messages(items: list) -> list:
             continue
         messages.append({
             "role": role,
-            "text": text,
+            "text": _redact_public_text(text),
             "tools": tools,
             "attachments": [],
             "ts": item.get("timestamp") or 0,
         })
     return messages
+
+
+def _redact_public_text(text: str) -> str:
+    """Browser-facing chat text must never carry host paths or secrets.
+
+    Hermes may legitimately see staging/agent paths inside a turn; the served
+    projection redacts them so /api/chat stays within the public boundary.
+    """
+    try:
+        from hermes_adapter.redaction import redact_text
+        return redact_text(text)
+    except Exception:
+        return text
 
 
 def hermes_reachable() -> dict:
@@ -533,7 +712,14 @@ def hermes_session_summaries() -> dict:
 @app.get("/api/health")
 def health():
     brain = hermes_reachable()
-    return jsonify({"ok": True, "service": "frank-window", "hermes": brain})
+    # Release identity only (Phase E): safe fields, no paths or secrets.
+    identity = {
+        "source_sha": os.environ.get("FRANK_SOURCE_SHA", "unknown"),
+        "build_id": os.environ.get("FRANK_BUILD_TIME", "unknown"),
+        "schema_version": "frank.release-identity/v1",
+    }
+    return jsonify({"ok": True, "service": "frank-window", "hermes": brain,
+                    "release": identity})
 
 
 @app.errorhandler(ProjectStoreError)
@@ -541,12 +727,28 @@ def project_store_error(error: ProjectStoreError):
     return jsonify({"error": str(error)}), 503
 
 
+@app.errorhandler(HTTPException)
+def api_http_exception(error: HTTPException):
+    """Return API validation failures as JSON so operator messages stay visible."""
+    if not request.path.startswith("/api/"):
+        return error
+    description = error.description
+    message = description.strip()[:300] if isinstance(description, str) and description.strip() else error.name
+    return jsonify({"error": {"message": message}}), error.code or 500
+
+
 @app.get("/api/projects")
 def projects():
     try:
-        return jsonify({"schema": "schema://frank.projects/v1", "projects": _project_items()})
+        items = _project_items()
+        return jsonify({
+            "schema": "schema://frank.projects/v1",
+            "projects": [item for item in items if not item.get("archived")],
+            "archived_projects": [item for item in items if item.get("archived")],
+        })
     except ProjectStoreError as error:
         abort(503, str(error))
+
 
 
 def _project_workspace(project: dict) -> str:
@@ -776,6 +978,67 @@ def projects_create():
     }), 201
 
 
+def _project_revision(body: dict) -> int:
+    if "revision" not in body:
+        abort(400, "project revision is required")
+    revision = body["revision"]
+    if isinstance(revision, bool) or not isinstance(revision, int) or revision < 0:
+        abort(400, "project revision is invalid")
+    return revision
+
+
+def _update_project(project_id: str, changes: dict, body: dict) -> dict:
+    if not _project_store.get_project(project_id):
+        abort(404, "project not found")
+    try:
+        return _project_store.update_project(
+            project_id, changes, expected_revision=_project_revision(body)
+        )
+    except ValueError as error:
+        if "changed elsewhere" in str(error):
+            abort(409, str(error))
+        abort(400, str(error))
+    except ProjectStoreError as error:
+        abort(503, str(error))
+
+
+@app.patch("/api/projects/<project_id>")
+def projects_update(project_id: str):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict):
+        abort(400, "request body must be an object")
+    allowed = {"name", "blurb", "live", "revision"}
+    if not body or set(body) - allowed or set(body) == {"revision"}:
+        abort(400, "unsupported project fields")
+    changes = {}
+    if "name" in body:
+        changes["name"] = _clean_project_text(body["name"], 80, required=True)
+    if "blurb" in body:
+        changes["blurb"] = _clean_project_text(body["blurb"], 240)
+    if "live" in body:
+        changes["live"] = _clean_project_url(body["live"], "live URL")
+    return jsonify({"ok": True, "project": _project_public(_update_project(project_id, changes, body))})
+
+
+@app.post("/api/projects/<project_id>/archive")
+def projects_archive(project_id: str):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or set(body) - {"revision"}:
+        abort(400, "unsupported project fields")
+    project = _update_project(project_id, {"archived": True, "archived_at": int(time.time())}, body)
+    return jsonify({"ok": True, "project": _project_public(project)})
+
+
+@app.post("/api/projects/<project_id>/restore")
+def projects_restore(project_id: str):
+    body = request.get_json(silent=True) or {}
+    if not isinstance(body, dict) or set(body) - {"revision"}:
+        abort(400, "unsupported project fields")
+    project = _update_project(project_id, {"archived": False, "archived_at": 0}, body)
+    return jsonify({"ok": True, "project": _project_public(project)})
+
+
+
 @app.get("/api/accounts")
 def accounts_list():
     data = _ensure_accounts()
@@ -849,19 +1112,150 @@ def accounts_delete(account_id: str):
 
 @app.get("/api/email-tools")
 def email_tools():
-    mautic_url = os.environ.get("MAUTIC_URL", "").strip()
-    mautic_fallback = "configured" if mautic_url else "unconfigured"
+    mautic_url = _safe_provider_url(_mautic_base_url())
     return jsonify({
+        "stalwart": {
+            "status": _connector_status("STALWART_CONNECTOR_STATUS"),
+            "url": _safe_provider_url(os.environ.get("STALWART_BASE_URL", "")),
+        },
         "resend": {
+            "role": "compatibility",
             "status": _connector_status("RESEND_CONNECTOR_STATUS"),
             "mcp_status": _connector_status("RESEND_MCP_STATUS"),
             "url": "https://resend.com/emails",
         },
+        "mailflare": {
+            "role": "human_inbox",
+            "status": _connector_status("MAILFLARE_CONNECTOR_STATUS"),
+            "url": _safe_provider_url(os.environ.get("MAILFLARE_BASE_URL", "")),
+        },
         "mautic": {
-            "status": _connector_status("MAUTIC_CONNECTOR_STATUS", mautic_fallback),
+            # A URL is configuration metadata, not proof that Hermes verified it.
+            "status": _connector_status("MAUTIC_CONNECTOR_STATUS"),
             "url": mautic_url,
         },
     })
+
+
+def _safe_provider_url(value: str) -> str:
+    """Return one normalized HTTP(S) origin without credentials or paths."""
+    parsed = urllib.parse.urlparse(str(value or "").strip())
+    if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+        return ""
+    try:
+        port = parsed.port
+    except ValueError:
+        return ""
+    scheme = parsed.scheme.lower()
+    host = parsed.hostname.lower().rstrip(".")
+    suffix = f":{port}" if port and not ((scheme == "http" and port == 80) or (scheme == "https" and port == 443)) else ""
+    return f"{scheme}://{host}{suffix}"
+
+
+def _safe_support_url(value: str) -> str:
+    parsed = urllib.parse.urlparse(str(value or "").strip())
+    if parsed.scheme != "https" or not parsed.netloc or parsed.username or parsed.password:
+        return ""
+    return f"{_safe_provider_url(value)}{parsed.path}"
+
+
+def _mautic_base_url() -> str:
+    return os.environ.get("MAUTIC_BASE_URL", "").strip() or os.environ.get("MAUTIC_URL", "").strip()
+
+
+@app.get("/api/providers/readiness")
+def providers_readiness():
+    """Provider-neutral readiness projection; verification remains Hermes-owned."""
+    providers = {
+        "stalwart": ("STALWART_CONNECTOR_STATUS", "STALWART_BASE_URL"),
+        "mautic": ("MAUTIC_CONNECTOR_STATUS", "MAUTIC_BASE_URL"),
+        "chatwoot": ("CHATWOOT_CONNECTOR_STATUS", "CHATWOOT_BASE_URL"),
+        "mailflare": ("MAILFLARE_CONNECTOR_STATUS", "MAILFLARE_BASE_URL"),
+        # Analytics tools are intentionally represented only by their recorded
+        # connector state. A dashboard URL or a tracking snippet is never
+        # treated as proof that the property is collecting data.
+        "ga4": ("GA4_CONNECTOR_STATUS", "GA4_DASHBOARD_URL"),
+        "clarity": ("CLARITY_CONNECTOR_STATUS", "CLARITY_DASHBOARD_URL"),
+    }
+    items = []
+    for provider, (status_var, url_var) in providers.items():
+        status = _connector_status(status_var)
+        items.append({
+            "provider": provider,
+            "status": status,
+            "configured": status in {"configured", "ready"},
+            "verified": status == "ready",
+            "base_url": _safe_provider_url(_mautic_base_url() if provider == "mautic" else os.environ.get(url_var, "")),
+            "error": status == "error",
+        })
+    return jsonify({"schema": "schema://frank.provider-readiness/v1", "providers": items})
+
+
+def _support_projection() -> list[dict]:
+    if not SUPPORT_CONVERSATIONS_FILE.exists():
+        return []
+    try:
+        data = json.loads(SUPPORT_CONVERSATIONS_FILE.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        abort(503, "support conversation state is unavailable")
+    if not isinstance(data, dict) or set(data) != {"version", "conversations"} or data.get("version") != 1:
+        abort(503, "support conversation state is corrupt")
+    records = data.get("conversations")
+    if not isinstance(records, list) or any(not isinstance(item, dict) for item in records):
+        abort(503, "support conversation state is corrupt")
+    allowed = {"id", "account_id", "project_id", "status", "subject", "updated_at", "external_ref", "url"}
+    output = []
+    for item in records:
+        if set(item) - allowed or not isinstance(item.get("id"), str) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,119}", item["id"]):
+            abort(503, "support conversation state is corrupt")
+        if not isinstance(item.get("status", "open"), str):
+            abort(503, "support conversation state is corrupt")
+        status = item.get("status", "open").lower()
+        if status not in SUPPORT_CONVERSATION_STATUSES:
+            abort(503, "support conversation state is corrupt")
+        for field in ("account_id", "project_id", "subject", "external_ref", "url"):
+            if field in item and not isinstance(item[field], str):
+                abort(503, "support conversation state is corrupt")
+        account_id_value = item.get("account_id", "")
+        project_id_value = item.get("project_id", "main")
+        if account_id_value and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}", account_id_value):
+            abort(503, "support conversation state is corrupt")
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,79}", project_id_value):
+            abort(503, "support conversation state is corrupt")
+        external_ref = item.get("external_ref", "")
+        if external_ref and not EXTERNAL_REFERENCE.fullmatch(external_ref):
+            abort(503, "support conversation state is corrupt")
+        updated_at = item.get("updated_at")
+        if updated_at is not None:
+            if not isinstance(updated_at, str) or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z", updated_at):
+                abort(503, "support conversation state is corrupt")
+            try:
+                datetime.fromisoformat(updated_at[:-1] + "+00:00")
+            except ValueError:
+                abort(503, "support conversation state is corrupt")
+        chatwoot_ready = _connector_status("CHATWOOT_CONNECTOR_STATUS") == "ready"
+        chatwoot_origin = _safe_provider_url(os.environ.get("CHATWOOT_BASE_URL", ""))
+        parsed = urllib.parse.urlparse(item.get("url", "")) if isinstance(item.get("url", ""), str) else None
+        valid_origin = bool(parsed and _safe_provider_url(item.get("url", "")) == chatwoot_origin and not parsed.username and not parsed.password)
+        url = _safe_support_url(item.get("url", "")) if chatwoot_ready and chatwoot_origin and valid_origin else ""
+        output.append({
+            "id": item["id"], "account_id": account_id_value,
+            "project_id": project_id_value, "status": status,
+            "subject": item.get("subject", ""), "updated_at": updated_at,
+            "external_ref": external_ref, "url": url,
+        })
+    return output
+
+
+@app.get("/api/support/conversations")
+def support_conversations():
+    account_id = str(request.args.get("account_id", "")).strip()
+    if account_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,79}", account_id):
+        abort(400, "invalid account id")
+    items = _support_projection()
+    if account_id:
+        items = [item for item in items if item["account_id"] == account_id]
+    return jsonify({"schema": "schema://frank.support-conversations/v1", "conversations": items})
 
 
 @app.get("/api/roots")
@@ -943,7 +1337,7 @@ def tree_search():
                 if child.is_dir():
                     stack.append(child)
                     continue
-                if child.suffix.lower() not in AD_STUDIO_IMAGE_EXTENSIONS or query not in child.name.lower():
+                if child.suffix.lower() not in AD_TEMPLATE_GENERATOR_IMAGE_EXTENSIONS or query not in child.name.lower():
                     continue
                 resolved = child.resolve()
                 resolved.relative_to(base.resolve())
@@ -998,11 +1392,68 @@ def file_get():
     return jsonify({"ok": True, "root": root, "path": rel, "text": text})
 
 
+def _hermes_model_rows(payload: dict) -> list[dict]:
+    """Normalize Hermes's authoritative picker payload into browser rows.
+
+    Live v0.21 shape: per-provider rows carry `models` (strings or dicts),
+    `capabilities` ({model: {fast, reasoning}}) and an `authenticated` flag.
+    Only authenticated providers are selectable; nothing is inferred.
+    """
+    rows: list[dict] = []
+    options = payload.get("options") if isinstance(payload, dict) else None
+    if isinstance(options, list):
+        for entry in options:
+            if isinstance(entry, dict) and entry.get("id"):
+                rows.append({
+                    "id": str(entry.get("id")),
+                    "provider": entry.get("provider"),
+                    "note": entry.get("note"),
+                    "reasoning": entry.get("reasoning"),
+                })
+        return rows
+    if not isinstance(payload, dict):
+        return rows
+    for row in payload.get("providers", []) or []:
+        if not isinstance(row, dict) or not row.get("authenticated"):
+            continue
+        provider = str(row.get("slug") or row.get("id") or "")
+        capabilities = row.get("capabilities") if isinstance(row.get("capabilities"), dict) else {}
+        for entry in row.get("models", []) or []:
+            if isinstance(entry, dict) and entry.get("id"):
+                model_id = str(entry.get("id"))
+                note = entry.get("note")
+            elif isinstance(entry, str) and entry.strip():
+                model_id = entry.strip()
+                note = None
+            else:
+                continue
+            cap = capabilities.get(model_id)
+            rows.append({
+                "id": model_id,
+                "provider": provider,
+                "note": note or row.get("name"),
+                "reasoning": bool(cap.get("reasoning")) if isinstance(cap, dict) else None,
+            })
+    return rows
+
+
 @app.get("/api/models")
 def models():
-    items = list(CURATED_MODELS)
-    hermes = hermes_reachable()
-    return jsonify({"models": items, "profile": HERMES_PROFILE, "hermes": hermes})
+    """Model truth lives in Hermes.  No Frank catalogue; failures are visible."""
+    if _serve_client is None:
+        abort(503, description="hermes serve bridge is not configured; model options unavailable")
+    try:
+        payload = _serve_client().model_options()
+    except Exception as err:
+        return jsonify({
+            "error": {"type": "hermes.model_unavailable", "message": f"Hermes model options are unavailable: {err}"}
+        }), 503
+    rows = _hermes_model_rows(payload)
+    if not rows:
+        return jsonify({
+            "error": {"type": "hermes.model_unavailable", "message": "Hermes returned no selectable models."}
+        }), 503
+    return jsonify({"models": rows, "profile": HERMES_PROFILE, "hermes": hermes_reachable()})
 
 
 @app.get("/api/chat/sessions")
@@ -1334,7 +1785,7 @@ def _public_generation_text(value: object) -> str:
     return text
 
 
-def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]:
+def _public_ad_template_generator_generations(value: object, run_id: str = "") -> list[dict]:
     if not isinstance(value, list):
         return []
     public = []
@@ -1349,7 +1800,7 @@ def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]
             if not isinstance(item, dict): continue
             name = str(item.get("name") or "").strip()
             if not re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", name): continue
-            previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}"})
+            previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-template-generator/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}"})
         public.append({
             "iteration": iteration,
             "decision": str(raw.get("decision") or "revise")[:20],
@@ -1359,7 +1810,7 @@ def _public_ad_studio_generations(value: object, run_id: str = "") -> list[dict]
     return public
 
 
-def _public_ad_studio_import(value: object) -> dict:
+def _public_ad_template_generator_import(value: object) -> dict:
     """Project only a verified Blockwise template destination from Hermes output."""
     if not isinstance(value, dict):
         return {}
@@ -1403,15 +1854,781 @@ def _public_ad_studio_import(value: object) -> dict:
     return public
 
 
-def _ad_studio_source_url(run_id: str, name: str) -> str | None:
+def _public_ad_template_generator_review_artifact(value: object, run_id: str) -> dict:
+    """Project one image artifact through Frank's authenticated artifact route."""
+    raw = {"name": value} if isinstance(value, str) else value
+    if not isinstance(raw, dict):
+        return {}
+    name = str(raw.get("name") or raw.get("artifact") or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,119}\.(?:avif|gif|jpe?g|png|webp)", name, re.IGNORECASE):
+        return {}
+    public = {
+        "name": name,
+        "url": f"/api/ad-template-generator/runs/{run_id}/artifacts/{urllib.parse.quote(name, safe='')}",
+    }
+    for key in ("kind", "label", "placement", "view"):
+        cleaned = _public_generation_text(raw.get(key))
+        if cleaned:
+            public[key] = cleaned[:80]
+    return public
+
+
+def _public_ad_template_generator_review_artifacts(value: object, run_id: str) -> list[dict]:
+    raw_values = value if isinstance(value, list) else list(value.values()) if isinstance(value, dict) else [value]
+    projected = []
+    for raw in raw_values[:24]:
+        artifact = _public_ad_template_generator_review_artifact(raw, run_id)
+        if artifact and artifact["name"] not in {item["name"] for item in projected}:
+            projected.append(artifact)
+    return projected
+
+
+def _public_ad_template_generator_review_scores(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    public = {}
+    for key, raw in list(value.items())[:24]:
+        safe_key = str(key or "").strip().lower().replace(" ", "_")
+        if not re.fullmatch(r"[a-z][a-z0-9_-]{0,47}", safe_key):
+            continue
+        number = _number_from(raw)
+        if number is not None:
+            public[safe_key] = number
+            continue
+        if safe_key != "reviewers" or not isinstance(raw, list):
+            continue
+        reviewers = []
+        for index, item in enumerate(raw[:4], 1):
+            if not isinstance(item, dict):
+                continue
+            score = _number_from(item.get("score"), item.get("overall"), item.get("likeness"))
+            reviewer = {
+                "label": _public_generation_text(item.get("label") or f"Reviewer {index}")[:80],
+                "decision": _public_generation_text(item.get("decision"))[:40],
+            }
+            if score is not None:
+                reviewer["score"] = score
+            if reviewer["label"] or reviewer["decision"] or "score" in reviewer:
+                reviewers.append(reviewer)
+        if reviewers:
+            public["reviewers"] = reviewers
+    return public
+
+
+def _public_ad_template_generator_review_warnings(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    public = []
+    for raw in value[:24]:
+        item = raw if isinstance(raw, dict) else {"message": raw}
+        message = _public_generation_text(item.get("message") or item.get("detail") or item.get("warning"))
+        if not message:
+            continue
+        warning = {"message": message}
+        for key in ("code", "placement"):
+            cleaned = _public_generation_text(item.get(key))
+            if cleaned:
+                warning[key] = cleaned[:80]
+        public.append(warning)
+    return public
+
+
+def _public_ad_template_generator_font_substitution(value: object) -> list[dict]:
+    raw_values = value if isinstance(value, list) else [value]
+    public = []
+    for raw in raw_values[:12]:
+        item = raw if isinstance(raw, dict) else {"replacement": raw}
+        substitution = {}
+        for key in ("source", "replacement", "reason"):
+            cleaned = _public_generation_text(item.get(key))
+            if cleaned:
+                substitution[key] = cleaned[:160]
+        if substitution:
+            public.append(substitution)
+    return public
+
+
+def _public_ad_template_generator_smoke_test(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    status = str(value.get("status") or "").strip().lower()
+    passed = value.get("passed") if isinstance(value.get("passed"), bool) else status in {"passed", "pass", "complete", "completed"}
+    checks = []
+    for raw in value.get("checks") if isinstance(value.get("checks"), list) else []:
+        item = raw if isinstance(raw, dict) else {"label": raw}
+        label = _public_generation_text(item.get("label") or item.get("name") or item.get("message"))
+        if not label:
+            continue
+        check = {"label": label[:160]}
+        if isinstance(item.get("passed"), bool):
+            check["passed"] = item["passed"]
+        checks.append(check)
+    return {
+        "status": status[:32] if re.fullmatch(r"[a-z0-9_-]{1,32}", status) else "passed" if passed else "pending",
+        "passed": passed,
+        "checks": checks[:20],
+    }
+
+
+def _public_ad_template_generator_layers(value: object) -> list[dict]:
+    if not isinstance(value, list):
+        return []
+    public = []
+    for index, raw in enumerate(value[:240], 1):
+        if not isinstance(raw, dict):
+            continue
+        layer = {}
+        for key in ("id", "name", "type", "role", "placement"):
+            cleaned = _public_generation_text(raw.get(key))
+            if cleaned:
+                layer[key] = cleaned[:100]
+        if isinstance(raw.get("editable"), bool):
+            layer["editable"] = raw["editable"]
+        if layer:
+            layer.setdefault("name", f"Layer {index}")
+            public.append(layer)
+    return public
+
+
+def _public_ad_template_generator_review_model_profile(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    roles = []
+    for raw in value.get("roles") if isinstance(value.get("roles"), list) else []:
+        if not isinstance(raw, dict):
+            continue
+        role = {}
+        for key in ("role", "label", "provider", "model"):
+            cleaned = str(raw.get(key) or "").strip()
+            if cleaned and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9 ._+:/-]{0,119}", cleaned):
+                role[key] = cleaned
+        if role.get("model") and role.get("provider"):
+            roles.append(role)
+    public = {"roles": roles[:12]} if roles else {}
+    source = _public_generation_text(value.get("source"))
+    if source:
+        public["source"] = source[:120]
+    revision = value.get("revision")
+    if isinstance(revision, int) and not isinstance(revision, bool) and 0 <= revision <= 1_000_000:
+        public["revision"] = revision
+    if isinstance(value.get("immutable"), bool):
+        public["immutable"] = value["immutable"]
+    return public
+
+
+def _public_ad_template_generator_review_summary(value: object, run_id: str) -> dict:
+    """Expose the bounded evidence Hermes has declared ready for operator review."""
+    if not isinstance(value, dict):
+        return {}
+    public = {}
+    source = _public_ad_template_generator_review_artifact(value.get("source"), run_id)
+    if source:
+        public["source"] = source
+    for key in ("references", "previews", "diffs"):
+        artifacts = _public_ad_template_generator_review_artifacts(value.get(key), run_id)
+        if artifacts:
+            public[key] = artifacts
+    scores = _public_ad_template_generator_review_scores(value.get("scores"))
+    if scores:
+        public["scores"] = scores
+    warnings = _public_ad_template_generator_review_warnings(value.get("warnings"))
+    if warnings:
+        public["warnings"] = warnings
+    substitutions = _public_ad_template_generator_font_substitution(value.get("font_substitution"))
+    if substitutions:
+        public["font_substitution"] = substitutions
+    for key in ("elapsed_seconds", "cost_usd"):
+        number = _number_from(value.get(key))
+        if number is not None and number >= 0:
+            public[key] = number
+    iterations = value.get("iterations")
+    if isinstance(iterations, int) and not isinstance(iterations, bool) and 0 <= iterations <= 10_000:
+        public["iterations"] = iterations
+    smoke_test = _public_ad_template_generator_smoke_test(value.get("smoke_test"))
+    if smoke_test:
+        public["smoke_test"] = smoke_test
+    layers = _public_ad_template_generator_layers(value.get("layers"))
+    if layers:
+        public["layers"] = layers
+    model_profile = _public_ad_template_generator_review_model_profile(value.get("model_profile"))
+    if model_profile:
+        public["model_profile"] = model_profile
+    return public
+
+
+def _source_matched_review_summary(output: dict, model_profile: dict) -> dict:
+    """Adapt Hermes' source-matched root output to Frank's review view."""
+    if output.get("process") != "exact-clone":
+        return {}
+    references = output.get("references") if isinstance(output.get("references"), list) else []
+    source_placement = next((
+        str(item.get("sourcePlacement") or "").lower()
+        for item in references if isinstance(item, dict) and item.get("sourcePlacement") in {"feed", "story"}
+    ), "")
+    reciprocal = next((
+        item for item in references
+        if isinstance(item, dict) and item.get("kind") == "reciprocal-image-reference"
+    ), None)
+    if not source_placement and isinstance(reciprocal, dict):
+        source_placement = "story" if reciprocal.get("placement") == "feed" else "feed"
+
+    raw_source = output.get("source")
+    source_name = str(raw_source.get("name") if isinstance(raw_source, dict) else raw_source or "").strip()
+    summary = {
+        "source": {"name": source_name, "kind": "original-source", "placement": source_placement},
+        "references": references,
+        "previews": [],
+        "diffs": output.get("diffs"),
+        "warnings": output.get("warnings"),
+        "font_substitution": output.get("font_substitution"),
+        "smoke_test": output.get("smoke_test"),
+        "model_profile": model_profile,
+    }
+    iterations = output.get("iterations") if isinstance(output.get("iterations"), list) else []
+    accepted = next((
+        item for item in reversed(iterations)
+        if isinstance(item, dict) and str(item.get("decision") or "").lower() in {"accept", "accepted", "pass", "passed"}
+    ), {})
+    for name in accepted.get("previews") if isinstance(accepted.get("previews"), list) else []:
+        match = re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", str(name or ""))
+        if match:
+            summary["previews"].append({"name": name, "placement": match.group(1), "kind": "qa-source-filled"})
+    for item in output.get("previews") if isinstance(output.get("previews"), list) else []:
+        if isinstance(item, dict):
+            summary["previews"].append(item)
+
+    comparator = (output.get("scores") or {}).get("comparator") if isinstance(output.get("scores"), dict) else {}
+    if not isinstance(comparator, dict):
+        comparator = accepted.get("scores") if isinstance(accepted.get("scores"), dict) else {}
+    def normalized(value):
+        number = _number_from(value)
+        return round(number * 10, 4) if number is not None and 0 <= number <= 1 else number
+    scores = {"overall": normalized(comparator.get("overall"))}
+    reviewers = []
+    final = output.get("final_review") if isinstance(output.get("final_review"), dict) else {}
+    for index, item in enumerate(final.get("reviewers") if isinstance(final.get("reviewers"), list) else [], 1):
+        if not isinstance(item, dict):
+            continue
+        item_scores = item.get("scores") if isinstance(item.get("scores"), dict) else {}
+        reviewers.append({
+            "label": f"Final reviewer {index}",
+            "decision": "pass" if str(item.get("decision") or "").lower() in {"accept", "accepted", "pass", "passed"} else str(item.get("decision") or ""),
+            "score": normalized(item_scores.get("overall")),
+        })
+    scores["reviewers"] = reviewers
+    summary["scores"] = scores
+    summary["iterations"] = len(iterations)
+    summary["elapsed_seconds"] = output.get("elapsed_seconds")
+
+    layers = output.get("layers") if isinstance(output.get("layers"), dict) else {}
+    summary["layers"] = [
+        {
+            "id": str(layer.get("layerId") or ""),
+            "name": str(layer.get("inputKey") or layer.get("layerId") or "Layer"),
+            "type": str(layer.get("type") or "unknown"),
+            "placement": placement,
+            "editable": bool(layer.get("inputKey")),
+        }
+        for placement in ("feed", "story")
+        for layer in ((layers.get(placement) or {}).get("ordered") or [])
+        if isinstance(layer, dict)
+    ]
+    return summary
+
+
+def _ad_template_generator_source_url(run_id: str, name: str) -> str | None:
     suffix = Path(str(name or "")).suffix.lower()
     if suffix not in {".avif", ".bmp", ".gif", ".heic", ".heif", ".jpeg", ".jpg", ".png", ".tif", ".tiff", ".webp"}:
         return None
     artifact = f"source{suffix}"
-    return f"/api/ad-studio/runs/{run_id}/artifacts/{urllib.parse.quote(artifact, safe='')}"
+    return f"/api/ad-template-generator/runs/{run_id}/artifacts/{urllib.parse.quote(artifact, safe='')}"
 
 
-def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -> dict:
+_AD_TEMPLATE_GENERATOR_MODEL_ROLES = MappingProxyType({
+    "builder": "analyse",
+    "comparator": "compare",
+    "final_review_a": "final-review-a",
+    "final_review_b": "final-review-b",
+    "quality_fallback": "quality-escalation",
+})
+_AD_TEMPLATE_GENERATOR_IMAGE_STAGE = "aspect-reference-image"
+_AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES = frozenset({
+    _AD_TEMPLATE_GENERATOR_IMAGE_STAGE, "analyse", "compare", "final-review-a", "final-review-b",
+})
+_AD_TEMPLATE_GENERATOR_OPTIONAL_MODEL_STAGES = frozenset({"quality-escalation"})
+_AD_TEMPLATE_GENERATOR_IMAGE_CAPABILITIES = ("reference_image_edit", "masked_image_edit")
+
+
+def _public_ad_template_generator_candidate(value: object) -> dict:
+    if not isinstance(value, dict):
+        return {}
+    provider = str(value.get("provider") or "").strip()
+    model = str(value.get("model") or "").strip()
+    capabilities = value.get("capabilities") if isinstance(value.get("capabilities"), list) else []
+    capabilities = [str(item) for item in capabilities if isinstance(item, str) and len(item) <= 80]
+    if not provider or not model or len(provider) > 80 or len(model) > 200:
+        return {}
+    return {
+        "provider": provider,
+        "model": model,
+        "capability_verified": value.get("capability_verified") is True,
+        "capabilities": capabilities,
+        "supports_vision": value.get("supports_vision") is True,
+        "supports_tools": value.get("supports_tools") is True,
+    }
+
+
+def _public_ad_template_generator_policy(value: object) -> dict:
+    """Expose only the non-secret Hermes model policy fields needed for one run."""
+    if not isinstance(value, dict):
+        return {}
+    stages = value.get("stages") if isinstance(value.get("stages"), dict) else {}
+    public_stages = {}
+    for stage_id in (*_AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES, *_AD_TEMPLATE_GENERATOR_OPTIONAL_MODEL_STAGES):
+        stage = stages.get(stage_id)
+        if not isinstance(stage, dict):
+            continue
+        primary = _public_ad_template_generator_candidate(stage.get("primary"))
+        if not primary:
+            continue
+        public_stages[stage_id] = {
+            "capability": str(stage.get("capability") or ""),
+            "primary": primary,
+            "fallbacks": [],
+            "max_attempts": stage.get("max_attempts"),
+            "timeout_seconds": stage.get("timeout_seconds"),
+            "max_cost_usd": stage.get("max_cost_usd"),
+        }
+    result = {
+        "schema": str(value.get("schema") or ""),
+        "tool_id": str(value.get("tool_id") or ""),
+        "name": str(value.get("name") or "")[:160],
+        "preset": str(value.get("preset") or "")[:80],
+        "stages": public_stages,
+        "deterministic_stages": [
+            str(item) for item in value.get("deterministic_stages", [])
+            if isinstance(item, str) and len(item) <= 80
+        ],
+    }
+    if isinstance(value.get("seed_revision"), int):
+        result["seed_revision"] = value["seed_revision"]
+    return result
+
+
+def _ad_template_generator_model_catalogue(project_id: str = "") -> dict:
+    """Read Hermes-owned capabilities and its current Ad Template Generator policy."""
+    model_data = hermes_request("/v1/tool-runs/models", timeout=8)
+    raw_models = (model_data.get("ad_template_generator_capabilities") or model_data.get("ad_studio_capabilities")) if isinstance(model_data, dict) else []
+    models = []
+    image_models = []
+    for raw in raw_models if isinstance(raw_models, list) else []:
+        candidate = _public_ad_template_generator_candidate(raw)
+        if not candidate:
+            continue
+        candidate.update({
+            "available": raw.get("available") is True,
+            "credential_ready": raw.get("credential_ready") is True,
+        })
+        image_capability = next((
+            capability for capability in _AD_TEMPLATE_GENERATOR_IMAGE_CAPABILITIES
+            if capability in candidate["capabilities"]
+        ), "")
+        if (
+            image_capability
+            and candidate["capability_verified"]
+            and candidate["supports_vision"]
+        ):
+            image_models.append({**candidate, "capability": image_capability})
+        if "vision_structured" in candidate["capabilities"]:
+            models.append(candidate)
+    query = urllib.parse.urlencode({"project_id": project_id}) if project_id else ""
+    path = "/v1/tool-runs/policies/ad-template-generator" + (f"?{query}" if query else "")
+    policy_data = hermes_request(path, timeout=8)
+    records = policy_data.get("data") if isinstance(policy_data, dict) else []
+    records = [item for item in records if isinstance(item, dict)] if isinstance(records, list) else []
+    record = next((item for item in records if item.get("is_default") is True), records[0] if records else {})
+    policy = _public_ad_template_generator_policy(record.get("policy"))
+    return {
+        "models": models,
+        "image_models": image_models,
+        "policy_schema": str(model_data.get("policy_schema") or "") if isinstance(model_data, dict) else "",
+        "policy_revision": record.get("revision") if isinstance(record.get("revision"), int) else None,
+        "policy": policy,
+    }
+
+
+def _validated_ad_template_generator_model_policy(value: object, *, project_id: str) -> dict:
+    """Fail visibly unless every selected route is currently verified by Hermes."""
+    policy = _public_ad_template_generator_policy(value)
+    stages = policy.get("stages") if isinstance(policy.get("stages"), dict) else {}
+    if (
+        policy.get("schema") != "schema://hermes.tool-model-policy/v1"
+        or policy.get("tool_id") != "ad-template-generator"
+        or not _AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES.issubset(stages)
+        or set(stages) - (_AD_TEMPLATE_GENERATOR_REQUIRED_MODEL_STAGES | _AD_TEMPLATE_GENERATOR_OPTIONAL_MODEL_STAGES)
+    ):
+        raise _AdTemplateGeneratorSourceError("invalid_model_policy", "Choose a valid Ad Template Generator model setup.")
+    catalogue = _ad_template_generator_model_catalogue(project_id)
+    available = {
+        (item["provider"], item["model"]): item
+        for item in catalogue["models"]
+        if item.get("available") and item.get("credential_ready")
+        and item.get("supports_vision") and item.get("supports_tools")
+        and "vision_structured" in item.get("capabilities", [])
+    }
+    image_available = {
+        (item["provider"], item["model"]): item
+        for item in catalogue["image_models"]
+        if item.get("available") and item.get("credential_ready")
+    }
+    for stage_id, stage in stages.items():
+        primary = stage.get("primary") if isinstance(stage, dict) else {}
+        route = (primary.get("provider"), primary.get("model")) if isinstance(primary, dict) else (None, None)
+        if stage_id == _AD_TEMPLATE_GENERATOR_IMAGE_STAGE:
+            verified = image_available.get(route)
+            capability = verified.get("capability") if verified else ""
+            if not verified or stage.get("capability") != capability:
+                raise _AdTemplateGeneratorSourceError(
+                    "model_unavailable",
+                    "The selected photo assets model is not currently available with an audited image-edit route in Hermes.",
+                )
+        else:
+            verified = available.get(route)
+            capability = "vision_structured"
+            if not verified:
+                label = stage_id.replace("-", " ")
+                raise _AdTemplateGeneratorSourceError(
+                    "model_unavailable",
+                    f"The selected {label} model is not currently available with verified vision and structured output in Hermes.",
+                )
+        # Candidate capabilities come from the live Hermes catalogue, never
+        # from browser claims.
+        stage["primary"] = {
+            "provider": verified["provider"],
+            "model": verified["model"],
+            "capability_verified": True,
+            "capabilities": [capability],
+            "supports_vision": True,
+            "supports_tools": verified["supports_tools"],
+        }
+    return policy
+
+
+@app.get("/api/ad-studio/models")
+@app.get("/api/ad-template-generator/models")
+def ad_template_generator_models():
+    project_id = _clean_project_id(request.args.get("project_id")) if request.args.get("project_id") else ""
+    try:
+        data = _ad_template_generator_model_catalogue(project_id)
+    except Exception as error:
+        return _hermes_error(error)
+    if not data["models"] or not data["image_models"] or not data["policy"]:
+        return jsonify({"error": "Hermes has no verified Ad Template Generator model setup available."}), 503
+    return jsonify(data)
+def _public_ad_template_generator_model_profile(run: dict) -> dict:
+    """Expose only the immutable provider/model choices frozen for this run."""
+    policy = run.get("model_policy") if isinstance(run.get("model_policy"), dict) else {}
+    stages = policy.get("stages") if isinstance(policy.get("stages"), dict) else {}
+    role_specs = (
+        ("photo-assets", "Photo assets", ("aspect-reference-image",)),
+        ("builder", "Builder & analysis", ("analyse", "build")),
+        ("comparator", "Comparator", ("compare",)),
+        ("quality-escalation", "Quality escalation", ("quality-escalation",)),
+        ("final-review-a", "Final review A", ("final-review-a",)),
+        ("final-review-b", "Final review B", ("final-review-b",)),
+    )
+    roles = []
+    for role, label, stage_names in role_specs:
+        stage = next((stages.get(name) for name in stage_names if isinstance(stages.get(name), dict)), {})
+        primary = stage.get("primary") if isinstance(stage.get("primary"), dict) else {}
+        provider = str(primary.get("provider") or "").strip()
+        model = str(primary.get("model") or "").strip()
+        if not (
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", provider)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", model)
+        ):
+            continue
+        roles.append({"role": role, "label": label, "provider": provider, "model": model})
+    revision = run.get("model_policy_revision")
+    return {
+        "source": "Hermes frozen run policy",
+        "immutable": True,
+        "roles": roles,
+        **({"revision": int(revision)} if isinstance(revision, int) and not isinstance(revision, bool) else {}),
+    } if roles else {}
+
+
+def _source_matched_event_layers(value: object) -> list[dict]:
+    """Project only layer metadata explicitly recorded in durable evidence."""
+    if isinstance(value, list):
+        return _public_ad_template_generator_layers(value)
+    if not isinstance(value, dict):
+        return []
+    layers = []
+    for placement in ("feed", "story"):
+        placement_value = value.get(placement)
+        ordered = placement_value.get("ordered") if isinstance(placement_value, dict) else None
+        for raw in ordered if isinstance(ordered, list) else []:
+            if not isinstance(raw, dict):
+                continue
+            layers.append({
+                "id": str(raw.get("layerId") or ""),
+                "name": str(raw.get("inputKey") or raw.get("layerId") or "Layer"),
+                "type": str(raw.get("type") or "unknown"),
+                "placement": placement,
+                "editable": bool(raw.get("inputKey")),
+            })
+    return _public_ad_template_generator_layers(layers)
+
+
+def _source_matched_event_model_profile(events: list[dict]) -> dict:
+    """Adapt the immutable profile snapshot recorded with command.accepted."""
+    snapshot = {}
+    for event in events:
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        candidate = data.get("model_profile")
+        if event.get("kind") == "command.accepted" and isinstance(candidate, dict):
+            snapshot = candidate
+    role_specs = (
+        ("builder", "Builder & analysis"),
+        ("comparator", "Comparator"),
+        ("fallback", "Quality escalation"),
+        ("final-review-a", "Final review A"),
+        ("final-review-b", "Final review B"),
+    )
+    roles = []
+    for role, label in role_specs:
+        raw = snapshot.get(role)
+        if not isinstance(raw, dict):
+            continue
+        provider = str(raw.get("provider") or "").strip()
+        model = str(raw.get("model") or "").strip()
+        if not (
+            re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", provider)
+            and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._/-]{0,119}", model)
+        ):
+            continue
+        roles.append({"role": role, "label": label, "provider": provider, "model": model})
+    revision = snapshot.get("profile_revision")
+    return {
+        "source": "Hermes durable run event", "immutable": True, "roles": roles,
+        **({"revision": revision} if isinstance(revision, int) and not isinstance(revision, bool) else {}),
+    } if roles else {}
+
+
+def _source_matched_event_output(run: dict, events: object, model_profile: dict) -> dict:
+    """Recover a bounded monitor view from already-durable source-matched events."""
+    if not isinstance(events, list):
+        return {}
+    ordered = [item for item in events[:1000] if isinstance(item, dict)]
+    ordered.sort(key=lambda item: item.get("sequence") if isinstance(item.get("sequence"), int) else -1)
+    process_kinds = {
+        "source-map.completed", "aspect-reference-image.started",
+        "aspect-reference-image.completed", "aspect-reference.started",
+        "aspect-reference.completed", "iteration.rendered", "iteration.compared",
+        "final-review.started", "final-review.completed",
+    }
+    if not any(str(item.get("kind") or "") in process_kinds for item in ordered):
+        return {}
+
+    source_placement = target_placement = ""
+    reference_available = False
+    source_available = False
+    iteration_records = {}
+    latest_previews = []
+    latest_diffs = []
+    latest_scores = {}
+    latest_reviewers = []
+    layers = []
+
+    def score(value: object) -> int | float | None:
+        number = _number_from(value)
+        return round(number * 10, 4) if number is not None and 0 <= number <= 1 else number
+
+    for event in ordered:
+        kind = str(event.get("kind") or "")
+        data = event.get("data") if isinstance(event.get("data"), dict) else {}
+        if kind.startswith("aspect-reference"):
+            for key, destination in (("source_placement", "source"), ("target_placement", "target")):
+                placement = str(data.get(key) or "").lower()
+                if placement in {"feed", "story"}:
+                    if destination == "source":
+                        source_placement = placement
+                    else:
+                        target_placement = placement
+        if kind == "source-map.completed":
+            source_available = True
+        # Emitted only after the reciprocal image is in the public preview root.
+        if kind in {"aspect-reference.started", "aspect-reference.completed"}:
+            reference_available = True
+        event_layers = _source_matched_event_layers(data.get("layers")) if kind in process_kinds else []
+        if event_layers:
+            layers = event_layers
+        if kind == "final-review.completed":
+            reviewers = []
+            for index, raw in enumerate(data.get("reviewers") if isinstance(data.get("reviewers"), list) else [], 1):
+                if not isinstance(raw, dict):
+                    continue
+                raw_scores = raw.get("scores") if isinstance(raw.get("scores"), dict) else {}
+                reviewer_score = score(raw_scores.get("overall"))
+                reviewer = {
+                    "label": f"Final reviewer {index}",
+                    "decision": "pass" if str(raw.get("decision") or "").lower() in {"accept", "accepted", "pass", "passed"} else str(raw.get("decision") or "")[:40],
+                }
+                if reviewer_score is not None:
+                    reviewer["score"] = reviewer_score
+                reviewers.append(reviewer)
+            if reviewers:
+                latest_reviewers = reviewers
+            continue
+        if kind not in {"iteration.rendered", "iteration.compared"}:
+            continue
+
+        iteration = data.get("iteration")
+        if not isinstance(iteration, int) or isinstance(iteration, bool) or not 1 <= iteration <= 10_000:
+            continue
+        record = iteration_records.setdefault(iteration, {
+            "iteration": iteration, "decision": "revise", "comparison": {}, "previews": [],
+        })
+        if kind == "iteration.rendered":
+            previews = []
+            for raw_name in data.get("previews") if isinstance(data.get("previews"), list) else []:
+                name = str(raw_name.get("name") if isinstance(raw_name, dict) else raw_name or "").strip()
+                match = re.fullmatch(r"iteration-[0-9]{2}-(feed|story)\.png", name, re.IGNORECASE)
+                if not match:
+                    continue
+                artifact = _public_ad_template_generator_review_artifact({
+                    "name": name, "placement": match.group(1).lower(), "kind": "qa-source-filled",
+                }, str(run.get("id") or run.get("run_id") or ""))
+                if artifact:
+                    previews.append(artifact)
+            diffs = []
+            for raw_name in data.get("diffs") if isinstance(data.get("diffs"), list) else []:
+                name = str(raw_name.get("name") if isinstance(raw_name, dict) else raw_name or "").strip()
+                match = re.fullmatch(
+                    r"iteration-[0-9]{2}-(feed|story)-(overlay|difference)\.png", name, re.IGNORECASE,
+                )
+                if not match:
+                    continue
+                artifact = _public_ad_template_generator_review_artifact({
+                    "name": name, "placement": match.group(1).lower(), "kind": match.group(2).lower(),
+                    "view": match.group(2).lower(),
+                }, str(run.get("id") or run.get("run_id") or ""))
+                if artifact:
+                    diffs.append(artifact)
+            if previews:
+                record["previews"] = previews
+            if previews or diffs:
+                latest_previews = previews
+                latest_diffs = diffs
+        elif kind == "iteration.compared":
+            raw_scores = data.get("scores") if isinstance(data.get("scores"), dict) else {}
+            comparison_scores = {}
+            for key, value in list(raw_scores.items())[:24]:
+                normalized = score(value)
+                if normalized is not None:
+                    comparison_scores[str(key)] = normalized
+            overall = score(data.get("score"))
+            if overall is not None:
+                comparison_scores["overall"] = overall
+            if comparison_scores:
+                latest_scores = comparison_scores
+                record["comparison"] = {"score": comparison_scores.get("overall")}
+            decision = str(data.get("decision") or "").lower()
+            if decision in {"accept", "accepted", "pass", "passed"}:
+                record["decision"] = "accepted"
+
+    run_id = str(run.get("id") or run.get("run_id") or "")
+    summary = {"previews": latest_previews, "diffs": latest_diffs}
+    source_values = (run.get("payload") or {}).get("sources") if isinstance(run.get("payload"), dict) else []
+    source_item = source_values[0] if isinstance(source_values, list) and source_values and isinstance(source_values[0], dict) else {}
+    source_url = _ad_template_generator_source_url(run_id, str(source_item.get("name") or "")) if source_available else None
+    if source_url:
+        summary["source"] = {
+            "name": urllib.parse.unquote(source_url.rsplit("/", 1)[-1]), "kind": "original-source",
+            **({"placement": source_placement} if source_placement else {}),
+        }
+    if reference_available and target_placement:
+        summary["references"] = [{
+            "name": f"reference-{target_placement}.png", "placement": target_placement,
+            "kind": "reciprocal-image-reference",
+        }]
+    if latest_scores or latest_reviewers:
+        summary["scores"] = {**latest_scores, **({"reviewers": latest_reviewers} if latest_reviewers else {})}
+    profile = model_profile or _source_matched_event_model_profile(ordered)
+    if profile:
+        summary["model_profile"] = profile
+    if layers:
+        summary["layers"] = layers
+    iterations = [iteration_records[key] for key in sorted(iteration_records)[-30:]]
+    if iterations:
+        summary["iterations"] = len(iterations)
+    public_summary = _public_ad_template_generator_review_summary(summary, run_id)
+    return {
+        "process": "exact-clone",
+        **({"review_summary": public_summary} if public_summary else {}),
+        **({"previews": latest_previews} if latest_previews else {}),
+        **({"iterations": iterations} if iterations else {}),
+    }
+
+
+def _read_ad_template_generator_run_events(run_id: str) -> list[dict]:
+    """Read the current durable SSE backlog with strict time/size bounds."""
+    if not AD_TEMPLATE_GENERATOR_RUN_ID.fullmatch(run_id):
+        return []
+    url = hermes_base() + _tool_run_path(run_id, "/events") + "?" + urllib.parse.urlencode({"after": -1})
+    headers = {"Accept": "text/event-stream"}
+    if HERMES_KEY:
+        headers["Authorization"] = f"Bearer {HERMES_KEY}"
+    events = []
+    total = 0
+    data_lines = []
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=0.75) as response:
+            while total < 1_000_000 and len(events) < 1000:
+                line = response.readline(min(65_537, 1_000_001 - total))
+                if not line:
+                    break
+                total += len(line)
+                if len(line) > 65_536:
+                    data_lines = []
+                    continue
+                text = line.decode("utf-8", errors="replace").rstrip("\r\n")
+                if text.startswith("data:"):
+                    data_lines.append(text[5:].lstrip())
+                elif not text and data_lines:
+                    try:
+                        event = json.loads("\n".join(data_lines))
+                    except (json.JSONDecodeError, ValueError):
+                        event = None
+                    if isinstance(event, dict):
+                        events.append(event)
+                    data_lines = []
+    except (OSError, TimeoutError, urllib.error.URLError):
+        pass
+    return events
+
+
+def _public_ad_template_generator_final_review(value: object) -> dict:
+    """Project only the bounded reviewer evidence the monitor renders."""
+    if not isinstance(value, dict):
+        return {}
+    reviewers = []
+    raw_reviewers = value.get("reviewers") if isinstance(value.get("reviewers"), list) else []
+    for item in raw_reviewers[:8]:
+        if not isinstance(item, dict):
+            continue
+        reviewer = {"decision": str(item.get("decision") or "")[:40]}
+        scores = item.get("scores") if isinstance(item.get("scores"), dict) else {}
+        score = _number_from(scores.get("overall"))
+        if score is not None:
+            reviewer["score"] = score
+        reviewers.append(reviewer)
+    decision = str(value.get("decision") or "")[:40]
+    return {"decision": decision, "reviewers": reviewers} if reviewers or decision else {}
+
+
+def _public_ad_template_generator_run(run: dict, *, title: str = "", project_id: str = "", events: object = None) -> dict:
     """Project Hermes state for Frank's internal operator monitor."""
     now = int(time.time())
     payload = run.get("payload") if isinstance(run.get("payload"), dict) else {}
@@ -1419,10 +2636,21 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
     source = sources[0] if sources and isinstance(sources[0], dict) else {}
     output = run.get("output") if isinstance(run.get("output"), dict) else {}
     scope = run.get("scope") if isinstance(run.get("scope"), dict) else {}
+    run_id = str(run.get("id") or run.get("run_id") or "")
+    model_profile = _public_ad_template_generator_model_profile(run)
+    if not model_profile and isinstance(events, list):
+        model_profile = _source_matched_event_model_profile(events[:1000])
     safe_output = {key: output.get(key) for key in (
-        "iterations", "final_review", "process",
+        "iterations", "process",
     ) if key in output}
-    public_import = _public_ad_studio_import(output.get("import"))
+    public_final_review = _public_ad_template_generator_final_review(output.get("final_review"))
+    if public_final_review:
+        safe_output["final_review"] = public_final_review
+    review_value = output.get("review_summary") if isinstance(output.get("review_summary"), dict) else _source_matched_review_summary(output, model_profile)
+    review_summary = _public_ad_template_generator_review_summary(review_value, run_id)
+    if review_summary:
+        safe_output["review_summary"] = review_summary
+    public_import = _public_ad_template_generator_import(output.get("import"))
     if public_import:
         safe_output["import"] = public_import
     previews = []
@@ -1432,21 +2660,41 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         name = str(item.get("name") or "").strip()
         if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", name):
             continue
-        previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-studio/runs/{run.get('run_id') or run.get('id')}/artifacts/{urllib.parse.quote(name, safe='')}"})
+        previews.append({"name": name, "placement": str(item.get("placement") or ""), "url": f"/api/ad-template-generator/runs/{run.get('run_id') or run.get('id')}/artifacts/{urllib.parse.quote(name, safe='')}"})
     if previews:
         safe_output["previews"] = previews
     if "iterations" in output:
-        safe_output["iterations"] = _public_ad_studio_generations(output.get("iterations"), str(run.get("run_id") or run.get("id") or ""))
-    run_id = str(run.get("id") or run.get("run_id") or "")
+        safe_output["iterations"] = _public_ad_template_generator_generations(output.get("iterations"), str(run.get("run_id") or run.get("id") or ""))
+    if str(run.get("status") or "") not in {"ready_for_review", "completed", "approved"}:
+        event_output = _source_matched_event_output(run, events, model_profile)
+        for key, value in event_output.items():
+            if key not in safe_output or not safe_output[key]:
+                safe_output[key] = value
     source_public = {
         "name": str(source.get("name") or ""),
         "size": int(source.get("size") or 0),
         "media_type": str(source.get("media_type") or ""),
         "origin": str(source.get("origin") or ""),
     }
-    source_url = _ad_studio_source_url(run_id, source_public["name"])
+    source_url = _ad_template_generator_source_url(run_id, source_public["name"])
     if source_url:
         source_public["url"] = source_url
+    raw_usage = output.get("usage") if isinstance(output.get("usage"), dict) else {}
+    raw_cost = output.get("cost") if isinstance(output.get("cost"), dict) else {}
+    usage = {}
+    for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd"):
+        number = _number_from(raw_usage.get(key))
+        if number is not None and number >= 0:
+            usage[key] = number
+    reported_cost = _number_from(raw_cost.get("reported_usd"), raw_usage.get("reported_cost_usd"))
+    if reported_cost is not None and reported_cost >= 0:
+        usage["reported_cost_usd"] = reported_cost
+    providers = {str(role.get("provider") or "") for role in model_profile.get("roles", [])}
+    usage.update({
+        "source": "Hermes run ledger",
+        "status": "reported" if any(key in usage for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd", "reported_cost_usd")) else "not_reported",
+        "billing": "ChatGPT/Codex OAuth — not OpenAI API dashboard" if providers == {"openai-codex"} else "Provider account",
+    })
     return {
         "id": run_id,
         "request_id": str(run.get("request_id") or ""),
@@ -1458,21 +2706,24 @@ def _public_ad_studio_run(run: dict, *, title: str = "", project_id: str = "") -
         "updated_at": run.get("updated_at") or run.get("created_at") or now,
         "source": source_public,
         "output": safe_output,
-        "cost": (output.get("cost") or {}).get("reported_usd") if isinstance(output.get("cost"), dict) else None,
-        "usage": {key: output.get("usage", {}).get(key) for key in ("input_tokens", "output_tokens", "total_tokens", "estimated_cost_usd") if isinstance(output.get("usage"), dict) and output.get("usage", {}).get(key) is not None},
+        "cost": reported_cost,
+        "usage": usage,
+        "model_profile": model_profile,
         "title": title or str(run.get("title") or payload.get("job_name") or "Ad template"),
         "project_id": project_id or str(scope.get("project_id") or payload.get("project_id") or ""),
+        "model_policy_revision": run.get("model_policy_revision"),
         **({"error": str(run.get("error"))[:1200]} if run.get("error") else {}),
     }
 
 
 @app.get("/api/ad-studio/architecture")
-def ad_studio_architecture():
+@app.get("/api/ad-template-generator/architecture")
+def ad_template_generator_architecture():
     validated = _archify_build_validated()
     return jsonify({
         "available": validated, "source": "archify",
         "read_only": True, "validated": validated,
-        "artifact_url": "/api/ad-studio/architecture/artifact" if validated else None,
+        "artifact_url": "/api/ad-template-generator/architecture/artifact" if validated else None,
         "message": "Archify build validation or its content binding is unavailable." if not validated else "Archify typed-IR artifact is validated and available.",
     })
 
@@ -1499,14 +2750,16 @@ def _archify_build_validated() -> bool:
 
 
 @app.get("/api/ad-studio/architecture/artifact")
-def ad_studio_architecture_artifact():
+@app.get("/api/ad-template-generator/architecture/artifact")
+def ad_template_generator_architecture_artifact():
     if not _archify_build_validated():
         abort(404, "Archify artifact is not available")
     return send_file(ARCHIFY_ARTIFACT, mimetype="text/html", max_age=0)
 
 
 @app.get("/api/ad-studio/implementation-activity")
-def ad_studio_implementation_activity():
+@app.get("/api/ad-template-generator/implementation-activity")
+def ad_template_generator_implementation_activity():
     # AgentTrail shares only Frank's loopback namespace. Frank proxies one read
     # endpoint and never exposes AgentTrail's hook/setup/control surfaces.
     if not AGENTTRAIL_URL:
@@ -1593,7 +2846,7 @@ def agenttrail_proxy(agenttrail_path: str):
     return Response(body, status=200, content_type=content_type, headers={"Cache-Control": "no-store"})
 
 
-def _ad_studio_source(attachment: dict) -> dict:
+def _ad_template_generator_source(attachment: dict) -> dict:
     target = _upload_target(attachment["id"])
     if target is None or not target.is_file():
         abort(400, "source image is no longer available")
@@ -1606,7 +2859,7 @@ def _ad_studio_source(attachment: dict) -> dict:
     }
 
 
-_AD_STUDIO_IMAGE_EXTENSIONS = MappingProxyType({
+_AD_TEMPLATE_GENERATOR_IMAGE_EXTENSIONS = MappingProxyType({
     ".avif": "image/avif",
     ".bmp": "image/bmp",
     ".gif": "image/gif",
@@ -1621,13 +2874,39 @@ _AD_STUDIO_IMAGE_EXTENSIONS = MappingProxyType({
 })
 
 
-class _AdStudioSourceError(ValueError):
+class _AdTemplateGeneratorSourceError(ValueError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
 
 
-def _ad_studio_safe_filename(raw: object, index: int) -> str:
+class _AdTemplateGeneratorBriefError(ValueError):
+    def __init__(self, code: str, message: str, status: int = 400):
+        super().__init__(message)
+        self.code = code
+        self.status = status
+
+
+def _ad_template_generator_brief(raw: object) -> str:
+    """Validate without rewriting the immutable UTF-8 generator brief."""
+    if raw is None:
+        return ""
+    if not isinstance(raw, str):
+        raise _AdTemplateGeneratorBriefError("brief_invalid", "The generator brief must be text.")
+    if len(raw) > AD_TEMPLATE_GENERATOR_MAX_BRIEF_CHARACTERS:
+        raise _AdTemplateGeneratorBriefError(
+            "brief_too_long",
+            f"Brief is {len(raw):,} characters. Keep it to {AD_TEMPLATE_GENERATOR_MAX_BRIEF_CHARACTERS:,} or fewer; Frank did not shorten it.",
+            413,
+        )
+    try:
+        raw.encode("utf-8", errors="strict")
+    except UnicodeEncodeError as error:
+        raise _AdTemplateGeneratorBriefError("brief_invalid_utf8", "The generator brief must be valid UTF-8 text.") from error
+    return raw
+
+
+def _ad_template_generator_safe_filename(raw: object, index: int) -> str:
     """Return one display-safe basename; staging prefixes prevent collisions."""
     basename = Path(str(raw or "").replace("\\", "/")).name.strip()
     if not basename or basename in {".", ".."}:
@@ -1638,7 +2917,7 @@ def _ad_studio_safe_filename(raw: object, index: int) -> str:
     return f"{stem[:96]}{suffix[:12]}"
 
 
-def _ad_studio_signature_matches(media_type: str, header: bytes) -> bool:
+def _ad_template_generator_signature_matches(media_type: str, header: bytes) -> bool:
     if media_type == "image/png":
         return header.startswith(b"\x89PNG\r\n\x1a\n")
     if media_type == "image/jpeg":
@@ -1662,35 +2941,35 @@ def _ad_studio_signature_matches(media_type: str, header: bytes) -> bool:
     return False
 
 
-def _validate_ad_studio_attachment(attachment: dict) -> dict:
+def _validate_ad_template_generator_attachment(attachment: dict) -> dict:
     target = _upload_target(str(attachment.get("id") or ""))
     if target is None or not target.is_file():
-        raise _AdStudioSourceError("source_missing", "source image is no longer available")
+        raise _AdTemplateGeneratorSourceError("source_missing", "source image is no longer available")
     size = target.stat().st_size
     if size <= 0:
-        raise _AdStudioSourceError("empty_file", "source image is empty")
-    if size > AD_STUDIO_MAX_SOURCE_BYTES:
-        raise _AdStudioSourceError("file_too_large", "source image exceeds the per-file size limit")
+        raise _AdTemplateGeneratorSourceError("empty_file", "source image is empty")
+    if size > AD_TEMPLATE_GENERATOR_MAX_SOURCE_BYTES:
+        raise _AdTemplateGeneratorSourceError("file_too_large", "source image exceeds the per-file size limit")
     suffix = target.suffix.lower()
-    media_type = _AD_STUDIO_IMAGE_EXTENSIONS.get(suffix)
+    media_type = _AD_TEMPLATE_GENERATOR_IMAGE_EXTENSIONS.get(suffix)
     if not media_type:
-        raise _AdStudioSourceError("unsupported_type", "source must use a supported image file type")
+        raise _AdTemplateGeneratorSourceError("unsupported_type", "source must use a supported image file type")
     declared_type = str(attachment.get("type") or "").lower().split(";", 1)[0].strip()
     if declared_type and declared_type not in {media_type, "application/octet-stream"}:
-        raise _AdStudioSourceError("type_mismatch", "source image type does not match its filename")
+        raise _AdTemplateGeneratorSourceError("type_mismatch", "source image type does not match its filename")
     try:
         with target.open("rb") as source_file:
             header = source_file.read(64)
     except OSError as error:
-        raise _AdStudioSourceError("source_unreadable", "source image could not be read") from error
-    if not _ad_studio_signature_matches(media_type, header):
-        raise _AdStudioSourceError("invalid_image", "source image content does not match its file type")
+        raise _AdTemplateGeneratorSourceError("source_unreadable", "source image could not be read") from error
+    if not _ad_template_generator_signature_matches(media_type, header):
+        raise _AdTemplateGeneratorSourceError("invalid_image", "source image content does not match its file type")
     clean = dict(attachment)
     clean.update({"name": target.name, "size": size, "type": media_type})
     return clean
 
 
-def _remove_ad_studio_staging(attachment: dict) -> None:
+def _remove_ad_template_generator_staging(attachment: dict) -> None:
     target = _upload_target(str(attachment.get("id") or ""))
     if target is None:
         return
@@ -1708,16 +2987,16 @@ def _remove_ad_studio_staging(attachment: dict) -> None:
         parent = parent.parent
 
 
-def _remove_raw_ad_studio_attachments(raw_attachments: list) -> None:
+def _remove_raw_ad_template_generator_attachments(raw_attachments: list) -> None:
     for raw_attachment in raw_attachments:
         if not isinstance(raw_attachment, dict):
             continue
         cleaned = _clean_atts([raw_attachment])
         if cleaned:
-            _remove_ad_studio_staging(cleaned[0])
+            _remove_ad_template_generator_staging(cleaned[0])
 
 
-def _start_ad_studio_source_run(
+def _start_ad_template_generator_source_run(
     source_item: dict,
     *,
     total_items: int,
@@ -1725,6 +3004,7 @@ def _start_ad_studio_source_run(
     brief: str,
     project_id: str,
     project: dict,
+    model_policy: dict,
 ) -> tuple[dict | None, dict]:
     index = source_item["index"]
     attachment = source_item["attachment"]
@@ -1735,8 +3015,9 @@ def _start_ad_studio_source_run(
     command_payload = {
         "job_name": name,
         "brief": brief,
+        "brief_sha256": hashlib.sha256(brief.encode("utf-8")).hexdigest(),
         "placements": ["feed", "story"],
-        "sources": [_ad_studio_source(attachment)],
+        "sources": [_ad_template_generator_source(attachment)],
         "project_context": _project_context(project),
     }
     request_payload = {
@@ -1747,16 +3028,17 @@ def _start_ad_studio_source_run(
         "scope": {"project_id": project_id},
         "payload": command_payload,
         "idempotency_key": f"ad-template:{secrets.token_hex(16)}",
+        "model_policy_override": deepcopy(model_policy),
     }
     try:
         data = hermes_request("/v1/tool-runs", request_payload, method="POST", timeout=8)
         run_data = data.get("run") if isinstance(data.get("run"), dict) else data
         run_id = str(run_data.get("id") or run_data.get("run_id") or "")
-        if not AD_STUDIO_RUN_ID.fullmatch(run_id):
-            raise _AdStudioSourceError("invalid_hermes_response", "Hermes did not return a valid Tool run id")
-        run = _public_ad_studio_run(run_data, title=f"Ad Studio · {name}", project_id=project_id)
+        if not AD_TEMPLATE_GENERATOR_RUN_ID.fullmatch(run_id):
+            raise _AdTemplateGeneratorSourceError("invalid_hermes_response", "Hermes did not return a valid Tool run id")
+        run = _public_ad_template_generator_run(run_data, title=f"Ad Template Generator · {name}", project_id=project_id)
         return run, {"index": index, "name": attachment["name"], "status": "accepted", "run": run}
-    except _AdStudioSourceError as error:
+    except _AdTemplateGeneratorSourceError as error:
         return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": error.code, "message": str(error)}}
     except urllib.error.HTTPError as error:
         detail = error.read().decode("utf-8", errors="replace")[:1200]
@@ -1770,17 +3052,88 @@ def _start_ad_studio_source_run(
     except Exception as error:
         return None, {"index": index, "name": attachment["name"], "status": "failed", "error": {"code": "hermes_unavailable", "message": f"Could not reach Hermes: {str(error).split(chr(10))[0][:180]}"}}
     finally:
-        _remove_ad_studio_staging(attachment)
+        _remove_ad_template_generator_staging(attachment)
 
 
 def _tool_run_path(run_id: str, suffix: str = "") -> str:
-    if not AD_STUDIO_RUN_ID.fullmatch(run_id):
+    if not AD_TEMPLATE_GENERATOR_RUN_ID.fullmatch(run_id):
         abort(404)
     return f"/v1/tool-runs/{urllib.parse.quote(run_id, safe='')}{suffix}"
 
 
+@app.get("/api/ad-db/runs/readiness")
+def ad_db_scan_readiness():
+    try:
+        payload = _ad_db_request("/v1/ad-db/runs/readiness", timeout=10)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(payload)
+
+
+@app.post("/api/ad-db/runs/scan")
+def ad_db_scan_create():
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict) or set(body) - {"pageIds", "maxCredits", "idempotencyKey"}:
+        abort(400, "scan body must contain only pageIds, maxCredits, and idempotencyKey")
+    page_ids = body.get("pageIds")
+    if not isinstance(page_ids, list) or not 1 <= len(page_ids) <= 50:
+        abort(400, "pageIds must contain 1 to 50 advertiser page IDs")
+    if any(not isinstance(value, str) or not _AD_DB_PAGE_UUID.fullmatch(value) for value in page_ids):
+        abort(400, "pageIds must be UUIDs")
+    if len(set(page_ids)) != len(page_ids):
+        abort(400, "pageIds must be distinct")
+    max_credits = body.get("maxCredits", 25)
+    if isinstance(max_credits, bool) or not isinstance(max_credits, (int, float)) or not 0 < max_credits <= 25:
+        abort(400, "maxCredits must be greater than 0 and no more than 25")
+    idempotency_key = body.get("idempotencyKey")
+    if not isinstance(idempotency_key, str) or not _AD_DB_IDEMPOTENCY.fullmatch(idempotency_key):
+        abort(400, "idempotencyKey has an invalid format")
+    try:
+        payload = _ad_db_request("/v1/ad-db/runs/scan", {
+            "pageIds": page_ids,
+            "maxCredits": max_credits,
+            "idempotencyKey": idempotency_key,
+        }, method="POST", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(payload), 202
+
+
+@app.get("/api/ad-db/ads")
+@app.get("/api/ad-db/prospects")
+@app.get("/api/ad-db/runs")
+def ad_db_collection():
+    """Read-only Ad DB facade; canonical data and policy stay in Hermes."""
+    collection = request.path.rsplit("/", 1)[-1]
+    query = _ad_db_query()
+    try:
+        payload = _ad_db_request(f"/v1/ad-db/{collection}" + (f"?{query}" if query else ""), timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(_ad_db_public_payload(payload))
+
+
+@app.get("/api/ad-db/ads/<ad_id>")
+def ad_db_ad(ad_id: str):
+    ad_id = _ad_db_id(ad_id)
+    try:
+        payload = _ad_db_request(f"/v1/ad-db/ads/{urllib.parse.quote(ad_id, safe='')}", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    return jsonify(_ad_db_public_payload(payload))
+
+
+@app.route("/api/ad-db/ads/<ad_id>/media/<asset_id>", methods=["GET", "HEAD"])
+def ad_db_media(ad_id: str, asset_id: str):
+    try:
+        return _ad_db_media_response(_ad_db_id(ad_id), _ad_db_id(asset_id))
+    except Exception as error:
+        return _hermes_error(error)
+
+
 @app.post("/api/ad-studio/runs")
-def ad_studio_run_create():
+@app.post("/api/ad-template-generator/runs")
+def ad_template_generator_run_create():
     """Start one durable canonical Feed + Story Hermes run per source image."""
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict):
@@ -1788,51 +3141,72 @@ def ad_studio_run_create():
     raw_attachments = body.get("attachments")
     if not isinstance(raw_attachments, list) or not raw_attachments:
         abort(400, "choose at least one source image")
-    if len(raw_attachments) > AD_STUDIO_MAX_SOURCES:
-        _remove_raw_ad_studio_attachments(raw_attachments)
-        abort(413, f"choose no more than {AD_STUDIO_MAX_SOURCES} source images")
+    if len(raw_attachments) > AD_TEMPLATE_GENERATOR_MAX_SOURCES:
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
+        abort(413, f"choose no more than {AD_TEMPLATE_GENERATOR_MAX_SOURCES} source images")
+
+    try:
+        brief = _ad_template_generator_brief(body.get("brief"))
+    except _AdTemplateGeneratorBriefError as error:
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
+        return jsonify({
+            "ok": False,
+            "error": {"code": error.code, "message": str(error)},
+            "limit": AD_TEMPLATE_GENERATOR_MAX_BRIEF_CHARACTERS,
+        }), error.status
 
     project_id = _clean_project_id(body.get("project_id")) if body.get("project_id") else ""
     project = _project_store.get_project(project_id) if project_id else None
     if not project:
-        _remove_raw_ad_studio_attachments(raw_attachments)
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
         abort(404, "project not found")
+
+    try:
+        model_policy = _validated_ad_template_generator_model_policy(
+            body.get("model_policy_override"), project_id=project_id,
+        )
+    except _AdTemplateGeneratorSourceError as error:
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
+        return jsonify({"error": str(error), "code": error.code}), 422
+    except Exception as error:
+        _remove_raw_ad_template_generator_attachments(raw_attachments)
+        return _hermes_error(error)
 
     sources = []
     results = []
     total_size = 0
     for index, raw_attachment in enumerate(raw_attachments):
-        name = _ad_studio_safe_filename(raw_attachment.get("name") if isinstance(raw_attachment, dict) else "", index)
+        name = _ad_template_generator_safe_filename(raw_attachment.get("name") if isinstance(raw_attachment, dict) else "", index)
         cleaned = _clean_atts([raw_attachment]) if isinstance(raw_attachment, dict) else []
         attachment = cleaned[0] if cleaned else None
         try:
             if attachment is None:
-                raise _AdStudioSourceError("source_missing", "source image is no longer available")
-            attachment = _validate_ad_studio_attachment(attachment)
+                raise _AdTemplateGeneratorSourceError("source_missing", "source image is no longer available")
+            attachment = _validate_ad_template_generator_attachment(attachment)
             total_size += attachment["size"]
-            if total_size > AD_STUDIO_MAX_BATCH_BYTES:
-                raise _AdStudioSourceError("batch_too_large", "source images exceed the batch size limit")
+            if total_size > AD_TEMPLATE_GENERATOR_MAX_BATCH_BYTES:
+                raise _AdTemplateGeneratorSourceError("batch_too_large", "source images exceed the batch size limit")
             sources.append({"index": index, "attachment": attachment})
-        except _AdStudioSourceError as error:
+        except _AdTemplateGeneratorSourceError as error:
             if attachment is not None:
-                _remove_ad_studio_staging(attachment)
+                _remove_ad_template_generator_staging(attachment)
             results.append({"index": index, "name": name, "status": "rejected", "error": {"code": error.code, "message": str(error)}})
 
-    brief = _clean_project_text(body.get("brief"), 800)
     common_name = _clean_project_text(body.get("name"), 60)
     runs = []
     if sources:
         total_items = len(sources) + len(results)
         worker_count = min(4, len(sources))
-        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ad-studio-start") as executor:
+        with ThreadPoolExecutor(max_workers=worker_count, thread_name_prefix="ad-template-generator-start") as executor:
             outcomes = executor.map(
-                lambda source_item: _start_ad_studio_source_run(
+                lambda source_item: _start_ad_template_generator_source_run(
                     source_item,
                     total_items=total_items,
                     common_name=common_name,
                     brief=brief,
                     project_id=project_id,
                     project=project,
+                    model_policy=model_policy,
                 ),
                 sources,
             )
@@ -1865,7 +3239,8 @@ def ad_studio_run_create():
 
 
 @app.get("/api/ad-studio/runs")
-def ad_studio_run_list():
+@app.get("/api/ad-template-generator/runs")
+def ad_template_generator_run_list():
     query = urllib.parse.urlencode({
         "tool_id": "ad-template-generator",
         "project_id": str(request.args.get("project_id") or ""),
@@ -1876,22 +3251,25 @@ def ad_studio_run_list():
     except Exception as error:
         return _hermes_error(error)
     raw_runs = data.get("runs") if isinstance(data.get("runs"), list) else data.get("data", [])
-    return jsonify({"runs": [_public_ad_studio_run(item) for item in raw_runs if isinstance(item, dict)]})
+    return jsonify({"runs": [_public_ad_template_generator_run(item) for item in raw_runs if isinstance(item, dict)]})
 
 
 @app.get("/api/ad-studio/runs/<run_id>")
-def ad_studio_run_get(run_id: str):
+@app.get("/api/ad-template-generator/runs/<run_id>")
+def ad_template_generator_run_get(run_id: str):
     """Read authoritative Tool-run status without creating a Hub chat."""
     try:
         data = hermes_request(_tool_run_path(run_id), timeout=8)
     except Exception as error:
         return _hermes_error(error)
     run = data.get("run") if isinstance(data.get("run"), dict) else data
-    return jsonify({"run": _public_ad_studio_run(run)})
+    events = _read_ad_template_generator_run_events(run_id) if isinstance(run, dict) and str(run.get("status") or "") not in {"ready_for_review", "completed", "approved"} else []
+    return jsonify({"run": _public_ad_template_generator_run(run, events=events)})
 
 
 @app.get("/api/ad-studio/runs/<run_id>/events")
-def ad_studio_run_events(run_id: str):
+@app.get("/api/ad-template-generator/runs/<run_id>/events")
+def ad_template_generator_run_events(run_id: str):
     after = request.args.get("after", type=int)
     if after is None:
         try:
@@ -1918,7 +3296,8 @@ def ad_studio_run_events(run_id: str):
 
 
 @app.get("/api/ad-studio/runs/<run_id>/artifacts/<name>")
-def ad_studio_run_artifact(run_id: str, name: str):
+@app.get("/api/ad-template-generator/runs/<run_id>/artifacts/<name>")
+def ad_template_generator_run_artifact(run_id: str, name: str):
     if not re.fullmatch(r"[A-Za-z0-9_.-]{1,120}", name):
         abort(404)
     url = hermes_base() + _tool_run_path(run_id, f"/artifacts/{urllib.parse.quote(name, safe='')}")
@@ -1935,7 +3314,79 @@ def ad_studio_run_artifact(run_id: str, name: str):
         return _hermes_error(error)
 
 
-def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):
+def _template_release_target(release_id: str, artifact: str) -> Path | None:
+    """Resolve one sealed, source-free release artifact without traversal."""
+    if not TEMPLATE_RELEASE_ID.fullmatch(release_id or ""):
+        return None
+    if not artifact or "\\" in artifact or artifact.startswith("/"):
+        return None
+    parts = artifact.split("/")
+    if any(not part or part in {".", ".."} or part.startswith(".") for part in parts):
+        return None
+    target = (TEMPLATE_RELEASE_ROOT / release_id / Path(*parts)).resolve()
+    try:
+        target.relative_to(TEMPLATE_RELEASE_ROOT)
+    except ValueError:
+        return None
+    if target.suffix.lower() not in TEMPLATE_RELEASE_EXTENSIONS:
+        return None
+    current = TEMPLATE_RELEASE_ROOT
+    try:
+        for part in (release_id, *parts):
+            current = current / part
+            if current.is_symlink():
+                return None
+    except OSError:
+        return None
+    if not target.exists() or not target.is_file() or target.is_symlink():
+        return None
+    try:
+        if target.stat().st_size > TEMPLATE_RELEASE_MAX_BYTES:
+            return None
+    except OSError:
+        return None
+    return target
+
+
+@app.route("/releases/ad-template-generator/<release_id>/<path:artifact>", methods=["GET", "HEAD"])
+def ad_template_generator_release_artifact(release_id: str, artifact: str):
+    target = _template_release_target(release_id, artifact)
+    if target is None:
+        abort(404)
+    try:
+        stat = target.stat()
+        etag = hashlib.sha256(f"{stat.st_ino}:{stat.st_size}:{stat.st_mtime_ns}".encode()).hexdigest()
+        headers = {
+            "ETag": f'"{etag}"',
+            "Cache-Control": "public, max-age=31536000, immutable",
+            "Content-Length": str(stat.st_size),
+        }
+        if request.if_none_match and request.if_none_match.contains(etag):
+            return Response(status=304, headers=headers)
+        content_type = (
+            TEMPLATE_RELEASE_MIME_TYPES.get(target.suffix.lower())
+            or mimetypes.guess_type(target.name)[0]
+            or "application/octet-stream"
+        )
+        if request.method == "HEAD":
+            return Response(status=200, headers=headers, mimetype=content_type)
+
+        def stream():
+            with target.open("rb") as handle:
+                while chunk := handle.read(64 * 1024):
+                    yield chunk
+
+        return Response(
+            stream_with_context(stream()),
+            headers=headers,
+            mimetype=content_type,
+            direct_passthrough=True,
+        )
+    except OSError:
+        abort(404)
+
+
+def _proxy_ad_template_generator_action(run_id: str, suffix: str, allowed: set[str]):
     body = request.get_json(silent=True) or {}
     if not isinstance(body, dict) or any(key not in allowed for key in body):
         abort(400, "invalid action")
@@ -1944,7 +3395,7 @@ def _proxy_ad_studio_action(run_id: str, suffix: str, allowed: set[str]):
     except Exception as error:
         return _hermes_error(error)
     run = data.get("run") if isinstance(data.get("run"), dict) else data
-    return jsonify({"ok": True, "run": _public_ad_studio_run(run)})
+    return jsonify({"ok": True, "run": _public_ad_template_generator_run(run)})
 
 
 def _number_from(*values):
@@ -1961,13 +3412,116 @@ def _number_from(*values):
 
 
 @app.post("/api/ad-studio/runs/<run_id>/retry")
-def ad_studio_run_retry(run_id: str):
-    return _proxy_ad_studio_action(run_id, "/retry", {"from_stage"})
+@app.post("/api/ad-template-generator/runs/<run_id>/retry")
+def ad_template_generator_run_retry(run_id: str):
+    return _proxy_ad_template_generator_action(run_id, "/retry", set())
 
 
 @app.post("/api/ad-studio/runs/<run_id>/cancel")
-def ad_studio_run_cancel(run_id: str):
-    return _proxy_ad_studio_action(run_id, "/cancel", {"reason"})
+@app.post("/api/ad-template-generator/runs/<run_id>/cancel")
+def ad_template_generator_run_cancel(run_id: str):
+    return _proxy_ad_template_generator_action(run_id, "/cancel", {"reason"})
+
+
+@app.post("/api/ad-studio/runs/<run_id>/approve")
+@app.post("/api/ad-template-generator/runs/<run_id>/approve")
+def ad_template_generator_run_approve(run_id: str):
+    """Forward the operator's explicit template publication decision to Hermes."""
+    return _proxy_ad_template_generator_action(run_id, "/approve", set())
+
+
+def _review_run_scope(run_id: str, project_id: str) -> dict:
+    run_data = hermes_request(_tool_run_path(run_id), timeout=8)
+    run = run_data.get("run") if isinstance(run_data.get("run"), dict) else run_data
+    scope = run.get("scope") if isinstance(run, dict) and isinstance(run.get("scope"), dict) else {}
+    if not _project_store.get_project(project_id) or str(scope.get("project_id") or "") != project_id:
+        abort(403, "review project scope does not match the Tool run")
+    return run
+
+
+def _review_payload_response(data):
+    return jsonify(data)
+
+
+@app.post("/api/ad-template-generator/runs/<run_id>/review-messages")
+def ad_template_generator_run_review_message(run_id: str):
+    try:
+        review = validate_review_message(request.get_json(silent=True))
+        _review_run_scope(run_id, review["project_id"])
+        data = hermes_request(_tool_run_path(run_id, "/request-changes"), hermes_review_payload(review), method="POST", timeout=15)
+        return _review_payload_response(data)
+    except ReviewChatError as error:
+        return jsonify({"error": {"message": str(error), "code": "invalid_review_message"}}), 400
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _hermes_error(error)
+
+
+@app.get("/api/ad-template-generator/runs/<run_id>/revisions")
+def ad_template_generator_run_review_revisions(run_id: str):
+    project_id = str(request.args.get("project_id") or "").strip()
+    try:
+        if not project_id: raise ReviewChatError("project_id is required")
+        _review_run_scope(run_id, project_id)
+        query = urllib.parse.urlencode({"project_id": project_id})
+        return _review_payload_response(hermes_request(_tool_run_path(run_id, "/revisions") + "?" + query, timeout=8))
+    except ReviewChatError as error:
+        return jsonify({"error": {"message": str(error), "code": "invalid_review_revisions"}}), 400
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _hermes_error(error)
+
+
+@app.post("/api/ad-template-generator/runs/<run_id>/revisions/undo")
+def ad_template_generator_run_review_undo(run_id: str):
+    try:
+        body = validate_undo_body(request.get_json(silent=True))
+        _review_run_scope(run_id, body["project_id"])
+        query = urllib.parse.urlencode({"project_id": body["project_id"]})
+        history = hermes_request(_tool_run_path(run_id, "/revisions") + "?" + query, timeout=8)
+        records = history.get("revisions") if isinstance(history, dict) else []
+        target = next((item for item in reversed(records if isinstance(records, list) else []) if isinstance(item, dict) and item.get("status") in {"ready_for_review", "completed"} and item.get("revision") == body["expected_revision"] and item.get("id")), None)
+        if target is None: raise ReviewChatError("no ready revision matches expected_revision")
+        data = hermes_request(_tool_run_path(run_id, "/request-changes"), hermes_undo_payload(body, str(target["id"])), method="POST", timeout=15)
+        return _review_payload_response(data)
+    except ReviewChatError as error:
+        return jsonify({"error": {"message": str(error), "code": "invalid_review_undo"}}), 409
+    except HTTPException:
+        raise
+    except Exception as error:
+        return _hermes_error(error)
+
+
+@app.post("/api/ad-studio/runs/<run_id>/request-changes")
+@app.post("/api/ad-template-generator/runs/<run_id>/request-changes")
+def ad_template_generator_run_request_changes(run_id: str):
+    body = request.get_json(silent=True) or {}
+    instructions = str(body.get("instructions") or "").strip() if isinstance(body, dict) else ""
+    if set(body) != {"instructions"} or not instructions or len(instructions) > 2_000:
+        abort(400, "change instructions must contain 1–2,000 characters")
+    try:
+        data = hermes_request(_tool_run_path(run_id, "/request-changes"), {"instructions": instructions}, method="POST", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    return jsonify({"ok": True, "run": _public_ad_template_generator_run(run)})
+
+
+@app.post("/api/ad-studio/runs/<run_id>/discard")
+@app.post("/api/ad-template-generator/runs/<run_id>/discard")
+def ad_template_generator_run_discard(run_id: str):
+    body = request.get_json(silent=True) or {}
+    reason = str(body.get("reason") or "").strip() if isinstance(body, dict) else ""
+    if not isinstance(body, dict) or any(key != "reason" for key in body) or len(reason) > 1_000:
+        abort(400, "discard reason must be no more than 1,000 characters")
+    try:
+        data = hermes_request(_tool_run_path(run_id, "/discard"), {"reason": reason} if reason else {}, method="POST", timeout=15)
+    except Exception as error:
+        return _hermes_error(error)
+    run = data.get("run") if isinstance(data.get("run"), dict) else data
+    return jsonify({"ok": True, "run": _public_ad_template_generator_run(run)})
 
 
 # --- Blog Studio: display and proxy only; Hermes owns the durable run -------
@@ -2226,7 +3780,7 @@ def chat_turn():
     if provider:
         payload["provider"] = provider
     return Response(
-        stream_with_context(_hermes_chat_stream(chat_id, payload)),
+        stream_with_context(_project_chat_stream(chat_id, payload)),
         mimetype="text/event-stream",
         headers=_sse_headers(),
     )
@@ -2238,6 +3792,445 @@ def _sse_headers():
         "X-Accel-Buffering": "no",
         "Connection": "keep-alive",
     }
+
+
+# ============================================================================
+# v0.21 central wiring (Session 1; contract v1.0.0 §2–§8)
+# ============================================================================
+
+from urllib.parse import urlsplit as _urlsplit
+from hermes_adapter.http import RestSurface as _RestSurface, RestError as _RestError
+from hermes_adapter.serve import ServeClient as _ServeClient, ServeError as _ServeError
+from hermes_adapter.projection import EventProjection as _EventProjection
+from hermes_adapter.events import derived_label as _derived_label
+
+_HERMES_SERVE_URL = os.environ.get("HERMES_SERVE_URL", "")
+_HERMES_SERVE_TOKEN = os.environ.get("HERMES_SERVE_TOKEN", "")
+
+# Terminal run events used to release the active-run binding.
+_RUN_TERMINAL = frozenset({
+    "run.completed", "run.cancelled", "run.stopped", "run.failed",
+    "run.expired", "error", "done",
+})
+
+
+def _serve_client():
+    if not (_HERMES_SERVE_URL and _HERMES_SERVE_TOKEN):
+        return None
+    return _ServeClient(_RestSurface(
+        "serve", _HERMES_SERVE_URL, lambda: {"X-Hermes-Session-Token": _HERMES_SERVE_TOKEN}))
+
+
+def _same_origin_guard():
+    """Strict same-origin mutation guard for browser state changes."""
+    sec_site = request.headers.get("Sec-Fetch-Site")
+    if sec_site not in (None, "same-origin", "same-site", "none"):
+        abort(403, description="cross-site mutation rejected")
+    origin = request.headers.get("Origin", "")
+    if origin:
+        netloc = _urlsplit(origin).netloc
+        if netloc and netloc != request.host:
+            abort(403, description="cross-origin mutation rejected")
+    if request.content_type and "application/json" not in request.content_type:
+        abort(415, description="expected application/json")
+
+
+# --- one redacted event projection under the Window data root ---------------
+_EVENT_PROJECTION = _EventProjection(Path(os.environ.get(
+    "FRANK_EVENT_PROJECTION_ROOT", str(Path(os.environ.get("CHAT_STORE_DIR", "/data")) / "events-projection"))))
+_active_runs_lock = threading.Lock()
+_ACTIVE_RUNS: dict[str, str] = {}
+
+
+def _projection_key(chat_id: str) -> str:
+    return _EventProjection.scope_key("operator", "frank", chat_id)
+
+
+def _record_projected_event(chat_id: str, native_event: str, data_text: str) -> None:
+    data = None
+    try:
+        data = json.loads(data_text) if data_text else {}
+    except json.JSONDecodeError:
+        data = {"raw": data_text[:2000]}
+    if not isinstance(data, dict):
+        data = {"raw": str(data)[:2000]}
+    run_id = str(data.get("run_id") or "")
+    if run_id:
+        with _active_runs_lock:
+            _ACTIVE_RUNS[chat_id] = run_id
+        if native_event in _RUN_TERMINAL:
+            with _active_runs_lock:
+                if _ACTIVE_RUNS.get(chat_id) == run_id:
+                    _ACTIVE_RUNS.pop(chat_id, None)
+    envelope = {
+        "native_event": native_event or "message",
+        "derived_label": _derived_label(native_event or "message"),
+        "payload": data,
+        "run_id": run_id,
+    }
+    try:
+        _EVENT_PROJECTION.append(_projection_key(chat_id), envelope, run_id=run_id)
+    except Exception:
+        # Projection failure must never corrupt the live turn stream.
+        pass
+
+
+def _project_chat_stream(chat_id: str, payload: dict):
+    """Pass the authoritative turn through unchanged while persisting a
+    redacted, sequence-stamped projection for replay (contract §5)."""
+    event_name = "message"
+    data_buf: list[str] = []
+
+    def _flush() -> None:
+        nonlocal event_name
+        if data_buf:
+            _record_projected_event(chat_id, event_name, "\n".join(data_buf))
+            event_name = "message"
+            data_buf.clear()
+
+    try:
+        for raw_line in _hermes_chat_stream(chat_id, payload):
+            yield raw_line
+            text = raw_line.decode("utf-8", errors="replace")
+            for line in text.splitlines():
+                if line.startswith("event:"):
+                    _flush()
+                    event_name = line[6:].strip() or "message"
+                elif line.startswith("data:"):
+                    data_buf.append(line[5:].strip())
+                elif not line.strip():
+                    _flush()
+        _flush()
+    finally:
+        with _active_runs_lock:
+            _ACTIVE_RUNS.pop(chat_id, None)
+
+
+@app.post("/api/chat/stop")
+def chat_stop():
+    _same_origin_guard()
+    body = request.get_json(silent=True) or {}
+    chat_id = str(body.get("chat_id", "")).strip()
+    if not chat_id:
+        abort(400, "chat_id required")
+    with _active_runs_lock:
+        run_id = str(body.get("run_id", "")).strip() or _ACTIVE_RUNS.get(chat_id, "")
+    if not run_id:
+        return jsonify({"error": {"type": "no_active_run",
+                                  "message": "No active Hermes run to stop for this chat."}}), 409
+    try:
+        result = hermes_request(f"/v1/runs/{run_id}/stop",
+                                {"reason": str(body.get("reason", "user stop"))[:200]})
+    except Exception as err:
+        return _hermes_error(err)
+    _record_projected_event(chat_id, "run.stopped", json.dumps(
+        {"type": "run.stopped", "run_id": run_id, "frank_origin": True}))
+    return jsonify(result)
+
+
+@app.post("/api/chat/respond")
+def chat_respond():
+    """Resolve one blocking input against the exact native request."""
+    _same_origin_guard()
+    body = request.get_json(silent=True) or {}
+    chat_id = str(body.get("chat_id", "")).strip()
+    kind = str(body.get("kind", "approval")).strip().lower()
+    value = body.get("value")
+    request_id = str(body.get("request_id", "")).strip()
+    with _active_runs_lock:
+        run_id = str(body.get("run_id", "")).strip() or _ACTIVE_RUNS.get(chat_id, "")
+    if not chat_id:
+        abort(400, "chat_id required")
+    if not run_id:
+        return jsonify({"error": {"type": "no_active_run",
+                                  "message": "No active Hermes run is waiting on this chat."}}), 409
+    if kind == "clarify":
+        answer = str(value or "").strip()
+        if not answer:
+            abort(400, "clarification answer required")
+        try:
+            result = hermes_request(f"/v1/runs/{run_id}/steer", {"input": answer[:8000]})
+        except Exception as err:
+            return _hermes_error(err)
+    elif kind in ("approval", "sudo"):
+        choice = str(value or "once").strip().lower()
+        choice = {"approve": "once", "approved": "once", "allow": "once", "yes": "once",
+                  "deny": "deny", "no": "deny"}.get(choice, choice)
+        if choice not in ("once", "session", "always", "deny"):
+            abort(400, "invalid approval choice")
+        payload: dict = {"choice": choice}
+        if request_id:
+            payload["request_id"] = request_id
+        try:
+            result = hermes_request(f"/v1/runs/{run_id}/approval", payload)
+        except Exception as err:
+            return _hermes_error(err)
+    elif kind == "secret":
+        return jsonify({"error": {"type": "unsupported",
+                                  "message": "Secret input is not exposed by the pinned run-mode gateway."}}), 501
+    else:
+        abort(400, "unknown blocking-input kind")
+    _record_projected_event(chat_id, f"input.resolved", json.dumps(
+        {"type": "input.resolved", "run_id": run_id, "kind": kind, "frank_origin": True}))
+    return jsonify(result)
+
+
+@app.post("/api/chat/steer")
+def chat_steer():
+    _same_origin_guard()
+    body = request.get_json(silent=True) or {}
+    chat_id = str(body.get("chat_id", "")).strip()
+    instruction = str(body.get("instruction", "")).strip()
+    with _active_runs_lock:
+        run_id = str(body.get("run_id", "")).strip() or _ACTIVE_RUNS.get(chat_id, "")
+    if not chat_id or not instruction:
+        abort(400, "chat_id and instruction required")
+    if not run_id:
+        return jsonify({"error": {"type": "no_active_run",
+                                  "message": "No active Hermes run to steer."}}), 409
+    try:
+        result = hermes_request(f"/v1/runs/{run_id}/steer", {"input": instruction[:8000]})
+    except Exception as err:
+        return _hermes_error(err)
+    _record_projected_event(chat_id, "run.steered", json.dumps(
+        {"type": "run.steered", "run_id": run_id, "frank_origin": True}))
+    return jsonify(result)
+
+
+@app.get("/api/chat/events")
+def chat_events():
+    """Replay the redacted projection after a browser reload/disconnect."""
+    chat_id = request.args.get("session_id", "").strip()
+    if not chat_id:
+        abort(400, "session_id required")
+    try:
+        after = int(request.args.get("after", "-1"))
+    except ValueError:
+        abort(400, "after must be an integer")
+    events = list(_EVENT_PROJECTION.iter_events(_projection_key(chat_id), after_frank_sequence=after))
+    return jsonify({"events": events, "session_id": chat_id})
+
+
+@app.post("/api/audio/transcribe")
+def audio_transcribe():
+    """Server-side STT via the pinned Hermes endpoint (contract §6)."""
+    _same_origin_guard()
+    client = _serve_client()
+    if client is None:
+        abort(503, description="hermes serve bridge is not configured")
+    body = request.get_json(silent=True) or {}
+    data_url = str(body.get("data_url", ""))
+    mime_type = str(body.get("mime_type")) if body.get("mime_type") else None
+    try:
+        result = client.transcribe(data_url, mime_type=mime_type)
+    except _ServeError as err:
+        status = 413 if err.frank_code == "hermes.payload_too_large" else (
+            400 if err.frank_code == "hermes.invalid_params" else 503)
+        return jsonify({"error": {"type": err.frank_code, "message": str(err)}}), status
+    return jsonify(result)
+
+
+@app.post("/api/chat/attachments/vps")
+def chat_attachments_vps():
+    """Attach one allowlisted VPS file/folder to the current chat."""
+    _same_origin_guard()
+    if _ws_catalog is None:
+        abort(503, description="workspace estate is not configured")
+    body = request.get_json(silent=True) or {}
+    root_id = str(body.get("root", "")).strip()
+    rel = str(body.get("path", "")).strip()
+    kind = str(body.get("kind", "file")).strip()
+    chat_id = str(body.get("chat_id", "")).strip()
+    if not chat_id:
+        abort(400, "chat_id required")
+    if kind not in ("file", "folder"):
+        abort(400, "kind must be file or folder")
+    workspace = _chat_workspace(chat_id)
+    if workspace is None:
+        return jsonify({"error": {"type": "outside_workspace",
+                                  "message": "This chat has no registered project workspace; VPS folders cannot be attached live. Start the chat from a project, or upload a local snapshot."}}), 403
+    contract = None
+    for candidate in _ws_catalog.roots_for(workspace.workspace_id):
+        if candidate.kind != "live-reference":
+            continue
+        # The Explorer presents one tree under the "vps" root id; per-workspace
+        # live roots are also accepted by their registered id.
+        if root_id in ("vps", candidate.root_id):
+            contract = candidate
+            break
+    if contract is None:
+        abort(403, "root is not permitted for this chat's workspace")
+    try:
+        manifest = _build_manifest(Path(contract.container_path), rel)
+    except Exception as err:
+        return jsonify({"error": {"type": "path_rejected", "message": str(err)}}), 400
+    chip = {
+        "id": f"vps-{manifest.get('attachment_id') or _uuid.uuid4().hex}",
+        "name": manifest.get("display_name") or rel.rsplit("/", 1)[-1],
+        "relative_path": rel,
+        "type": manifest.get("media_type") or ("inode/directory" if kind == "folder" else "application/octet-stream"),
+        "size": manifest.get("total_bytes"),
+        "source": "vps",
+        "file_count": manifest.get("file_count"),
+    }
+    return jsonify(chip)
+
+
+# --- workspace estate foundation (flag-gated) ------------------------------
+_ws_registry = None
+_ws_catalog = None
+_ws_leases = None
+_ws_resolver = None
+_build_manifest = None
+import uuid as _uuid
+
+if os.environ.get("FRANK_V021_FOUNDATION", "").lower() in ("1", "true", "yes"):
+    from infra.workspace.resolver import WorkspaceRegistry as _WSRegistry
+    from infra.workspace.roots import RootCatalog as _WSCatalog
+    from infra.workspace.manifest import build_manifest as _ws_build_manifest
+    from infra.workspace.lease import WorkspaceLease as _WSLease
+    import work_api as _work_api
+    import work_cron as _work_cron
+    from kanban_bridge_port import BridgeKanbanPort as _BridgeKanbanPort
+
+    def _legacy_bank_for(project: dict) -> str:
+        try:
+            from memory_inspector import _bank_id as _legacy_bank_id
+            return _legacy_bank_id(project)
+        except Exception:
+            return ""
+
+    def _seed_registry(registry: _WSRegistry) -> dict:
+        """Backward-compatible migration through Session 5's own migration
+        API. Every registered project becomes an opaque workspace whose
+        immutable memory_scope is the exact legacy root-derived bank."""
+        candidates = []
+        for project in _project_store.list_projects() or []:
+            project_id = str(project.get("id") or "").strip()
+            if not project_id:
+                continue
+            root = str(project.get("root") or "").strip()
+            if root and not root.startswith("/"):
+                # Legacy project roots are relative names; the canonical host
+                # location is /projects/<name> (resolver's canonical prefix).
+                root = f"/projects/{root.lstrip('/')}"
+            slug = re.sub(r"[^a-z0-9-]+", "-", project_id.lower()).strip("-") or "project"
+            candidates.append({
+                "project_id": project_id,
+                "slug": slug,
+                "host_path": root,
+                "hermes_path": root,
+                "container_path": f"/vps/projects/{slug}" if root else "",
+                "root_kind": "live-reference" if root else "upload-staging",
+                "legacy_memory_scope": _legacy_bank_for(project) or f"steven-{slug}",
+            })
+        return registry.migrate_registry(candidates)
+
+    _ws_registry = _WSRegistry(Path(os.environ.get(
+        "FRANK_WORKSPACE_REGISTRY", str(Path(os.environ.get("CHAT_STORE_DIR", "/data")) / "workspace-registry.json"))))
+    try:
+        _seed_registry(_ws_registry)
+    except Exception:
+        # Registry corruption must not stop Frank; estate features fail closed.
+        _ws_registry = None
+    if _ws_registry is not None:
+        _ws_catalog = _WSCatalog(_ws_registry)
+        _ws_leases = _WSLease(Path(os.environ.get(
+            "FRANK_WORKSPACE_LEASES", str(Path(os.environ.get("CHAT_STORE_DIR", "/data")) / "workspace-leases.json"))))
+        _build_manifest = _ws_build_manifest
+
+        class _ResolverShim:
+            """The minimal resolver view work_api consumes."""
+            def __init__(self, registry):
+                self._registry = registry
+            def get(self, workspace_id):
+                return self._registry.get(workspace_id)
+            def get_active(self, workspace_id):
+                return self._registry.get_active(workspace_id)
+            def hermes_path(self, workspace_id):
+                record = self._registry.get(workspace_id)
+                return record.hermes_path if record else ""
+
+        _ws_resolver = _ResolverShim(_ws_registry)
+        _kanban_port = _BridgeKanbanPort(
+            base_url=os.environ.get("FRANK_KANBAN_BRIDGE_URL", ""),
+            key_provider=lambda: os.environ.get("FRANK_KANBAN_BRIDGE_KEY", ""),
+            slug_for=lambda binding: (
+                _ws_registry.get_active(_binding_workspace(binding)).board_slug_private
+                if _ws_registry.get(_binding_workspace(binding)) else None),
+        )
+        _cron_client = _work_cron.CronClient(
+            _HERMES_SERVE_URL, lambda: _HERMES_SERVE_TOKEN)
+        _work_api.configure(
+            project_loader=_project_store.get_project,
+            kanban=_kanban_port,
+            resolver=_ws_resolver,
+            leases=_ws_leases,
+            cron_client=_cron_client,
+        )
+        app.register_blueprint(_work_api.api)
+
+        import hmac as _hmac
+        from infra.workspace.lease_blueprint import create_lease_blueprint as _create_lease_blueprint
+        app.register_blueprint(_create_lease_blueprint(_ws_leases))
+
+        @app.post("/internal/workspaces")
+        def _internal_workspace_resolve():
+            """Private server-to-server resolve (codex launcher contract).
+
+            Same runtime-only credential and constant-time compare as the
+            lease endpoints; only active workspaces resolve, and only to the
+            canonical host path — never to the browser.
+            """
+            presented = request.headers.get("Authorization", "")
+            expected = os.environ.get("FRANK_LEASE_CREDENTIAL", "")
+            if not expected:
+                abort(503, "lease credential is not configured")
+            prefix = "Bearer "
+            if not presented.startswith(prefix) or not _hmac.compare_digest(presented[len(prefix):], expected):
+                abort(403)
+            body = request.get_json(silent=True) or {}
+            workspace_id = str(body.get("workspace_id") or "")
+            if not workspace_id:
+                abort(400, "workspace_id is required")
+            record = _ws_registry.get(workspace_id)
+            if record is None or record.status != "active" or not record.host_path:
+                abort(404)
+            return jsonify({
+                "ok": True,
+                "workspace_id": workspace_id,
+                "host_path": record.host_path,
+                "hermes_path": record.hermes_path,
+                "root_kind": record.root_kind,
+            })
+
+
+def _binding_workspace(binding_id: str) -> str:
+    """Board bindings map 1:1 to their project workspace in this migration."""
+    return binding_id[3:] if binding_id.startswith("bb-") else binding_id
+
+
+def _chat_workspace(chat_id: str):
+    """Resolve the chat's bound project to its opaque workspace record."""
+    if _ws_registry is None:
+        return None
+    project_id = ""
+    try:
+        if hasattr(_project_store, "project_id_for_session"):
+            project_id = str(_project_store.project_id_for_session(chat_id) or "")
+    except Exception:
+        project_id = ""
+    if not project_id and hasattr(_project_store, "session_bindings"):
+        try:
+            project_id = str(_project_store.session_bindings().get(chat_id) or "")
+        except Exception:
+            project_id = ""
+    if not project_id:
+        return None
+    try:
+        return _ws_registry.get_active(project_id)
+    except Exception:
+        return None
 
 
 home_platform.configure(
@@ -2252,11 +4245,14 @@ home_platform.configure(
 app.register_blueprint(home_platform.api)
 app.register_blueprint(create_graph_blueprint(_graph_provider))
 app.register_blueprint(control_plane_view.api)
+app.register_blueprint(ops_projections.create_blueprint())
+app.register_blueprint(customer_ops_actions.create_blueprint())
 app.register_blueprint(vault_broker.api)
 app.register_blueprint(create_memory_blueprint(MemoryInspector(
     _project_store.get_project,
     HindsightClient(HINDSIGHT_URL),
     Path(os.environ.get("PROJECT_KNOWLEDGE_ROOT", "/data/knowledge")),
+    global_bank_id=os.environ.get("FRANK_GLOBAL_MEMORY_BANK", "steven-global"),
 )))
 app.register_blueprint(create_blog_studio_blueprint(
     project_getter=_project_store.get_project,
@@ -2269,23 +4265,31 @@ app.register_blueprint(create_blog_studio_blueprint(
 ))
 
 
-app.register_blueprint(mini_frank.create_blueprint(
-    data_root=_mini_data_root(),
-    project_view_root=_mini_preview_root(),
-    legacy_project_root=_mini_legacy_root(),
-    project_getter=_project_store.get_project,
-    session_creator=_create_project_session,
-    hermes_request=hermes_request,
-    hermes_chat_stream=_hermes_chat_stream,
-    # Hermes runs on the VPS host, while Frank writes through the /data
-    # container mount. The shared upload root already names that host path.
-    hermes_data_root=HERMES_UPLOAD_ROOT.parent,
-    # Keep claim links stable across restarts when a dedicated Mini key has not
-    # yet been provisioned. HERMES_KEY is already a persistent server secret.
-    rate_limit_key=os.environ.get("MINI_RATE_LIMIT_KEY", "").strip() or HERMES_KEY,
-    free_project_limit=int(os.environ.get("MINI_FREE_PROJECT_LIMIT", "1")),
-    start_reconciler=True,
-))
+MINI_PEER_MODE = os.environ.get("MINI_PEER_MODE", "0") == "1"
+
+if not MINI_PEER_MODE:
+    app.register_blueprint(mini_frank.create_blueprint(
+        data_root=_mini_data_root(),
+        project_view_root=_mini_preview_root(),
+        legacy_project_root=_mini_legacy_root(),
+        project_getter=_project_store.get_project,
+        session_creator=_create_project_session,
+        hermes_request=hermes_request,
+        hermes_chat_stream=_hermes_chat_stream,
+        # Hermes runs on the VPS host, while Frank writes through the /data
+        # container mount. The shared upload root already names that host path.
+        hermes_data_root=HERMES_UPLOAD_ROOT.parent,
+        # Keep claim links stable across restarts when a dedicated Mini key has not
+        # yet been provisioned. HERMES_KEY is already a persistent server secret.
+        rate_limit_key=os.environ.get("MINI_RATE_LIMIT_KEY", "").strip() or HERMES_KEY,
+        free_project_limit=int(os.environ.get("MINI_FREE_PROJECT_LIMIT", "1")),
+        start_reconciler=True,
+    ))
+
+else:
+    # Peer mode has one reader/writer: the dedicated Mini service. Do not start
+    # the embedded reconciler or register its overlapping API routes.
+    app.register_blueprint(mini_operator.create_blueprint())
 
 
 @app.get("/mini-frank")

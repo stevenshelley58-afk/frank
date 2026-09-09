@@ -1,0 +1,79 @@
+{
+  "issued": "2026-09-03T12:05Z",
+  "issuer": "session-1-integration-owner",
+  "contract": {
+    "file": "docs/contracts/FRANK_HERMES_V021_CONTRACT.md",
+    "version": "1.0.0",
+    "commit": "2139353037fe544ca4306c521492846cf2b03c98",
+    "tag": "frank-v021-contract-ready-v1.0.0",
+    "status": "READY",
+    "preflight_tip": "6a975aead077b742bcbe590ac0609d9cdb5aa648"
+  },
+  "upstream_hermes": {
+    "tag": "v2026.8.31",
+    "commit": "29112bef099274229cadff79cdff7bf7b99c4b77",
+    "tool_runs_v1_replaced_by": "/v1/runs (+SSE/approval/steer/stop, durable Idempotency-Key)",
+    "compatibility_patch": "none-required"
+  },
+  "canary_allocations": {
+    "s2": {
+      "state_root": "/srv/frank-canaries/s2-hermes-v021",
+      "api_server": "127.0.0.1:18643",
+      "serve": "127.0.0.1:19121"
+    },
+    "s3": {
+      "state_root": "/srv/frank-canaries/s3-hermes-v021",
+      "api_server": "127.0.0.1:18644",
+      "serve": "127.0.0.1:19122"
+    },
+    "s4": {
+      "state_root": "/srv/frank-canaries/s4-hermes-v021",
+      "api_server": "127.0.0.1:18645",
+      "serve": "127.0.0.1:19123"
+    },
+    "s5": {
+      "state_root": "/srv/frank-canaries/s5-hermes-v021",
+      "api_server": "127.0.0.1:18646",
+      "serve": "127.0.0.1:19124"
+    }
+  },
+  "namespace_prefixes": {
+    "banks": "steven-v021canary-",
+    "sessions": "v021canary-",
+    "boards": "v021canary-"
+  },
+  "foundation_checkpoint": {
+    "expected_from": "session-5 on codex/frank-v021-shared-estate",
+    "must_not_depend_on": "hermes adapter",
+    "s1_adds_after": "project_store migration + central route wiring on codex/frank-v021-foundation"
+  },
+  "adapter_checkpoint": {
+    "expected_from": "session-2 on codex/frank-v021-hermes-adapter",
+    "requires_in_ancestry": [
+      "contract 2139353037fe544ca4306c521492846cf2b03c98",
+      "foundation tip 1493b55dc6a0ea934551da0b15b444653b0e1b99 (fallback, see foundation_fallback)"
+    ]
+  },
+  "open_release_gates": [
+    "provider billing for tool-capable live runs (402 today; production affected)",
+    "supports_tools:false override behavior sign-off (session-2)",
+    "bridge build-out + security negatives",
+    "lease live proof",
+    "migration rehearsal on restored clone",
+    "phase F full matrix + dual attestations"
+  ],
+  "foundation_fallback": {
+    "status": "ACTIVE (session-5 stalled; wake-up ca6572f unanswered as of 13:35Z)",
+    "branch": "codex/frank-v021-foundation-s1-fallback",
+    "commit": "1493b55dc6a0ea934551da0b15b444653b0e1b99",
+    "contents": [
+      "opaque workspace_id registry migration",
+      "immutable legacy memory_scope",
+      "opaque board_binding_id -> private native slug",
+      "private host/hermes/container resolver",
+      "one-writer execution lease: heartbeat/TTL/queue/cancel/release/verifier-gated reclaim, fail-closed",
+      "12 unit tests passing, no new suite failures"
+    ],
+    "supersede_rule": "if session-5 publishes a labeled checkpoint later, sessions merge it forward and the checkpoint replaces the fallback for future work; READY foundation ref remains the fallback tip until then"
+  }
+}

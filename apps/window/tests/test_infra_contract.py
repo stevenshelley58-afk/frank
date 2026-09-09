@@ -1,4 +1,5 @@
 from pathlib import Path
+import yaml
 import unittest
 
 
@@ -28,7 +29,7 @@ class InfraContractTest(unittest.TestCase):
 
     def test_window_image_copies_all_imported_runtime_modules(self):
         dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
-        workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")
+        compose = yaml.safe_load((APP / "docker-compose.yml").read_text(encoding="utf-8"))
         self.assertIn("COPY apps/window/connections_agent.py .", dockerfile)
         self.assertIn("COPY apps/window/mini_frank.py .", dockerfile)
         self.assertIn("COPY apps/window/mini ./mini", dockerfile)
@@ -37,21 +38,36 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("COPY apps/window/archify ./archify", dockerfile)
         self.assertIn("COPY apps/window/vendor/archify/archify ./vendor/archify/archify", dockerfile)
         self.assertIn("COPY governance/control-plane/schema ./governance/control-plane/schema", dockerfile)
-        self.assertIn("docker build -f apps/window/Dockerfile -t frank-window:verify .", workflow)
         self.assertIn("archify.mjs validate architecture", dockerfile)
         self.assertIn("archify.mjs check archify/ad-template-process.html", dockerfile)
         self.assertIn("frank.archify-build-validation.v1", dockerfile)
+
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
+        deploy_lib = (APP / "deploy_lib.sh").read_text(encoding="utf-8")
+        window_build = compose["services"]["frank-window"]["build"]
+        agenttrail_build = compose["services"]["frank-agenttrail"]["build"]
+        self.assertIn('frank_immutable_package="$(frank_create_immutable_package', deploy)
+        self.assertIn('git -C "$repo" archive --format=tar "$candidate"', deploy_lib)
+        self.assertIn('frank_cleanup_immutable_package "$frank_immutable_package"', deploy)
+        self.assertEqual(window_build["context"], "../..")
+        self.assertEqual(agenttrail_build["context"], window_build["context"])
+        self.assertIn('cd "$app"', deploy)
         self.assertIn('"import connections_agent, home_platform, server, tool_apps;', deploy)
         self.assertIn("import memory_inspector, mini, mini_frank", deploy)
 
-    def test_ci_runs_every_mini_test_and_checks_every_mini_script(self):
+    def test_ci_invokes_the_single_window_verification_runner(self):
         workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")
-        self.assertIn("python -m compileall -q mini", workflow)
-        self.assertIn("python -m unittest discover -s tests", workflow)
-        self.assertIn("find apps/window/web/mini -type f", workflow)
-        self.assertIn("node --check \"$file\"", workflow)
-        self.assertIn("node --test apps/window/tests/mini_*.test.mjs", workflow)
+        package = (APP / "package.json").read_text(encoding="utf-8")
+        runner = (APP / "scripts" / "verify.sh").read_text(encoding="utf-8")
+        self.assertIn("npm ci --ignore-scripts", workflow)
+        self.assertIn("working-directory: apps/window\n        run: npm run verify", workflow)
+        self.assertIn('"verify": "bash scripts/verify.sh"', package)
+        self.assertIn("python -m unittest discover -s tests", runner)
+        self.assertIn("python -m compileall -q mini", runner)
+        self.assertIn("-not -path './node_modules/*' -not -path './vendor/*'", runner)
+        self.assertIn("node --check \"$file\"", runner)
+        self.assertIn("-not -name 'graph_browser.test.mjs'", runner)
+        self.assertIn('node --test "${js_tests[@]}"', runner)
 
     def test_agenttrail_is_a_read_only_loopback_sidecar(self):
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
@@ -65,7 +81,10 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("/projects/only-process-hermes}:/workspace:ro", sidecar)
         self.assertIn("agenttrail_state:/home/node/.agenttrail", sidecar)
         self.assertNotIn("ports:", sidecar)
-        self.assertIn("docker compose build frank-window frank-agenttrail", deploy)
+        self.assertIn("frank-window frank-agenttrail", deploy)
+        # Release provenance (Phase E): the build injects the exact revision.
+        self.assertIn("SOURCE_SHA=", deploy)
+        self.assertIn("org.opencontainers.image.revision", dockerfile)
         self.assertIn("docker rm -f frank-agenttrail", deploy)
 
     def test_caddy_receives_only_derived_basic_auth_env(self):
@@ -194,14 +213,25 @@ class InfraContractTest(unittest.TestCase):
         blockwise = caddyfile.split("blockwise.sale {", 1)[1].split("preview.frank.fail {", 1)[0]
         self.assertIn('header X-Frame-Options "DENY"', blockwise)
 
-    def test_retired_template_release_surface_is_absent(self):
+    def test_template_release_bypass_is_exact_and_strips_private_headers(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        release = caddyfile.split("@ad_template_release", 1)[1].split("@pavone_root", 1)[0]
+        self.assertIn("method GET HEAD", release)
+        self.assertIn("path_regexp ad_template_release ^/releases/ad-template-generator/", release)
+        self.assertNotIn("basic_auth", release)
+        self.assertIn("header_up -Authorization", release)
+        self.assertIn("header_up -Cookie", release)
+        self.assertIn("header_up -X-Frank-Operator-Attestation", release)
+        self.assertIn("header_down -Set-Cookie", release)
+        self.assertIn('Cache-Control "public, max-age=31536000, immutable"', release)
+        self.assertIn('Cross-Origin-Resource-Policy "cross-origin"', release)
+        self.assertLess(caddyfile.index("@ad_template_release"), caddyfile.index("basic_auth"))
+
+    def test_template_release_root_uses_existing_private_data_volume(self):
         deploy = (APP / "deploy.sh").read_text(encoding="utf-8")
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
-        self.assertNotIn("@ad_template_release", caddyfile)
-        self.assertNotIn("/releases/ad-template-generator", caddyfile)
-        self.assertNotIn("template_release_dir", deploy)
-        self.assertNotIn("/releases/ad-template-generator", deploy)
+        self.assertIn('template_release_dir="$data_dir/releases/ad-template-generator"', deploy)
+        self.assertIn('install -d -o hermes -g hermes -m 2755 -- "$template_release_dir"', deploy)
         self.assertIn("/srv/frank/data/window:/data", compose)
         self.assertNotIn("template-release", compose)
 
@@ -240,15 +270,20 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("/srv/frank/data/window:/data", window)
         self.assertNotIn("/projects:/vps/projects", window)
         self.assertNotIn("/var/run/docker.sock", window)
+        # The base compose keeps only Frank's own repo mount. Product workspace
+        # mounts are generated per registry into the workspaces override file
+        # (see apps/window/scripts/generate_workspace_override.py) and must
+        # never be hardcoded back into this file.
+        self.assertIn("/projects/frank:/vps/projects/frank:ro", window)
         for mount in (
-            "/projects/frank:/vps/projects/frank:ro",
             "/projects/mini-frank:/vps/projects/mini-frank:ro",
             "/projects/blockwise-product-release-21a192cd2420:/vps/projects/blockwise:ro",
             "/projects/merrypaws:/vps/projects/merrypaws:ro",
             "/projects/elfandwonder:/vps/projects/elfandwonder:ro",
             "/projects/pavone-demo:/vps/projects/pavone-demo:ro",
         ):
-            self.assertIn(mount, window)
+            self.assertNotIn(mount, window)
+        self.assertIn("generate_workspace_override.py", deploy)
         self.assertIn("/srv/frank/previews:/srv/frank/previews:ro", caddy)
         self.assertNotIn("mini-shared/workspaces", caddy)
         self.assertIn("secrets.token_urlsafe(48)", deploy)
@@ -299,7 +334,13 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("header_up X-Forwarded-Proto https", product)
         self.assertIn("max_size 14MB", product)
         self.assertIn("request>headers>Authorization delete", product)
-        self.assertIn("request>headers>Cookie delete", product)
+        # Cookie must NOT be deleted by the log filter: Caddy's field deletion
+        # mutates the live request, not just the log line (caddyserver/caddy#5786
+        # class bug), which silently stripped cookies from every blockwise
+        # request and broke PKCE email confirmation. See the Caddyfile comment
+        # on this block for the incident writeup. Cookie stays redacted from
+        # logs by default (no log_credentials set), so this is log-safe.
+        self.assertNotIn("request>headers>Cookie delete", product)
         self.assertNotIn("basic_auth", product)
 
     def test_customer_previews_are_not_indexed_or_content_sniffed(self):
