@@ -11,7 +11,7 @@ const summary = {
     { name: "overlay-story.png", placement: "story", view: "overlay", url: "/overlay-story" },
   ],
   diffs: [{ name: "diff-feed.png", placement: "feed", view: "difference", url: "/diff-feed" }],
-  scores: { overall: 9.8, feed: 9.9, story_likeness: 9.8 },
+  scores: { overall: 9.5, feed: 9.9, story_likeness: 9.5 },
 };
 
 test("review evidence selector never substitutes a different evidence kind", () => {
@@ -28,9 +28,9 @@ test("Meta preview selection cannot silently return a raw template", () => {
 });
 
 test("recorded overall and placement scores are selected explicitly", () => {
-  assert.equal(reviewOverallScore(summary), 9.8);
+  assert.equal(reviewOverallScore(summary), 9.5);
   assert.equal(placementScore(summary, "feed"), 9.9);
-  assert.equal(placementScore(summary, "story"), 9.8);
+  assert.equal(placementScore(summary, "story"), 9.5);
   assert.equal(reviewOverallScore({ scores: { feed: 9.9, story: 9.7 } }), 9.7);
 });
 

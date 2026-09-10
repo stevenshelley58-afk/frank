@@ -110,7 +110,7 @@ test("an equal-second delayed snapshot cannot overwrite event-derived state", ()
     stage: "compare",
     progress: 0.7,
     updated_at: 40,
-    output: { iterations: [{ iteration: 1, decision: "accepted", comparison: { score: 9.8 }, previews: [{ url: "/current.png" }] }] },
+    output: { iterations: [{ iteration: 1, decision: "accepted", comparison: { score: 9.5 }, previews: [{ url: "/current.png" }] }] },
   };
   const delayed = {
     id: "trun-equal",
@@ -126,7 +126,7 @@ test("an equal-second delayed snapshot cannot overwrite event-derived state", ()
   assert.equal(merged.stage, "compare");
   assert.equal(merged.progress, 0.7);
   assert.equal(merged.output.iterations[0].decision, "accepted");
-  assert.equal(merged.output.iterations[0].comparison.score, 9.8);
+  assert.equal(merged.output.iterations[0].comparison.score, 9.5);
   assert.equal(merged.output.iterations[0].previews[0].url, "/current.png");
 });
 
@@ -302,11 +302,11 @@ test("canonical ready status queues despite stale processing evidence", () => {
 test("thin refresh preserves review evidence already displayed", () => {
   const detailed = {
     id: "review", status: "ready_for_review", updated_at: 10,
-    output: { review_summary: { previews: [{ name: "feed.png", url: "/feed.png" }], scores: { overall: 9.8 }, layers: [{ id: "headline" }] } },
+    output: { review_summary: { previews: [{ name: "feed.png", url: "/feed.png" }], scores: { overall: 9.5 }, layers: [{ id: "headline" }] } },
   };
   const merged = mergeAdTemplateGeneratorRun(detailed, { id: "review", status: "ready_for_review", updated_at: 11, output: { review_summary: { scores: { feed: 9.9 } } } });
 
-  assert.equal(merged.output.review_summary.scores.overall, 9.8);
+  assert.equal(merged.output.review_summary.scores.overall, 9.5);
   assert.equal(merged.output.review_summary.scores.feed, 9.9);
   assert.equal(merged.output.review_summary.previews[0].url, "/feed.png");
   assert.equal(merged.output.review_summary.layers[0].id, "headline");

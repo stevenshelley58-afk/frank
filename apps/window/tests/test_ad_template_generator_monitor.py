@@ -106,8 +106,8 @@ class AdTemplateGeneratorMonitorTest(unittest.TestCase):
                     {"name": "meta-story.png", "placement": "story", "kind": "meta-preview"},
                 ],
                 "diffs": [{"name": "diff-feed.png", "placement": "feed", "view": "difference"}],
-                "scores": {"overall": 9.8, "feed": 9.9, "story": 9.8, "reviewers": [
-                    {"label": "Final A", "score": 9.8, "decision": "pass", "prompt": "never public"},
+                "scores": {"overall": 9.5, "feed": 9.9, "story": 9.5, "reviewers": [
+                    {"label": "Final A", "score": 9.5, "decision": "pass", "prompt": "never public"},
                 ]},
                 "warnings": [{"code": "FONT", "message": "Poppins replaced", "secret": "never"}],
                 "font_substitution": [{"source": "Paid Font", "replacement": "Poppins", "reason": "Closest available"}],
@@ -125,7 +125,7 @@ class AdTemplateGeneratorMonitorTest(unittest.TestCase):
         summary = projected["output"]["review_summary"]
         self.assertEqual(summary["source"]["url"], "/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/source.png")
         self.assertEqual(summary["previews"][0]["url"], "/api/ad-template-generator/runs/trun_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/artifacts/final-feed.png")
-        self.assertEqual(summary["scores"]["reviewers"][0], {"label": "Final A", "decision": "pass", "score": 9.8})
+        self.assertEqual(summary["scores"]["reviewers"][0], {"label": "Final A", "decision": "pass", "score": 9.5})
         self.assertEqual(summary["smoke_test"]["checks"], [{"label": "Editor opened", "passed": True}])
         self.assertEqual(summary["model_profile"]["roles"], [{"role": "builder", "label": "Builder", "provider": "openai-codex", "model": "gpt-5.6-sol"}])
         self.assertEqual(summary["layers"], [{"id": "headline", "name": "Headline", "type": "text", "placement": "feed", "editable": True}])
@@ -161,7 +161,7 @@ class AdTemplateGeneratorMonitorTest(unittest.TestCase):
                 "scores": {"comparator": {"overall": 0.98}},
                 "final_review": {"reviewers": [
                     {"decision": "accept", "scores": {"overall": 0.99}},
-                    {"decision": "accept", "scores": {"overall": 9.8}},
+                    {"decision": "accept", "scores": {"overall": 9.5}},
                 ]},
                 "elapsed_seconds": 90,
                 "smoke_test": {"status": "passed"},
@@ -172,8 +172,8 @@ class AdTemplateGeneratorMonitorTest(unittest.TestCase):
         self.assertEqual(summary["source"]["placement"], "feed")
         self.assertEqual(summary["references"][0]["name"], "reference-story.png")
         self.assertEqual([item["kind"] for item in summary["previews"]], ["qa-source-filled", "qa-source-filled", "final-neutral-shippable", "final-neutral-shippable"])
-        self.assertEqual(summary["scores"]["overall"], 9.8)
-        self.assertEqual([item["score"] for item in summary["scores"]["reviewers"]], [9.9, 9.8])
+        self.assertEqual(summary["scores"]["overall"], 9.5)
+        self.assertEqual([item["score"] for item in summary["scores"]["reviewers"]], [9.9, 9.5])
         self.assertTrue(summary["smoke_test"]["passed"])
         self.assertEqual(summary["layers"][0]["id"], "headline")
         self.assertEqual(summary["model_profile"]["revision"], 41)
@@ -256,7 +256,7 @@ class AdTemplateGeneratorMonitorTest(unittest.TestCase):
                 "diffs": ["iteration-01-story-overlay.png", "not-an-artifact.png"],
             }},
             {"sequence": 9, "kind": "iteration.compared", "data": {
-                "iteration": 1, "decision": "accept", "score": 9.8,
+                "iteration": 1, "decision": "accept", "score": 9.5,
             }},
         ])
 
@@ -267,7 +267,7 @@ class AdTemplateGeneratorMonitorTest(unittest.TestCase):
         self.assertNotIn("references", summary)
         self.assertEqual([item["name"] for item in summary["previews"]], ["iteration-01-feed.png", "iteration-01-story.png"])
         self.assertEqual([item["name"] for item in summary["diffs"]], ["iteration-01-story-overlay.png"])
-        self.assertEqual(summary["scores"]["overall"], 9.8)
+        self.assertEqual(summary["scores"]["overall"], 9.5)
         self.assertNotIn("private-generated-name", json.dumps(projected))
 
     def test_review_decisions_proxy_exact_hermes_routes_and_bodies(self):
@@ -322,7 +322,7 @@ class AdTemplateGeneratorMonitorTest(unittest.TestCase):
                     "internal_notes": "/srv/private/notes",
                     "reviewers": [
                         {"decision": "accept", "scores": {"overall": 0.99}, "route": "openai-codex/gpt-5.6-luna"},
-                        {"decision": "accept", "scores": {"overall": 9.8}},
+                        {"decision": "accept", "scores": {"overall": 9.5}},
                     ],
                 },
             },
@@ -332,7 +332,7 @@ class AdTemplateGeneratorMonitorTest(unittest.TestCase):
             "decision": "accepted",
             "reviewers": [
                 {"decision": "accept", "score": 0.99},
-                {"decision": "accept", "score": 9.8},
+                {"decision": "accept", "score": 9.5},
             ],
         })
         self.assertNotIn("internal_notes", json.dumps(final_review))
