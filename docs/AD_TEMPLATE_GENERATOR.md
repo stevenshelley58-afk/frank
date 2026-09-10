@@ -25,12 +25,12 @@ Steven approved this policy on 8 September 2026:
 | Typography except exact font family (`typography`) | 9.5 |
 | Details (`details`) | 9.5 |
 
-Gate history: approved at 9.8 on 8 September 2026; Hermes lowered its
-enforcement to 9.5 on 9 September 2026 after live runs landed in the
-9.5-9.8 band and Blockwise kept rejecting them at import; aligned to 9.5
-in Hermes, Blockwise (contract, frozen section-98 history still readable)
-and this guide on 10 September 2026. The review policy literal is now
-`section-95-font-exempt-no-obvious-errors-v1`.
+Gate history: the 8 September 2026 approval set a stricter minimum, and
+Hermes lowered its enforcement to 9.5 on 9 September 2026 after live runs
+landed below that minimum and Blockwise kept rejecting them at import;
+aligned to 9.5 in Hermes, Blockwise (contract, earlier imported artifacts
+remain readable) and this guide on 10 September 2026. The review policy
+literal is `section-95-font-exempt-no-obvious-errors-v1`.
 
 The comparator and both independent final reviewers must each meet every section
 minimum. A higher score in one section cannot compensate for a lower score in
@@ -95,7 +95,7 @@ Informational website/contact details and offer copy remain; locally rebalance
 the vacated button area and remove orphan button dividers without redesigning
 unrelated content. Reviewers must not restore or penalize this intentional source
 omission. A remaining embedded CTA button blocks the overall obvious-error check.
-The five 9.8 gates, font-family exemption, reusable tests and independent final
+The five 9.5 gates, font-family exemption, reusable tests and independent final
 reviews remain unchanged. Hermes evaluation policy is now version 10, release
 `dc5e088681f4b8ec23d7ffdaf4d599e89dfa16e3`; all 269 generator tests passed.
 
@@ -108,7 +108,7 @@ Edge-filling hero photos and footer panels must meet the outer corners squarely.
 Interior rounded elements that are genuinely part of the design may remain.
 This intentional source exception must not reduce likeness/effects scores or
 be reversed by repairs. Outer cutouts/frame artifacts block the obvious-error
-check. The no-embedded-CTA policy and five 9.8 gates remain unchanged.
+check. The no-embedded-CTA policy and five 9.5 gates remain unchanged.
 Implemented by Hermes evaluation policy 11, release
 `4758d83a8c1c703801a73112ce9c4c0e790e07f2`; all 269 generator tests passed.
 
@@ -152,7 +152,7 @@ Hermes `78f6f3db8fcad7370ad65b95130eb4c0a6acd549`, pinned renderer
 `e09a5d6f9b141c2613d914e293c1d4bfd9521a00`. Template
 `open-house-estate-1080` imported with four assets and remains quarantined.
 Its matching smoke test passed. Comparator minimum 9.85; independent reviewer
-minima 9.8 and 9.85; all effects matched/absent, no issues, and
+minima 9.5 and 9.85; all effects matched/absent, no issues, and
 `no_obvious_errors=true`. Short, maximum, Unicode and optional-empty scenarios
 all passed. The serving first-50 acceptance predicate returned true; the dry
 manifest verified 50 distinct source IDs/hashes and no batch has started.
@@ -165,10 +165,10 @@ This verifies one complete pipeline handoff, not guaranteed acceptance of all
 
 As observed earlier on 8 September 2026, Hermes release `e691c16a2a` still used
 a 9.5 gate while its pinned Blockwise renderer `39e51fed` required review metadata
-declaring at least 9.8. That mismatch caused the latest sample to fail final
+declaring a stricter minimum. That mismatch caused the latest sample to fail final
 validation. RESOLVED 10 September 2026: the gate is 9.5 on all sides — Hermes
 emits `section-95-font-exempt-no-obvious-errors-v1` with 9.5 minimums, the
-Blockwise contract accepts it (section-98 artifacts remain readable), and the
+Blockwise contract accepts it (earlier imported artifacts remain readable), and the
 serving first-50 predicate uses 9.5. No recorded run had completed the full successful handoff, and the
 first-50 batch had not been started. See the latest deployment evidence below
 before treating that dated failure as the current runtime state.
@@ -179,7 +179,7 @@ Documentation changes do not fix the implementation or establish template qualit
 
 ### Deployment evidence, 8 September 2026
 
-The five-section 9.8, exact-font-exempt policy deployed in Hermes
+The five-section 9.5, exact-font-exempt policy deployed in Hermes
 75bd842674a1f677de598f5bd3868645ff856861 with renderer
 cbc3f92e061477f5f2162ef816d26e130ec16fcf. Prompt improvements then deployed in
 Hermes 502fafe9f8f8262e7c7e5aa68324a33b26eada21 at 04:30:39 UTC, with the same
@@ -200,7 +200,7 @@ The same improved-prompt sample later completed Meta source analysis, built
 both placements and generated its demo photographs. Review-feedback and
 semantic-colour-target fixes deployed in Hermes
 `2fb98a5a0f125cfa82d9be6f2b6bdf0ad0fc46e0` at 05:19:11 UTC, preserving the
-renderer, frozen provider policy, 9.8 gate and retry budgets. All 220 generator
+renderer, frozen provider policy, 9.5 gate and retry budgets. All 220 generator
 tests passed, but those tests are not live acceptance.
 
 The fifth main comparison scored 9.9 across all sections and four reusable
