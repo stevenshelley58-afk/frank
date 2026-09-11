@@ -441,10 +441,30 @@ git.frank.fail {
         max_size 64MB
     }
 
-    reverse_proxy forgejo:3000 {
-        header_up Host {host}
-        header_up X-Real-IP {remote_host}
-        header_up X-Forwarded-Proto https
+    # `route` preserves this order. /hooks/github must reach the mirror-sync
+    # receiver rather than Forgejo, and must be matched before the catch-all.
+    route {
+        @github_hook path /hooks/github
+        handle @github_hook {
+            request_body {
+                # A push payload is a few KB. Fail closed well below the
+                # mirror budget; the receiver enforces its own cap too.
+                max_size 1MB
+            }
+            reverse_proxy forgejo-mirror-hook:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+            }
+        }
+
+        handle {
+            reverse_proxy forgejo:3000 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+            }
+        }
     }
 }
 
