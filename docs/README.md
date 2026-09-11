@@ -2,7 +2,8 @@
 
 ## Current guides
 
-Read the [shared engineering rules](standards/engineering-rules.md) and
+Read the canonical rulebook at
+[`/projects/blockwise/AGENTS.md`](/projects/blockwise/AGENTS.md) and the
 [Frank project rules](../AGENTS.md) first. This is the sole current Frank
 documentation index. Worktree snapshots and dated records do not override it.
 

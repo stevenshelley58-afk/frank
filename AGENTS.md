@@ -1,10 +1,14 @@
 # Frank project rules
 
-The shared engineering, verification, security, and delivery rules live in
-[docs/standards/engineering-rules.md](docs/standards/engineering-rules.md).
-This file is the project-specific entry point. If a historical handoff or
-component note conflicts with the current guides, follow the current guide and
-record any necessary correction in the appropriate document.
+The single canonical rulebook for this VPS is
+[`/projects/blockwise/AGENTS.md`](/projects/blockwise/AGENTS.md). It carries the
+shared engineering rules, the Frank and Hermes boundaries, the non-negotiable
+constitution, and the permission posture. Read it first.
+
+This file adds Frank-specific detail only. It does not repeat the canonical
+rules and it is not a second rulebook. If a historical handoff or component note
+conflicts with the current guides, follow the current guide and record the
+correction in the right document.
 
 ## Product boundary
 
