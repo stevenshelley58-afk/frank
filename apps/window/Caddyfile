@@ -373,7 +373,14 @@ blockwise.sale {
     # path routing on the isolated blockwise-product network.
     reverse_proxy product-caddy:80 {
         header_up Host {host}
-        header_up X-Real-IP {remote_host}
+        # {client_ip}, not {remote_host}: behind Cloudflare the latter is an edge
+        # address. {client_ip} resolves the real customer from CF-Connecting-IP
+        # using the trusted_proxies ranges set in the global block above.
+        header_up X-Real-IP {client_ip}
+        # Caddy's default puts THIS hop's address in X-Forwarded-For and drops
+        # the original, which leaves product-caddy unable to recover the
+        # customer address. Forward the resolved customer instead.
+        header_up X-Forwarded-For {client_ip}
         header_up X-Forwarded-Proto https
     }
 }
