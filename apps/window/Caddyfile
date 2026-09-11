@@ -410,6 +410,44 @@ ssh.frank.fail {
     respond 404
 }
 
+# git.frank.fail publishes the read-only Forgejo mirror of each project.
+#
+# Forgejo holds *pull mirrors* only: GitHub stays the source of truth and
+# nothing on that instance is ever pushed back upstream. The runtime lives
+# outside this repo as its own Compose project on the `frank` network
+# (/srv/forgejo on the VPS); this block is the only public way in.
+git.frank.fail {
+    encode zstd gzip
+    import frank_common_security_headers
+    # Forgejo's own UI is same-origin only; nothing legitimately frames it.
+    header X-Frame-Options "SAMEORIGIN"
+    # This instance may later mirror private repositories, so keep the whole
+    # hostname out of search indexes regardless of per-repo visibility.
+    header X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+
+    # Deliberately NO `format filter` here. The field-deletion bug documented
+    # on the frank.fail block above (caddyserver/caddy#5786 class in 2.8.x)
+    # mutates the live request instead of only the log line, and Forgejo needs
+    # both Cookie (web session) and Authorization (git-over-HTTPS) to arrive
+    # intact. Caddy already redacts credentials from logs while
+    # log_credentials is unset, so nothing sensitive is logged either way.
+    log {
+        output stdout
+    }
+
+    request_body {
+        # Mirrors are read-only: clones are GETs and git-upload-pack is a small
+        # POST. There is no push route to size for, so stay fail-closed.
+        max_size 64MB
+    }
+
+    reverse_proxy forgejo:3000 {
+        header_up Host {host}
+        header_up X-Real-IP {remote_host}
+        header_up X-Forwarded-Proto https
+    }
+}
+
 :80 {
     respond "Frank is running." 200
 }
