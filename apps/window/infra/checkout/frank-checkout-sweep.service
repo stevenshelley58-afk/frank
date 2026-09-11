@@ -1,0 +1,15 @@
+[Unit]
+Description=Retire merged, idle Frank session checkouts and merged branches
+[Service]
+Type=oneshot
+Environment=HOME=/root
+ExecStart=/bin/bash /projects/frank/apps/window/infra/checkout/frank-checkout-sweep.sh --quiet --apply
+StandardOutput=append:/srv/frank/checkout-hygiene.log
+StandardError=append:/srv/frank/checkout-hygiene.log
+TimeoutStartSec=30m
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+# The sweep writes only inside the canonical repository's administrative files
+# and the roots it retires checkouts from; everything else stays read-only.
+ReadWritePaths=/projects/frank /projects/frank-worktrees /root/work /root /opt/releases /srv/frank

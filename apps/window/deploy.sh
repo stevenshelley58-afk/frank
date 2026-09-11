@@ -349,6 +349,11 @@ if [[ -n "$revision" ]]; then
 else
   bash "$app/infra/control_plane/install.sh" --preserve-active-release
 fi
+# Checkout hygiene is host-level rather than a staged product feature, so it is
+# installed and enabled here instead of through the release-evidence timer set:
+# the commit guard, the session-worktree parent, and the sweep timers that keep
+# both true without anyone having to remember a command.
+bash "$host_app/infra/checkout/install-checkout-hygiene.sh"
 # Public Mini builds are deliberately networkless at runtime. Bake their
 # document, spreadsheet, PDF, image, and headless-browser tools ahead of time.
 docker build \
@@ -475,5 +480,16 @@ else
 fi
 if ! bash "$post_deploy_hook"; then
   echo "warning: post-deploy control-plane reconciliation failed; the healthy release remains current" >&2
+fi
+# Deploy-triggered checkout cleanup: a release is exactly when the checkouts it
+# superseded became obsolete. Like the reconciliation above, a hygiene failure
+# has its own log line and must not turn an already-promoted, healthy release
+# into an ambiguously failed deploy.
+checkout_hygiene_log="/srv/frank/checkout-hygiene.log"
+if ! bash "$host_app/infra/checkout/frank-checkout-sweep.sh" --quiet --apply >>"$checkout_hygiene_log" 2>&1; then
+  echo "warning: post-deploy checkout sweep failed; see $checkout_hygiene_log" >&2
+fi
+if ! bash "$host_app/infra/checkout/frank-release-prune.sh" --keep 3 --apply >>"$checkout_hygiene_log" 2>&1; then
+  echo "warning: post-deploy release worktree prune failed; see $checkout_hygiene_log" >&2
 fi
 echo "deployed $candidate_sha"

@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+# Record this checkout's session start as soon as the checkout exists.
+#
+# `git worktree add` runs this hook, so a session that claims its own worktree
+# gets a session start that predates every edit it makes. The commit guard then
+# refuses another session's older files from the very first commit, instead of
+# having to record the start at commit time and excuse that commit.
+#
+# This hook never fails a checkout: a missing marker is recoverable (the guard
+# records its own start), while a broken `git checkout` is not.
+set -Eeuo pipefail
+
+hook_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=session-start.sh
+source "$hook_dir/session-start.sh"
+
+marker="$(frank_session_marker)"
+[[ -n "$marker" && ! -e "$marker" ]] || exit 0
+
+started="$(frank_worktree_claim_epoch || frank_now)"
+mkdir -p -- "$(dirname -- "$marker")" 2>/dev/null || true
+printf '%s\n' "$started" >"$marker" 2>/dev/null || true
+exit 0

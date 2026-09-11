@@ -1,0 +1,18 @@
+[Unit]
+Description=Weekly Frank checkout backstop: bound release worktrees, report every kept checkout
+[Service]
+Type=oneshot
+Environment=HOME=/root
+# The periodic backstop does the work the hourly sweep deliberately leaves alone:
+# it bounds release and deploy worktrees to a retention count, then re-runs the
+# sweep in report mode so a checkout that only ever gets kept says so out loud
+# instead of quietly living forever.
+ExecStart=/bin/bash /projects/frank/apps/window/infra/checkout/frank-release-prune.sh --keep 3 --apply
+ExecStart=/bin/bash /projects/frank/apps/window/infra/checkout/frank-checkout-sweep.sh --hours 24 --report --apply
+StandardOutput=append:/srv/frank/checkout-hygiene.log
+StandardError=append:/srv/frank/checkout-hygiene.log
+TimeoutStartSec=1h
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ReadWritePaths=/projects/frank /projects/frank-worktrees /root/work /root /opt/releases /srv/frank

@@ -1,0 +1,8 @@
+[Unit]
+Description=Weekly Frank checkout backstop
+[Timer]
+OnCalendar=Sun 04:40:00 UTC
+Persistent=true
+Unit=frank-checkout-prune.service
+[Install]
+WantedBy=timers.target

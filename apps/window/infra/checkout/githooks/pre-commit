@@ -1,0 +1,88 @@
+#!/usr/bin/env bash
+# Frank commit guard: refuse to publish a file this session never touched.
+#
+# Sessions share the canonical checkout at /projects/frank. One session's
+# `git add -A` there sweeps up whatever another session left uncommitted, and the
+# commit message then describes something the commit does not contain. Because
+# main is what production releases, that mistake reaches the running product.
+#
+# Age is the reliable signal, not dirtiness: a file last modified before this
+# session started cannot be this session's work. The start is recorded once per
+# checkout, the first time the guard runs there (or at claim time, for a
+# worktree), so a session committing its own files is never blocked, and neither
+# is the session that originally created a file when it commits it later.
+#
+# Deliberate exception, for a file that was legitimately prepared before this
+# session began:
+#
+#   FRANK_ALLOW_PRIOR_FILES=1 git commit ...
+set -Eeuo pipefail
+
+# Named escape hatch. Checked before anything else so it also covers a checkout
+# whose marker cannot be written.
+if [[ "${FRANK_ALLOW_PRIOR_FILES:-0}" == "1" ]]; then
+  exit 0
+fi
+
+hook_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=session-start.sh
+source "$hook_dir/session-start.sh"
+
+marker="$(frank_session_marker)"
+[[ -n "$marker" ]] || exit 0 # not inside a repository: nothing to guard
+
+started=""
+if [[ -f "$marker" ]]; then
+  started="$(cat -- "$marker" 2>/dev/null || true)"
+fi
+
+if [[ ! "$started" =~ ^[0-9]+$ ]]; then
+  bootstrap=false
+  if ! started="$(frank_worktree_claim_epoch)"; then
+    # The shared canonical checkout has no claim to read, so the session start
+    # is now, recorded once for this checkout.
+    started="$(frank_now)"
+    bootstrap=true
+  fi
+  mkdir -p -- "$(dirname -- "$marker")" 2>/dev/null || true
+  if ! printf '%s\n' "$started" >"$marker" 2>/dev/null; then
+    printf '\npre-commit refused: cannot record this session'"'"'s start at\n    %s\n' "$marker" >&2
+    printf 'Without it the guard cannot tell this session'"'"'s files from another session'"'"'s,\n' >&2
+    printf 'so it refuses rather than passing silently. Make that path writable, or\n' >&2
+    printf 'commit anyway with FRANK_ALLOW_PRIOR_FILES=1.\n\n' >&2
+    exit 1
+  fi
+  if [[ "$bootstrap" == true ]]; then
+    printf 'frank commit guard: recorded session start %s in %s.\n' "$started" "$marker" >&2
+    printf 'This shared checkout had no start yet, so this first commit is not age-checked.\n' >&2
+    exit 0
+  fi
+fi
+
+# Only added, copied, modified and renamed entries have a file to date. A
+# deletion publishes no content of its own.
+mapfile -t staged < <(git diff --cached --name-only -z --diff-filter=ACMR 2>/dev/null | tr '\0' '\n')
+
+prior=()
+for path in ${staged+"${staged[@]}"}; do
+  [[ -n "$path" && -f "$path" ]] || continue
+  mtime="$(stat -c %Y -- "$path" 2>/dev/null || true)"
+  [[ "$mtime" =~ ^[0-9]+$ ]] || continue
+  if ((mtime > 0 && mtime < started)); then
+    prior+=("$path")
+  fi
+done
+
+((${#prior[@]} == 0)) && exit 0
+
+printf '\npre-commit refused: %s staged file(s) were last modified before this session started.\n' \
+  "${#prior[@]}" >&2
+printf 'They are most likely another session'"'"'s uncommitted work in a shared checkout.\n\n' >&2
+for path in "${prior[@]}"; do
+  printf '    %s\n' "$path" >&2
+done
+printf '\nStage only files you changed, or edit in your own worktree:\n' >&2
+printf '    git -C /projects/frank worktree add -b <task> /projects/frank-worktrees/<task> origin/main\n' >&2
+printf '\nIf publishing these files is deliberate, repeat the commit with\n' >&2
+printf '    FRANK_ALLOW_PRIOR_FILES=1 git commit ...\n\n' >&2
+exit 1

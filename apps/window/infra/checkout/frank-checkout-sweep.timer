@@ -1,0 +1,9 @@
+[Unit]
+Description=Hourly Frank checkout sweep
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Persistent=true
+Unit=frank-checkout-sweep.service
+[Install]
+WantedBy=timers.target
