@@ -109,6 +109,21 @@ frank.fail {
     }
 
     route {
+        # Claude MCP connector -> mcp-vps.service on the host, port 8787.
+        # The MCP server validates the Authorization bearer token itself, so
+        # this route must stay ahead of the operator Basic Auth fallback.
+        # Host is rewritten because the MCP SDK transport security only
+        # accepts 127.0.0.1:8787. Upstream is the docker gateway to the host.
+        @claude_mcp path /mcpx /mcpx/*
+        handle @claude_mcp {
+            uri strip_prefix /mcpx
+            reverse_proxy 172.30.0.128:8787 {
+                header_up Host 127.0.0.1:8787
+                header_up X-Forwarded-Proto https
+                header_up X-Real-IP {remote_host}
+            }
+        }
+
         # Signed template packs and their hash-declared assets are intentionally
         # public, source-free release artifacts. Keep this exact read-only
         # route ahead of the operator-authenticated fallback.
