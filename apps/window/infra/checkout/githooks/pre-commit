@@ -60,8 +60,22 @@ if [[ ! "$started" =~ ^[0-9]+$ ]]; then
 fi
 
 # Only added, copied, modified and renamed entries have a file to date. A
-# deletion publishes no content of its own.
-mapfile -t staged < <(git diff --cached --name-only -z --diff-filter=ACMR 2>/dev/null | tr '\0' '\n')
+# deletion publishes no content of its own. The list goes through a file rather
+# than a shell variable: path names may contain anything but NUL, and a shell
+# variable silently drops NUL. An unreadable index is refused rather than treated
+# as "nothing staged", so the guard never passes silently when it cannot see what
+# the commit would publish.
+staged_file="$(mktemp 2>/dev/null || true)"
+if [[ -z "$staged_file" ]] || ! git diff --cached --name-only -z --diff-filter=ACMR >"$staged_file" 2>/dev/null; then
+  [[ -n "$staged_file" ]] && rm -f -- "$staged_file"
+  printf '\npre-commit refused: this checkout has no readable staged file list.\n' >&2
+  printf 'The guard cannot check what the commit would publish, so it refuses instead\n' >&2
+  printf 'of passing silently. Repair the index, or commit anyway with\n' >&2
+  printf 'FRANK_ALLOW_PRIOR_FILES=1.\n\n' >&2
+  exit 1
+fi
+mapfile -d '' -t staged <"$staged_file"
+rm -f -- "$staged_file"
 
 prior=()
 for path in ${staged+"${staged[@]}"}; do

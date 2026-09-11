@@ -220,6 +220,17 @@ class CommitGuardTest(ScratchTest):
         result = self.guard(self.repo)
         self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_an_unreadable_index_refuses_instead_of_passing_silently(self):
+        self.guard(self.repo)  # records the session start
+        # An empty file is not a valid index; the guard cannot see what would be
+        # published, so it must say so rather than allow the commit.
+        broken = self.tmp / "broken-index"
+        broken.write_bytes(b"")
+        result = self.guard(self.repo, env={"GIT_INDEX_FILE": str(broken)})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("no readable staged file list", result.stderr)
+        self.assertIn(GUARD_ENV, result.stderr)
+
 
 class ClaimedWorktreeGuardTest(ScratchTest):
     """A claimed worktree records its start at claim time, before any edit."""

@@ -50,7 +50,13 @@ install -d -o root -g root -m 0755 -- "$(dirname -- "$LOG_FILE")"
 git -c safe.directory='*' -C "$CANONICAL" config core.hooksPath "$HOOKS_DIR"
 
 chmod 0755 -- "$HOOKS_DIR"
-chmod 0755 -- "$HOOKS_DIR"/*.sh "$HOOKS_DIR"/pre-commit "$HOOKS_DIR"/post-checkout
+# Git executes these two; it skips a hook that is not executable without a word.
+# session-start.sh is only sourced, so it keeps the mode it was committed with.
+chmod 0755 -- "$HOOKS_DIR"/pre-commit "$HOOKS_DIR"/post-checkout
+git -c safe.directory='*' -C "$CANONICAL" diff --quiet -- "$HOOKS_DIR" || {
+  printf 'hook permissions do not match the committed revision: %s\n' "$HOOKS_DIR" >&2
+  exit 1
+}
 
 # The sweep units belong to this contract, not to the staged control-plane timer
 # set: they are installed, verified and enabled here so that one entry point
