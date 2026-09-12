@@ -103,9 +103,12 @@ services:
       - >-
         key=$$(cat /fixture-input/encryption-key); secret=$$(cat /fixture-input/secret);
         bench --site "${OWNER_CRM_DRILL_SITE}" set-config encryption_key "$$key";
-        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.file_manager.save_file --args "[\"owner-crm-fixture-public.txt\",\"$$(cat /fixture-input/public.txt)\",\"System Settings\",\"System Settings\",null,false,0]";
-        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.file_manager.save_file --args "[\"owner-crm-fixture-private.txt\",\"$$(cat /fixture-input/private.txt)\",\"System Settings\",\"System Settings\",null,false,1]";
-        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.password.set_encrypted_password --args "[\"CRM Twilio Settings\",\"CRM Twilio Settings\",\"$$secret\",\"api_secret\"]"
+        public_args=$$(jq -cn --arg content "$$(cat /fixture-input/public.txt)" '{fname:"owner-crm-fixture-public.txt",content:$$content,dt:"System Settings",dn:"System Settings",is_private:0}');
+        private_args=$$(jq -cn --arg content "$$(cat /fixture-input/private.txt)" '{fname:"owner-crm-fixture-private.txt",content:$$content,dt:"System Settings",dn:"System Settings",is_private:1}');
+        secret_args=$$(jq -cn --arg pwd "$$secret" '{doctype:"CRM Twilio Settings",name:"CRM Twilio Settings",pwd:$$pwd,fieldname:"api_secret"}');
+        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.file_manager.save_file --kwargs "$$public_args";
+        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.file_manager.save_file --kwargs "$$private_args";
+        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.password.set_encrypted_password --kwargs "$$secret_args"
 
   fixture-backup:
     <<: *bench
@@ -143,7 +146,8 @@ services:
         test "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/private/files" -type f | wc -l)" = 1;
         test "$$(sha256sum "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/public/files" -type f -print -quit)" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/public.txt | awk '{print $$1}')";
         test "$$(sha256sum "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/private/files" -type f -print -quit)" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/private.txt | awk '{print $$1}')";
-        test "$$(bench --site "${OWNER_CRM_FIXTURE_SITE}" execute frappe.utils.password.get_decrypted_password --args '[\"CRM Twilio Settings\",\"CRM Twilio Settings\",\"api_secret\"]')" = "$$(cat /fixture-input/secret)"
+        password_args=$$(jq -cn '{doctype:"CRM Twilio Settings",name:"CRM Twilio Settings",fieldname:"api_secret"}');
+        test "$$(bench --site "${OWNER_CRM_FIXTURE_SITE}" execute frappe.utils.password.get_decrypted_password --kwargs "$$password_args")" = "$$(cat /fixture-input/secret)"
 
 
 networks:
