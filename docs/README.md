@@ -31,6 +31,9 @@ Start with the [root README](../README.md), then use
 - [CLEANUP-20260905.md](CLEANUP-20260905.md) records dated cleanup evidence
   and explicitly deferred work.
 
+- [Owner CRM integration](OWNER_CRM.md) records the owner-only CRM boundary,
+  private Ad Radar contact handoff and remaining activation gates.
+
 ## Historical material
 
 The files in `evidence/`, `handoffs/`, and
