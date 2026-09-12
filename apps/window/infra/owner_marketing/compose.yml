@@ -54,7 +54,7 @@ services:
     tmpfs: [/var/cache/nginx, /var/run]
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
-    cap_add: [NET_BIND_SERVICE]
+    cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE]
     labels:
       org.frank.source-sha: "${MAUTIC_SOURCE_SHA:?required}"
       org.frank.image-digest: "sha256:30f1c0d78e0ad60901648be663a710bdadf19e4c10ac6782c235200619158284"
