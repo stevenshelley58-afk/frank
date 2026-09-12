@@ -63,10 +63,12 @@ docker compose --project-name frank-owner-notifications --env-file "$env_file" -
 for _ in $(seq 1 36); do s="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-ntfy 2>/dev/null || true)"; [[ "$s" == healthy ]] && break; [[ "$s" != unhealthy ]] || die "ntfy became unhealthy"; sleep 5; done
 [[ "$(docker inspect --format '{{.State.Health.Status}}' frank-owner-ntfy)" == healthy ]] || die "ntfy did not become healthy"
 # Idempotently converge native ntfy users and ACLs. Credentials are passed only in process env.
-if ! docker exec frank-owner-ntfy ntfy user list 2>/dev/null | grep -q '^user owner '; then
+users="$(docker exec frank-owner-ntfy ntfy user list 2>/dev/null || true)"
+if [[ "$users" != *"user owner (role:"* ]]; then
   NTFY_PASSWORD="$owner_pw" docker exec -e NTFY_PASSWORD frank-owner-ntfy ntfy user add owner >/dev/null
 fi
-if ! docker exec frank-owner-ntfy ntfy user list 2>/dev/null | grep -q '^user publisher '; then
+users="$(docker exec frank-owner-ntfy ntfy user list 2>/dev/null || true)"
+if [[ "$users" != *"user publisher (role:"* ]]; then
   NTFY_PASSWORD="$publisher_pw" docker exec -e NTFY_PASSWORD frank-owner-ntfy ntfy user add publisher >/dev/null
 fi
 for rule in 'owner owner-notifications read-only' 'publisher owner-notifications write-only'; do set -- $rule; docker exec frank-owner-ntfy ntfy access "$1" "$2" "$3" >/dev/null; done
