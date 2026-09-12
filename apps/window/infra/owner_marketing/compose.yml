@@ -42,7 +42,7 @@ services:
       retries: 20
       start_period: 30s
 volumes:
-  owner_marketing_db: {name: frank_owner_marketing_db}
+  owner_marketing_db: {name: frank_owner_marketing_db_v1}
   owner_marketing_config: {name: frank_owner_marketing_config}
   owner_marketing_media: {name: frank_owner_marketing_media}
 networks:
