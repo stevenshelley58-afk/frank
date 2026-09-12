@@ -10,6 +10,7 @@ MAUTIC_DB_ROOT_PASSWORD=%s
 ' "$port" "$(openssl rand -hex 24)" "$(openssl rand -hex 24)" >"$tmp"; chmod 0600 "$tmp"; mv "$tmp" "$env_file"; fi
 [[ -f "$env_file" && ! -L "$env_file" ]] || die unsafe-env-file; chmod 0600 "$env_file"; [[ "$(stat -c '%U:%a' "$env_file")" == root:600 ]] || die unsafe-env-file
 running="$(docker ps --filter publish="$port" --format '{{.Names}}' || true)"; [[ -z "$running" || "$running" == frank-owner-marketing ]] || die port-in-use
+export MAUTIC_HOST_PORT="$port"
 docker compose --project-name frank-owner-marketing --env-file "$env_file" -f "$compose_file" up -d
 for _ in $(seq 1 60); do s="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing 2>/dev/null || true)"; [[ "$s" == healthy ]] && break; [[ "$s" != unhealthy ]] || die unhealthy; sleep 5; done
 "$script_dir/check.sh"
