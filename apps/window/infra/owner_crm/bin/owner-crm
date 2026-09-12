@@ -10,7 +10,7 @@ frappe_gid=1000
 mariadb_uid=999
 mariadb_gid=999
 
-usage() { echo "usage: owner-crm {config|up|create-site|health|backup-preflight}" >&2; exit 2; }
+usage() { echo "usage: owner-crm {config|up|create-site|archive-failed-site|health|backup-preflight}" >&2; exit 2; }
 fail() { echo "owner-crm: $*" >&2; exit 1; }
 clean_source() {
   test -z "$(git -C "$root_dir" status --porcelain)" || fail "source checkout is not clean"
@@ -68,6 +68,23 @@ case ${1:-} in
     chmod 0600 "$runtime_root/.owner-crm-site-created"
     "${compose[@]}" up -d
     "$script_dir/health.sh"
+    ;;
+  archive-failed-site)
+    site_path="$runtime_root/sites/owner.crm.internal"
+    test -d "$site_path" && test ! -L "$site_path" || fail "no regular failed site path to archive"
+    test ! -e "$runtime_root/.owner-crm-site-created" || fail "owner CRM site is marked created; refusing to archive it"
+    test -f "$site_path/site_config.json" && test ! -L "$site_path/site_config.json" || fail "failed site has no regular config"
+    db_name=$(jq -r '.db_name // empty' "$site_path/site_config.json")
+    [[ "$db_name" =~ ^_[a-z0-9]+$ ]] || fail "failed site config has an unexpected database name"
+    databases=$("${compose[@]}" exec -T -e MYSQL_PWD="$OWNER_CRM_DB_PASSWORD" db mariadb -uroot -N -e 'SHOW DATABASES') || fail "could not verify failed site database state"
+    printf '%s\n' "$databases" | grep -Fxq "$db_name" && fail "failed site database exists; refusing to archive"
+    archive_root="$runtime_root/failed-site-archives"
+    install -d -m 0700 -o root -g root "$archive_root"
+    archive_path="$archive_root/owner.crm.internal-$(date -u +%Y%m%dT%H%M%SZ)"
+    mv "$site_path" "$archive_path"
+    chown -R root:root "$archive_path"
+    chmod -R go-rwx "$archive_path"
+    echo "archived database-free failed owner site to $archive_path"
     ;;
   health) "$script_dir/health.sh" ;;
   backup-preflight) "$script_dir/backup-preflight.sh" ;;
