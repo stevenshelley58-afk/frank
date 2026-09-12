@@ -80,7 +80,8 @@ requested service message. AI-personalized mail remains draft until approved.
 
 ## Remaining activation gates
 
-- Dedicated CRM + Helpdesk runtime, native roles and fresh owner site verified.
+- Individual owner login, least-privilege roles, MFA and protected daily access;
+  the private CRM + Helpdesk runtime is already verified.
 - Private idempotent prospect/customer/billing handoffs implemented and tested.
 - Mailbox inbound, outbound, Sent and reply threading verified using @blockwise.sale.
 - Reviewed templates and approved flow definitions, with safe test recipients.
@@ -149,3 +150,22 @@ internal-only. The sending transport is deliberately non-delivering and cron
 is disabled. No email flow has been activated and no marketing contact has
 been imported. A native sales-stage mapping is recorded in the setup guide;
 standard conversion and won/lost meanings are preserved.
+
+## Native event and recovery checkpoint, 13 September Perth time
+
+Two native Frappe Webhooks now connect new CRM Tasks and Helpdesk tickets to
+private ntfy. One retained, clearly labelled CRM Task exercised the native short
+worker. Its replay verified the corrected ntfy JSON endpoint and a parsed generic
+notification title/message. Two native request logs have responses and no errors.
+This is at-least-once delivery, not an exactly-once guarantee; the support-ticket
+hook is configured but has not had a separate ticket canary. No public route,
+phone subscription or real device receipt is claimed.
+
+A native local backup and isolated restore drill succeeded. The restored app
+set and all eight customer/prospect field definitions matched. The drill's
+temporary containers, network and directories were cleaned up. Evidence is
+`/srv/frank/backups/owner-crm/local-20260912T160227Z-d03afcca795b/drill-receipt.json`.
+This proves a local fresh-site restore only: both attachment trees contained
+zero files, encrypted-credential/encryption-key recovery is unverified, and
+there is no off-host backup or hourly recovery-point claim yet. It is not
+permission to delete existing customer, research or mailbox history.

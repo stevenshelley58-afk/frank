@@ -52,5 +52,6 @@ upstream projects and is not Frank operational guidance.
 remaining activation gates. Component runbooks: [native CRM and Helpdesk](../apps/window/infra/owner_crm/README.md),
 [native field setup](../apps/window/infra/owner_crm_setup/README.md),
 [private Mautic](../apps/window/infra/owner_marketing/README.md), and
-[private ntfy](../apps/window/infra/owner_notifications/README.md).
+[private ntfy](../apps/window/infra/owner_notifications/README.md), and
+[native CRM alert hooks](../apps/window/infra/owner_crm_notifications/README.md).
 These are private foundations, not a completed customer-lifecycle acceptance.
