@@ -110,6 +110,11 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn("encrypted_credentials_roundtrip_verified:false", restore)
         self.assertIn("public_file_count", restore)
         self.assertIn("unsupported files-root layout", restore)
+        self.assertIn("staged_fixture", restore)
+        self.assertIn("fixture native backup did not capture encryption key", restore)
+        self.assertIn("fixture-seed", drill)
+        self.assertIn("set_encrypted_password", drill)
+        self.assertIn("get_decrypted_password", drill)
         self.assertNotIn("scheduler:", drill)
 
 

@@ -93,6 +93,59 @@ services:
     command: ['bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.get_all --kwargs "$${OWNER_CRM_CUSTOM_FIELDS_KWARGS}"']
 
 
+  fixture-seed:
+    <<: *bench
+    volumes:
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/sites:/home/frappe/frappe-bench/sites
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/fixture-input:/fixture-input:ro
+    entrypoint: ["bash", "-ec"]
+    command:
+      - >-
+        key=$$(cat /fixture-input/encryption-key); secret=$$(cat /fixture-input/secret);
+        bench --site "${OWNER_CRM_DRILL_SITE}" set-config encryption_key "$$key";
+        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.file_manager.save_file --args "[\"owner-crm-fixture-public.txt\",\"$$(cat /fixture-input/public.txt)\",\"System Settings\",\"System Settings\",null,false,0]";
+        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.file_manager.save_file --args "[\"owner-crm-fixture-private.txt\",\"$$(cat /fixture-input/private.txt)\",\"System Settings\",\"System Settings\",null,false,1]";
+        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.password.set_encrypted_password --args "[\"CRM Twilio Settings\",\"CRM Twilio Settings\",\"$$secret\",\"api_secret\"]"
+
+  fixture-backup:
+    <<: *bench
+    volumes:
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/sites:/home/frappe/frappe-bench/sites
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/fixture-backup:/fixture-backup
+    entrypoint: ["bash", "-ec"]
+    command: ['bench --site "${OWNER_CRM_DRILL_SITE}" backup --with-files --backup-path /fixture-backup']
+
+  fixture-restore:
+    <<: *bench
+    volumes:
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/sites:/home/frappe/frappe-bench/sites
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/fixture-backup:/fixture-backup:ro
+    entrypoint: ["bash", "-ec"]
+    command:
+      - >-
+        sql=$$(find /fixture-backup -maxdepth 1 -name '*.sql.gz' -type f -print -quit); public=$$(find /fixture-backup -maxdepth 1 -name '*-files.tar' ! -name '*-private-files.tar' -type f -print -quit); private=$$(find /fixture-backup -maxdepth 1 -name '*-private-files.tar' -type f -print -quit); config=$$(find /fixture-backup -maxdepth 1 -name '*site_config_backup.json' -type f -print -quit);
+        test -n "$$sql" && test -n "$$public" && test -n "$$private" && test -n "$$config";
+        test ! -e "sites/${OWNER_CRM_FIXTURE_SITE}";
+        bench new-site "${OWNER_CRM_FIXTURE_SITE}" --mariadb-user-host-login-scope=% --db-root-username=root --db-root-password="${OWNER_CRM_DB_PASSWORD}" --admin-password="${OWNER_CRM_ADMIN_PASSWORD}" --install-app crm --install-app telephony --install-app helpdesk;
+        bench --site "${OWNER_CRM_FIXTURE_SITE}" restore "$$sql" --db-root-username=root --db-root-password="${OWNER_CRM_DB_PASSWORD}" --admin-password="${OWNER_CRM_ADMIN_PASSWORD}" --install-app crm --install-app telephony --install-app helpdesk --with-public-files "$$public" --with-private-files "$$private" --force;
+        key=$$(jq -r '.encryption_key // empty' "$$config"); test -n "$$key"; bench --site "${OWNER_CRM_FIXTURE_SITE}" set-config encryption_key "$$key";
+        bench --site "${OWNER_CRM_FIXTURE_SITE}" set-config mute_emails 1; bench --site "${OWNER_CRM_FIXTURE_SITE}" set-config enable_scheduler 0
+
+  fixture-verify:
+    <<: *bench
+    volumes:
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/sites:/home/frappe/frappe-bench/sites
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/fixture-input:/fixture-input:ro
+    entrypoint: ["bash", "-ec"]
+    command:
+      - >-
+        test "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/public/files" -type f | wc -l)" = 1;
+        test "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/private/files" -type f | wc -l)" = 1;
+        test "$$(sha256sum "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/public/files" -type f -print -quit)" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/public.txt | awk '{print $$1}')";
+        test "$$(sha256sum "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/private/files" -type f -print -quit)" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/private.txt | awk '{print $$1}')";
+        test "$$(bench --site "${OWNER_CRM_FIXTURE_SITE}" execute frappe.utils.password.get_decrypted_password --args '[\"CRM Twilio Settings\",\"CRM Twilio Settings\",\"api_secret\"]')" = "$$(cat /fixture-input/secret)"
+
+
 networks:
   restore-drill-internal:
     internal: true

@@ -81,7 +81,12 @@ then retires only the marked temporary drill resources. The receipt reports
 actual restored public/private file counts: zero counts prove archive structure,
 not non-empty attachment recovery. It verifies only `db_type`, mail, and scheduler
 configuration, never restores database credentials; encrypted credentials and any
-encryption-key round trip are not verified. `backup-preflight` remains the
+encryption-key round trip are not verified for live configuration. The drill also
+creates harmless public/private attachments and an encrypted temporary setting only
+inside its restored temporary source site, then uses a second native `--with-files`
+backup and temporary recovery site to verify those staged fixtures and their original
+encryption key. That receipt is explicitly staged-fixture provenance, not a claim
+that the live backup contained those fixture records. `backup-preflight` remains the
 separate `age`/off-host readiness gate; off-host escrow is unresolved.
 
 ## Health evidence

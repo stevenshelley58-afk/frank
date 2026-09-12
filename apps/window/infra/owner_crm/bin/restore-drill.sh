@@ -103,6 +103,33 @@ for key in db_type mute_emails enable_scheduler; do
   restored_value=$(jq -c --arg key "$key" '.[$key]' "$restored_config")
   test "$source_value" = "$restored_value" || fail "restored safe config key differs: $key"
 done
+# Fixture provenance: these harmless files and encrypted value are created only in
+# this restored temporary source site, then captured in a second native backup.
+fixture_site="fixture-$restore_id.crm.internal"
+[[ "$fixture_site" =~ ^fixture-restore-[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}\.crm\.internal$ ]] || fail "unsafe fixture site"
+install -d -m 0700 -o "$frappe_uid" -g "$frappe_gid" "$drill_root/fixture-input" "$drill_root/fixture-backup"
+printf 'owner-crm staged public attachment fixture
+' > "$drill_root/fixture-input/public.txt"
+printf 'owner-crm staged private attachment fixture
+' > "$drill_root/fixture-input/private.txt"
+openssl rand -hex 32 > "$drill_root/fixture-input/encryption-key"
+openssl rand -hex 32 > "$drill_root/fixture-input/secret"
+chown "$frappe_uid:$frappe_gid" "$drill_root/fixture-input/"*
+chmod 0600 "$drill_root/fixture-input/"*
+export OWNER_CRM_FIXTURE_SITE="$fixture_site"
+"${compose[@]}" run --rm fixture-seed
+"${compose[@]}" run --rm fixture-backup
+fixture_config=$(find "$drill_root/fixture-backup" -maxdepth 1 -type f -name '*site_config_backup.json' -print -quit)
+test -n "$fixture_config" && test ! -L "$fixture_config" || fail "fixture native config backup is missing"
+test -n "$(jq -r '.encryption_key // empty' "$fixture_config")" || fail "fixture native backup did not capture encryption key"
+"${compose[@]}" run --rm fixture-restore
+"${compose[@]}" run --rm fixture-verify
+fixture_config_key_sha=$(jq -r '.encryption_key' "$fixture_config" | sha256sum | awk '{print $1}')
+fixture_restored_key_sha=$(jq -r '.encryption_key' "$drill_root/sites/$fixture_site/site_config.json" | sha256sum | awk '{print $1}')
+test "$fixture_config_key_sha" = "$fixture_restored_key_sha" || fail "fixture encryption key differs after restore"
+fixture_public_count=$(find "$drill_root/sites/$fixture_site/public/files" -type f | wc -l)
+fixture_private_count=$(find "$drill_root/sites/$fixture_site/private/files" -type f | wc -l)
+test "$fixture_public_count" = 1 && test "$fixture_private_count" = 1 || fail "fixture attachment counts differ after restore"
 file_manifest "$drill_root/expected-public" > "$drill_root/expected-public-content.json"
 file_manifest "$drill_root/expected-private" > "$drill_root/expected-private-content.json"
 file_manifest "$drill_root/sites/$site/public/files" > "$drill_root/restored-public-content.json"
@@ -122,8 +149,8 @@ test ! -e "$drill_root" || fail "temporary drill root remains; no success receip
 trap - EXIT
 tmp_receipt="$archive/.drill-receipt.$$"
 test ! -e "$tmp_receipt" || fail "temporary receipt path already exists"
-jq --arg restore_id "$restore_id" --arg site "$site" --arg apps_sha "$(printf '%s\n' "$apps" | sha256sum | awk '{print $1}')" --arg source_custom_sha "$source_custom_sha" --arg restored_custom_sha "$restored_custom_sha" --arg public_content_sha "$public_content_sha" --arg private_content_sha "$private_content_sha" --argjson public_file_count "$public_file_count" --argjson private_file_count "$private_file_count" \
-  '. + {restore_drill:{restore_id:$restore_id,site:$site,network:"internal-only temporary compose project",mail_disabled:true,scheduler_disabled:true,apps_sha256:$apps_sha,custom_fields_source_sha256:$source_custom_sha,custom_fields_restored_sha256:$restored_custom_sha,custom_fields_match:($source_custom_sha == $restored_custom_sha),files:{public_content_sha256:$public_content_sha,private_content_sha256:$private_content_sha,public_file_count:$public_file_count,private_file_count:$private_file_count,content_match:true,nonempty_attachment_recovery_verified:(($public_file_count + $private_file_count) > 0)},config:{safe_keys_verified:["db_type","mute_emails","enable_scheduler"],database_credentials_restored:false,encryption_key_roundtrip_verified:false,encrypted_credentials_roundtrip_verified:false},cleanup:"verified and completed"}}' "$archive/receipt.json" > "$tmp_receipt"
+jq --arg restore_id "$restore_id" --arg site "$site" --arg apps_sha "$(printf '%s\n' "$apps" | sha256sum | awk '{print $1}')" --arg source_custom_sha "$source_custom_sha" --arg restored_custom_sha "$restored_custom_sha" --arg public_content_sha "$public_content_sha" --arg private_content_sha "$private_content_sha" --argjson public_file_count "$public_file_count" --argjson private_file_count "$private_file_count" --arg fixture_config_key_sha "$fixture_config_key_sha" --arg fixture_restored_key_sha "$fixture_restored_key_sha" --argjson fixture_public_count "$fixture_public_count" --argjson fixture_private_count "$fixture_private_count" \
+  '. + {restore_drill:{restore_id:$restore_id,site:$site,network:"internal-only temporary compose project",mail_disabled:true,scheduler_disabled:true,apps_sha256:$apps_sha,custom_fields_source_sha256:$source_custom_sha,custom_fields_restored_sha256:$restored_custom_sha,custom_fields_match:($source_custom_sha == $restored_custom_sha),files:{public_content_sha256:$public_content_sha,private_content_sha256:$private_content_sha,public_file_count:$public_file_count,private_file_count:$private_file_count,content_match:true,nonempty_attachment_recovery_verified:(($public_file_count + $private_file_count) > 0)},config:{safe_keys_verified:["db_type","mute_emails","enable_scheduler"],database_credentials_restored:false,encryption_key_roundtrip_verified:false,encrypted_credentials_roundtrip_verified:false},staged_fixture:{provenance:"created only after base backup restore in temporary source site; not claimed as live backup content",native_backup_with_files:true,encryption_key_source_sha256:$fixture_config_key_sha,encryption_key_restored_sha256:$fixture_restored_key_sha,encryption_key_match:($fixture_config_key_sha == $fixture_restored_key_sha),encrypted_secret_roundtrip_verified:true,public_attachment_count:$fixture_public_count,private_attachment_count:$fixture_private_count,nonempty_attachment_roundtrip_verified:(($fixture_public_count + $fixture_private_count) > 0)},cleanup:"verified and completed"}}' "$archive/receipt.json" > "$tmp_receipt"
 chown root:root "$tmp_receipt"
 chmod 0600 "$tmp_receipt"
 mv "$tmp_receipt" "$archive/drill-receipt.json"
