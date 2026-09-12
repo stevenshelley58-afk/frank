@@ -107,6 +107,9 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn("enable_scheduler 0", drill)
         self.assertIn("verify-safe-config", drill)
         self.assertIn("database_credentials_restored:false", restore)
+        self.assertIn("encrypted_credentials_roundtrip_verified:false", restore)
+        self.assertIn("public_file_count", restore)
+        self.assertIn("unsupported files-root layout", restore)
         self.assertNotIn("scheduler:", drill)
 
 

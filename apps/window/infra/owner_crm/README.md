@@ -77,8 +77,12 @@ local copy only: there is no schedule, off-host destination, or RPO claim.
 into a unique, temporary, internal-only compose project/site/database. Mail and
 the scheduler stay disabled; the live owner site and every customer service are
 not targets. A passing drill leaves its root-only receipt beside the archive,
-then retires only the marked temporary drill resources. `backup-preflight`
-remains the separate `age`/off-host readiness gate; off-host escrow is unresolved.
+then retires only the marked temporary drill resources. The receipt reports
+actual restored public/private file counts: zero counts prove archive structure,
+not non-empty attachment recovery. It verifies only `db_type`, mail, and scheduler
+configuration, never restores database credentials; encrypted credentials and any
+encryption-key round trip are not verified. `backup-preflight` remains the
+separate `age`/off-host readiness gate; off-host escrow is unresolved.
 
 ## Health evidence
 

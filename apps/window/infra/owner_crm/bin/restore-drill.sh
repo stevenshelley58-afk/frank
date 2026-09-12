@@ -66,6 +66,9 @@ install -d -m 0700 -o "$redis_uid" -g "$redis_gid" "$drill_root/redis-queue"
 install -d -m 0700 -o root -g root "$drill_root/expected-public" "$drill_root/expected-private"
 cp -a "$archive/$sql" "$archive/$public" "$archive/$private" "$archive/$config" "$drill_root/input/"
 chown "$frappe_uid:$frappe_gid" "$drill_root/input/"*
+for artifact in "$public" "$private"; do
+  tar -tf "$archive/$artifact" | grep -Eq '^(\./.*)?$' || fail "native archive has an unsupported files-root layout"
+done
 tar --no-same-owner --no-same-permissions -xf "$archive/$public" -C "$drill_root/expected-public"
 tar --no-same-owner --no-same-permissions -xf "$archive/$private" -C "$drill_root/expected-private"
 compose=(docker compose --project-name "$project" --project-directory "$root_dir" --env-file "$secret_file" -f "$root_dir/restore-drill.compose.yaml")
@@ -105,6 +108,8 @@ source_custom_sha=$(sha256sum "$archive/custom-fields.json" | awk '{print $1}')
 restored_custom_sha=$(sha256sum "$drill_root/restored-custom-fields.json" | awk '{print $1}')
 public_content_sha=$(sha256sum "$drill_root/restored-public-content.json" | awk '{print $1}')
 private_content_sha=$(sha256sum "$drill_root/restored-private-content.json" | awk '{print $1}')
+public_file_count=$(jq 'length' "$drill_root/restored-public-content.json")
+private_file_count=$(jq 'length' "$drill_root/restored-private-content.json")
 "${compose[@]}" down --volumes --remove-orphans || fail "temporary compose cleanup failed; no success receipt was published"
 test -f "$drill_root/.owner-crm-restore-drill" && test ! -L "$drill_root/.owner-crm-restore-drill" && grep -Fxq "$restore_id" "$drill_root/.owner-crm-restore-drill" || fail "temporary drill marker changed"
 case "$(readlink -f "$drill_root")" in "$drill_root_base"/*) rm -rf -- "$drill_root" ;; *) fail "refusing to retire an unexpected drill path" ;; esac
@@ -112,8 +117,8 @@ test ! -e "$drill_root" || fail "temporary drill root remains; no success receip
 trap - EXIT
 tmp_receipt="$archive/.drill-receipt.$$"
 test ! -e "$tmp_receipt" || fail "temporary receipt path already exists"
-jq --arg restore_id "$restore_id" --arg site "$site" --arg apps_sha "$(printf '%s\n' "$apps" | sha256sum | awk '{print $1}')" --arg source_custom_sha "$source_custom_sha" --arg restored_custom_sha "$restored_custom_sha" --arg public_content_sha "$public_content_sha" --arg private_content_sha "$private_content_sha" \
-  '. + {restore_drill:{restore_id:$restore_id,site:$site,network:"internal-only temporary compose project",mail_disabled:true,scheduler_disabled:true,apps_sha256:$apps_sha,custom_fields_source_sha256:$source_custom_sha,custom_fields_restored_sha256:$restored_custom_sha,custom_fields_match:($source_custom_sha == $restored_custom_sha),files:{public_content_sha256:$public_content_sha,private_content_sha256:$private_content_sha,content_match:true},config:{safe_keys_verified:["db_type","mute_emails","enable_scheduler"],database_credentials_restored:false},cleanup:"verified and completed"}}' "$archive/receipt.json" > "$tmp_receipt"
+jq --arg restore_id "$restore_id" --arg site "$site" --arg apps_sha "$(printf '%s\n' "$apps" | sha256sum | awk '{print $1}')" --arg source_custom_sha "$source_custom_sha" --arg restored_custom_sha "$restored_custom_sha" --arg public_content_sha "$public_content_sha" --arg private_content_sha "$private_content_sha" --argjson public_file_count "$public_file_count" --argjson private_file_count "$private_file_count" \
+  '. + {restore_drill:{restore_id:$restore_id,site:$site,network:"internal-only temporary compose project",mail_disabled:true,scheduler_disabled:true,apps_sha256:$apps_sha,custom_fields_source_sha256:$source_custom_sha,custom_fields_restored_sha256:$restored_custom_sha,custom_fields_match:($source_custom_sha == $restored_custom_sha),files:{public_content_sha256:$public_content_sha,private_content_sha256:$private_content_sha,public_file_count:$public_file_count,private_file_count:$private_file_count,content_match:true,nonempty_attachment_recovery_verified:(($public_file_count + $private_file_count) > 0)},config:{safe_keys_verified:["db_type","mute_emails","enable_scheduler"],database_credentials_restored:false,encryption_key_roundtrip_verified:false,encrypted_credentials_roundtrip_verified:false},cleanup:"verified and completed"}}' "$archive/receipt.json" > "$tmp_receipt"
 chown root:root "$tmp_receipt"
 chmod 0600 "$tmp_receipt"
 mv "$tmp_receipt" "$archive/drill-receipt.json"
