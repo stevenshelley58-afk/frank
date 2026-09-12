@@ -21,6 +21,9 @@ services:
       timeout: 5s
       retries: 12
       start_period: 5s
+    labels:
+      org.frank.source-sha: "${NTFY_SOURCE_SHA:?NTFY_SOURCE_SHA is required}"
+      org.frank.image-digest: "sha256:416507e2100728cac39bb911fd26759a1de872ca8d1e428d08db73054b33dc85"
     networks: [owner_notifications_private]
 volumes:
   owner_notifications_cache:
