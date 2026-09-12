@@ -105,11 +105,11 @@ services:
         test -z "$$(find "sites/${OWNER_CRM_DRILL_SITE}/public/files" -type f -name 'owner-crm-fixture-public*' -print -quit)";
         test -z "$$(find "sites/${OWNER_CRM_DRILL_SITE}/private/files" -type f -name 'owner-crm-fixture-private*' -print -quit)";
         bench --site "${OWNER_CRM_DRILL_SITE}" set-config encryption_key "$$key";
-        public_args=$$(jq -cn --arg content "$$(cat /fixture-input/public.txt)" '{fname:"owner-crm-fixture-public.txt",content:$$content,dt:"System Settings",dn:"System Settings",is_private:0}');
-        private_args=$$(jq -cn --arg content "$$(cat /fixture-input/private.txt)" '{fname:"owner-crm-fixture-private.txt",content:$$content,dt:"System Settings",dn:"System Settings",is_private:1}');
+        public_args=$$(jq -cn --arg content "$$(cat /fixture-input/public.txt)" '{doc:{doctype:"File",file_name:"owner-crm-fixture-public.txt",content:$$content,attached_to_doctype:"System Settings",attached_to_name:"System Settings",is_private:0}}');
+        private_args=$$(jq -cn --arg content "$$(cat /fixture-input/private.txt)" '{doc:{doctype:"File",file_name:"owner-crm-fixture-private.txt",content:$$content,attached_to_doctype:"System Settings",attached_to_name:"System Settings",is_private:1}}');
         secret_args=$$(jq -cn --arg pwd "$$secret" '{doctype:"CRM Twilio Settings",name:"CRM Twilio Settings",pwd:$$pwd,fieldname:"api_secret"}');
-        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.file_manager.save_file --kwargs "$$public_args";
-        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.file_manager.save_file --kwargs "$$private_args";
+        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.client.insert --kwargs "$$public_args";
+        bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.client.insert --kwargs "$$private_args";
         bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.password.set_encrypted_password --kwargs "$$secret_args"
 
   fixture-backup:
