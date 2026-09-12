@@ -1,0 +1,159 @@
+import importlib.util
+import json
+from pathlib import Path
+import tempfile
+import sys
+import unittest
+from unittest import mock
+import urllib.parse
+
+ROOT = Path(__file__).parent
+SPEC = importlib.util.spec_from_file_location("owner_crm_setup_adapter", ROOT / "setup_adapter.py")
+adapter = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+sys.modules[SPEC.name] = adapter
+SPEC.loader.exec_module(adapter)
+
+
+class Response:
+    def __init__(self, payload, status=200):
+        self.status = status
+        self._payload = json.dumps(payload).encode()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_):
+        return False
+
+    def read(self, _limit=-1):
+        return self._payload
+
+    def getcode(self):
+        return self.status
+
+
+class FakeFrappe:
+    def __init__(self, fields=None, redirect=False):
+        self.fields = dict(fields or {})
+        self.requests = []
+        self.posts = []
+        self.redirect = redirect
+
+    def __call__(self, request, timeout=0):
+        path = urllib.parse.urlsplit(request.full_url).path
+        self.requests.append((request.method, path, request.full_url, dict(request.headers)))
+        if self.redirect:
+            return Response({}, status=302)
+        if path == "/api/method/login":
+            return Response({"message": "Logged In"})
+        if path == "/api/method/logout":
+            return Response({"message": "Logged Out"})
+        if path.startswith("/api/resource/DocType/"):
+            name = urllib.parse.unquote(path.rsplit("/", 1)[-1])
+            return Response({"data": {"name": name}})
+        if path == "/api/resource/Custom%20Field" and request.method == "GET":
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(request.full_url).query)
+            filters = json.loads(query["filters"][0])
+            fieldname = next(item[2] for item in filters if item[0] == "fieldname")
+            field = self.fields.get(fieldname)
+            return Response({"data": [field] if field else []})
+        if path == "/api/resource/Custom%20Field" and request.method == "POST":
+            payload = json.loads(request.data.decode())
+            self.fields[payload["fieldname"]] = payload
+            self.posts.append(payload)
+            return Response({"data": payload})
+        raise AssertionError(f"unexpected request: {request.method} {path}")
+
+
+class OwnerCrmSetupTests(unittest.TestCase):
+    def fields(self):
+        return adapter.load_manifest(ROOT / "manifest.json")
+
+    def client(self, fake):
+        return adapter.FrappeRestClient(opener=fake)
+
+    def test_manifest_targets_native_crm_lead_and_contact_without_sendability(self):
+        fields = self.fields()
+        self.assertEqual(len(fields), 8)
+        self.assertEqual({field["dt"] for field in fields}, {"CRM Lead", "Contact"})
+        names = {field["name"] for field in fields}
+        self.assertIn("CRM Lead-custom_blockwise_eligibility", names)
+        eligibility = next(field for field in fields if field["name"].endswith("eligibility"))
+        self.assertEqual(eligibility["default"], "review_required")
+        self.assertEqual(eligibility["read_only"], 0)
+        self.assertIn("Contact-custom_blockwise_last_synced_at", names)
+        encoded = json.dumps(fields).lower()
+        self.assertNotIn("consent", encoded)
+        self.assertNotIn("sendability", encoded)
+
+    def test_dry_run_is_default_and_never_posts_or_touches_records(self):
+        fake = FakeFrappe()
+        plan = adapter.run_setup(client=self.client(fake), apply=False)
+        self.assertTrue(all(item.action == "create" for item in plan))
+        self.assertEqual(fake.posts, [])
+        paths = [request[1] for request in fake.requests]
+        self.assertEqual(set(paths), {"/api/resource/DocType/CRM%20Lead", "/api/resource/DocType/Contact", "/api/resource/Custom%20Field"})
+
+    def test_apply_is_idempotent(self):
+        fake = FakeFrappe()
+        first = adapter.run_setup(client=self.client(fake), apply=True)
+        self.assertEqual(len(fake.posts), 8)
+        self.assertTrue(all(item.action == "create" for item in first))
+        fake.requests.clear()
+        second = adapter.run_setup(client=self.client(fake), apply=True)
+        self.assertEqual(len(fake.posts), 8)
+        self.assertTrue(all(item.action == "unchanged" for item in second))
+
+    def test_incompatible_existing_field_fails_before_any_write(self):
+        fields = self.fields()
+        conflicting = dict(fields[0])
+        conflicting["label"] = "Wrong definition"
+        fake = FakeFrappe({fields[0]["fieldname"]: conflicting})
+        with self.assertRaisesRegex(adapter.SetupError, "incompatible existing"):
+            adapter.run_setup(client=self.client(fake), apply=True)
+        self.assertEqual(fake.posts, [])
+
+    def test_redirects_fail_closed(self):
+        fake = FakeFrappe(redirect=True)
+        with self.assertRaisesRegex(adapter.SetupError, "redirect rejected"):
+            adapter.run_setup(client=self.client(fake), apply=False)
+
+    def test_target_cannot_be_redirected_or_overridden(self):
+        with self.assertRaises(adapter.SetupError):
+            adapter.FrappeRestClient(endpoint="http://127.0.0.1:18082", opener=lambda *_a, **_k: None)
+        with self.assertRaises(adapter.SetupError):
+            adapter.FrappeRestClient(site="other.internal", opener=lambda *_a, **_k: None)
+
+    def test_credentials_are_external_and_only_password_is_returned(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "owner-crm.env"
+            path.write_text("OWNER_CRM_ADMIN_PASSWORD=short-lived-secret\nOWNER_CRM_DB_PASSWORD=do-not-use\n")
+            self.assertEqual(
+                adapter.load_credentials(path, enforce_permissions=False),
+                ("Administrator", "short-lived-secret"),
+            )
+
+    def test_owned_bootstrap_logs_out_and_clears_session(self):
+        fake = FakeFrappe()
+        client = self.client(fake)
+        with mock.patch.object(adapter, "load_credentials", return_value=("Administrator", "secret")):
+            with mock.patch.object(adapter, "FrappeRestClient", return_value=client):
+                adapter.run_setup(manifest_path=ROOT / "manifest.json", apply=False)
+        methods = [method for method, path, *_ in fake.requests]
+        self.assertEqual(methods[0], "POST")
+        self.assertEqual(methods[-1], "POST")
+        self.assertEqual(fake.requests[0][1], "/api/method/login")
+        self.assertEqual(fake.requests[-1][1], "/api/method/logout")
+        self.assertEqual(list(client.cookies), [])
+
+    def test_credentials_reject_missing_password(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "owner-crm.env"
+            path.write_text("OWNER_CRM_DB_PASSWORD=not-admin\n")
+            with self.assertRaisesRegex(adapter.SetupError, "password is missing"):
+                adapter.load_credentials(path, enforce_permissions=False)
+
+
+if __name__ == "__main__":
+    unittest.main()

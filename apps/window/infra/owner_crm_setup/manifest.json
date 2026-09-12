@@ -1,0 +1,90 @@
+{
+  "$schema": "schema://frank.owner-crm-setup-manifest/v1",
+  "version": 1,
+  "fields": [
+    {
+      "name": "CRM Lead-custom_blockwise_prospect_source_uuid",
+      "doctype": "Custom Field",
+      "dt": "CRM Lead",
+      "fieldname": "custom_blockwise_prospect_source_uuid",
+      "label": "Blockwise prospect source UUID",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "Read-only UUID linking this CRM Lead to its Blockwise prospect source."
+    },
+    {
+      "name": "CRM Lead-custom_blockwise_evidence_refs",
+      "doctype": "Custom Field",
+      "dt": "CRM Lead",
+      "fieldname": "custom_blockwise_evidence_refs",
+      "label": "Blockwise evidence references",
+      "fieldtype": "Long Text",
+      "read_only": 1,
+      "description": "Read-only references to approved evidence records. Do not store contact notes or credentials."
+    },
+    {
+      "name": "CRM Lead-custom_blockwise_eligibility",
+      "doctype": "Custom Field",
+      "dt": "CRM Lead",
+      "fieldname": "custom_blockwise_eligibility",
+      "label": "Blockwise eligibility",
+      "fieldtype": "Select",
+      "options": "review_required\neligible\nineligible",
+      "default": "review_required",
+      "description": "Explicit owner review state. A Lead is never auto-marked eligible.",
+      "read_only": 0
+    },
+    {
+      "name": "Contact-custom_blockwise_profile_uuid",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_profile_uuid",
+      "label": "Blockwise profile UUID",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "Read-only Blockwise profile UUID mirror."
+    },
+    {
+      "name": "Contact-custom_blockwise_workspace_uuid",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_workspace_uuid",
+      "label": "Blockwise workspace UUID",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "Read-only Blockwise workspace UUID mirror."
+    },
+    {
+      "name": "Contact-custom_blockwise_subscription_status",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_subscription_status",
+      "label": "Blockwise subscription status",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "Read-only subscription status mirror. Stripe remains authoritative for billing."
+    },
+    {
+      "name": "Contact-custom_blockwise_access_status",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_access_status",
+      "label": "Blockwise access status",
+      "fieldtype": "Data",
+      "read_only": 1,
+      "description": "Read-only access status mirror. Blockwise remains authoritative for access."
+    },
+    {
+      "name": "Contact-custom_blockwise_last_synced_at",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_last_synced_at",
+      "label": "Blockwise last synced at",
+      "fieldtype": "Datetime",
+      "read_only": 1,
+      "description": "Read-only timestamp for the last accepted Blockwise mirror update."
+    }
+  ],
+  "site": "owner.crm.internal",
+  "endpoint": "http://127.0.0.1:18081"
+}
