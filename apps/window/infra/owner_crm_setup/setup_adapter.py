@@ -47,7 +47,6 @@ _FIELD_KEYS = {
 }
 _COMPARE_KEYS = (
     "name",
-    "doctype",
     "dt",
     "fieldname",
     "label",
@@ -218,9 +217,12 @@ class FrappeRestClient:
         self.site = site
         self.timeout = timeout
         self.cookies = http.cookiejar.CookieJar()
-        self._opener = opener or urllib.request.build_opener(
-            _NoRedirect(), urllib.request.HTTPCookieProcessor(self.cookies)
-        )
+        if opener is None:
+            self._opener = urllib.request.build_opener(
+                _NoRedirect(), urllib.request.HTTPCookieProcessor(self.cookies)
+            ).open
+        else:
+            self._opener = opener if callable(opener) else opener.open
 
     def close(self) -> None:
         self.cookies.clear()

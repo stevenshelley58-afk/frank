@@ -1,3 +1,4 @@
+import http.server
 import importlib.util
 import json
 from pathlib import Path
@@ -6,6 +7,7 @@ import sys
 import unittest
 from unittest import mock
 import urllib.parse
+import threading
 
 ROOT = Path(__file__).parent
 SPEC = importlib.util.spec_from_file_location("owner_crm_setup_adapter", ROOT / "setup_adapter.py")
@@ -133,6 +135,93 @@ class OwnerCrmSetupTests(unittest.TestCase):
                 adapter.load_credentials(path, enforce_permissions=False),
                 ("Administrator", "short-lived-secret"),
             )
+
+    def test_real_loopback_transport_uses_cookie_csrf_and_logout(self):
+        state = {"methods": [], "created": 0, "logout_cookie": "", "csrf_headers": []}
+        fields = self.fields()
+
+        class Handler(http.server.BaseHTTPRequestHandler):
+            def log_message(self, *_args):
+                return
+
+            def send_payload(self, payload, status=200, headers=None):
+                raw = json.dumps(payload).encode()
+                self.send_response(status)
+                for key, value in (headers or {}).items():
+                    values = value if isinstance(value, (list, tuple)) else (value,)
+                    for item in values:
+                        self.send_header(key, item)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(raw)))
+                self.end_headers()
+                self.wfile.write(raw)
+
+            def do_POST(self):
+                state["methods"].append(self.command + " " + self.path)
+                length = int(self.headers.get("Content-Length", "0"))
+                body = self.rfile.read(length)
+                if self.path == "/api/method/login":
+                    self.send_payload(
+                        {"message": "Logged In"},
+                        headers={"Set-Cookie": ["sid=temporary-session; Path=/", "csrf_token=temporary-csrf; Path=/"]},
+                    )
+                    return
+                if self.path == "/api/method/logout":
+                    state["logout_cookie"] = self.headers.get("Cookie", "")
+                    self.send_payload({"message": "Logged Out"})
+                    return
+                if self.path == "/api/resource/Custom%20Field":
+                    self.assert_request_csrf()
+                    payload = json.loads(body.decode())
+                    state["created"] += 1
+                    self.send_payload({"data": payload})
+                    return
+                self.send_payload({"error": "not found"}, 404)
+
+            def do_GET(self):
+                state["methods"].append(self.command + " " + self.path)
+                if self.path == "/redirect":
+                    self.send_response(302)
+                    self.send_header("Location", "http://example.invalid/")
+                    self.end_headers()
+                    return
+                if self.path.startswith("/api/resource/DocType/"):
+                    name = urllib.parse.unquote(self.path.rsplit("/", 1)[-1])
+                    self.send_payload({"data": {"name": name}})
+                    return
+                if self.path.startswith("/api/resource/Custom%20Field?"):
+                    self.send_payload({"data": []})
+                    return
+                self.send_payload({"error": "not found"}, 404)
+
+            def assert_request_csrf(self):
+                state["csrf_headers"].append(self.headers.get("X-Frappe-CSRF-Token", ""))
+                if self.headers.get("X-Frappe-CSRF-Token") != "temporary-csrf":
+                    self.send_payload({"error": "csrf"}, 403)
+                    raise AssertionError("missing CSRF header")
+
+        server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Handler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        endpoint = "http://127.0.0.1:" + str(server.server_port)
+        try:
+            with mock.patch.object(adapter, "DEFAULT_ENDPOINT", endpoint):
+                client = adapter.FrappeRestClient(endpoint=endpoint)
+                client.login("Administrator", "temporary-password")
+                plan = adapter.plan_setup(client, fields)
+                for item in plan:
+                    client.create_custom_field(item.field)
+                client.logout()
+                client.close()
+                self.assertEqual(state["created"], 8)
+                self.assertEqual(state["csrf_headers"], ["temporary-csrf"] * 8)
+                self.assertIn("sid=temporary-session", state["logout_cookie"])
+                with self.assertRaisesRegex(adapter.SetupError, "redirect rejected"):
+                    client._request("GET", "/redirect")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(timeout=2)
 
     def test_owned_bootstrap_logs_out_and_clears_session(self):
         fake = FakeFrappe()
