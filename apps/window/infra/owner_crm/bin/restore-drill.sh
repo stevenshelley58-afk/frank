@@ -103,6 +103,18 @@ for key in db_type mute_emails enable_scheduler; do
   restored_value=$(jq -c --arg key "$key" '.[$key]' "$restored_config")
   test "$source_value" = "$restored_value" || fail "restored safe config key differs: $key"
 done
+file_manifest "$drill_root/expected-public" > "$drill_root/expected-public-content.json"
+file_manifest "$drill_root/expected-private" > "$drill_root/expected-private-content.json"
+file_manifest "$drill_root/sites/$site/public/files" > "$drill_root/restored-public-content.json"
+file_manifest "$drill_root/sites/$site/private/files" > "$drill_root/restored-private-content.json"
+cmp -s "$drill_root/expected-public-content.json" "$drill_root/restored-public-content.json" || fail "restored public files differ from native archive"
+cmp -s "$drill_root/expected-private-content.json" "$drill_root/restored-private-content.json" || fail "restored private files differ from native archive"
+source_custom_sha=$(sha256sum "$archive/custom-fields.json" | awk '{print $1}')
+restored_custom_sha=$(sha256sum "$drill_root/restored-custom-fields.json" | awk '{print $1}')
+public_content_sha=$(sha256sum "$drill_root/restored-public-content.json" | awk '{print $1}')
+private_content_sha=$(sha256sum "$drill_root/restored-private-content.json" | awk '{print $1}')
+public_file_count=$(jq 'length' "$drill_root/restored-public-content.json")
+private_file_count=$(jq 'length' "$drill_root/restored-private-content.json")
 # Fixture provenance: these harmless files and encrypted value are created only in
 # this restored temporary source site, then captured in a second native backup.
 fixture_site="fixture-$restore_id.crm.internal"
@@ -112,7 +124,7 @@ printf 'owner-crm staged public attachment fixture
 ' > "$drill_root/fixture-input/public.txt"
 printf 'owner-crm staged private attachment fixture
 ' > "$drill_root/fixture-input/private.txt"
-openssl rand -hex 32 > "$drill_root/fixture-input/encryption-key"
+python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())' > "$drill_root/fixture-input/encryption-key"
 openssl rand -hex 32 > "$drill_root/fixture-input/secret"
 chown "$frappe_uid:$frappe_gid" "$drill_root/fixture-input/"*
 chmod 0600 "$drill_root/fixture-input/"*
@@ -130,18 +142,6 @@ test "$fixture_config_key_sha" = "$fixture_restored_key_sha" || fail "fixture en
 fixture_public_count=$(find "$drill_root/sites/$fixture_site/public/files" -type f | wc -l)
 fixture_private_count=$(find "$drill_root/sites/$fixture_site/private/files" -type f | wc -l)
 test "$fixture_public_count" = 1 && test "$fixture_private_count" = 1 || fail "fixture attachment counts differ after restore"
-file_manifest "$drill_root/expected-public" > "$drill_root/expected-public-content.json"
-file_manifest "$drill_root/expected-private" > "$drill_root/expected-private-content.json"
-file_manifest "$drill_root/sites/$site/public/files" > "$drill_root/restored-public-content.json"
-file_manifest "$drill_root/sites/$site/private/files" > "$drill_root/restored-private-content.json"
-cmp -s "$drill_root/expected-public-content.json" "$drill_root/restored-public-content.json" || fail "restored public files differ from native archive"
-cmp -s "$drill_root/expected-private-content.json" "$drill_root/restored-private-content.json" || fail "restored private files differ from native archive"
-source_custom_sha=$(sha256sum "$archive/custom-fields.json" | awk '{print $1}')
-restored_custom_sha=$(sha256sum "$drill_root/restored-custom-fields.json" | awk '{print $1}')
-public_content_sha=$(sha256sum "$drill_root/restored-public-content.json" | awk '{print $1}')
-private_content_sha=$(sha256sum "$drill_root/restored-private-content.json" | awk '{print $1}')
-public_file_count=$(jq 'length' "$drill_root/restored-public-content.json")
-private_file_count=$(jq 'length' "$drill_root/restored-private-content.json")
 "${compose[@]}" down --volumes --remove-orphans || fail "temporary compose cleanup failed; no success receipt was published"
 test -f "$drill_root/.owner-crm-restore-drill" && test ! -L "$drill_root/.owner-crm-restore-drill" && grep -Fxq "$restore_id" "$drill_root/.owner-crm-restore-drill" || fail "temporary drill marker changed"
 case "$(readlink -f "$drill_root")" in "$drill_root_base"/*) rm -rf -- "$drill_root" ;; *) fail "refusing to retire an unexpected drill path" ;; esac
