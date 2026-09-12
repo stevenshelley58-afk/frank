@@ -7,6 +7,8 @@ secret_file=/srv/frank/secrets/owner-crm.env
 runtime_root=/srv/frank/owner-crm
 frappe_uid=1000
 frappe_gid=1000
+mariadb_uid=999
+mariadb_gid=999
 
 usage() { echo "usage: owner-crm {config|up|create-site|health|backup-preflight}" >&2; exit 2; }
 fail() { echo "owner-crm: $*" >&2; exit 1; }
@@ -36,10 +38,12 @@ prepare_runtime() {
     test ! -L "$runtime_root/$d" || fail "runtime path is a symlink: $d"
     install -d -m 0700 -o "$frappe_uid" -g "$frappe_gid" "$runtime_root/$d"
   done
-  for d in mariadb redis-queue; do
-    test ! -L "$runtime_root/$d" || fail "runtime path is a symlink: $d"
-    install -d -m 0700 -o root -g root "$runtime_root/$d"
-  done
+  test ! -L "$runtime_root/mariadb" || fail "runtime path is a symlink: mariadb"
+  # MariaDB's official image runs its server as mysql (999:999). Its bind-mount
+  # parent must be traversable by that user, including after a failed first run.
+  install -d -m 0700 -o "$mariadb_uid" -g "$mariadb_gid" "$runtime_root/mariadb"
+  test ! -L "$runtime_root/redis-queue" || fail "runtime path is a symlink: redis-queue"
+  install -d -m 0700 -o root -g root "$runtime_root/redis-queue"
 }
 
 clean_source
