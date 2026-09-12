@@ -59,6 +59,7 @@ grep -Eq '^cache-duration:[[:space:]]+[0-9]+(h|m|s)$' "$config_file" || die "con
 export NTFY_CONFIG_FILE="$config_file" NTFY_HOST_PORT="$port"
 running="$(docker ps --filter publish="$port" --format '{{.Names}}' || true)"
 [[ -z "$running" || "$running" == frank-owner-ntfy ]] || die "loopback port $port already used by $running"
+docker network inspect owner-crm_owner-crm-internal >/dev/null 2>&1 || die "owner CRM private network is unavailable"
 docker compose --project-name frank-owner-notifications --env-file "$env_file" -f "$compose_file" up -d
 for _ in $(seq 1 36); do s="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-ntfy 2>/dev/null || true)"; [[ "$s" == healthy ]] && break; [[ "$s" != unhealthy ]] || die "ntfy became unhealthy"; sleep 5; done
 [[ "$(docker inspect --format '{{.State.Health.Status}}' frank-owner-ntfy)" == healthy ]] || die "ntfy did not become healthy"

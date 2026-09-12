@@ -8,6 +8,8 @@ grep -q 'cache-duration: 24h' "$script_dir/deploy.sh"
 grep -q 'owner-notifications.*read-only' "$script_dir/deploy.sh"
 grep -q 'publisher.*write-only' "$script_dir/deploy.sh"
 grep -q '127.0.0.1:' "$script_dir/compose.yml"
+grep -q 'external: true' "$script_dir/compose.yml"
+python3 "$script_dir/../owner_crm_notifications/test_setup_adapter.py"
 if command -v shellcheck >/dev/null 2>&1; then shellcheck "$script_dir/deploy.sh" "$script_dir/check.sh"; fi
 if command -v docker >/dev/null 2>&1; then docker compose -f "$script_dir/compose.yml" config >/dev/null 2>&1 || true; fi
 echo 'owner-notifications static tests passed'
