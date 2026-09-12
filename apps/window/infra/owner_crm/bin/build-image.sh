@@ -44,9 +44,10 @@ apps_hash=$(sha256sum "$root_dir/apps.json" "$root_dir/pins.env" | sha256sum | c
 # frappe_docker removes app Git metadata at the end of its builder stage. Insert
 # a check immediately before that removal so labels cannot disguise a moved ref.
 containerfile="$work_dir/Containerfile.owner-crm"
-printf -v pin_check $'for pair in "frappe:%s" "crm:%s" "telephony:%s" "helpdesk:%s"; do app=${pair%%:*}; expected=${pair#*:}; actual=$(git -C "apps/$app" rev-parse HEAD); test "$actual" = "$expected" || { echo "pin mismatch for $app" >&2; exit 1; }; done && \\' \
+printf -v pin_check $'for pair in "frappe:%s" "crm:%s" "telephony:%s" "helpdesk:%s"; do app=${pair%%:*}; expected=${pair#*:}; actual=$(git -C "apps/$app" rev-parse HEAD); test "$actual" = "$expected" || { echo "pin mismatch for $app" >&2; exit 1; }; done &&' \
   "$FRAPPE_SHA" "$CRM_SHA" "$TELEPHONY_SHA" "$HELPDESK_SHA"
-awk -v pin_check="$pin_check" '/find apps -mindepth 1 -path/ { print "  " pin_check } { print }' \
+# awk -v consumes a trailing backslash in an assignment; use octal 134 to emit it instead.
+awk -v pin_check="$pin_check" '/find apps -mindepth 1 -path/ { print "  " pin_check " \134" } { print }' \
   "$work_dir/frappe_docker/images/custom/Containerfile" > "$containerfile"
 
 grep -Fq 'git -C "apps/$app" rev-parse HEAD' "$containerfile" || { echo "could not install pin check" >&2; exit 1; }
