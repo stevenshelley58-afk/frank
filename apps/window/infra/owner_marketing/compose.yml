@@ -37,7 +37,7 @@ services:
       org.frank.image-digest: "sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda"
     networks: [owner_marketing_private]
     healthcheck:
-      test: ["CMD-SHELL", "php -r '$$f=@file_get_contents("http://127.0.0.1/"); exit($$f===false?1:0);'"]
+      test: ["CMD-SHELL", 'php -r "$$f=@file_get_contents(\"http://127.0.0.1/\"); exit($$f===false?1:0);"']
       interval: 15s
       timeout: 8s
       retries: 20
