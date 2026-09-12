@@ -211,7 +211,10 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn('X-Frame-Options "DENY"', private)
         self.assertIn('X-Frame-Options "SAMEORIGIN"', agenttrail)
         blockwise = caddyfile.split("blockwise.sale {", 1)[1].split("preview.frank.fail {", 1)[0]
-        self.assertIn('header X-Frame-Options "DENY"', blockwise)
+        self.assertIn('@blockwise_vue_editor path /vue-ad-editor /vue-ad-editor/*', blockwise)
+        self.assertIn('header @blockwise_vue_editor X-Frame-Options "SAMEORIGIN"', blockwise)
+        self.assertIn('@blockwise_not_vue_editor not path /vue-ad-editor /vue-ad-editor/*', blockwise)
+        self.assertIn('header @blockwise_not_vue_editor X-Frame-Options "DENY"', blockwise)
 
     def test_template_release_bypass_is_exact_and_strips_private_headers(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")

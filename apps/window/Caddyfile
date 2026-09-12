@@ -341,7 +341,12 @@ frank.fail {
 blockwise.sale {
     encode zstd gzip
     import frank_common_security_headers
-    header X-Frame-Options "DENY"
+    # The self-hosted Vue editor is embedded only by the Blockwise origin.
+    # Keep every other product response unframeable.
+    @blockwise_vue_editor path /vue-ad-editor /vue-ad-editor/*
+    header @blockwise_vue_editor X-Frame-Options "SAMEORIGIN"
+    @blockwise_not_vue_editor not path /vue-ad-editor /vue-ad-editor/*
+    header @blockwise_not_vue_editor X-Frame-Options "DENY"
 
     log {
         output stdout
