@@ -1,0 +1,102 @@
+# One-shot, internal-only native restore drill. The wrapper supplies a unique project/site/root.
+x-runtime-labels: &runtime-labels
+  io.frank.owner-crm.applied-source-sha: ${OWNER_CRM_SOURCE_SHA:?OWNER_CRM_SOURCE_SHA is required}
+  io.frank.owner-crm.restore-drill: "true"
+
+x-bench: &bench
+  image: ${OWNER_CRM_IMAGE:?OWNER_CRM_IMAGE is required}:${OWNER_CRM_TAG:?OWNER_CRM_TAG is required}
+  pull_policy: never
+  restart: "no"
+  labels: *runtime-labels
+  volumes:
+    - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/sites:/home/frappe/frappe-bench/sites
+    - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/logs:/home/frappe/frappe-bench/logs
+  networks: [restore-drill-internal]
+
+services:
+  db:
+    image: mariadb:11.8@sha256:2439dcd7d14010ecd1ff7a4e1c5abe8e208c34fe35290744deeeaac3569043c3
+    pull_policy: never
+    restart: "no"
+    labels: *runtime-labels
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--skip-character-set-client-handshake", "--transaction-isolation=READ-COMMITTED", "--skip-name-resolve"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${OWNER_CRM_DB_PASSWORD:?OWNER_CRM_DB_PASSWORD is required}
+      MARIADB_AUTO_UPGRADE: "1"
+    volumes:
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/mariadb:/var/lib/mysql
+    networks: [restore-drill-internal]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  redis-cache:
+    image: redis:8.6-alpine@sha256:75934ddb37bfaebe3b4082ba673cac39f66495244134f33dd0a502ce03cdcd36
+    pull_policy: never
+    restart: "no"
+    labels: *runtime-labels
+    command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
+    networks: [restore-drill-internal]
+
+  redis-queue:
+    image: redis:8.6-alpine@sha256:75934ddb37bfaebe3b4082ba673cac39f66495244134f33dd0a502ce03cdcd36
+    pull_policy: never
+    restart: "no"
+    labels: *runtime-labels
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/redis-queue:/data
+    networks: [restore-drill-internal]
+
+  restore:
+    <<: *bench
+    volumes:
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/sites:/home/frappe/frappe-bench/sites
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/logs:/home/frappe/frappe-bench/logs
+      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/input:/backup:ro
+    entrypoint: ["bash", "-ec"]
+    command:
+      - >-
+        test ! -e "sites/${OWNER_CRM_DRILL_SITE}";
+        if test ! -e sites/common_site_config.json; then
+          (umask 077; set -C; printf '{}\n' > sites/common_site_config.json) 2>/dev/null || test -f sites/common_site_config.json;
+        fi;
+        test -f sites/common_site_config.json && test ! -L sites/common_site_config.json;
+        ls -1 apps > sites/apps.txt;
+        bench set-config -g db_host db;
+        bench set-config -gp db_port 3306;
+        bench set-config -g redis_cache redis://redis-cache:6379;
+        bench set-config -g redis_queue redis://redis-queue:6379;
+        bench set-config -g redis_socketio redis://redis-queue:6379;
+        bench set-config -g mute_emails 1;
+        bench set-config -g enable_scheduler 0;
+        bench new-site "${OWNER_CRM_DRILL_SITE}" --mariadb-user-host-login-scope=% --db-root-username=root --db-root-password="${OWNER_CRM_DB_PASSWORD}" --admin-password="${OWNER_CRM_ADMIN_PASSWORD}" --install-app crm --install-app telephony --install-app helpdesk;
+        bench --site "${OWNER_CRM_DRILL_SITE}" restore "${OWNER_CRM_BACKUP_SQL}" --db-root-username=root --db-root-password="${OWNER_CRM_DB_PASSWORD}" --admin-password="${OWNER_CRM_ADMIN_PASSWORD}" --install-app crm --install-app telephony --install-app helpdesk --with-public-files "${OWNER_CRM_BACKUP_PUBLIC}" --with-private-files "${OWNER_CRM_BACKUP_PRIVATE}" --force;
+        bench --site "${OWNER_CRM_DRILL_SITE}" set-config mute_emails 1;
+        bench --site "${OWNER_CRM_DRILL_SITE}" set-config enable_scheduler 0
+    depends_on:
+      db: {condition: service_healthy}
+      redis-cache: {condition: service_started}
+      redis-queue: {condition: service_started}
+
+  verify-apps:
+    <<: *bench
+    entrypoint: ["bash", "-ec"]
+    command: ['bench --site "${OWNER_CRM_DRILL_SITE}" list-apps']
+
+  verify-custom-fields:
+    <<: *bench
+    entrypoint: ["bash", "-ec"]
+    command: ['bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.get_all --kwargs "$${OWNER_CRM_CUSTOM_FIELDS_KWARGS}"']
+
+  verify-safety:
+    <<: *bench
+    entrypoint: ["bash", "-ec"]
+    command: ['test "$(bench --site "${OWNER_CRM_DRILL_SITE}" get-config mute_emails)" = "1"; test "$(bench --site "${OWNER_CRM_DRILL_SITE}" get-config enable_scheduler)" = "0"']
+
+networks:
+  restore-drill-internal:
+    internal: true

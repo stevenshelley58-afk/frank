@@ -153,6 +153,23 @@ services:
       retries: 5
       start_period: 90s
 
+  backup:
+    <<: *bench
+    profiles: [tools]
+    restart: "no"
+    volumes:
+      - /srv/frank/owner-crm/sites:/home/frappe/frappe-bench/sites
+      - /srv/frank/owner-crm/logs:/home/frappe/frappe-bench/logs
+      - /srv/frank/backups/owner-crm/.staging:/backups
+    entrypoint: ["bash", "-ec"]
+    command:
+      - >-
+        test -n "$${OWNER_CRM_BACKUP_PATH:-}";
+        case "$${OWNER_CRM_BACKUP_PATH}" in /backups/local-*) ;; *) exit 2 ;; esac;
+        test ! -e "$${OWNER_CRM_BACKUP_PATH}" || { echo "backup path already exists"; exit 3; };
+        install -d -m 0700 "$${OWNER_CRM_BACKUP_PATH}";
+        bench --site "owner.crm.internal" backup --with-files --backup-path "$${OWNER_CRM_BACKUP_PATH}"
+
   create-site:
     <<: *bench
     profiles: [tools]

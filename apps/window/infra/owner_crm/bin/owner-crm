@@ -12,7 +12,7 @@ mariadb_gid=999
 redis_uid=999
 redis_gid=1000
 
-usage() { echo "usage: owner-crm {config|up|create-site|archive-failed-site|health|backup-preflight}" >&2; exit 2; }
+usage() { echo "usage: owner-crm {config|up|create-site|archive-failed-site|health|backup|restore-drill|backup-preflight}" >&2; exit 2; }
 fail() { echo "owner-crm: $*" >&2; exit 1; }
 clean_source() {
   test -z "$(git -C "$root_dir" status --porcelain)" || fail "source checkout is not clean"
@@ -92,6 +92,8 @@ case ${1:-} in
     echo "archived database-free failed owner site to $archive_path"
     ;;
   health) "$script_dir/health.sh" ;;
+  backup) "$script_dir/local-backup.sh" ;;
+  restore-drill) "$script_dir/restore-drill.sh" ;;
   backup-preflight) "$script_dir/backup-preflight.sh" ;;
   *) usage ;;
 esac

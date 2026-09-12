@@ -30,7 +30,7 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertGreaterEqual(self.compose.count("enable_scheduler 0"), 2)
 
     def test_config_and_site_commands_are_single_bash_scripts(self):
-        self.assertEqual(self.compose.count("    command:\n      - >-"), 2)
+        self.assertEqual(self.compose.count("    command:\n      - >-"), 3)
         self.assertNotIn("    command: >-", self.compose)
         self.assertIn('restart: "no"', self.compose)
         self.assertIn("set -C; printf", self.compose)
@@ -81,6 +81,27 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         backup = (ROOT / "bin/backup-preflight.sh").read_text()
         self.assertIn("age", backup)
         self.assertIn("restore", backup)
+
+    def test_local_backup_and_restore_drill_are_narrow_and_native(self):
+        wrapper = (ROOT / "bin/owner-crm").read_text()
+        backup = (ROOT / "bin/local-backup.sh").read_text()
+        restore = (ROOT / "bin/restore-drill.sh").read_text()
+        drill = (ROOT / "restore-drill.compose.yaml").read_text()
+        self.assertIn("restore-drill", wrapper)
+        self.assertIn("local-backup.sh", wrapper)
+        self.assertIn('backup --with-files', (ROOT / 'compose.yaml').read_text())
+        self.assertIn("/srv/frank/backups/owner-crm", backup)
+        self.assertIn('local-only', backup)
+        self.assertIn("custom-fields.json", backup)
+        self.assertIn("sha256sum -c SHA256SUMS", restore)
+        self.assertIn("owner-crm-restore-drill", restore)
+        self.assertIn('rm -rf -- \"$drill_root\"', restore)
+        self.assertIn("internal: true", drill)
+        self.assertNotIn("ports:", drill)
+        self.assertIn('bench --site \"${OWNER_CRM_DRILL_SITE}\" restore', drill)
+        self.assertIn("mute_emails 1", drill)
+        self.assertIn("enable_scheduler 0", drill)
+        self.assertNotIn("scheduler:", drill)
 
 
 if __name__ == "__main__":

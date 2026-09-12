@@ -15,7 +15,7 @@ The committed source lives here. Runtime state is outside Git:
 | --- | --- |
 | Secrets | `/srv/frank/secrets/owner-crm.env`, mode `0600` |
 | Database, site files and logs | `/srv/frank/owner-crm/`, mode `0700` |
-| Optional encrypted-backup destination | `/srv/frank/owner-crm-backups/` or another mounted disk |
+| Manual local backup archive | `/srv/frank/backups/owner-crm/`, root-only mode `0700` |
 | Browser exposure | `127.0.0.1:18081` only, with no Caddy route |
 
 The compose project is named `owner-crm`, uses an internal-only Docker network,
@@ -68,11 +68,17 @@ therefore has no scheduled or normal Frappe mail path. Enabling mail, a
 scheduler, a Caddy route, a sender, or any paid service is a separate change
 with its own review and test.
 
-This foundation does not claim a backup exists. `owner-crm backup-preflight`
-requires an `age` public recipient and a backup root outside the live runtime
-before backup work can be enabled. It is only a readiness gate: an off-host
-identity escrow and a recorded restore test are still required before a backup
-can be called operational.
+`owner-crm backup` creates a manual native `bench backup --with-files` archive
+at `/srv/frank/backups/owner-crm/`. It records checksums plus custom-field,
+attachment-member, and site-config artifact manifests, all root-only. It is a
+local copy only: there is no schedule, off-host destination, or RPO claim.
+
+`owner-crm restore-drill` checks the newest local archive and restores it only
+into a unique, temporary, internal-only compose project/site/database. Mail and
+the scheduler stay disabled; the live owner site and every customer service are
+not targets. A passing drill leaves its root-only receipt beside the archive,
+then retires only the marked temporary drill resources. `backup-preflight`
+remains the separate `age`/off-host readiness gate; off-host escrow is unresolved.
 
 ## Health evidence
 
