@@ -120,10 +120,8 @@ private_file_count=$(jq 'length' "$drill_root/restored-private-content.json")
 fixture_site="fixture-$restore_id.crm.internal"
 [[ "$fixture_site" =~ ^fixture-restore-[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}\.crm\.internal$ ]] || fail "unsafe fixture site"
 install -d -m 0700 -o "$frappe_uid" -g "$frappe_gid" "$drill_root/fixture-input" "$drill_root/fixture-backup"
-printf 'owner-crm staged public attachment fixture
-' > "$drill_root/fixture-input/public.txt"
-printf 'owner-crm staged private attachment fixture
-' > "$drill_root/fixture-input/private.txt"
+printf '%s' 'owner-crm staged public attachment fixture' > "$drill_root/fixture-input/public.txt"
+printf '%s' 'owner-crm staged private attachment fixture' > "$drill_root/fixture-input/private.txt"
 python3 -c 'import base64, os; print(base64.urlsafe_b64encode(os.urandom(32)).decode())' > "$drill_root/fixture-input/encryption-key"
 openssl rand -hex 32 > "$drill_root/fixture-input/secret"
 chown "$frappe_uid:$frappe_gid" "$drill_root/fixture-input/"*
