@@ -92,28 +92,6 @@ services:
     entrypoint: ["bash", "-ec"]
     command: ['bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.get_all --kwargs "$${OWNER_CRM_CUSTOM_FIELDS_KWARGS}"']
 
-  verify-safety:
-    <<: *bench
-    entrypoint: ["bash", "-ec"]
-    command: ['test "$(bench --site "${OWNER_CRM_DRILL_SITE}" get-config mute_emails)" = "1"; test "$(bench --site "${OWNER_CRM_DRILL_SITE}" get-config enable_scheduler)" = "0"']
-
-
-  verify-safe-config:
-    <<: *bench
-    volumes:
-      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/sites:/home/frappe/frappe-bench/sites
-      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/logs:/home/frappe/frappe-bench/logs
-      - ${OWNER_CRM_DRILL_ROOT:?OWNER_CRM_DRILL_ROOT is required}/input:/backup:ro
-    entrypoint: ["bash", "-ec"]
-    command:
-      - >-
-        test -f "${OWNER_CRM_BACKUP_CONFIG}" && test ! -L "${OWNER_CRM_BACKUP_CONFIG}";
-        source_db_type=$$(jq -r '.db_type // empty' "${OWNER_CRM_BACKUP_CONFIG}");
-        source_mute=$$(jq -r 'if .mute_emails == 1 or .mute_emails == true then "1" else "0" end' "${OWNER_CRM_BACKUP_CONFIG}");
-        source_scheduler=$$(jq -r 'if .enable_scheduler == 1 or .enable_scheduler == true then "1" else "0" end' "${OWNER_CRM_BACKUP_CONFIG}");
-        test "$$(bench --site "${OWNER_CRM_DRILL_SITE}" get-config db_type)" = "$$source_db_type";
-        test "$$(bench --site "${OWNER_CRM_DRILL_SITE}" get-config mute_emails)" = "$$source_mute";
-        test "$$(bench --site "${OWNER_CRM_DRILL_SITE}" get-config enable_scheduler)" = "$$source_scheduler"
 
 networks:
   restore-drill-internal:

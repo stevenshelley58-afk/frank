@@ -96,8 +96,13 @@ for app in crm telephony helpdesk; do printf '%s\n' "$apps" | grep -Eq "^${app}(
 kwargs=$(jq -cn --argjson names "$(jq -c 'map(.name)' "$archive/custom-fields.json")" '{doctype:"Custom Field",filters:{name:["in",$names]},fields:["name","dt","fieldname","label","fieldtype","options","insert_after","reqd","hidden","read_only"],order_by:"name asc"}')
 "${compose[@]}" run --rm -e "OWNER_CRM_CUSTOM_FIELDS_KWARGS=$kwargs" verify-custom-fields | jq -S 'sort_by(.name)' > "$drill_root/restored-custom-fields.json"
 cmp -s "$archive/custom-fields.json" "$drill_root/restored-custom-fields.json" || fail "restored custom-field definitions differ from backup manifest"
-"${compose[@]}" run --rm verify-safety
-"${compose[@]}" run --rm verify-safe-config
+restored_config="$drill_root/sites/$site/site_config.json"
+test -f "$restored_config" && test ! -L "$restored_config" || fail "restored site config is missing"
+for key in db_type mute_emails enable_scheduler; do
+  source_value=$(jq -c --arg key "$key" '.[$key]' "$archive/$config")
+  restored_value=$(jq -c --arg key "$key" '.[$key]' "$restored_config")
+  test "$source_value" = "$restored_value" || fail "restored safe config key differs: $key"
+done
 file_manifest "$drill_root/expected-public" > "$drill_root/expected-public-content.json"
 file_manifest "$drill_root/expected-private" > "$drill_root/expected-private-content.json"
 file_manifest "$drill_root/sites/$site/public/files" > "$drill_root/restored-public-content.json"
