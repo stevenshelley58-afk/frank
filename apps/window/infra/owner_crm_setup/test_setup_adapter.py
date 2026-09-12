@@ -36,10 +36,12 @@ class Response:
 
 
 class FakeFrappe:
-    def __init__(self, fields=None, redirect=False):
+    def __init__(self, fields=None, records=None, redirect=False):
         self.fields = dict(fields or {})
+        self.records = {dt: list(values) for dt, values in (records or {}).items()}
         self.requests = []
         self.posts = []
+        self.updates = []
         self.redirect = redirect
 
     def __call__(self, request, timeout=0):
@@ -54,6 +56,20 @@ class FakeFrappe:
         if path.startswith("/api/resource/DocType/"):
             name = urllib.parse.unquote(path.rsplit("/", 1)[-1])
             return Response({"data": {"name": name}})
+        if path in {"/api/resource/CRM%20Lead", "/api/resource/Contact"} and request.method == "GET":
+            dt = urllib.parse.unquote(path.split("/api/resource/", 1)[1])
+            query = urllib.parse.parse_qs(urllib.parse.urlsplit(request.full_url).query)
+            fieldname = json.loads(query["fields"][0])[0]
+            offset = int(query["limit_start"][0])
+            page_length = int(query["limit_page_length"][0])
+            values = self.records.get(dt, [])
+            return Response({"data": [{fieldname: value} for value in values[offset:offset + page_length]]})
+        if path.startswith("/api/resource/Custom%20Field/") and request.method == "PUT":
+            name = urllib.parse.unquote(path.rsplit("/", 1)[-1])
+            payload = json.loads(request.data.decode())
+            self.fields[name.split("-", 1)[1]]["unique"] = payload["unique"]
+            self.updates.append(payload)
+            return Response({"data": self.fields[name.split("-", 1)[1]]})
         if path == "/api/resource/Custom%20Field" and request.method == "GET":
             query = urllib.parse.parse_qs(urllib.parse.urlsplit(request.full_url).query)
             filters = json.loads(query["filters"][0])
@@ -88,6 +104,67 @@ class OwnerCrmSetupTests(unittest.TestCase):
         encoded = json.dumps(fields).lower()
         self.assertNotIn("consent", encoded)
         self.assertNotIn("sendability", encoded)
+
+    def test_source_uuid_fields_are_native_unique_and_optional(self):
+        fields = self.fields()
+        unique_names = {
+            field["name"] for field in fields if field["unique"] == 1
+        }
+        self.assertEqual(unique_names, {
+            "CRM Lead-custom_blockwise_prospect_source_uuid",
+            "Contact-custom_blockwise_profile_uuid",
+            "Contact-custom_blockwise_workspace_uuid",
+        })
+        self.assertTrue(all(field["unique"] in (0, 1) for field in fields))
+        self.assertTrue(all(field["read_only"] in (0, 1) for field in fields))
+
+    def test_manifest_rejects_non_strict_unique_flags(self):
+        manifest = json.loads((ROOT / "manifest.json").read_text())
+        for value in (None, 2, "1"):
+            candidate = json.loads(json.dumps(manifest))
+            candidate["fields"][0]["unique"] = value
+            with self.assertRaisesRegex(adapter.SetupError, "unique"):
+                adapter.validate_manifest(candidate)
+
+    def test_existing_source_field_only_upgrades_unique_flag(self):
+        fields = self.fields()
+        existing = {field["fieldname"]: dict(field) for field in fields}
+        source = next(field for field in fields if field["name"].startswith("CRM Lead-"))
+        existing[source["fieldname"]]["unique"] = 0
+        fake = FakeFrappe(existing, records={"CRM Lead": ["123e4567-e89b-42d3-a456-426614174000", None]})
+        plan = adapter.run_setup(client=self.client(fake), apply=False)
+        self.assertEqual(
+            [item.action for item in plan if item.field["name"] == source["name"]],
+            ["upgrade_unique"],
+        )
+        adapter.run_setup(client=self.client(fake), apply=True)
+        self.assertEqual(fake.posts, [])
+        self.assertEqual(fake.updates, [{"unique": 1}])
+        adapter.run_setup(client=self.client(fake), apply=True)
+        self.assertEqual(fake.updates, [{"unique": 1}])
+
+    def test_duplicate_source_values_fail_before_any_write(self):
+        fields = self.fields()
+        existing = {field["fieldname"]: dict(field) for field in fields}
+        source = next(field for field in fields if field["name"].startswith("CRM Lead-"))
+        existing[source["fieldname"]]["unique"] = 0
+        value = "123e4567-e89b-42d3-a456-426614174000"
+        fake = FakeFrappe(existing, records={"CRM Lead": [value, value.upper()]})
+        with self.assertRaisesRegex(adapter.SetupError, "duplicate source identity"):
+            adapter.run_setup(client=self.client(fake), apply=True)
+        self.assertEqual(fake.posts, [])
+        self.assertEqual(fake.updates, [])
+
+    def test_invalid_source_values_fail_before_any_write(self):
+        fields = self.fields()
+        source = next(field for field in fields if field["name"].startswith("CRM Lead-"))
+        conflicting = dict(source)
+        conflicting["unique"] = 0
+        fake = FakeFrappe({source["fieldname"]: conflicting}, records={"CRM Lead": ["not-a-uuid"]})
+        with self.assertRaisesRegex(adapter.SetupError, "invalid source identity"):
+            adapter.run_setup(client=self.client(fake), apply=True)
+        self.assertEqual(fake.posts, [])
+        self.assertEqual(fake.updates, [])
 
     def test_dry_run_is_default_and_never_posts_or_touches_records(self):
         fake = FakeFrappe()

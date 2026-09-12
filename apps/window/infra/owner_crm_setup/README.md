@@ -16,10 +16,11 @@ python3 apps/window/infra/owner_crm_setup/setup_adapter.py
 python3 apps/window/infra/owner_crm_setup/setup_adapter.py --apply
 ```
 
-The first command is the default and only plans missing fields. `--apply`
-creates missing definitions after preflighting both native DocTypes and every
-existing field. Existing definitions must have the deterministic name and the
-same closed definition; incompatible definitions or duplicate matches fail
+The first command is the default and only plans missing fields or narrow
+unique upgrades. The apply mode creates missing definitions or upgrades the
+three source identity definitions after preflighting both native DocTypes and
+every existing field. Existing definitions must have the deterministic name and
+the same closed definition; incompatible definitions or duplicate matches fail
 before any write. Redirects, non-loopback targets, malformed responses, unsafe
 secret files, and missing credentials fail closed.
 
@@ -31,6 +32,56 @@ Blockwise-authoritative access status, and the last accepted sync timestamp.
 The adapter does not configure email, scheduler, billing, access, or outbound
 delivery.
 
+### Source identity uniqueness
+
+The three source identity fields use native Frappe unique flag 1:
+
+- CRM Lead.custom_blockwise_prospect_source_uuid
+- Contact.custom_blockwise_profile_uuid
+- Contact.custom_blockwise_workspace_uuid
+
+They remain optional read-only Data fields. The native columns are nullable and
+default to NULL, so a manual Contact can leave all Blockwise identity fields
+unset. The preflight treats NULL and the native empty value as absent, and
+checks every non-empty value against the UUID contract. It rejects malformed or
+duplicate identities before any Custom Field write. It requests only the identity
+column, paginates with a hard record bound, and never prints record values.
+
+When an existing target field is exact except for unique 0, the plan contains
+only upgrade_unique and the apply path sends only {"unique": 1} for that
+Custom Field. Any other mismatch, including unique 1 on a non-source field,
+fails closed. This is a narrow schema change, not a record edit, merge, delete,
+or import. The database unique index remains the final concurrent-write guard;
+take the normal native backup and run the read-only preflight before approving
+--apply.
+
+After the backup and review, verify native nullability and indexes from the
+running backend container with:
+
+~~~bash
+docker exec owner-crm-backend-1 bash -lc 'cd /home/frappe/frappe-bench && bench --site owner.crm.internal mariadb --skip-column-names -e "
+SELECT table_name, column_name, is_nullable, column_default, column_type
+FROM information_schema.columns
+WHERE table_schema = DATABASE()
+  AND table_name IN (0x74616243524d204c656164, 0x746162436f6e74616374)
+  AND column_name IN (
+    0x637573746f6d5f626c6f636b776973655f70726f73706563745f736f757263655f75756964,
+    0x637573746f6d5f626c6f636b776973655f70726f66696c655f75756964,
+    0x637573746f6d5f626c6f636b776973655f776f726b73706163655f75756964
+  )
+ORDER BY table_name, column_name;
+SELECT table_name, index_name, non_unique, column_name
+FROM information_schema.statistics
+WHERE table_schema = DATABASE()
+  AND table_name IN (0x74616243524d204c656164, 0x746162436f6e74616374)
+  AND column_name IN (
+    0x637573746f6d5f626c6f636b776973655f70726f73706563745f736f757263655f75756964,
+    0x637573746f6d5f626c6f636b776973655f70726f66696c655f75756964,
+    0x637573746f6d5f626c6f636b776973655f776f726b73706163655f75756964
+  )
+ORDER BY table_name, index_name, seq_in_index;
+"'
+~~~
 
 ## Native sales-stage mapping
 

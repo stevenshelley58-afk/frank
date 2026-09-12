@@ -30,9 +30,17 @@ DEFAULT_SECRET_FILE = Path("/srv/frank/secrets/owner-crm.env")
 DEFAULT_MANIFEST_FILE = Path(__file__).with_name("manifest.json")
 ADMIN_USER = "Administrator"
 MAX_RESPONSE_BYTES = 1024 * 1024
+RECORD_PAGE_LENGTH = 100
+MAX_PREFLIGHT_RECORDS = 10_000
 _SAFE_FIELDNAME = re.compile(r"^custom_[a-z][a-z0-9_]{0,58}$")
 _SAFE_NAME = re.compile(r"^(?:CRM Lead|Contact)-custom_[a-z][a-z0-9_]{0,58}$")
 _FIELD_TYPES = {"Data", "Datetime", "Long Text", "Select"}
+_SOURCE_IDENTITY_FIELDS = frozenset({
+    ("CRM Lead", "custom_blockwise_prospect_source_uuid"),
+    ("Contact", "custom_blockwise_profile_uuid"),
+    ("Contact", "custom_blockwise_workspace_uuid"),
+})
+_UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
 _FIELD_KEYS = {
     "name",
     "doctype",
@@ -42,6 +50,7 @@ _FIELD_KEYS = {
     "fieldtype",
     "options",
     "default",
+    "unique",
     "read_only",
     "description",
 }
@@ -53,9 +62,11 @@ _COMPARE_KEYS = (
     "fieldtype",
     "options",
     "default",
+    "unique",
     "read_only",
     "description",
 )
+_COMPARE_KEYS_WITHOUT_UNIQUE = tuple(key for key in _COMPARE_KEYS if key != "unique")
 
 
 class SetupError(RuntimeError):
@@ -89,6 +100,7 @@ def _canonical_field(field: Mapping[str, Any]) -> dict[str, Any]:
         "label": field["label"],
         "fieldtype": field["fieldtype"],
         "read_only": int(bool(field["read_only"])),
+        "unique": int(bool(field["unique"])),
         "description": field["description"],
     }
     for key in ("options", "default"):
@@ -117,7 +129,7 @@ def validate_manifest(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], ...]
     for field in fields:
         if not isinstance(field, Mapping) or not set(field).issubset(_FIELD_KEYS):
             raise SetupError("manifest contains an unsupported field definition")
-        required = ("name", "doctype", "dt", "fieldname", "label", "fieldtype", "read_only", "description")
+        required = ("name", "doctype", "dt", "fieldname", "label", "fieldtype", "unique", "read_only", "description")
         if any(key not in field for key in required):
             raise SetupError("manifest field is missing required metadata")
         name = _text(field["name"], "field name")
@@ -133,6 +145,12 @@ def validate_manifest(manifest: Mapping[str, Any]) -> tuple[dict[str, Any], ...]
             raise SetupError(f"invalid Custom Field definition: {name}")
         if not _is_flag(field["read_only"]):
             raise SetupError(f"invalid read_only flag: {name}")
+        if not _is_flag(field["unique"]):
+            raise SetupError(f"invalid unique flag: {name}")
+        if (dt, fieldname) in _SOURCE_IDENTITY_FIELDS and not field["unique"]:
+            raise SetupError(f"source identity field must be unique: {name}")
+        if (dt, fieldname) not in _SOURCE_IDENTITY_FIELDS and field["unique"]:
+            raise SetupError(f"only source identity fields may be unique: {name}")
         label = _text(field["label"], f"{name}.label")
         description = _text(field["description"], f"{name}.description")
         if chr(10) in label or chr(13) in label or chr(10) in description or chr(13) in description:
@@ -308,6 +326,40 @@ class FrappeRestClient:
             raise SetupError("Frappe returned invalid Custom Field data")
         return data
 
+    def iter_field_values(self, dt: str, fieldname: str):
+        """Yield one optional identity value at a time with a hard page bound."""
+        if dt not in {"CRM Lead", "Contact"} or not _SAFE_FIELDNAME.fullmatch(fieldname):
+            raise SetupError("unsupported owner CRM identity field")
+        fields = json.dumps([fieldname], separators=(",", ":"))
+        offset = 0
+        total = 0
+        while True:
+            query = urllib.parse.urlencode({
+                "fields": fields,
+                "limit_page_length": str(RECORD_PAGE_LENGTH),
+                "limit_start": str(offset),
+                "order_by": "name asc",
+            })
+            result = self._request(
+                "GET",
+                "/api/resource/" + urllib.parse.quote(dt, safe="") + "?" + query,
+            )
+            data = result.get("data")
+            if not isinstance(data, list) or not all(isinstance(item, dict) for item in data):
+                raise SetupError("Frappe returned invalid owner CRM data")
+            if len(data) > RECORD_PAGE_LENGTH:
+                raise SetupError("Frappe exceeded the bounded owner CRM page size")
+            total += len(data)
+            if total > MAX_PREFLIGHT_RECORDS:
+                raise SetupError("owner CRM identity preflight exceeds its bounded record limit")
+            for item in data:
+                if fieldname not in item:
+                    raise SetupError("Frappe returned an owner CRM row without the identity field")
+                yield item[fieldname]
+            if len(data) < RECORD_PAGE_LENGTH:
+                return
+            offset += len(data)
+
     def create_custom_field(self, field: Mapping[str, Any]) -> dict[str, Any]:
         result = self._request("POST", "/api/resource/Custom%20Field", body=dict(field))
         data = result.get("data")
@@ -315,17 +367,56 @@ class FrappeRestClient:
             raise SetupError("Frappe returned invalid created Custom Field data")
         return data
 
+    def update_custom_field_unique(self, field: Mapping[str, Any]) -> dict[str, Any]:
+        name = field.get("name")
+        identity = (field.get("dt"), field.get("fieldname"))
+        if not isinstance(name, str) or identity not in _SOURCE_IDENTITY_FIELDS:
+            raise SetupError("invalid owner CRM source identity field")
+        result = self._request(
+            "PUT",
+            "/api/resource/Custom%20Field/" + urllib.parse.quote(name, safe=""),
+            body={"unique": 1},
+        )
+        data = result.get("data")
+        if not isinstance(data, dict) or data.get("name") != name:
+            raise SetupError("Frappe returned an invalid updated Custom Field")
+        try:
+            updated_unique = _normalise_flag(data.get("unique"))
+        except ValueError:
+            raise SetupError("Frappe returned an invalid updated Custom Field") from None
+        if updated_unique != 1 or not _compatible(data, field):
+            raise SetupError("Frappe returned an incompatible updated Custom Field")
+        return data
 
-def _compatible(existing: Mapping[str, Any], desired: Mapping[str, Any]) -> bool:
-    for key in _COMPARE_KEYS:
+
+def _normalise_flag(value: Any, *, missing: int | None = None) -> int:
+    if value is None and missing is not None:
+        return missing
+    if isinstance(value, bool):
+        return int(value)
+    if isinstance(value, int) and value in (0, 1):
+        return value
+    if isinstance(value, str) and value in {"0", "1"}:
+        return int(value)
+    raise ValueError("invalid flag")
+
+
+def _compatible(
+    existing: Mapping[str, Any],
+    desired: Mapping[str, Any],
+    *,
+    include_unique: bool = True,
+) -> bool:
+    keys = _COMPARE_KEYS if include_unique else _COMPARE_KEYS_WITHOUT_UNIQUE
+    for key in keys:
         expected = desired.get(key, "")
         actual = existing.get(key, "")
-        if key == "read_only":
+        if key in {"read_only", "unique"}:
             try:
-                actual = int(bool(int(actual)))
-            except (TypeError, ValueError):
+                actual = _normalise_flag(actual, missing=0)
+                expected = _normalise_flag(expected)
+            except ValueError:
                 return False
-            expected = int(bool(expected))
         elif actual is None:
             actual = ""
         if str(actual) != str(expected):
@@ -333,11 +424,25 @@ def _compatible(existing: Mapping[str, Any], desired: Mapping[str, Any]) -> bool
     return True
 
 
+def _preflight_source_values(client: FrappeRestClient, field: Mapping[str, Any]) -> None:
+    seen: set[str] = set()
+    for value in client.iter_field_values(field["dt"], field["fieldname"]):
+        if value is None or value == "":
+            continue
+        if not isinstance(value, str) or not _UUID.fullmatch(value):
+            raise SetupError(f"invalid source identity values: {field['name']}")
+        identity = value.lower()
+        if identity in seen:
+            raise SetupError(f"duplicate source identity values: {field['name']}")
+        seen.add(identity)
+
+
 def plan_setup(
     client: FrappeRestClient, fields: tuple[dict[str, Any], ...]
 ) -> tuple[PlanItem, ...]:
-    """Preflight every field before any write, rejecting conflicting definitions."""
+    """Preflight definitions and source values before returning any write plan."""
     plan: list[PlanItem] = []
+    existing_by_identity: dict[tuple[str, str], Mapping[str, Any]] = {}
     for dt in sorted({field["dt"] for field in fields}):
         client.get_doctype(dt)
     for desired in fields:
@@ -348,9 +453,28 @@ def plan_setup(
             plan.append(PlanItem("create", desired))
             continue
         record = existing[0]
-        if record.get("name") != desired["name"] or not _compatible(record, desired):
+        if record.get("name") != desired["name"]:
             raise SetupError(f"incompatible existing Custom Field: {desired['name']}")
-        plan.append(PlanItem("unchanged", desired, desired["name"]))
+        try:
+            existing_unique = _normalise_flag(record.get("unique"), missing=0)
+        except ValueError:
+            raise SetupError(f"incompatible existing Custom Field: {desired['name']}") from None
+        identity = (desired["dt"], desired["fieldname"])
+        existing_by_identity[identity] = record
+        if _compatible(record, desired):
+            plan.append(PlanItem("unchanged", desired, desired["name"]))
+        elif (
+            desired["unique"] == 1
+            and existing_unique == 0
+            and _compatible(record, desired, include_unique=False)
+        ):
+            plan.append(PlanItem("upgrade_unique", desired, desired["name"]))
+        else:
+            raise SetupError(f"incompatible existing Custom Field: {desired['name']}")
+    for desired in fields:
+        identity = (desired["dt"], desired["fieldname"])
+        if identity in _SOURCE_IDENTITY_FIELDS and identity in existing_by_identity:
+            _preflight_source_values(client, desired)
     return tuple(plan)
 
 
@@ -379,6 +503,8 @@ def run_setup(
             for item in plan:
                 if item.action == "create":
                     client.create_custom_field(item.field)
+                elif item.action == "upgrade_unique":
+                    client.update_custom_field_unique(item.field)
         return plan
     finally:
         if owned_client:
