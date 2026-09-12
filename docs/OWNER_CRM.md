@@ -169,3 +169,27 @@ This proves a local fresh-site restore only: both attachment trees contained
 zero files, encrypted-credential/encryption-key recovery is unverified, and
 there is no off-host backup or hourly recovery-point claim yet. It is not
 permission to delete existing customer, research or mailbox history.
+
+
+### Identity and recovery hardening, 13 September Perth time
+
+Native database uniqueness is now applied to the three immutable source UUID
+fields. The adapter first checks all definitions and bounded existing identity
+values, and only permits otherwise-identical unique-zero to unique-one upgrades.
+All eight fields are unchanged on replay. Native schema inspection confirms
+three unique indexes and nullable NULL defaults, retaining ordinary contacts
+without a product identity. Fifteen setup tests pass. This prevents duplicate
+source identities; it is not a running customer synchronization service or an
+atomic transaction across all schema updates.
+
+The Blockwise customer snapshot candidate now has scoped authentication,
+no-store responses, safe fixed-label failure logging and native isolated SQL
+rehearsal coverage. It preserves raw billing/trial facts rather than inventing
+access decisions, and does not select an arbitrary owner where membership is
+ambiguous. It remains feature-branch source, not an applied product migration,
+released endpoint or enabled CRM writer. Current complete repository checks
+passed 1,309 tests with two skips; typecheck and production build also passed.
+Native fixture checks cover permissions, bounded pagination, invalid limits,
+unchanged data and preserved RLS, with a deliberately broken permission negative
+control. Final product release and customer-journey browser acceptance remain
+separate.
