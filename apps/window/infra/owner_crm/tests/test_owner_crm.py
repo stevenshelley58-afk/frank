@@ -94,6 +94,10 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn('local-only', backup)
         self.assertIn("custom-fields.json", backup)
         self.assertIn("sha256sum -c SHA256SUMS", restore)
+        self.assertIn("verify-safe-config", restore)
+        self.assertIn("restored public files differ from native archive", restore)
+        self.assertIn("temporary compose cleanup failed; no success receipt was published", restore)
+        self.assertIn("cleanup:\"verified and completed\"", restore)
         self.assertIn("owner-crm-restore-drill", restore)
         self.assertIn('rm -rf -- \"$drill_root\"', restore)
         self.assertIn("internal: true", drill)
@@ -101,6 +105,8 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn('bench --site \"${OWNER_CRM_DRILL_SITE}\" restore', drill)
         self.assertIn("mute_emails 1", drill)
         self.assertIn("enable_scheduler 0", drill)
+        self.assertIn("verify-safe-config", drill)
+        self.assertIn("database_credentials_restored:false", restore)
         self.assertNotIn("scheduler:", drill)
 
 

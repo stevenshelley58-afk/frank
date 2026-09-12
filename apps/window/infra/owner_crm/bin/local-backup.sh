@@ -42,8 +42,8 @@ tar -tf "$stage/$public" | LC_ALL=C sort > "$stage/public-files.members"
 tar -tf "$stage/$private" | LC_ALL=C sort > "$stage/private-files.members"
 jq -e . "$stage/$config" >/dev/null
 kwargs=$(jq -cn --argjson names "$custom_field_names" '{doctype:"Custom Field",filters:{name:["in",$names]},fields:["name","dt","fieldname","label","fieldtype","options","insert_after","reqd","hidden","read_only"],order_by:"name asc"}')
-"${compose[@]}" exec -T backend bench --site "$site" execute frappe.get_all --kwargs "$kwargs" | jq -S . > "$stage/custom-fields.json"
-jq -e --argjson expected "$custom_field_names" 'length == 8 and (map(.name) == $expected)' "$stage/custom-fields.json" >/dev/null || fail "the exact eight expected custom fields are not present"
+"${compose[@]}" exec -T backend bench --site "$site" execute frappe.get_all --kwargs "$kwargs" | jq -S 'sort_by(.name)' > "$stage/custom-fields.json"
+jq -e --argjson expected "$custom_field_names" 'length == 8 and ((map(.name) | sort) == ($expected | sort))' "$stage/custom-fields.json" >/dev/null || fail "the exact eight expected custom fields are not present"
 (
   cd "$stage"
   sha256sum "$sql" "$public" "$private" "$config" custom-fields.json public-files.members private-files.members > SHA256SUMS
@@ -54,7 +54,8 @@ jq -n --arg backup_id "$run_id" --arg site "$site" --arg source_sha "$source_sha
   --arg custom_fields_sha "$(sha256sum "$stage/custom-fields.json" | awk '{print $1}')" \
   --arg public_members_sha "$(sha256sum "$stage/public-files.members" | awk '{print $1}')" \
   --arg private_members_sha "$(sha256sum "$stage/private-files.members" | awk '{print $1}')" \
-  '{backup_id:$backup_id,site:$site,source_sha:$source_sha,scope:"local-only",off_host:false,rpo_claim:false,native:{sql:$sql,public_files:$public,private_files:$private,site_config:$config},manifests:{custom_fields_sha256:$custom_fields_sha,public_files_members_sha256:$public_members_sha,private_files_members_sha256:$private_members_sha}}' > "$stage/receipt.json"
+  --arg config_sha "$(sha256sum "$stage/$config" | awk '{print $1}')" \
+  '{backup_id:$backup_id,site:$site,source_sha:$source_sha,scope:"local-only",off_host:false,rpo_claim:false,native:{sql:$sql,public_files:$public,private_files:$private,site_config:$config},manifests:{custom_fields_sha256:$custom_fields_sha,public_files_members_sha256:$public_members_sha,private_files_members_sha256:$private_members_sha,site_config_sha256:$config_sha}}' > "$stage/receipt.json"
 chown -R root:root "$stage"
 chmod -R go-rwx "$stage"
 mv "$stage" "$final"
