@@ -53,7 +53,8 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> tuple[dict[str, Any], ...]:
         if not isinstance(hook["name"], str) or not hook["name"].startswith("owner-") or hook["name"] in names: raise NotificationError("webhook name is invalid or duplicate")
         if hook["webhook_doctype"] not in ALLOWED_DOCTYPES or hook["webhook_docevent"] != "after_insert" or hook["enabled"] != 1: raise NotificationError("webhook event is not a new owner task or ticket")
         if hook["request_url"] != URL or hook["request_method"] != "POST" or hook["request_structure"] != "JSON" or hook["timeout"] != 5 or hook["background_jobs_queue"] != "short": raise NotificationError("webhook delivery target is unsafe")
-        if not isinstance(hook["webhook_headers"], list) or hook["webhook_headers"] != [{"key":"Authorization","value":"publisher-basic"}]: raise NotificationError("webhook authentication contract is invalid")
+        expected_headers = [{"key":"Authorization","value":"publisher-basic"},{"key":"Content-Type","value":"application/json"}]
+        if not isinstance(hook["webhook_headers"], list) or hook["webhook_headers"] != expected_headers: raise NotificationError("webhook authentication contract is invalid")
         try: payload = json.loads(hook["webhook_json"])
         except (TypeError, json.JSONDecodeError) as exc: raise NotificationError("webhook payload is invalid") from exc
         if set(payload) != {"topic","title","message","tags"} or payload["topic"] != TOPIC or not all(isinstance(payload[k], str) and payload[k] for k in ("title","message")) or not isinstance(payload["tags"], list): raise NotificationError("webhook payload is unsafe")
@@ -71,7 +72,6 @@ class Client(crm.FrappeRestClient):
         query = urllib.parse.urlencode({"filters": json.dumps([["name","=",name]], separators=(",",":")), "fields": json.dumps(["name"], separators=(",",":")), "limit_page_length":"2"})
         data = self._request("GET", "/api/resource/Webhook?" + query).get("data")
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data): raise NotificationError("Frappe returned invalid Webhook list")
-        return data
     def get_webhook(self, name: str) -> dict[str, Any]:
         data = self._request("GET", "/api/resource/Webhook/" + urllib.parse.quote(name, safe="")).get("data")
         if not isinstance(data, dict): raise NotificationError("Frappe returned invalid Webhook")
@@ -79,17 +79,21 @@ class Client(crm.FrappeRestClient):
     def create_webhook(self, hook: Mapping[str, Any]) -> None:
         data = self._request("POST", "/api/resource/Webhook", body=dict(hook)).get("data")
         if not isinstance(data, dict) or data.get("name") != hook["name"]: raise NotificationError("Frappe did not create the requested Webhook")
+    def update_webhook(self, hook: Mapping[str, Any]) -> None:
+        data = self._request("PUT", "/api/resource/Webhook/" + urllib.parse.quote(str(hook["name"]), safe=""), body=dict(hook)).get("data")
+        if not isinstance(data, dict) or data.get("name") != hook["name"]: raise NotificationError("Frappe did not update the requested Webhook")
 
 def _desired(hook: Mapping[str, Any], password: str) -> dict[str, Any]:
     value = base64.b64encode(("publisher:" + password).encode("utf-8")).decode("ascii")
-    result = dict(hook); result["webhook_headers"] = [{"key":"Authorization", "value":"Basic " + value}]
+    result = dict(hook)
+    result["webhook_headers"] = [{"key":"Authorization", "value":"Basic " + value}, {"key":"Content-Type", "value":"application/json"}]
     return result
 
 def _compatible(actual: Mapping[str, Any], desired: Mapping[str, Any]) -> bool:
     for key in ("name","webhook_doctype","webhook_docevent","enabled","request_url","request_method","request_structure","timeout","background_jobs_queue","webhook_json"):
         if str(actual.get(key, "")) != str(desired[key]): return False
     headers = actual.get("webhook_headers")
-    return isinstance(headers, list) and len(headers) == 1 and headers[0].get("key") == "Authorization" and headers[0].get("value") == desired["webhook_headers"][0]["value"]
+    return isinstance(headers, list) and [{"key": item.get("key"), "value": item.get("value")} for item in headers] == desired["webhook_headers"]
 
 def run_setup(*, apply: bool = False, manifest_path: Path = DEFAULT_MANIFEST, client: Client | None = None) -> tuple[PlanItem, ...]:
     hooks = load_manifest(manifest_path); password = _load_env_value(NTFY_SECRET, "NTFY_PUBLISHER_PASSWORD")
@@ -103,11 +107,14 @@ def run_setup(*, apply: bool = False, manifest_path: Path = DEFAULT_MANIFEST, cl
             found = client.list_named(hook["name"])
             if len(found) > 1: raise NotificationError("duplicate native Webhooks found")
             if not found: plan.append(PlanItem("create", hook["name"])); continue
-            if not _compatible(client.get_webhook(hook["name"]), hook): raise NotificationError("existing native Webhook is incompatible")
-            plan.append(PlanItem("unchanged", hook["name"]))
+            actual = client.get_webhook(hook["name"])
+            if _compatible(actual, hook): plan.append(PlanItem("unchanged", hook["name"])); continue
+            if actual.get("webhook_doctype") != hook["webhook_doctype"] or actual.get("webhook_docevent") != "after_insert": raise NotificationError("existing native Webhook is incompatible")
+            plan.append(PlanItem("update", hook["name"]))
         if apply:
             for hook, item in zip(desired, plan):
                 if item.action == "create": client.create_webhook(hook)
+                elif item.action == "update": client.update_webhook(hook)
         return tuple(plan)
     finally:
         if owned:
