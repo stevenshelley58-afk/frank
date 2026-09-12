@@ -1,0 +1,31 @@
+#!/usr/bin/env bash
+# The only supported operator entrypoint for this isolated foundation.
+set -euo pipefail
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+root_dir=$(cd "$script_dir/.." && pwd)
+secret_file=${OWNER_CRM_SECRET_FILE:-/srv/frank/secrets/owner-crm.env}
+
+usage() { echo "usage: owner-crm {config|up|create-site|health|backup-preflight}" >&2; exit 2; }
+test -r "$secret_file" || { echo "missing owner CRM secret file: $secret_file" >&2; exit 1; }
+test "$(stat -c %a "$secret_file")" = 600 || { echo "secret file must be mode 0600" >&2; exit 1; }
+
+compose=(docker compose --project-directory "$root_dir" --env-file "$secret_file" -f "$root_dir/compose.yaml")
+case ${1:-} in
+  config) "${compose[@]}" config -q ;;
+  up)
+    runtime_root=$(sed -n 's/^OWNER_CRM_RUNTIME_ROOT=//p' "$secret_file" | tail -n1)
+    test -n "$runtime_root" || { echo "OWNER_CRM_RUNTIME_ROOT missing" >&2; exit 1; }
+    install -d -m 0700 "$runtime_root"/{sites,logs,mariadb,redis-queue}
+    "${compose[@]}" up -d
+    ;;
+  create-site)
+    # run starts only the dependencies needed for an empty, fresh site. Once the
+    # site exists, start the browser-facing services and then assert live state.
+    "${compose[@]}" --profile tools run --rm create-site
+    "${compose[@]}" up -d
+    "$script_dir/health.sh"
+    ;;
+  health) "$script_dir/health.sh" ;;
+  backup-preflight) "$script_dir/backup-preflight.sh" ;;
+  *) usage ;;
+esac
