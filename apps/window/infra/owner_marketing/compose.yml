@@ -1,0 +1,52 @@
+name: frank-owner-marketing
+services:
+  db:
+    image: mysql:8.4@sha256:8c19b656bb381f163750b238852bd377ba5764e1ec30cdd3f02e55cf8e2f89b7
+    container_name: frank-owner-marketing-db
+    restart: unless-stopped
+    command: ["--default-authentication-plugin=mysql_native_password"]
+    environment:
+      MYSQL_DATABASE: mautic
+      MYSQL_USER: mautic
+      MYSQL_PASSWORD: ${MAUTIC_DB_PASSWORD:?required}
+      MYSQL_ROOT_PASSWORD: ${MAUTIC_DB_ROOT_PASSWORD:?required}
+    volumes: [owner_marketing_db:/var/lib/mysql]
+    networks: [owner_marketing_private]
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$${MAUTIC_DB_ROOT_PASSWORD} --silent"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+  mautic:
+    image: mautic/mautic:7.2-apache@sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda
+    container_name: frank-owner-marketing
+    restart: unless-stopped
+    depends_on: {db: {condition: service_healthy}}
+    environment:
+      MAUTIC_DB_HOST: db
+      MAUTIC_DB_NAME: mautic
+      MAUTIC_DB_USER: mautic
+      MAUTIC_DB_PASSWORD: ${MAUTIC_DB_PASSWORD:?required}
+      MAUTIC_RUN_CRON_JOBS: "false"
+      MAUTIC_MAILER_TRANSPORT: null
+      MAUTIC_URL: http://127.0.0.1:${MAUTIC_HOST_PORT:-18106}
+    ports: ["127.0.0.1:${MAUTIC_HOST_PORT:-18106}:80"]
+    volumes: [owner_marketing_config:/var/www/html/config, owner_marketing_media:/var/www/html/docroot/media]
+    labels:
+      org.frank.source-sha: "${MAUTIC_SOURCE_SHA:?required}"
+      org.frank.image-digest: "sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda"
+    networks: [owner_marketing_private]
+    healthcheck:
+      test: ["CMD-SHELL", "php -r '$$f=@file_get_contents("http://127.0.0.1/"); exit($$f===false?1:0);'"]
+      interval: 15s
+      timeout: 8s
+      retries: 20
+      start_period: 30s
+volumes:
+  owner_marketing_db: {name: frank_owner_marketing_db}
+  owner_marketing_config: {name: frank_owner_marketing_config}
+  owner_marketing_media: {name: frank_owner_marketing_media}
+networks:
+  owner_marketing_private:
+    name: frank_owner_marketing_private
+    internal: true
