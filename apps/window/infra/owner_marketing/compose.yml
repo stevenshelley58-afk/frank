@@ -27,7 +27,9 @@ services:
       MAUTIC_DB_USER: mautic
       MAUTIC_DB_PASSWORD: ${MAUTIC_DB_PASSWORD:?required}
       MAUTIC_RUN_CRON_JOBS: "false"
-      MAUTIC_MAILER_TRANSPORT: null
+      MAUTIC_MAILER_TRANSPORT: smtp
+      MAUTIC_MAILER_HOST: mail-sink.invalid
+      MAUTIC_MAILER_PORT: "25"
       MAUTIC_URL: http://127.0.0.1:${MAUTIC_HOST_PORT:-18106}
     ports: ["127.0.0.1:${MAUTIC_HOST_PORT:-18106}:80"]
     volumes: [owner_marketing_config:/var/www/html/config, owner_marketing_media:/var/www/html/docroot/media]
@@ -36,7 +38,7 @@ services:
       org.frank.image-digest: "sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda"
     networks: [owner_marketing_private]
     healthcheck:
-      test: ["CMD-SHELL", 'php -r "$$f=@file_get_contents(\"http://127.0.0.1/\"); exit($$f===false?1:0);"']
+      test: ["CMD-SHELL", 'php -r "$$s=@fsockopen(\"127.0.0.1\",80); exit($$s?0:1);"']
       interval: 15s
       timeout: 8s
       retries: 20
