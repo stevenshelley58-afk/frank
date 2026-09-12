@@ -166,8 +166,7 @@ services:
       - >-
         test -n "$${OWNER_CRM_BACKUP_PATH:-}";
         case "$${OWNER_CRM_BACKUP_PATH}" in /backups/local-*) ;; *) exit 2 ;; esac;
-        test ! -e "$${OWNER_CRM_BACKUP_PATH}" || { echo "backup path already exists"; exit 3; };
-        install -d -m 0700 "$${OWNER_CRM_BACKUP_PATH}";
+        test -d "$${OWNER_CRM_BACKUP_PATH}" && test ! -L "$${OWNER_CRM_BACKUP_PATH}" || { echo "backup path is not a regular directory"; exit 3; };
         bench --site "owner.crm.internal" backup --with-files --backup-path "$${OWNER_CRM_BACKUP_PATH}"
 
   create-site:
