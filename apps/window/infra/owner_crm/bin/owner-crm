@@ -55,6 +55,9 @@ case ${1:-} in
   create-site)
     prepare_runtime
     test ! -e "$runtime_root/sites/owner.crm.internal" || fail "site path already exists; refusing to overwrite a partial or existing site"
+    # Recreate this owner-only one-shot service so a previous failed provision
+    # cannot leave a stale common_site_config behind for the first site build.
+    "${compose[@]}" up -d --force-recreate configurator
     "${compose[@]}" --profile tools run --rm create-site
     : > "$runtime_root/.owner-crm-site-created"
     chown root:root "$runtime_root/.owner-crm-site-created"

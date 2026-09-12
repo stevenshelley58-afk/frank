@@ -53,6 +53,7 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn("source checkout is not clean", wrapper)
         self.assertIn("refusing an unmarked runtime root", wrapper)
         self.assertIn("frappe_uid=1000", wrapper)
+        self.assertIn("up -d --force-recreate configurator", wrapper)
         health = (ROOT / "bin/health.sh").read_text()
         self.assertNotIn("show-config", health)
         self.assertIn("common_site_config.json", health)
