@@ -45,3 +45,12 @@ the current checkout or production state.
 
 The vendored documentation under `apps/window/vendor/` belongs to its
 upstream projects and is not Frank operational guidance.
+
+## Owner CRM private foundations
+
+[Owner CRM contract](OWNER_CRM.md) records the owner/customer boundary and
+remaining activation gates. Component runbooks: [native CRM and Helpdesk](../apps/window/infra/owner_crm/README.md),
+[native field setup](../apps/window/infra/owner_crm_setup/README.md),
+[private Mautic](../apps/window/infra/owner_marketing/README.md), and
+[private ntfy](../apps/window/infra/owner_notifications/README.md).
+These are private foundations, not a completed customer-lifecycle acceptance.

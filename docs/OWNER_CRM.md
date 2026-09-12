@@ -140,3 +140,12 @@ Only the frontend has an ingress bridge; data and worker services remain on
 the internal-only network. This is private foundation readiness, not complete
 CRM activation. The installed framework licence is MIT; the installed CRM,
 Helpdesk and Telephony licence files are AGPLv3. No upstream fork was created.
+
+Mautic 7.2 is now installed with a native administrator on loopback port 18106.
+Its verifier exercised a real login, dashboard response and anonymous access
+denial; contacts and campaigns are both empty. Only a fixed upstream Nginx
+reverse proxy has the extra ingress network, while Mautic and MySQL remain
+internal-only. The sending transport is deliberately non-delivering and cron
+is disabled. No email flow has been activated and no marketing contact has
+been imported. A native sales-stage mapping is recorded in the setup guide;
+standard conversion and won/lost meanings are preserved.
