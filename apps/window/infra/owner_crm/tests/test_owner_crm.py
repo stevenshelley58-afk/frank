@@ -112,6 +112,8 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn("unsupported files-root layout", restore)
         self.assertIn("staged_fixture", restore)
         self.assertIn("fixture native backup did not capture encryption key", restore)
+        self.assertIn("\"unique\"", restore)
+        self.assertIn("fixture attachments are absent after restore", restore)
         self.assertIn("fixture-seed", drill)
         self.assertIn("set_encrypted_password", drill)
         self.assertIn("get_decrypted_password", drill)

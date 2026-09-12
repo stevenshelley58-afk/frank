@@ -41,7 +41,7 @@ config=$(find "$stage" -maxdepth 1 -type f -name '*site_config_backup.json' -pri
 tar -tf "$stage/$public" | LC_ALL=C sort > "$stage/public-files.members"
 tar -tf "$stage/$private" | LC_ALL=C sort > "$stage/private-files.members"
 jq -e . "$stage/$config" >/dev/null
-kwargs=$(jq -cn --argjson names "$custom_field_names" '{doctype:"Custom Field",filters:{name:["in",$names]},fields:["name","dt","fieldname","label","fieldtype","options","insert_after","reqd","hidden","read_only"],order_by:"name asc"}')
+kwargs=$(jq -cn --argjson names "$custom_field_names" '{doctype:"Custom Field",filters:{name:["in",$names]},fields:["name","dt","fieldname","label","fieldtype","options","insert_after","reqd","hidden","read_only","unique"],order_by:"name asc"}')
 "${compose[@]}" exec -T backend bench --site "$site" execute frappe.get_all --kwargs "$kwargs" | jq -S 'sort_by(.name)' > "$stage/custom-fields.json"
 jq -e --argjson expected "$custom_field_names" 'length == 8 and ((map(.name) | sort) == ($expected | sort))' "$stage/custom-fields.json" >/dev/null || fail "the exact eight expected custom fields are not present"
 (

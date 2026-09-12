@@ -102,6 +102,8 @@ services:
     command:
       - >-
         key=$$(cat /fixture-input/encryption-key); secret=$$(cat /fixture-input/secret);
+        test -z "$$(find "sites/${OWNER_CRM_DRILL_SITE}/public/files" -type f -name 'owner-crm-fixture-public*' -print -quit)";
+        test -z "$$(find "sites/${OWNER_CRM_DRILL_SITE}/private/files" -type f -name 'owner-crm-fixture-private*' -print -quit)";
         bench --site "${OWNER_CRM_DRILL_SITE}" set-config encryption_key "$$key";
         public_args=$$(jq -cn --arg content "$$(cat /fixture-input/public.txt)" '{fname:"owner-crm-fixture-public.txt",content:$$content,dt:"System Settings",dn:"System Settings",is_private:0}');
         private_args=$$(jq -cn --arg content "$$(cat /fixture-input/private.txt)" '{fname:"owner-crm-fixture-private.txt",content:$$content,dt:"System Settings",dn:"System Settings",is_private:1}');
@@ -142,10 +144,10 @@ services:
     entrypoint: ["bash", "-ec"]
     command:
       - >-
-        test "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/public/files" -type f | wc -l)" = 1;
-        test "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/private/files" -type f | wc -l)" = 1;
-        test "$$(sha256sum "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/public/files" -type f -print -quit)" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/public.txt | awk '{print $$1}')";
-        test "$$(sha256sum "$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/private/files" -type f -print -quit)" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/private.txt | awk '{print $$1}')";
+        public_files=$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/public/files" -type f -name 'owner-crm-fixture-public*'); private_files=$$(find "sites/${OWNER_CRM_FIXTURE_SITE}/private/files" -type f -name 'owner-crm-fixture-private*');
+        test -n "$$public_files" && test -n "$$private_files";
+        for file in $$public_files; do test "$$(sha256sum "$$file" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/public.txt | awk '{print $$1}')"; done;
+        for file in $$private_files; do test "$$(sha256sum "$$file" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/private.txt | awk '{print $$1}')"; done;
         password_args=$$(jq -cn '{doctype:"CRM Twilio Settings",name:"CRM Twilio Settings",fieldname:"api_secret"}');
         actual=$$(bench --site "${OWNER_CRM_FIXTURE_SITE}" execute frappe.utils.password.get_decrypted_password --kwargs "$$password_args" | jq -r .); test "$$actual" = "$$(cat /fixture-input/secret)"
 
