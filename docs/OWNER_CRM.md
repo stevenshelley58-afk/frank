@@ -106,12 +106,14 @@ subscribed. The image content and pinned digest were checked, not just its
 label. This is backend verification, not actual phone delivery.
 
 Native Frappe field setup has ten passing tests including a real loopback HTTP
-transport test. Its actual owner-site apply is a separate gate. No prospect
+transport test. Its actual owner-site apply created all eight fields; a second dry-run
+reported all eight unchanged. Anonymous lead reads and reuse of a logged-out
+Administrator session both returned HTTP 403. No prospect
 or customer records have been imported and no billing mirror is running yet.
 
 The Blockwise signup-attribution and watchdog-recipient changes passed 1,301
-tests with two skips on the current integration candidate. The full build and
-release are separate checks. This does not prove public signup, inbox delivery,
+tests with two skips on the current integration candidate. The full build also passed. Production release and
+final browser acceptance remain separate checks. This does not prove public signup, inbox delivery,
 CRM data synchronization or lifecycle E2E.
 
 ### Sending and phone-provider constraints
@@ -129,3 +131,12 @@ The private service currently has no public authenticated route or device
 subscription. Do not claim background delivery until the intended phone has
 received and opened a test notification. Lock-screen messages must omit
 customer contact details and link back to an authenticated owner surface.
+
+The fresh owner CRM site now runs upstream Frappe 15.120.1, CRM 1.83.0,
+Helpdesk 1.30.1 and Helpdesk's required Telephony dependency. All required
+services passed the runtime health check, the host loopback endpoint answered,
+and native Administrator login was tested. Email and scheduling are disabled.
+Only the frontend has an ingress bridge; data and worker services remain on
+the internal-only network. This is private foundation readiness, not complete
+CRM activation. The installed framework licence is MIT; the installed CRM,
+Helpdesk and Telephony licence files are AGPLv3. No upstream fork was created.

@@ -40,7 +40,7 @@ does not create or rename status records:
 | Owner stage | Native status | Native meaning |
 | --- | --- | --- |
 | new | CRM Lead Status 'New' | Open |
-| qualifying | CRM Lead Status 'Nurture'; CRM Deal Status 'Qualification' after conversion | Ongoing qualification / open deal handoff |
+| qualifying | Lead review task while 'New'; CRM Deal Status 'Qualification' after conversion | Review before the native deal handoff |
 | conversation | CRM Lead Status 'Contacted' | Ongoing |
 | meeting/demo | CRM Deal Status 'Demo/Making' | Ongoing |
 | decision | CRM Deal Status 'Negotiation' then 'Ready to Close' | Ongoing |
@@ -51,5 +51,7 @@ marks it converted, and creates a CRM Deal. 'Qualified' and 'Converted' are
 therefore preserved as native conversion outcomes, not repurposed as the
 owner's qualifying stage. 'Unqualified' and 'Junk' remain the native lost lead
 outcomes. 'Proposal/Quotation' is available as an existing optional
-commercial substage. No onboarding or billing statuses are added; Stripe and
+commercial substage. 'Nurture' means deferred follow-up, not proof of qualification;
+'Contacted' does not prove a reply. Conversation evidence comes from the linked
+mail thread or an operator note. No onboarding or billing statuses are added; Stripe and
 Blockwise remain authoritative for those concerns.
