@@ -5,6 +5,7 @@ compose_file="$script_dir/compose.yml"
 die(){ echo "owner-notifications check: $*" >&2; exit 1; }
 cd "$script_dir/../../../.."
 source_sha="$(git rev-parse HEAD)"
+export NTFY_SOURCE_SHA="$source_sha"
 [[ -z "$(git status --porcelain)" ]] || die "worktree has untracked or changed files"
 git ls-files --error-unmatch apps/window/infra/owner_notifications/compose.yml apps/window/infra/owner_notifications/deploy.sh apps/window/infra/owner_notifications/check.sh >/dev/null || die "notification source is not tracked"
 cd "$script_dir"
