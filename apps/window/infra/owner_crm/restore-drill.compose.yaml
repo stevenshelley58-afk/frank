@@ -148,6 +148,10 @@ services:
         test -n "$$public_files" && test -n "$$private_files";
         for file in $$public_files; do test "$$(sha256sum "$$file" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/public.txt | awk '{print $$1}')"; done;
         for file in $$private_files; do test "$$(sha256sum "$$file" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/private.txt | awk '{print $$1}')"; done;
+        public_url=$$(bench --site "${OWNER_CRM_FIXTURE_SITE}" execute frappe.get_all --kwargs '{"doctype":"File","filters":{"file_name":"owner-crm-fixture-public.txt"},"fields":["file_url"],"limit_page_length":1}' | jq -r '.[0].file_url');
+        private_url=$$(bench --site "${OWNER_CRM_FIXTURE_SITE}" execute frappe.get_all --kwargs '{"doctype":"File","filters":{"file_name":"owner-crm-fixture-private.txt"},"fields":["file_url"],"limit_page_length":1}' | jq -r '.[0].file_url');
+        test "$$(sha256sum "sites/${OWNER_CRM_FIXTURE_SITE}/public$$public_url" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/public.txt | awk '{print $$1}')";
+        test "$$(sha256sum "sites/${OWNER_CRM_FIXTURE_SITE}$$private_url" | awk '{print $$1}')" = "$$(sha256sum /fixture-input/private.txt | awk '{print $$1}')";
         password_args=$$(jq -cn '{doctype:"CRM Twilio Settings",name:"CRM Twilio Settings",fieldname:"api_secret"}');
         actual=$$(bench --site "${OWNER_CRM_FIXTURE_SITE}" execute frappe.utils.password.get_decrypted_password --kwargs "$$password_args" | jq -r .); test "$$actual" = "$$(cat /fixture-input/secret)"
 
