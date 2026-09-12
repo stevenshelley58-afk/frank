@@ -133,7 +133,9 @@ services:
       websocket: {condition: service_started}
     ports:
       - "127.0.0.1:18081:8080"
-    networks: [owner-crm-internal]
+    # Docker 29 does not publish a port from an internal-only network. The
+    # frontend alone joins this ordinary bridge; every app and data service stays internal.
+    networks: [owner-crm-internal, owner-crm-ingress]
     healthcheck:
       test: ["CMD", "curl", "-fsS", "-H", "Host: owner.crm.internal", "http://localhost:8080/api/method/ping"]
       interval: 30s
@@ -161,3 +163,5 @@ services:
 networks:
   owner-crm-internal:
     internal: true
+  owner-crm-ingress:
+    driver: bridge

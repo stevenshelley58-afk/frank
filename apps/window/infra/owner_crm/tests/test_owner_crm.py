@@ -15,6 +15,8 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn("name: owner-crm", self.compose)
         self.assertIn("internal: true", self.compose)
         self.assertIn('"127.0.0.1:18081:8080"', self.compose)
+        self.assertIn("networks: [owner-crm-internal, owner-crm-ingress]", self.compose)
+        self.assertIn("owner-crm-ingress:\n    driver: bridge", self.compose)
         self.assertIn('/srv/frank/owner-crm/sites', self.compose)
         self.assertNotIn("blockwise-product", self.compose)
         self.assertNotIn("blockwise-crm", self.compose)
