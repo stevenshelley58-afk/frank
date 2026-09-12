@@ -142,13 +142,13 @@ services:
     restart: "no"
     entrypoint: ["bash", "-ec"]
     command: >-
-      test ! -d "sites/${OWNER_CRM_SITE}" || { echo "site already exists"; exit 0; };
+      test ! -e "sites/owner.crm.internal" || { echo "site path already exists"; exit 3; };
       bench new-site --mariadb-user-host-login-scope=% --db-root-username=root
       --db-root-password="${OWNER_CRM_DB_PASSWORD}" --admin-password="${OWNER_CRM_ADMIN_PASSWORD}"
-      --install-app crm --install-app telephony --install-app helpdesk --set-default "${OWNER_CRM_SITE}";
-      bench --site "${OWNER_CRM_SITE}" set-config mute_emails 1;
-      bench --site "${OWNER_CRM_SITE}" set-config enable_scheduler 0;
-      bench --site "${OWNER_CRM_SITE}" migrate
+      --install-app crm --install-app telephony --install-app helpdesk --set-default "owner.crm.internal";
+      bench --site "owner.crm.internal" set-config mute_emails 1;
+      bench --site "owner.crm.internal" set-config enable_scheduler 0;
+      bench --site "owner.crm.internal" migrate
     depends_on:
       configurator: {condition: service_completed_successfully}
 
