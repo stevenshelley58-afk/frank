@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+set -euo pipefail
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+compose_file="$script_dir/compose.yml"
+secret_dir="${NTFY_SECRET_DIR:-/srv/frank/secrets/owner-notifications}"
+config_file="${NTFY_CONFIG_FILE:-$secret_dir/server.yml}"
+env_file="$secret_dir/owner-notifications.env"
+port="${NTFY_HOST_PORT:-18104}"
+die(){ echo "owner-notifications check: $*" >&2; exit 1; }
+command -v docker >/dev/null || die "missing docker"; command -v curl >/dev/null || die "missing curl"; command -v python3 >/dev/null || die "missing python3"
+[[ -f "$config_file" && -f "$env_file" ]] || die "external config/secret missing"
+[[ ! -L "$config_file" && ! -L "$env_file" ]] || die "external files must not be symlinks"
+[[ "$(stat -c '%a' "$config_file")" == 600 && "$(stat -c '%a' "$env_file")" == 600 ]] || die "external files must be 0600"
+cfg="$(NTFY_CONFIG_FILE="$config_file" docker compose --project-name frank-owner-notifications --env-file "$env_file" -f "$compose_file" config --format json)" || die "invalid compose"
+printf '%s' "$cfg" | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]["ntfy"]; p=s["ports"]; assert len(p)==1 and p[0]["host_ip"] in ("127.0.0.1","::1"); assert set(s["networks"])=={"owner_notifications_private"}; assert not s.get("env_file")' || die "compose policy failed"
+docker inspect frank-owner-ntfy >/dev/null 2>&1 || die "container missing"
+[[ "$(docker inspect --format '{{.State.Health.Status}}' frank-owner-ntfy)" == healthy ]] || die "container unhealthy"
+net="$(docker inspect --format '{{json .NetworkSettings.Networks}}' frank-owner-ntfy)"; printf '%s' "$net" | python3 -c 'import json,sys; assert set(json.load(sys.stdin))=={"frank_owner_notifications_private"}' || die "network policy failed"
+curl --fail --silent --show-error --connect-timeout 3 "http://127.0.0.1:$port/v1/health" >/dev/null || die "health endpoint failed"
+users="$(docker exec frank-owner-ntfy ntfy user list 2>/dev/null)"; printf '%s' "$users" | grep -q owner || die "owner user missing"; printf '%s' "$users" | grep -q publisher || die "publisher user missing"
+acl="$(docker exec frank-owner-ntfy ntfy access 2>/dev/null)"; printf '%s\n' "$acl" | grep -A2 -F 'user owner ' | grep -q 'read-only access to topic owner-notifications' || die "owner read ACL missing"; printf '%s\n' "$acl" | grep -A2 -F 'user publisher ' | grep -q 'write-only access to topic owner-notifications' || die "publisher write ACL missing"
+echo "healthy: loopback:$port, deny-all auth, native owner-read/publisher-write ACLs, 24h cache"

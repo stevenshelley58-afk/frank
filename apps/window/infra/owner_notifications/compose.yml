@@ -1,0 +1,30 @@
+name: frank-owner-notifications
+services:
+  ntfy:
+    image: binwiederhier/ntfy:v2.14.0@sha256:416507e2100728cac39bb911fd26759a1de872ca8d1e428d08db73054b33dc85
+    container_name: frank-owner-ntfy
+    restart: unless-stopped
+    command: ["serve"]
+    volumes:
+      - ${NTFY_CONFIG_FILE:-/srv/frank/secrets/owner-notifications/server.yml}:/etc/ntfy/server.yml:ro
+      - owner_notifications_cache:/var/cache/ntfy
+    ports:
+      - "127.0.0.1:${NTFY_HOST_PORT:-18104}:80"
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=32m
+    security_opt:
+      - no-new-privileges:true
+    cap_drop: [ALL]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O - http://127.0.0.1:80/v1/health >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+    networks: [owner_notifications_private]
+volumes:
+  owner_notifications_cache:
+    name: frank_owner_notifications_cache
+networks:
+  owner_notifications_private:
+    name: frank_owner_notifications_private
