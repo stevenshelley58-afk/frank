@@ -2,7 +2,7 @@
 
 This bundle configures exactly two native Frappe Webhooks: `after_insert` for
 `CRM Task` and `HD Ticket`. Both enqueue on Frappe's existing short worker and
-POST a static, generic JSON alert to the private ntfy topic. No custom Frappe
+POST a static, generic JSON alert to the ntfy JSON publish root, selecting the private topic from the payload. No custom Frappe
 app, DocType, scheduler, event server, customer route, mail, or phone delivery
 is introduced.
 

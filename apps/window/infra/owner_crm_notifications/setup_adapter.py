@@ -13,7 +13,7 @@ from owner_crm_setup import setup_adapter as crm
 DEFAULT_MANIFEST = Path(__file__).with_name("manifest.json")
 NTFY_SECRET = Path("/srv/frank/secrets/owner-notifications/owner-notifications.env")
 TOPIC = "owner-notifications"
-URL = "http://frank-owner-ntfy/owner-notifications"
+URL = "http://frank-owner-ntfy/"
 ALLOWED_DOCTYPES = {"CRM Task", "HD Ticket"}
 
 class NotificationError(crm.SetupError):
