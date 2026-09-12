@@ -4,27 +4,37 @@ Frank is only the authenticated transport and display boundary. It does not
 reason, select models, invoke tools, run provider adapters, or host an agent
 loop. Hermes remains the sole brain and executor.
 
-## CRM and support projection (additive)
+## Owner CRM authority and existing projection compatibility
 
-For the Blockwise launch, Mautic (GPL) is the CRM/campaign authority, Chatwoot
-(MIT) is the customer-enquiry/support authority, and Mailflare is the human
-inbox authority for incoming mail and replies. Frank accepts only
-provider-neutral connection metadata (`provider: mautic|chatwoot|mailflare`) and opaque
-`credential_ref`/`connection_ref` values. `GET /api/providers/readiness` reports
+The current owner CRM decision is recorded in [OWNER_CRM.md](OWNER_CRM.md).
+The dedicated upstream Frappe CRM site owns owner contacts, sales and tasks;
+Frappe Helpdesk owns owner support, and Mautic owns approved email flows.
+An ordinary business mailbox owns human replies. Mailbox verification and
+marketing/cold transport approval are separate, unfinished gates. This replaces
+the earlier proposal to use Mautic as the CRM and Chatwoot as owner support.
+It does not alter existing customer-agency CRM data or expose Frank to customers.
+
+The existing Window implementation still accepts connection metadata for
+`provider: mautic|chatwoot|mailflare` and opaque `credential_ref`/`connection_ref`
+values. These compatibility entries are not evidence that those products are
+the selected or operational owner CRM. `GET /api/providers/readiness` reports
 `unconfigured`, `configured`, `ready`, or `error`; a URL alone never implies
-configured or verified. These are operator/Hermes projection inputs; Frank
-does not independently verify credentials or manufacture receipts.
+configured or verified. Frank does not independently verify credentials or
+manufacture receipts. A Frappe/Helpdesk provider adapter and corresponding
+projection have not been activated merely by provisioning native services.
 
-Hermes may publish a redacted JSON projection at the path in
-`SUPPORT_CONVERSATIONS_FILE` with `{version: 1, conversations: [...]}`. Each
-record may contain only `id`, `account_id`, `project_id`, `status` (open,
-pending, snoozed, resolved, closed), `subject`, `updated_at`, `external_ref`,
-and an HTTPS `url` on the configured Chatwoot origin. Frank exposes this read-only at
+The existing optional support projection remains Chatwoot-specific until its
+own tested migration. Hermes may publish a redacted JSON file at
+`SUPPORT_CONVERSATIONS_FILE` with `{version: 1, conversations: [...]}`. Records
+allow only `id`, `account_id`, `project_id`, `status` (open, pending, snoozed,
+resolved, closed), `subject`, `updated_at`, `external_ref`, and an HTTPS `url`
+on the configured Chatwoot origin. Frank exposes it read-only at
 `GET /api/support/conversations` (optionally `account_id=...`) and returns 503
-for malformed or unknown-state data. Frank never accepts provider tokens,
-message bodies, or writes to Mautic/Chatwoot. Provider execution and receipt
-schemas remain Hermes-owned.
-Resend remains a transactional delivery and receipt log, not the shared inbox.
+for malformed or unknown-state data. Do not relabel a Helpdesk URL as Chatwoot
+or weaken that origin restriction to make a new integration appear ready.
+Frank accepts no provider tokens/message bodies and performs no provider writes.
+Provider execution and receipt schemas remain Hermes-owned. Resend remains a
+transactional delivery and receipt log, not the human inbox or cold sender.
 
 ## Existing compatibility surface
 

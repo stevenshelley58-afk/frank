@@ -157,8 +157,8 @@ Two native Frappe Webhooks now connect new CRM Tasks and Helpdesk tickets to
 private ntfy. One retained, clearly labelled CRM Task exercised the native short
 worker. Its replay verified the corrected ntfy JSON endpoint and a parsed generic
 notification title/message. Two native request logs have responses and no errors.
-This is at-least-once delivery, not an exactly-once guarantee; the support-ticket
-hook is configured but has not had a separate ticket canary. No public route,
+This is at-least-once delivery, not an exactly-once guarantee; a separate retained native Helpdesk ticket canary subsequently produced one
+parsed generic support notification without a customer contact or recipient. No public route,
 phone subscription or real device receipt is claimed.
 
 A native local backup and isolated restore drill succeeded. The restored app
