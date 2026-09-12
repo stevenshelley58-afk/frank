@@ -9,6 +9,8 @@ frappe_uid=1000
 frappe_gid=1000
 mariadb_uid=999
 mariadb_gid=999
+redis_uid=999
+redis_gid=1000
 
 usage() { echo "usage: owner-crm {config|up|create-site|archive-failed-site|health|backup-preflight}" >&2; exit 2; }
 fail() { echo "owner-crm: $*" >&2; exit 1; }
@@ -43,12 +45,13 @@ prepare_runtime() {
   # parent must be traversable by that user, including after a failed first run.
   install -d -m 0700 -o "$mariadb_uid" -g "$mariadb_gid" "$runtime_root/mariadb"
   test ! -L "$runtime_root/redis-queue" || fail "runtime path is a symlink: redis-queue"
-  install -d -m 0700 -o root -g root "$runtime_root/redis-queue"
+  install -d -m 0700 -o "$redis_uid" -g "$redis_gid" "$runtime_root/redis-queue"
 }
 
 clean_source
 secret_file_ok
 fixed_settings_ok
+export OWNER_CRM_SOURCE_SHA=$(git -C "$root_dir" rev-parse HEAD)
 compose=(docker compose --project-directory "$root_dir" --env-file "$secret_file" -f "$root_dir/compose.yaml")
 case ${1:-} in
   config) "${compose[@]}" config -q ;;

@@ -1,10 +1,14 @@
 # Dedicated owner CRM and Helpdesk. It never joins customer networks.
 name: owner-crm
 
+x-runtime-labels: &runtime-labels
+  io.frank.owner-crm.applied-source-sha: ${OWNER_CRM_SOURCE_SHA:?OWNER_CRM_SOURCE_SHA is required}
+
 x-image: &image
   image: ${OWNER_CRM_IMAGE:?OWNER_CRM_IMAGE is required}:${OWNER_CRM_TAG:?OWNER_CRM_TAG is required}
   pull_policy: never
   restart: unless-stopped
+  labels: *runtime-labels
 
 x-bench: &bench
   <<: *image
@@ -15,8 +19,10 @@ x-bench: &bench
 
 services:
   db:
-    image: mariadb:11.8
+    image: mariadb:11.8@sha256:2439dcd7d14010ecd1ff7a4e1c5abe8e208c34fe35290744deeeaac3569043c3
+    pull_policy: never
     restart: unless-stopped
+    labels: *runtime-labels
     command:
       - --character-set-server=utf8mb4
       - --collation-server=utf8mb4_unicode_ci
@@ -37,8 +43,10 @@ services:
       start_period: 10s
 
   redis-cache:
-    image: redis:8.6-alpine
+    image: redis:8.6-alpine@sha256:75934ddb37bfaebe3b4082ba673cac39f66495244134f33dd0a502ce03cdcd36
+    pull_policy: never
     restart: unless-stopped
+    labels: *runtime-labels
     command: ["redis-server", "--maxmemory", "128mb", "--maxmemory-policy", "allkeys-lru"]
     networks: [owner-crm-internal]
     healthcheck:
@@ -48,8 +56,10 @@ services:
       retries: 5
 
   redis-queue:
-    image: redis:8.6-alpine
+    image: redis:8.6-alpine@sha256:75934ddb37bfaebe3b4082ba673cac39f66495244134f33dd0a502ce03cdcd36
+    pull_policy: never
     restart: unless-stopped
+    labels: *runtime-labels
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
       - /srv/frank/owner-crm/redis-queue:/data
