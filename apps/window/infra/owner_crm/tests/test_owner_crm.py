@@ -64,6 +64,7 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn("archive-failed-site", wrapper)
         self.assertIn("failed site database exists; refusing to archive", wrapper)
         self.assertIn("failed-site-archives", wrapper)
+        self.assertIn("db_password=$(value OWNER_CRM_DB_PASSWORD)", wrapper)
         health = (ROOT / "bin/health.sh").read_text()
         self.assertNotIn("show-config", health)
         self.assertIn("common_site_config.json", health)

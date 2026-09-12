@@ -76,7 +76,9 @@ case ${1:-} in
     test -f "$site_path/site_config.json" && test ! -L "$site_path/site_config.json" || fail "failed site has no regular config"
     db_name=$(jq -r '.db_name // empty' "$site_path/site_config.json")
     [[ "$db_name" =~ ^_[a-z0-9]+$ ]] || fail "failed site config has an unexpected database name"
-    databases=$("${compose[@]}" exec -T -e MYSQL_PWD="$OWNER_CRM_DB_PASSWORD" db mariadb -uroot -N -e 'SHOW DATABASES') || fail "could not verify failed site database state"
+    db_password=$(value OWNER_CRM_DB_PASSWORD)
+    test -n "$db_password" || fail "owner CRM database password is missing"
+    databases=$("${compose[@]}" exec -T -e MYSQL_PWD="$db_password" db mariadb -uroot -N -e 'SHOW DATABASES') || fail "could not verify failed site database state"
     printf '%s\n' "$databases" | grep -Fxq "$db_name" && fail "failed site database exists; refusing to archive"
     archive_root="$runtime_root/failed-site-archives"
     install -d -m 0700 -o root -g root "$archive_root"
