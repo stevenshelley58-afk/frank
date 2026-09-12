@@ -28,9 +28,7 @@ services:
       MAUTIC_DB_USER: mautic
       MAUTIC_DB_PASSWORD: ${MAUTIC_DB_PASSWORD:?required}
       MAUTIC_RUN_CRON_JOBS: "false"
-      MAUTIC_MAILER_TRANSPORT: smtp
-      MAUTIC_MAILER_HOST: mail-sink.invalid
-      MAUTIC_MAILER_PORT: "25"
+      MAUTIC_MAILER_DSN: smtp://mail-sink.invalid:25
       MAUTIC_URL: http://127.0.0.1:${MAUTIC_HOST_PORT:-18106}
     volumes: [owner_marketing_config:/var/www/html/config, owner_marketing_media:/var/www/html/docroot/media]
     labels:
