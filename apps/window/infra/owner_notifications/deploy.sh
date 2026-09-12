@@ -9,7 +9,7 @@ port="${NTFY_HOST_PORT:-18104}"
 die(){ echo "owner-notifications deploy: $*" >&2; exit 1; }
 need(){ command -v "$1" >/dev/null || die "missing required command: $1"; }
 [[ -f "$compose_file" ]] || die "missing compose file"
-cd "$script_dir/../../../../.."
+cd "$script_dir/../../../.."
 git diff --quiet || die "worktree has unstaged changes"
 git diff --cached --quiet || die "worktree has staged changes"
 [[ -z "$(git status --porcelain)" ]] || die "worktree has untracked or changed files"
