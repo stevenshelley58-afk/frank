@@ -49,8 +49,8 @@ for artifact in "$sql" "$public" "$private" "$config" custom-fields.json public-
   [[ "$artifact" != */* && "$artifact" != .* ]] || fail "unsafe artifact name"
   test -f "$archive/$artifact" && test ! -L "$archive/$artifact" || fail "missing regular archive artifact: $artifact"
 done
-restore_id="restore-${run_id#local-}"
-[[ "$restore_id" =~ ^restore-[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$ ]] || fail "unsafe restore id"
+restore_id="restore-$(printf '%s' "${run_id#local-}" | tr '[:upper:]' '[:lower:]')"
+[[ "$restore_id" =~ ^restore-[0-9]{8}t[0-9]{6}z-[0-9a-f]{12}$ ]] || fail "unsafe restore id"
 drill_root="$drill_root_base/$restore_id"
 site="$restore_id.crm.internal"
 project="owner-crm-$restore_id"
