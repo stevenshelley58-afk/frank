@@ -4,7 +4,6 @@ services:
     image: mysql:8.4@sha256:8c19b656bb381f163750b238852bd377ba5764e1ec30cdd3f02e55cf8e2f89b7
     container_name: frank-owner-marketing-db
     restart: unless-stopped
-    command: ["--default-authentication-plugin=mysql_native_password"]
     environment:
       MYSQL_DATABASE: mautic
       MYSQL_USER: mautic
