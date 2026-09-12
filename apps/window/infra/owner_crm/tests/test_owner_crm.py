@@ -24,6 +24,10 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertGreaterEqual(self.compose.count("mute_emails 1"), 2)
         self.assertGreaterEqual(self.compose.count("enable_scheduler 0"), 2)
 
+    def test_config_and_site_commands_are_single_bash_scripts(self):
+        self.assertEqual(self.compose.count("    command:\n      - >-"), 2)
+        self.assertNotIn("    command: >-", self.compose)
+
     def test_site_installs_the_supported_app_set(self):
         self.assertIn("--install-app crm --install-app telephony --install-app helpdesk", self.compose)
         self.assertEqual(

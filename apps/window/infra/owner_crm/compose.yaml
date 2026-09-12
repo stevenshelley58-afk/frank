@@ -64,16 +64,17 @@ services:
     <<: *bench
     restart: on-failure
     entrypoint: ["bash", "-ec"]
-    command: >-
-      ls -1 apps > sites/apps.txt;
-      bench set-config -g db_host db;
-      bench set-config -gp db_port 3306;
-      bench set-config -g redis_cache redis://redis-cache:6379;
-      bench set-config -g redis_queue redis://redis-queue:6379;
-      bench set-config -g redis_socketio redis://redis-queue:6379;
-      bench set-config -gp socketio_port 9000;
-      bench set-config -g mute_emails 1;
-      bench set-config -g enable_scheduler 0
+    command:
+      - >-
+        ls -1 apps > sites/apps.txt;
+        bench set-config -g db_host db;
+        bench set-config -gp db_port 3306;
+        bench set-config -g redis_cache redis://redis-cache:6379;
+        bench set-config -g redis_queue redis://redis-queue:6379;
+        bench set-config -g redis_socketio redis://redis-queue:6379;
+        bench set-config -gp socketio_port 9000;
+        bench set-config -g mute_emails 1;
+        bench set-config -g enable_scheduler 0
     depends_on:
       db: {condition: service_healthy}
       redis-cache: {condition: service_healthy}
@@ -141,14 +142,15 @@ services:
     profiles: [tools]
     restart: "no"
     entrypoint: ["bash", "-ec"]
-    command: >-
-      test ! -e "sites/owner.crm.internal" || { echo "site path already exists"; exit 3; };
-      bench new-site --mariadb-user-host-login-scope=% --db-root-username=root
-      --db-root-password="${OWNER_CRM_DB_PASSWORD}" --admin-password="${OWNER_CRM_ADMIN_PASSWORD}"
-      --install-app crm --install-app telephony --install-app helpdesk --set-default "owner.crm.internal";
-      bench --site "owner.crm.internal" set-config mute_emails 1;
-      bench --site "owner.crm.internal" set-config enable_scheduler 0;
-      bench --site "owner.crm.internal" migrate
+    command:
+      - >-
+        test ! -e "sites/owner.crm.internal" || { echo "site path already exists"; exit 3; };
+        bench new-site --mariadb-user-host-login-scope=% --db-root-username=root
+        --db-root-password="${OWNER_CRM_DB_PASSWORD}" --admin-password="${OWNER_CRM_ADMIN_PASSWORD}"
+        --install-app crm --install-app telephony --install-app helpdesk --set-default "owner.crm.internal";
+        bench --site "owner.crm.internal" set-config mute_emails 1;
+        bench --site "owner.crm.internal" set-config enable_scheduler 0;
+        bench --site "owner.crm.internal" migrate
     depends_on:
       configurator: {condition: service_completed_successfully}
 
