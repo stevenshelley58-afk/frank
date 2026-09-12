@@ -62,10 +62,14 @@ services:
 
   configurator:
     <<: *bench
-    restart: on-failure
+    restart: "no"
     entrypoint: ["bash", "-ec"]
     command:
       - >-
+        if test ! -e sites/common_site_config.json; then
+          (umask 077; set -C; printf '{}\n' > sites/common_site_config.json) 2>/dev/null || test -f sites/common_site_config.json;
+        fi;
+        test -f sites/common_site_config.json && test ! -L sites/common_site_config.json;
         ls -1 apps > sites/apps.txt;
         bench set-config -g db_host db;
         bench set-config -gp db_port 3306;

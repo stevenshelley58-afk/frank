@@ -27,6 +27,9 @@ class OwnerCrmFoundationTests(unittest.TestCase):
     def test_config_and_site_commands_are_single_bash_scripts(self):
         self.assertEqual(self.compose.count("    command:\n      - >-"), 2)
         self.assertNotIn("    command: >-", self.compose)
+        self.assertIn('restart: "no"', self.compose)
+        self.assertIn("set -C; printf", self.compose)
+        self.assertIn("test ! -L sites/common_site_config.json", self.compose)
 
     def test_site_installs_the_supported_app_set(self):
         self.assertIn("--install-app crm --install-app telephony --install-app helpdesk", self.compose)
