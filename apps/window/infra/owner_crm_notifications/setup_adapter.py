@@ -72,6 +72,7 @@ class Client(crm.FrappeRestClient):
         query = urllib.parse.urlencode({"filters": json.dumps([["name","=",name]], separators=(",",":")), "fields": json.dumps(["name"], separators=(",",":")), "limit_page_length":"2"})
         data = self._request("GET", "/api/resource/Webhook?" + query).get("data")
         if not isinstance(data, list) or not all(isinstance(item, dict) for item in data): raise NotificationError("Frappe returned invalid Webhook list")
+        return data
     def get_webhook(self, name: str) -> dict[str, Any]:
         data = self._request("GET", "/api/resource/Webhook/" + urllib.parse.quote(name, safe="")).get("data")
         if not isinstance(data, dict): raise NotificationError("Frappe returned invalid Webhook")
