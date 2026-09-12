@@ -16,11 +16,12 @@ Follow the canonical engineering rules and existing component release guides.
   contact evidence; Outreach owns eligibility, approval and suppression.
   Hermes is the execution boundary. Frank remains a launcher/read-only Hub,
   without a duplicate mail, CRM, queue or agent runtime.
-- Mautic is the candidate flow engine. A business mailbox owns ordinary mail;
-  the sending provider for cold outreach remains unresolved. Resend is not an
-  allowed cold-outreach transport. Auth and requested transactional mail must
+- Mautic is the upstream flow engine being provisioned privately. A business mailbox owns ordinary mail;
+  the sending provider for cold outreach remains unresolved. Neither Resend nor Purelymail is an
+  allowed cold-outreach transport. Purelymail is restricted here to ordinary
+  mailbox use, not marketing or advertising. Auth and requested transactional mail must
   not be disabled merely because prospecting is gated.
-- ntfy is the candidate phone notification transport. Native CRM in-app alerts
+- ntfy is the upstream phone notification transport running privately. Native CRM in-app alerts
   and a webapp manifest alone do not prove background phone notifications.
 
 ## Identity and synchronization
@@ -94,3 +95,37 @@ No complete-CRM or launch-ready claim is supported until these gates are met.
 Missing business identity/ABN, final commercial terms and provider account
 approvals remain explicit. Use placeholders only in drafts, never legal invoices
 or live sending settings. No purchase is implied by the absence of a budget cap.
+
+## Private foundation verification, 12 September 2026
+
+The ntfy service is healthy on loopback port 18104 with deny-all default access,
+a publisher that can only publish and an owner that can only subscribe to the
+owner topic. Actual HTTP checks rejected anonymous reads/writes and the two
+wrong-role operations. A private test message was accepted; no phone was
+subscribed. The image content and pinned digest were checked, not just its
+label. This is backend verification, not actual phone delivery.
+
+Native Frappe field setup has ten passing tests including a real loopback HTTP
+transport test. Its actual owner-site apply is a separate gate. No prospect
+or customer records have been imported and no billing mirror is running yet.
+
+The Blockwise signup-attribution and watchdog-recipient changes passed 1,301
+tests with two skips on the current integration candidate. The full build and
+release are separate checks. This does not prove public signup, inbox delivery,
+CRM data synchronization or lifecycle E2E.
+
+### Sending and phone-provider constraints
+
+Purelymail's current [provider policy](https://support.purelymail.com/support/solutions/articles/159000430367-instantly-ai-connectivity-issues)
+explicitly prohibits marketing/advertising and unsolicited outreach. Existing
+DNS records or a working mailbox do not waive that restriction. Keep it out of
+Mautic marketing and Ad Radar outreach; select a permitted transport separately.
+The mailbox admin currently requires the owner's login. No new paid account
+has been purchased.
+
+For an iPhone, self-hosted ntfy's native app needs an upstream push wake-up
+service, per [upstream configuration](https://docs.ntfy.sh/config/#ios-instant-notifications).
+The private service currently has no public authenticated route or device
+subscription. Do not claim background delivery until the intended phone has
+received and opened a test notification. Lock-screen messages must omit
+customer contact details and link back to an authenticated owner surface.
