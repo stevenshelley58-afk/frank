@@ -8,9 +8,13 @@ Cron/workers are disabled and the native mailer uses deliberately unresolvable
 `mail-sink.invalid:25`, so delivery fails closed rather than reporting false
 success. Campaigns and provider transports remain unconfigured and unpublished.
 
-`deploy.sh` creates only root-owned 0700/0600 external runtime secrets under
-`/srv/frank/secrets/owner-marketing`. It refuses dirty or untracked source and
-stamps the exact Git SHA and image digest into the running containers. Use
-`./test.sh`, `./deploy.sh`, and `./check.sh` from the exact committed revision.
+`deploy.sh` creates root-owned 0700/0600 external runtime secrets under
+`/srv/frank/secrets/owner-marketing`, including a random native admin password.
+It refuses dirty or untracked source and stamps the exact Git SHA and image
+digest into the running containers. `install.sh` runs Mautic's own installer
+once only after proving the Mautic database has no tables, so it cannot reset or
+overwrite an existing installation. Use `./test.sh`, `./deploy.sh`,
+`./install.sh`, and `./check.sh` from the exact committed revision.
+
 `deploy.sh` validates reachability for a fresh native setup; `check.sh` validates
 the completed native login, unauthenticated denial, and empty contacts/campaigns.
