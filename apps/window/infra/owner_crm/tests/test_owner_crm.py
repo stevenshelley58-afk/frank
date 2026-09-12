@@ -14,7 +14,8 @@ class OwnerCrmFoundationTests(unittest.TestCase):
     def test_isolated_loopback_only_compose(self):
         self.assertIn("name: owner-crm", self.compose)
         self.assertIn("internal: true", self.compose)
-        self.assertIn("${OWNER_CRM_BIND_ADDRESS", self.compose)
+        self.assertIn('"127.0.0.1:18081:8080"', self.compose)
+        self.assertIn('/srv/frank/owner-crm/sites', self.compose)
         self.assertNotIn("blockwise-product", self.compose)
         self.assertNotIn("blockwise-crm", self.compose)
 
@@ -36,12 +37,18 @@ class OwnerCrmFoundationTests(unittest.TestCase):
             self.assertRegex(value, r"^[0-9a-f]{40}$")
         build = (ROOT / "bin/build-image.sh").read_text()
         self.assertIn("assert_ref", build)
+        self.assertIn("dirty source checkout", build)
         self.assertIn("images/custom/Containerfile", build)
+        self.assertIn("git -C \"apps/$app\" rev-parse HEAD", build)
         self.assertIn("free_gib < 15", build)
 
     def test_secrets_and_backup_requirements_stay_outside_source(self):
         example = (ROOT / ".env.example").read_text()
         self.assertIn("/srv/frank/secrets/owner-crm.env", example)
+        wrapper = (ROOT / "bin/owner-crm").read_text()
+        self.assertIn("source checkout is not clean", wrapper)
+        self.assertIn("refusing an unmarked runtime root", wrapper)
+        self.assertIn("frappe_uid=1000", wrapper)
         health = (ROOT / "bin/health.sh").read_text()
         self.assertNotIn("show-config", health)
         self.assertIn("common_site_config.json", health)

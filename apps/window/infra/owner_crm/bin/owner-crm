@@ -3,25 +3,62 @@
 set -euo pipefail
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root_dir=$(cd "$script_dir/.." && pwd)
-secret_file=${OWNER_CRM_SECRET_FILE:-/srv/frank/secrets/owner-crm.env}
+secret_file=/srv/frank/secrets/owner-crm.env
+runtime_root=/srv/frank/owner-crm
+frappe_uid=1000
+frappe_gid=1000
 
 usage() { echo "usage: owner-crm {config|up|create-site|health|backup-preflight}" >&2; exit 2; }
-test -r "$secret_file" || { echo "missing owner CRM secret file: $secret_file" >&2; exit 1; }
-test "$(stat -c %a "$secret_file")" = 600 || { echo "secret file must be mode 0600" >&2; exit 1; }
+fail() { echo "owner-crm: $*" >&2; exit 1; }
+clean_source() {
+  test -z "$(git -C "$root_dir" status --porcelain)" || fail "source checkout is not clean"
+  git -C "$root_dir" rev-parse --verify HEAD^{commit} >/dev/null
+}
+secret_file_ok() {
+  test -f "$secret_file" && test ! -L "$secret_file" || fail "secret file must be a regular file: $secret_file"
+  test "$(stat -c %a "$secret_file")" = 600 || fail "secret file must be mode 0600"
+  test "$(stat -c %u "$secret_file")" = 0 || fail "secret file must be root-owned"
+}
+value() { sed -n "s/^$1=//p" "$secret_file" | tail -n1; }
+fixed_settings_ok() {
+  test "$(value OWNER_CRM_IMAGE)" = owner-crm-app || fail "OWNER_CRM_IMAGE must be owner-crm-app"
+  test "$(value OWNER_CRM_TAG)" = frappe15.120.1-crm1.83.0-helpdesk1.30.1 || fail "OWNER_CRM_TAG is not the accepted image tag"
+}
+prepare_runtime() {
+  if test -e "$runtime_root" || test -L "$runtime_root"; then
+    test -d "$runtime_root" && test ! -L "$runtime_root" || fail "runtime root is not a directory"
+    test -f "$runtime_root/.owner-crm-runtime" && test ! -L "$runtime_root/.owner-crm-runtime" || fail "refusing an unmarked runtime root"
+  else
+    install -d -m 0711 -o root -g root "$runtime_root"
+    install -m 0600 -o root -g root /dev/null "$runtime_root/.owner-crm-runtime"
+  fi
+  for d in sites logs; do
+    test ! -L "$runtime_root/$d" || fail "runtime path is a symlink: $d"
+    install -d -m 0700 -o "$frappe_uid" -g "$frappe_gid" "$runtime_root/$d"
+  done
+  for d in mariadb redis-queue; do
+    test ! -L "$runtime_root/$d" || fail "runtime path is a symlink: $d"
+    install -d -m 0700 -o root -g root "$runtime_root/$d"
+  done
+}
 
+clean_source
+secret_file_ok
+fixed_settings_ok
 compose=(docker compose --project-directory "$root_dir" --env-file "$secret_file" -f "$root_dir/compose.yaml")
 case ${1:-} in
   config) "${compose[@]}" config -q ;;
   up)
-    runtime_root=$(sed -n 's/^OWNER_CRM_RUNTIME_ROOT=//p' "$secret_file" | tail -n1)
-    test -n "$runtime_root" || { echo "OWNER_CRM_RUNTIME_ROOT missing" >&2; exit 1; }
-    install -d -m 0700 "$runtime_root"/{sites,logs,mariadb,redis-queue}
+    prepare_runtime
     "${compose[@]}" up -d
     ;;
   create-site)
-    # run starts only the dependencies needed for an empty, fresh site. Once the
-    # site exists, start the browser-facing services and then assert live state.
+    prepare_runtime
+    test ! -e "$runtime_root/sites/owner.crm.internal" || fail "site path already exists; refusing to overwrite a partial or existing site"
     "${compose[@]}" --profile tools run --rm create-site
+    : > "$runtime_root/.owner-crm-site-created"
+    chown root:root "$runtime_root/.owner-crm-site-created"
+    chmod 0600 "$runtime_root/.owner-crm-site-created"
     "${compose[@]}" up -d
     "$script_dir/health.sh"
     ;;

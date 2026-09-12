@@ -9,8 +9,8 @@ x-image: &image
 x-bench: &bench
   <<: *image
   volumes:
-    - ${OWNER_CRM_RUNTIME_ROOT:?OWNER_CRM_RUNTIME_ROOT is required}/sites:/home/frappe/frappe-bench/sites
-    - ${OWNER_CRM_RUNTIME_ROOT:?OWNER_CRM_RUNTIME_ROOT is required}/logs:/home/frappe/frappe-bench/logs
+    - /srv/frank/owner-crm/sites:/home/frappe/frappe-bench/sites
+    - /srv/frank/owner-crm/logs:/home/frappe/frappe-bench/logs
   networks: [owner-crm-internal]
 
 services:
@@ -27,7 +27,7 @@ services:
       MYSQL_ROOT_PASSWORD: ${OWNER_CRM_DB_PASSWORD:?OWNER_CRM_DB_PASSWORD is required}
       MARIADB_AUTO_UPGRADE: "1"
     volumes:
-      - ${OWNER_CRM_RUNTIME_ROOT:?OWNER_CRM_RUNTIME_ROOT is required}/mariadb:/var/lib/mysql
+      - /srv/frank/owner-crm/mariadb:/var/lib/mysql
     networks: [owner-crm-internal]
     healthcheck:
       test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
@@ -52,7 +52,7 @@ services:
     restart: unless-stopped
     command: ["redis-server", "--appendonly", "yes"]
     volumes:
-      - ${OWNER_CRM_RUNTIME_ROOT:?OWNER_CRM_RUNTIME_ROOT is required}/redis-queue:/data
+      - /srv/frank/owner-crm/redis-queue:/data
     networks: [owner-crm-internal]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -84,7 +84,7 @@ services:
     depends_on:
       configurator: {condition: service_completed_successfully}
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "-H", "Host: ${OWNER_CRM_SITE:?OWNER_CRM_SITE is required}", "http://localhost:8000/api/method/ping"]
+      test: ["CMD", "curl", "-fsS", "-H", "Host: owner.crm.internal", "http://localhost:8000/api/method/ping"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -116,21 +116,21 @@ services:
     environment:
       BACKEND: backend:8000
       SOCKETIO: websocket:9000
-      FRAPPE_SITE_NAME_HEADER: ${OWNER_CRM_SITE:?OWNER_CRM_SITE is required}
+      FRAPPE_SITE_NAME_HEADER: owner.crm.internal
       UPSTREAM_REAL_IP_ADDRESS: 127.0.0.1
       UPSTREAM_REAL_IP_HEADER: X-Forwarded-For
       UPSTREAM_REAL_IP_RECURSIVE: "off"
     volumes:
-      - ${OWNER_CRM_RUNTIME_ROOT:?OWNER_CRM_RUNTIME_ROOT is required}/sites:/home/frappe/frappe-bench/sites
-      - ${OWNER_CRM_RUNTIME_ROOT:?OWNER_CRM_RUNTIME_ROOT is required}/logs:/home/frappe/frappe-bench/logs
+      - /srv/frank/owner-crm/sites:/home/frappe/frappe-bench/sites
+      - /srv/frank/owner-crm/logs:/home/frappe/frappe-bench/logs
     depends_on:
       backend: {condition: service_healthy}
       websocket: {condition: service_started}
     ports:
-      - "${OWNER_CRM_BIND_ADDRESS:?OWNER_CRM_BIND_ADDRESS is required}:${OWNER_CRM_PORT:?OWNER_CRM_PORT is required}:8080"
+      - "127.0.0.1:18081:8080"
     networks: [owner-crm-internal]
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "-H", "Host: ${OWNER_CRM_SITE:?OWNER_CRM_SITE is required}", "http://localhost:8080/api/method/ping"]
+      test: ["CMD", "curl", "-fsS", "-H", "Host: owner.crm.internal", "http://localhost:8080/api/method/ping"]
       interval: 30s
       timeout: 10s
       retries: 5
