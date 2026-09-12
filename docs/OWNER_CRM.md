@@ -193,3 +193,17 @@ Native fixture checks cover permissions, bounded pagination, invalid limits,
 unchanged data and preserved RLS, with a deliberately broken permission negative
 control. Final product release and customer-journey browser acceptance remain
 separate.
+
+
+The strengthened local recovery drill also passed. Receipt:
+`/srv/frank/backups/owner-crm/local-20260912T163731Z-e62737974e25/drill-receipt.json`.
+The base restore matched all eight definitions including the three applied
+unique flags. A separate staged-only native backup and second restore verified
+one public attachment, one private attachment, their native File URLs and exact
+contents, the original staged encryption key, and a decrypted fixture secret.
+The fixture was created only after restoring the base archive, never on the live
+site. Native File document insertion avoids the file-manager helper's duplicate
+unreferenced blob. Temporary sites, containers and network were removed.
+This proves the staged recovery mechanism, not off-host recovery or existing live
+encrypted credentials: the base archive still has no attachments. Off-host backup,
+recovery-point objectives and real mailbox recovery remain unresolved.
