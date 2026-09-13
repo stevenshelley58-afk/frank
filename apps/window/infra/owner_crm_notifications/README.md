@@ -1,12 +1,20 @@
 # Private owner CRM notifications
 
-This bundle configures exactly four native Frappe Webhooks: after_insert for
-CRM Task, HD Ticket, CRM Lead, and Communication. The Communication hook is
+This bundle configures five native Frappe Webhooks: four private alerts plus a
+second Communication `after_insert` hook for owner-mail reply stopping. The Communication hooks are
 restricted by native Frappe condition to communication_medium == Email and
 sent_or_received == Received, so outgoing email does not alert. All hooks
 enqueue on Frappe's existing short worker and POST a static, generic JSON alert
 to the ntfy JSON publish root. No custom Frappe app, DocType, event server,
 customer route, mail, or phone delivery is introduced.
+
+The reply hook sends only the Communication identity, sender/recipient fields,
+reply-link fields and bounded stored email headers. It never sends message
+content. Native Frappe signs the exact JSON body with HMAC-SHA256 and sends it
+only to the host-gateway receiver on `172.16.1.1:18085`; there is no public
+route. The shared secret comes from the root-owned 0600
+`/srv/hermes/secrets/owner-mail-events.env` file and is never committed or
+printed.
 
 ntfy joins the existing external Docker network `owner-crm_owner-crm-internal`
 only to accept these private Webhook requests. Its public listener remains

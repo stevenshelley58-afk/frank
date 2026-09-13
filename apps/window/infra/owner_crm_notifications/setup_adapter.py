@@ -12,8 +12,23 @@ from owner_crm_setup import setup_adapter as crm
 
 DEFAULT_MANIFEST = Path(__file__).with_name("manifest.json")
 NTFY_SECRET = Path("/srv/frank/secrets/owner-notifications/owner-notifications.env")
+REPLY_SECRET = Path("/srv/hermes/secrets/owner-mail-events.env")
 TOPIC = "owner-notifications"
 URL = "http://frank-owner-ntfy/"
+REPLY_URL = "http://172.16.1.1:18085/api/owner-mail-events/reply"
+REPLY_HOOK = "owner-incoming-email-reply-stop"
+REPLY_SECRET_MARKER = "owner-mail-reply-secret"
+REPLY_FIELDS = (
+    ("event_id", "name"),
+    ("sender", "sender"),
+    ("recipients", "recipients"),
+    ("cc", "cc"),
+    ("bcc", "bcc"),
+    ("communication_medium", "communication_medium"),
+    ("sent_or_received", "sent_or_received"),
+    ("in_reply_to", "in_reply_to"),
+    ("email_headers", "email_headers"),
+)
 ALLOWED_DOCTYPES = {"CRM Task", "HD Ticket", "CRM Lead", "Communication"}
 REQUIRED_DOCTYPES = ("CRM Task", "HD Ticket", "CRM Lead", "Communication")
 INCOMING_EMAIL_CONDITION = "doc.communication_medium == \"Email\" and doc.sent_or_received == \"Received\""
@@ -47,10 +62,10 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> tuple[dict[str, Any], ...]:
     if raw["$schema"] != "schema://frank.owner-crm-notifications/v1" or raw["version"] != 1 or raw["site"] != crm.DEFAULT_SITE or raw["endpoint"] != crm.DEFAULT_ENDPOINT or raw["topic"] != TOPIC:
         raise NotificationError("webhook manifest target is not fixed owner infrastructure")
     hooks = raw["webhooks"]
-    if not isinstance(hooks, list) or len(hooks) != 4: raise NotificationError("webhook manifest must define exactly four hooks")
+    if not isinstance(hooks, list) or len(hooks) != 5: raise NotificationError("webhook manifest must define exactly five hooks")
     names: set[str] = set(); result = []
     for hook in hooks:
-        if not isinstance(hook, dict) or set(hook) != {"name","webhook_doctype","webhook_docevent","condition","enabled","request_url","request_method","request_structure","timeout","background_jobs_queue","webhook_json","webhook_headers"}:
+        if not isinstance(hook, dict) or set(hook) != {"name","webhook_doctype","webhook_docevent","condition","enabled","request_url","request_method","request_structure","timeout","background_jobs_queue","webhook_json","webhook_headers","webhook_data","enable_security","webhook_secret"}:
             raise NotificationError("webhook manifest has unsupported fields")
         if not isinstance(hook["name"], str) or not hook["name"].startswith("owner-") or hook["name"] in names: raise NotificationError("webhook name is invalid or duplicate")
         if hook["webhook_doctype"] not in ALLOWED_DOCTYPES or hook["webhook_docevent"] != "after_insert" or hook["enabled"] != 1: raise NotificationError("webhook event is not an allowed owner notification")
@@ -58,14 +73,23 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> tuple[dict[str, Any], ...]:
         if condition is not None and not isinstance(condition, str): raise NotificationError("webhook condition is invalid")
         if hook["webhook_doctype"] == "Communication" and condition != INCOMING_EMAIL_CONDITION: raise NotificationError("Communication webhook must match incoming email only")
         if hook["webhook_doctype"] != "Communication" and condition is not None: raise NotificationError("non-email webhook cannot have a condition")
-        if hook["request_url"] != URL or hook["request_method"] != "POST" or hook["request_structure"] != "JSON" or hook["timeout"] != 5 or hook["background_jobs_queue"] != "short": raise NotificationError("webhook delivery target is unsafe")
-        expected_headers = [{"key":"Authorization","value":"publisher-basic"},{"key":"Content-Type","value":"application/json"}]
-        if not isinstance(hook["webhook_headers"], list) or hook["webhook_headers"] != expected_headers: raise NotificationError("webhook authentication contract is invalid")
-        try: payload = json.loads(hook["webhook_json"])
-        except (TypeError, json.JSONDecodeError) as exc: raise NotificationError("webhook payload is invalid") from exc
-        if set(payload) != {"topic","title","message","tags"} or payload["topic"] != TOPIC or not all(isinstance(payload[k], str) and payload[k] for k in ("title","message")) or not isinstance(payload["tags"], list): raise NotificationError("webhook payload is unsafe")
-        rendered = hook["webhook_json"].lower()
-        if any(word in rendered for word in ("doc.", "contact", "customer", "description", "subject", "sender", "recipient", "body", "{{", "}}")): raise NotificationError("webhook payload may contain private record data")
+        is_reply = hook["name"] == REPLY_HOOK
+        expected_url = REPLY_URL if is_reply else URL
+        expected_structure = "" if is_reply else "JSON"
+        if hook["request_url"] != expected_url or hook["request_method"] != "POST" or hook["request_structure"] != expected_structure or hook["timeout"] != 5 or hook["background_jobs_queue"] != "short": raise NotificationError("webhook delivery target is unsafe")
+        expected_headers = ([{"key":"Content-Type","value":"application/json"}] if is_reply else [{"key":"Authorization","value":"publisher-basic"},{"key":"Content-Type","value":"application/json"}])
+        if hook["webhook_headers"] != expected_headers: raise NotificationError("webhook authentication contract is invalid")
+        if is_reply:
+            expected_data = [{"key": key, "fieldname": field} for key, field in REPLY_FIELDS]
+            if hook["webhook_doctype"] != "Communication" or hook["webhook_data"] != expected_data or hook["webhook_json"] is not None: raise NotificationError("reply webhook data contract is invalid")
+            if hook["enable_security"] != 1 or hook["webhook_secret"] != REPLY_SECRET_MARKER: raise NotificationError("reply webhook security is invalid")
+        else:
+            if hook["webhook_data"] != [] or hook["enable_security"] != 0 or hook["webhook_secret"] is not None: raise NotificationError("notification webhook security contract is invalid")
+            try: payload = json.loads(hook["webhook_json"])
+            except (TypeError, json.JSONDecodeError) as exc: raise NotificationError("webhook payload is invalid") from exc
+            if set(payload) != {"topic","title","message","tags"} or payload["topic"] != TOPIC or not all(isinstance(payload[k], str) and payload[k] for k in ("title","message")) or not isinstance(payload["tags"], list): raise NotificationError("webhook payload is unsafe")
+            rendered = hook["webhook_json"].lower()
+            if any(word in rendered for word in ("doc.", "contact", "customer", "description", "subject", "sender", "recipient", "body", "{{", "}}")): raise NotificationError("webhook payload may contain private record data")
         names.add(hook["name"]); result.append(dict(hook))
     return tuple(result)
 
@@ -107,30 +131,35 @@ def _payload_json(doctype: str) -> str:
     return json.dumps(payload_for_doctype(doctype), separators=(",", ":"))
 
 
-def _desired(hook: Mapping[str, Any], password: str) -> dict[str, Any]:
-    value = base64.b64encode(("publisher:" + password).encode("utf-8")).decode("ascii")
+def _desired(hook: Mapping[str, Any], password: str, reply_secret: str) -> dict[str, Any]:
     result = dict(hook)
-    result["webhook_json"] = _payload_json(str(hook["webhook_doctype"]))
-    result["webhook_headers"] = [{"key":"Authorization", "value":"Basic " + value}, {"key":"Content-Type", "value":"application/json"}]
+    if hook["name"] == REPLY_HOOK:
+        result["webhook_secret"] = reply_secret
+    else:
+        value = base64.b64encode(("publisher:" + password).encode("utf-8")).decode("ascii")
+        result["webhook_json"] = _payload_json(str(hook["webhook_doctype"]))
+        result["webhook_headers"] = [{"key":"Authorization", "value":"Basic " + value}, {"key":"Content-Type", "value":"application/json"}]
     return result
 
 def _compatible(actual: Mapping[str, Any], desired: Mapping[str, Any]) -> bool:
     # Frappe omits an unset condition on reads but accepts null on writes.
     if (actual.get("condition") or None) != (desired.get("condition") or None):
         return False
-    for key in ("name","webhook_doctype","webhook_docevent","enabled","request_url","request_method","request_structure","timeout","background_jobs_queue","webhook_json"):
+    for key in ("name","webhook_doctype","webhook_docevent","enabled","request_url","request_method","request_structure","timeout","background_jobs_queue","webhook_json","enable_security"):
         if str(actual.get(key, "")) != str(desired[key]): return False
     headers = actual.get("webhook_headers")
-    return isinstance(headers, list) and [{"key": item.get("key"), "value": item.get("value")} for item in headers] == desired["webhook_headers"]
+    data = actual.get("webhook_data") or []
+    return isinstance(headers, list) and [{"key": item.get("key"), "value": item.get("value")} for item in headers] == desired["webhook_headers"] and [{"key": item.get("key"), "fieldname": item.get("fieldname")} for item in data] == desired["webhook_data"]
 
 def run_setup(*, apply: bool = False, manifest_path: Path = DEFAULT_MANIFEST, client: Client | None = None) -> tuple[PlanItem, ...]:
-    hooks = load_manifest(manifest_path); password = _load_env_value(NTFY_SECRET, "NTFY_PUBLISHER_PASSWORD")
+    hooks = load_manifest(manifest_path); password = _load_env_value(NTFY_SECRET, "NTFY_PUBLISHER_PASSWORD"); reply_secret = _load_env_value(REPLY_SECRET, "OWNER_MAIL_REPLY_SECRET")
+    if len(reply_secret) < 32: raise NotificationError("reply webhook secret is too short")
     owned = client is None; logged = False
     if client is None:
         username, admin_password = crm.load_credentials(); client = Client(); client.login(username, admin_password); logged = True
     try:
         for doctype in REQUIRED_DOCTYPES: client.get_required_doctype(doctype)
-        desired = [_desired(hook, password) for hook in hooks]; plan: list[PlanItem] = []
+        desired = [_desired(hook, password, reply_secret) for hook in hooks]; plan: list[PlanItem] = []
         for hook in desired:
             found = client.list_named(hook["name"])
             if len(found) > 1: raise NotificationError("duplicate native Webhooks found")

@@ -14,9 +14,12 @@
       "request_url": "http://frank-owner-ntfy/",
       "request_method": "POST",
       "request_structure": "JSON",
+      "enable_security": 0,
+      "webhook_secret": null,
       "timeout": 5,
       "background_jobs_queue": "short",
       "webhook_json": "{\"topic\":\"owner-notifications\",\"title\":\"Owner CRM task created\",\"message\":\"A new owner CRM task requires review.\",\"tags\":[\"clipboard\"]}",
+      "webhook_data": [],
       "webhook_headers": [
         {
           "key": "Authorization",
@@ -37,9 +40,12 @@
       "request_url": "http://frank-owner-ntfy/",
       "request_method": "POST",
       "request_structure": "JSON",
+      "enable_security": 0,
+      "webhook_secret": null,
       "timeout": 5,
       "background_jobs_queue": "short",
       "webhook_json": "{\"topic\":\"owner-notifications\",\"title\":\"Owner support ticket created\",\"message\":\"A new owner support ticket requires review.\",\"tags\":[\"ticket\"]}",
+      "webhook_data": [],
       "webhook_headers": [
         {
           "key": "Authorization",
@@ -60,9 +66,12 @@
       "request_url": "http://frank-owner-ntfy/",
       "request_method": "POST",
       "request_structure": "JSON",
+      "enable_security": 0,
+      "webhook_secret": null,
       "timeout": 5,
       "background_jobs_queue": "short",
       "webhook_json": "{\"topic\":\"owner-notifications\",\"title\":\"Owner CRM lead created\",\"message\":\"A new owner CRM lead requires review.\",\"tags\":[\"lead\"]}",
+      "webhook_data": [],
       "webhook_headers": [
         {
           "key": "Authorization",
@@ -83,9 +92,12 @@
       "request_url": "http://frank-owner-ntfy/",
       "request_method": "POST",
       "request_structure": "JSON",
+      "enable_security": 0,
+      "webhook_secret": null,
       "timeout": 5,
       "background_jobs_queue": "short",
       "webhook_json": "{\"topic\":\"owner-notifications\",\"title\":\"Owner inbound email received\",\"message\":\"A new inbound email requires review.\",\"tags\":[\"email\"]}",
+      "webhook_data": [],
       "webhook_headers": [
         {
           "key": "Authorization",
@@ -95,6 +107,35 @@
           "key": "Content-Type",
           "value": "application/json"
         }
+      ]
+    },
+    {
+      "name": "owner-incoming-email-reply-stop",
+      "webhook_doctype": "Communication",
+      "webhook_docevent": "after_insert",
+      "condition": "doc.communication_medium == \"Email\" and doc.sent_or_received == \"Received\"",
+      "enabled": 1,
+      "request_url": "http://172.16.1.1:18085/api/owner-mail-events/reply",
+      "request_method": "POST",
+      "request_structure": "",
+      "enable_security": 1,
+      "webhook_secret": "owner-mail-reply-secret",
+      "timeout": 5,
+      "background_jobs_queue": "short",
+      "webhook_json": null,
+      "webhook_data": [
+        {"key": "event_id", "fieldname": "name"},
+        {"key": "sender", "fieldname": "sender"},
+        {"key": "recipients", "fieldname": "recipients"},
+        {"key": "cc", "fieldname": "cc"},
+        {"key": "bcc", "fieldname": "bcc"},
+        {"key": "communication_medium", "fieldname": "communication_medium"},
+        {"key": "sent_or_received", "fieldname": "sent_or_received"},
+        {"key": "in_reply_to", "fieldname": "in_reply_to"},
+        {"key": "email_headers", "fieldname": "email_headers"}
+      ],
+      "webhook_headers": [
+        {"key": "Content-Type", "value": "application/json"}
       ]
     }
   ]
