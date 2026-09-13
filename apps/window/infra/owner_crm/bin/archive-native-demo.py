@@ -8,6 +8,7 @@ def bench(method,kwargs=None):
     args=['docker','exec','owner-crm-backend-1','bench','--site','owner.crm.internal','execute',method]
     if kwargs is not None: args += ['--kwargs',json.dumps(kwargs)]
     result=subprocess.run(args,check=True,capture_output=True,text=True)
+    if method=='crm.demo.api.clear_demo_data': return None
     return json.loads(result.stdout) if result.stdout.strip() else None
 
 def main():
@@ -15,6 +16,18 @@ def main():
     if os.geteuid()!=0: raise SystemExit('root required')
     defaults=bench('frappe.get_all',{'doctype':'DefaultValue','fields':['defkey','defvalue'],'filters':{'defkey':['like','crm_demo%']}})
     if not any(x['defkey']=='crm_demo_data_created' and x['defvalue']=='1' for x in defaults):
+        run=(ROOT/'LATEST').read_text().strip(); dest=ARCHIVE/run
+        if args.apply and (dest/'cleanup-scope.json').is_file():
+            scope=json.loads((dest/'cleanup-scope.json').read_text())
+            leads=bench('frappe.get_all',{'doctype':'CRM Lead','fields':['name']})
+            mirrors=bench('frappe.get_all',{'doctype':'Contact','fields':['name','custom_blockwise_profile_uuid'],'filters':{'custom_blockwise_profile_uuid':['is','set']}})
+            if {x['name'] for x in leads} != set(scope['protected_leads']) or sorted(mirrors,key=lambda x:x['name'])!=sorted(scope['protected_mirrors'],key=lambda x:x['name']): raise SystemExit('post-cleanup scope mismatch')
+            result={'native_demo_removed':True,'protected_leads':len(leads),'protected_customer_mirrors':len(mirrors),'archive':str(dest)}
+            receipt=dest/'cleanup-receipt.json'
+            if not receipt.exists():
+                fd=os.open(receipt,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+                with os.fdopen(fd,'w') as stream: json.dump(result,stream)
+            print(json.dumps(result));return
         print(json.dumps({'native_demo_present':False}));return
     tracked=json.loads(next(x['defvalue'] for x in defaults if x['defkey']=='crm_demo_leads'))
     leads=bench('frappe.get_all',{'doctype':'CRM Lead','fields':['name','email','custom_blockwise_prospect_source_uuid']})
