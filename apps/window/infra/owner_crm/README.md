@@ -108,3 +108,7 @@ build alone is not runtime evidence.
 ## Prepared off-host recovery
 
 `bin/offhost-backup.sh` is manual and disabled by default. Its `--offhost` mode first creates the existing native Frappe SQL/files/config archive, then requires explicit root-only R2/restic configuration and four explicit Mautic/ntfy artifact paths (native Mautic MySQL dump, config, media, and ntfy state). It never schedules, prunes, or guesses a path. It does not claim Mautic or ntfy restore acceptance until an actual restore drill is recorded.
+
+## Mautic and ntfy local recovery
+
+`bin/marketing-backup.sh` makes a manual root-only local archive: native consistent Mautic MariaDB dump, explicit Mautic config/media volumes, and ntfy cache/auth state with its private configuration. It makes no off-host or restore-success claim. A disposable network-none restore drill is required before claiming Mautic or ntfy recovery.
