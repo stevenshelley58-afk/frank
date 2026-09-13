@@ -100,3 +100,7 @@ both mail and scheduler disablement by default. `health --mail-enabled` instead
 requires the explicitly enabled native site and running scheduler. Backend and
 queue workers have a separate egress bridge for SMTP/IMAP; database and Redis do not. A green compose configuration or image
 build alone is not runtime evidence.
+
+## Private owner web access
+
+`python3 bin/private-access.py` previews existing native Tailscale Serve configuration; `--apply` adds only private HTTPS ports 8445 (CRM) and 8446 (ntfy). Existing Serve services are preserved, occupied ports and public Funnel flags are rejected, and native CRM/ntfy authentication remains required. No public CRM ingress, custom proxy, or new account is created. An enrolled phone with Tailscale plus native ntfy setup is still required for actual mobile notification receipt.
