@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 import pwd
 import subprocess
+import tempfile
 
 ROOT = Path(__file__).resolve().parent
 HOME = Path("/home/hermes/.hermes")
@@ -16,7 +17,14 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--enable", action="store_true", help="root-only after controlled recipient acceptance")
     args = parser.parse_args()
-    subprocess.run(["git", "-C", str(ROOT), "diff", "--exit-code", "HEAD", "--", str(ROOT)], check=True)
+    if os.geteuid() != 0:
+        raise SystemExit("native bridge installation requires root")
+    status = subprocess.check_output(["git", "-C", str(ROOT), "status", "--porcelain"], text=True)
+    if status.strip():
+        raise SystemExit("refuse dirty or untracked source")
+    subprocess.run(["git", "-C", str(ROOT), "merge-base", "--is-ancestor", "HEAD", "origin/main"], check=True)
+    if TARGET.is_symlink():
+        raise SystemExit("refuse symlinked Hermes runtime directory")
     account = pwd.getpwnam("hermes")
     TARGET.mkdir(parents=True, exist_ok=True, mode=0o750)
     os.chown(TARGET, account.pw_uid, account.pw_gid)
@@ -28,9 +36,17 @@ def main():
         path = TARGET / name
         if path.is_symlink():
             raise SystemExit("refuse symlinked Hermes runtime script")
-        path.write_bytes(data)
-        os.chmod(path, 0o640)
-        os.chown(path, account.pw_uid, account.pw_gid)
+        fd, temporary = tempfile.mkstemp(prefix=".install-", dir=TARGET)
+        try:
+            with os.fdopen(fd, "wb") as stream:
+                stream.write(data)
+                stream.flush()
+                os.fsync(stream.fileno())
+                os.fchmod(stream.fileno(), 0o640)
+                os.fchown(stream.fileno(), account.pw_uid, account.pw_gid)
+            os.replace(temporary, path)
+        finally:
+            Path(temporary).unlink(missing_ok=True)
     state = Path("/srv/hermes/state/owner-email-flows")
     state.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chown(state, account.pw_uid, account.pw_gid)
