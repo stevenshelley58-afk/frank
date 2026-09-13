@@ -144,6 +144,29 @@ frank.fail {
             }
         }
 
+        # Resend can reach exactly one public callback. The application verifies
+        # its raw Svix signature before making any native Mautic change.
+        @owner_mail_events_resend {
+            method POST
+            path /api/owner-mail-events/resend
+        }
+        handle @owner_mail_events_resend {
+            import frank_mini_api_response_headers
+            request_body {
+                max_size 64KB
+            }
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -Cookie
+                header_up -X-Frank-Operator-Attestation
+                header_down -Set-Cookie
+            }
+        }
+
         # Signed template packs and their hash-declared assets are intentionally
         # public, source-free release artifacts. Keep this exact read-only
         # route ahead of the operator-authenticated fallback.

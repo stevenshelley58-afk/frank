@@ -151,3 +151,33 @@ image or Composer build that includes a compatible DomCrawler package, followed
 by a controlled HTML-template save and own-mailbox render test. Until then these
 native templates deliberately remain plain text, with native preference and
 unsubscribe tokens and no tracking pixel.
+
+## Resend bounce and complaint receiver
+
+`POST /api/owner-mail-events/resend` is the single public callback path. Caddy
+allows only that POST with a 64 KiB body limit and strips browser credentials.
+The Flask handler verifies the raw Svix signature and short timestamp window
+before doing anything. It accepts only `email.bounced` and `email.complained`.
+
+It uses the fixed Resend `GET /emails/{email_id}` endpoint, extracts one native
+Mautic unsubscribe tracking hash from stored provider content, then requires
+exactly one Mautic `email_stats` match. The provider recipient, statistic,
+contact ID, contact email, immutable Blockwise profile ID and workspace ID must
+all agree. Address matching alone is never authority. An unprovable relationship
+does not change Mautic.
+
+After proof, the receiver removes non-cold owner source segments and writes
+native email Do Not Contact plus `blockwise_nurture_exit=stopped`. These native
+operations are replay-safe. Temporary Resend or Mautic failure returns 503 for
+provider retry. It never sends email, publishes campaigns, creates contacts, or
+accepts provider-controlled URLs.
+
+Before deployment root must provision root-only
+`/srv/frank/secrets/owner-mail-events.env` (or set
+`OWNER_MAIL_EVENTS_ENV_FILE`) with no source-controlled values:
+`RESEND_WEBHOOK_SECRET`, `OWNER_MAIL_EVENTS_RESEND_API_KEY`,
+`OWNER_MAIL_EVENTS_MAUTIC_USERNAME`, `OWNER_MAIL_EVENTS_MAUTIC_PASSWORD`, and
+optionally `OWNER_MAIL_EVENTS_MAUTIC_URL`. The Mautic role needs Stats read,
+contact view/edit and source static-segment membership edit only. Root registers
+the Resend webhook after endpoint deployment; this repository creates no keys or
+webhook registrations.

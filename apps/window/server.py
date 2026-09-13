@@ -56,6 +56,12 @@ from graph.provider import (
 )
 from tool_apps import discover_tool_apps
 from review_chat import ReviewChatError, hermes_review_payload, hermes_undo_payload, validate_review_message, validate_undo_body
+from owner_mail_events import (
+    OwnerMailEventError,
+    OwnerMailEventUnavailable,
+    OwnerMailEventsConfig,
+    process_event as process_owner_mail_event,
+)
 
 WEB = Path(os.environ.get("FRANK_WEB", "/web")).resolve()
 MINI_PUBLIC_ASSETS = {
@@ -732,6 +738,25 @@ def health():
     }
     return jsonify({"ok": True, "service": "frank-window", "hermes": brain,
                     "release": identity})
+
+
+@app.post("/api/owner-mail-events/resend")
+def owner_mail_events_resend():
+    """Public only at Caddy's exact signed Resend callback path."""
+    raw = request.get_data(cache=False)
+    if len(raw) > 64 * 1024:
+        return Response(status=413)
+    try:
+        outcome = process_owner_mail_event(raw, request.headers, OwnerMailEventsConfig.from_env())
+    except OwnerMailEventUnavailable:
+        # A valid provider retry is the only recovery path for an unavailable
+        # fixed Resend/Mautic lookup. Do not disclose configuration or IDs.
+        return Response(status=503)
+    except OwnerMailEventError:
+        return Response(status=400)
+    # Signed non-bounce/complaint events are intentionally acknowledged as a
+    # no-op, preventing provider retry churn without opening any other action.
+    return Response(status=204 if outcome in {"suppressed", "ignored"} else 500)
 
 
 @app.errorhandler(ProjectStoreError)
