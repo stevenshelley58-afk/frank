@@ -106,3 +106,7 @@ commercial substage. 'Nurture' means deferred follow-up, not proof of qualificat
 'Contacted' does not prove a reply. Conversation evidence comes from the linked
 mail thread or an operator note. No onboarding or billing statuses are added; Stripe and
 Blockwise remain authoritative for those concerns.
+
+## Native owner login
+
+`python3 owner_user.py` previews/verifies the dedicated owner@blockwise.sale System User. `--apply` creates it without sending an invitation, with native Sales Manager, Agent Manager, Inbox User and Knowledge Base Editor roles. The generated password stays in root-private `/srv/frank/secrets/owner-crm-login.env`. Replay never resets the password or silently changes an existing identity. This is not MFA/device enrollment or proof of mobile reachability.
