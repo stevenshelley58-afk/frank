@@ -33,20 +33,20 @@ approval.
   Mautic app DB, new Resend SMTP and receiver credentials were rotated and
   runtime-verified. No credential values belong in this document.
 - Local backup and isolated restore passed, including encryption-key and
-  encrypted-credential round trips and staged attachment recovery. It is local
-  only, with no off-host RPO claim. Receipt:
-  `/srv/frank/backups/owner-crm/local-20260913T073405Z-91df4513e9df/drill-receipt.json`.
+  encrypted-credential round trips and staged attachment recovery. These native drills are local, with no off-host RPO claim. Receipt:
+  `/srv/frank/backups/owner-crm/local-20260913T102630Z-cf6820f497b4/drill-receipt.json`.
   Mautic and ntfy private restore checks also passed without changing production;
-  receipt `/srv/frank/backups/owner-marketing/local-20260913T074805Z/restore-receipt-20260913T074818Z-1102792.json`.
+  receipt `/srv/frank/backups/owner-marketing/local-20260913T102850Z/restore-receipt-20260913T102855Z-2038897.json`.
+
+- A manual, age-encrypted off-host recovery copy is verified on the owner laptop at `C:\Users\steve\.codex\backups\owner-crm\owner-crm-recovery-20260913T103500Z.tar.age`. The archive checksum and separately access-restricted key escrow match their source; authenticated decryption/archive readability and native isolated restore checks passed. Local transfer receipt: `C:\Users\steve\.codex\backups\owner-crm\recovery-receipt.json`. This is not an automatic cloud backup or a scheduled off-host RPO.
 
 ### Remaining gates and explicit non-claims
 
-- Actual new-reply, bounce and complaint acceptance is still being finished by
-  a separate work item; do not claim those paths passed. A reply currently stops
+- Actual new-reply, bounce and complaint acceptance is still being finished. One real simulator bounce reached Resend, but exposed a receiver recipient-display-name parsing defect; its existing event must be replayed after the tested fix, not sent again. Do not claim these paths passed. A reply currently stops
   or alerts only; a durable reply follow-up task is not implemented.
-- Off-host backup is not done and needs Cloudflare authorization. An actual
+- Automatic off-host cloud backup and its schedule still need Cloudflare authorization. The manual encrypted laptop copy above is verified. An actual
   phone notification is not done and needs the intended OS/login and device
-  receipt. Public 15-minute owner booking is not wired.
+  receipt. Public 15-minute owner booking is not wired. The existing SnagTime production contract requires Google Calendar OAuth plus owner availability; no owner scheduling runtime/account/event is verified.
 - The old exposed Resend key still needs exact identification and revocation;
   its value is intentionally omitted. Resend and Purelymail remain disallowed
   for cold prospecting. No provider, campaign, prospect enrolment or customer
