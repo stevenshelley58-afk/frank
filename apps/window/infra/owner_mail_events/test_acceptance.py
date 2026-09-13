@@ -80,6 +80,7 @@ class AcceptanceTests(unittest.TestCase):
         args = run.call_args.args[0]
         self.assertEqual(args[:6], ["docker", "exec", "-i", "-w", "/home/frappe/frappe-bench/sites", "owner-crm-backend-1"])
         self.assertEqual(args[6], "/home/frappe/frappe-bench/env/bin/python")
+        self.assertEqual(run.call_args.kwargs["timeout"], 120)
         program = run.call_args.kwargs["input"]
         self.assertIn('frappe.init(site="owner.crm.internal", sites_path="/home/frappe/frappe-bench/sites")', program)
         self.assertIn('frappe.get_doc("Communication", "COMM-00011")', program)

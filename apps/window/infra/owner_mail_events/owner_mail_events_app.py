@@ -3,15 +3,11 @@ from __future__ import annotations
 
 import os
 from flask import Flask, Response, request
-from owner_mail_events import OwnerMailEventError, OwnerMailEventUnavailable, OwnerMailEventsConfig, process_event
+from owner_mail_events import SAFE_ERROR_CODES, OwnerMailEventError, OwnerMailEventUnavailable, OwnerMailEventsConfig, process_event
 from owner_mail_reply import register_owner_mail_reply
 
 
-SAFE_REJECTION_CODES = frozenset({
-    "signature_invalid", "signature_expired", "payload_rejected", "recipient_rejected",
-    "upstream_lookup_rejected", "upstream_lookup_unavailable",
-    "native_write_rejected", "native_write_unavailable", "processing_rejected",
-})
+SAFE_REJECTION_CODES = SAFE_ERROR_CODES
 
 
 def safe_rejection_code(error: Exception) -> str:

@@ -61,8 +61,16 @@ class OwnerMailEventsTests(unittest.TestCase):
    with self.assertRaises(events.OwnerMailEventError): events._recipients(value)
  def test_wrong_provider_recipient_is_rejected_without_mutation(self):
   raw,headers=signed(self.payload()); fake=FakeHttp(provider_to=["wrong@example.test"])
-  with self.assertRaises(events.OwnerMailEventError): events.process_event(raw,headers,self.cfg,fake,1000)
+  with self.assertRaises(events.OwnerMailEventError) as captured: events.process_event(raw,headers,self.cfg,fake,1000)
+  self.assertEqual(captured.exception.safe_code,"recipient_mismatch")
   self.assertFalse(any(method in {"PATCH","POST"} for method,_,_ in fake.calls))
+ def test_malformed_provider_and_callback_recipients_have_distinct_safe_codes(self):
+  raw,headers=signed(self.payload()); fake=FakeHttp(provider_to=["not-an-address"])
+  with self.assertRaises(events.OwnerMailEventError) as captured: events.process_event(raw,headers,self.cfg,fake,1000)
+  self.assertEqual(captured.exception.safe_code,"provider_recipient_rejected")
+  payload=self.payload();payload["data"]["to"]=["not-an-address"];raw,headers=signed(payload)
+  with self.assertRaises(events.OwnerMailEventError) as captured: events.process_event(raw,headers,self.cfg,FakeHttp(),1000)
+  self.assertEqual(captured.exception.safe_code,"callback_recipient_rejected")
  def test_wrong_immutable_scope_is_rejected(self):
   raw,headers=signed(self.payload()); fake=FakeHttp()
   original=fake.request

@@ -110,7 +110,7 @@ finally:
         text=True,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.DEVNULL,
-        timeout=30,
+        timeout=120,
         check=False,
     )
     if result.returncode != 0:

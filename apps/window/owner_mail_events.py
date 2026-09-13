@@ -12,7 +12,7 @@ UNSUBSCRIBE_HASH=re.compile(r"https://mail\.blockwise\.sale/email/unsubscribe/([
 MAX_BODY_BYTES=64*1024
 SVIX_TOLERANCE_SECONDS=300
 SOURCE_SEGMENT_NAMES=("Owner CRM | Onboarding and trial help","Owner CRM | Trial ending","Owner CRM | Trial ended","Owner CRM | Opted-in education","Owner CRM | Paid welcome","Owner CRM | Cancellation follow-up","Owner CRM | Winback")
-SAFE_ERROR_CODES=frozenset({"signature_invalid","signature_expired","payload_rejected","recipient_rejected","upstream_lookup_rejected","upstream_lookup_unavailable","native_write_rejected","native_write_unavailable","processing_rejected"})
+SAFE_ERROR_CODES=frozenset({"signature_invalid","signature_expired","payload_rejected","provider_recipient_rejected","callback_recipient_rejected","recipient_mismatch","upstream_lookup_rejected","upstream_lookup_unavailable","native_write_rejected","native_write_unavailable","processing_rejected"})
 class OwnerMailEventError(RuntimeError):
  def __init__(self,message="owner mail event rejected",*,safe_code="processing_rejected"):
   super().__init__(message); self.safe_code=safe_code if safe_code in SAFE_ERROR_CODES else "processing_rejected"
@@ -74,15 +74,16 @@ def _write(client,method,url,headers,payload=None):
 def _contact_value(contact,name):
  fields=contact.get("fields"); all_fields=fields.get("all") if isinstance(fields,dict) else None
  return all_fields.get(name) if isinstance(all_fields,dict) else contact.get(name)
-def _recipients(value):
- if not isinstance(value,list) or len(value)!=1: raise OwnerMailEventError("provider recipient list was malformed",safe_code="recipient_rejected")
+def _recipients(value,safe_code="provider_recipient_rejected"):
+ if safe_code not in {"provider_recipient_rejected","callback_recipient_rejected"}: raise ValueError("invalid recipient source")
+ if not isinstance(value,list) or len(value)!=1: raise OwnerMailEventError("recipient list was malformed",safe_code=safe_code)
  item=value[0]; raw=item if isinstance(item,str) else item.get("email") if isinstance(item,dict) else None
- if not isinstance(raw,str) or not raw or len(raw)>998 or any(character in raw for character in ("\r","\n","\x00")): raise OwnerMailEventError("provider recipient was malformed",safe_code="recipient_rejected")
+ if not isinstance(raw,str) or not raw or len(raw)>998 or any(character in raw for character in ("\r","\n","\x00")): raise OwnerMailEventError("recipient was malformed",safe_code=safe_code)
  header=Parser(policy=policy.default).parsestr("To: "+raw+"\n\n").get("To")
- if header is None or header.defects or len(header.addresses)!=1 or len(header.groups)!=1 or header.groups[0].display_name is not None: raise OwnerMailEventError("provider recipient was malformed",safe_code="recipient_rejected")
+ if header is None or header.defects or len(header.addresses)!=1 or len(header.groups)!=1 or header.groups[0].display_name is not None: raise OwnerMailEventError("recipient was malformed",safe_code=safe_code)
  parsed=header.addresses[0]; display,address=parsed.display_name,parsed.addr_spec.strip().lower()
- if isinstance(item,dict) and display: raise OwnerMailEventError("provider recipient was malformed",safe_code="recipient_rejected")
- if len(address)>254 or not re.fullmatch(r"[^\s<>,;@]+@[^\s<>,;@]+",address): raise OwnerMailEventError("provider recipient was malformed",safe_code="recipient_rejected")
+ if isinstance(item,dict) and display: raise OwnerMailEventError("recipient was malformed",safe_code=safe_code)
+ if len(address)>254 or not re.fullmatch(r"[^\s<>,;@]+@[^\s<>,;@]+",address): raise OwnerMailEventError("recipient was malformed",safe_code=safe_code)
  return {address}
 def _tracking_hash(provider):
  # Resend's returned stored render is the proof. Do not accept a matching
@@ -118,7 +119,9 @@ def process_event(raw:bytes,headers:Mapping[str,str],cfg:OwnerMailEventsConfig,h
  stat=stats[0]; email,lead=stat.get("email_address"),stat.get("lead_id")
  if isinstance(lead,str) and re.fullmatch(r"[1-9][0-9]{0,14}",lead): lead=int(lead)
  if not isinstance(email,str) or isinstance(lead,bool) or not isinstance(lead,int) or lead<1: raise OwnerMailEventError("Mautic email statistic was malformed")
- if _recipients(provider.get("to")) != {email.strip().lower()} or _recipients(data.get("to")) != {email.strip().lower()}: raise OwnerMailEventError("provider recipient did not match native statistic",safe_code="recipient_rejected")
+ provider_recipients=_recipients(provider.get("to"),"provider_recipient_rejected")
+ callback_recipients=_recipients(data.get("to"),"callback_recipient_rejected")
+ if provider_recipients != {email.strip().lower()} or callback_recipients != {email.strip().lower()}: raise OwnerMailEventError("recipient did not match native statistic",safe_code="recipient_mismatch")
  contact=_lookup(client,"GET",cfg.mautic_url+f"/api/contacts/{lead}",mautic_headers).get("contact")
  if not isinstance(contact,dict) or contact.get("id") not in (lead,str(lead)): raise OwnerMailEventError("Mautic statistic contact did not resolve exactly")
  profile,workspace=_contact_value(contact,"blockwise_profile_id"),_contact_value(contact,"blockwise_workspace_id")
