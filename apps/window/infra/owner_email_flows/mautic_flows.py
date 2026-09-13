@@ -312,15 +312,17 @@ def validate_bridge_arguments(args: argparse.Namespace) -> None:
         raise ApiError("invalid email")
 
 
-def find_profile_contacts(api: Mautic, profile_id: str) -> list[dict[str, Any]]:
+def find_contacts(
+    api: Mautic, *, search: str, predicate: callable, label: str
+) -> list[dict[str, Any]]:
     """Bounded, paginated exact lookup. Never scan the contact collection."""
-    matches: list[dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
     start = 0
     total: int | None = None
     while total is None or start < total:
         query = urllib.parse.urlencode(
             {
-                "search": "blockwise_profile_id:" + profile_id,
+                "search": search,
                 "limit": str(CONTACT_LOOKUP_PAGE_SIZE),
                 "start": str(start),
             }
@@ -339,18 +341,40 @@ def find_profile_contacts(api: Mautic, profile_id: str) -> list[dict[str, Any]]:
         page = list(raw_contacts.values())
         if len(page) > CONTACT_LOOKUP_PAGE_SIZE:
             raise ApiError("Mautic contact identity page exceeded its safe bound")
-        matches.extend(
-            contact
-            for contact in page
-            if isinstance(contact, dict)
-            and contact_value(contact, "blockwise_profile_id") == profile_id
+        results.extend(
+            contact for contact in page if isinstance(contact, dict) and predicate(contact)
         )
         start += len(page)
         if start >= total:
             break
         if not page:
             raise ApiError("Mautic contact identity lookup was truncated")
-    return matches
+    return results
+
+
+def find_profile_contacts(api: Mautic, profile_id: str) -> list[dict[str, Any]]:
+    return find_contacts(
+        api,
+        search="blockwise_profile_id:" + profile_id,
+        predicate=lambda contact: contact_value(contact, "blockwise_profile_id") == profile_id,
+        label="profile",
+    )
+
+
+def contact_email(contact: dict[str, Any]) -> str | None:
+    value = contact_value(contact, "email")
+    if value is None:
+        value = contact.get("email")
+    return value if isinstance(value, str) else None
+
+
+def find_email_contacts(api: Mautic, email: str) -> list[dict[str, Any]]:
+    return find_contacts(
+        api,
+        search="email:" + email,
+        predicate=lambda contact: (contact_email(contact) or "").lower() == email.lower(),
+        label="email",
+    )
 
 
 def resolve_contact(
@@ -402,6 +426,11 @@ def bridge(api: Mautic, args: argparse.Namespace) -> None:
         NURTURE_EXIT_FIELD: "active",
     }
     if not contact:
+        # Mautic can match an existing contact by email on create. Email is not
+        # an integration identity, so never let that implicit merge overwrite
+        # a different profile/workspace or an unproven legacy contact.
+        if find_email_contacts(api, args.email):
+            raise ApiError("Mautic email belongs to a different or unproven immutable identity")
         contact = api.request("POST", "contacts/new", payload).get("contact", {})
     contact_id = int(contact["id"])
     if has_email_dnc(contact):

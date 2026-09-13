@@ -58,10 +58,10 @@ EVENT_OLD = "30000000-0000-4000-8000-000000000002"
 EVENT_NEW = "30000000-0000-4000-8000-000000000003"
 
 
-def bridge_contact(profile_id=PROFILE_ID, workspace_id=WORKSPACE_ID, dnc=None, contact_id=1):
+def bridge_contact(profile_id=PROFILE_ID, workspace_id=WORKSPACE_ID, dnc=None, contact_id=1, email="owner@example.test"):
     return {
         "id": contact_id,
-        "fields": {"all": {"blockwise_profile_id": profile_id, "blockwise_workspace_id": workspace_id}},
+        "fields": {"all": {"blockwise_profile_id": profile_id, "blockwise_workspace_id": workspace_id, "email": email}},
         "doNotContact": [] if dnc is None else dnc,
     }
 
@@ -85,8 +85,15 @@ class FakeBridgeMautic:
             from urllib.parse import parse_qs, urlparse
             query = parse_qs(urlparse(path).query)
             start, limit = int(query["start"][0]), int(query["limit"][0])
-            page = self.contacts[start:start + limit]
-            return {"contacts": {str(contact["id"]): contact for contact in page}, "total": len(self.contacts)}
+            search = query["search"][0]
+            if search.startswith("blockwise_profile_id:"):
+                matched = [contact for contact in self.contacts if contact["fields"]["all"].get("blockwise_profile_id") == search.removeprefix("blockwise_profile_id:")]
+            elif search.startswith("email:"):
+                matched = [contact for contact in self.contacts if contact["fields"]["all"].get("email", "").lower() == search.removeprefix("email:").lower()]
+            else:
+                raise AssertionError(search)
+            page = matched[start:start + limit]
+            return {"contacts": {str(contact["id"]): contact for contact in page}, "total": len(matched)}
         if method == "POST" and path == "contacts/new":
             contact = bridge_contact(contact_id=len(self.contacts) + 1)
             contact["fields"]["all"].update(payload)
@@ -219,6 +226,12 @@ class FlowTests(unittest.TestCase):
             flows.bridge(api, bridge_args())
         self.assertEqual(api.memberships, set())
         self.assertFalse(any(call[0] == "PATCH" for call in api.calls))
+
+    def test_bridge_refuses_implicit_email_merge_before_create(self):
+        api = FakeBridgeMautic(contacts=[bridge_contact(profile_id="10000000-0000-4000-8000-000000000002")])
+        with self.assertRaisesRegex(flows.ApiError, "email belongs"):
+            flows.bridge(api, bridge_args())
+        self.assertFalse(any(call[1] == "contacts/new" for call in api.calls))
 
     def test_bridge_rejects_malformed_identity_and_email(self):
         for values in (
