@@ -83,6 +83,21 @@ class LifecycleAction:
     identity: str
 
 
+@dataclass(frozen=True)
+class TimingPolicy:
+    as_of: datetime
+    trial_ending_window_days: int = 3
+    winback_delay_days: int = 30
+    event_freshness_days: int = 7
+
+    def __post_init__(self) -> None:
+        if self.as_of.tzinfo is None:
+            raise AdapterError("timing as-of must be timezone-aware")
+        for value in (self.trial_ending_window_days, self.winback_delay_days, self.event_freshness_days):
+            if not isinstance(value, int) or isinstance(value, bool) or not 1 <= value <= 365:
+                raise AdapterError("timing policy was out of range")
+
+
 def _action_id(workspace_id: str, flow: str, immutable_value: str) -> str:
     """A local action identity, never a claimed Stripe event identifier."""
     return str(uuid.uuid5(UUID_NAMESPACE, f"{workspace_id}:{flow}:{immutable_value}"))
@@ -181,30 +196,83 @@ def map_consent_fact(row: Mapping[str, Any]) -> ConsentFact | None:
     return fact
 
 
-def lifecycle_action(fact: ConsentFact) -> LifecycleAction | str | None:
+def _event_window(event: str, policy: TimingPolicy) -> str | None:
+    timestamp = _timestamp(event)
+    assert timestamp is not None
+    age = policy.as_of - timestamp
+    if age.total_seconds() < 0:
+        return "held_future_event"
+    if age.days > policy.event_freshness_days:
+        return "held_stale_event"
+    return None
+
+
+def _winback_window(event: str, policy: TimingPolicy) -> str | None:
+    timestamp = _timestamp(event)
+    assert timestamp is not None
+    age = policy.as_of - timestamp
+    if age.total_seconds() < 0:
+        return "held_future_event"
+    if age.days < policy.winback_delay_days:
+        return None
+    if age.days > policy.winback_delay_days + policy.event_freshness_days:
+        return "held_stale_winback"
+    return "eligible"
+
+
+def lifecycle_action(fact: ConsentFact, policy: TimingPolicy | None = None) -> LifecycleAction | str | None:
     """Select one current lifecycle path from raw authoritative facts."""
+    policy = policy or TimingPolicy(datetime.now(timezone.utc))
     if fact.state != "granted":
         return None
     if fact.billing_access_state == "paid":
         if fact.billing_checkout_completed_at is None:
             return "held_missing_checkout_completion"
+        held = _event_window(fact.billing_checkout_completed_at, policy)
+        if held:
+            return held
         return LifecycleAction("paid_welcome", _action_id(fact.workspace_id, "paid_welcome", fact.billing_checkout_completed_at))
     if fact.billing_access_state == "canceled":
         if fact.billing_event_created is None:
             return "held_missing_billing_event"
+        if fact.current_period_end is None:
+            return "held_missing_cancellation_time"
+        winback = _winback_window(fact.current_period_end, policy)
+        if winback == "eligible":
+            return LifecycleAction("winback", _action_id(fact.workspace_id, "winback", fact.current_period_end))
+        if winback:
+            return winback
+        held = _event_window(fact.current_period_end, policy)
+        if held:
+            return held
         return LifecycleAction("cancelled", _action_id(fact.workspace_id, "cancelled", str(fact.billing_event_created)))
     if fact.trial_state == "ended":
         if fact.trial_ends_at is None:
             return "held_missing_trial_end"
+        winback = _winback_window(fact.trial_ends_at, policy)
+        if winback == "eligible":
+            return LifecycleAction("winback", _action_id(fact.workspace_id, "winback", fact.trial_ends_at))
+        if winback:
+            return winback
+        held = _event_window(fact.trial_ends_at, policy)
+        if held:
+            return held
         return LifecycleAction("trial_ended", _action_id(fact.workspace_id, "trial_ended", fact.trial_ends_at))
     if fact.trial_state == "active":
+        if fact.trial_ends_at is not None:
+            until_end = _timestamp(fact.trial_ends_at) - policy.as_of
+            if 0 <= until_end.total_seconds() <= policy.trial_ending_window_days * 86400:
+                return LifecycleAction("trial_ending", _action_id(fact.workspace_id, "trial_ending", fact.trial_ends_at))
         if fact.trial_started_at is None:
             return "held_missing_trial_start"
-        # There is no approved near-end interval. Trial ending and winback are
-        # held policy decisions, while the normal active-trial help path remains
-        # eligible from its immutable start event.
+        held = _event_window(fact.trial_started_at, policy)
+        if held:
+            return held
         return LifecycleAction("onboarding_trial_help", _action_id(fact.workspace_id, "onboarding_trial_help", fact.trial_started_at))
     if fact.workspace_created_at is not None:
+        held = _event_window(fact.workspace_created_at, policy)
+        if held:
+            return held
         return LifecycleAction("onboarding_trial_help", _action_id(fact.workspace_id, "onboarding_trial_help", fact.workspace_created_at))
     return "held_no_current_lifecycle"
 
@@ -280,7 +348,7 @@ def collect_facts(source: SnapshotClient, *, page_limit: int = SNAPSHOT_PAGE_LIM
         after = next_after
 
 
-def apply_fact(api: Mautic, fact: ConsentFact, *, apply: bool) -> str:
+def apply_fact(api: Mautic, fact: ConsentFact, *, apply: bool, timing: TimingPolicy | None = None) -> str:
     state = fact.state
     if state == "ungranted":
         return state
@@ -288,7 +356,7 @@ def apply_fact(api: Mautic, fact: ConsentFact, *, apply: bool) -> str:
         return state
     if fact.event_id is None:
         return "held_missing_event_id"
-    action = lifecycle_action(fact)
+    action = lifecycle_action(fact, timing)
     if isinstance(action, str):
         return action
     flow = action.flow if action is not None else FLOW
@@ -309,12 +377,16 @@ def apply_fact(api: Mautic, fact: ConsentFact, *, apply: bool) -> str:
     return "suppressed"
 
 
-def run(*, source: SnapshotClient, api: Mautic | None, apply: bool) -> dict[str, int]:
+def run(*, source: SnapshotClient, api: Mautic | None, apply: bool, timing: TimingPolicy | None = None) -> dict[str, int]:
     facts = collect_facts(source)
-    summary = {key: 0 for key in ("suppressed", "ungranted", "held_missing_event_id", "held_ambiguous_consent", "held_ineligible", "held_missing_checkout_completion", "held_missing_billing_event", "held_missing_trial_end", "held_missing_trial_start", "held_trial_ending_policy", "held_no_current_lifecycle", "failed")}
+    summary = {key: 0 for key in ("suppressed", "ungranted", "held_missing_event_id", "held_ambiguous_consent", "held_ineligible", "held_missing_checkout_completion", "held_missing_billing_event", "held_missing_cancellation_time", "held_missing_trial_end", "held_missing_trial_start", "held_future_event", "held_stale_event", "held_stale_winback", "held_no_current_lifecycle", "failed")}
     for fact in facts:
         try:
-            outcome = apply_fact(api, fact, apply=apply) if api is not None else fact.state
+            if api is None:
+                action = lifecycle_action(fact, timing)
+                outcome = action if isinstance(action, str) else ("eligible_" + action.flow if action else fact.state)
+            else:
+                outcome = apply_fact(api, fact, apply=apply, timing=timing)
         except (ApiError, AdapterError):
             outcome = "failed"
         summary[outcome] = summary.get(outcome, 0) + 1
@@ -324,8 +396,16 @@ def run(*, source: SnapshotClient, api: Mautic | None, apply: bool) -> dict[str,
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("command", choices=("preview", "run"))
+    parser.add_argument("--as-of", default=os.environ.get("OWNER_EMAIL_FLOWS_AS_OF"))
+    parser.add_argument("--trial-ending-window-days", type=int, default=int(os.environ.get("OWNER_EMAIL_FLOWS_TRIAL_ENDING_WINDOW_DAYS", "3")))
+    parser.add_argument("--winback-delay-days", type=int, default=int(os.environ.get("OWNER_EMAIL_FLOWS_WINBACK_DELAY_DAYS", "30")))
+    parser.add_argument("--event-freshness-days", type=int, default=int(os.environ.get("OWNER_EMAIL_FLOWS_EVENT_FRESHNESS_DAYS", "7")))
     args = parser.parse_args()
     try:
+        as_of = _timestamp(args.as_of) if args.as_of else datetime.now(timezone.utc)
+        if as_of is None:
+            raise AdapterError("timing as-of was invalid")
+        timing = TimingPolicy(as_of, args.trial_ending_window_days, args.winback_delay_days, args.event_freshness_days)
         snapshot = load_sync_credentials()
         source = BlockwiseSnapshotClient(
             base_url=snapshot.blockwise_snapshot_url,
@@ -336,7 +416,7 @@ def main() -> int:
         if args.command == "run":
             marketing = load_marketing_credentials()
             api = Mautic(MAUTIC_URL, marketing.username, marketing.password)
-        print(json.dumps(run(source=source, api=api, apply=args.command == "run"), sort_keys=True))
+        print(json.dumps(run(source=source, api=api, apply=args.command == "run", timing=timing), sort_keys=True))
         return 0
     except (AdapterError, ConnectorError, ApiError):
         print(json.dumps({"failed": 1, "error": "source_or_native_marketing_unavailable"}))

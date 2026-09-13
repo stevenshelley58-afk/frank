@@ -42,9 +42,17 @@ action IDs are local bridge identities, not asserted Stripe event IDs. Mautic Do
 Not Contact does not automatically suppress the separate Blockwise transactional
 outbox.
 
-There is no approved trial-near-end interval or winback offer. Trial-ending and
-winback therefore remain explicit `held_policy` outcomes. The adapter never
-derives them from `sourceObservedAt`, an elapsed wall clock, signup or billing.
+The default timing policy is deliberately narrow and configurable: trial-ending
+is eligible only in the three days before authoritative `trial.endsAt`; winback
+is eligible only from 30 through 37 days after an authoritative trial end or
+actual cancellation period end. Neither carries an offer, price or incentive.
+`OWNER_EMAIL_FLOWS_TRIAL_ENDING_WINDOW_DAYS`,
+`OWNER_EMAIL_FLOWS_WINBACK_DELAY_DAYS` and
+`OWNER_EMAIL_FLOWS_EVENT_FRESHNESS_DAYS` can be overridden through the native
+operator command, with `--as-of` available for deterministic review. The
+default seven-day freshness window holds old lifecycle facts, so enabling a new
+adapter cannot backfill historical signups or lifecycle emails. The adapter
+never derives timing from `sourceObservedAt`, signup or an agency lead event.
 Reply, conversion, bounce and complaint exits are native/email-side gates, not
 asserted Blockwise customer-lead events.
 

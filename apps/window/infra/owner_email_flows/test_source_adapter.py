@@ -15,6 +15,7 @@ spec.loader.exec_module(adapter)
 PROFILE_ID = "10000000-0000-4000-8000-000000000001"
 WORKSPACE_ID = "20000000-0000-4000-8000-000000000001"
 EVENT_ID = "30000000-0000-4000-8000-000000000001"
+AS_OF = adapter.TimingPolicy(adapter._timestamp("2026-09-13T00:00:00Z"))
 
 
 def row(**overrides):
@@ -79,8 +80,8 @@ class SourceAdapterTests(unittest.TestCase):
             adapter.collect_facts(FakeSource([row(marketingConsent={"eventId": "not-a-uuid", "granted": True, "occurredAt": "2026-09-13T00:00:00Z", "policyVersion": "2026-09-13"})]))
 
     def test_preview_never_calls_the_native_bridge(self):
-        summary = adapter.run(source=FakeSource([row()]), api=None, apply=False)
-        self.assertEqual(summary["granted"], 1)
+        summary = adapter.run(source=FakeSource([row()]), api=None, apply=False, timing=AS_OF)
+        self.assertEqual(summary["eligible_trial_ending"], 1)
         self.assertFalse(any(key.startswith("enrolled_") for key in summary))
 
     def test_grant_uses_only_the_authoritative_consent_event(self):
@@ -88,7 +89,7 @@ class SourceAdapterTests(unittest.TestCase):
         original = adapter.bridge
         try:
             adapter.bridge = lambda api, args: calls.append(args)
-            outcome = adapter.apply_fact(FakeApi(), adapter.map_consent_fact(row(trial={"state": "active", "startedAt": "2026-09-01T00:00:00Z", "endsAt": None})), apply=True)
+            outcome = adapter.apply_fact(FakeApi(), adapter.map_consent_fact(row(trial={"state": "active", "startedAt": "2026-09-12T00:00:00Z", "endsAt": None})), apply=True, timing=AS_OF)
         finally:
             adapter.bridge = original
         self.assertEqual(outcome, "enrolled_onboarding_trial_help")
@@ -111,27 +112,28 @@ class SourceAdapterTests(unittest.TestCase):
     def test_paid_requires_authoritative_checkout_completion(self):
         fact = adapter.map_consent_fact(row(billingAccessState="paid"))
         self.assertEqual(adapter.lifecycle_action(fact), "held_missing_checkout_completion")
-        fact = adapter.map_consent_fact(row(billingAccessState="paid", billingCheckoutCompletedAt="2026-09-13T01:00:00Z"))
-        action = adapter.lifecycle_action(fact)
+        fact = adapter.map_consent_fact(row(billingAccessState="paid", billingCheckoutCompletedAt="2026-09-12T01:00:00Z"))
+        action = adapter.lifecycle_action(fact, AS_OF)
         self.assertEqual(action.flow, "paid_welcome")
         self.assertRegex(action.identity, adapter._UUID.pattern)
 
     def test_scheduled_cancellation_never_means_cancelled(self):
         fact = adapter.map_consent_fact(row(cancelAtPeriodEnd=True, currentPeriodEnd="2026-09-20T00:00:00Z"))
         self.assertNotEqual(getattr(adapter.lifecycle_action(fact), "flow", None), "cancelled")
-        fact = adapter.map_consent_fact(row(billingAccessState="canceled", billingEventCreated=42, cancelAtPeriodEnd=True))
-        action = adapter.lifecycle_action(fact)
+        fact = adapter.map_consent_fact(row(billingAccessState="canceled", billingEventCreated=42, cancelAtPeriodEnd=True, currentPeriodEnd="2026-09-12T00:00:00Z"))
+        action = adapter.lifecycle_action(fact, AS_OF)
         self.assertEqual(action.flow, "cancelled")
         self.assertNotIn("42", action.identity)
 
     def test_active_trial_uses_help_not_an_unapproved_near_end_reminder(self):
         fact = adapter.map_consent_fact(row())
-        self.assertEqual(adapter.lifecycle_action(fact).flow, "onboarding_trial_help")
+        self.assertEqual(adapter.lifecycle_action(fact, AS_OF).flow, "trial_ending")
 
     def test_trial_end_and_replay_are_stable(self):
         ended = row(trial={"state": "ended", "startedAt": "2026-09-01T00:00:00Z", "endsAt": "2026-09-15T00:00:00Z"})
-        first = adapter.lifecycle_action(adapter.map_consent_fact(ended))
-        second = adapter.lifecycle_action(adapter.map_consent_fact(ended))
+        timing = adapter.TimingPolicy(adapter._timestamp("2026-09-15T01:00:00Z"))
+        first = adapter.lifecycle_action(adapter.map_consent_fact(ended), timing)
+        second = adapter.lifecycle_action(adapter.map_consent_fact(ended), timing)
         self.assertEqual(first.flow, "trial_ended")
         self.assertEqual(first.identity, second.identity)
 
@@ -143,6 +145,21 @@ class SourceAdapterTests(unittest.TestCase):
 
     def test_ambiguous_owner_never_becomes_a_customer_contact(self):
         self.assertIsNone(adapter.map_consent_fact(row(mappingAmbiguities=["multiple owners"])))
+
+    def test_winback_waits_thirty_days_after_authoritative_trial_end(self):
+        ended = row(trial={"state": "ended", "startedAt": "2026-07-01T00:00:00Z", "endsAt": "2026-08-14T00:00:00Z"})
+        action = adapter.lifecycle_action(adapter.map_consent_fact(ended), AS_OF)
+        self.assertEqual(action.flow, "winback")
+
+    def test_first_run_holds_old_lifecycle_facts_instead_of_backfilling(self):
+        old = row(trial={"state": "active", "startedAt": "2026-08-01T00:00:00Z", "endsAt": "2026-10-01T00:00:00Z"})
+        self.assertEqual(adapter.lifecycle_action(adapter.map_consent_fact(old), AS_OF), "held_stale_event")
+
+    def test_near_end_window_is_configurable_and_uses_injected_as_of(self):
+        active = adapter.map_consent_fact(row(trial={"state": "active", "startedAt": "2026-09-12T00:00:00Z", "endsAt": "2026-09-17T00:00:00Z"}))
+        self.assertEqual(adapter.lifecycle_action(active, AS_OF).flow, "onboarding_trial_help")
+        four_day_window = adapter.TimingPolicy(AS_OF.as_of, trial_ending_window_days=4)
+        self.assertEqual(adapter.lifecycle_action(active, four_day_window).flow, "trial_ending")
 
 
 if __name__ == "__main__":
