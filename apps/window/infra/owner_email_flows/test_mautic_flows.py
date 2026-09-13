@@ -185,14 +185,18 @@ class FlowTests(unittest.TestCase):
         legacy = dict(desired, events=[{"type": "email.send", "order": 1, "properties": {"email": 1, "email_type": "transactional"}, "triggerInterval": 0}])
         self.assertTrue(flows.campaign_needs_update(legacy, desired))
 
-    def test_campaign_reconciliation_replaces_stale_unpublished_campaign(self):
+    def test_campaign_reconciliation_preserves_stale_unpublished_campaign(self):
         api = FakeMautic()
         flows.setup(api, apply=True)
         campaign = api.store["campaigns"][0]
         campaign["events"] = [{"type": "email.send", "order": 1, "properties": {"email": 1, "email_type": "transactional"}, "triggerInterval": 0}]
         api.calls.clear()
         flows.setup(api, apply=True)
-        self.assertIn(("DELETE", f"campaigns/{campaign['id']}/delete", None), api.calls)
+        self.assertFalse(any(method == "DELETE" for method, _, _ in api.calls))
+        self.assertTrue(any("[superseded " in c["name"] for c in api.store["campaigns"]))
+        api.calls.clear()
+        flows.setup(api, apply=True)
+        self.assertFalse(any(method in ("POST", "PATCH", "DELETE") for method, _, _ in api.calls))
 
     def test_copy_has_opt_out_and_no_em_dash(self):
         for flow in flows.FLOWS:

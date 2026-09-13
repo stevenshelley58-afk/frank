@@ -264,6 +264,8 @@ def event_signature(events: list[dict[str, Any]] | dict[str, dict[str, Any]]) ->
     return [
         (
             event.get("type"),
+            event.get("eventType"),
+            json.dumps(event.get("properties") or {}, sort_keys=True),
             (event.get("properties") or {}).get("field"),
             (event.get("properties") or {}).get("email"),
             (event.get("properties") or {}).get("email_type"),
@@ -288,15 +290,18 @@ def ensure_campaigns(api: Mautic, segments: dict[str, int], emails: dict[str, in
             campaign = api.request("POST", "campaigns/new", desired).get("campaign", {})
             existing.append(campaign)
         elif campaign and apply and campaign_needs_update(campaign, desired):
-            if api.total("contacts") != 0:
-                raise ApiError(f"refusing to revise campaign with native contacts: {name}")
-            # Mautic appends graph events when supplied transient new_* IDs on
-            # a campaign edit. With no native contacts and this campaign still
-            # unpublished, replacing only this owner-owned campaign is the
-            # safe idempotent reconciliation path.
-            api.request("DELETE", f"campaigns/{int(campaign['id'])}/delete")
+            if campaign.get("isPublished"):
+                raise ApiError(f"refusing to revise a published campaign: {name}")
+            # Preserve the previous draft and all native event/contact history.
+            # Transient graph IDs append on edit, so archive this unpublished
+            # revision by name and create the new canonical draft without DELETE.
+            old_id = int(campaign["id"])
+            archived = api.request("PATCH", f"campaigns/{old_id}/edit", {
+                "name": f"{name} [superseded {old_id}]", "isPublished": False,
+            }).get("campaign", {})
+            existing[existing.index(campaign)] = archived
             campaign = api.request("POST", "campaigns/new", desired).get("campaign", {})
-            existing[existing.index(named(existing, name))] = campaign
+            existing.append(campaign)
         if campaign:
             if campaign.get("isPublished"):
                 raise ApiError(f"campaign must remain unpublished until acceptance: {name}")
