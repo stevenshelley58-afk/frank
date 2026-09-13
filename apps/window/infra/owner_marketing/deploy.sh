@@ -30,18 +30,15 @@ if [[ -z "$runtime_profiles" ]]; then
   docker compose "${cleanup_args[@]}" stop cron worker >/dev/null 2>&1 || die cannot-stop-native-senders
   docker compose "${cleanup_args[@]}" rm -f cron worker >/dev/null 2>&1 || die cannot-retire-stopped-senders
 fi
-# Keep the proxy health requests out of Symfony while native cache clearing
-# runs. This avoids concurrent request/cache rebuilds during configuration.
-docker compose "${compose_args[@]}" stop ingress >/dev/null
-docker compose "${compose_args[@]}" up -d db mautic
-for _ in $(seq 1 60); do
-  s="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing 2>/dev/null || true)"
-  [[ "$s" == healthy ]] && break
-  [[ "$s" != unhealthy ]] || die unhealthy
-  sleep 5
-done
-[[ "$s" == healthy ]] || die backend-health-timeout
+# Start the exact proxy revision, then pause it before its first health
+# request. Pausing retains its private address while native cache/configuration
+# is refreshed without concurrent proxy requests. Always unpause on failure.
+docker compose "${compose_args[@]}" up -d db mautic ingress
+docker pause frank-owner-marketing-ingress >/dev/null
+trap 'docker unpause frank-owner-marketing-ingress >/dev/null 2>&1 || true' EXIT
 "$script_dir/configure_site.sh"
+docker unpause frank-owner-marketing-ingress >/dev/null
+trap - EXIT
 docker compose "${compose_args[@]}" up -d
 for _ in $(seq 1 60); do s="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing 2>/dev/null || true)"; i="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing-ingress 2>/dev/null || true)"; [[ "$s" == healthy && "$i" == healthy ]] && break; [[ "$s" != unhealthy && "$i" != unhealthy ]] || die unhealthy; sleep 5; done
 "$script_dir/check.sh" --preinstall
