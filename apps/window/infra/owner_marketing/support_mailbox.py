@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check or create only the native Support mailbox, without fetching messages."""
+"""Check or create only the native routing mailboxes, without fetching messages."""
 import argparse
 import imaplib
 import json
@@ -7,18 +7,21 @@ import os
 import ssl
 
 
-def ensure_folder(connection, create=False):
-    status, _ = connection.select('"Support"', readonly=True)
+def ensure_folder(connection, create=False, name="Support"):
+    if name not in {"Support", "Notifications"}:
+        raise RuntimeError("unsupported_folder")
+    quoted = '"' + name + '"'
+    status, _ = connection.select(quoted, readonly=True)
     if status == "OK":
         return "unchanged"
     if not create:
-        raise RuntimeError("support_folder_missing")
-    status, _ = connection.create('"Support"')
+        raise RuntimeError("routing_folder_missing")
+    status, _ = connection.create(quoted)
     if status != "OK":
-        raise RuntimeError("support_folder_create_failed")
-    status, _ = connection.select('"Support"', readonly=True)
+        raise RuntimeError("routing_folder_create_failed")
+    status, _ = connection.select(quoted, readonly=True)
     if status != "OK":
-        raise RuntimeError("support_folder_readback_failed")
+        raise RuntimeError("routing_folder_readback_failed")
     return "created"
 
 
@@ -32,13 +35,13 @@ def main():
         raise RuntimeError("mailbox_credential_unavailable")
     with imaplib.IMAP4_SSL("imap.purelymail.com", 993, ssl_context=ssl.create_default_context(), timeout=20) as connection:
         connection.login(username, password)
-        result = ensure_folder(connection, args.create)
-    print(json.dumps({"support_folder": result, "mail_fetched": False, "mail_moved": False}))
+        results = {name.lower(): ensure_folder(connection, args.create, name) for name in ("Support", "Notifications")}
+    print(json.dumps({"routing_folders": results, "mail_fetched": False, "mail_moved": False}))
 
 
 if __name__ == "__main__":
     try:
         main()
     except (RuntimeError, OSError, imaplib.IMAP4.error):
-        print('{"error":"support_mailbox_check_failed"}')
+        print('{"error":"routing_mailbox_check_failed"}')
         raise SystemExit(2)

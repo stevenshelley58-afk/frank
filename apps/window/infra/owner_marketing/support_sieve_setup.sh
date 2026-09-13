@@ -26,10 +26,27 @@ if allof(
   fileinto :copy "Mautic Replies";
 }
 # END blockwise-mautic-replies
+# BEGIN blockwise-support-folder
+if address :is "to" "support@blockwise.sale" {
+  fileinto "Support";
+  stop;
+}
+# END blockwise-support-folder
 SIEVE
 cat >"$tmp/desired.sieve" <<'SIEVE'
-# BEGIN blockwise-mautic-replies
 require ["fileinto", "copy"];
+# BEGIN blockwise-frappe-owner-notifications
+if allof(
+  header :is "IsNotification" "<notification>",
+  header :is "X-Frappe-Site" "https://srv1625369.tail3084c0.ts.net:8445",
+  address :is "from" "hello@blockwise.sale",
+  address :is "cc" "owner@blockwise.sale"
+) {
+  fileinto "Notifications";
+  stop;
+}
+# END blockwise-frappe-owner-notifications
+# BEGIN blockwise-mautic-replies
 if allof(
   address :is "to" "hello@blockwise.sale",
   anyof(exists "in-reply-to", exists "references")
@@ -53,13 +70,13 @@ sed -i 's/\r$//' "$tmp/current.sieve"
 # uses the existing private mailbox login only, and never reads or moves mail.
 export PURELYMAIL_USERNAME PURELYMAIL_PASSWORD
 folder_args=(); ((apply)) && folder_args+=(--create)
-python3 "$(dirname "$0")/support_mailbox.py" "${folder_args[@]}" || die native-imap-support-folder-unavailable
+python3 "$(dirname "$0")/support_mailbox.py" "${folder_args[@]}" || die native-imap-routing-folders-unavailable
 # The exact prior owned script is the sole migration source; any other edit is
 # held rather than overwritten.
-if cmp -s "$tmp/current.sieve" "$tmp/desired.sieve"; then echo '{"status":"unchanged","support_folder":"checked"}'; exit 0; fi
+if cmp -s "$tmp/current.sieve" "$tmp/desired.sieve"; then echo '{"status":"unchanged","routing_folders":"checked"}'; exit 0; fi
 cmp -s "$tmp/current.sieve" "$tmp/base.sieve" || die owned-script-drift-refusing-to-overwrite
 run --localsieve /work/desired.sieve --checkscript || die provider-rejected-script
-if (( !activate )); then echo '{"status":"sieve_held","support_folder":"checked","mail_moved":false}'; exit 0; fi
+if (( !activate )); then echo '{"status":"sieve_held","routing_folders":"checked","mail_moved":false}'; exit 0; fi
 install -d -o root -g root -m 0700 "$backup"
 stamp=$(date -u +%Y%m%dT%H%M%SZ); install -o root -g root -m 0600 "$tmp/current.sieve" "$backup/$script.$stamp.sieve"
 run --localsieve /work/desired.sieve --remotesieve "$script" --upload || die upload-failed
