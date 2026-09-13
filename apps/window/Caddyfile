@@ -414,8 +414,6 @@ mail.blockwise.sale {
             header_up X-Real-IP {client_ip}
             header_up X-Forwarded-For {client_ip}
             header_up -Authorization
-            header_up -Cookie
-            header_down -Set-Cookie
         }
     }
     handle {
