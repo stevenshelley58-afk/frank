@@ -82,7 +82,7 @@ requested service message. AI-personalized mail remains draft until approved.
 
 - Individual owner login, least-privilege roles, MFA and protected daily access;
   the private CRM + Helpdesk runtime is already verified.
-- Private idempotent prospect/customer/billing handoffs implemented and tested.
+- Prospect import and outreach handoff remain gated. The customer/billing mirror is active, as recorded below.
 - Mailbox inbound, outbound, Sent and reply threading verified using @blockwise.sale.
 - Reviewed templates and approved flow definitions, with safe test recipients.
 - Cold provider policy and recipient eligibility resolved before live enrolment.
@@ -207,3 +207,20 @@ unreferenced blob. Temporary sites, containers and network were removed.
 This proves the staged recovery mechanism, not off-host recovery or existing live
 encrypted credentials: the base archive still has no attachments. Off-host backup,
 recovery-point objectives and real mailbox recovery remain unresolved.
+
+
+## Customer sync activated, 13 September 2026
+
+This supersedes the earlier candidate-only customer-sync notes, not the remaining launch gates.
+
+- Product revision `db775a3902c00589a3ccc7a768246539e37cb3ab` exposes a bounded, raw-fact customer snapshot. The dedicated HMAC secret cannot fall back to or reuse the shared internal key. Replay, scope, unauthenticated and bearer requests are rejected; all responses are no-store.
+- Hermes runtime source `55d026ceddf58e1a17e156cd870d07ad3a3cf7e9` connects through the existing product loopback ingress on 8080 with fixed Host `blockwise.sale`. Public Cloudflare blocked the first server-side attempt; no ingress or security policy was changed. No provider credentials are given to this connector.
+- All thirteen native Custom Fields were verified unchanged by setup preflight. Three identity fields retain native unique indexes. Five existing pre-launch Blockwise accounts were mirrored. Four source addresses look like test addresses; none of these records prove a paying/live customer. Existing manual and labelled native acceptance contacts were preserved.
+- Native acceptance covered create, identical-observation replay, billing/trial mirror update, stale observation, conflicting single identity, concurrent stale modified token, parent-contact email insertion, changed-source alternate email preserving the operator primary, native CRM review tasks and forbidden Administrator/Email Account access.
+- An upstream Frappe Contact permission hook allowed deletion of one labelled acceptance fixture despite a no-delete role. No real customer was deleted. The committed native Before Delete Server Script now denies this identity, and the actual DELETE denial passed. Three labelled native acceptance contacts remain, with their review tasks resolved. This is documented native configuration, not a custom Frappe application.
+- Native Hermes job `521151fe28c3`, **Owner CRM customer sync**, is enabled every 15 minutes in the single default profile with `no_agent=true`. A native `hermes cron run` completed successfully. There is no model call per sync, new system timer or Frank worker. Pause, blocked-while-paused, resume, source preview, apply and retry were exercised. A fresh observation advances the watermark; this is reported as an update even when the other facts are unchanged.
+- Runtime scripts are under `/home/hermes/.hermes/scripts/owner-crm-sync`. Operator commands are `python3 operate.py status|preview|run|pause|resume` as user hermes. Hermes cron provides native enable/pause/history. Private aggregate receipts are in `/srv/hermes/state/owner-crm-sync`; exceptions are ordinary CRM Tasks, not a second task store. No credentials or customer payloads appear in receipts.
+- The actual product database dump was restored into a network-isolated Postgres container and the new migration passed against that schema. Native SQL permission tests, repository tests/typecheck, immutable production build, private compiled-revision/HMAC canary and guarded release passed. The temporary canary was removed and the pre-existing autodeploy timer resumed.
+- Post-sync native backup and isolated restore succeeded: `/srv/frank/backups/owner-crm/local-20260913T012436Z-cf6416be85cc/drill-receipt.json`. All thirteen custom fields matched. The isolated staged attachment/encrypted-secret round trip passed and temporary resources were removed. This remains local-only; it is not an offsite backup claim.
+
+Evidence is root-private at `/srv/blockwise/verification/owner-crm-sync-20260913/`. Connector/setup tests currently total 46 passing. No live email, charge, provider write, prospect enrolment or customer-agency CRM mutation was performed. The full mailbox/flows, mobile receipt, prospect eligibility and final consolidated browser acceptance gates above remain open.
