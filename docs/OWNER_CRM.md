@@ -5,7 +5,7 @@ covers Steven's Blockwise customer business, not a customer's property-lead CRM.
 Follow the canonical engineering rules and existing component release guides.
 
 
-## Current acceptance ledger, 13 September 2026 12:10 UTC
+## Current acceptance ledger, 13 September 2026 10:18 UTC
 
 This ledger supersedes the older checkpoint below. It records private, sanitized
 receipts and current runtime evidence. It is not a completed-CRM or launch
@@ -13,19 +13,18 @@ approval.
 
 ### Completed and evidenced
 
-- Native owner mailbox subscription works on desktop and mobile. Ordinary IMAP
+- Native customer subscription details were verified on desktop and mobile. Ordinary IMAP
   reply send, Sent-copy handling and native reply threading passed. The mailbox
   receipt is `/srv/frank/verification/owner-crm-final-20260913/mailbox-native-acceptance.json`.
 - Native support routing passed: ticket `0003`, one notification, and zero
   duplicate receipts on repeat delivery. Receipt:
   `/srv/frank/verification/owner-crm-final-20260913/support-native-acceptance.json`.
 - CRM native task, Helpdesk and inbound-mail notifications are private and
-  generic. The owner-only Agent permissions work is still being corrected and
-  is not claimed complete here.
+  generic. The native owner Agent role and HD Agent record are reconciled, and desktop assignment persisted on mobile reload. The phone-sized Helpdesk email view has no horizontal overflow. Receipts: `/srv/frank/verification/owner-crm-final-20260913/helpdesk-owner-reconcile.jsonl` and `helpdesk-owner-browser-acceptance.json` in the same directory.
 - Mautic acceptance now covers rendered HTML and plain variants, direct CTA,
   token rendering and the restricted unsubscribe/DNC negative path. No negative
   message was sent; the negative check left the sent count unchanged. There are
-  10 draft campaigns plus newsletter 11 and segment 9 drafts; nothing is
+  eight canonical draft campaigns, ten native flow emails, and a separate unpublished newsletter (email 11, segment 9); nothing is
   activated. Receipt:
   `/srv/frank/verification/owner-crm-final-20260913/mautic-html-final-acceptance.json`.
 - Current runtime evidence is Mautic image `a47a2aa68fff2680206282255743fe18654b2492`,
@@ -52,10 +51,7 @@ approval.
   its value is intentionally omitted. Resend and Purelymail remain disallowed
   for cold prospecting. No provider, campaign, prospect enrolment or customer
   send was activated.
-- The source-audit-plan intake correction awaits release. Owner Agent
-  permissions, final consolidated browser acceptance, consent-source release,
-  public audit freshness/signup attribution and remaining lifecycle exits remain
-  open. Historical evidence below must not be read as current acceptance.
+- Audit-plan intake is released within `959860336febdc060e4c403f08712b32e36162dc`. The exact intake change passed repository checks and an isolated canary; another independent main update superseded its original release candidate before activation. Live bounded signed reads, authentication rejection, replay rejection and no-store passed. Evidence: `/srv/blockwise/verification/owner-crm-sync-20260913/audit-intake-live-acceptance.json`. This does not attest unrelated changes in that later release. Final consolidated browser acceptance, public audit freshness and remaining lifecycle exits are separate gates. Historical evidence below must not be read as current acceptance.
 
 ### Saved email design inspiration
 
