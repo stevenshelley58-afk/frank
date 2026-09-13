@@ -449,6 +449,13 @@ class RegressionTests(unittest.TestCase):
             sync.run(snapshot_client=Cycle(), store=store, apply=True)
         self.assertEqual(store.created, [])
 
+    def test_numeric_native_task_name_is_supported(self):
+        store = sync.FrappeContactStore()
+        writes=[]
+        store._request=lambda method,path,**kw: ({"data":[{"name":123,"status":"Todo"}]} if method=="GET" else (writes.append(path) or {"data":{}}))
+        store.reconcile_hold("workspace", "unchanged")
+        self.assertEqual(writes, ["/api/resource/CRM%20Task/123"])
+
     def test_wrong_source_origin_fails_before_network(self):
         with self.assertRaises(sync.ConnectorError):
             sync.BlockwiseSnapshotClient(base_url="https://evil.test", signing_secret="x"*40, scope="scope")

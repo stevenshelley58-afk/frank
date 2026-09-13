@@ -506,7 +506,7 @@ class FrappeContactStore:
                 "description": "Customer sync needs review: " + outcome +
                     ". No customer access, billing or email was changed. Retry after resolving source ownership or contact identity."})
         elif not held and rows and rows[0].get("status") != "Done":
-            self._request("PUT", "/api/resource/CRM%20Task/" + urllib.parse.quote(rows[0]["name"], safe=""),
+            self._request("PUT", "/api/resource/CRM%20Task/" + urllib.parse.quote(str(rows[0]["name"]), safe=""),
                           body={"status": "Done"})
 
     def _contact_fields(self, extra: Sequence[str]) -> list[str]:
