@@ -15,10 +15,10 @@ if docker exec frank-owner-marketing test -f /var/www/html/config/local.php; the
   docker exec -e EXPECTED_SITE_URL="$public_url" frank-owner-marketing php -r '
   $parameters = [];
   include "/var/www/html/config/local.php";
-  if (($parameters["site_url"] ?? null) !== getenv("EXPECTED_SITE_URL")) {
+  if (($parameters["site_url"] ?? null) !== getenv("EXPECTED_SITE_URL") || ($parameters["disable_trackable_urls"] ?? false) !== true) {
       exit(1);
   }
-  ' || die native-site-url-mismatch
+  ' || die native-site-url-or-click-tracking-mismatch
 fi
 [[ "$preinstall" == --preinstall ]] && { echo "healthy: private Mautic setup reachable through pinned loopback ingress"; exit 0; }
 login_page="$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${MAUTIC_HOST_PORT:-18106}/s/login")"; printf '%s' "$login_page" | grep -Eqi 'mautic|login|sign in' || die native-login-unavailable

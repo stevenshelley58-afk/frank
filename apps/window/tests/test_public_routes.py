@@ -98,6 +98,7 @@ class PublicFrankRouteTest(unittest.TestCase):
         for forbidden in ("/s/*", "/api/*", "/admin/*", "/webviews/*"):
             self.assertNotIn(forbidden, route.lower())
         self.assertNotIn("basic_auth", route)
+        self.assertNotIn("/r/*", route)
 
     def test_caddy_uses_existing_private_mautic_ingress_network(self):
         compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")

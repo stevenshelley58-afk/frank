@@ -26,11 +26,12 @@ include $path;
 if (!is_array($parameters) || !isset($parameters["site_url"])) {
     exit(2);
 }
-if ($parameters["site_url"] === $expected && ($parameters["trusted_proxies"] ?? []) === [$proxy]) {
+if ($parameters["site_url"] === $expected && ($parameters["trusted_proxies"] ?? []) === [$proxy] && ($parameters["disable_trackable_urls"] ?? false) === true) {
     exit(0);
 }
 $parameters["site_url"] = $expected;
 $parameters["trusted_proxies"] = [$proxy];
+$parameters["disable_trackable_urls"] = true;
 $mode = fileperms($path) & 0777;
 $uid = fileowner($path);
 $gid = filegroup($path);
