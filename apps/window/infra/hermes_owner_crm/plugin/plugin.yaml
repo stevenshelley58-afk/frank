@@ -1,0 +1,7 @@
+name: owner-crm-sync
+version: "1.0.0"
+description: Deterministic Blockwise snapshot to owner Frappe Contact sync
+requires_env:
+  - OWNER_CRM_SNAPSHOT_AUTH_SECRET
+  - OWNER_CRM_FRAPPE_API_KEY
+  - OWNER_CRM_FRAPPE_API_SECRET
