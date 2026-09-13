@@ -119,6 +119,9 @@ services:
       # Blockwise owns its services and state on a separate Compose network.
       # Frank's edge is the only Frank container allowed to join it.
       - blockwise-product
+      # The public mail allowlist terminates at the existing Mautic ingress.
+      # Caddy is the only Frank service attached to this network.
+      - owner-marketing-ingress
     depends_on:
       frank-window:
         condition: service_healthy
@@ -138,3 +141,6 @@ networks:
   blockwise-product:
     external: true
     name: blockwise-product
+  owner-marketing-ingress:
+    external: true
+    name: frank_owner_marketing_ingress

@@ -390,6 +390,39 @@ blockwise.sale {
     }
 }
 
+# mail.blockwise.sale is a deliberately tiny public Mautic boundary. Recipient
+# unsubscribe and do-not-contact links are the only public paths; the Mautic
+# admin, API, tracking, webviews, and every other path remain unreachable here.
+mail.blockwise.sale {
+    encode zstd gzip
+    import frank_common_security_headers
+    header {
+        X-Frame-Options "DENY"
+        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:"
+        X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+        Cache-Control "no-store"
+    }
+
+    @mautic_optout {
+        method GET POST
+        path /email/unsubscribe/* /email/dnc/*
+    }
+    handle @mautic_optout {
+        reverse_proxy frank-owner-marketing-ingress:80 {
+            header_up Host {host}
+            header_up X-Forwarded-Proto https
+            header_up X-Real-IP {client_ip}
+            header_up X-Forwarded-For {client_ip}
+            header_up -Authorization
+            header_up -Cookie
+            header_down -Set-Cookie
+        }
+    }
+    handle {
+        respond 404
+    }
+}
+
 preview.frank.fail {
     header {
         -Server

@@ -84,6 +84,32 @@ class PublicFrankRouteTest(unittest.TestCase):
             with self.client.get(path) as response:
                 self.assertEqual(response.status_code, 404, path)
 
+    def test_public_mail_optout_is_strictly_allowlisted(self):
+        caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
+        start = caddyfile.index("mail.blockwise.sale {")
+        end = caddyfile.index("\npreview.frank.fail {", start)
+        route = caddyfile[start:end]
+
+        self.assertIn("method GET POST", route)
+        self.assertIn("path /email/unsubscribe/* /email/dnc/*", route)
+        self.assertIn("reverse_proxy frank-owner-marketing-ingress:80", route)
+        self.assertRegex(route, r"handle @mautic_optout \{[\s\S]*?reverse_proxy", msg=route)
+        self.assertRegex(route, r"handle \{\s+respond 404\s+\}", msg=route)
+        for forbidden in ("/s/*", "/api/*", "/admin/*", "/webviews/*"):
+            self.assertNotIn(forbidden, route.lower())
+        self.assertNotIn("basic_auth", route)
+
+    def test_caddy_uses_existing_private_mautic_ingress_network(self):
+        compose = (APP / "docker-compose.yml").read_text(encoding="utf-8")
+        caddy_start = compose.index("  frank-caddy:")
+        caddy_end = compose.index("\n\nvolumes:", caddy_start)
+        caddy = compose[caddy_start:caddy_end]
+        self.assertIn("- owner-marketing-ingress", caddy)
+        self.assertIn(
+            "owner-marketing-ingress:\n    external: true\n    name: frank_owner_marketing_ingress",
+            compose,
+        )
+
     def test_root_remains_protected_by_caddy_fallback(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         public = caddyfile.index("@mini_ui path /mini-frank /mini-frank/* /frank /frank/* /mini /mini/*")
