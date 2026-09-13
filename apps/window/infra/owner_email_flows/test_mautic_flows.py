@@ -67,10 +67,11 @@ def bridge_contact(profile_id=PROFILE_ID, workspace_id=WORKSPACE_ID, dnc=None, c
 
 
 class FakeBridgeMautic:
-    def __init__(self, contacts=None, fail_segment_once=False, create_response=None):
+    def __init__(self, contacts=None, fail_segment_once=False, create_response=None, total_as_string=False):
         self.contacts = list(contacts or [])
         self.fail_segment_once = fail_segment_once
         self.create_response = create_response
+        self.total_as_string = total_as_string
         self.memberships = set()
         self.calls = []
 
@@ -94,7 +95,8 @@ class FakeBridgeMautic:
             else:
                 raise AssertionError(search)
             page = matched[start:start + limit]
-            return {"contacts": {str(contact["id"]): contact for contact in page}, "total": len(matched)}
+            total = str(len(matched)) if self.total_as_string else len(matched)
+            return {"contacts": {str(contact["id"]): contact for contact in page}, "total": total}
         if method == "POST" and path == "contacts/new":
             contact = bridge_contact(contact_id=len(self.contacts) + 1)
             contact["fields"]["all"].update(payload)
@@ -297,6 +299,11 @@ class FlowTests(unittest.TestCase):
         lookups = [call for call in api.calls if call[0] == "GET"]
         self.assertEqual(len(lookups), 2)
         self.assertTrue(all("limit=10" in call[1] for call in lookups))
+
+    def test_identity_lookup_accepts_only_decimal_matic_total(self):
+        api = FakeBridgeMautic(total_as_string=True)
+        flows.bridge(api, bridge_args())
+        self.assertEqual(len(api.contacts), 1)
 
 
 if __name__ == "__main__":

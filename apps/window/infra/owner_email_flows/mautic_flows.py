@@ -330,13 +330,21 @@ def find_contacts(
         response = api.request("GET", "contacts?" + query)
         raw_contacts = response.get("contacts")
         raw_total = response.get("total")
-        if not isinstance(raw_contacts, dict) or not isinstance(raw_total, int) or raw_total < 0:
+        # Mautic 7 returns its JSON `total` as a decimal string. Accept only
+        # that narrow equivalent, not arbitrary numeric/coerced values.
+        if isinstance(raw_total, int) and not isinstance(raw_total, bool):
+            page_total = raw_total
+        elif isinstance(raw_total, str) and raw_total.isdecimal():
+            page_total = int(raw_total)
+        else:
+            page_total = -1
+        if not isinstance(raw_contacts, dict) or page_total < 0:
             raise ApiError("Mautic contact identity lookup was malformed")
-        if raw_total > MAX_CONTACT_IDENTITY_MATCHES:
+        if page_total > MAX_CONTACT_IDENTITY_MATCHES:
             raise ApiError("Mautic contact identity lookup exceeded its safe bound")
         if total is None:
-            total = raw_total
-        elif total != raw_total:
+            total = page_total
+        elif total != page_total:
             raise ApiError("Mautic contact identity lookup changed while paginating")
         page = list(raw_contacts.values())
         if len(page) > CONTACT_LOOKUP_PAGE_SIZE:
