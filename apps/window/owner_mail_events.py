@@ -65,7 +65,10 @@ def _recipients(value):
   if isinstance(address,str) and 3<=len(address)<=254: result.add(address.strip().lower())
  return result
 def _tracking_hash(provider):
- hashes=set(UNSUBSCRIBE_HASH.findall(json.dumps(provider,separators=(",",":"))))
+ # Resend's returned stored render is the proof. Do not accept a matching
+ # string in provider metadata, tags or a webhook-controlled field.
+ stored="\n".join(value for value in (provider.get("html"),provider.get("text")) if isinstance(value,str))
+ hashes=set(UNSUBSCRIBE_HASH.findall(stored))
  if len(hashes)!=1: raise OwnerMailEventError("provider email has no unique Mautic tracking hash")
  return hashes.pop()
 def _segments(http,cfg,headers):
