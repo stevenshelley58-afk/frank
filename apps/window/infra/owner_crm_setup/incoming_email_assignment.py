@@ -8,7 +8,7 @@ from setup_adapter import FrappeRestClient,SetupError,load_credentials
 RULE_NAME="Owner CRM follow-up incoming email"
 OWNER="owner@blockwise.sale"
 CONDITION='sent_or_received == "Received" and communication_medium == "Email" and email_account == "Blockwise Owner Inbox" and reference_doctype != "HD Ticket" and sender not in ("hello@blockwise.sale", "owner@blockwise.sale")'
-DESCRIPTION="Review incoming owner inbox email: {{ subject }}"
+DESCRIPTION="Review incoming owner inbox email"
 DAYS=("Monday","Tuesday","Wednesday","Thursday","Friday","Saturday","Sunday")
 COMPARE=("name","document_type","priority","disabled","description","assign_condition","unassign_condition","close_condition","rule")
 

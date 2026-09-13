@@ -15,6 +15,8 @@ def test_exact_native_contract():
  d=mod.desired_rule()
  assert d["document_type"]=="Communication" and d["rule"]=="Round Robin"
  assert d["users"]==[{"user":"owner@blockwise.sale"}]
+ assert d["description"] == "Review incoming owner inbox email"
+ assert "{{" not in d["description"]
  assert 'sent_or_received == "Received"' in d["assign_condition"]
  assert 'email_account == "Blockwise Owner Inbox"' in d["assign_condition"]
  assert 'reference_doctype != "HD Ticket"' in d["assign_condition"]
