@@ -5,7 +5,7 @@ covers Steven's Blockwise customer business, not a customer's property-lead CRM.
 Follow the canonical engineering rules and existing component release guides.
 
 
-## Current acceptance ledger, 13 September 2026 10:18 UTC
+## Current acceptance ledger, 13 September 2026 11:28 UTC
 
 This ledger supersedes the older checkpoint below. It records private, sanitized
 receipts and current runtime evidence. It is not a completed-CRM or launch
@@ -19,6 +19,7 @@ approval.
 - Native support routing passed: ticket `0003`, one notification, and zero
   duplicate receipts on repeat delivery. Receipt:
   `/srv/frank/verification/owner-crm-final-20260913/support-native-acceptance.json`.
+- Native owner Helpdesk reply acceptance passed: one owner Agent reply reached native Email Queue `Sent` and the controlled mailbox with matching thread headers. The signed-in owner browser shows the sent reply and retained assignment. Receipts: `support-reply-acceptance.json` and `support-reply-browser-acceptance.json` in the same verification directory. This self-addressed test also creates a bounded received copy in the same mailbox; it is not a second customer send.
 - CRM native task, Helpdesk and inbound-mail notifications are private and
   generic. The native owner Agent role and HD Agent record are reconciled, and desktop assignment persisted on mobile reload. The phone-sized Helpdesk email view has no horizontal overflow. Receipts: `/srv/frank/verification/owner-crm-final-20260913/helpdesk-owner-reconcile.jsonl` and `helpdesk-owner-browser-acceptance.json` in the same directory.
 - Mautic acceptance now covers rendered HTML and plain variants, direct CTA,
@@ -29,7 +30,7 @@ approval.
   `/srv/frank/verification/owner-crm-final-20260913/mautic-html-final-acceptance.json`.
 - Current runtime evidence is Mautic image `a47a2aa68fff2680206282255743fe18654b2492`,
   Frank/Window revision `f03920780d9b6cd7bf708069525028e333a00916`, and the
-  private receiver source is `516d821` (sanitized identifier). CRM admin/root,
+  private receiver source is `ba280512822e67a0148ce01c6864c751c4b6de34`. CRM admin/root,
   Mautic app DB, new Resend SMTP and receiver credentials were rotated and
   runtime-verified. No credential values belong in this document.
 - Local backup and isolated restore passed, including encryption-key and
@@ -42,7 +43,7 @@ approval.
 
 ### Remaining gates and explicit non-claims
 
-- Actual new-reply, bounce and complaint acceptance is still being finished. One real simulator bounce reached Resend, but exposed a receiver recipient-display-name parsing defect; its existing event must be replayed after the tested fix, not sent again. Do not claim these paths passed. A reply currently stops
+- Actual new-reply, bounce and complaint acceptance is still being finished. Real simulator bounce and complaint events reached Resend. Strict display-name parsing and privacy-safe rejection categories are deployed. The actual complaint retry still fails recipient proof and stays unacknowledged; no recipient or signature guard was weakened. The known bounced test contact was reconciled through the native API after fresh provider/statistic/immutable-identity proof, explicitly not signed-callback acceptance. Existing events need diagnosis/replay through Resend, not another send. Do not claim these paths passed. A reply currently stops
   or alerts only; a durable reply follow-up task is not implemented.
 - Automatic off-host cloud backup and its schedule still need Cloudflare authorization. The manual encrypted laptop copy above is verified. An actual
   phone notification is not done and needs the intended OS/login and device
@@ -52,6 +53,8 @@ approval.
   for cold prospecting. No provider, campaign, prospect enrolment or customer
   send was activated.
 - Audit-plan intake is released within `959860336febdc060e4c403f08712b32e36162dc`. The exact intake change passed repository checks and an isolated canary; another independent main update superseded its original release candidate before activation. Live bounded signed reads, authentication rejection, replay rejection and no-store passed. Evidence: `/srv/blockwise/verification/owner-crm-sync-20260913/audit-intake-live-acceptance.json`. This does not attest unrelated changes in that later release. Final consolidated browser acceptance, public audit freshness and remaining lifecycle exits are separate gates. Historical evidence below must not be read as current acceptance.
+
+The final truthful audit page is live at `cfab632bd390a9bd0dbe08052352a9d6ea8c3aeb`. Full repository checks, immutable build, bounded signed-read canary, and live desktop/mobile browser checks passed. Unknown observations are no longer presented as zero competition; obsolete offers and listing-promotion choices were removed. Evidence: `/srv/blockwise/verification/owner-crm-sync-20260913/audit-truthfulness/final-batch/`. This does not make missing Ad Radar data available or prove form-to-mail-to-CRM acceptance.
 
 ### Saved email design inspiration
 
