@@ -6,7 +6,7 @@ frappe.init(site="owner.crm.internal",sites_path="/home/frappe/frappe-bench/site
 try:
  role="Owner CRM Sync"; user="crm-sync@blockwise.sale"; dt="CRM Lead"; add_permission(dt,role)
  for action in ["read","write","create","delete","submit","cancel","amend","report","export","import","share","print","email"]: update_permission_property(dt,role,0,action,int(action in {"read","write","create"}),validate=False)
- name="Owner CRM Sync Lead Delete Guard"; script="if frappe.session.user == 'crm-sync@blockwise.sale':\\n    frappe.throw('Owner lead intake cannot delete CRM Leads', frappe.PermissionError)"
+ name="Owner CRM Sync Lead Delete Guard"; script="if frappe.session.user == 'crm-sync@blockwise.sale':\n    frappe.throw('Owner lead intake cannot delete CRM Leads', frappe.PermissionError)"
  if frappe.db.exists("Server Script",name):
   guard=frappe.get_doc("Server Script",name)
   if guard.script != script: raise RuntimeError("CRM Lead deletion guard conflict")
