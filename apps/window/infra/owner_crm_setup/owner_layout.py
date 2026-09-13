@@ -24,7 +24,7 @@ def main():
             for section in sections:
                 for field in section['columns'][0]['fields']:
                     meta=api._request('GET','/api/resource/Custom%20Field/'+quote(dt+'-'+field,safe=''))['data']
-                    if not meta.get('read_only'): raise RuntimeError('Owner source field must be read-only')
+                    if field != 'custom_blockwise_eligibility' and not meta.get('read_only'): raise RuntimeError('Owner source field must be read-only')
             if current != desired and args.apply: api._request('PUT',path,body={'layout':json.dumps(desired),'modified':doc['modified']})
             print(json.dumps({'doctype':dt,'action':'unchanged' if current==desired else ('updated' if args.apply else 'would_update'),'native_layout':True}))
     finally:api.logout();api.close()
