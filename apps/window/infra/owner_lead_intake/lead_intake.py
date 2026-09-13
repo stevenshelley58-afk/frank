@@ -82,12 +82,12 @@ class FrappeLeadStore:
   self.token=key+":"+secret
   if self.request("GET","/api/method/frappe.auth.get_logged_user").get("message")!="crm-sync@blockwise.sale":self.token="";raise IntakeError("native CRM token is not the integration identity")
  def find(self,key):
-  q=urllib.parse.urlencode({"filters":json.dumps([[SOURCE_FIELD,"=",key]]),"fields":json.dumps(["name",SOURCE_FIELD,"lead_owner"]),"limit_page_length":"2"});data=self.request("GET","/api/resource/CRM%20Lead?"+q).get("data")
+  q=urllib.parse.urlencode({"filters":json.dumps([[SOURCE_FIELD,"=",key]]),"fields":json.dumps(["name",SOURCE_FIELD,"lead_owner","modified"]),"limit_page_length":"2"});data=self.request("GET","/api/resource/CRM%20Lead?"+q).get("data")
   if not isinstance(data,list) or len(data)>1:raise IntakeError("native source identity is ambiguous")
   return data[0] if data else None
- def assign_owner(self,name):
-  if not _text(name,200):raise IntakeError("native CRM returned invalid Lead identity")
-  data=self.request("PUT","/api/resource/CRM%20Lead/"+urllib.parse.quote(name,safe=""),{"lead_owner":OWNER}).get("data")
+ def assign_owner(self,name,modified):
+  if not _text(name,200) or not _text(modified,64):raise IntakeError("native CRM returned invalid Lead repair guard")
+  data=self.request("PUT","/api/resource/CRM%20Lead/"+urllib.parse.quote(name,safe=""),{"lead_owner":OWNER,"modified":modified}).get("data")
   if not isinstance(data,dict) or data.get("name")!=name or data.get("lead_owner")!=OWNER:raise IntakeError("native CRM did not confirm Lead owner")
  def create(self,item):
   p={"lead_name":item.name,"first_name":item.name.split(None,1)[0],"last_name":item.name.split(None,1)[1] if len(item.name.split(None,1))>1 else "","status":"New","lead_owner":OWNER,"email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
@@ -99,12 +99,15 @@ class FrappeLeadStore:
 def _existing_result(store:FrappeLeadStore,item:LeadRequest,existing:Mapping[str,Any])->dict[str,str]:
  name=str(existing.get("name", ""))
  if not _text(name,200):raise IntakeError("native CRM returned invalid Lead identity")
- if existing.get("lead_owner")==SYNC_OWNER:store.assign_owner(name)
- return {"action":"unchanged","lead":name,"sourceKey":item.source_key}
-def _existing_result(store:FrappeLeadStore,item:LeadRequest,existing:Mapping[str,Any])->dict[str,str]:
- name=str(existing.get("name", ""))
- if not _text(name,200):raise IntakeError("native CRM returned invalid Lead identity")
- if existing.get("lead_owner")==SYNC_OWNER:store.assign_owner(name)
+ if existing.get("lead_owner")==SYNC_OWNER:
+  modified=existing.get("modified")
+  if not isinstance(modified,str) or not modified:raise IntakeError("native CRM omitted Lead repair guard")
+  try:store.assign_owner(name,modified)
+  except IntakeError:
+   latest=store.find(item.source_key)
+   if latest and latest.get("name")==name and latest.get("lead_owner")!=SYNC_OWNER:
+    return {"action":"unchanged","lead":name,"sourceKey":item.source_key}
+   raise
  return {"action":"unchanged","lead":name,"sourceKey":item.source_key}
 def intake_one(store:FrappeLeadStore,item:LeadRequest)->dict[str,str]:
  existing=store.find(item.source_key)

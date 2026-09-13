@@ -7,19 +7,29 @@ class Store:
  def find(self,key): return self.rows.get(key)
  def create(self,item):
   self.payloads.append(item); name="LEAD-0001"; self.rows[item.source_key]={"name":name,"lead_owner":OWNER}; return name
- def assign_owner(self,name): self.assigned.append(name)
+ def assign_owner(self,name,modified): self.assigned.append((name,modified))
 class IntakeTests(unittest.TestCase):
  def test_source_key_is_only_identity_and_replay_does_not_duplicate(self):
   item=map_item(RAW); store=Store(); first=intake_one(store,item); replay=intake_one(store,item)
   self.assertEqual(first["action"],"created"); self.assertEqual(replay["action"],"unchanged"); self.assertEqual(len(store.payloads),1); self.assertEqual(item.source_key,RAW["sourceKey"])
 
  def test_existing_service_owned_lead_is_repaired_once_without_duplicate(self):
-  item=map_item(RAW);store=Store();store.rows[item.source_key]={"name":"LEAD-OLD","lead_owner":SYNC_OWNER}
+  item=map_item(RAW);store=Store();store.rows[item.source_key]={"name":"LEAD-OLD","lead_owner":SYNC_OWNER,"modified":"2026-09-13 00:00:00"}
   result=intake_one(store,item)
-  self.assertEqual(result["action"],"unchanged");self.assertEqual(store.assigned,["LEAD-OLD"]);self.assertEqual(store.payloads,[])
+  self.assertEqual(result["action"],"unchanged");self.assertEqual(store.assigned,[("LEAD-OLD","2026-09-13 00:00:00")]);self.assertEqual(store.payloads,[])
  def test_existing_human_owner_is_never_overwritten(self):
   item=map_item(RAW);store=Store();store.rows[item.source_key]={"name":"LEAD-HUMAN","lead_owner":"sales-person@example.invalid"}
   intake_one(store,item);self.assertEqual(store.assigned,[])
+ def test_stale_repair_rereads_and_preserves_human_assignment(self):
+  item=map_item(RAW)
+  class Raced(Store):
+   def __init__(self):super().__init__();self.reads=0
+   def find(self,key):
+    self.reads+=1
+    return {"name":"LEAD-RACE","lead_owner":SYNC_OWNER,"modified":"old"} if self.reads==1 else {"name":"LEAD-RACE","lead_owner":"human@example.invalid","modified":"new"}
+   def assign_owner(self,name,modified):raise IntakeError("stale modified")
+  store=Raced();result=intake_one(store,item)
+  self.assertEqual(result["action"],"unchanged");self.assertEqual(store.reads,2)
  def test_invalid_or_research_identity_is_rejected(self):
   bad=dict(RAW); bad["sourceKey"]="blockwise_research_agent:"+RAW["sourceEventId"]
   with self.assertRaises(IntakeError): map_item(bad)
@@ -34,7 +44,7 @@ class NativeBoundaryTests(unittest.TestCase):
   store=FrappeLeadStore();calls=[]
   store.request=lambda method,path,body: calls.append(body) or {"data":{"name":"CRM-TEST"}}
   store.create(map_item(RAW));payload=calls[0]
-  self.assertEqual(payload["first_name"],"Test");self.assertEqual(payload["last_name"],"Lead");self.assertEqual(payload["email"],RAW["lead"]["email"]);self.assertEqual(payload["email"],RAW["lead"]["email"])
+  self.assertEqual(payload["first_name"],"Test");self.assertEqual(payload["last_name"],"Lead");self.assertEqual(payload["email"],RAW["lead"]["email"])
   self.assertEqual(payload["lead_owner"],OWNER)
   self.assertEqual(payload[ELIGIBILITY_FIELD],"review_required")
   self.assertFalse(any("consent" in key for key in payload))
@@ -43,12 +53,12 @@ class NativeBoundaryTests(unittest.TestCase):
   store=FrappeLeadStore();calls=[]
   store.request=lambda method,path,body=None: calls.append((method,path,body)) or {"data":[]}
   self.assertIsNone(store.find(RAW["sourceKey"]))
-  self.assertIn("lead_owner",urllib.parse.unquote(calls[0][1]))
+  self.assertIn("lead_owner",urllib.parse.unquote(calls[0][1]));self.assertIn("modified",urllib.parse.unquote(calls[0][1]))
  def test_native_owner_repair_updates_only_owner_field(self):
   store=FrappeLeadStore();calls=[]
   store.request=lambda method,path,body=None: calls.append((method,path,body)) or {"data":{"name":"CRM-OLD","lead_owner":OWNER}}
-  store.assign_owner("CRM-OLD")
-  self.assertEqual(calls,[('PUT','/api/resource/CRM%20Lead/CRM-OLD',{'lead_owner':OWNER})])
+  store.assign_owner("CRM-OLD","2026-09-13 00:00:00")
+  self.assertEqual(calls,[('PUT','/api/resource/CRM%20Lead/CRM-OLD',{'lead_owner':OWNER,'modified':"2026-09-13 00:00:00"})])
  def test_duplicate_without_same_source_key_is_not_success(self):
   class Conflict(Store):
    def create(self,item):raise DuplicateSource("different unique field")
