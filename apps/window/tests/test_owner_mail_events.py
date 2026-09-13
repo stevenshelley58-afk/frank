@@ -19,9 +19,9 @@ class FakeHttp:
  def request(self,method,url,headers,payload=None):
   self.calls.append((method,url,payload))
   if self.unavailable and "api.resend.com" in url: raise events.OwnerMailEventUnavailable("temporary")
-  if "api.resend.com" in url: return {"html":"https://mail.blockwise.sale/email/unsubscribe/abc123/recipient/secret"}
+  if "api.resend.com" in url: return {"id":EMAIL,"to":["owner@example.test"],"html":"https://mail.blockwise.sale/email/unsubscribe/abc123/recipient/secret"}
   if "/stats/" in url:
-   row={"email_address":"owner@example.test","lead_id":7}
+   row={"email_address":"owner@example.test","lead_id":"7"}
    return {"stats":[row,row] if self.collision else [row]}
   if "/contacts/7" in url and method=="GET": return {"contact":{"id":7,"fields":{"all":{"email":"owner@example.test","blockwise_profile_id":PROFILE,"blockwise_workspace_id":WORKSPACE}},"doNotContact":[]}}
   if "/segments?" in url: return {"lists":{str(i):{"id":i,"name":name} for i,name in enumerate(events.SOURCE_SEGMENT_NAMES,1)}}

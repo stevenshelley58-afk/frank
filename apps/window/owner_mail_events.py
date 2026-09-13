@@ -27,6 +27,8 @@ class OwnerMailEventsConfig:
 class UrlLibJsonHttp:
  def request(self,method,url,headers,payload=None):
   data=json.dumps(payload,separators=(",",":" )).encode() if payload is not None else None
+  headers=dict(headers)
+  if payload is not None: headers["Content-Type"]="application/json"
   try:
    with urllib.request.urlopen(urllib.request.Request(url,data=data,method=method,headers=dict(headers)),timeout=10) as response: raw=response.read(MAX_BODY_BYTES+1)
   except urllib.error.HTTPError as error:
@@ -90,13 +92,15 @@ def process_event(raw:bytes,headers:Mapping[str,str],cfg:OwnerMailEventsConfig,h
  if not isinstance(email_id,str) or not UUID.fullmatch(email_id): raise OwnerMailEventError("invalid provider email ID")
  client=http or UrlLibJsonHttp()
  provider=client.request("GET","https://api.resend.com/emails/"+email_id,{"Authorization":"Bearer "+cfg.resend_api_key,"Accept":"application/json","User-Agent":"resend-node:6.18.1"})
+ if provider.get("id") != email_id: raise OwnerMailEventError("provider message identity mismatch")
  tracking_hash=_tracking_hash(provider); mautic_headers={"Authorization":_basic(cfg.mautic_username,cfg.mautic_password),"Accept":"application/json"}
  query=urllib.parse.urlencode({"limit":"2","where[0][col]":"tracking_hash","where[0][expr]":"eq","where[0][val]":tracking_hash})
- stats=http_stats=client.request("GET",cfg.mautic_url+"/api/stats/email_stats?"+query,mautic_headers).get("stats")
+ stats=client.request("GET",cfg.mautic_url+"/api/stats/email_stats?"+query,mautic_headers).get("stats")
  if not isinstance(stats,list) or len(stats)!=1 or not isinstance(stats[0],dict): raise OwnerMailEventError("Mautic tracking hash did not resolve exactly one email statistic")
  stat=stats[0]; email,lead=stat.get("email_address"),stat.get("lead_id")
- if not isinstance(email,str) or not isinstance(lead,int) or lead<1: raise OwnerMailEventError("Mautic email statistic was malformed")
- if email.strip().lower() not in _recipients(data.get("to")): raise OwnerMailEventError("provider recipient did not match native statistic")
+ if isinstance(lead,str) and re.fullmatch(r"[1-9][0-9]{0,14}",lead): lead=int(lead)
+ if not isinstance(email,str) or isinstance(lead,bool) or not isinstance(lead,int) or lead<1: raise OwnerMailEventError("Mautic email statistic was malformed")
+ if _recipients(provider.get("to")) != {email.strip().lower()} or _recipients(data.get("to")) != {email.strip().lower()}: raise OwnerMailEventError("provider recipient did not match native statistic")
  contact=client.request("GET",cfg.mautic_url+f"/api/contacts/{lead}",mautic_headers).get("contact")
  if not isinstance(contact,dict) or contact.get("id") not in (lead,str(lead)): raise OwnerMailEventError("Mautic statistic contact did not resolve exactly")
  profile,workspace=_contact_value(contact,"blockwise_profile_id"),_contact_value(contact,"blockwise_workspace_id")
