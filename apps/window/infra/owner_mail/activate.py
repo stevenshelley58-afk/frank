@@ -18,10 +18,12 @@ frappe.init(site="owner.crm.internal", sites_path=".")
 frappe.connect()
 try:
     rows=frappe.get_all("Email Account", fields=["name","email_id","enable_incoming","enable_outgoing"])
-    pending=frappe.db.count("Email Queue", {"status":["not in",["Sent","Cancelled"]]})
+    # Error rows are retained for audit but are not dispatchable queue work.
+    pending=frappe.db.count("Email Queue", {"status":["in",["Not Sent","Sending","Partially Sent"]]})
+    failed=frappe.db.count("Email Queue", {"status":"Error"})
     notifications=frappe.db.count("Notification", {"enabled":1,"channel":"Email"})
     reports=frappe.db.count("Auto Email Report", {"enabled":1})
-    print(json.dumps({"accounts":rows,"pending_queue":pending,"enabled_email_notifications":notifications,"enabled_email_reports":reports}))
+    print(json.dumps({"accounts":rows,"pending_queue":pending,"failed_queue":failed,"enabled_email_notifications":notifications,"enabled_email_reports":reports}))
 finally:
     frappe.destroy()
 """
@@ -58,7 +60,7 @@ def main():
     state=json.loads(run(["exec","-T","backend","./env/bin/python","-"],input=PROBE).stdout)
     validate(state)
     if not args.apply:
-        print(json.dumps({"mode":"preview","queue_empty":True,"native_mailbox_ready":True,"source_sha":sha}))
+        print(json.dumps({"mode":"preview","queue_empty":True,"failed_queue":state["failed_queue"],"native_mailbox_ready":True,"source_sha":sha}))
         return
     try:
         run(["exec","-T","backend","bench","--site",SITE,"set-config","mute_emails","0"])
