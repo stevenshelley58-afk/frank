@@ -131,3 +131,12 @@ class OwnerCrmFoundationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MailActivationRegressionTests(unittest.TestCase):
+    def test_wrapper_forwards_explicit_health_mode(self):
+        self.assertIn('health) shift; "$script_dir/health.sh" "$@"', (ROOT / "bin" / "owner-crm").read_text())
+    def test_original_encryption_key_is_restored_without_database_credentials(self):
+        source=(ROOT / "restore-drill.compose.yaml").read_text()
+        self.assertIn('source.get("encryption_key")', source)
+        self.assertIn('current.update({"encryption_key":key} if key else {})', source)

@@ -75,6 +75,7 @@ services:
         bench set-config -g enable_scheduler 0;
         bench new-site "${OWNER_CRM_DRILL_SITE}" --mariadb-user-host-login-scope=% --db-root-username=root --db-root-password="${OWNER_CRM_DB_PASSWORD}" --admin-password="${OWNER_CRM_ADMIN_PASSWORD}" --install-app crm --install-app telephony --install-app helpdesk;
         bench --site "${OWNER_CRM_DRILL_SITE}" restore "${OWNER_CRM_BACKUP_SQL}" --db-root-username=root --db-root-password="${OWNER_CRM_DB_PASSWORD}" --admin-password="${OWNER_CRM_ADMIN_PASSWORD}" --install-app crm --install-app telephony --install-app helpdesk --with-public-files "${OWNER_CRM_BACKUP_PUBLIC}" --with-private-files "${OWNER_CRM_BACKUP_PRIVATE}" --force;
+        ./env/bin/python -c 'import json,os; source=json.load(open("${OWNER_CRM_BACKUP_CONFIG}")); path="sites/${OWNER_CRM_DRILL_SITE}/site_config.json"; current=json.load(open(path)); key=source.get("encryption_key"); current.update({"encryption_key":key} if key else {}); temporary=path+".restoring"; fd=os.open(temporary,os.O_CREAT|os.O_EXCL|os.O_WRONLY,0o600); stream=os.fdopen(fd,"w"); json.dump(current,stream); stream.flush(); os.fsync(stream.fileno()); stream.close(); os.replace(temporary,path)';
         bench --site "${OWNER_CRM_DRILL_SITE}" set-config mute_emails 1;
         bench --site "${OWNER_CRM_DRILL_SITE}" set-config enable_scheduler 0
     depends_on:

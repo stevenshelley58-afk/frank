@@ -18,7 +18,7 @@ The committed source lives here. Runtime state is outside Git:
 | Manual local backup archive | `/srv/frank/backups/owner-crm/`, root-only mode `0700` |
 | Browser exposure | `127.0.0.1:18081` only, with no Caddy route |
 
-The compose project is named `owner-crm`, uses an internal-only Docker network,
+The compose project is named `owner-crm`, keeps data services on an internal-only Docker network,
 and is separate from `blockwise-crm` and `blockwise-product`. It must be run
 from a committed Frank release checkout, never by editing runtime files.
 
@@ -62,8 +62,8 @@ and Helpdesk natively, then runs migrations.
 
 ## Mail, scheduler, ingress and backup safety
 
-Mail is disabled at two levels: no scheduler container exists, and both common
-and site config set `mute_emails=1` and `enable_scheduler=0`. The setup wizard
+Mail defaults to disabled at two levels: the native scheduler is behind the opt-in
+`owner-mail` profile, and common/site config default to `mute_emails=1` and `enable_scheduler=0`. The setup wizard
 therefore has no scheduled or normal Frappe mail path. Enabling mail, a
 scheduler, a Caddy route, a sender, or any paid service is a separate change
 with its own review and test.
@@ -80,8 +80,11 @@ not targets. A passing drill leaves its root-only receipt beside the archive,
 then retires only the marked temporary drill resources. The receipt reports
 actual restored public/private file counts: zero counts prove archive structure,
 not non-empty attachment recovery. It verifies only `db_type`, mail, and scheduler
-configuration, never restores database credentials; encrypted credentials and any
-encryption-key round trip are not verified for live configuration. The drill also
+configuration, never restores database credentials; the original encryption key alone is restored without copying database credentials.
+With `OWNER_CRM_VERIFY_EMAIL_ACCOUNT=1`, the isolated drill decrypts the real
+Blockwise Owner Inbox credential and verifies a private HMAC against its protected
+source secret, never printing either value. Without this flag, real credential
+round-trip verification remains explicitly false. The drill also
 creates harmless public/private attachments and an encrypted temporary setting only
 inside its restored temporary source site, then uses a second native `--with-files`
 backup and temporary recovery site to verify those staged fixtures and their original
@@ -93,5 +96,7 @@ separate `age`/off-host readiness gate; off-host escrow is unresolved.
 
 `owner-crm health` checks the loopback ping, active frontend, and that CRM,
 Telephony, and Helpdesk are installed. It also checks the live site config for
-both mail and scheduler disablement. A green compose configuration or image
+both mail and scheduler disablement by default. `health --mail-enabled` instead
+requires the explicitly enabled native site and running scheduler. Backend and
+queue workers have a separate egress bridge for SMTP/IMAP; database and Redis do not. A green compose configuration or image
 build alone is not runtime evidence.

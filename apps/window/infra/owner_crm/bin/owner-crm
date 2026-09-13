@@ -91,7 +91,7 @@ case ${1:-} in
     chmod -R go-rwx "$archive_path"
     echo "archived database-free failed owner site to $archive_path"
     ;;
-  health) "$script_dir/health.sh" ;;
+  health) shift; "$script_dir/health.sh" "$@" ;;
   backup) "$script_dir/local-backup.sh" ;;
   restore-drill) "$script_dir/restore-drill.sh" ;;
   backup-preflight) "$script_dir/backup-preflight.sh" ;;
