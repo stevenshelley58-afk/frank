@@ -12,8 +12,9 @@ ENV = Path("/srv/frank/secrets/owner-crm.env")
 SITE = "owner.crm.internal"
 ACCOUNT = "Blockwise Owner Inbox"
 PROBE = r"""
-import frappe, json
-frappe.init(site="owner.crm.internal", sites_path="sites")
+import frappe, json, os
+os.chdir("/home/frappe/frappe-bench/sites")
+frappe.init(site="owner.crm.internal", sites_path=".")
 frappe.connect()
 try:
     rows=frappe.get_all("Email Account", fields=["name","email_id","enable_incoming","enable_outgoing"])
