@@ -35,6 +35,7 @@ listed="$(run_sieve --list)" || die managesieve-list-failed
 if [[ -n "$listed" && "$listed" != *"$remote_script"* ]]; then die existing-user-sieve-script-present-refusing-to-replace; fi
 if [[ "$listed" == *"$remote_script"* ]]; then
   run_sieve --remotesieve "$remote_script" --localsieve "/work/$remote_script.sieve" --download >"$tmp/active.sieve" || die managesieve-download-failed
+  sed -i 's/\r$//' "$tmp/active.sieve"
   cmp -s "$tmp/$remote_script.sieve" "$tmp/active.sieve" || die existing-owned-sieve-script-differs-refusing-to-replace
 else
   run_sieve --localsieve "/work/$remote_script.sieve" --checkscript || die provider-does-not-support-required-sieve-extensions
