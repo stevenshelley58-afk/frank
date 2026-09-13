@@ -52,11 +52,8 @@ sed -i 's/\r$//' "$tmp/current.sieve"
 # A Sieve fileinto target must exist before its script can be activated. This
 # uses the existing private mailbox login only, and never reads or moves mail.
 export PURELYMAIL_USERNAME PURELYMAIL_PASSWORD
-folder_mode=check; ((apply)) && folder_mode=create
-export FOLDER_MODE="$folder_mode"
-python3 -c 'import os,json; print(json.dumps({"user":os.environ["PURELYMAIL_USERNAME"],"password":os.environ["PURELYMAIL_PASSWORD"],"mode":os.environ["FOLDER_MODE"]}))' | docker exec -i "$container" php -r '
-  $v=json_decode(stream_get_contents(STDIN),true,flags:JSON_THROW_ON_ERROR);$base="{imap.purelymail.com:993/ssl}";$s=@imap_open($base."INBOX",$v["user"],$v["password"],OP_HALFOPEN);if(!$s)exit(2);$target=imap_utf7_encode($base."Support");$ok=imap_reopen($s,$target,OP_HALFOPEN);if(!$ok&&$v["mode"]==="create"){$ok=imap_createmailbox($s,$target)&&imap_reopen($s,$target,OP_HALFOPEN);}imap_close($s);if(!$ok)exit(3);
-' || die native-imap-support-folder-unavailable
+folder_args=(); ((apply)) && folder_args+=(--create)
+python3 "$(dirname "$0")/support_mailbox.py" "${folder_args[@]}" || die native-imap-support-folder-unavailable
 # The exact prior owned script is the sole migration source; any other edit is
 # held rather than overwritten.
 if cmp -s "$tmp/current.sieve" "$tmp/desired.sieve"; then echo '{"status":"unchanged","support_folder":"checked"}'; exit 0; fi
