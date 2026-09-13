@@ -9,6 +9,7 @@ import re
 import subprocess
 import sys
 from typing import Any
+from email.utils import getaddresses
 import urllib.parse
 import urllib.request
 
@@ -22,7 +23,9 @@ from mautic_flows import ApiError, Mautic, NURTURE_EXIT_FIELD, UUID_PATTERN
 from owner_crm_notifications import setup_adapter as notifications
 
 SERVICE_HEALTH = "http://172.16.1.1:18085/health"
-SUBJECT = "Re: owner marketing reply monitor check"
+CONTROLLED_UID = "11"
+OWNER_EMAIL_ACCOUNT = "Blockwise Owner Inbox"
+OWNER_INBOX = "hello@blockwise.sale"
 WEBHOOK = notifications.REPLY_HOOK
 CONTACT_ID = "3"
 CONTACT_EMAIL = "blockwise@purelymail.com"
@@ -57,10 +60,34 @@ def _frappe_query(client: notifications.Client, path: str, filters: list[list[st
 
 
 def retained_communication(client: notifications.Client) -> str:
-    rows = _frappe_query(client, "/api/resource/Communication", [["subject", "=", SUBJECT]], ["name"], 2)
-    if len(rows) != 1 or not isinstance(rows[0].get("name"), str) or not SAFE_FRAPPE_NAME.fullmatch(rows[0]["name"]):
+    rows = _frappe_query(
+        client,
+        "/api/resource/Communication",
+        [
+            ["uid", "=", CONTROLLED_UID],
+            ["email_account", "=", OWNER_EMAIL_ACCOUNT],
+            ["communication_medium", "=", "Email"],
+            ["sent_or_received", "=", "Received"],
+        ],
+        ["name", "uid", "email_account", "sender", "recipients"],
+        2,
+    )
+    if len(rows) != 1:
         raise AcceptanceError("retained reply Communication did not resolve exactly")
-    return rows[0]["name"]
+    row = rows[0]
+    name = row.get("name")
+    senders = {address.strip().lower() for _display, address in getaddresses([str(row.get("sender") or "")]) if address.strip()}
+    recipients = {address.strip().lower() for _display, address in getaddresses([str(row.get("recipients") or "")]) if address.strip()}
+    if (
+        not isinstance(name, str)
+        or not SAFE_FRAPPE_NAME.fullmatch(name)
+        or str(row.get("uid") or "") != CONTROLLED_UID
+        or row.get("email_account") != OWNER_EMAIL_ACCOUNT
+        or senders != {CONTACT_EMAIL}
+        or OWNER_INBOX not in recipients
+    ):
+        raise AcceptanceError("retained reply Communication identity drifted")
+    return name
 
 
 def enqueue_native_reply(name: str) -> None:

@@ -54,12 +54,21 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_retained_communication_lookup_is_exact_and_requests_no_body_or_headers(self):
         client = mock.Mock()
-        client._request.return_value = {"data": [{"name": "COMM-00011"}]}
+        client._request.return_value = {"data": [{
+            "name": "COMM-00011",
+            "uid": module.CONTROLLED_UID,
+            "email_account": module.OWNER_EMAIL_ACCOUNT,
+            "sender": module.CONTACT_EMAIL,
+            "recipients": module.OWNER_INBOX,
+        }]}
         self.assertEqual(module.retained_communication(client), "COMM-00011")
         path = client._request.call_args.args[1]
         self.assertIn("Communication?", path)
         self.assertNotIn("email_headers", path)
         self.assertNotIn("content", path)
+        self.assertNotIn("subject", path)
+        self.assertIn("uid", path)
+        self.assertIn("email_account", path)
         client._request.return_value = {"data": [{"name": "A"}, {"name": "B"}]}
         with self.assertRaises(module.AcceptanceError):
             module.retained_communication(client)

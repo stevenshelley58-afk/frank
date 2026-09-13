@@ -64,6 +64,18 @@ class FakeResend:
         raise AssertionError((method, path))
 
 
+class FakeFrappe:
+    def _request(self, method, path):
+        if method != "GET" or "Email%20Account" not in path:
+            raise AssertionError((method, path))
+        return {"data": {
+            "name": module.OWNER_EMAIL_ACCOUNT,
+            "email_id": module.OWNER_INBOX,
+            "use_imap": 1,
+            "imap_folder": [{"folder_name": module.IMAP_FOLDER, "uidvalidity": "1286881107"}],
+        }}
+
+
 class ProvisionTests(unittest.TestCase):
     def secret(self, root, name, text):
         path = Path(root) / name
@@ -96,18 +108,23 @@ class ProvisionTests(unittest.TestCase):
     def test_apply_creates_separate_identity_webhook_and_root_only_secret_then_replays(self):
         with tempfile.TemporaryDirectory() as directory:
             admin = self.secret(directory, "admin.env", "MAUTIC_ADMIN_PASSWORD=admin-private\nMAUTIC_MAILER_DSN='resend+smtp://resend:re_test%2Dkey@smtp.resend.com:465'\n")
+            mail = self.secret(directory, "mail.env", "PURELYMAIL_USERNAME=mail-user\nPURELYMAIL_PASSWORD=mail-private\nOWNER_MAIL_ADDRESS=hello@blockwise.sale\n")
             runtime = Path(directory) / "runtime.env"
             mautic, resend = FakeMautic(), FakeResend()
-            first = module.provision(apply=True, admin_path=admin, runtime_path=runtime, mautic=mautic, resend=resend)
+            first = module.provision(apply=True, admin_path=admin, mail_path=mail, runtime_path=runtime, mautic=mautic, resend=resend, mailbox_client=FakeFrappe())
             self.assertEqual(first["status"], "applied")
             values = module.read_env(runtime)
             self.assertEqual(values["OWNER_MAIL_EVENTS_MAUTIC_USERNAME"], module.USERNAME)
             self.assertEqual(values["OWNER_MAIL_EVENTS_RESEND_API_KEY"], "re_test-key")
             self.assertGreaterEqual(len(values["OWNER_MAIL_REPLY_SECRET"]), 32)
             self.assertTrue(values["RESEND_WEBHOOK_SECRET"].startswith("whsec_"))
+            self.assertEqual(values["OWNER_MAIL_EVENTS_IMAP_HOST"], module.IMAP_HOST)
+            self.assertEqual(values["OWNER_MAIL_EVENTS_IMAP_FOLDER"], module.IMAP_FOLDER)
+            self.assertEqual(values["OWNER_MAIL_EVENTS_IMAP_UIDVALIDITY"], "1286881107")
+            self.assertEqual(values["OWNER_MAIL_EVENTS_IMAP_USERNAME"], "mail-user")
             self.assertEqual(stat.S_IMODE(runtime.stat().st_mode), 0o600)
             before = dict(values)
-            second = module.provision(apply=True, admin_path=admin, runtime_path=runtime, mautic=mautic, resend=resend)
+            second = module.provision(apply=True, admin_path=admin, mail_path=mail, runtime_path=runtime, mautic=mautic, resend=resend, mailbox_client=FakeFrappe())
             self.assertEqual(second["actions"], ["unchanged"])
             self.assertEqual(module.read_env(runtime), before)
             self.assertEqual(len([call for call in resend.calls if call[:2] == ("POST", "/webhooks")]), 1)
@@ -147,6 +164,40 @@ class ProvisionTests(unittest.TestCase):
         with self.assertRaises(module.ProvisionError):
             module.decimal_id("7.0", "role")
 
+
+    def test_existing_dedicated_resend_key_is_preserved_when_mailer_dsn_rotates(self):
+        with tempfile.TemporaryDirectory() as directory:
+            admin = self.secret(directory, "admin.env", "MAUTIC_ADMIN_PASSWORD=admin-private\nMAUTIC_MAILER_DSN=smtps://resend:re_sending_only@smtp.resend.com:465\n")
+            mail = self.secret(directory, "mail.env", "PURELYMAIL_USERNAME=mail-user\nPURELYMAIL_PASSWORD=mail-private\nOWNER_MAIL_ADDRESS=hello@blockwise.sale\n")
+            runtime = self.secret(directory, "runtime.env", "\n".join([
+                "OWNER_MAIL_EVENTS_RESEND_API_KEY=re_dedicated_full",
+                "OWNER_MAIL_EVENTS_MAUTIC_USERNAME=owner-mail-events-receiver",
+                "OWNER_MAIL_EVENTS_MAUTIC_PASSWORD=existing-password",
+                "OWNER_MAIL_REPLY_SECRET=" + "r" * 40,
+                "RESEND_WEBHOOK_SECRET=whsec_" + "w" * 32,
+                "",
+            ]))
+            mautic, resend = FakeMautic(), FakeResend()
+            mautic.role = {"id": "7", "name": module.ROLE, "isAdmin": False, "rawPermissions": module.PERMISSIONS}
+            mautic.user = {"id": "9", "username": module.USERNAME, "role": {"id": "7"}}
+            resend.webhook = {
+                "object": "webhook", "id": WEBHOOK_ID, "status": "enabled",
+                "endpoint": module.WEBHOOK_ENDPOINT, "events": sorted(module.WEBHOOK_EVENTS),
+                "signing_secret": "whsec_" + "w" * 32,
+            }
+            module.provision(apply=True, admin_path=admin, mail_path=mail, runtime_path=runtime, mautic=mautic, resend=resend, mailbox_client=FakeFrappe())
+            self.assertEqual(module.read_env(runtime)["OWNER_MAIL_EVENTS_RESEND_API_KEY"], "re_dedicated_full")
+
+    def test_native_mailbox_requires_exact_inbox_with_uidvalidity(self):
+        values = module.native_mailbox_identity(FakeFrappe())
+        self.assertEqual(values["OWNER_MAIL_EVENTS_IMAP_UIDVALIDITY"], "1286881107")
+        bad = FakeFrappe()
+        bad._request = lambda method, path: {"data": {
+            "name": module.OWNER_EMAIL_ACCOUNT, "email_id": module.OWNER_INBOX,
+            "use_imap": 1, "imap_folder": [{"folder_name": "INBOX", "uidvalidity": ""}],
+        }}
+        with self.assertRaises(module.ProvisionError):
+            module.native_mailbox_identity(bad)
 
 if __name__ == "__main__":
     unittest.main()

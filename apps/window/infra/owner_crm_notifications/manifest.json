@@ -124,18 +124,60 @@
       "background_jobs_queue": "short",
       "webhook_json": null,
       "webhook_data": [
-        {"key": "event_id", "fieldname": "name"},
-        {"key": "sender", "fieldname": "sender"},
-        {"key": "recipients", "fieldname": "recipients"},
-        {"key": "cc", "fieldname": "cc"},
-        {"key": "bcc", "fieldname": "bcc"},
-        {"key": "communication_medium", "fieldname": "communication_medium"},
-        {"key": "sent_or_received", "fieldname": "sent_or_received"},
-        {"key": "in_reply_to", "fieldname": "in_reply_to"},
-        {"key": "email_headers", "fieldname": "email_headers"}
+        {
+          "key": "event_id",
+          "fieldname": "name"
+        },
+        {
+          "key": "sender",
+          "fieldname": "sender"
+        },
+        {
+          "key": "recipients",
+          "fieldname": "recipients"
+        },
+        {
+          "key": "cc",
+          "fieldname": "cc"
+        },
+        {
+          "key": "bcc",
+          "fieldname": "bcc"
+        },
+        {
+          "key": "communication_medium",
+          "fieldname": "communication_medium"
+        },
+        {
+          "key": "sent_or_received",
+          "fieldname": "sent_or_received"
+        },
+        {
+          "key": "in_reply_to",
+          "fieldname": "in_reply_to"
+        },
+        {
+          "key": "uid",
+          "fieldname": "uid"
+        },
+        {
+          "key": "email_account",
+          "fieldname": "email_account"
+        },
+        {
+          "key": "communication_date",
+          "fieldname": "communication_date"
+        },
+        {
+          "key": "message_id",
+          "fieldname": "message_id"
+        }
       ],
       "webhook_headers": [
-        {"key": "Content-Type", "value": "application/json"}
+        {
+          "key": "Content-Type",
+          "value": "application/json"
+        }
       ]
     }
   ]

@@ -16,12 +16,16 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-EMAIL_FLOWS = Path(__file__).resolve().parents[1] / "owner_email_flows"
-if str(EMAIL_FLOWS) not in sys.path:
-    sys.path.insert(0, str(EMAIL_FLOWS))
+INFRA_ROOT = Path(__file__).resolve().parents[1]
+EMAIL_FLOWS = INFRA_ROOT / "owner_email_flows"
+for directory in (INFRA_ROOT, EMAIL_FLOWS):
+    if str(directory) not in sys.path:
+        sys.path.insert(0, str(directory))
 from mautic_flows import ApiError, Mautic
+from owner_crm_setup import setup_adapter as crm
 
 ADMIN_SECRET = Path("/srv/frank/secrets/owner-marketing/owner-marketing.env")
+MAIL_SECRET = Path("/srv/frank/secrets/owner-mail.env")
 RUNTIME_SECRET = Path("/srv/hermes/secrets/owner-mail-events.env")
 MAUTIC_URL = "http://127.0.0.1:18106"
 ROLE = "Owner mail events receiver"
@@ -31,6 +35,11 @@ WEBHOOK_EVENTS = frozenset({"email.bounced", "email.complained"})
 RESEND_API = "https://api.resend.com"
 USER_AGENT = "resend-node:6.18.1"
 MAX_RESPONSE_BYTES = 1024 * 1024
+OWNER_INBOX = "hello@blockwise.sale"
+OWNER_EMAIL_ACCOUNT = "Blockwise Owner Inbox"
+IMAP_HOST = "imap.purelymail.com"
+IMAP_FOLDER = "INBOX"
+UIDVALIDITY = re.compile(r"^[1-9][0-9]{0,14}$")
 UUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$", re.I)
 SAFE_KEY = re.compile(r"^[A-Z][A-Z0-9_]*$")
 SAFE_VALUE = re.compile(r"^[A-Za-z0-9_!+./:=@%-]+$")
@@ -109,6 +118,58 @@ def read_env(path: Path, *, allow_missing: bool = False) -> dict[str, str]:
             raise ProvisionError("secret file value is invalid")
         result[key] = value
     return result
+
+
+def native_mailbox_identity(client: crm.FrappeRestClient | None = None) -> dict[str, str]:
+    owned = client is None
+    logged = False
+    if client is None:
+        username, password = crm.load_credentials()
+        client = crm.FrappeRestClient()
+        client.login(username, password)
+        logged = True
+    try:
+        encoded = urllib.parse.quote(OWNER_EMAIL_ACCOUNT, safe="")
+        data = client._request("GET", "/api/resource/Email%20Account/" + encoded).get("data")
+        if not isinstance(data, dict) or data.get("name") != OWNER_EMAIL_ACCOUNT:
+            raise ProvisionError("native owner Email Account did not resolve exactly")
+        if data.get("email_id") != OWNER_INBOX or data.get("use_imap") not in (1, True):
+            raise ProvisionError("native owner Email Account identity drifted")
+        folders = data.get("imap_folder")
+        if not isinstance(folders, list) or len(folders) > 20 or not all(isinstance(item, dict) for item in folders):
+            raise ProvisionError("native owner IMAP folder state was malformed")
+        matches = [item for item in folders if item.get("folder_name") == IMAP_FOLDER]
+        if len(matches) != 1:
+            raise ProvisionError("native owner INBOX identity was ambiguous")
+        uidvalidity = str(matches[0].get("uidvalidity") or "")
+        if not UIDVALIDITY.fullmatch(uidvalidity):
+            raise ProvisionError("native owner INBOX UID validity was unavailable")
+        return {
+            "OWNER_MAIL_EVENTS_IMAP_HOST": IMAP_HOST,
+            "OWNER_MAIL_EVENTS_IMAP_FOLDER": IMAP_FOLDER,
+            "OWNER_MAIL_EVENTS_IMAP_UIDVALIDITY": uidvalidity,
+        }
+    except crm.SetupError as error:
+        raise ProvisionError("native owner Email Account lookup failed") from error
+    finally:
+        if owned:
+            try:
+                if logged:
+                    client.logout()
+            finally:
+                client.close()
+
+
+def owner_mail_credentials(path: Path = MAIL_SECRET) -> dict[str, str]:
+    values = read_env(path)
+    username = values.get("PURELYMAIL_USERNAME", "")
+    password = values.get("PURELYMAIL_PASSWORD", "")
+    if not username or not password or values.get("OWNER_MAIL_ADDRESS", "").strip().lower() != OWNER_INBOX:
+        raise ProvisionError("native owner mailbox credential identity drifted")
+    return {
+        "OWNER_MAIL_EVENTS_IMAP_USERNAME": username,
+        "OWNER_MAIL_EVENTS_IMAP_PASSWORD": password,
+    }
 
 
 def resend_key_from_dsn(value: str) -> str:
@@ -277,23 +338,47 @@ def write_env(path: Path, values: Mapping[str, str]) -> None:
         raise
 
 
-def provision(*, apply: bool, admin_path: Path = ADMIN_SECRET, runtime_path: Path = RUNTIME_SECRET, mautic: Mautic | None = None, resend: Resend | None = None) -> dict[str, Any]:
+def provision(
+    *,
+    apply: bool,
+    admin_path: Path = ADMIN_SECRET,
+    mail_path: Path = MAIL_SECRET,
+    runtime_path: Path = RUNTIME_SECRET,
+    mautic: Mautic | None = None,
+    resend: Resend | None = None,
+    mailbox_client: crm.FrappeRestClient | None = None,
+) -> dict[str, Any]:
     if os.geteuid() != 0:
         raise ProvisionError("provisioning must run as root")
     admin = read_env(admin_path)
     runtime = read_env(runtime_path, allow_missing=True)
     admin_password = admin.get("MAUTIC_ADMIN_PASSWORD", "")
-    dsn = admin.get("MAUTIC_MAILER_DSN", "")
-    if not admin_password or not dsn:
+    if not admin_password:
         raise ProvisionError("native owner marketing credential is unavailable")
-    resend_key = resend_key_from_dsn(dsn)
-    existing_key = runtime.get("OWNER_MAIL_EVENTS_RESEND_API_KEY", "")
-    if existing_key and existing_key != resend_key:
-        raise ProvisionError("stored Resend API key does not match native mail transport")
+
+    # A dedicated full Resend API key, once provisioned, is authoritative.
+    # The mailer DSN is only a first-run bootstrap because its key may later be
+    # rotated to a domain-restricted sending-only credential.
+    resend_key = runtime.get("OWNER_MAIL_EVENTS_RESEND_API_KEY", "")
+    if resend_key:
+        if not resend_key.startswith("re_") or len(resend_key) < 8:
+            raise ProvisionError("stored Resend API key is malformed")
+    else:
+        dsn = admin.get("MAUTIC_MAILER_DSN", "")
+        if not dsn:
+            raise ProvisionError("Resend API bootstrap credential is unavailable")
+        resend_key = resend_key_from_dsn(dsn)
+
+    mailbox_values = owner_mail_credentials(mail_path)
+    mailbox_values.update(native_mailbox_identity(mailbox_client))
+    mailbox_drift = any(runtime.get(key) != value for key, value in mailbox_values.items())
+
     mautic_api = mautic or Mautic(MAUTIC_URL, "owner", admin_password)
     username, password, plan = ensure_mautic(mautic_api, runtime, apply)
     resend_secret, resend_plan = ensure_resend(resend or Resend(resend_key), runtime, apply)
     plan.extend(resend_plan)
+    if mailbox_drift:
+        plan.append("sync_imap_identity")
     reply_secret = runtime.get("OWNER_MAIL_REPLY_SECRET", "")
     if reply_secret and len(reply_secret) < 32:
         raise ProvisionError("stored owner reply secret is too short")
@@ -311,6 +396,7 @@ def provision(*, apply: bool, admin_path: Path = ADMIN_SECRET, runtime_path: Pat
             "OWNER_MAIL_EVENTS_RESEND_API_KEY": resend_key,
             "OWNER_MAIL_REPLY_SECRET": reply_secret,
             "RESEND_WEBHOOK_SECRET": resend_secret,
+            **mailbox_values,
         })
         write_env(runtime_path, merged)
     return {"status": "applied" if apply else "dry_run", "actions": plan or ["unchanged"], "role": "owner_mail_events_receiver", "webhook": "exact"}

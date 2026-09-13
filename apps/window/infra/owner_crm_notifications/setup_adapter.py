@@ -27,7 +27,10 @@ REPLY_FIELDS = (
     ("communication_medium", "communication_medium"),
     ("sent_or_received", "sent_or_received"),
     ("in_reply_to", "in_reply_to"),
-    ("email_headers", "email_headers"),
+    ("uid", "uid"),
+    ("email_account", "email_account"),
+    ("communication_date", "communication_date"),
+    ("message_id", "message_id"),
 )
 ALLOWED_DOCTYPES = {"CRM Task", "HD Ticket", "CRM Lead", "Communication"}
 REQUIRED_DOCTYPES = ("CRM Task", "HD Ticket", "CRM Lead", "Communication")
