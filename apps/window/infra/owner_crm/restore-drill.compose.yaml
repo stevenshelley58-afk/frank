@@ -93,6 +93,22 @@ services:
     command: ['bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.get_all --kwargs "$${OWNER_CRM_CUSTOM_FIELDS_KWARGS}"']
 
 
+  # Optional real-account recovery check. The expected HMAC is passed by the
+  # host wrapper; neither the source password nor the restored password is
+  # printed or persisted in the drill receipt.
+  verify-native-email:
+    <<: *bench
+    entrypoint: ["bash", "-ec"]
+    environment:
+      OWNER_CRM_EMAIL_ACCOUNT_NAME: "$${OWNER_CRM_EMAIL_ACCOUNT_NAME:?OWNER_CRM_EMAIL_ACCOUNT_NAME is required}"
+      OWNER_CRM_EMAIL_EXPECTED_HMAC: "$${OWNER_CRM_EMAIL_EXPECTED_HMAC:?OWNER_CRM_EMAIL_EXPECTED_HMAC is required}"
+    command:
+      - >-
+        actual=$$(bench --site "${OWNER_CRM_DRILL_SITE}" execute frappe.utils.password.get_decrypted_password --kwargs "$$(jq -cn --arg doctype "Email Account" --arg name "$${OWNER_CRM_EMAIL_ACCOUNT_NAME}" '{doctype:$$doctype,name:$$name,fieldname:"password"}')" | jq -r .);
+        test -n "$$actual" && test "$$actual" != "null";
+        actual_hmac=$$(printf '%s' "$$actual" | openssl dgst -sha256 -hmac owner-crm-email-account-v1 | awk '{print $$2}');
+        test "$$actual_hmac" = "$${OWNER_CRM_EMAIL_EXPECTED_HMAC}"
+
   fixture-seed:
     <<: *bench
     volumes:

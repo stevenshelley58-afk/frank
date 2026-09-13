@@ -13,6 +13,19 @@ mariadb_gid=999
 redis_uid=999
 redis_gid=1000
 fail() { echo "owner-crm restore-drill: $*" >&2; exit 1; }
+email_recovery_verified=false
+email_account_name="${OWNER_CRM_EMAIL_ACCOUNT_NAME:-Blockwise Owner Inbox}"
+email_expected_hmac=""
+if [[ "${OWNER_CRM_VERIFY_EMAIL_ACCOUNT:-0}" == 1 ]]; then
+  email_secret_file="${OWNER_CRM_EMAIL_SECRET_FILE:-/srv/frank/secrets/owner-mail.env}"
+  test -f "$email_secret_file" && test ! -L "$email_secret_file" || fail "email recovery secret file is unavailable"
+  test "$(stat -c '%u:%a' "$email_secret_file")" = 0:600 || fail "email recovery secret file must be root-owned mode 0600"
+  email_password=$(awk -F= '$1=="PURELYMAIL_PASSWORD" {print substr($0,index($0,"=")+1); exit}' "$email_secret_file")
+  [[ -n "$email_password" && "$email_password" != *$'\n'* && "$email_password" != *$'\r'* ]] || fail "email recovery secret is missing or malformed"
+  command -v openssl >/dev/null || fail "openssl is required for email recovery verification"
+  email_expected_hmac=$(printf '%s' "$email_password" | openssl dgst -sha256 -hmac owner-crm-email-account-v1 | awk '{print $2}')
+  unset email_password
+fi
 file_manifest() {
   python3 - "$1" <<'PY'
 import hashlib, json, sys
@@ -103,6 +116,11 @@ for key in db_type mute_emails enable_scheduler; do
   restored_value=$(jq -c --arg key "$key" '.[$key]' "$restored_config")
   test "$source_value" = "$restored_value" || fail "restored safe config key differs: $key"
 done
+if [[ "${OWNER_CRM_VERIFY_EMAIL_ACCOUNT:-0}" == 1 ]]; then
+  "${compose[@]}" run --rm -e "OWNER_CRM_EMAIL_ACCOUNT_NAME=$email_account_name" -e "OWNER_CRM_EMAIL_EXPECTED_HMAC=$email_expected_hmac" verify-native-email
+  email_recovery_verified=true
+fi
+
 file_manifest "$drill_root/expected-public" > "$drill_root/expected-public-content.json"
 file_manifest "$drill_root/expected-private" > "$drill_root/expected-private-content.json"
 file_manifest "$drill_root/sites/$site/public/files" > "$drill_root/restored-public-content.json"
@@ -151,6 +169,11 @@ tmp_receipt="$archive/.drill-receipt.$$"
 test ! -e "$tmp_receipt" || fail "temporary receipt path already exists"
 jq --arg restore_id "$restore_id" --arg site "$site" --arg apps_sha "$(printf '%s\n' "$apps" | sha256sum | awk '{print $1}')" --arg source_custom_sha "$source_custom_sha" --arg restored_custom_sha "$restored_custom_sha" --arg public_content_sha "$public_content_sha" --arg private_content_sha "$private_content_sha" --argjson public_file_count "$public_file_count" --argjson private_file_count "$private_file_count" --arg fixture_config_key_sha "$fixture_config_key_sha" --arg fixture_restored_key_sha "$fixture_restored_key_sha" --argjson fixture_public_count "$fixture_public_count" --argjson fixture_private_count "$fixture_private_count" --argjson fixture_public_total "$fixture_public_total" --argjson fixture_private_total "$fixture_private_total" \
   '. + {restore_drill:{restore_id:$restore_id,site:$site,network:"internal-only temporary compose project",mail_disabled:true,scheduler_disabled:true,apps_sha256:$apps_sha,custom_fields_source_sha256:$source_custom_sha,custom_fields_restored_sha256:$restored_custom_sha,custom_fields_match:($source_custom_sha == $restored_custom_sha),files:{public_content_sha256:$public_content_sha,private_content_sha256:$private_content_sha,public_file_count:$public_file_count,private_file_count:$private_file_count,content_match:true,nonempty_attachment_recovery_verified:(($public_file_count + $private_file_count) > 0)},config:{safe_keys_verified:["db_type","mute_emails","enable_scheduler"],database_credentials_restored:false,encryption_key_roundtrip_verified:false,encrypted_credentials_roundtrip_verified:false},staged_fixture:{provenance:"created only after base backup restore in temporary source site; not claimed as live backup content",native_backup_with_files:true,encryption_key_source_sha256:$fixture_config_key_sha,encryption_key_restored_sha256:$fixture_restored_key_sha,encryption_key_match:($fixture_config_key_sha == $fixture_restored_key_sha),encrypted_secret_roundtrip_verified:true,file_url_content_verified:true,public_attachment_count:$fixture_public_count,private_attachment_count:$fixture_private_count,public_file_total:$fixture_public_total,private_file_total:$fixture_private_total,nonempty_attachment_roundtrip_verified:(($fixture_public_count + $fixture_private_count) > 0)},cleanup:"verified and completed"}}' "$archive/receipt.json" > "$tmp_receipt"
+if [[ "${OWNER_CRM_VERIFY_EMAIL_ACCOUNT:-0}" == 1 ]]; then
+  jq --argjson verified "$email_recovery_verified" '.restore_drill.config.encryption_key_roundtrip_verified=$verified | .restore_drill.config.encrypted_credentials_roundtrip_verified=$verified' "$tmp_receipt" > "$tmp_receipt.email"
+  mv "$tmp_receipt.email" "$tmp_receipt"
+fi
+
 chown root:root "$tmp_receipt"
 chmod 0600 "$tmp_receipt"
 mv "$tmp_receipt" "$archive/drill-receipt.json"

@@ -96,6 +96,7 @@ services:
 
   backend:
     <<: *bench
+    networks: [owner-crm-internal, owner-crm-egress]
     depends_on:
       configurator: {condition: service_completed_successfully}
     healthcheck:
@@ -113,6 +114,7 @@ services:
 
   queue-short:
     <<: *bench
+    networks: [owner-crm-internal, owner-crm-egress]
     command: ["bench", "worker", "--queue", "short,default"]
     depends_on:
       configurator: {condition: service_completed_successfully}
@@ -120,11 +122,21 @@ services:
   queue-long:
     <<: *bench
     command: ["bench", "worker", "--queue", "long,default,short"]
+    networks: [owner-crm-internal, owner-crm-egress]
     depends_on:
       configurator: {condition: service_completed_successfully}
 
-  # There is deliberately no scheduler service. Starting one needs an explicit
-  # later mail and integration review rather than an accidental compose upgrade.
+  # Mail activation is an explicit profile. It runs the native scheduler on
+  # the internal network after the owner-mail account and queue checks pass.
+  scheduler:
+    <<: *bench
+    profiles: [owner-mail]
+    command: ["bench", "schedule"]
+    depends_on:
+      configurator: {condition: service_completed_successfully}
+
+  # The scheduler is deliberately opt-in. Starting this profile needs an
+  # explicit mail and integration review rather than an accidental upgrade.
   frontend:
     <<: *image
     command: ["nginx-entrypoint.sh"]
@@ -190,4 +202,9 @@ networks:
   owner-crm-internal:
     internal: true
   owner-crm-ingress:
+    driver: bridge
+  # Only the application and native workers need outbound SMTP/IMAP or
+  # provider connections. Database and Redis services stay on the internal
+  # network and therefore cannot reach the outside world.
+  owner-crm-egress:
     driver: bridge

@@ -16,7 +16,9 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn("internal: true", self.compose)
         self.assertIn('"127.0.0.1:18081:8080"', self.compose)
         self.assertIn("networks: [owner-crm-internal, owner-crm-ingress]", self.compose)
+        self.assertIn("networks: [owner-crm-internal, owner-crm-egress]", self.compose)
         self.assertIn("owner-crm-ingress:\n    driver: bridge", self.compose)
+        self.assertIn("owner-crm-egress:\n    driver: bridge", self.compose)
         self.assertIn("OWNER_CRM_SOURCE_SHA", self.compose)
         self.assertIn("mariadb:11.8@sha256:", self.compose)
         self.assertIn("redis:8.6-alpine@sha256:", self.compose)
@@ -24,8 +26,10 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertNotIn("blockwise-product", self.compose)
         self.assertNotIn("blockwise-crm", self.compose)
 
-    def test_mail_and_scheduler_are_disabled(self):
-        self.assertNotIn("\n  scheduler:", self.compose)
+    def test_mail_and_scheduler_are_opt_in(self):
+        self.assertIn("\n  scheduler:", self.compose)
+        self.assertIn("profiles: [owner-mail]", self.compose)
+        self.assertIn('command: ["bench", "schedule"]', self.compose)
         self.assertGreaterEqual(self.compose.count("mute_emails 1"), 2)
         self.assertGreaterEqual(self.compose.count("enable_scheduler 0"), 2)
 
@@ -78,6 +82,8 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn("io.frank.owner-crm.applied-source-sha", health)
         self.assertIn(".State.Health.Status", health)
         self.assertIn('grep -Eq "^${app}([[:space:]]|$)"', health)
+        self.assertIn("--mail-enabled", health)
+        self.assertIn("mode=mail-enabled", health)
         backup = (ROOT / "bin/backup-preflight.sh").read_text()
         self.assertIn("age", backup)
         self.assertIn("restore", backup)
@@ -106,6 +112,9 @@ class OwnerCrmFoundationTests(unittest.TestCase):
         self.assertIn("mute_emails 1", drill)
         self.assertIn("enable_scheduler 0", drill)
         self.assertNotIn("get-config", drill)
+        self.assertIn("OWNER_CRM_VERIFY_EMAIL_ACCOUNT", restore)
+        self.assertIn("verify-native-email", drill)
+        self.assertIn("owner-crm-email-account-v1", drill)
         self.assertIn("database_credentials_restored:false", restore)
         self.assertIn("encrypted_credentials_roundtrip_verified:false", restore)
         self.assertIn("public_file_count", restore)
