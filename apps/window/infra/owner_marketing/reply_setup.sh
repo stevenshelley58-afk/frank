@@ -40,7 +40,8 @@ if [[ "$listed" == *"$remote_script"* ]]; then
 else
   run_sieve --localsieve "/work/$remote_script.sieve" --checkscript || die provider-does-not-support-required-sieve-extensions
 fi
-printf '%s' "$(printf '{"address":"%s","user":"%s","password":"%s"}' "$OWNER_MAIL_ADDRESS" "$PURELYMAIL_USERNAME" "$PURELYMAIL_PASSWORD")" | docker exec -i "$container" php -r '
+export OWNER_MAIL_ADDRESS PURELYMAIL_USERNAME PURELYMAIL_PASSWORD
+python3 -c 'import os,json; print(json.dumps({"address":os.environ["OWNER_MAIL_ADDRESS"],"user":os.environ["PURELYMAIL_USERNAME"],"password":os.environ["PURELYMAIL_PASSWORD"]}))' | docker exec -i "$container" php -r '
   $input=json_decode(stream_get_contents(STDIN),true,flags:JSON_THROW_ON_ERROR); $path="/var/www/html/config/local.php"; $parameters=[]; include $path; if(!is_array($parameters))exit(2);
   $mailboxes=$parameters["monitored_email"]??[]; $mailboxes["general"]=array_merge($mailboxes["general"]??[],["address"=>$input["address"],"host"=>"mailserver.purelymail.com","port"=>"993","encryption"=>"/ssl","user"=>$input["user"],"password"=>$input["password"],"use_attachments"=>false]);
   $mailboxes["EmailBundle_replies"]=array_merge($mailboxes["EmailBundle_replies"]??[],["override_settings"=>0,"folder"=>"Mautic Replies"]); $parameters["monitored_email"]=$mailboxes;

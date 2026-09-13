@@ -9,8 +9,8 @@ fail(){ echo "owner-crm offhost backup: $*" >&2; exit 2; }
 [[ -f $secret && ! -L $secret && $(stat -c '%u:%a' "$secret") == 0:600 ]] || fail 'missing or unsafe root-only R2 configuration'
 set -a; source "$secret"; set +a
 [[ ${OWNER_BACKUP_OFFHOST_ENABLED:-0} == 1 ]] || fail 'off-host backup is explicitly disabled'
-[[ ${RESTIC_REPOSITORY:-} == s3:* && ${RESTIC_REPOSITORY} == *r2* ]] || fail 'RESTIC_REPOSITORY must be an explicit R2 S3 target'
-[[ -f ${RESTIC_PASSWORD_FILE:-} && ! -L ${RESTIC_PASSWORD_FILE:-/missing} ]] || fail 'missing restic password escrow file'
+[[ ${RESTIC_REPOSITORY:-} =~ ^s3:https://[a-f0-9]{32}\.r2\.cloudflarestorage\.com/[a-z0-9][a-z0-9-]{2,62}(/[-a-zA-Z0-9_/]+)?$ ]] || fail 'RESTIC_REPOSITORY must be an explicit R2 S3 target'
+[[ -f ${RESTIC_PASSWORD_FILE:-} && ! -L ${RESTIC_PASSWORD_FILE:-/missing} && $(stat -c '%u:%a' "$RESTIC_PASSWORD_FILE") == 0:600 ]] || fail 'missing restic password escrow file'
 command -v restic >/dev/null || fail 'restic is not installed'
 "$root/bin/local-backup.sh"
 local_id=$(cat "$backup_root/LATEST")
