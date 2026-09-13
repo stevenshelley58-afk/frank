@@ -9,7 +9,7 @@ def bench(method,kwargs=None):
     if kwargs is not None: args += ['--kwargs',json.dumps(kwargs)]
     result=subprocess.run(args,check=True,capture_output=True,text=True)
     if method=='crm.demo.api.clear_demo_data': return None
-    return json.loads(result.stdout) if result.stdout.strip() else None
+    return json.loads(result.stdout) if result.stdout.strip() else []
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('--apply',action='store_true');args=parser.parse_args()
