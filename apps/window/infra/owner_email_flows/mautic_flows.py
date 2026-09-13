@@ -392,6 +392,25 @@ def resolve_contact(
     return contact
 
 
+def verify_contact_identity(
+    contact: dict[str, Any], *, profile_id: str, workspace_id: str, email: str
+) -> int:
+    """Require the Mautic response to preserve all three bridge identities."""
+    try:
+        contact_id = int(contact["id"])
+    except (KeyError, TypeError, ValueError) as error:
+        raise ApiError("Mautic contact create response was malformed") from error
+    if (
+        contact_value(contact, "blockwise_profile_id") != profile_id
+        or contact_value(contact, "blockwise_workspace_id") != workspace_id
+    ):
+        raise ApiError("Mautic contact response has immutable identity drift")
+    actual_email = contact_email(contact)
+    if actual_email is None or actual_email.lower() != email.lower():
+        raise ApiError("Mautic contact response has email identity drift")
+    return contact_id
+
+
 def has_email_dnc(contact: dict[str, Any]) -> bool:
     records = contact.get("doNotContact", [])
     if not isinstance(records, list):
@@ -432,7 +451,14 @@ def bridge(api: Mautic, args: argparse.Namespace) -> None:
         if find_email_contacts(api, args.email):
             raise ApiError("Mautic email belongs to a different or unproven immutable identity")
         contact = api.request("POST", "contacts/new", payload).get("contact", {})
-    contact_id = int(contact["id"])
+    # Even an exact profile match is held when its stored email differs. The
+    # bridge never treats an address change as permission to rewrite identity.
+    contact_id = verify_contact_identity(
+        contact,
+        profile_id=args.profile_id,
+        workspace_id=args.workspace_id,
+        email=args.email,
+    )
     if has_email_dnc(contact):
         raise ApiError("contact has native Mautic Do Not Contact; enrolment refused")
     segments = ensure_segments(api, apply=False)

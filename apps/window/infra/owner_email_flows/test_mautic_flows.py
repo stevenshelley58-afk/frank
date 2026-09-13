@@ -67,9 +67,10 @@ def bridge_contact(profile_id=PROFILE_ID, workspace_id=WORKSPACE_ID, dnc=None, c
 
 
 class FakeBridgeMautic:
-    def __init__(self, contacts=None, fail_segment_once=False):
+    def __init__(self, contacts=None, fail_segment_once=False, create_response=None):
         self.contacts = list(contacts or [])
         self.fail_segment_once = fail_segment_once
+        self.create_response = create_response
         self.memberships = set()
         self.calls = []
 
@@ -98,7 +99,7 @@ class FakeBridgeMautic:
             contact = bridge_contact(contact_id=len(self.contacts) + 1)
             contact["fields"]["all"].update(payload)
             self.contacts.append(contact)
-            return {"contact": contact}
+            return {"contact": self.create_response if self.create_response is not None else contact}
         if method == "POST" and "/segments/" in path and path.endswith("/add"):
             if self.fail_segment_once:
                 self.fail_segment_once = False
@@ -232,6 +233,25 @@ class FlowTests(unittest.TestCase):
         with self.assertRaisesRegex(flows.ApiError, "email belongs"):
             flows.bridge(api, bridge_args())
         self.assertFalse(any(call[1] == "contacts/new" for call in api.calls))
+
+    def test_bridge_holds_existing_profile_when_email_has_drifted(self):
+        api = FakeBridgeMautic(contacts=[bridge_contact(email="changed@example.test")])
+        with self.assertRaisesRegex(flows.ApiError, "email identity drift"):
+            flows.bridge(api, bridge_args())
+        self.assertEqual(api.memberships, set())
+        self.assertFalse(any(call[0] == "PATCH" for call in api.calls))
+
+    def test_bridge_holds_malformed_or_mismatched_create_response_before_membership(self):
+        responses = (
+            {"id": 1, "fields": {"all": {"blockwise_profile_id": PROFILE_ID, "blockwise_workspace_id": WORKSPACE_ID}}},
+            bridge_contact(profile_id="10000000-0000-4000-8000-000000000002"),
+        )
+        for response in responses:
+            with self.subTest(response=response):
+                api = FakeBridgeMautic(create_response=response)
+                with self.assertRaisesRegex(flows.ApiError, "contact response"):
+                    flows.bridge(api, bridge_args())
+                self.assertEqual(api.memberships, set())
 
     def test_bridge_rejects_malformed_identity_and_email(self):
         for values in (
