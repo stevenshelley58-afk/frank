@@ -15,11 +15,6 @@ SEGMENT_DESCRIPTION = (
     "Dynamic newsletter audience. Requires current explicit opted_in marketing "
     "consent and active nurture state. Native Mautic email Do Not Contact still applies."
 )
-EMAIL_DESCRIPTION = (
-    "Held newsletter issue. Manual content and audience review plus explicit publish "
-    "approval are required before this issue can be sent. No cadence or automation."
-)
-
 
 def desired_filters() -> list[dict[str, Any]]:
     return [
@@ -94,7 +89,6 @@ def newsletter_payload(segment_id: int) -> dict[str, Any]:
     payload.update(
         {
             "name": EMAIL_NAME,
-            "description": EMAIL_DESCRIPTION,
             "subject": "Before you publish, check the campaign basics",
             "preheaderText": "Review the offer, audience, creative, budget and lead form.",
             "emailType": "list",
@@ -126,7 +120,7 @@ def verify_email(email: dict[str, Any], desired: dict[str, Any]) -> None:
         raise ApiError("newsletter draft must remain unpublished")
     if int(email.get("sentCount", 0)) != 0:
         raise ApiError("newsletter draft has already been sent and must not be reconciled")
-    for key in ("name", "description", "subject", "preheaderText", "customHtml", "plainText"):
+    for key in ("name", "subject", "preheaderText", "customHtml", "plainText"):
         if email.get(key) != desired[key]:
             raise ApiError(f"newsletter draft drift requires manual review: {key}")
     if list_ids(email) != sorted(desired["lists"]):
