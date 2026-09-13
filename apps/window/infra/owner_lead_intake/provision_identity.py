@@ -12,7 +12,7 @@ try:
   if guard.script != script: raise RuntimeError("CRM Lead deletion guard conflict")
  else: frappe.get_doc({"doctype":"Server Script","name":name,"script_type":"DocType Event","reference_doctype":dt,"doctype_event":"Before Delete","disabled":0,"script":script}).insert()
  frappe.clear_cache();frappe.db.commit();frappe.set_user(user)
- checks={"lead_read":frappe.has_permission(dt,"read"),"lead_create":frappe.has_permission(dt,"create"),"lead_delete":frappe.has_permission(dt,"delete"),"lead_export":frappe.has_permission(dt,"export"),"cross_doctype_export":frappe.has_permission("CRM Note","read")}
+ checks={"lead_read":frappe.has_permission(dt,"read"),"lead_create":frappe.has_permission(dt,"create"),"lead_delete":frappe.has_permission(dt,"delete"),"lead_export":frappe.has_permission(dt,"export"),"cross_doctype_export":frappe.has_permission("User","read")}
  if checks != {"lead_read":True,"lead_create":True,"lead_delete":False,"lead_export":False,"cross_doctype_export":False}: raise RuntimeError("native permission boundary check failed")
  print(json.dumps(checks))
 finally: frappe.destroy()
