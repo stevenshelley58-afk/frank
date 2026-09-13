@@ -60,7 +60,7 @@ class FrappeLeadStore:
    if e.code==417:
     try:category=json.loads(e.read(65537)).get("exc_type")
     except (ValueError,UnicodeDecodeError):category=None
-    if category=="DuplicateEntryError":raise DuplicateSource("native source key already exists") from None
+    if category in {"DuplicateEntryError", "UniqueValidationError"}:raise DuplicateSource("native source key already exists") from None
     raise IntakeError("native CRM rejected an invalid Lead") from None
    if e.code==409:raise DuplicateSource("native source key already exists") from None
    raise IntakeError("native CRM request failed") from None
