@@ -15,18 +15,22 @@ if ! docker exec frank-owner-marketing test -f /var/www/html/config/local.php; t
   echo "native Mautic is not installed; installer will use MAUTIC_PUBLIC_URL"
   exit 0
 fi
-docker exec -e EXPECTED_SITE_URL="$public_url" frank-owner-marketing php -r '
+ingress_ip="$(docker inspect --format '{{(index .NetworkSettings.Networks "frank_owner_marketing_private").IPAddress}}' frank-owner-marketing-ingress)"
+[[ "$ingress_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die missing-private-ingress-address
+docker exec -e EXPECTED_SITE_URL="$public_url" -e EXPECTED_INGRESS_IP="$ingress_ip" frank-owner-marketing php -r '
 $path = "/var/www/html/config/local.php";
 $expected = getenv("EXPECTED_SITE_URL");
+$proxy = getenv("EXPECTED_INGRESS_IP");
 $parameters = [];
 include $path;
 if (!is_array($parameters) || !isset($parameters["site_url"])) {
     exit(2);
 }
-if ($parameters["site_url"] === $expected) {
+if ($parameters["site_url"] === $expected && ($parameters["trusted_proxies"] ?? []) === [$proxy]) {
     exit(0);
 }
 $parameters["site_url"] = $expected;
+$parameters["trusted_proxies"] = [$proxy];
 $mode = fileperms($path) & 0777;
 $uid = fileowner($path);
 $gid = filegroup($path);
