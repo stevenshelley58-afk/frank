@@ -247,6 +247,10 @@ def map_snapshot_row(row: Mapping[str, Any]) -> CustomerSnapshot:
         ends_at=_as_optional_text(trial_raw.get("endsAt")),
     )
 
+    for timestamp in (trial.started_at, trial.ends_at):
+        if timestamp is not None and _normalise_timestamp(timestamp) is None:
+            raise ConnectorError("snapshot trial timestamp was invalid")
+
     ambiguities_raw = row.get("mappingAmbiguities")
     if not isinstance(ambiguities_raw, list) or not all(
         isinstance(item, str) for item in ambiguities_raw
@@ -789,6 +793,8 @@ def plan_snapshot(
     if _identity_conflict([contact], profile_uuid=profile_uuid, workspace_uuid=workspace_uuid):
         raise ConnectorError("owner CRM identity changed during preview")
     current_observed = _normalise_timestamp(contact.source_observed_at)
+    if contact.source_observed_at and current_observed is None:
+        raise ConnectorError("owner CRM observation timestamp is malformed")
     if (
         current_observed is not None
         and incoming_observed is not None
@@ -912,6 +918,8 @@ def apply_plan(
             if _identity_conflict([contact], profile_uuid=profile_uuid, workspace_uuid=workspace_uuid):
                 return "held_conflict"
             current_observed = _normalise_timestamp(contact.source_observed_at)
+            if contact.source_observed_at and current_observed is None:
+                raise ConnectorError("owner CRM observation timestamp is malformed")
             if (
                 current_observed is not None
                 and incoming_observed is not None

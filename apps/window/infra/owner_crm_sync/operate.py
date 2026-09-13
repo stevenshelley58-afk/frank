@@ -57,9 +57,14 @@ def main():
                 signing_secret=credentials.blockwise_signing_secret, scope=credentials.blockwise_scope)
             result = run(snapshot_client=source, store=store, apply=args.command == "run")
             summary = (result.applied or result.preview).summary()
+            if args.command == "run":
+                store.reconcile_hold("source-connection", "unchanged")
             receipt = {"status":"failed" if summary.get("failed") else "ok", "mode":args.command,
                 "finished_at":time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "summary":summary}
         except (ConnectorError, OSError):
+            if args.command == "run":
+                with contextlib.suppress(ConnectorError, OSError):
+                    store.reconcile_hold("source-connection", "failed")
             receipt = {"status":"failed", "mode":args.command, "finished_at":time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                 "error":"source_or_native_crm_unavailable; no credentials or customer payload logged"}
         finally:
