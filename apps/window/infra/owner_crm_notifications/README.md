@@ -1,10 +1,12 @@
 # Private owner CRM notifications
 
-This bundle configures exactly two native Frappe Webhooks: `after_insert` for
-`CRM Task` and `HD Ticket`. Both enqueue on Frappe's existing short worker and
-POST a static, generic JSON alert to the ntfy JSON publish root, selecting the private topic from the payload. No custom Frappe
-app, DocType, scheduler, event server, customer route, mail, or phone delivery
-is introduced.
+This bundle configures exactly four native Frappe Webhooks: after_insert for
+CRM Task, HD Ticket, CRM Lead, and Communication. The Communication hook is
+restricted by native Frappe condition to communication_medium == Email and
+sent_or_received == Received, so outgoing email does not alert. All hooks
+enqueue on Frappe's existing short worker and POST a static, generic JSON alert
+to the ntfy JSON publish root. No custom Frappe app, DocType, event server,
+customer route, mail, or phone delivery is introduced.
 
 ntfy joins the existing external Docker network `owner-crm_owner-crm-internal`
 only to accept these private Webhook requests. Its public listener remains
