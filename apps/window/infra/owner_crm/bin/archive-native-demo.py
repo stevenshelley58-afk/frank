@@ -36,10 +36,16 @@ def main():
     ARCHIVE.mkdir(parents=True,exist_ok=True,mode=0o700)
     if ARCHIVE.is_symlink(): raise SystemExit('unsafe archive root')
     dest=ARCHIVE/run
-    shutil.copytree(backup,dest)
+    if not dest.exists(): shutil.copytree(backup,dest)
+    if dest.is_symlink(): raise SystemExit('unsafe existing archive')
+    subprocess.run(['sha256sum','-c','SHA256SUMS'],cwd=dest,check=True,capture_output=True)
     manifest={'defaults':defaults,'protected_leads':protected,'protected_mirrors':mirrors}
-    fd=os.open(dest/'cleanup-scope.json',os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
-    with os.fdopen(fd,'w') as stream: json.dump(manifest,stream)
+    scope=dest/'cleanup-scope.json'
+    if scope.exists():
+        if json.loads(scope.read_text()) != manifest: raise SystemExit('archived cleanup scope drifted')
+    else:
+        fd=os.open(scope,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+        with os.fdopen(fd,'w') as stream: json.dump(manifest,stream)
     bench('crm.demo.api.clear_demo_data')
     remaining=bench('frappe.get_all',{'doctype':'CRM Lead','fields':['name']})
     aftermirrors=bench('frappe.get_all',{'doctype':'Contact','fields':['name','custom_blockwise_profile_uuid'],'filters':{'custom_blockwise_profile_uuid':['is','set']}})
