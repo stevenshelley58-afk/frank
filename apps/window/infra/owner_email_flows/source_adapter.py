@@ -11,6 +11,7 @@ from pathlib import Path
 import re
 import sys
 import stat
+import uuid
 from typing import Any, Mapping, Protocol
 
 if not (Path(__file__).resolve().parent / "customer_sync.py").exists():
@@ -31,6 +32,7 @@ from mautic_flows import ApiError, Mautic, bridge, suppress
 MAUTIC_URL = "http://127.0.0.1:18106"
 DEFAULT_SECRET_FILE = Path("/srv/hermes/secrets/owner-email-flows.env")
 FLOW = "opted_in_education"
+UUID_NAMESPACE = uuid.UUID("9c5a28af-b9c3-4d0b-b9e5-82061242d496")
 
 
 class AdapterError(RuntimeError):
@@ -53,6 +55,16 @@ class ConsentFact:
     occurred_at: str | None
     policy_version: str | None
     event_id: str | None
+    billing_access_state: str | None = None
+    stripe_subscription_status: str | None = None
+    trial_state: str | None = None
+    trial_started_at: str | None = None
+    trial_ends_at: str | None = None
+    billing_event_created: int | None = None
+    billing_checkout_completed_at: str | None = None
+    cancel_at_period_end: bool | None = None
+    current_period_end: str | None = None
+    workspace_created_at: str | None = None
 
     @property
     def state(self) -> str:
@@ -63,6 +75,17 @@ class ConsentFact:
         if self.granted and (self.email_verified_at is None or not self.policy_version):
             return "held_ineligible"
         return "granted" if self.granted else "revoked"
+
+
+@dataclass(frozen=True)
+class LifecycleAction:
+    flow: str
+    identity: str
+
+
+def _action_id(workspace_id: str, flow: str, immutable_value: str) -> str:
+    """A local action identity, never a claimed Stripe event identifier."""
+    return str(uuid.uuid5(UUID_NAMESPACE, f"{workspace_id}:{flow}:{immutable_value}"))
 
 
 def _timestamp(value: str | None) -> datetime | None:
@@ -85,14 +108,35 @@ def _optional_text(value: Any, label: str) -> str | None:
     return value
 
 
+def _optional_timestamp(value: Any, label: str) -> str | None:
+    parsed = _optional_text(value, label)
+    if parsed is not None and _timestamp(parsed) is None:
+        raise AdapterError(f"snapshot {label} was invalid")
+    return parsed
+
+
+def _optional_nonnegative_int(value: Any, label: str) -> int | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise AdapterError(f"snapshot {label} was invalid")
+    return value
+
+
+def _optional_bool(value: Any, label: str) -> bool | None:
+    if value is None:
+        return None
+    if not isinstance(value, bool):
+        raise AdapterError(f"snapshot {label} was invalid")
+    return value
+
+
 def map_consent_fact(row: Mapping[str, Any]) -> ConsentFact | None:
     """Map only the committed latest-event snapshot contract."""
     common = map_snapshot_row(row)
     if common.is_ambiguous or common.owner is None:
         return None
-    verified = _optional_text(row.get("ownerEmailVerifiedAt"), "owner email verification")
-    if verified is not None and _timestamp(verified) is None:
-        raise AdapterError("snapshot owner email verification was invalid")
+    verified = _optional_timestamp(row.get("ownerEmailVerifiedAt"), "owner email verification")
     raw = row.get("marketingConsent")
     granted: bool | None = None
     occurred: str | None = None
@@ -123,8 +167,46 @@ def map_consent_fact(row: Mapping[str, Any]) -> ConsentFact | None:
         occurred_at=occurred,
         policy_version=policy,
         event_id=event_id,
+        billing_access_state=common.billing_access_state,
+        stripe_subscription_status=common.stripe_subscription_status,
+        trial_state=common.trial.state,
+        trial_started_at=common.trial.started_at,
+        trial_ends_at=common.trial.ends_at,
+        billing_event_created=_optional_nonnegative_int(row.get("billingEventCreated"), "billing event high-water"),
+        billing_checkout_completed_at=_optional_timestamp(row.get("billingCheckoutCompletedAt"), "billing checkout completion"),
+        cancel_at_period_end=_optional_bool(row.get("cancelAtPeriodEnd"), "cancel at period end"),
+        current_period_end=_optional_timestamp(row.get("currentPeriodEnd"), "current period end"),
+        workspace_created_at=_optional_timestamp(row.get("workspaceCreatedAt"), "workspace creation"),
     )
     return fact
+
+
+def lifecycle_action(fact: ConsentFact) -> LifecycleAction | str | None:
+    """Select one current lifecycle path from raw authoritative facts."""
+    if fact.state != "granted":
+        return None
+    if fact.billing_access_state == "paid":
+        if fact.billing_checkout_completed_at is None:
+            return "held_missing_checkout_completion"
+        return LifecycleAction("paid_welcome", _action_id(fact.workspace_id, "paid_welcome", fact.billing_checkout_completed_at))
+    if fact.billing_access_state == "canceled":
+        if fact.billing_event_created is None:
+            return "held_missing_billing_event"
+        return LifecycleAction("cancelled", _action_id(fact.workspace_id, "cancelled", str(fact.billing_event_created)))
+    if fact.trial_state == "ended":
+        if fact.trial_ends_at is None:
+            return "held_missing_trial_end"
+        return LifecycleAction("trial_ended", _action_id(fact.workspace_id, "trial_ended", fact.trial_ends_at))
+    if fact.trial_state == "active":
+        if fact.trial_started_at is None:
+            return "held_missing_trial_start"
+        # There is no approved near-end interval. Trial ending and winback are
+        # held policy decisions, while the normal active-trial help path remains
+        # eligible from its immutable start event.
+        return LifecycleAction("onboarding_trial_help", _action_id(fact.workspace_id, "onboarding_trial_help", fact.trial_started_at))
+    if fact.workspace_created_at is not None:
+        return LifecycleAction("onboarding_trial_help", _action_id(fact.workspace_id, "onboarding_trial_help", fact.workspace_created_at))
+    return "held_no_current_lifecycle"
 
 
 def _parse_secret(path: Path) -> dict[str, str]:
@@ -206,9 +288,14 @@ def apply_fact(api: Mautic, fact: ConsentFact, *, apply: bool) -> str:
         return state
     if fact.event_id is None:
         return "held_missing_event_id"
+    action = lifecycle_action(fact)
+    if isinstance(action, str):
+        return action
+    flow = action.flow if action is not None else FLOW
+    source_event_id = action.identity if action is not None else fact.event_id
     namespace = argparse.Namespace(
-        flow=FLOW,
-        source_event_id=fact.event_id,
+        flow=flow,
+        source_event_id=source_event_id,
         profile_id=fact.profile_id,
         workspace_id=fact.workspace_id,
         email=fact.email,
@@ -217,14 +304,14 @@ def apply_fact(api: Mautic, fact: ConsentFact, *, apply: bool) -> str:
     )
     if state == "granted":
         bridge(api, namespace)
-        return "enrolled"
+        return "enrolled_" + flow
     suppress(api, namespace)
     return "suppressed"
 
 
 def run(*, source: SnapshotClient, api: Mautic | None, apply: bool) -> dict[str, int]:
     facts = collect_facts(source)
-    summary = {key: 0 for key in ("enrolled", "suppressed", "ungranted", "held_missing_event_id", "held_ambiguous_consent", "held_ineligible", "failed")}
+    summary = {key: 0 for key in ("suppressed", "ungranted", "held_missing_event_id", "held_ambiguous_consent", "held_ineligible", "held_missing_checkout_completion", "held_missing_billing_event", "held_missing_trial_end", "held_missing_trial_start", "held_trial_ending_policy", "held_no_current_lifecycle", "failed")}
     for fact in facts:
         try:
             outcome = apply_fact(api, fact, apply=apply) if api is not None else fact.state

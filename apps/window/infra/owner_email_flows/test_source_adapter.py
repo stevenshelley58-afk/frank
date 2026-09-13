@@ -73,19 +73,19 @@ class SourceAdapterTests(unittest.TestCase):
     def test_preview_never_calls_the_native_bridge(self):
         summary = adapter.run(source=FakeSource([row()]), api=None, apply=False)
         self.assertEqual(summary["granted"], 1)
-        self.assertEqual(summary["enrolled"], 0)
+        self.assertFalse(any(key.startswith("enrolled_") for key in summary))
 
     def test_grant_uses_only_the_authoritative_consent_event(self):
         calls = []
         original = adapter.bridge
         try:
             adapter.bridge = lambda api, args: calls.append(args)
-            outcome = adapter.apply_fact(FakeApi(), adapter.map_consent_fact(row()), apply=True)
+            outcome = adapter.apply_fact(FakeApi(), adapter.map_consent_fact(row(trial={"state": "active", "startedAt": "2026-09-01T00:00:00Z", "endsAt": None})), apply=True)
         finally:
             adapter.bridge = original
-        self.assertEqual(outcome, "enrolled")
-        self.assertEqual(calls[0].flow, "opted_in_education")
-        self.assertEqual(calls[0].source_event_id, EVENT_ID)
+        self.assertEqual(outcome, "enrolled_onboarding_trial_help")
+        self.assertEqual(calls[0].flow, "onboarding_trial_help")
+        self.assertNotEqual(calls[0].source_event_id, EVENT_ID)
         self.assertEqual(calls[0].consent_state, "opted_in")
 
     def test_revoke_calls_native_suppression_not_enrolment(self):
@@ -99,6 +99,42 @@ class SourceAdapterTests(unittest.TestCase):
             adapter.suppress = original
         self.assertEqual(outcome, "suppressed")
         self.assertEqual(calls[0].consent_state, "opted_out")
+
+    def test_paid_requires_authoritative_checkout_completion(self):
+        fact = adapter.map_consent_fact(row(billingAccessState="paid"))
+        self.assertEqual(adapter.lifecycle_action(fact), "held_missing_checkout_completion")
+        fact = adapter.map_consent_fact(row(billingAccessState="paid", billingCheckoutCompletedAt="2026-09-13T01:00:00Z"))
+        action = adapter.lifecycle_action(fact)
+        self.assertEqual(action.flow, "paid_welcome")
+        self.assertRegex(action.identity, adapter._UUID.pattern)
+
+    def test_scheduled_cancellation_never_means_cancelled(self):
+        fact = adapter.map_consent_fact(row(cancelAtPeriodEnd=True, currentPeriodEnd="2026-09-20T00:00:00Z"))
+        self.assertNotEqual(getattr(adapter.lifecycle_action(fact), "flow", None), "cancelled")
+        fact = adapter.map_consent_fact(row(billingAccessState="canceled", billingEventCreated=42, cancelAtPeriodEnd=True))
+        action = adapter.lifecycle_action(fact)
+        self.assertEqual(action.flow, "cancelled")
+        self.assertNotIn("42", action.identity)
+
+    def test_active_trial_uses_help_not_an_unapproved_near_end_reminder(self):
+        fact = adapter.map_consent_fact(row())
+        self.assertEqual(adapter.lifecycle_action(fact).flow, "onboarding_trial_help")
+
+    def test_trial_end_and_replay_are_stable(self):
+        ended = row(trial={"state": "ended", "startedAt": "2026-09-01T00:00:00Z", "endsAt": "2026-09-15T00:00:00Z"})
+        first = adapter.lifecycle_action(adapter.map_consent_fact(ended))
+        second = adapter.lifecycle_action(adapter.map_consent_fact(ended))
+        self.assertEqual(first.flow, "trial_ended")
+        self.assertEqual(first.identity, second.identity)
+
+    def test_invalid_new_authoritative_values_fail_closed(self):
+        with self.assertRaisesRegex(adapter.AdapterError, "billing event"):
+            adapter.map_consent_fact(row(billingEventCreated=True))
+        with self.assertRaisesRegex(adapter.AdapterError, "checkout completion"):
+            adapter.map_consent_fact(row(billingCheckoutCompletedAt="not-a-time"))
+
+    def test_ambiguous_owner_never_becomes_a_customer_contact(self):
+        self.assertIsNone(adapter.map_consent_fact(row(mappingAmbiguities=["multiple owners"])))
 
 
 if __name__ == "__main__":

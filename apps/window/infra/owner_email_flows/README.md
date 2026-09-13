@@ -31,13 +31,22 @@ explicit opted-in consent, active nurture state and no native Mautic Do Not
 Contact. The active snapshot has no marketing-consent fact, so no real customer
 is eligible until an authoritative consent source is accepted.
 
-The committed Hermes source adapter currently consumes only verified explicit
-consent from the protected customer snapshot. It can enrol opted-in education or
-record a consent withdrawal as email Do Not Contact. It has no reply, conversion,
-bounce, complaint or lifecycle-event source, so it does not claim those exits are
-connected. Mautic Do Not Contact does not automatically suppress the separate
-Blockwise transactional outbox. Trial flows consume exact events and do not
-calculate trial deadlines.
+The committed Hermes source adapter consumes verified explicit consent and the
+protected snapshot's raw workspace, trial and billing facts. It selects one
+currently eligible native source path, removes stale non-cold source segments,
+then records Mautic email Do Not Contact on a consent withdrawal. Paid welcome
+requires paid access plus `billingCheckoutCompletedAt`; cancellation requires
+actual `canceled` access plus the authoritative billing-event high-water.
+`cancelAtPeriodEnd` alone never implies cancellation. Its deterministic UUID5
+action IDs are local bridge identities, not asserted Stripe event IDs. Mautic Do
+Not Contact does not automatically suppress the separate Blockwise transactional
+outbox.
+
+There is no approved trial-near-end interval or winback offer. Trial-ending and
+winback therefore remain explicit `held_policy` outcomes. The adapter never
+derives them from `sourceObservedAt`, an elapsed wall clock, signup or billing.
+Reply, conversion, bounce and complaint exits are native/email-side gates, not
+asserted Blockwise customer-lead events.
 
 ## Copy provenance
 
@@ -83,10 +92,10 @@ still refuses missing consent, native DNC and cold enrolment.
 
 The owner CRM sync is not a lifecycle-email event source. The paused source
 adapter requires an accepted consent UI and the released protected customer
-snapshot facts before it can run. Only opted-in education is wired through that
-adapter; no trial, paid, cancellation, winback, reply or conversion event is
-wired. Root enables campaigns/workers only after the consent source, Resend SMTP,
-public consent route and controlled own-mailbox unsubscribe test pass.
+snapshot facts before it can run. It maps only present raw facts and never
+dispatches from an agency lead lifecycle event. Root enables campaigns/workers
+only after the consent source, Resend SMTP, public consent route and controlled
+own-mailbox unsubscribe test pass.
 
 ## Hermes consent bridge
 
@@ -96,10 +105,11 @@ latest exact marketingConsent event: eventId, granted, occurredAt and policyVers
 No event means ungranted. It cannot infer consent from signup, billing, trial or
 email address.
 
-A latest granted event with a verified email enrols only opted-in education. A
-latest revoked event writes Mautic email Do Not Contact and stops nurture. The
-adapter has no reply or conversion source, so it does not claim those exits are
-connected. Its dedicated Mautic role has contact create/view/edit access plus
+A latest granted event with a verified email permits the selected current
+education or lifecycle path. A latest revoked event writes Mautic email Do Not
+Contact, stops nurture and removes non-cold source-segment paths. The adapter
+has no customer-agency lead reply or conversion source. Its dedicated Mautic
+role has contact create/view/edit access plus
 the native static-segment edit capability required for membership. Mautic has no
 membership-only permission, so that segment edit capability is broader than the
 adapter needs and does not grant campaign, email, publish, send, delete or admin

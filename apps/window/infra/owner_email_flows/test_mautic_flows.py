@@ -110,6 +110,11 @@ class FakeBridgeMautic:
             contact_id = int(path.split("/")[3])
             self.memberships.add((contact_id, segment_id))
             return {"contact": next(contact for contact in self.contacts if contact["id"] == contact_id)}
+        if method == "POST" and path.startswith("segments/") and "/contact/" in path and path.endswith("/remove"):
+            segment_id = int(path.split("/")[1])
+            contact_id = int(path.split("/")[3])
+            self.memberships.discard((contact_id, segment_id))
+            return {"contact": next(contact for contact in self.contacts if contact["id"] == contact_id)}
         if method == "PATCH" and path.startswith("contacts/") and path.endswith("/edit"):
             contact = next(contact for contact in self.contacts if contact["id"] == int(path.split("/")[1]))
             contact["fields"]["all"].update(payload)
@@ -237,10 +242,18 @@ class FlowTests(unittest.TestCase):
         flows.bridge(api, bridge_args(source_event_id=EVENT_ONE))
         flows.bridge(api, bridge_args(source_event_id=EVENT_OLD))
         flows.bridge(api, bridge_args(source_event_id=EVENT_NEW))
-        segment_adds = [call for call in api.calls if call[0] == "POST" and call[1].startswith("segments/")]
+        segment_adds = [call for call in api.calls if call[0] == "POST" and call[1].endswith("/add")]
         self.assertEqual(len(segment_adds), 3)
         self.assertEqual(api.memberships, {(1, 4)})
         self.assertEqual(api.contacts[0]["fields"]["all"]["blockwise_source_event_id"], EVENT_NEW)
+
+    def test_bridge_removes_old_source_paths_before_entering_current_path(self):
+        api = FakeBridgeMautic(contacts=[bridge_contact()])
+        api.memberships = {(1, 1), (1, 4), (1, 5)}
+        flows.bridge(api, bridge_args(flow="paid_welcome"))
+        self.assertEqual(api.memberships, {(1, 5)})
+        removes = [call for call in api.calls if call[1].endswith("/remove")]
+        self.assertEqual(len(removes), 6)
 
     def test_bridge_holds_cross_workspace_profile_without_overwrite(self):
         api = FakeBridgeMautic(contacts=[bridge_contact(workspace_id="20000000-0000-4000-8000-000000000002")])

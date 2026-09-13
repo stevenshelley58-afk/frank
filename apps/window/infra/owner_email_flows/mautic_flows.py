@@ -447,6 +447,19 @@ def has_email_dnc(contact: dict[str, Any]) -> bool:
     return False
 
 
+def remove_stale_source_segments(api: Mautic, segments: dict[str, int], contact_id: int, selected_flow: str | None) -> None:
+    """Keep only the source path that is currently eligible.
+
+    Static source segments are the native campaign-entry authority. Removing a
+    contact from every other non-cold source segment before adding its current
+    path prevents a delayed snapshot from leaving old trial or paid paths live.
+    """
+    for candidate in FLOWS:
+        if candidate.cold or candidate.key == selected_flow:
+            continue
+        api.request("POST", f"segments/{segments[candidate.key]}/contact/{contact_id}/remove")
+
+
 def bridge(api: Mautic, args: argparse.Namespace) -> None:
     flow = next(flow for flow in FLOWS if flow.key == args.flow)
     if flow.cold:
@@ -486,6 +499,7 @@ def bridge(api: Mautic, args: argparse.Namespace) -> None:
     if has_email_dnc(contact):
         raise ApiError("contact has native Mautic Do Not Contact; enrolment refused")
     segments = ensure_segments(api, apply=False)
+    remove_stale_source_segments(api, segments, contact_id, flow.key)
     api.request("POST", f"segments/{segments[flow.key]}/contact/{contact_id}/add")
     # Segment membership is Mautic's idempotency authority. Record source
     # metadata only after it confirms membership, so a replay repairs a
@@ -512,6 +526,8 @@ def suppress(api: Mautic, args: argparse.Namespace) -> None:
     if not contact:
         print("unchanged: no native Mautic contact for source suppression")
         return
+    segments = ensure_segments(api, apply=False)
+    remove_stale_source_segments(api, segments, int(contact["id"]), None)
     payload: dict[str, Any] = {
         CONSENT_FIELD: args.consent_state,
         NURTURE_EXIT_FIELD: "stopped",
