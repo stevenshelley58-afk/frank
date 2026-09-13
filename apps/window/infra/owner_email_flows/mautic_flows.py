@@ -2,7 +2,7 @@
 """Idempotent native Mautic flow setup and fail-closed enrolment bridge."""
 from __future__ import annotations
 
-import argparse, base64, json, os, sys, urllib.error, urllib.parse, urllib.request
+import argparse, base64, json, os, re, sys, urllib.error, urllib.parse, urllib.request
 from dataclasses import dataclass
 from typing import Any
 
@@ -10,6 +10,13 @@ PREFIX = "Owner CRM | "
 CONSENT_FIELD = "blockwise_marketing_conse"
 NURTURE_EXIT_FIELD = "blockwise_nurture_exit"
 COLD_RELEASE_FIELD = "blockwise_cold_release"
+MAX_CONTACT_IDENTITY_MATCHES = 20
+CONTACT_LOOKUP_PAGE_SIZE = 10
+UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",
+    re.I,
+)
+EMAIL_PATTERN = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 
 
 @dataclass(frozen=True)
@@ -293,12 +300,84 @@ def contact_value(contact: dict[str, Any], alias: str) -> str | None:
     return (((contact.get("fields") or {}).get("all") or {}).get(alias))
 
 
-def find_profile(api: Mautic, profile_id: str) -> dict[str, Any] | None:
-    contacts = api.collection("contacts?" + urllib.parse.urlencode({"search": "blockwise_profile_id:" + profile_id}), "contacts")
-    matches = [contact for contact in contacts if contact_value(contact, "blockwise_profile_id") == profile_id]
-    if len(matches) > 1:
-        raise ApiError("immutable profile ID is ambiguous in Mautic")
-    return matches[0] if matches else None
+def validate_bridge_arguments(args: argparse.Namespace) -> None:
+    for label, value in (
+        ("profile ID", args.profile_id),
+        ("workspace ID", args.workspace_id),
+        ("source event ID", args.source_event_id),
+    ):
+        if not UUID_PATTERN.fullmatch(value):
+            raise ApiError(f"invalid {label}")
+    if len(args.email) > 254 or not EMAIL_PATTERN.fullmatch(args.email):
+        raise ApiError("invalid email")
+
+
+def find_profile_contacts(api: Mautic, profile_id: str) -> list[dict[str, Any]]:
+    """Bounded, paginated exact lookup. Never scan the contact collection."""
+    matches: list[dict[str, Any]] = []
+    start = 0
+    total: int | None = None
+    while total is None or start < total:
+        query = urllib.parse.urlencode(
+            {
+                "search": "blockwise_profile_id:" + profile_id,
+                "limit": str(CONTACT_LOOKUP_PAGE_SIZE),
+                "start": str(start),
+            }
+        )
+        response = api.request("GET", "contacts?" + query)
+        raw_contacts = response.get("contacts")
+        raw_total = response.get("total")
+        if not isinstance(raw_contacts, dict) or not isinstance(raw_total, int) or raw_total < 0:
+            raise ApiError("Mautic contact identity lookup was malformed")
+        if raw_total > MAX_CONTACT_IDENTITY_MATCHES:
+            raise ApiError("Mautic contact identity lookup exceeded its safe bound")
+        if total is None:
+            total = raw_total
+        elif total != raw_total:
+            raise ApiError("Mautic contact identity lookup changed while paginating")
+        page = list(raw_contacts.values())
+        if len(page) > CONTACT_LOOKUP_PAGE_SIZE:
+            raise ApiError("Mautic contact identity page exceeded its safe bound")
+        matches.extend(
+            contact
+            for contact in page
+            if isinstance(contact, dict)
+            and contact_value(contact, "blockwise_profile_id") == profile_id
+        )
+        start += len(page)
+        if start >= total:
+            break
+        if not page:
+            raise ApiError("Mautic contact identity lookup was truncated")
+    return matches
+
+
+def resolve_contact(
+    contacts: list[dict[str, Any]], *, profile_id: str, workspace_id: str
+) -> dict[str, Any] | None:
+    if len(contacts) > 1:
+        raise ApiError("Mautic profile identity is ambiguous")
+    if not contacts:
+        return None
+    contact = contacts[0]
+    if contact_value(contact, "blockwise_profile_id") != profile_id:
+        raise ApiError("Mautic profile identity drift")
+    if contact_value(contact, "blockwise_workspace_id") != workspace_id:
+        raise ApiError("Mautic profile/workspace identity conflict")
+    return contact
+
+
+def has_email_dnc(contact: dict[str, Any]) -> bool:
+    records = contact.get("doNotContact", [])
+    if not isinstance(records, list):
+        raise ApiError("Mautic contact Do Not Contact state was malformed")
+    for record in records:
+        if not isinstance(record, dict):
+            raise ApiError("Mautic contact Do Not Contact record was malformed")
+        if str(record.get("channel") or "").lower() == "email":
+            return True
+    return False
 
 
 def bridge(api: Mautic, args: argparse.Namespace) -> None:
@@ -309,22 +388,62 @@ def bridge(api: Mautic, args: argparse.Namespace) -> None:
         raise ApiError("explicit opted_in consent is required for every Mautic education flow")
     if not args.apply:
         raise ApiError("bridge is dry-run by default; pass --apply after source adapter acceptance")
-    contact = find_profile(api, args.profile_id)
-    already_applied = bool(contact and contact_value(contact, "blockwise_source_event_id") == args.source_event_id)
-    payload = {"email": args.email, "blockwise_profile_id": args.profile_id, "blockwise_workspace_id": args.workspace_id, CONSENT_FIELD: args.consent_state, NURTURE_EXIT_FIELD: "active", "blockwise_source_event_id": args.source_event_id}
+    validate_bridge_arguments(args)
+    contact = resolve_contact(
+        find_profile_contacts(api, args.profile_id),
+        profile_id=args.profile_id,
+        workspace_id=args.workspace_id,
+    )
+    payload = {
+        "email": args.email,
+        "blockwise_profile_id": args.profile_id,
+        "blockwise_workspace_id": args.workspace_id,
+        CONSENT_FIELD: args.consent_state,
+        NURTURE_EXIT_FIELD: "active",
+    }
     if not contact:
         contact = api.request("POST", "contacts/new", payload).get("contact", {})
     contact_id = int(contact["id"])
-    if contact.get("doNotContact"):
+    if has_email_dnc(contact):
         raise ApiError("contact has native Mautic Do Not Contact; enrolment refused")
-    if already_applied:
-        print("unchanged: source event already applied")
-        return
-    if contact_value(contact, "blockwise_source_event_id"):
-        api.request("PATCH", f"contacts/{contact_id}/edit", payload)
     segments = ensure_segments(api, apply=False)
     api.request("POST", f"contacts/{contact_id}/segments/{segments[flow.key]}/add")
+    # Segment membership is Mautic's idempotency authority. Record source
+    # metadata only after it confirms membership, so a replay repairs a
+    # create-or-patch failure rather than being skipped by a last-event marker.
+    api.request(
+        "PATCH",
+        f"contacts/{contact_id}/edit",
+        {"blockwise_source_event_id": args.source_event_id, CONSENT_FIELD: args.consent_state, NURTURE_EXIT_FIELD: "active"},
+    )
     print("enrolled: native campaign remains unpublished")
+
+
+def suppress(api: Mautic, args: argparse.Namespace) -> None:
+    if args.consent_state != "opted_out":
+        raise ApiError("explicit opted_out consent is required for marketing suppression")
+    if not args.apply:
+        raise ApiError("suppression is dry-run by default; pass --apply after source adapter acceptance")
+    validate_bridge_arguments(args)
+    contact = resolve_contact(
+        find_profile_contacts(api, args.profile_id),
+        profile_id=args.profile_id,
+        workspace_id=args.workspace_id,
+    )
+    if not contact:
+        print("unchanged: no native Mautic contact for source suppression")
+        return
+    payload: dict[str, Any] = {
+        CONSENT_FIELD: args.consent_state,
+        NURTURE_EXIT_FIELD: "stopped",
+        "blockwise_source_event_id": args.source_event_id,
+    }
+    if not has_email_dnc(contact):
+        # Mautic's documented Contact API represents an explicit email DNC
+        # record this way. Other channel DNC records are not altered.
+        payload["doNotContact"] = [{"channel": "email", "reason": 3}]
+    api.request("PATCH", f"contacts/{int(contact['id'])}/edit", payload)
+    print("suppressed: native email DNC and campaign exit recorded")
 
 
 def main() -> int:
@@ -344,12 +463,21 @@ def main() -> int:
     b.add_argument("--email", required=True)
     b.add_argument("--consent-state", required=True, choices=["opted_in", "opted_out", "unknown"])
     b.add_argument("--apply", action="store_true")
+    s = sub.add_parser("suppress")
+    s.add_argument("--source-event-id", required=True)
+    s.add_argument("--profile-id", required=True)
+    s.add_argument("--workspace-id", required=True)
+    s.add_argument("--email", required=True)
+    s.add_argument("--consent-state", required=True, choices=["opted_in", "opted_out", "unknown"])
+    s.add_argument("--apply", action="store_true")
     args = parser.parse_args()
     if not args.password:
         raise ApiError("MAUTIC_ADMIN_PASSWORD is required")
     api = Mautic(args.url, args.username, args.password)
     if args.command == "bridge":
         bridge(api, args)
+    elif args.command == "suppress":
+        suppress(api, args)
     else:
         print(json.dumps(setup(api, apply=args.command == "apply"), sort_keys=True))
     return 0

@@ -3,6 +3,7 @@ import importlib.util
 import pathlib
 import sys
 import unittest
+from types import SimpleNamespace
 
 spec = importlib.util.spec_from_file_location("flows", pathlib.Path(__file__).with_name("mautic_flows.py"))
 flows = importlib.util.module_from_spec(spec)
@@ -48,6 +49,76 @@ class FakeMautic:
             self.store["campaigns"] = [item for item in self.store["campaigns"] if item["id"] != int(path.split("/")[1])]
             return {}
         raise AssertionError((method, path))
+
+
+PROFILE_ID = "10000000-0000-4000-8000-000000000001"
+WORKSPACE_ID = "20000000-0000-4000-8000-000000000001"
+EVENT_ONE = "30000000-0000-4000-8000-000000000001"
+EVENT_OLD = "30000000-0000-4000-8000-000000000002"
+EVENT_NEW = "30000000-0000-4000-8000-000000000003"
+
+
+def bridge_contact(profile_id=PROFILE_ID, workspace_id=WORKSPACE_ID, dnc=None, contact_id=1):
+    return {
+        "id": contact_id,
+        "fields": {"all": {"blockwise_profile_id": profile_id, "blockwise_workspace_id": workspace_id}},
+        "doNotContact": [] if dnc is None else dnc,
+    }
+
+
+class FakeBridgeMautic:
+    def __init__(self, contacts=None, fail_segment_once=False):
+        self.contacts = list(contacts or [])
+        self.fail_segment_once = fail_segment_once
+        self.memberships = set()
+        self.calls = []
+
+    def collection(self, path, key):
+        if key != "lists":
+            raise AssertionError((path, key))
+        return [{"id": index + 1, "name": flows.PREFIX + flow.title, "isPublished": True} for index, flow in enumerate(flows.FLOWS)]
+
+    def request(self, method, path, payload=None):
+        self.calls.append((method, path, payload))
+        if method == "GET" and path.startswith("contacts?"):
+            # Deliberately emulate a bounded paginated exact-lookup result.
+            from urllib.parse import parse_qs, urlparse
+            query = parse_qs(urlparse(path).query)
+            start, limit = int(query["start"][0]), int(query["limit"][0])
+            page = self.contacts[start:start + limit]
+            return {"contacts": {str(contact["id"]): contact for contact in page}, "total": len(self.contacts)}
+        if method == "POST" and path == "contacts/new":
+            contact = bridge_contact(contact_id=len(self.contacts) + 1)
+            contact["fields"]["all"].update(payload)
+            self.contacts.append(contact)
+            return {"contact": contact}
+        if method == "POST" and "/segments/" in path and path.endswith("/add"):
+            if self.fail_segment_once:
+                self.fail_segment_once = False
+                raise flows.ApiError("segment membership was unavailable")
+            contact_id = int(path.split("/")[1])
+            segment_id = int(path.split("/")[3])
+            self.memberships.add((contact_id, segment_id))
+            return {"contact": next(contact for contact in self.contacts if contact["id"] == contact_id)}
+        if method == "PATCH" and path.startswith("contacts/") and path.endswith("/edit"):
+            contact = next(contact for contact in self.contacts if contact["id"] == int(path.split("/")[1]))
+            contact["fields"]["all"].update(payload)
+            return {"contact": contact}
+        raise AssertionError((method, path))
+
+
+def bridge_args(**overrides):
+    values = {
+        "flow": "opted_in_education",
+        "source_event_id": EVENT_ONE,
+        "profile_id": PROFILE_ID,
+        "workspace_id": WORKSPACE_ID,
+        "email": "owner@example.test",
+        "consent_state": "opted_in",
+        "apply": True,
+    }
+    values.update(overrides)
+    return SimpleNamespace(**values)
 
 
 class FlowTests(unittest.TestCase):
@@ -121,6 +192,75 @@ class FlowTests(unittest.TestCase):
 
     def test_cold_flow_is_explicitly_blocked(self):
         self.assertTrue(next(flow for flow in flows.FLOWS if flow.key == "cold_local_audit").cold)
+
+    def test_bridge_replay_repairs_segment_failure_after_contact_create(self):
+        api = FakeBridgeMautic(fail_segment_once=True)
+        with self.assertRaisesRegex(flows.ApiError, "segment membership"):
+            flows.bridge(api, bridge_args())
+        self.assertEqual(len(api.contacts), 1)
+        self.assertNotIn("blockwise_source_event_id", api.contacts[0]["fields"]["all"])
+        flows.bridge(api, bridge_args())
+        self.assertEqual(api.memberships, {(1, 4)})
+        self.assertEqual(api.contacts[0]["fields"]["all"]["blockwise_source_event_id"], EVENT_ONE)
+
+    def test_bridge_replays_old_and_new_events_without_last_event_dedup(self):
+        api = FakeBridgeMautic(contacts=[bridge_contact()])
+        flows.bridge(api, bridge_args(source_event_id=EVENT_ONE))
+        flows.bridge(api, bridge_args(source_event_id=EVENT_OLD))
+        flows.bridge(api, bridge_args(source_event_id=EVENT_NEW))
+        segment_adds = [call for call in api.calls if call[0] == "POST" and "/segments/" in call[1]]
+        self.assertEqual(len(segment_adds), 3)
+        self.assertEqual(api.memberships, {(1, 4)})
+        self.assertEqual(api.contacts[0]["fields"]["all"]["blockwise_source_event_id"], EVENT_NEW)
+
+    def test_bridge_holds_cross_workspace_profile_without_overwrite(self):
+        api = FakeBridgeMautic(contacts=[bridge_contact(workspace_id="20000000-0000-4000-8000-000000000002")])
+        with self.assertRaisesRegex(flows.ApiError, "profile/workspace"):
+            flows.bridge(api, bridge_args())
+        self.assertEqual(api.memberships, set())
+        self.assertFalse(any(call[0] == "PATCH" for call in api.calls))
+
+    def test_bridge_rejects_malformed_identity_and_email(self):
+        for values in (
+            {"profile_id": "not-a-uuid"},
+            {"workspace_id": "not-a-uuid"},
+            {"source_event_id": "not-a-uuid"},
+            {"email": "not-an-email"},
+        ):
+            with self.subTest(values=values):
+                with self.assertRaises(flows.ApiError):
+                    flows.bridge(FakeBridgeMautic(), bridge_args(**values))
+
+    def test_dnc_only_blocks_the_native_email_channel(self):
+        sms = FakeBridgeMautic(contacts=[bridge_contact(dnc=[{"channel": "sms", "reason": 3}])])
+        flows.bridge(sms, bridge_args())
+        self.assertEqual(sms.memberships, {(1, 4)})
+        email = FakeBridgeMautic(contacts=[bridge_contact(dnc=[{"channel": "email", "reason": 3}])])
+        with self.assertRaisesRegex(flows.ApiError, "Do Not Contact"):
+            flows.bridge(email, bridge_args())
+        self.assertEqual(email.memberships, set())
+
+    def test_suppression_stops_campaign_and_adds_email_dnc_only(self):
+        api = FakeBridgeMautic(contacts=[bridge_contact(dnc=[{"channel": "sms", "reason": 3}])])
+        flows.suppress(api, bridge_args(consent_state="opted_out", source_event_id=EVENT_NEW))
+        patch = next(call[2] for call in api.calls if call[0] == "PATCH")
+        self.assertEqual(patch[flows.CONSENT_FIELD], "opted_out")
+        self.assertEqual(patch[flows.NURTURE_EXIT_FIELD], "stopped")
+        self.assertEqual(patch["doNotContact"], [{"channel": "email", "reason": 3}])
+
+    def test_suppression_never_creates_a_contact(self):
+        api = FakeBridgeMautic()
+        flows.suppress(api, bridge_args(consent_state="opted_out"))
+        self.assertEqual(api.contacts, [])
+        self.assertFalse(any(call[1] == "contacts/new" for call in api.calls))
+
+    def test_identity_lookup_is_paginated_and_bounded(self):
+        api = FakeBridgeMautic(contacts=[bridge_contact(contact_id=index) for index in range(1, 12)])
+        with self.assertRaisesRegex(flows.ApiError, "ambiguous"):
+            flows.bridge(api, bridge_args())
+        lookups = [call for call in api.calls if call[0] == "GET"]
+        self.assertEqual(len(lookups), 2)
+        self.assertTrue(all("limit=10" in call[1] for call in lookups))
 
 
 if __name__ == "__main__":

@@ -75,3 +75,18 @@ and consent UI must provide recorded explicit consent, source events and nurture
 exit updates before bridge use. Root enables campaigns/workers only after that
 adapter, Resend SMTP, public consent route and controlled own-mailbox unsubscribe
 test pass.
+
+## Hermes consent bridge
+
+The committed but paused native Hermes bridge reads only the protected customer
+snapshot. Its exact input is a verified owner email timestamp and the snapshot's
+latest exact marketingConsent event: eventId, granted, occurredAt and policyVersion.
+No event means ungranted. It cannot infer consent from signup, billing, trial or
+email address.
+
+A latest granted event with a verified email enrols only opted-in education. A
+latest revoked event writes Mautic email Do Not Contact and stops nurture. The
+adapter has no reply or conversion source, so it does not claim those exits are
+connected. Hermes installation creates the no-agent job Owner email consent
+bridge every 15 minutes in a paused state. Root alone may install its dedicated
+Mautic API credential and resume it after the controlled recipient test.
