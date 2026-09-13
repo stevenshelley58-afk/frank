@@ -7,7 +7,7 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends libc-client-dev libkrb5-dev \
     && docker-php-ext-configure imap --with-kerberos --with-imap-ssl \
     && docker-php-ext-install -j"$(nproc)" imap \
-    && cd /var/www/html && composer require --no-interaction --no-scripts --update-no-dev symfony/dom-crawler:7.4.17 \
-    && test -f vendor/symfony/dom-crawler/Crawler.php \
+    && cd /var/www/html && composer require --no-interaction --no-scripts --update-no-dev symfony/dom-crawler:7.4.17 symfony/css-selector:7.4.17 \
+    && php -r 'require "vendor/autoload.php"; $c=implode(chr(92), ["Symfony","Component","DomCrawler","Crawler"]); exit((new $c("<a href=target>Link</a>"))->filter("a")->count() === 1 ? 0 : 1);' \
     && php -m | grep -Fx imap \
     && rm -rf /var/lib/apt/lists/*
