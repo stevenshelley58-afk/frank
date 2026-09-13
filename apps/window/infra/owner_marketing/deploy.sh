@@ -30,16 +30,19 @@ if [[ -z "$runtime_profiles" ]]; then
   docker compose "${cleanup_args[@]}" stop cron worker >/dev/null 2>&1 || die cannot-stop-native-senders
   docker compose "${cleanup_args[@]}" rm -f cron worker >/dev/null 2>&1 || die cannot-retire-stopped-senders
 fi
-# Start the exact proxy revision, then pause it before its first health
-# request. Pausing retains its private address while native cache/configuration
-# is refreshed without concurrent proxy requests. Always unpause on failure.
+# Keep the dedicated proxy stopped during native cache maintenance. Preserve
+# and verify its private address; no public or data-service ingress is changed.
 docker compose "${compose_args[@]}" up -d db mautic ingress
-docker pause frank-owner-marketing-ingress >/dev/null
-trap 'docker unpause frank-owner-marketing-ingress >/dev/null 2>&1 || true' EXIT
+export MAUTIC_EXPECTED_INGRESS_IP="$(docker inspect --format '{{(index .NetworkSettings.Networks "frank_owner_marketing_private").IPAddress}}' frank-owner-marketing-ingress)"
+docker compose "${compose_args[@]}" stop ingress >/dev/null
+trap 'docker start frank-owner-marketing-ingress >/dev/null 2>&1 || true' EXIT
 "$script_dir/configure_site.sh"
-docker unpause frank-owner-marketing-ingress >/dev/null
+docker compose "${compose_args[@]}" start ingress >/dev/null
 trap - EXIT
+actual_ingress_ip="$(docker inspect --format '{{(index .NetworkSettings.Networks "frank_owner_marketing_private").IPAddress}}' frank-owner-marketing-ingress)"
+[[ "$actual_ingress_ip" == "$MAUTIC_EXPECTED_INGRESS_IP" ]] || die private-ingress-address-changed
 docker compose "${compose_args[@]}" up -d
-for _ in $(seq 1 60); do s="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing 2>/dev/null || true)"; i="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing-ingress 2>/dev/null || true)"; [[ "$s" == healthy && "$i" == healthy ]] && break; [[ "$s" != unhealthy && "$i" != unhealthy ]] || die unhealthy; sleep 5; done
+for _ in $(seq 1 60); do s="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing 2>/dev/null || true)"; i="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing-ingress 2>/dev/null || true)"; [[ "$s" == healthy && "$i" == healthy ]] && break; sleep 5; done
+[[ "$s" == healthy && "$i" == healthy ]] || die native-health-timeout
 "$script_dir/check.sh" --preinstall
 echo "private Mautic native setup is reachable at http://127.0.0.1:$port"

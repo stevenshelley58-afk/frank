@@ -15,7 +15,7 @@ if ! docker exec frank-owner-marketing test -f /var/www/html/config/local.php; t
   echo "native Mautic is not installed; installer will use MAUTIC_PUBLIC_URL"
   exit 0
 fi
-ingress_ip="$(docker inspect --format '{{(index .NetworkSettings.Networks "frank_owner_marketing_private").IPAddress}}' frank-owner-marketing-ingress)"
+ingress_ip="${MAUTIC_EXPECTED_INGRESS_IP:-$(docker inspect --format '{{(index .NetworkSettings.Networks "frank_owner_marketing_private").IPAddress}}' frank-owner-marketing-ingress)}"
 [[ "$ingress_ip" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die missing-private-ingress-address
 docker exec -e EXPECTED_SITE_URL="$public_url" -e EXPECTED_INGRESS_IP="$ingress_ip" frank-owner-marketing php -r '
 $path = "/var/www/html/config/local.php";
