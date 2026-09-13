@@ -32,7 +32,7 @@ if [[ -z "$runtime_profiles" ]]; then
 fi
 # Keep the dedicated proxy stopped during native cache maintenance. Preserve
 # and verify its private address; no public or data-service ingress is changed.
-docker compose "${compose_args[@]}" up -d db mautic ingress
+docker compose "${compose_args[@]}" up -d --build db mautic ingress
 export MAUTIC_EXPECTED_INGRESS_IP="$(docker inspect --format '{{(index .NetworkSettings.Networks "frank_owner_marketing_private").IPAddress}}' frank-owner-marketing-ingress)"
 docker compose "${compose_args[@]}" stop ingress >/dev/null
 trap 'docker start frank-owner-marketing-ingress >/dev/null 2>&1 || true' EXIT

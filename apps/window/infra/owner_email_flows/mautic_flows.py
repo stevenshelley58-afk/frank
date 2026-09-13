@@ -2,7 +2,7 @@
 """Idempotent native Mautic flow setup and fail-closed enrolment bridge."""
 from __future__ import annotations
 
-import argparse, base64, json, os, re, sys, urllib.error, urllib.parse, urllib.request
+import argparse, base64, html, json, os, re, sys, urllib.error, urllib.parse, urllib.request
 from dataclasses import dataclass
 from typing import Any
 
@@ -166,13 +166,24 @@ def ensure_segments(api: Mautic, apply: bool) -> dict[str, int]:
 
 def email_payload(flow: Flow, index: int) -> dict[str, Any]:
     step = flow.steps[index]
-    # Plain text is intentional: the installed upstream image lacks Symfony DomCrawler,
-    # which its HTML-link validator requires. It also avoids open pixels and HTML link tracking.
-    return {"name": email_name(flow, index), "subject": step.subject, "language": "en", "isPublished": not flow.cold, "emailType": "template", "publicPreview": False, "preheaderText": step.preheader, "customHtml": "", "plainText": step.text + "\n\nManage email preferences: {unsubscribe_url}\nUnsubscribe from all marketing emails: {dnc_url}", "lists": []}
+    body = html.escape(step.text)
+    body = re.sub(r"(https://blockwise\\.sale/[^\\s<]+)", r'<a href="\1">\1</a>', body)
+    body = body.replace("\n\n", "</p><p>").replace("\n", "<br>")
+    custom_html = (
+        '<!doctype html><html><body style="margin:0;background:#f5f5f2;color:#1c2520;font-family:Arial,sans-serif">'
+        '<div style="max-width:620px;margin:0 auto;padding:32px 16px">'
+        '<div style="background:#fff;border:1px solid #deded8;border-radius:14px;padding:32px">'
+        '<p style="margin:0 0 24px;font-weight:700">Blockwise</p>'
+        f'<p style="margin:0;line-height:1.6">{body}</p>'
+        '</div><p style="font-size:12px;line-height:1.5;color:#63706a;margin:18px 8px">'
+        '<a href="{unsubscribe_url}">Manage email preferences</a><br>'
+        '<a href="{dnc_url}">Unsubscribe from all marketing emails</a></p></div></body></html>'
+    )
+    return {"name": email_name(flow, index), "subject": step.subject, "language": "en", "isPublished": not flow.cold, "emailType": "template", "publicPreview": False, "preheaderText": step.preheader, "customHtml": custom_html, "plainText": step.text + "\n\nManage email preferences: {unsubscribe_url}\nUnsubscribe from all marketing emails: {dnc_url}", "lists": []}
 
 
 def email_needs_update(email: dict[str, Any], desired: dict[str, Any]) -> bool:
-    keys = ("subject", "preheaderText", "plainText", "emailType", "isPublished")
+    keys = ("subject", "preheaderText", "customHtml", "plainText", "emailType", "isPublished")
     return any(email.get(key) != desired[key] for key in keys)
 
 
@@ -227,7 +238,12 @@ def campaign_events(flow: Flow, emails: dict[str, int]) -> tuple[list[dict[str, 
     for index, step in enumerate(flow.steps):
         add_event("Consent remains opted in", "Exit if the authoritative consent field is not opted_in.", "lead.field_value", {"field": CONSENT_FIELD, "operator": "=", "value": "opted_in"}, step.delay_days)
         add_event("Nurture remains active", "Exit if the source adapter has recorded reply, conversion, withdrawal, bounce or complaint.", "lead.field_value", {"field": NURTURE_EXIT_FIELD, "operator": "=", "value": "active"})
-        add_event(f"Send {step.name.lower()} email", "Native marketing email action. Mautic Do Not Contact is enforced by the sender.", "email.send", {"email": emails[email_key(flow, index)], "email_type": "marketing"})
+        sent_event = add_event(f"Send {step.name.lower()} email", "Native marketing email action. Mautic Do Not Contact is enforced by the sender.", "email.send", {"email": emails[email_key(flow, index)], "email_type": "marketing"})
+        if flow.key == "opted_in_education":
+            saved_parent = parent
+            reply_event = add_event("Reply received", "Native monitored-email decision. A confirmed reply stops this Mautic education path.", "email.reply", {})
+            add_event("Stop education after reply", "Native contact update. The next education consent gate exits.", "lead.updatelead", {NURTURE_EXIT_FIELD: "stopped"})
+            parent = saved_parent
     return events, {"nodes": nodes, "connections": connections}
 
 

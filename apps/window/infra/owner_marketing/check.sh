@@ -36,3 +36,7 @@ else
 fi
 counts="$(docker exec frank-owner-marketing-db sh -lc 'mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -Nse "SELECT (SELECT COUNT(*) FROM leads), (SELECT COUNT(*) FROM campaigns) FROM DUAL" mautic')"; [[ "$counts" =~ ^[0-9]+[[:space:]][0-9]+$ ]] || die invalid-native-record-counts
 echo "healthy: native Mautic admin login through loopback ingress, protected routes deny unauthenticated access, preserved contacts/campaigns, native runtime profile policy, mail transport policy, private backend network"
+
+docker exec frank-owner-marketing php -r 'require "/var/www/html/vendor/autoload.php"; exit(class_exists(implode(chr(92), ["Symfony", "Component", "DomCrawler", "Crawler"])) ? 0 : 1);' || die native-html-validator-dependency-missing
+docker exec frank-owner-marketing php -r 'exit(function_exists("imap_open") ? 0 : 1);' || die native-monitored-email-dependency-missing
+[[ "$(docker inspect --format '{{.Image}}' frank-owner-marketing)" == "$(docker image inspect --format '{{.Id}}' "frank-owner-marketing-mautic:$source_sha")" ]] || die built-image-source-mismatch

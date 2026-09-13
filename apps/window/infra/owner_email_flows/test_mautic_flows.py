@@ -160,14 +160,18 @@ class FlowTests(unittest.TestCase):
                 self.assertEqual(events[0]["properties"]["field"], flows.COLD_RELEASE_FIELD)
                 self.assertNotIn("email.send", [event["type"] for event in events])
                 continue
-            self.assertEqual(len(events), len(flow.steps) * 3)
+            expected_events = len(flow.steps) * (5 if flow.key == "opted_in_education" else 3)
+            self.assertEqual(len(events), expected_events)
+            conditions = [event for event in events if event["type"] == "lead.field_value"]
+            sends = [event for event in events if event["type"] == "email.send"]
+            self.assertEqual(len(conditions), len(flow.steps) * 2)
+            self.assertEqual(len(sends), len(flow.steps))
             for index, _step in enumerate(flow.steps):
-                group = events[index * 3:(index + 1) * 3]
-                self.assertEqual(group[0]["properties"]["field"], flows.CONSENT_FIELD)
-                self.assertEqual(group[0]["properties"]["value"], "opted_in")
-                self.assertEqual(group[1]["properties"]["field"], flows.NURTURE_EXIT_FIELD)
-                self.assertEqual(group[1]["properties"]["value"], "active")
-                self.assertEqual(group[2]["properties"]["email_type"], "marketing")
+                self.assertEqual(conditions[index * 2]["properties"]["field"], flows.CONSENT_FIELD)
+                self.assertEqual(conditions[index * 2]["properties"]["value"], "opted_in")
+                self.assertEqual(conditions[index * 2 + 1]["properties"]["field"], flows.NURTURE_EXIT_FIELD)
+                self.assertEqual(conditions[index * 2 + 1]["properties"]["value"], "active")
+                self.assertEqual(sends[index]["properties"]["email_type"], "marketing")
 
     def test_campaign_reconciliation_detects_unsafe_same_count_drift(self):
         flow = next(flow for flow in flows.FLOWS if flow.key == "cold_local_audit")
@@ -192,7 +196,10 @@ class FlowTests(unittest.TestCase):
                 payload = flows.email_payload(flow, index)
                 self.assertIn("{unsubscribe_url}", payload["plainText"])
                 self.assertIn("{dnc_url}", payload["plainText"])
-                self.assertEqual("", payload["customHtml"])
+                self.assertIn("{unsubscribe_url}", payload["customHtml"])
+                self.assertIn("{dnc_url}", payload["customHtml"])
+                self.assertIn("<!doctype html>", payload["customHtml"])
+                self.assertNotIn("tracking_pixel", payload["customHtml"])
                 if not flow.cold:
                     self.assertIn("https://blockwise.sale/", step.text)
                     self.assertNotIn("https://blockwise.sale\n", step.text)
@@ -202,6 +209,18 @@ class FlowTests(unittest.TestCase):
 
     def test_cold_flow_is_explicitly_blocked(self):
         self.assertTrue(next(flow for flow in flows.FLOWS if flow.key == "cold_local_audit").cold)
+
+    def test_education_reply_uses_native_exit_without_changing_other_flows(self):
+        emails = {flows.email_key(flow, index): index + 1 for flow in flows.FLOWS for index, _step in enumerate(flow.steps)}
+        for flow in flows.FLOWS:
+            events, _canvas = flows.campaign_events(flow, emails)
+            replies = [event for event in events if event["type"] == "email.reply"]
+            if flow.key == "opted_in_education":
+                self.assertEqual(len(replies), 3)
+                self.assertEqual(len([event for event in events if event["type"] == "lead.updatelead"]), 3)
+                self.assertTrue(all(event["properties"][flows.NURTURE_EXIT_FIELD] == "stopped" for event in events if event["type"] == "lead.updatelead"))
+            else:
+                self.assertEqual(replies, [])
 
     def test_bridge_replay_repairs_segment_failure_after_contact_create(self):
         api = FakeBridgeMautic(fail_segment_once=True)

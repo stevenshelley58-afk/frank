@@ -17,7 +17,10 @@ services:
       timeout: 5s
       retries: 20
   mautic:
-    image: mautic/mautic:7.2-apache@sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda
+    image: frank-owner-marketing-mautic:${MAUTIC_SOURCE_SHA:?required}
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: frank-owner-marketing
     restart: unless-stopped
     depends_on: {db: {condition: service_healthy}}
@@ -40,6 +43,7 @@ services:
     labels:
       org.frank.source-sha: "${MAUTIC_SOURCE_SHA:?required}"
       org.frank.image-digest: "sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda"
+      org.frank.image-build: "dom-crawler-imap-v1"
     networks: [owner_marketing_private, owner_marketing_egress]
     healthcheck:
       test: ["CMD-SHELL", "php -r 'fsockopen(\"127.0.0.1\",80) or exit(1);'"]
@@ -48,7 +52,10 @@ services:
       retries: 20
       start_period: 30s
   cron:
-    image: mautic/mautic:7.2-apache@sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda
+    image: frank-owner-marketing-mautic:${MAUTIC_SOURCE_SHA:?required}
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: frank-owner-marketing-cron
     restart: unless-stopped
     profiles: ["owner-marketing-cron"]
@@ -73,9 +80,13 @@ services:
     labels:
       org.frank.source-sha: "${MAUTIC_SOURCE_SHA:?required}"
       org.frank.image-digest: "sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda"
+      org.frank.image-build: "dom-crawler-imap-v1"
 
   worker:
-    image: mautic/mautic:7.2-apache@sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda
+    image: frank-owner-marketing-mautic:${MAUTIC_SOURCE_SHA:?required}
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: frank-owner-marketing-worker
     restart: unless-stopped
     profiles: ["owner-marketing-worker"]
@@ -103,6 +114,7 @@ services:
     labels:
       org.frank.source-sha: "${MAUTIC_SOURCE_SHA:?required}"
       org.frank.image-digest: "sha256:39e967af9f154d50d1a7cbc12e6cfd5a847939c8abdcace98ab20e30570bdfda"
+      org.frank.image-build: "dom-crawler-imap-v1"
 
   ingress:
     image: nginx:1.28.0-alpine@sha256:30f1c0d78e0ad60901648be663a710bdadf19e4c10ac6782c235200619158284
