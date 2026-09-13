@@ -1,0 +1,17 @@
+{
+  "name": "Owner CRM public consent browser compatibility",
+  "description": "Allow non-browser email clients on signed native Mautic opt-out routes only. Preserve all other zone protections.",
+  "kind": "zone",
+  "phase": "http_config_settings",
+  "rules": [
+    {
+      "action": "set_config",
+      "action_parameters": {
+        "bic": false
+      },
+      "description": "Native signed email consent routes must work for email clients",
+      "expression": "(http.host eq \"mail.blockwise.sale\" and http.request.method in {\"GET\" \"POST\"} and (starts_with(http.request.uri.path, \"/email/unsubscribe/\") or starts_with(http.request.uri.path, \"/email/dnc/\")))",
+      "enabled": true
+    }
+  ]
+}
