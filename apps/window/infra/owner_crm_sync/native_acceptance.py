@@ -34,7 +34,7 @@ def main():
     store.reconcile_hold(workspace,"held_conflict")
     store.reconcile_hold(workspace,"held_conflict")
     store.reconcile_hold(workspace,"unchanged")
-    for path in ["/api/resource/User", "/api/resource/Email%20Account"]:
+    for path in ["/api/resource/User/Administrator", "/api/resource/Email%20Account"]:
         try:
             store._request("GET",path)
         except ConnectorError:
