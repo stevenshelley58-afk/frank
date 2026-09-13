@@ -120,7 +120,7 @@
       "request_structure": "",
       "enable_security": 1,
       "webhook_secret": "owner-mail-reply-secret",
-      "timeout": 5,
+      "timeout": 30,
       "background_jobs_queue": "short",
       "webhook_json": null,
       "webhook_data": [

@@ -17,6 +17,7 @@ TOPIC = "owner-notifications"
 URL = "http://frank-owner-ntfy/"
 REPLY_URL = "http://172.16.1.1:18085/api/owner-mail-events/reply"
 REPLY_HOOK = "owner-incoming-email-reply-stop"
+REPLY_TIMEOUT = 30
 REPLY_SECRET_MARKER = "owner-mail-reply-secret"
 REPLY_FIELDS = (
     ("event_id", "name"),
@@ -79,7 +80,8 @@ def load_manifest(path: Path = DEFAULT_MANIFEST) -> tuple[dict[str, Any], ...]:
         is_reply = hook["name"] == REPLY_HOOK
         expected_url = REPLY_URL if is_reply else URL
         expected_structure = "" if is_reply else "JSON"
-        if hook["request_url"] != expected_url or hook["request_method"] != "POST" or hook["request_structure"] != expected_structure or hook["timeout"] != 5 or hook["background_jobs_queue"] != "short": raise NotificationError("webhook delivery target is unsafe")
+        expected_timeout = REPLY_TIMEOUT if is_reply else 5
+        if hook["request_url"] != expected_url or hook["request_method"] != "POST" or hook["request_structure"] != expected_structure or hook["timeout"] != expected_timeout or hook["background_jobs_queue"] != "short": raise NotificationError("webhook delivery target is unsafe")
         expected_headers = ([{"key":"Content-Type","value":"application/json"}] if is_reply else [{"key":"Authorization","value":"publisher-basic"},{"key":"Content-Type","value":"application/json"}])
         if hook["webhook_headers"] != expected_headers: raise NotificationError("webhook authentication contract is invalid")
         if is_reply:

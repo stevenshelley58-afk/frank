@@ -22,6 +22,9 @@ class ManifestTests(unittest.TestCase):
         self.assertEqual(by_type["Communication"]["condition"], module.INCOMING_EMAIL_CONDITION)
         self.assertTrue(all(hook["background_jobs_queue"] == "short" for hook in hooks))
         alerts = [hook for hook in hooks if hook["name"] != module.REPLY_HOOK]
+        reply = next(hook for hook in hooks if hook["name"] == module.REPLY_HOOK)
+        self.assertEqual(reply["timeout"], module.REPLY_TIMEOUT)
+        self.assertTrue(all(hook["timeout"] == 5 for hook in hooks if hook["name"] != module.REPLY_HOOK))
         encoded = json.dumps([hook["webhook_json"] for hook in alerts]).lower()
         for forbidden in ("doc.", "contact", "customer", "description", "subject", "sender", "recipient", "body", "{{", "}}"):
             self.assertNotIn(forbidden, encoded)
