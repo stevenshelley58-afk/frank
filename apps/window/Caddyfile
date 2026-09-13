@@ -144,8 +144,8 @@ frank.fail {
             }
         }
 
-        # Resend can reach exactly one public callback. The application verifies
-        # its raw Svix signature before making any native Mautic change.
+        # The only public owner-mail callback. The Hermes service validates
+        # the raw Svix request; all other receiver routes stay private.
         @owner_mail_events_resend {
             method POST
             path /api/owner-mail-events/resend
@@ -155,7 +155,7 @@ frank.fail {
             request_body {
                 max_size 64KB
             }
-            reverse_proxy frank-window:8080 {
+            reverse_proxy 172.16.1.1:18085 {
                 header_up Host {host}
                 header_up X-Real-IP {remote_host}
                 header_up X-Forwarded-Proto https

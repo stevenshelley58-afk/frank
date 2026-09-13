@@ -1,0 +1,26 @@
+[Unit]
+Description=Hermes Owner Mail Event Receiver
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=hermes
+Group=hermes
+WorkingDirectory=/srv/hermes/owner-mail-events/current
+Environment="PYTHONDONTWRITEBYTECODE=1"
+EnvironmentFile=/srv/hermes/secrets/owner-mail-events.env
+ExecStart=/srv/hermes/owner-mail-events/venv/bin/gunicorn --bind 172.16.1.1:18085 --workers 1 --threads 4 --timeout 30 owner_mail_events_app:app
+Restart=always
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
