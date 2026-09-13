@@ -1,7 +1,8 @@
 import importlib.util,json,sys,tempfile,unittest
+from contextlib import nullcontext
 from email.message import EmailMessage
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock,patch
 ROOT=Path(__file__).parent;sys.path.insert(0,str(ROOT.parent.parent/'owner_crm_setup'))
 s=importlib.util.spec_from_file_location('support',ROOT.parent/'bin'/'support-reply-acceptance.py');m=importlib.util.module_from_spec(s);s.loader.exec_module(m)
 class Tests(unittest.TestCase):
@@ -37,4 +38,10 @@ class Tests(unittest.TestCase):
   with patch.object(m,'find_communication',return_value=None),patch.object(m,'write_receipt') as write,patch.object(m,'send_native') as send:
    with self.assertRaisesRegex(RuntimeError,'no_resend'):m.reconcile(object(),object(),receipt,'parent@example.test',30)
    send.assert_not_called();self.assertEqual(write.call_args.args[0]['state'],'uncertain')
+ def test_prior_receipt_skips_latest_parent_guard_and_never_resends(self):
+  receipt=m.receipt_base('00000000-0000-4000-8000-000000000001','native_communication')
+  owner=MagicMock();admin=MagicMock()
+  with patch.object(m,'single_instance',return_value=nullcontext()),patch.object(m,'read_receipt',return_value=receipt),patch.object(m,'owner_credentials',return_value=(m.OWNER_USER,'password')),patch.object(m,'FrappeRestClient',side_effect=[owner,admin]),patch.object(m,'login_owner'),patch.object(m,'preflight',return_value='parent@example.test'),patch.object(m,'load_credentials',return_value=('Administrator','password')),patch.object(m,'verify_latest_parent') as latest,patch.object(m,'send_native') as send,patch.object(m,'reconcile',return_value={'status':'accepted'}) as reconcile:
+   self.assertEqual(m.run(True,30),{'status':'accepted'})
+  latest.assert_not_called();send.assert_not_called();reconcile.assert_called_once_with(owner,admin,receipt,'parent@example.test',30)
 if __name__=='__main__':unittest.main()

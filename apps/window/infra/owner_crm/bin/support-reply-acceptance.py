@@ -201,9 +201,9 @@ def run(execute,timeout):
    parent_id=preflight(owner)
    admin_user,admin_password=load_credentials();admin=FrappeRestClient();admin.login(admin_user,admin_password)
    try:
-    verify_latest_parent(admin)
-    if not execute and not prior:return {"status":"ready","will_send_one":True,"recipient":RECIPIENT,"owner_agent":OWNER_USER}
     if prior:return reconcile(owner,admin,prior,parent_id,timeout)
+    verify_latest_parent(admin)
+    if not execute:return {"status":"ready","will_send_one":True,"recipient":RECIPIENT,"owner_agent":OWNER_USER}
     marker=str(uuid.uuid4());write_receipt(receipt_base(marker,"prepared"))
     try:send_native(owner,marker)
     except Exception:write_receipt({**receipt_base(marker,"uncertain"),"reason":"native_call_failed"})
