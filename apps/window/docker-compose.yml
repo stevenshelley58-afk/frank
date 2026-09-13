@@ -10,10 +10,6 @@ services:
     restart: unless-stopped
     env_file:
       - ${FRANK_WINDOW_ENV_FILE:-/srv/frank/secrets/window.env}
-      # Root-only Resend Svix and limited Mautic role credentials. This file is
-      # intentionally not in the repository or image and is provisioned only
-      # when the signed callback is deployed.
-      - ${OWNER_MAIL_EVENTS_ENV_FILE:-/srv/frank/secrets/owner-mail-events.env}
       - ${FRANK_RELEASE_FLAGS_FILE:-/var/lib/frank/release/feature-flags.env}
       # MAP_PREVIEW_RUN_KEY is intentionally not declared here: production
       # reads the single promoted maps/current.json selector. Explicit preview

@@ -9,6 +9,7 @@ from owner_mail_reply import register_owner_mail_reply
 
 def create_app(config=os.environ):
     app = Flask(__name__)
+    app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
     @app.get("/health")
     def health():
