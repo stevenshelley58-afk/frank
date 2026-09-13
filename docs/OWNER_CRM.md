@@ -4,6 +4,61 @@ Implementation began 12 September 2026 following the owner review. This guide
 covers Steven's Blockwise customer business, not a customer's property-lead CRM.
 Follow the canonical engineering rules and existing component release guides.
 
+
+## Current acceptance checkpoint, 13 September 2026 03:30 UTC
+
+This checkpoint supersedes older foundation observations below. It is not a
+completed-CRM or launch approval.
+
+- Owner CRM native password login and least-privilege record reads passed for
+  the dedicated owner user. Private Tailscale Serve reaches the CRM on 8445 and
+  authenticated ntfy on 8446. No phone is enrolled; MFA and device delivery
+  remain unverified.
+- Native SMTP and IMAP TLS login to the existing Purelymail account passed.
+  The configured CRM Email Account and scheduler remain disabled. Saving the
+  business domain and routing to the existing inbox is awaiting the owner's
+  action-time browser confirmation. Sent copies and reply threading are not
+  accepted yet.
+- A controlled Resend message to the owner's existing Purelymail inbox arrived
+  in INBOX, with SPF, DKIM and DMARC passing. This does not prove universal
+  inbox placement, Mautic SMTP delivery or any customer campaign.
+- Four native CRM alert hooks cover tasks, helpdesk tickets, leads and incoming
+  email Communications. Controlled lead and inbound records produced generic
+  private notifications; an outgoing Communication did not produce an inbound
+  alert. No customer details were put in push content.
+- The local native backup and isolated restore verified both the original site
+  encryption key and an encrypted Email Account credential. Evidence:
+  `/srv/frank/backups/owner-crm/local-20260913T030048Z-c4a523465a7e/drill-receipt.json`.
+  Off-host backup and key escrow remain unresolved.
+- Blockwise release `367e77855c8b654c5d2cbafd31eb69842c6b140a` serves the protected
+  bounded lead source. The native Hermes lead job is enabled, has completed an
+  empty-source scan, and holds imported leads for review. It does not send mail.
+- Mautic has six fields, eight segments, ten templates and eight unpublished
+  campaigns. Source installation is paused and campaigns/cron/workers are off.
+  Only the consent-to-education adapter exists; lifecycle event, reply and
+  conversion exits are not all connected. Plain-text templates are provisional
+  while the installed HTML validator dependency is investigated.
+- Frank release `6fb2708e06c6307abd21275b10b4b21ae36761e9` deployed the restricted
+  public unsubscribe/DNC route. A browser reached the native invalid-record
+  response. A real controlled unsubscribe and suppression round trip remains
+  required. Admin and API routes are not intentionally exposed there.
+- Consent source is a reviewed candidate, not a released feature. An earlier
+  rehearsal accidentally committed an empty RLS consent table and incompatible
+  snapshot definition. The known-good committed snapshot was atomically
+  restored and its service-role read passed; no consent fixture rows persisted.
+  Corrective migrations and authenticated browser acceptance remain pending.
+
+### Saved email design inspiration
+
+The owner's latest direction is to use the VPS templates as inspiration, not
+preserve old tests because of sunk cost. Maintained Blockwise
+`src/lib/email-design/renderer.ts` contains Quiet card, Personal letter and
+Operations brief. Historical examples also exist under
+`/srv/blockwise/previews/email/`. These guide visual hierarchy, concise copy and
+clear actions. Never reuse their fictional sample prices, addresses, expiry
+periods or preview links as verified business facts. Frank must not import
+Blockwise source; use native Mautic templates for its own flow engine.
+
 ## Authorities and boundaries
 
 - A dedicated Frappe site owns the owner sales pipeline, contacts, tasks and
