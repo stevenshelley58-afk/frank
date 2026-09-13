@@ -259,7 +259,10 @@ class FlowTests(unittest.TestCase):
         patch = next(call[2] for call in api.calls if call[0] == "PATCH")
         self.assertEqual(patch[flows.CONSENT_FIELD], "opted_out")
         self.assertEqual(patch[flows.NURTURE_EXIT_FIELD], "stopped")
-        self.assertEqual(patch["doNotContact"], [{"channel": "email", "reason": 3}])
+        self.assertEqual(
+            patch["doNotContact"],
+            [{"channel": "sms", "reason": 3}, {"channel": "email", "reason": 3}],
+        )
 
     def test_suppression_never_creates_a_contact(self):
         api = FakeBridgeMautic()

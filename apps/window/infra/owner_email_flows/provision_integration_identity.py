@@ -21,6 +21,7 @@ ROLE = "Owner email consent bridge"
 USERNAME = "owner-email-bridge"
 PERMISSIONS = {
     "lead:leads": ["viewother", "create", "editother"],
+    "lead:fields": ["viewother"],
     "lead:lists": ["viewother"],
     "campaign:campaigns": ["viewother"],
     "email:emails": ["viewother"],
@@ -90,6 +91,16 @@ def main() -> int:
             print('{"status":"would_create_role"}')
             return 0
         role = api.request("POST", "roles/new", {"name": ROLE, "description": "Native API role for consent bridge only.", "isAdmin": False, "rawPermissions": PERMISSIONS}).get("role", {})
+    if role.get("isAdmin"):
+        raise SystemExit("native role unexpectedly has administrator access")
+    if role.get("rawPermissions") != PERMISSIONS:
+        if not args.apply:
+            raise SystemExit("native role permissions drifted")
+        role = api.request(
+            "PATCH",
+            f"roles/{int(role["id"])}/edit",
+            {"name": ROLE, "description": "Native API role for consent bridge only.", "isAdmin": False, "rawPermissions": PERMISSIONS},
+        ).get("role", {})
     if role.get("isAdmin") or role.get("rawPermissions") != PERMISSIONS:
         raise SystemExit("native role permissions drifted")
     existing_secret = env_file(RUNTIME_SECRET, owner=pwd.getpwnam("hermes").pw_uid) if RUNTIME_SECRET.exists() else {}

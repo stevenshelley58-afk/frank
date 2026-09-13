@@ -15,6 +15,7 @@ spec.loader.exec_module(identity)
 class IdentityTests(unittest.TestCase):
     def test_role_is_non_admin_and_has_no_delete_publish_or_send(self):
         self.assertEqual(identity.PERMISSIONS["lead:leads"], ["viewother", "create", "editother"])
+        self.assertEqual(identity.PERMISSIONS["lead:fields"], ["viewother"])
         self.assertEqual(identity.PERMISSIONS["lead:lists"], ["viewother"])
         self.assertEqual(identity.PERMISSIONS["campaign:campaigns"], ["viewother"])
         self.assertEqual(identity.PERMISSIONS["email:emails"], ["viewother"])

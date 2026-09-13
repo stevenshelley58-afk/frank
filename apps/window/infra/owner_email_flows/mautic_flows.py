@@ -469,8 +469,10 @@ def suppress(api: Mautic, args: argparse.Namespace) -> None:
     }
     if not has_email_dnc(contact):
         # Mautic's documented Contact API represents an explicit email DNC
-        # record this way. Other channel DNC records are not altered.
-        payload["doNotContact"] = [{"channel": "email", "reason": 3}]
+        # record this way. Preserve existing non-email channel records: a
+        # PATCH must not silently replace an SMS or other channel preference.
+        records = contact.get("doNotContact", [])
+        payload["doNotContact"] = [*records, {"channel": "email", "reason": 3}]
     api.request("PATCH", f"contacts/{int(contact['id'])}/edit", payload)
     print("suppressed: native email DNC and campaign exit recorded")
 

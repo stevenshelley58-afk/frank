@@ -31,11 +31,13 @@ explicit opted-in consent, active nurture state and no native Mautic Do Not
 Contact. The active snapshot has no marketing-consent fact, so no real customer
 is eligible until an authoritative consent source is accepted.
 
-The future source adapter must set blockwise_nurture_exit to non-active on reply,
-conversion, consent withdrawal, bounce or complaint. That stops the next pending
-education checkpoint. This pack does not implement the adapter. Mautic Do Not
-Contact does not automatically suppress the separate Blockwise transactional
-outbox. Trial flows consume exact events and do not calculate trial deadlines.
+The committed Hermes source adapter currently consumes only verified explicit
+consent from the protected customer snapshot. It can enrol opted-in education or
+record a consent withdrawal as email Do Not Contact. It has no reply, conversion,
+bounce, complaint or lifecycle-event source, so it does not claim those exits are
+connected. Mautic Do Not Contact does not automatically suppress the separate
+Blockwise transactional outbox. Trial flows consume exact events and do not
+calculate trial deadlines.
 
 ## Copy provenance
 
@@ -70,11 +72,12 @@ Apply reads the root-only secret file without printing it and enables private
 loopback-only Basic API access. The bridge is dry-run unless passed --apply, and
 still refuses missing consent, native DNC and cold enrolment.
 
-The owner CRM sync currently mirrors raw facts to Frappe only. A source adapter
-and consent UI must provide recorded explicit consent, source events and nurture
-exit updates before bridge use. Root enables campaigns/workers only after that
-adapter, Resend SMTP, public consent route and controlled own-mailbox unsubscribe
-test pass.
+The owner CRM sync is not a lifecycle-email event source. The paused source
+adapter requires an accepted consent UI and the released protected customer
+snapshot facts before it can run. Only opted-in education is wired through that
+adapter; no trial, paid, cancellation, winback, reply or conversion event is
+wired. Root enables campaigns/workers only after the consent source, Resend SMTP,
+public consent route and controlled own-mailbox unsubscribe test pass.
 
 ## Hermes consent bridge
 
