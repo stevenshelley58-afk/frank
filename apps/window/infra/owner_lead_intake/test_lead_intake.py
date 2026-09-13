@@ -19,3 +19,51 @@ class IntakeTests(unittest.TestCase):
   self.assertEqual(payload[ELIGIBILITY_FIELD],"review_required"); self.assertEqual(payload["status"],"New"); self.assertEqual(payload["lead_owner"],"crm-sync@blockwise.sale")
   self.assertFalse(any("consent" in k or "send" in k for k in payload))
 if __name__=="__main__": unittest.main()
+
+class NativeBoundaryTests(unittest.TestCase):
+ def test_payload_uses_real_native_create_and_preserves_full_name(self):
+  store=FrappeLeadStore();calls=[]
+  store.request=lambda method,path,body: calls.append(body) or {"data":{"name":"CRM-TEST"}}
+  store.create(map_item(RAW));payload=calls[0]
+  self.assertEqual(payload["first_name"],"Test");self.assertEqual(payload["last_name"],"Lead")
+  self.assertEqual(payload["lead_owner"],"crm-sync@blockwise.sale")
+  self.assertEqual(payload[ELIGIBILITY_FIELD],"review_required")
+  self.assertFalse(any("consent" in key for key in payload))
+ def test_duplicate_without_same_source_key_is_not_success(self):
+  class Conflict(Store):
+   def create(self,item):raise DuplicateSource("different unique field")
+  with self.assertRaises(IntakeError):intake_one(Conflict(),map_item(RAW))
+ def test_uncertain_write_reconciles_same_native_source(self):
+  class Uncertain(Store):
+   def create(self,item):
+    super().create(item);raise IntakeError("response lost")
+  result=intake_one(Uncertain(),map_item(RAW));self.assertEqual(result["lead"],"LEAD-0001")
+ def test_secret_permissions_and_symlink_rejected(self):
+  import tempfile,os
+  with tempfile.TemporaryDirectory() as d:
+   secret=Path(d)/"secret";secret.write_text("OWNER_LEAD_INTAKE_AUTH_SECRET="+"a"*40+"\nOWNER_CRM_FRAPPE_API_KEY=k\nOWNER_CRM_FRAPPE_API_SECRET=s\n")
+   secret.chmod(0o644)
+   with self.assertRaises(IntakeError):load_credentials(secret)
+   secret.chmod(0o600);self.assertEqual(load_credentials(secret).api_key,"k")
+   link=Path(d)/"link";link.symlink_to(secret)
+   with self.assertRaises(IntakeError):load_credentials(link)
+ def test_source_invalid_item_not_silently_skipped(self):
+  import io
+  source=SourceClient("a"*40,opener=lambda *a,**k:io.BytesIO(json.dumps({"items":[RAW,None]}).encode()))
+  with self.assertRaises(IntakeError):source.page()
+ def test_source_nonadvancing_cursor_rejected(self):
+  import io
+  source=SourceClient("a"*40,opener=lambda *a,**k:io.BytesIO(json.dumps({"items":[RAW]}).encode()))
+  with self.assertRaises(IntakeError):source.page(after_id=RAW["sourceEventId"])
+ def test_multiple_pages_and_checkpoint_wrap(self):
+  from operate import cycle
+  import dataclasses
+  base=map_item(RAW)
+  items=[dataclasses.replace(base,source_event_id=f"{i:08x}-1111-4111-8111-111111111111",source_key=f"blockwise_demo_request:{i:08x}-1111-4111-8111-111111111111") for i in range(1,56)]
+  class Source:
+   def page(self,after_id=None,limit=50):return [i for i in items if after_id is None or i.source_event_id>after_id][:limit]
+  checkpoints=[];store=Store()
+  first=cycle(Source(),store,checkpoint=checkpoints.append,max_pages=1)
+  self.assertFalse(first["scan_complete"]);self.assertEqual(first["processed"],50)
+  second=cycle(Source(),store,after_id=checkpoints[-1],checkpoint=checkpoints.append)
+  self.assertTrue(second["scan_complete"]);self.assertEqual(second["processed"],5);self.assertIsNone(checkpoints[-1]);self.assertEqual(len(store.rows),55)

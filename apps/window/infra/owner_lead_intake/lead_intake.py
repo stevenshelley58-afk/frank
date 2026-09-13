@@ -2,7 +2,7 @@
 Never merges by email, sends email, or derives consent. Source identity is only
 blockwise_demo_request:<public.demo_requests.id>."""
 from __future__ import annotations
-import hashlib,hmac,json,os,re,secrets,stat,time,urllib.error,urllib.parse,urllib.request
+import hashlib,hmac,json,os,pwd,re,secrets,stat,time,urllib.error,urllib.parse,urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any,Mapping
@@ -14,19 +14,24 @@ class DuplicateSource(IntakeError): pass
 @dataclass(frozen=True)
 class Credentials: secret:str; api_key:str; api_secret:str
 def load_credentials(path:Path=SECRET_FILE)->Credentials:
- try: lines=path.read_text().splitlines()
+ try:
+  info=path.lstat()
+  if not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode)!=0o600 or info.st_uid not in {0,pwd.getpwnam("hermes").pw_uid}: raise IntakeError("unsafe lead intake secret file")
+  lines=path.read_text().splitlines()
  except OSError as e: raise IntakeError("lead intake secret file unavailable") from e
  values={}
  for line in lines:
   line=line.strip()
   if line and not line.startswith("#"):
    key,separator,value=line.partition("=")
-   if separator: values[key]=value
+   if separator:
+    if key in values: raise IntakeError("duplicate lead intake credential key")
+    values[key]=value
  try: c=Credentials(values["OWNER_LEAD_INTAKE_AUTH_SECRET"],values["OWNER_CRM_FRAPPE_API_KEY"],values["OWNER_CRM_FRAPPE_API_SECRET"])
  except KeyError as e: raise IntakeError("lead intake secret missing required key") from e
- if len(c.secret)<32 or any("\n" in x or "\r" in x for x in (c.secret,c.api_key,c.api_secret)): raise IntakeError("lead intake credentials invalid")
+ if len(c.secret)<32 or not c.api_key or not c.api_secret or any("\n" in x or "\r" in x for x in (c.secret,c.api_key,c.api_secret)): raise IntakeError("lead intake credentials invalid")
  return c
-def _text(value:Any,limit:int=500)->str|None: return value if isinstance(value,str) and 0<len(value)<=limit else None
+def _text(value:Any,limit:int=500)->str|None: return value.strip() if isinstance(value,str) and 0<len(value.strip())<=limit else None
 @dataclass(frozen=True)
 class LeadRequest: source_key:str; source_kind:str; source_event_id:str; received_at:str; name:str; email:str; phone:str|None; agency:str|None
 def map_item(raw:Mapping[str,Any])->LeadRequest:
@@ -48,7 +53,10 @@ class SourceClient:
   except ValueError as e:raise IntakeError("lead source returned invalid JSON") from e
   if not isinstance(decoded,dict) or not isinstance(decoded.get("items"),list):raise IntakeError("lead source response invalid")
   if not all(isinstance(item,dict) for item in decoded["items"]): raise IntakeError("lead source item invalid")
-  return [map_item(item) for item in decoded["items"]]
+  items=[map_item(item) for item in decoded["items"]]
+  ids=[item.source_event_id for item in items]
+  if len(items)>limit or ids!=sorted(set(ids)) or (after_id and any(value<=after_id for value in ids)):raise IntakeError("source pagination did not advance safely")
+  return items
 class FrappeLeadStore:
  def __init__(self,opener=None):self.open=opener or urllib.request.build_opener().open;self.token=""
  def request(self,method,path,body=None):
@@ -78,7 +86,7 @@ class FrappeLeadStore:
   if not isinstance(data,list) or len(data)>1:raise IntakeError("native source identity is ambiguous")
   return data[0] if data else None
  def create(self,item):
-  p={"lead_name":item.name,"first_name":item.name.split(None,1)[0],"status":"New","lead_owner":"crm-sync@blockwise.sale","email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
+  p={"lead_name":item.name,"first_name":item.name.split(None,1)[0],"last_name":item.name.split(None,1)[1] if len(item.name.split(None,1))>1 else "","status":"New","lead_owner":"crm-sync@blockwise.sale","email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
   if item.phone:p["mobile_no"]=item.phone
   if item.agency:p["organization"]=item.agency
   data=self.request("POST","/api/resource/CRM%20Lead",p).get("data")
