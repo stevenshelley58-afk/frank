@@ -329,6 +329,14 @@ class FlowTests(unittest.TestCase):
             flows.bridge(email, bridge_args())
         self.assertEqual(email.memberships, set())
 
+    def test_bridge_never_reactivates_a_native_stopped_nurture_path(self):
+        contact = bridge_contact()
+        contact["fields"]["all"][flows.NURTURE_EXIT_FIELD] = "stopped"
+        api = FakeBridgeMautic(contacts=[contact])
+        flows.bridge(api, bridge_args())
+        self.assertEqual(api.memberships, set())
+        self.assertFalse(any(call[0] == "PATCH" for call in api.calls))
+
     def test_suppression_stops_campaign_and_adds_email_dnc_only(self):
         api = FakeBridgeMautic(contacts=[bridge_contact(dnc=[{"channel": "sms", "reason": 3}])])
         flows.suppress(api, bridge_args(consent_state="opted_out", source_event_id=EVENT_NEW))

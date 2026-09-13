@@ -526,6 +526,12 @@ def bridge(api: Mautic, args: argparse.Namespace) -> None:
         workspace_id=args.workspace_id,
         email=args.email,
     )
+    # A confirmed human reply (and the bounce/complaint receiver) is native
+    # stop authority. Snapshot consent may remain granted, but it is never
+    # permission for this bridge to revive a stopped nurture path.
+    if contact_value(contact, NURTURE_EXIT_FIELD) == "stopped":
+        print("unchanged: native nurture exit is stopped")
+        return
     if has_email_dnc(contact):
         raise ApiError("contact has native Mautic Do Not Contact; enrolment refused")
     segments = ensure_segments(api, apply=False)
