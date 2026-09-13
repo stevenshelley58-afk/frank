@@ -27,8 +27,8 @@ running="$(docker ps --filter publish="$port" --format '{{.Names}}' || true)"; [
 export MAUTIC_HOST_PORT="$port"
 if [[ -z "$runtime_profiles" ]]; then
   cleanup_args=("${compose_args[@]}" --profile owner-marketing-cron --profile owner-marketing-worker)
-  docker compose "${cleanup_args[@]}" stop cron worker >/dev/null 2>&1 || true
-  docker compose "${cleanup_args[@]}" rm -f cron worker >/dev/null 2>&1 || true
+  docker compose "${cleanup_args[@]}" stop cron worker >/dev/null 2>&1 || die cannot-stop-native-senders
+  docker compose "${cleanup_args[@]}" rm -f cron worker >/dev/null 2>&1 || die cannot-retire-stopped-senders
 fi
 docker compose "${compose_args[@]}" up -d
 for _ in $(seq 1 60); do s="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing 2>/dev/null || true)"; i="$(docker inspect --format '{{.State.Health.Status}}' frank-owner-marketing-ingress 2>/dev/null || true)"; [[ "$s" == healthy && "$i" == healthy ]] && break; [[ "$s" != unhealthy && "$i" != unhealthy ]] || die unhealthy; sleep 5; done
