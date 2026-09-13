@@ -327,3 +327,13 @@ class FlowTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)
+
+class NativeHtmlRegressionTests(unittest.TestCase):
+    def test_real_blockwise_links_and_reply_decisions(self):
+        flow = next(f for f in flows.FLOWS if f.key == "opted_in_education")
+        self.assertIn('href="https://blockwise.sale/ad-studio"', flows.email_payload(flow, 0)["customHtml"])
+        emails = {flows.email_key(flow, i): i + 1 for i in range(len(flow.steps))}
+        events, _ = flows.campaign_events(flow, emails)
+        replies = [e for e in events if e["type"] == "email.reply"]
+        self.assertEqual(len(replies), 3)
+        self.assertTrue(all(e["eventType"] == "decision" for e in replies))

@@ -167,7 +167,7 @@ def ensure_segments(api: Mautic, apply: bool) -> dict[str, int]:
 def email_payload(flow: Flow, index: int) -> dict[str, Any]:
     step = flow.steps[index]
     body = html.escape(step.text)
-    body = re.sub(r"(https://blockwise\\.sale/[^\\s<]+)", r'<a href="\1">\1</a>', body)
+    body = re.sub(r"(https://blockwise\.sale/[^\s<]+)", r'<a href="\1">\1</a>', body)
     body = body.replace("\n\n", "</p><p>").replace("\n", "<br>")
     custom_html = (
         '<!doctype html><html><body style="margin:0;background:#f5f5f2;color:#1c2520;font-family:Arial,sans-serif">'
@@ -225,7 +225,7 @@ def campaign_events(flow: Flow, emails: dict[str, int]) -> tuple[list[dict[str, 
         nonlocal event_number, parent
         event_number += 1
         event_id = f"new_{event_number}"
-        event = {"id": event_id, "name": name, "description": description, "type": event_type, "eventType": "condition" if event_type == "lead.field_value" else "action", "order": event_number, "properties": properties, "triggerInterval": delay_days, "triggerIntervalUnit": "d", "triggerMode": "interval", "children": [], "parent": parent, "decisionPath": "yes"}
+        event = {"id": event_id, "name": name, "description": description, "type": event_type, "eventType": "condition" if event_type == "lead.field_value" else "decision" if event_type == "email.reply" else "action", "order": event_number, "properties": properties, "triggerInterval": delay_days, "triggerIntervalUnit": "d", "triggerMode": "interval", "children": [], "parent": parent, "decisionPath": "yes"}
         events.append(event)
         source = "lists" if parent is None else parent
         if parent is not None:
