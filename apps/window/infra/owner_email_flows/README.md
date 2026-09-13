@@ -177,3 +177,18 @@ optionally `OWNER_MAIL_EVENTS_MAUTIC_URL`. The Mautic role needs Stats read,
 contact view/edit and source static-segment membership edit only. Root registers
 the Resend webhook after endpoint deployment; this repository creates no keys or
 webhook registrations.
+## Manual newsletter draft
+
+`newsletter.py` creates one native dynamic segment and one unpublished native list email. The segment includes contacts only when `blockwise_marketing_conse` is exactly `opted_in` and `blockwise_nurture_exit` is exactly `active`. Native Mautic email Do Not Contact remains the final sending suppression.
+
+The first held issue reuses the approved useful-guide email structure and its current Ad Studio checklist destination. It has no guessed cadence, campaign, contact import or custom sender. Each issue requires a human to review the current consent audience and draft, then explicitly approve native publication and sending. This helper never publishes or sends it and never enables Mautic scheduled jobs.
+
+Run it only with the existing root-only owner-marketing secret loaded:
+
+```bash
+python3 newsletter.py plan
+python3 newsletter.py apply
+python3 newsletter.py verify
+```
+
+Replays are read-only when the native objects match. Duplicate names, changed audience filters, a published or previously sent email, changed copy, or a changed segment binding stop for review. The helper never edits or deletes an existing native object.
