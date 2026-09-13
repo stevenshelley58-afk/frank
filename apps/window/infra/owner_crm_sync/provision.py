@@ -38,6 +38,18 @@ try:
         user.api_secret = secret
     user.send_welcome_email = 0
     user.save()
+    # Upstream Contact has_permission may allow delete even when the role does
+    # not. A native document-event rule enforces the service boundary server-side.
+    guard_name = "Owner CRM Sync Contact Delete Guard"
+    guard = {"doctype":"Server Script", "name":guard_name, "script_type":"DocType Event",
+        "reference_doctype":"Contact", "doctype_event":"Before Delete", "disabled":0,
+        "script":"if frappe.session.user == 'crm-sync@blockwise.sale':\n    frappe.throw('Customer sync cannot delete contacts', frappe.PermissionError)"}
+    if frappe.db.exists("Server Script", guard_name):
+        existing = frappe.get_doc("Server Script", guard_name)
+        if existing.script != guard["script"] or existing.doctype_event != "Before Delete":
+            raise RuntimeError("native deletion guard conflicts with existing configuration")
+    else:
+        frappe.get_doc(guard).insert()
     frappe.clear_cache()
     frappe.db.commit()
     print(json.dumps({"api_key":user.api_key, "api_secret":secret}))
@@ -74,6 +86,8 @@ def main():
     secret=values.get("OWNER_CRM_SNAPSHOT_AUTH_SECRET") or secrets.token_hex(32)
     if len(secret)<32 or secret in {values.get("BLOCKWISE_INTERNAL_AUTH_SECRET"), values.get("BLOCKWISE_INTERNAL_SECRET")}:
         raise SystemExit("dedicated snapshot key required")
+    subprocess.run(["docker", "exec", "owner-crm-backend-1", "bench", "--site", "owner.crm.internal",
+        "set-config", "server_script_enabled", "true", "--parse"], check=True, stdout=subprocess.DEVNULL)
     result=subprocess.run(["docker","exec","-i","-w","/home/frappe/frappe-bench/sites","owner-crm-backend-1","/home/frappe/frappe-bench/env/bin/python","-"],
         input=NATIVE, text=True, capture_output=True)
     if result.returncode:
