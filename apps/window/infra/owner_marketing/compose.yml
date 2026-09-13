@@ -28,8 +28,12 @@ services:
       MAUTIC_DB_USER: mautic
       MAUTIC_DB_PASSWORD: ${MAUTIC_DB_PASSWORD:?required}
       MAUTIC_RUN_CRON_JOBS: "false"
-      MAUTIC_MAILER_DSN: smtp://mail-sink.invalid:25
-      MAUTIC_URL: http://127.0.0.1:${MAUTIC_HOST_PORT:-18106}
+      MAUTIC_MAILER_DSN: ${MAUTIC_MAILER_DSN:-smtp://mail-sink.invalid:25}
+      MAUTIC_MAILER_FROM_EMAIL: ${MAUTIC_MAILER_FROM_EMAIL:-owner@localhost.invalid}
+      MAUTIC_MAILER_FROM_NAME: ${MAUTIC_MAILER_FROM_NAME:-Owner Marketing}
+      MAUTIC_MAILER_REPLY_TO_EMAIL: ${MAUTIC_MAILER_REPLY_TO:-owner@localhost.invalid}
+      MAUTIC_MAILER_APPEND_TRACKING_PIXEL: "false"
+      MAUTIC_URL: ${MAUTIC_PUBLIC_URL:-http://127.0.0.1:${MAUTIC_HOST_PORT:-18106}}
     volumes: [owner_marketing_config:/var/www/html/config, owner_marketing_media:/var/www/html/docroot/media]
     labels:
       org.frank.source-sha: "${MAUTIC_SOURCE_SHA:?required}"
