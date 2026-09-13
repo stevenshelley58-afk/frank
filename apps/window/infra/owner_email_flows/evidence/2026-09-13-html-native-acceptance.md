@@ -1,0 +1,3 @@
+# Native HTML mail acceptance
+
+A single owner-only Mautic contact received the native template. The received message had HTML and plaintext alternatives, rendered unsubscribe tokens, and a direct `https://blockwise.sale/ad-studio` CTA with no `/r/` tracking rewrite. The default HTTP user agent reached native unsubscribe and recorded email DNC. A subsequent native marketing API attempt returned unsuccessful and left the sent count unchanged. Eight canonical campaigns remain unpublished with `allowRestart` false. Private receipt: `/srv/frank/verification/owner-crm-final-20260913/mautic-html-final-acceptance.json`.
