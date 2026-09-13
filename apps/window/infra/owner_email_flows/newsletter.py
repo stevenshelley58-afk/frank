@@ -121,7 +121,11 @@ def verify_email(email: dict[str, Any], desired: dict[str, Any]) -> None:
     if int(email.get("sentCount", 0)) != 0:
         raise ApiError("newsletter draft has already been sent and must not be reconciled")
     for key in ("name", "subject", "preheaderText", "customHtml", "plainText"):
-        if email.get(key) != desired[key]:
+        actual, expected = email.get(key), desired[key]
+        if key == "customHtml":
+            actual = str(actual).replace("<br />", "<br>")
+            expected = str(expected).replace("<br />", "<br>")
+        if actual != expected:
             raise ApiError(f"newsletter draft drift requires manual review: {key}")
     if list_ids(email) != sorted(desired["lists"]):
         raise ApiError("newsletter draft audience drift requires manual review")

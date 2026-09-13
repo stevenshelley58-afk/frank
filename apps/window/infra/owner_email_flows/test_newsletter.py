@@ -56,6 +56,14 @@ class NewsletterTests(unittest.TestCase):
         self.assertEqual(email["lists"], [{"id": 1}])
         self.assertEqual(email["sentCount"], 0)
 
+    def test_native_html_void_element_normalization_is_accepted(self):
+        api = FakeMautic()
+        newsletter.setup(api, apply=True)
+        api.store["emails"][0]["customHtml"] = api.store["emails"][0]["customHtml"].replace("<br>", "<br />")
+        api.calls.clear()
+        newsletter.setup(api, apply=True)
+        self.assertEqual(api.calls, [])
+
     def test_audience_is_only_explicit_current_newsletter_consent(self):
         filters = newsletter.desired_filters()
         self.assertEqual(
