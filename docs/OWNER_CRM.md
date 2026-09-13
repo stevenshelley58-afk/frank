@@ -5,48 +5,57 @@ covers Steven's Blockwise customer business, not a customer's property-lead CRM.
 Follow the canonical engineering rules and existing component release guides.
 
 
-## Current acceptance checkpoint, 13 September 2026 03:30 UTC
+## Current acceptance ledger, 13 September 2026 12:10 UTC
 
-This checkpoint supersedes older foundation observations below. It is not a
-completed-CRM or launch approval.
+This ledger supersedes the older checkpoint below. It records private, sanitized
+receipts and current runtime evidence. It is not a completed-CRM or launch
+approval.
 
-- Owner CRM native password login and least-privilege record reads passed for
-  the dedicated owner user. Private Tailscale Serve reaches the CRM on 8445 and
-  authenticated ntfy on 8446. No phone is enrolled; MFA and device delivery
-  remain unverified.
-- Native SMTP and IMAP TLS login to the existing Purelymail account passed.
-  The configured CRM Email Account and scheduler remain disabled. Saving the
-  business domain and routing to the existing inbox is awaiting the owner's
-  action-time browser confirmation. Sent copies and reply threading are not
-  accepted yet.
-- A controlled Resend message to the owner's existing Purelymail inbox arrived
-  in INBOX, with SPF, DKIM and DMARC passing. This does not prove universal
-  inbox placement, Mautic SMTP delivery or any customer campaign.
-- Four native CRM alert hooks cover tasks, helpdesk tickets, leads and incoming
-  email Communications. Controlled lead and inbound records produced generic
-  private notifications; an outgoing Communication did not produce an inbound
-  alert. No customer details were put in push content.
-- The local native backup and isolated restore verified both the original site
-  encryption key and an encrypted Email Account credential. Evidence:
-  `/srv/frank/backups/owner-crm/local-20260913T030048Z-c4a523465a7e/drill-receipt.json`.
-  Off-host backup and key escrow remain unresolved.
-- Blockwise release `367e77855c8b654c5d2cbafd31eb69842c6b140a` serves the protected
-  bounded lead source. The native Hermes lead job is enabled, has completed an
-  empty-source scan, and holds imported leads for review. It does not send mail.
-- Mautic has six fields, eight segments, ten templates and eight unpublished
-  campaigns. Source installation is paused and campaigns/cron/workers are off.
-  Only the consent-to-education adapter exists; lifecycle event, reply and
-  conversion exits are not all connected. Plain-text templates are provisional
-  while the installed HTML validator dependency is investigated.
-- Frank release `6fb2708e06c6307abd21275b10b4b21ae36761e9` deployed the restricted
-  public unsubscribe/DNC route. A browser reached the native invalid-record
-  response. A real controlled unsubscribe and suppression round trip remains
-  required. Admin and API routes are not intentionally exposed there.
-- Consent source is a reviewed candidate, not a released feature. An earlier
-  rehearsal accidentally committed an empty RLS consent table and incompatible
-  snapshot definition. The known-good committed snapshot was atomically
-  restored and its service-role read passed; no consent fixture rows persisted.
-  Corrective migrations and authenticated browser acceptance remain pending.
+### Completed and evidenced
+
+- Native owner mailbox subscription works on desktop and mobile. Ordinary IMAP
+  reply send, Sent-copy handling and native reply threading passed. The mailbox
+  receipt is `/srv/frank/verification/owner-crm-final-20260913/mailbox-native-acceptance.json`.
+- Native support routing passed: ticket `0003`, one notification, and zero
+  duplicate receipts on repeat delivery. Receipt:
+  `/srv/frank/verification/owner-crm-final-20260913/support-native-acceptance.json`.
+- CRM native task, Helpdesk and inbound-mail notifications are private and
+  generic. The owner-only Agent permissions work is still being corrected and
+  is not claimed complete here.
+- Mautic acceptance now covers rendered HTML and plain variants, direct CTA,
+  token rendering and the restricted unsubscribe/DNC negative path. No negative
+  message was sent; the negative check left the sent count unchanged. There are
+  10 draft campaigns plus newsletter 11 and segment 9 drafts; nothing is
+  activated. Receipt:
+  `/srv/frank/verification/owner-crm-final-20260913/mautic-html-final-acceptance.json`.
+- Current runtime evidence is Mautic image `a47a2aa68fff2680206282255743fe18654b2492`,
+  Frank/Window revision `f03920780d9b6cd7bf708069525028e333a00916`, and the
+  private receiver source is `516d821` (sanitized identifier). CRM admin/root,
+  Mautic app DB, new Resend SMTP and receiver credentials were rotated and
+  runtime-verified. No credential values belong in this document.
+- Local backup and isolated restore passed, including encryption-key and
+  encrypted-credential round trips and staged attachment recovery. It is local
+  only, with no off-host RPO claim. Receipt:
+  `/srv/frank/backups/owner-crm/local-20260913T073405Z-91df4513e9df/drill-receipt.json`.
+  Mautic and ntfy private restore checks also passed without changing production;
+  receipt `/srv/frank/backups/owner-marketing/local-20260913T074805Z/restore-receipt-20260913T074818Z-1102792.json`.
+
+### Remaining gates and explicit non-claims
+
+- Actual new-reply, bounce and complaint acceptance is still being finished by
+  a separate work item; do not claim those paths passed. A reply currently stops
+  or alerts only; a durable reply follow-up task is not implemented.
+- Off-host backup is not done and needs Cloudflare authorization. An actual
+  phone notification is not done and needs the intended OS/login and device
+  receipt. Public 15-minute owner booking is not wired.
+- The old exposed Resend key still needs exact identification and revocation;
+  its value is intentionally omitted. Resend and Purelymail remain disallowed
+  for cold prospecting. No provider, campaign, prospect enrolment or customer
+  send was activated.
+- The source-audit-plan intake correction awaits release. Owner Agent
+  permissions, final consolidated browser acceptance, consent-source release,
+  public audit freshness/signup attribution and remaining lifecycle exits remain
+  open. Historical evidence below must not be read as current acceptance.
 
 ### Saved email design inspiration
 
