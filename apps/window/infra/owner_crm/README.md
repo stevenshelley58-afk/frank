@@ -104,3 +104,7 @@ build alone is not runtime evidence.
 ## Private owner web access
 
 `python3 bin/private-access.py` previews existing native Tailscale Serve configuration; `--apply` adds only private HTTPS ports 8445 (CRM) and 8446 (ntfy). Existing Serve services are preserved, occupied ports and public Funnel flags are rejected, and native CRM/ntfy authentication remains required. No public CRM ingress, custom proxy, or new account is created. An enrolled phone with Tailscale plus native ntfy setup is still required for actual mobile notification receipt.
+
+## Prepared off-host recovery
+
+`bin/offhost-backup.sh` is manual and disabled by default. Its `--offhost` mode first creates the existing native Frappe SQL/files/config archive, then requires explicit root-only R2/restic configuration and four explicit Mautic/ntfy artifact paths (native Mautic MySQL dump, config, media, and ntfy state). It never schedules, prunes, or guesses a path. It does not claim Mautic or ntfy restore acceptance until an actual restore drill is recorded.
