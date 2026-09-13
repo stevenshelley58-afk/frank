@@ -27,7 +27,7 @@ def payload(password,activate=False):
         "enable_incoming":int(activate),"default_incoming":int(activate),"use_imap":1,"use_ssl":1,"use_starttls":0,
         "email_server":"imap.purelymail.com","incoming_port":"993","attachment_limit":10,
         "email_sync_option":"UNSEEN","initial_sync_count":"100","imap_folder":[{"folder_name":"INBOX"}],
-        "append_emails_to_sent_folder":1,"sent_folder_name":"Sent","create_contact":0,"enable_automatic_linking":1,
+        "append_emails_to_sent_folder":1,"sent_folder_name":"Sent","create_contact":0,"enable_automatic_linking":int(activate),
         "enable_outgoing":int(activate),"default_outgoing":int(activate),"smtp_server":"smtp.purelymail.com",
         "smtp_port":"465","use_ssl_for_outgoing":1,"use_tls":0,"no_smtp_authentication":0,
         "always_use_account_email_id_as_sender":1,"always_use_account_name_as_sender_name":0,

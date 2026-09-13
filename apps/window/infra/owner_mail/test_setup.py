@@ -6,7 +6,7 @@ module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
 class NativeMailTests(unittest.TestCase):
     def test_defaults_are_non_sending(self):
         p=module.payload("secret")
-        for name in ["enable_incoming","enable_outgoing","default_incoming","default_outgoing","enable_auto_reply","create_contact","track_email_status"]:self.assertEqual(p[name],0)
+        for name in ["enable_incoming","enable_outgoing","default_incoming","default_outgoing","enable_auto_reply","create_contact","track_email_status","enable_automatic_linking"]:self.assertEqual(p[name],0)
     def test_tls_and_native_sent_folder(self):
         p=module.payload("secret",True)
         self.assertEqual((p["smtp_server"],p["smtp_port"],p["use_ssl_for_outgoing"]),("smtp.purelymail.com","465",1))
