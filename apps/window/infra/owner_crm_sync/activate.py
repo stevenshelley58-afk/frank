@@ -1,0 +1,57 @@
+"""Install committed scripts into the existing single-profile Hermes scheduler."""
+import argparse
+import json
+import os
+from pathlib import Path
+import pwd
+import subprocess
+
+ROOT=Path(__file__).resolve().parent
+HOME=Path("/home/hermes/.hermes")
+TARGET=HOME / "scripts/owner-crm-sync"
+PYTHON=HOME / "hermes-agent/venv/bin/python"
+
+def main():
+    parser=argparse.ArgumentParser()
+    parser.add_argument("--enable",action="store_true",help="enable only after signed source and native acceptance")
+    args=parser.parse_args()
+    subprocess.run(["git", "-C",str(ROOT),"diff","--exit-code","HEAD","--",str(ROOT)],check=True)
+    account=pwd.getpwnam("hermes")
+    TARGET.mkdir(parents=True,exist_ok=True,mode=0o750)
+    os.chown(TARGET,account.pw_uid,account.pw_gid)
+    for name in ["customer_sync.py","operate.py","scheduled.py"]:
+        # Archive tracked source, never copy working-tree overlays.
+        relative="apps/window/infra/owner_crm_sync/"+name
+        data=subprocess.check_output(["git","-C",str(ROOT),"show","HEAD:"+relative])
+        path=TARGET/name
+        if path.is_symlink(): raise SystemExit("refuse symlinked runtime script")
+        path.write_bytes(data)
+        os.chmod(path,0o640); os.chown(path,account.pw_uid,account.pw_gid)
+    state=Path("/srv/hermes/state/owner-crm-sync")
+    state.mkdir(parents=True,exist_ok=True,mode=0o700)
+    os.chown(state,account.pw_uid,account.pw_gid)
+    code = r'''import json
+from cron.jobs import list_jobs, create_job, pause_job, resume_job, update_job
+name="Owner CRM customer sync"
+jobs=[job for job in list_jobs(include_disabled=True) if job.get("name")==name]
+if len(jobs)>1: raise RuntimeError("duplicate owner CRM native jobs need review")
+if jobs:
+    job=jobs[0]
+    if job.get("script") != "owner-crm-sync/scheduled.py" or not job.get("no_agent"):
+        raise RuntimeError("existing job is not the expected deterministic connector")
+else:
+    job=create_job(prompt="",schedule="*/15 * * * *",name=name,deliver="local",script="owner-crm-sync/scheduled.py",no_agent=True)
+job_id=job["id"]
+ACTION
+print(json.dumps({"job_id":job_id,"no_agent":True,"enabled":ENABLED}))
+'''.replace("ACTION", "resume_job(job_id)" if args.enable else "pause_job(job_id, reason='awaiting CRM acceptance')").replace("ENABLED", "True" if args.enable else "False")
+    result=subprocess.run(["runuser","-u","hermes","--","env","HERMES_HOME="+str(HOME),
+        str(PYTHON),"-c",code],cwd=HOME/"hermes-agent",capture_output=True,text=True)
+    if result.returncode: raise SystemExit("native Hermes cron activation failed; inspect native scheduler locally")
+    print(result.stdout.strip())
+    command="resume" if args.enable else "pause"
+    subprocess.run(["runuser","-u","hermes","--",str(PYTHON),str(TARGET/"operate.py"),command],check=True)
+    revision=subprocess.check_output(["git","-C",str(ROOT),"rev-parse","HEAD"],text=True).strip()
+    print(json.dumps({"installed_revision":revision,"profile":"default","model_calls":0}))
+
+if __name__=="__main__":main()
