@@ -91,6 +91,8 @@ class AcceptanceTests(unittest.TestCase):
 
     def test_provider_lookup_accepts_bounded_first_page_with_more_results(self):
         class Resend:
+            recipient = ['"Owner, CRM" <bounced+owner-crm-0123456789ab@resend.dev>']
+
             def request(self, method, path, payload=None):
                 self.call = (method, path, payload)
                 return {
@@ -98,7 +100,7 @@ class AcceptanceTests(unittest.TestCase):
                     "has_more": True,
                     "data": [{
                         "id": "11111111-1111-4111-8111-111111111111",
-                        "to": ["bounced+owner-crm-0123456789ab@resend.dev"],
+                        "to": self.recipient,
                         "subject": "unique acceptance",
                         "last_event": "bounced",
                     }],
@@ -111,6 +113,19 @@ class AcceptanceTests(unittest.TestCase):
         )
         self.assertEqual(result["last_event"], "bounced")
         self.assertEqual(resend.call[:2], ("GET", "/emails?limit=100"))
+        resend.recipient = ["wrong@resend.dev"]
+        self.assertIsNone(module.provider_message(
+            resend,
+            "unique acceptance",
+            "bounced+owner-crm-0123456789ab@resend.dev",
+        ))
+        resend.recipient = ["bounced+owner-crm-0123456789ab@resend.dev, wrong@resend.dev"]
+        with self.assertRaises(module.AcceptanceError):
+            module.provider_message(
+                resend,
+                "unique acceptance",
+                "bounced+owner-crm-0123456789ab@resend.dev",
+            )
 
     def test_runtime_hold_accepts_published_source_but_rejects_active_campaign_or_worker(self):
         self.assertIs(module.native_published({"isPublished": True}, "source segment"), True)

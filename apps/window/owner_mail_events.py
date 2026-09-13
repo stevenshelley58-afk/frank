@@ -1,6 +1,8 @@
 """Fail-closed Resend bounce/complaint bridge for native Mautic contacts."""
 from __future__ import annotations
 import base64, binascii, hashlib, hmac, json, os, re, time, urllib.error, urllib.parse, urllib.request
+from email import policy
+from email.parser import Parser
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
@@ -60,12 +62,15 @@ def _contact_value(contact,name):
  fields=contact.get("fields"); all_fields=fields.get("all") if isinstance(fields,dict) else None
  return all_fields.get(name) if isinstance(all_fields,dict) else contact.get(name)
 def _recipients(value):
- if not isinstance(value,list): return set()
- result=set()
- for item in value:
-  address=item if isinstance(item,str) else item.get("email") if isinstance(item,dict) else None
-  if isinstance(address,str) and 3<=len(address)<=254: result.add(address.strip().lower())
- return result
+ if not isinstance(value,list) or len(value)!=1: raise OwnerMailEventError("provider recipient list was malformed")
+ item=value[0]; raw=item if isinstance(item,str) else item.get("email") if isinstance(item,dict) else None
+ if not isinstance(raw,str) or not raw or len(raw)>998 or any(character in raw for character in ("\r","\n","\x00")): raise OwnerMailEventError("provider recipient was malformed")
+ header=Parser(policy=policy.default).parsestr("To: "+raw+"\n\n").get("To")
+ if header is None or header.defects or len(header.addresses)!=1 or len(header.groups)!=1 or header.groups[0].display_name is not None: raise OwnerMailEventError("provider recipient was malformed")
+ parsed=header.addresses[0]; display,address=parsed.display_name,parsed.addr_spec.strip().lower()
+ if isinstance(item,dict) and display: raise OwnerMailEventError("provider recipient was malformed")
+ if len(address)>254 or not re.fullmatch(r"[^\s<>,;@]+@[^\s<>,;@]+",address): raise OwnerMailEventError("provider recipient was malformed")
+ return {address}
 def _tracking_hash(provider):
  # Resend's returned stored render is the proof. Do not accept a matching
  # string in provider metadata, tags or a webhook-controlled field.

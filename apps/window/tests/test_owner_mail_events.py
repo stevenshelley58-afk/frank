@@ -15,11 +15,11 @@ def signed(event):
  return raw,{"svix-id":ident,"svix-timestamp":stamp,"svix-signature":"v1,"+sig}
 
 class FakeHttp:
- def __init__(self,collision=False,unavailable=False): self.calls=[]; self.collision=collision; self.unavailable=unavailable
+ def __init__(self,collision=False,unavailable=False,provider_to=None): self.calls=[]; self.collision=collision; self.unavailable=unavailable; self.provider_to=provider_to or ['"Owner, CRM" <owner@example.test>']
  def request(self,method,url,headers,payload=None):
   self.calls.append((method,url,payload))
   if self.unavailable and "api.resend.com" in url: raise events.OwnerMailEventUnavailable("temporary")
-  if "api.resend.com" in url: return {"id":EMAIL,"to":["owner@example.test"],"html":"https://mail.blockwise.sale/email/unsubscribe/abc123/recipient/secret"}
+  if "api.resend.com" in url: return {"id":EMAIL,"to":self.provider_to,"html":"https://mail.blockwise.sale/email/unsubscribe/abc123/recipient/secret"}
   if "/stats/" in url:
    row={"email_address":"owner@example.test","lead_id":"7"}
    return {"stats":[row,row] if self.collision else [row]}
@@ -47,6 +47,14 @@ class OwnerMailEventsTests(unittest.TestCase):
   patches=[payload for method,url,payload in fake.calls if method=="PATCH"]
   self.assertEqual(len(patches),2)
   self.assertEqual(patches[0]["doNotContact"],[{"channel":"email","reason":3}])
+ def test_recipient_parser_accepts_one_quoted_display_name_only(self):
+  self.assertEqual(events._recipients(['"Owner, CRM" <OWNER@EXAMPLE.TEST>']),{"owner@example.test"})
+  for value in ([],["owner@example.test","other@example.test"],["owner@example.test, other@example.test"],["not-an-address"],["Owner <owner@example.test"],['"Owner <owner@example.test>'],["Owner <owner@example.test> trailing"],["group: owner@example.test;"],["owner@example.test\r\nBcc: other@example.test"],[{"email":"Owner <owner@example.test>"}]):
+   with self.assertRaises(events.OwnerMailEventError): events._recipients(value)
+ def test_wrong_provider_recipient_is_rejected_without_mutation(self):
+  raw,headers=signed(self.payload()); fake=FakeHttp(provider_to=["wrong@example.test"])
+  with self.assertRaises(events.OwnerMailEventError): events.process_event(raw,headers,self.cfg,fake,1000)
+  self.assertFalse(any(method in {"PATCH","POST"} for method,_,_ in fake.calls))
  def test_wrong_immutable_scope_is_rejected(self):
   raw,headers=signed(self.payload()); fake=FakeHttp()
   original=fake.request

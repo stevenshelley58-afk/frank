@@ -15,12 +15,14 @@ import urllib.parse
 import uuid
 
 ROOT = Path(__file__).resolve().parent
+WINDOW = ROOT.parents[1]
 EMAIL_FLOWS = ROOT.parent / "owner_email_flows"
-for directory in (ROOT, EMAIL_FLOWS):
+for directory in (ROOT, EMAIL_FLOWS, WINDOW):
     if str(directory) not in sys.path:
         sys.path.insert(0, str(directory))
 import provision
 from mautic_flows import ApiError, CONSENT_FIELD, Mautic, NURTURE_EXIT_FIELD, UUID_PATTERN
+from owner_mail_events import OwnerMailEventError, _recipients
 
 RECEIPT_ROOT = Path("/srv/frank/verification/owner-mail-events")
 SOURCE_SEGMENT = "Owner CRM | Opted-in education"
@@ -210,11 +212,16 @@ def provider_message(resend: provision.Resend, subject: str, address: str) -> di
     has_more = response.get("has_more")
     if has_more is not None and not isinstance(has_more, bool):
         raise AcceptanceError("Resend sent-email pagination was malformed")
-    matches = [
-        item for item in values(response.get("data"), "Resend email", MAX_PROVIDER_EMAILS)
-        if item.get("subject") == subject
-        and {str(value).lower() for value in item.get("to", []) if isinstance(value, str)} == {address}
-    ]
+    matches = []
+    for item in values(response.get("data"), "Resend email", MAX_PROVIDER_EMAILS):
+        if item.get("subject") != subject:
+            continue
+        try:
+            recipients = _recipients(item.get("to"))
+        except OwnerMailEventError as error:
+            raise AcceptanceError("provider email recipient was malformed") from error
+        if recipients == {address}:
+            matches.append(item)
     if len(matches) > 1:
         raise AcceptanceError("provider message identity was ambiguous")
     return matches[0] if matches else None
