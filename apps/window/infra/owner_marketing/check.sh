@@ -27,7 +27,7 @@ admin_cookie="$(mktemp)"; trap 'rm -f "$admin_cookie"' EXIT
 login_token="$(printf '%s' "$login_page" | sed -n 's/.*name="_csrf_token" value="\([^"]*\)".*/\1/p')"; [[ -n "$login_token" ]] || die native-login-token-missing
 login_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 -c "$admin_cookie" --data-urlencode '_username=owner' --data-urlencode "_password=$MAUTIC_ADMIN_PASSWORD" --data-urlencode "_csrf_token=$login_token" "http://127.0.0.1:${MAUTIC_HOST_PORT:-18106}/s/login_check")"; [[ "$login_status" == 302 || "$login_status" == 303 ]] || die native-admin-login-failed
 dashboard_status="$(curl --silent --output /dev/null --write-out '%{http_code}' --max-time 10 -b "$admin_cookie" "http://127.0.0.1:${MAUTIC_HOST_PORT:-18106}/s/dashboard")"; [[ "$dashboard_status" == 200 ]] || die native-admin-dashboard-unavailable
-docker exec -w /var/www/html/docroot frank-owner-marketing php bin/console debug:config framework mailer --no-interaction | grep -Fq "%env(urlencoded-dsn:MAUTIC_MAILER_DSN)%" || die native-mailer-dsn-unconfigured
+docker exec -w /var/www/html/docroot frank-owner-marketing php /var/www/html/bin/console debug:config framework mailer --no-interaction | grep -Fq "%env(urlencoded-dsn:MAUTIC_MAILER_DSN)%" || die native-mailer-dsn-unconfigured
 mailer_dsn="${MAUTIC_MAILER_DSN:-smtp://mail-sink.invalid:25}"
 if [[ "$mailer_dsn" == "smtp://mail-sink.invalid:25" ]]; then
   docker exec frank-owner-marketing php -r '$u=parse_url(getenv("MAUTIC_MAILER_DSN")); if (($u["host"] ?? "") !== "mail-sink.invalid") exit(1);' || die default-mail-sink-not-preserved

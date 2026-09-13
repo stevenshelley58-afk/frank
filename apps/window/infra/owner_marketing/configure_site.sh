@@ -37,5 +37,5 @@ if (file_put_contents($tmp, $data, LOCK_EX) === false || !chmod($tmp, $mode) || 
     exit(3);
 }
 ' || die site-url-update-failed
-docker exec -u www-data -w /var/www/html/docroot frank-owner-marketing php bin/console cache:clear --no-warmup --no-interaction >/dev/null || die native-config-cache-refresh-failed
+docker exec -u www-data -w /var/www/html/docroot frank-owner-marketing php /var/www/html/bin/console cache:clear --no-warmup --no-interaction >/dev/null || die native-config-cache-refresh-failed
 echo "native Mautic site_url synchronized"
