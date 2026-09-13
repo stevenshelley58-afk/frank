@@ -13,10 +13,9 @@ docker exec frank-owner-marketing-db sh -lc 'exec mysqldump -uroot -p"$MYSQL_ROO
 for v in frank_owner_marketing_config frank_owner_marketing_media frank_owner_notifications_cache; do
  docker run --rm -v "$v":/source:ro alpine:3.21 tar -C /source -czf - . > "$dir/$v.tar.gz"
 done
-for f in /srv/frank/secrets/owner-marketing/owner-marketing.env /srv/frank/secrets/owner-notifications/server.yml /srv/frank/secrets/owner-notifications/owner-notifications.env; do
- [[ -f $f && ! -L $f ]] || fail "missing required private config"
- tar -C / -czf "$dir/private-config.tar.gz" "${f#/}" 2>/dev/null || fail 'private config capture failed'
-done
+configs=(/srv/frank/secrets/owner-marketing/owner-marketing.env /srv/frank/secrets/owner-notifications/server.yml /srv/frank/secrets/owner-notifications/owner-notifications.env)
+for f in "${configs[@]}"; do [[ -f $f && ! -L $f ]] || fail "missing required private config"; done
+tar -C / -czf "$dir/private-config.tar.gz" "${configs[@]#/}" 2>/dev/null || fail 'private config capture failed'
 (cd "$dir"; sha256sum *.gz > SHA256SUMS)
 printf '{"scope":"local-only","off_host":false,"mautic":"native mysqldump plus config/media","ntfy":"named auth/cache volume plus config","restore_claim":false}\n' > "$dir/receipt.json"
 chmod -R go-rwx "$dir"; echo "$dir"
