@@ -309,13 +309,20 @@ def run_case(
 
 
 
-def ensure_marketing_held(api: Mautic, segment: dict[str, Any]) -> None:
-    if segment.get("isPublished") not in (False, 0):
-        raise AcceptanceError("native source segment was not held unpublished")
+def native_published(item: dict[str, Any], label: str) -> bool:
+    raw = item.get("isPublished")
+    if isinstance(raw, bool):
+        return raw
+    if isinstance(raw, int) and raw in (0, 1):
+        return raw == 1
+    raise AcceptanceError(f"native {label} publication state was malformed")
+
+
+def ensure_marketing_held(api: Mautic) -> None:
     campaigns = api.collection("campaigns", "campaigns")
     if any(
         str(campaign.get("name") or "").startswith("Owner CRM | ")
-        and campaign.get("isPublished") not in (False, 0)
+        and native_published(campaign, "owner campaign")
         for campaign in campaigns
     ):
         raise AcceptanceError("native owner campaign was not held unpublished")
@@ -362,8 +369,13 @@ def run(run_id: str, progress: dict[str, Any]) -> dict[str, Any]:
     resend = provision.Resend(resend_key)
     segment = exact_named(admin, "segments", "lists", SOURCE_SEGMENT)
     segment_id = decimal_id(segment.get("id"), "segment")
-    progress.update({"stage": "checking_marketing_hold", "native_segment_id": segment_id})
-    ensure_marketing_held(admin, segment)
+    source_segment_published = native_published(segment, "source segment")
+    progress.update({
+        "stage": "checking_marketing_hold",
+        "native_segment_id": segment_id,
+        "native_source_segment_published": source_segment_published,
+    })
+    ensure_marketing_held(admin)
     progress["stage"] = "creating_native_email"
     email_id, subject = create_email(admin, run_id, segment_id)
     progress.update({"stage": "native_email_created", "native_email_id": email_id})
@@ -388,6 +400,7 @@ def run(run_id: str, progress: dict[str, Any]) -> dict[str, Any]:
         "status": "accepted",
         "run_id": run_id,
         "native_segment_id": segment_id,
+        "native_source_segment_published": source_segment_published,
         "native_email_id": email_id,
         "native_email_type": "list",
         "native_email_published": False,

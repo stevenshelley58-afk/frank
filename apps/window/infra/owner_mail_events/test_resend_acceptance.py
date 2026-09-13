@@ -112,20 +112,25 @@ class AcceptanceTests(unittest.TestCase):
         self.assertEqual(result["last_event"], "bounced")
         self.assertEqual(resend.call[:2], ("GET", "/emails?limit=100"))
 
-    def test_runtime_hold_rejects_published_owner_campaign_and_running_worker(self):
-        class Api:
+    def test_runtime_hold_accepts_published_source_but_rejects_active_campaign_or_worker(self):
+        self.assertIs(module.native_published({"isPublished": True}, "source segment"), True)
+
+        class ActiveCampaign:
             def collection(self, path, key):
                 return [{"name": "Owner CRM | Education", "isPublished": True}]
         with self.assertRaises(module.AcceptanceError):
-            module.ensure_marketing_held(Api(), {"isPublished": False})
+            module.ensure_marketing_held(ActiveCampaign())
 
         class Held:
             def collection(self, path, key):
                 return [{"name": "Owner CRM | Education", "isPublished": False}]
-        result = mock.Mock(returncode=0, stdout="true\n")
-        with mock.patch.object(module.subprocess, "run", return_value=result):
+        stopped = mock.Mock(returncode=1, stdout="")
+        with mock.patch.object(module.subprocess, "run", return_value=stopped):
+            module.ensure_marketing_held(Held())
+        running = mock.Mock(returncode=0, stdout="true\n")
+        with mock.patch.object(module.subprocess, "run", return_value=running):
             with self.assertRaises(module.AcceptanceError):
-                module.ensure_marketing_held(Held(), {"isPublished": False})
+                module.ensure_marketing_held(Held())
 
     def test_failure_receipt_keeps_safe_stage_and_native_ids(self):
         captured = {}
