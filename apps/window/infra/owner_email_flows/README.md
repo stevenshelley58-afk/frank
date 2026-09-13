@@ -28,8 +28,9 @@ onboarding-booking invitations. Mautic does not duplicate them.
 
 Each bridge enrolment requires immutable profile, workspace and source-event IDs,
 explicit opted-in consent, active nurture state and no native Mautic Do Not
-Contact. The active snapshot has no marketing-consent fact, so no real customer
-is eligible until an authoritative consent source is accepted.
+Contact. The released protected snapshot now carries explicit marketing-consent events and
+verified-owner evidence. No event means ineligible; the live read-only preview on
+13 September found five ungranted customers and no eligible enrolments.
 
 The committed Hermes source adapter consumes verified explicit consent and the
 protected snapshot's raw workspace, trial and billing facts. It selects one
@@ -79,10 +80,11 @@ Copy was revised from canonical VPS product material, not inferred offers:
   not Blockwise product facts and were not used.
 
 All authored copy avoids invented pricing, trial timing, performance claims and
-support promises. It uses no em dash. Installed Mautic cannot save HTML templates
-because its HTML-link validator lacks Symfony DomCrawler, so templates are plain
-text with native preference and global unsubscribe tokens. This avoids open-pixel
-and HTML-link tracking.
+support promises. It uses no em dash. The committed pinned Mautic image includes
+DomCrawler and CssSelector, so the ten native templates now contain HTML and
+plaintext alternatives. Native pixels and trackable URL rewriting are disabled.
+The actual own-mailbox delivery, direct CTA, native unsubscribe and post-DNC
+blocked-send acceptance passed; see evidence/2026-09-13-html-native-acceptance.md.
 
 ## Public consent surface
 
@@ -140,17 +142,11 @@ The actual Mautic 7 route for static membership is
 contact-first route. Native contact totals are returned as decimal JSON strings,
 which the bounded lookup accepts only after strict decimal validation.
 
-## HTML template handoff
+## HTML dependency ownership
 
-The installed `mautic/mautic:7.2-apache` image has no
-`vendor/symfony/dom-crawler` directory, although its lockfile contains optional
-constraints referring to that package. This explains the previously observed
-HTML-link-validation dependency boundary but is not a safe reason to overlay a
-vendor directory. The maintained fix is a separately reviewed, pinned Mautic
-image or Composer build that includes a compatible DomCrawler package, followed
-by a controlled HTML-template save and own-mailbox render test. Until then these
-native templates deliberately remain plain text, with native preference and
-unsubscribe tokens and no tracking pixel.
+The upstream image omitted optional HTML-validation dependencies. The maintained
+fix is the committed, pinned image build in ../owner_marketing/Dockerfile,
+including real Crawler.filter() acceptance. No live vendor overlay is used.
 
 ## Resend bounce and complaint receiver
 
