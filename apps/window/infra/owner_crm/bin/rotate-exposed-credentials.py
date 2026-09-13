@@ -61,7 +61,7 @@ def run():
         raise RuntimeError("crm_root_readback_failed")
     program = """import frappe
 from frappe.utils.password import update_password
-frappe.init(site="owner.crm.internal", sites_path="sites")
+frappe.init(site="owner.crm.internal", sites_path="/home/frappe/frappe-bench/sites")
 frappe.connect()
 try:
     update_password("Administrator", %s, logout_all_sessions=True)
@@ -69,13 +69,13 @@ try:
 finally:
     frappe.destroy()
 """ % repr(replacements["crm_admin"])
-    execute(["docker", "exec", "-i", "-w", "/home/frappe/frappe-bench", "owner-crm-backend-1", "env/bin/python", "-"], program)
+    execute(["docker", "exec", "-i", "-w", "/home/frappe/frappe-bench/sites", "owner-crm-backend-1", "/home/frappe/frappe-bench/env/bin/python", "-"], program)
     crm.update(OWNER_CRM_DB_PASSWORD=replacements["crm_root"], OWNER_CRM_ADMIN_PASSWORD=replacements["crm_admin"])
     provision.write_env(CRM, crm)
     sql("frank-owner-marketing-db", "mysql", marketing["MAUTIC_DB_ROOT_PASSWORD"],
         "ALTER USER 'mautic'@'%' IDENTIFIED BY '" + replacements["marketing_db"] + "';")
     # local.php is the upstream native persistent configuration, not a vendor overlay.
-    php = """$v=json_decode(stream_get_contents(STDIN),true,flags:JSON_THROW_ON_ERROR);
+    php = r"""$v=json_decode(stream_get_contents(STDIN),true,flags:JSON_THROW_ON_ERROR);
 $p='/var/www/html/config/local.php';$parameters=[];include $p;
 if(!is_array($parameters)||!isset($parameters['db_password']))exit(2);
 $parameters['db_password']=$v['password'];
