@@ -62,6 +62,14 @@ class SourceAdapterTests(unittest.TestCase):
         fact = adapter.map_consent_fact(row(ownerEmailVerifiedAt=None, marketingConsent={"eventId": EVENT_ID, "granted": False, "occurredAt": "2026-09-14T00:00:00Z", "policyVersion": "2026-09-13"}))
         self.assertEqual(fact.state, "revoked")
 
+    def test_regrant_is_a_new_eligible_fact_but_never_reuses_the_revocation_event(self):
+        revoked = adapter.map_consent_fact(row(marketingConsent={"eventId": EVENT_ID, "granted": False, "occurredAt": "2026-09-14T00:00:00Z", "policyVersion": "2026-09-13"}))
+        regrant_id = "30000000-0000-4000-8000-000000000004"
+        regranted = adapter.map_consent_fact(row(marketingConsent={"eventId": regrant_id, "granted": True, "occurredAt": "2026-09-15T00:00:00Z", "policyVersion": "2026-09-13"}))
+        self.assertEqual(revoked.state, "revoked")
+        self.assertEqual(regranted.state, "granted")
+        self.assertNotEqual(revoked.event_id, regranted.event_id)
+
     def test_missing_event_id_rejects_malformed_consent(self):
         with self.assertRaisesRegex(adapter.AdapterError, "event id"):
             adapter.map_consent_fact(row(marketingConsent={"eventId": None, "granted": True, "occurredAt": "2026-09-13T00:00:00Z", "policyVersion": "2026-09-13"}))
