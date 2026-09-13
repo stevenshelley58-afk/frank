@@ -188,6 +188,7 @@ class PlanningTests(unittest.TestCase):
                 "custom_blockwise_trial_ends_at": "2026-09-15 00:00:00",
                 "custom_blockwise_source_observed_at": "2026-09-13 00:00:00",
                 "custom_blockwise_sync_state": "synced",
+                "email_ids": [{"email_id":"sole-owner@example.test", "is_primary":1}],
             },
         )
         plan = sync.plan_snapshot(
@@ -448,6 +449,16 @@ class RegressionTests(unittest.TestCase):
         with self.assertRaises(sync.ConnectorError):
             sync.run(snapshot_client=Cycle(), store=store, apply=True)
         self.assertEqual(store.created, [])
+
+    def test_changed_source_email_preserves_existing_primary(self):
+        store = FakeStore()
+        row = snapshot_row()
+        sync.apply_plan(store, sync.map_snapshot_row(row))
+        row["owner"]["email"] = "changed@example.test"
+        self.assertEqual(sync.apply_plan(store, sync.map_snapshot_row(row)), "update")
+        emails = store.contacts[store.created[0]].values["email_ids"]
+        self.assertEqual(emails, [{"email_id":"sole-owner@example.test", "is_primary":1},
+                                 {"email_id":"changed@example.test", "is_primary":0}])
 
     def test_numeric_native_task_name_is_supported(self):
         store = sync.FrappeContactStore()

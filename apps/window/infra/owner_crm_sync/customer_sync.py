@@ -678,6 +678,17 @@ def _to_frappe_datetime(value: str | None) -> str | None:
     return _normalise_timestamp(value)
 
 
+def _contact_email_patch(contact: MirrorRecord, email: str) -> dict[str, Any]:
+    """Append a changed source email without deleting alternatives or stealing primary."""
+    rows = contact.values.get("email_ids") or []
+    if not isinstance(rows, list) or len(rows) > 100:
+        raise ConnectorError("owner CRM contact emails exceed the safe bound")
+    if any(str(row.get("email_id", "")).lower() == email.lower() for row in rows):
+        return {}
+    primary = any(row.get("is_primary") in (1, True, "1") for row in rows)
+    return {"email_ids": [*rows, {"email_id": email, "is_primary": int(not primary)}]}
+
+
 def _comparison_value(key: str, value: Any) -> str:
     if key in MIRROR_DATETIME_FIELDS:
         return _normalise_timestamp(value) or ""
@@ -814,6 +825,7 @@ def plan_snapshot(
         for key, value in values.items()
         if _comparison_value(key, contact.values.get(key)) != _comparison_value(key, value)
     }
+    changed.update(_contact_email_patch(contact, snapshot.owner.email))
     if not changed:
         return PlannedWrite(
             action="unchanged",
@@ -933,8 +945,11 @@ def apply_plan(
                 for key, value in values.items()
                 if _comparison_value(key, contact.values.get(key)) != _comparison_value(key, value)
             }
+            email_patch = _contact_email_patch(contact, snapshot.owner.email)
+            changed.update(email_patch)
             if not changed:
                 return "unchanged"
+            values.update(email_patch)
             modified = contact.values.get("modified")
             if not modified:
                 raise ConnectorError("owner CRM did not supply a concurrency token")
@@ -945,11 +960,13 @@ def apply_plan(
                 confirmed = store.get_contact(contact.name)
                 if confirmed is None or any(
                     _comparison_value(k, confirmed.values.get(k)) != _comparison_value(k, v)
-                    for k, v in values.items() if k != "modified"
+                    for k, v in values.items() if k in MIRROR_FIELDS
                 ) or _normalise_timestamp(
                     confirmed.values.get("custom_blockwise_last_synced_at")
                 ) != _normalise_timestamp(values["custom_blockwise_last_synced_at"]):
                     raise ConnectorError("owner CRM did not confirm the update")
+                if _contact_email_patch(confirmed, snapshot.owner.email):
+                    raise ConnectorError("owner CRM did not confirm the source email")
                 return "update"
             except ConnectorError as exc:
                 last_error = exc
