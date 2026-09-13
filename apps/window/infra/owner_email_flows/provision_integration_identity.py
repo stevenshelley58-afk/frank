@@ -20,10 +20,13 @@ RUNTIME_SECRET = Path("/srv/hermes/secrets/owner-email-flows.env")
 ROLE = "Owner email consent bridge"
 USERNAME = "owner-email-bridge"
 PERMISSIONS = {
-    "lead:leads": ["viewother", "create", "editother"],
+    # Mautic treats a freshly-created bridge contact as its creator's own
+    # record, so both own and other contact access are needed for replay.
+    "lead:leads": ["viewown", "viewother", "create", "editown", "editother"],
     "lead:fields": ["viewother"],
     # Mautic authorizes static-segment membership through the segment edit
-    # capability. It is the narrowest native permission for its add-contact API.
+    # capability. This is broader than membership alone, but is the narrowest
+    # native permission available for its add-contact API.
     "lead:lists": ["viewother", "editother"],
     "campaign:campaigns": ["viewother"],
     "email:emails": ["viewother"],

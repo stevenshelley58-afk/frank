@@ -90,6 +90,10 @@ email address.
 A latest granted event with a verified email enrols only opted-in education. A
 latest revoked event writes Mautic email Do Not Contact and stops nurture. The
 adapter has no reply or conversion source, so it does not claim those exits are
-connected. Hermes installation creates the no-agent job Owner email consent
-bridge every 15 minutes in a paused state. Root alone may install its dedicated
-Mautic API credential and resume it after the controlled recipient test.
+connected. Its dedicated Mautic role has contact create/view/edit access plus
+the native static-segment edit capability required for membership. Mautic has no
+membership-only permission, so that segment edit capability is broader than the
+adapter needs and does not grant campaign, email, publish, send, delete or admin
+access. Hermes installation creates the no-agent job Owner email consent bridge
+every 15 minutes in a paused state. Root alone may install its dedicated Mautic
+API credential and resume it after the controlled recipient test.
