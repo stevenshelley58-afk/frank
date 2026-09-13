@@ -77,7 +77,7 @@ class FrappeLeadStore:
     if not isinstance(data,list) or len(data)>1: raise IntakeError("native source identity is ambiguous")
     return data[0] if data else None
  def create(self,item:LeadRequest):
-    payload={"lead_name":item.name,"email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
+    payload={"lead_name":item.name,"first_name":item.name.split(None, 1)[0],"status":"New","email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
     if item.phone: payload["mobile_no"]=item.phone
     if item.agency: payload["organization"]=item.agency
     data=self.request("POST","/api/resource/CRM%20Lead",payload).get("data")

@@ -15,7 +15,7 @@ class IntakeTests(unittest.TestCase):
   bad=dict(RAW); bad["sourceKey"]="blockwise_research_agent:"+RAW["sourceEventId"]
   with self.assertRaises(IntakeError): map_item(bad)
  def test_create_payload_has_review_state_without_consent_or_sending_fields(self):
-  item=map_item(RAW); payload={"lead_name":item.name,"email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
-  self.assertEqual(payload[ELIGIBILITY_FIELD],"review_required")
+  item=map_item(RAW); payload={"lead_name":item.name,"first_name":item.name.split(None, 1)[0],"status":"New","email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
+  self.assertEqual(payload[ELIGIBILITY_FIELD],"review_required"); self.assertEqual(payload["status"],"New")
   self.assertFalse(any("consent" in k or "send" in k for k in payload))
 if __name__=="__main__": unittest.main()
