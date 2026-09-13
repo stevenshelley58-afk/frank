@@ -101,6 +101,24 @@ requires the explicitly enabled native site and running scheduler. Backend and
 queue workers have a separate egress bridge for SMTP/IMAP; database and Redis do not. A green compose configuration or image
 build alone is not runtime evidence.
 
+## One controlled Helpdesk reply acceptance
+
+`bin/support-reply-acceptance.py` is bounded to ticket `0003`. Preview mode
+logs in as the fixed owner Agent and reads the controlled ticket, parent
+Communication, native reply flag and current thread parent. It neither enables
+mail nor sends. `--execute` is reserved for a separate explicit run after the
+commit is on `main`.
+
+Execution calls native `HD Ticket.reply_via_agent` with `dt` and `dn`, so
+Frappe loads the stored ticket. Before that call, the helper atomically records
+a unique marker in a root-only receipt and takes a single-instance lock. A
+restart with a non-final receipt only reconciles that marker and never sends it
+again. Acceptance requires the linked native Email Queue to reach exactly
+`Sent`, then exact parsed `From`, `To`, `Subject` and `In-Reply-To` headers plus
+the marker in the decoded read-only mailbox body. Administrator credentials are
+used only for the thread-parent and Email Queue proofs. The reply itself is
+made by `owner@blockwise.sale`.
+
 ## Private owner web access
 
 `python3 bin/private-access.py` previews existing native Tailscale Serve configuration; `--apply` adds only private HTTPS ports 8445 (CRM) and 8446 (ntfy). Existing Serve services are preserved, occupied ports and public Funnel flags are rejected, and native CRM/ntfy authentication remains required. No public CRM ingress, custom proxy, or new account is created. An enrolled phone with Tailscale plus native ntfy setup is still required for actual mobile notification receipt.
