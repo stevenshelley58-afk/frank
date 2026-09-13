@@ -12,8 +12,13 @@ UNSUBSCRIBE_HASH=re.compile(r"https://mail\.blockwise\.sale/email/unsubscribe/([
 MAX_BODY_BYTES=64*1024
 SVIX_TOLERANCE_SECONDS=300
 SOURCE_SEGMENT_NAMES=("Owner CRM | Onboarding and trial help","Owner CRM | Trial ending","Owner CRM | Trial ended","Owner CRM | Opted-in education","Owner CRM | Paid welcome","Owner CRM | Cancellation follow-up","Owner CRM | Winback")
-class OwnerMailEventError(RuntimeError): pass
-class OwnerMailEventUnavailable(RuntimeError): pass
+SAFE_ERROR_CODES=frozenset({"signature_invalid","signature_expired","payload_rejected","recipient_rejected","upstream_lookup_rejected","upstream_lookup_unavailable","native_write_rejected","native_write_unavailable","processing_rejected"})
+class OwnerMailEventError(RuntimeError):
+ def __init__(self,message="owner mail event rejected",*,safe_code="processing_rejected"):
+  super().__init__(message); self.safe_code=safe_code if safe_code in SAFE_ERROR_CODES else "processing_rejected"
+class OwnerMailEventUnavailable(RuntimeError):
+ def __init__(self,message="owner mail event unavailable",*,safe_code="upstream_lookup_unavailable"):
+  super().__init__(message); self.safe_code=safe_code if safe_code in SAFE_ERROR_CODES else "upstream_lookup_unavailable"
 class JsonHttp(Protocol):
  def request(self,method:str,url:str,headers:Mapping[str,str],payload:dict[str,Any]|None=None)->dict[str,Any]: ...
 @dataclass(frozen=True)
@@ -44,32 +49,40 @@ class UrlLibJsonHttp:
   return value
 def _header(headers,name): return next((str(value) for key,value in headers.items() if str(key).lower()==name),"")
 def verify_svix(raw:bytes,headers:Mapping[str,str],secret:str,now:float|None=None)->dict[str,Any]:
- if not raw or len(raw)>MAX_BODY_BYTES or not secret.startswith("whsec_"): raise OwnerMailEventError("invalid signature")
+ if not raw or len(raw)>MAX_BODY_BYTES or not secret.startswith("whsec_"): raise OwnerMailEventError("invalid signature",safe_code="signature_invalid")
  ident,stamp,signatures=(_header(headers,key) for key in ("svix-id","svix-timestamp","svix-signature"))
- if not ident or len(ident)>128 or not stamp or not signatures: raise OwnerMailEventError("invalid signature")
+ if not ident or len(ident)>128 or not stamp or not signatures: raise OwnerMailEventError("invalid signature",safe_code="signature_invalid")
  try: ts=int(stamp); key=base64.b64decode(secret[6:],validate=True)
- except (ValueError,binascii.Error) as error: raise OwnerMailEventError("invalid signature") from error
- if not key or abs((time.time() if now is None else now)-ts)>SVIX_TOLERANCE_SECONDS: raise OwnerMailEventError("expired signature")
+ except (ValueError,binascii.Error) as error: raise OwnerMailEventError("invalid signature",safe_code="signature_invalid") from error
+ if not key or abs((time.time() if now is None else now)-ts)>SVIX_TOLERANCE_SECONDS: raise OwnerMailEventError("expired signature",safe_code="signature_expired")
  expected=base64.b64encode(hmac.new(key,(ident+"."+stamp+".").encode()+raw,hashlib.sha256).digest()).decode()
  candidates=[part[3:] for part in signatures.split() if part.startswith("v1,")]
- if not candidates or not any(hmac.compare_digest(value,expected) for value in candidates): raise OwnerMailEventError("invalid signature")
+ if not candidates or not any(hmac.compare_digest(value,expected) for value in candidates): raise OwnerMailEventError("invalid signature",safe_code="signature_invalid")
  try: event=json.loads(raw.decode())
- except (UnicodeDecodeError,json.JSONDecodeError) as error: raise OwnerMailEventError("invalid payload") from error
- if not isinstance(event,dict) or not isinstance(event.get("type"),str): raise OwnerMailEventError("invalid payload")
+ except (UnicodeDecodeError,json.JSONDecodeError) as error: raise OwnerMailEventError("invalid payload",safe_code="payload_rejected") from error
+ if not isinstance(event,dict) or not isinstance(event.get("type"),str): raise OwnerMailEventError("invalid payload",safe_code="payload_rejected")
  return event
 def _basic(username,password): return "Basic "+base64.b64encode(f"{username}:{password}".encode()).decode()
+def _lookup(client,method,url,headers,payload=None):
+ try: return client.request(method,url,headers,payload)
+ except OwnerMailEventUnavailable as error: raise OwnerMailEventUnavailable("upstream lookup unavailable",safe_code="upstream_lookup_unavailable") from error
+ except OwnerMailEventError as error: raise OwnerMailEventError("upstream lookup rejected",safe_code="upstream_lookup_rejected") from error
+def _write(client,method,url,headers,payload=None):
+ try: return client.request(method,url,headers,payload)
+ except OwnerMailEventUnavailable as error: raise OwnerMailEventUnavailable("native write unavailable",safe_code="native_write_unavailable") from error
+ except OwnerMailEventError as error: raise OwnerMailEventError("native write rejected",safe_code="native_write_rejected") from error
 def _contact_value(contact,name):
  fields=contact.get("fields"); all_fields=fields.get("all") if isinstance(fields,dict) else None
  return all_fields.get(name) if isinstance(all_fields,dict) else contact.get(name)
 def _recipients(value):
- if not isinstance(value,list) or len(value)!=1: raise OwnerMailEventError("provider recipient list was malformed")
+ if not isinstance(value,list) or len(value)!=1: raise OwnerMailEventError("provider recipient list was malformed",safe_code="recipient_rejected")
  item=value[0]; raw=item if isinstance(item,str) else item.get("email") if isinstance(item,dict) else None
- if not isinstance(raw,str) or not raw or len(raw)>998 or any(character in raw for character in ("\r","\n","\x00")): raise OwnerMailEventError("provider recipient was malformed")
+ if not isinstance(raw,str) or not raw or len(raw)>998 or any(character in raw for character in ("\r","\n","\x00")): raise OwnerMailEventError("provider recipient was malformed",safe_code="recipient_rejected")
  header=Parser(policy=policy.default).parsestr("To: "+raw+"\n\n").get("To")
- if header is None or header.defects or len(header.addresses)!=1 or len(header.groups)!=1 or header.groups[0].display_name is not None: raise OwnerMailEventError("provider recipient was malformed")
+ if header is None or header.defects or len(header.addresses)!=1 or len(header.groups)!=1 or header.groups[0].display_name is not None: raise OwnerMailEventError("provider recipient was malformed",safe_code="recipient_rejected")
  parsed=header.addresses[0]; display,address=parsed.display_name,parsed.addr_spec.strip().lower()
- if isinstance(item,dict) and display: raise OwnerMailEventError("provider recipient was malformed")
- if len(address)>254 or not re.fullmatch(r"[^\s<>,;@]+@[^\s<>,;@]+",address): raise OwnerMailEventError("provider recipient was malformed")
+ if isinstance(item,dict) and display: raise OwnerMailEventError("provider recipient was malformed",safe_code="recipient_rejected")
+ if len(address)>254 or not re.fullmatch(r"[^\s<>,;@]+@[^\s<>,;@]+",address): raise OwnerMailEventError("provider recipient was malformed",safe_code="recipient_rejected")
  return {address}
 def _tracking_hash(provider):
  # Resend's returned stored render is the proof. Do not accept a matching
@@ -79,7 +92,7 @@ def _tracking_hash(provider):
  if len(hashes)!=1: raise OwnerMailEventError("provider email has no unique Mautic tracking hash")
  return hashes.pop()
 def _segments(http,cfg,headers):
- raw=http.request("GET",cfg.mautic_url+"/api/segments?limit=100",headers).get("lists")
+ raw=_lookup(http,"GET",cfg.mautic_url+"/api/segments?limit=100",headers).get("lists")
  values=list(raw.values()) if isinstance(raw,dict) else raw if isinstance(raw,list) else None
  if not isinstance(values,list): raise OwnerMailEventError("Mautic segments response was malformed")
  found={}
@@ -94,19 +107,19 @@ def process_event(raw:bytes,headers:Mapping[str,str],cfg:OwnerMailEventsConfig,h
  event=verify_svix(raw,headers,cfg.svix_secret,now)
  if event["type"] not in EVENT_TYPES: return "ignored"
  data=event.get("data"); email_id=data.get("email_id") if isinstance(data,dict) else None
- if not isinstance(email_id,str) or not UUID.fullmatch(email_id): raise OwnerMailEventError("invalid provider email ID")
+ if not isinstance(email_id,str) or not UUID.fullmatch(email_id): raise OwnerMailEventError("invalid provider email ID",safe_code="payload_rejected")
  client=http or UrlLibJsonHttp()
- provider=client.request("GET","https://api.resend.com/emails/"+email_id,{"Authorization":"Bearer "+cfg.resend_api_key,"Accept":"application/json","User-Agent":"resend-node:6.18.1"})
+ provider=_lookup(client,"GET","https://api.resend.com/emails/"+email_id,{"Authorization":"Bearer "+cfg.resend_api_key,"Accept":"application/json","User-Agent":"resend-node:6.18.1"})
  if provider.get("id") != email_id: raise OwnerMailEventError("provider message identity mismatch")
  tracking_hash=_tracking_hash(provider); mautic_headers={"Authorization":_basic(cfg.mautic_username,cfg.mautic_password),"Accept":"application/json"}
  query=urllib.parse.urlencode({"limit":"2","where[0][col]":"tracking_hash","where[0][expr]":"eq","where[0][val]":tracking_hash})
- stats=client.request("GET",cfg.mautic_url+"/api/stats/email_stats?"+query,mautic_headers).get("stats")
+ stats=_lookup(client,"GET",cfg.mautic_url+"/api/stats/email_stats?"+query,mautic_headers).get("stats")
  if not isinstance(stats,list) or len(stats)!=1 or not isinstance(stats[0],dict): raise OwnerMailEventError("Mautic tracking hash did not resolve exactly one email statistic")
  stat=stats[0]; email,lead=stat.get("email_address"),stat.get("lead_id")
  if isinstance(lead,str) and re.fullmatch(r"[1-9][0-9]{0,14}",lead): lead=int(lead)
  if not isinstance(email,str) or isinstance(lead,bool) or not isinstance(lead,int) or lead<1: raise OwnerMailEventError("Mautic email statistic was malformed")
- if _recipients(provider.get("to")) != {email.strip().lower()} or _recipients(data.get("to")) != {email.strip().lower()}: raise OwnerMailEventError("provider recipient did not match native statistic")
- contact=client.request("GET",cfg.mautic_url+f"/api/contacts/{lead}",mautic_headers).get("contact")
+ if _recipients(provider.get("to")) != {email.strip().lower()} or _recipients(data.get("to")) != {email.strip().lower()}: raise OwnerMailEventError("provider recipient did not match native statistic",safe_code="recipient_rejected")
+ contact=_lookup(client,"GET",cfg.mautic_url+f"/api/contacts/{lead}",mautic_headers).get("contact")
  if not isinstance(contact,dict) or contact.get("id") not in (lead,str(lead)): raise OwnerMailEventError("Mautic statistic contact did not resolve exactly")
  profile,workspace=_contact_value(contact,"blockwise_profile_id"),_contact_value(contact,"blockwise_workspace_id")
  if not all(isinstance(value,str) and UUID.fullmatch(value) for value in (profile,workspace)): raise OwnerMailEventError("Mautic contact immutable identity is invalid")
@@ -114,7 +127,7 @@ def process_event(raw:bytes,headers:Mapping[str,str],cfg:OwnerMailEventsConfig,h
  if not isinstance(contact_email,str) or contact_email.strip().lower()!=email.strip().lower(): raise OwnerMailEventError("Mautic contact email identity drift")
  records=contact.get("doNotContact",[])
  if not isinstance(records,list) or any(not isinstance(record,dict) for record in records): raise OwnerMailEventError("Mautic contact DNC state was malformed")
- for segment_id in _segments(client,cfg,mautic_headers).values(): client.request("POST",cfg.mautic_url+f"/api/segments/{segment_id}/contact/{lead}/remove",mautic_headers)
+ for segment_id in _segments(client,cfg,mautic_headers).values(): _write(client,"POST",cfg.mautic_url+f"/api/segments/{segment_id}/contact/{lead}/remove",mautic_headers)
  if not any(str(record.get("channel") or "").lower()=="email" for record in records): records=[*records,{"channel":"email","reason":3}]
- client.request("PATCH",cfg.mautic_url+f"/api/contacts/{lead}/edit",mautic_headers,{"doNotContact":records,"blockwise_nurture_exit":"stopped"})
+ _write(client,"PATCH",cfg.mautic_url+f"/api/contacts/{lead}/edit",mautic_headers,{"doNotContact":records,"blockwise_nurture_exit":"stopped"})
  return "suppressed"

@@ -15,9 +15,10 @@ def signed(event):
  return raw,{"svix-id":ident,"svix-timestamp":stamp,"svix-signature":"v1,"+sig}
 
 class FakeHttp:
- def __init__(self,collision=False,unavailable=False,provider_to=None): self.calls=[]; self.collision=collision; self.unavailable=unavailable; self.provider_to=provider_to or ['"Owner, CRM" <owner@example.test>']
+ def __init__(self,collision=False,unavailable=False,provider_to=None,write_error=False): self.calls=[]; self.collision=collision; self.unavailable=unavailable; self.provider_to=provider_to or ['"Owner, CRM" <owner@example.test>']; self.write_error=write_error
  def request(self,method,url,headers,payload=None):
   self.calls.append((method,url,payload))
+  if self.write_error and method in {"POST","PATCH"}: raise events.OwnerMailEventError("native-secret-marker")
   if self.unavailable and "api.resend.com" in url: raise events.OwnerMailEventUnavailable("temporary")
   if "api.resend.com" in url: return {"id":EMAIL,"to":self.provider_to,"html":"https://mail.blockwise.sale/email/unsubscribe/abc123/recipient/secret"}
   if "/stats/" in url:
@@ -31,15 +32,22 @@ class OwnerMailEventsTests(unittest.TestCase):
  def setUp(self): self.cfg=events.OwnerMailEventsConfig(SECRET,"key","http://mautic","role","password")
  def payload(self): return {"type":"email.bounced","data":{"email_id":EMAIL,"to":[{"email":"owner@example.test"}]}}
  def test_unsigned_is_rejected_before_lookup(self):
-  with self.assertRaises(events.OwnerMailEventError): events.process_event(b"{}",{},self.cfg,http=FakeHttp(),now=1000)
+  with self.assertRaises(events.OwnerMailEventError) as captured: events.process_event(b"{}",{},self.cfg,http=FakeHttp(),now=1000)
+  self.assertEqual(captured.exception.safe_code,"signature_invalid")
  def test_collision_is_rejected_without_mutation(self):
   raw,headers=signed(self.payload()); fake=FakeHttp(collision=True)
   with self.assertRaises(events.OwnerMailEventError): events.process_event(raw,headers,self.cfg,fake,1000)
   self.assertFalse(any(method in {"PATCH","POST"} for method,_,_ in fake.calls))
  def test_provider_503_is_retryable_without_mutation(self):
   raw,headers=signed(self.payload()); fake=FakeHttp(unavailable=True)
-  with self.assertRaises(events.OwnerMailEventUnavailable): events.process_event(raw,headers,self.cfg,fake,1000)
+  with self.assertRaises(events.OwnerMailEventUnavailable) as captured: events.process_event(raw,headers,self.cfg,fake,1000)
+  self.assertEqual(captured.exception.safe_code,"upstream_lookup_unavailable")
   self.assertEqual(len(fake.calls),1)
+ def test_native_write_failure_has_only_constant_safe_code(self):
+  raw,headers=signed(self.payload()); fake=FakeHttp(write_error=True)
+  with self.assertRaises(events.OwnerMailEventError) as captured: events.process_event(raw,headers,self.cfg,fake,1000)
+  self.assertEqual(captured.exception.safe_code,"native_write_rejected")
+  self.assertNotIn("native-secret-marker",captured.exception.safe_code)
  def test_replay_is_native_idempotent(self):
   raw,headers=signed(self.payload()); fake=FakeHttp()
   self.assertEqual(events.process_event(raw,headers,self.cfg,fake,1000),"suppressed")
