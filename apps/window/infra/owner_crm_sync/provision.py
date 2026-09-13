@@ -87,7 +87,7 @@ def main():
     if len(secret)<32 or secret in {values.get("BLOCKWISE_INTERNAL_AUTH_SECRET"), values.get("BLOCKWISE_INTERNAL_SECRET")}:
         raise SystemExit("dedicated snapshot key required")
     subprocess.run(["docker", "exec", "owner-crm-backend-1", "bench", "--site", "owner.crm.internal",
-        "set-config", "server_script_enabled", "true", "--parse"], check=True, stdout=subprocess.DEVNULL)
+        "set-config", "server_script_enabled", "True", "--parse"], check=True, stdout=subprocess.DEVNULL)
     result=subprocess.run(["docker","exec","-i","-w","/home/frappe/frappe-bench/sites","owner-crm-backend-1","/home/frappe/frappe-bench/env/bin/python","-"],
         input=NATIVE, text=True, capture_output=True)
     if result.returncode:
