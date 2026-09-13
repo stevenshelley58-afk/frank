@@ -7,6 +7,9 @@ script=blockwise-mautic-replies
 image='debian:bookworm-slim@sha256:88200866dfff7ea7f5cbcb6ec7c8a701889efe6fe859fe64d6990e4b07ea4171'
 backup=/srv/frank/backups/owner-mail-sieve
 die(){ echo "support sieve: $*" >&2; exit 1; }
+apply=0; activate=0
+for arg in "$@"; do case "$arg" in --apply) apply=1;; --activate-sieve) activate=1;; *) die "unknown-argument";; esac; done
+(( !activate || apply )) || die --activate-sieve-requires-apply
 [[ $(id -u) -eq 0 ]] || die run-as-root
 [[ -f $secret && ! -L $secret && $(stat -c '%U:%a' $secret) == root:600 ]] || die unsafe-secret
 source "$secret"
@@ -46,11 +49,20 @@ listed=$(run --list) || die list-failed
 [[ $listed == *"$script"* ]] || die expected-owned-script-missing
 run --remotesieve "$script" --localsieve /work/current.sieve --download || die download-failed
 sed -i 's/\r$//' "$tmp/current.sieve"
+# A Sieve fileinto target must exist before its script can be activated. This
+# uses the existing private mailbox login only, and never reads or moves mail.
+export PURELYMAIL_USERNAME PURELYMAIL_PASSWORD
+folder_mode=check; ((apply)) && folder_mode=create
+export FOLDER_MODE="$folder_mode"
+python3 -c 'import os,json; print(json.dumps({"user":os.environ["PURELYMAIL_USERNAME"],"password":os.environ["PURELYMAIL_PASSWORD"],"mode":os.environ["FOLDER_MODE"]}))' | docker exec -i "$container" php -r '
+  $v=json_decode(stream_get_contents(STDIN),true,flags:JSON_THROW_ON_ERROR);$base="{imap.purelymail.com:993/ssl}";$s=@imap_open($base."INBOX",$v["user"],$v["password"],OP_HALFOPEN);if(!$s)exit(2);$target=imap_utf7_encode($base."Support");$ok=imap_reopen($s,$target,OP_HALFOPEN);if(!$ok&&$v["mode"]==="create"){$ok=imap_createmailbox($s,$target)&&imap_reopen($s,$target,OP_HALFOPEN);}imap_close($s);if(!$ok)exit(3);
+' || die native-imap-support-folder-unavailable
 # The exact prior owned script is the sole migration source; any other edit is
 # held rather than overwritten.
-if cmp -s "$tmp/current.sieve" "$tmp/desired.sieve"; then echo '{"status":"unchanged"}'; exit 0; fi
+if cmp -s "$tmp/current.sieve" "$tmp/desired.sieve"; then echo '{"status":"unchanged","support_folder":"checked"}'; exit 0; fi
 cmp -s "$tmp/current.sieve" "$tmp/base.sieve" || die owned-script-drift-refusing-to-overwrite
 run --localsieve /work/desired.sieve --checkscript || die provider-rejected-script
+if (( !activate )); then echo '{"status":"sieve_held","support_folder":"checked","mail_moved":false}'; exit 0; fi
 install -d -o root -g root -m 0700 "$backup"
 stamp=$(date -u +%Y%m%dT%H%M%SZ); install -o root -g root -m 0600 "$tmp/current.sieve" "$backup/$script.$stamp.sieve"
 run --localsieve /work/desired.sieve --remotesieve "$script" --upload || die upload-failed
