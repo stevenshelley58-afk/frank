@@ -22,7 +22,9 @@ USERNAME = "owner-email-bridge"
 PERMISSIONS = {
     "lead:leads": ["viewother", "create", "editother"],
     "lead:fields": ["viewother"],
-    "lead:lists": ["viewother"],
+    # Mautic authorizes static-segment membership through the segment edit
+    # capability. It is the narrowest native permission for its add-contact API.
+    "lead:lists": ["viewother", "editother"],
     "campaign:campaigns": ["viewother"],
     "email:emails": ["viewother"],
 }
