@@ -63,7 +63,7 @@ def segment_payload() -> dict[str, Any]:
     return {
         "name": SEGMENT_NAME,
         "description": SEGMENT_DESCRIPTION,
-        "isPublished": True,
+        "isPublished": False,
         "isGlobal": True,
         "filters": desired_filters(),
     }
@@ -76,8 +76,16 @@ def ensure_segment(api: Mautic, apply: bool) -> dict[str, Any] | None:
         segment = api.request("POST", "segments/new", desired).get("list", {})
     if segment is None:
         return None
-    if not segment.get("isPublished") or filter_signature(segment.get("filters")) != filter_signature(desired["filters"]):
+    if filter_signature(segment.get("filters")) != filter_signature(desired["filters"]):
         raise ApiError("newsletter audience drift: expected only opted_in consent and active nurture")
+    if segment.get("isPublished") not in (False, 0):
+        if not apply:
+            raise ApiError("newsletter audience must remain unpublished")
+        segment = api.request(
+            "PATCH", f"segments/{int(segment['id'])}/edit", {"isPublished": False}
+        ).get("list", {})
+    if segment.get("isPublished") not in (False, 0):
+        raise ApiError("newsletter audience must remain unpublished")
     return segment
 
 

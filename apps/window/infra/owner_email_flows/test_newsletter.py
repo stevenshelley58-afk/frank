@@ -38,6 +38,10 @@ class FakeMautic:
                 item["lists"] = [{"id": value} for value in payload["lists"]]
             self.store[store].append(item)
             return {response: item}
+        if method == "PATCH" and path.startswith("segments/") and path.endswith("/edit"):
+            item = next(item for item in self.store["lists"] if item["id"] == int(path.split("/")[1]))
+            item.update(payload)
+            return {"list": item}
         raise AssertionError((method, path, payload))
 
 
@@ -51,6 +55,7 @@ class NewsletterTests(unittest.TestCase):
         self.assertEqual(call_count, len(api.calls))
         self.assertEqual(first["audience_filters"], 2)
         email = api.store["emails"][0]
+        self.assertFalse(api.store["lists"][0]["isPublished"])
         self.assertEqual(email["emailType"], "list")
         self.assertFalse(email["isPublished"])
         self.assertEqual(email["lists"], [{"id": 1}])
@@ -63,6 +68,14 @@ class NewsletterTests(unittest.TestCase):
         api.calls.clear()
         newsletter.setup(api, apply=True)
         self.assertEqual(api.calls, [])
+
+    def test_replay_can_only_unpublish_the_owned_segment(self):
+        api = FakeMautic()
+        newsletter.setup(api, apply=True)
+        api.store["lists"][0]["isPublished"] = True
+        api.calls.clear()
+        newsletter.setup(api, apply=True)
+        self.assertEqual(api.calls, [("PATCH", "segments/1/edit", {"isPublished": False})])
 
     def test_audience_is_only_explicit_current_newsletter_consent(self):
         filters = newsletter.desired_filters()
