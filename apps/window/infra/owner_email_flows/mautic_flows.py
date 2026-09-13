@@ -470,7 +470,7 @@ def bridge(api: Mautic, args: argparse.Namespace) -> None:
     if has_email_dnc(contact):
         raise ApiError("contact has native Mautic Do Not Contact; enrolment refused")
     segments = ensure_segments(api, apply=False)
-    api.request("POST", f"contacts/{contact_id}/segments/{segments[flow.key]}/add")
+    api.request("POST", f"segments/{segments[flow.key]}/contact/{contact_id}/add")
     # Segment membership is Mautic's idempotency authority. Record source
     # metadata only after it confirms membership, so a replay repairs a
     # create-or-patch failure rather than being skipped by a last-event marker.

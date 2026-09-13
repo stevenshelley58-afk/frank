@@ -102,12 +102,12 @@ class FakeBridgeMautic:
             contact["fields"]["all"].update(payload)
             self.contacts.append(contact)
             return {"contact": self.create_response if self.create_response is not None else contact}
-        if method == "POST" and "/segments/" in path and path.endswith("/add"):
+        if method == "POST" and path.startswith("segments/") and "/contact/" in path and path.endswith("/add"):
             if self.fail_segment_once:
                 self.fail_segment_once = False
                 raise flows.ApiError("segment membership was unavailable")
-            contact_id = int(path.split("/")[1])
-            segment_id = int(path.split("/")[3])
+            segment_id = int(path.split("/")[1])
+            contact_id = int(path.split("/")[3])
             self.memberships.add((contact_id, segment_id))
             return {"contact": next(contact for contact in self.contacts if contact["id"] == contact_id)}
         if method == "PATCH" and path.startswith("contacts/") and path.endswith("/edit"):
@@ -218,7 +218,7 @@ class FlowTests(unittest.TestCase):
         flows.bridge(api, bridge_args(source_event_id=EVENT_ONE))
         flows.bridge(api, bridge_args(source_event_id=EVENT_OLD))
         flows.bridge(api, bridge_args(source_event_id=EVENT_NEW))
-        segment_adds = [call for call in api.calls if call[0] == "POST" and "/segments/" in call[1]]
+        segment_adds = [call for call in api.calls if call[0] == "POST" and call[1].startswith("segments/")]
         self.assertEqual(len(segment_adds), 3)
         self.assertEqual(api.memberships, {(1, 4)})
         self.assertEqual(api.contacts[0]["fields"]["all"]["blockwise_source_event_id"], EVENT_NEW)
