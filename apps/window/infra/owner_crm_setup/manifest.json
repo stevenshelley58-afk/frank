@@ -38,6 +38,63 @@
       "read_only": 0
     },
     {
+      "name": "Contact-custom_blockwise_trial_state",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_trial_state",
+      "label": "Blockwise trial state",
+      "fieldtype": "Data",
+      "unique": 0,
+      "read_only": 1,
+      "description": "Read-only native Blockwise trial state mirror. Not an access decision."
+    },
+    {
+      "name": "Contact-custom_blockwise_trial_started_at",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_trial_started_at",
+      "label": "Blockwise trial started at",
+      "fieldtype": "Datetime",
+      "unique": 0,
+      "read_only": 1,
+      "description": "Read-only native Blockwise trial start fact mirror."
+    },
+    {
+      "name": "Contact-custom_blockwise_trial_ends_at",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_trial_ends_at",
+      "label": "Blockwise trial ends at",
+      "fieldtype": "Datetime",
+      "unique": 0,
+      "read_only": 1,
+      "description": "Read-only native Blockwise trial end fact mirror."
+    },
+    {
+      "name": "Contact-custom_blockwise_source_observed_at",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_source_observed_at",
+      "label": "Blockwise source observed at",
+      "fieldtype": "Datetime",
+      "unique": 0,
+      "read_only": 1,
+      "description": "Read-only time the source snapshot was observed. Never the sync time."
+    },
+    {
+      "name": "Contact-custom_blockwise_sync_state",
+      "doctype": "Custom Field",
+      "dt": "Contact",
+      "fieldname": "custom_blockwise_sync_state",
+      "label": "Blockwise sync state",
+      "fieldtype": "Select",
+      "options": "synced\nheld_ambiguous\nheld_stale",
+      "default": "synced",
+      "unique": 0,
+      "read_only": 1,
+      "description": "Read-only connector-owned mirror state. Never set by an operator."
+    },
+    {
       "name": "Contact-custom_blockwise_profile_uuid",
       "doctype": "Custom Field",
       "dt": "Contact",

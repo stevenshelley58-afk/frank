@@ -10,7 +10,7 @@ stage_root="$backup_root/.staging"
 site=owner.crm.internal
 frappe_uid=1000
 frappe_gid=1000
-custom_field_names='["CRM Lead-custom_blockwise_eligibility","CRM Lead-custom_blockwise_evidence_refs","CRM Lead-custom_blockwise_prospect_source_uuid","Contact-custom_blockwise_access_status","Contact-custom_blockwise_last_synced_at","Contact-custom_blockwise_profile_uuid","Contact-custom_blockwise_subscription_status","Contact-custom_blockwise_workspace_uuid"]'
+custom_field_names='["CRM Lead-custom_blockwise_eligibility","CRM Lead-custom_blockwise_evidence_refs","CRM Lead-custom_blockwise_prospect_source_uuid","Contact-custom_blockwise_access_status","Contact-custom_blockwise_last_synced_at","Contact-custom_blockwise_profile_uuid","Contact-custom_blockwise_source_observed_at","Contact-custom_blockwise_subscription_status","Contact-custom_blockwise_sync_state","Contact-custom_blockwise_trial_ends_at","Contact-custom_blockwise_trial_started_at","Contact-custom_blockwise_trial_state","Contact-custom_blockwise_workspace_uuid"]'
 fail() { echo "owner-crm backup: $*" >&2; exit 1; }
 
 free_gib=$(df -BG / | awk 'NR==2 {gsub(/G/, "", $4); print $4}')
@@ -43,7 +43,7 @@ tar -tf "$stage/$private" | LC_ALL=C sort > "$stage/private-files.members"
 jq -e . "$stage/$config" >/dev/null
 kwargs=$(jq -cn --argjson names "$custom_field_names" '{doctype:"Custom Field",filters:{name:["in",$names]},fields:["name","dt","fieldname","label","fieldtype","options","insert_after","reqd","hidden","read_only","unique"],order_by:"name asc"}')
 "${compose[@]}" exec -T backend bench --site "$site" execute frappe.get_all --kwargs "$kwargs" | jq -S 'sort_by(.name)' > "$stage/custom-fields.json"
-jq -e --argjson expected "$custom_field_names" 'length == 8 and ((map(.name) | sort) == ($expected | sort))' "$stage/custom-fields.json" >/dev/null || fail "the exact eight expected custom fields are not present"
+jq -e --argjson expected "$custom_field_names" '((map(.name) | sort) == ($expected | sort))' "$stage/custom-fields.json" >/dev/null || fail "the expected owner CRM custom fields are not present"
 (
   cd "$stage"
   sha256sum "$sql" "$public" "$private" "$config" custom-fields.json public-files.members private-files.members > SHA256SUMS

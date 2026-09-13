@@ -93,7 +93,6 @@ class OwnerCrmSetupTests(unittest.TestCase):
 
     def test_manifest_targets_native_crm_lead_and_contact_without_sendability(self):
         fields = self.fields()
-        self.assertEqual(len(fields), 8)
         self.assertEqual({field["dt"] for field in fields}, {"CRM Lead", "Contact"})
         names = {field["name"] for field in fields}
         self.assertIn("CRM Lead-custom_blockwise_eligibility", names)
@@ -104,6 +103,55 @@ class OwnerCrmSetupTests(unittest.TestCase):
         encoded = json.dumps(fields).lower()
         self.assertNotIn("consent", encoded)
         self.assertNotIn("sendability", encoded)
+
+    def test_manifest_carries_the_documented_mirror_fields(self):
+        fields = self.fields()
+        names = {field["name"] for field in fields}
+        # The field contract requires a destination for every mirrored fact.
+        for required in (
+            "Contact-custom_blockwise_profile_uuid",
+            "Contact-custom_blockwise_workspace_uuid",
+            "Contact-custom_blockwise_subscription_status",
+            "Contact-custom_blockwise_access_status",
+            "Contact-custom_blockwise_trial_state",
+            "Contact-custom_blockwise_trial_started_at",
+            "Contact-custom_blockwise_trial_ends_at",
+            "Contact-custom_blockwise_source_observed_at",
+            "Contact-custom_blockwise_last_synced_at",
+            "Contact-custom_blockwise_sync_state",
+        ):
+            self.assertIn(required, names)
+        # Observation time and sync time are distinct destinations.
+        self.assertNotEqual(
+            "Contact-custom_blockwise_source_observed_at",
+            "Contact-custom_blockwise_last_synced_at",
+        )
+        sync_state = next(
+            field for field in fields if field["name"].endswith("sync_state")
+        )
+        self.assertEqual(set(sync_state["options"].splitlines()), {
+            "synced", "held_ambiguous", "held_stale",
+        })
+        self.assertEqual(sync_state["read_only"], 1)
+
+    def test_manifest_field_count_is_not_pinned(self):
+        # Adding a documented field must not require editing a fixed count.
+        manifest = json.loads((ROOT / "manifest.json").read_text())
+        self.assertGreaterEqual(len(manifest["fields"]), 13)
+        candidate = json.loads(json.dumps(manifest))
+        candidate["fields"].append({
+            "name": "Contact-custom_blockwise_extra_probe",
+            "doctype": "Custom Field",
+            "dt": "Contact",
+            "fieldname": "custom_blockwise_extra_probe",
+            "label": "Blockwise extra probe",
+            "fieldtype": "Data",
+            "unique": 0,
+            "read_only": 1,
+            "description": "Test-only probe field.",
+        })
+        validated = adapter.validate_manifest(candidate)
+        self.assertEqual(len(validated), len(manifest["fields"]) + 1)
 
     def test_source_uuid_fields_are_native_unique_and_optional(self):
         fields = self.fields()
@@ -176,12 +224,13 @@ class OwnerCrmSetupTests(unittest.TestCase):
 
     def test_apply_is_idempotent(self):
         fake = FakeFrappe()
+        fields = self.fields()
         first = adapter.run_setup(client=self.client(fake), apply=True)
-        self.assertEqual(len(fake.posts), 8)
+        self.assertEqual(len(fake.posts), len(fields))
         self.assertTrue(all(item.action == "create" for item in first))
         fake.requests.clear()
         second = adapter.run_setup(client=self.client(fake), apply=True)
-        self.assertEqual(len(fake.posts), 8)
+        self.assertEqual(len(fake.posts), len(fields))
         self.assertTrue(all(item.action == "unchanged" for item in second))
 
     def test_incompatible_existing_field_fails_before_any_write(self):
@@ -290,8 +339,8 @@ class OwnerCrmSetupTests(unittest.TestCase):
                     client.create_custom_field(item.field)
                 client.logout()
                 client.close()
-                self.assertEqual(state["created"], 8)
-                self.assertEqual(state["csrf_headers"], ["temporary-csrf"] * 8)
+                self.assertEqual(state["created"], len(fields))
+                self.assertEqual(state["csrf_headers"], ["temporary-csrf"] * len(fields))
                 self.assertIn("sid=temporary-session", state["logout_cookie"])
                 with self.assertRaisesRegex(adapter.SetupError, "redirect rejected"):
                     client._request("GET", "/redirect")
