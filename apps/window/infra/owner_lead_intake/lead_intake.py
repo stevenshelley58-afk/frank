@@ -2,7 +2,7 @@
 Never merges by email, sends email, or derives consent. Source identity is only
 blockwise_demo_request:<public.demo_requests.id>."""
 from __future__ import annotations
-import hashlib,hmac,json,os,re,secrets,time,urllib.error,urllib.parse,urllib.request
+import hashlib,hmac,json,os,re,secrets,stat,time,urllib.error,urllib.parse,urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any,Mapping
@@ -47,7 +47,8 @@ class SourceClient:
   try:decoded=json.loads(raw)
   except ValueError as e:raise IntakeError("lead source returned invalid JSON") from e
   if not isinstance(decoded,dict) or not isinstance(decoded.get("items"),list):raise IntakeError("lead source response invalid")
-  return [map_item(item) for item in decoded["items"] if isinstance(item,dict)]
+  if not all(isinstance(item,dict) for item in decoded["items"]): raise IntakeError("lead source item invalid")
+  return [map_item(item) for item in decoded["items"]]
 class FrappeLeadStore:
  def __init__(self,opener=None):self.open=opener or urllib.request.build_opener().open;self.token=""
  def request(self,method,path,body=None):
@@ -87,7 +88,10 @@ def intake_one(store:FrappeLeadStore,item:LeadRequest)->dict[str,str]:
  existing=store.find(item.source_key)
  if existing:return {"action":"unchanged","lead":str(existing.get("name", "")),"sourceKey":item.source_key}
  try:name=store.create(item)
- except DuplicateSource:return {"action":"unchanged","lead":"","sourceKey":item.source_key}
+ except DuplicateSource:
+  existing=store.find(item.source_key)
+  if existing:return {"action":"unchanged","lead":str(existing.get("name", "")),"sourceKey":item.source_key}
+  raise IntakeError("native source identity conflict requires review")
  except IntakeError:
   existing=store.find(item.source_key)
   if existing:return {"action":"unchanged","lead":str(existing.get("name", "")),"sourceKey":item.source_key}
