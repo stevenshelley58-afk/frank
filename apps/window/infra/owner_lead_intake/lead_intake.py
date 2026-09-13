@@ -63,7 +63,7 @@ class FrappeLeadStore:
       with self.open(urllib.request.Request(FRAPPE_URL+path,data=data,headers=headers,method=method),timeout=15) as response: raw=response.read(2*1024*1024+1)
     except urllib.error.HTTPError as e:
       if e.code in {409,417}: raise IntakeError("native CRM rejected a conflicting Lead") from None
-      raise IntakeError("native CRM request failed") from None
+      raise IntakeError(f"native CRM request failed ({e.code})") from None
     except OSError as e: raise IntakeError("native CRM unavailable") from e
     try: value=json.loads(raw)
     except ValueError as e: raise IntakeError("native CRM returned invalid JSON") from e
