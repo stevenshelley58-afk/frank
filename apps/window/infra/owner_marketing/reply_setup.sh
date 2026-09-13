@@ -25,7 +25,7 @@ if allof(
 # END blockwise-mautic-replies
 SIEVE
 run_sieve() {
-  printf '%s' "$PURELYMAIL_PASSWORD" | docker run --rm -i --network frank_owner_marketing_egress --env SIEVE_USER="$PURELYMAIL_USERNAME" --mount "type=bind,src=$tmp,dst=/work,readonly" "$runner_image" sh -ec '
+  printf '%s' "$PURELYMAIL_PASSWORD" | docker run --rm -i --network frank_owner_marketing_egress --env SIEVE_USER="$PURELYMAIL_USERNAME" --mount "type=bind,src=$tmp,dst=/work" "$runner_image" sh -ec '
     apt-get update -qq
     apt-get install -y -qq ca-certificates sieve-connect=0.90-1.1 >/dev/null
     exec sieve-connect --server mailserver.purelymail.com --port 4190 --user "$SIEVE_USER" --passwordfd 0 "$@"
