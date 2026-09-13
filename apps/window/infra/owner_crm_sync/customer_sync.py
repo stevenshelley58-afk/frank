@@ -51,7 +51,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 
 # --- Fixed targets -----------------------------------------------------------
 
-BLOCKWISE_SNAPSHOT_URL = "https://blockwise.sale"
+BLOCKWISE_SNAPSHOT_URL = "http://127.0.0.1:8080"
 FRAPPE_ENDPOINT = "http://127.0.0.1:18081"
 FRAPPE_SITE = "owner.crm.internal"
 
@@ -327,6 +327,7 @@ class BlockwiseSnapshotClient:
             query["afterWorkspaceId"] = after_workspace_id
         path = "/api/internal/ops/owner-crm-snapshot?" + urllib.parse.urlencode(query)
         headers = self._sign("GET", path, "")
+        headers["Host"] = "blockwise.sale"
         request = urllib.request.Request(
             self.base_url + path, headers=headers, method="GET"
         )

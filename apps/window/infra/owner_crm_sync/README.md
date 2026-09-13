@@ -2,7 +2,7 @@
 
 Minimal custom connection because neither native Frappe nor Blockwise exposes an upstream integration for this application-specific snapshot. All contacts, unique indexes and review tasks are native Frappe records. No custom queue, customer dashboard, provider runtime or model loop.
 
-Source: protected `https://blockwise.sale/api/internal/ops/owner-crm-snapshot`, dedicated HMAC credential, replay protection, bounded ordered pages. Destination: only owner.crm.internal on loopback18081. Never the customer-agency CRM.
+Source: protected existing product loopback ingress `http://127.0.0.1:8080/api/internal/ops/owner-crm-snapshot`, fixed Host `blockwise.sale`, dedicated HMAC credential, no public edge dependency, replay protection, bounded ordered pages. Destination: only owner.crm.internal on loopback18081. Never the customer-agency CRM.
 
 Native identity `crm-sync@blockwise.sale` has Contact and CRM Task read/create/write, Custom Field read only. No administrator role or billing privileges. Role permissions exclude deletion, email and export. Upstream Frappe Contact permission hooks can nevertheless allow document deletion, so provisioning installs a native Before Delete Server Script for this identity; the actual DELETE denial is tested. No custom Frappe app is installed. Bootstrap uses committed `provision.py --apply`; credentials are private in `/srv/hermes/secrets/owner-crm-sync.env` and are never given to Frank Window.
 

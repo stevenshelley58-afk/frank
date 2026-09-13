@@ -366,7 +366,7 @@ def _snapshot_to_row(snapshot):
 class SignatureTests(unittest.TestCase):
     def test_signature_uses_the_scope_bound_payload(self):
         client = sync.BlockwiseSnapshotClient(
-            base_url="https://blockwise.sale",
+            base_url="http://127.0.0.1:8080",
             signing_secret="x" * 40,
             scope="owner-crm.customer-snapshot",
             now=lambda: 1_700_000_000,
@@ -376,7 +376,7 @@ class SignatureTests(unittest.TestCase):
         self.assertEqual(headers["x-blockwise-scope"], "owner-crm.customer-snapshot")
         # The signature must depend on the scope.
         other = sync.BlockwiseSnapshotClient(
-            base_url="https://blockwise.sale",
+            base_url="http://127.0.0.1:8080",
             signing_secret="x" * 40,
             scope="some.other.scope",
             now=lambda: 1_700_000_000,
