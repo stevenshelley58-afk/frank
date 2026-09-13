@@ -265,7 +265,7 @@ def event_signature(events: list[dict[str, Any]] | dict[str, dict[str, Any]]) ->
         (
             event.get("type"),
             event.get("eventType"),
-            json.dumps(event.get("properties") or {}, sort_keys=True),
+            json.dumps({key: (event.get("properties") or {}).get(key) for key in ("field", "operator", "value", NURTURE_EXIT_FIELD)}, sort_keys=True),
             (event.get("properties") or {}).get("field"),
             (event.get("properties") or {}).get("email"),
             (event.get("properties") or {}).get("email_type"),
