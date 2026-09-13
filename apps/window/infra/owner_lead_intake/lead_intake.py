@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any,Mapping
 BLOCKWISE_URL="http://127.0.0.1:8080"; FRAPPE_URL="http://127.0.0.1:18081"; SITE="owner.crm.internal"
 SECRET_FILE=Path("/srv/hermes/secrets/owner-lead-intake.env"); UUID=re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",re.I)
-SOURCE_PREFIX="blockwise_demo_request:"; SOURCE_FIELD="custom_blockwise_source_key"; ELIGIBILITY_FIELD="custom_blockwise_eligibility"
+SOURCE_PREFIX="blockwise_demo_request:"; SOURCE_FIELD="custom_blockwise_source_key"; ELIGIBILITY_FIELD="custom_blockwise_eligibility"; SYNC_OWNER="crm-sync@blockwise.sale"; OWNER="owner@blockwise.sale"
 class IntakeError(RuntimeError): pass
 class DuplicateSource(IntakeError): pass
 @dataclass(frozen=True)
@@ -82,26 +82,40 @@ class FrappeLeadStore:
   self.token=key+":"+secret
   if self.request("GET","/api/method/frappe.auth.get_logged_user").get("message")!="crm-sync@blockwise.sale":self.token="";raise IntakeError("native CRM token is not the integration identity")
  def find(self,key):
-  q=urllib.parse.urlencode({"filters":json.dumps([[SOURCE_FIELD,"=",key]]),"fields":json.dumps(["name",SOURCE_FIELD]),"limit_page_length":"2"});data=self.request("GET","/api/resource/CRM%20Lead?"+q).get("data")
+  q=urllib.parse.urlencode({"filters":json.dumps([[SOURCE_FIELD,"=",key]]),"fields":json.dumps(["name",SOURCE_FIELD,"lead_owner"]),"limit_page_length":"2"});data=self.request("GET","/api/resource/CRM%20Lead?"+q).get("data")
   if not isinstance(data,list) or len(data)>1:raise IntakeError("native source identity is ambiguous")
   return data[0] if data else None
+ def assign_owner(self,name):
+  if not _text(name,200):raise IntakeError("native CRM returned invalid Lead identity")
+  data=self.request("PUT","/api/resource/CRM%20Lead/"+urllib.parse.quote(name,safe=""),{"lead_owner":OWNER}).get("data")
+  if not isinstance(data,dict) or data.get("name")!=name or data.get("lead_owner")!=OWNER:raise IntakeError("native CRM did not confirm Lead owner")
  def create(self,item):
-  p={"lead_name":item.name,"first_name":item.name.split(None,1)[0],"last_name":item.name.split(None,1)[1] if len(item.name.split(None,1))>1 else "","status":"New","lead_owner":"crm-sync@blockwise.sale","email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
+  p={"lead_name":item.name,"first_name":item.name.split(None,1)[0],"last_name":item.name.split(None,1)[1] if len(item.name.split(None,1))>1 else "","status":"New","lead_owner":OWNER,"email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
   if item.phone:p["mobile_no"]=item.phone
   if item.agency:p["organization"]=item.agency
   data=self.request("POST","/api/resource/CRM%20Lead",p).get("data")
   if not isinstance(data,dict) or not data.get("name"):raise IntakeError("native CRM did not confirm Lead")
   return str(data["name"])
+def _existing_result(store:FrappeLeadStore,item:LeadRequest,existing:Mapping[str,Any])->dict[str,str]:
+ name=str(existing.get("name", ""))
+ if not _text(name,200):raise IntakeError("native CRM returned invalid Lead identity")
+ if existing.get("lead_owner")==SYNC_OWNER:store.assign_owner(name)
+ return {"action":"unchanged","lead":name,"sourceKey":item.source_key}
+def _existing_result(store:FrappeLeadStore,item:LeadRequest,existing:Mapping[str,Any])->dict[str,str]:
+ name=str(existing.get("name", ""))
+ if not _text(name,200):raise IntakeError("native CRM returned invalid Lead identity")
+ if existing.get("lead_owner")==SYNC_OWNER:store.assign_owner(name)
+ return {"action":"unchanged","lead":name,"sourceKey":item.source_key}
 def intake_one(store:FrappeLeadStore,item:LeadRequest)->dict[str,str]:
  existing=store.find(item.source_key)
- if existing:return {"action":"unchanged","lead":str(existing.get("name", "")),"sourceKey":item.source_key}
+ if existing:return _existing_result(store,item,existing)
  try:name=store.create(item)
  except DuplicateSource:
   existing=store.find(item.source_key)
-  if existing:return {"action":"unchanged","lead":str(existing.get("name", "")),"sourceKey":item.source_key}
+  if existing:return _existing_result(store,item,existing)
   raise IntakeError("native source identity conflict requires review")
  except IntakeError:
   existing=store.find(item.source_key)
-  if existing:return {"action":"unchanged","lead":str(existing.get("name", "")),"sourceKey":item.source_key}
+  if existing:return _existing_result(store,item,existing)
   raise
  return {"action":"created","lead":name,"sourceKey":item.source_key}

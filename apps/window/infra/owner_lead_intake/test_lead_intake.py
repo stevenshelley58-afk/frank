@@ -3,20 +3,29 @@ from pathlib import Path
 sys.path.insert(0,str(Path(__file__).parent)); from lead_intake import *
 RAW={"sourceKey":"blockwise_demo_request:11111111-1111-4111-8111-111111111111","sourceKind":"audit_request","sourceEventId":"11111111-1111-4111-8111-111111111111","receivedAt":"2026-09-13T00:00:00Z","lead":{"name":"Test Lead","email":"lead@example.invalid","phone":"+61400000000","agency":"Test Agency"}}
 class Store:
- def __init__(self): self.rows={}; self.payloads=[]
+ def __init__(self): self.rows={}; self.payloads=[]; self.assigned=[]
  def find(self,key): return self.rows.get(key)
  def create(self,item):
-  self.payloads.append(item); name="LEAD-0001"; self.rows[item.source_key]={"name":name}; return name
+  self.payloads.append(item); name="LEAD-0001"; self.rows[item.source_key]={"name":name,"lead_owner":OWNER}; return name
+ def assign_owner(self,name): self.assigned.append(name)
 class IntakeTests(unittest.TestCase):
  def test_source_key_is_only_identity_and_replay_does_not_duplicate(self):
   item=map_item(RAW); store=Store(); first=intake_one(store,item); replay=intake_one(store,item)
   self.assertEqual(first["action"],"created"); self.assertEqual(replay["action"],"unchanged"); self.assertEqual(len(store.payloads),1); self.assertEqual(item.source_key,RAW["sourceKey"])
+
+ def test_existing_service_owned_lead_is_repaired_once_without_duplicate(self):
+  item=map_item(RAW);store=Store();store.rows[item.source_key]={"name":"LEAD-OLD","lead_owner":SYNC_OWNER}
+  result=intake_one(store,item)
+  self.assertEqual(result["action"],"unchanged");self.assertEqual(store.assigned,["LEAD-OLD"]);self.assertEqual(store.payloads,[])
+ def test_existing_human_owner_is_never_overwritten(self):
+  item=map_item(RAW);store=Store();store.rows[item.source_key]={"name":"LEAD-HUMAN","lead_owner":"sales-person@example.invalid"}
+  intake_one(store,item);self.assertEqual(store.assigned,[])
  def test_invalid_or_research_identity_is_rejected(self):
   bad=dict(RAW); bad["sourceKey"]="blockwise_research_agent:"+RAW["sourceEventId"]
   with self.assertRaises(IntakeError): map_item(bad)
  def test_create_payload_has_review_state_without_consent_or_sending_fields(self):
-  item=map_item(RAW); payload={"lead_name":item.name,"first_name":item.name.split(None, 1)[0],"status":"New","lead_owner":"crm-sync@blockwise.sale","email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
-  self.assertEqual(payload[ELIGIBILITY_FIELD],"review_required"); self.assertEqual(payload["status"],"New"); self.assertEqual(payload["lead_owner"],"crm-sync@blockwise.sale")
+  item=map_item(RAW); payload={"lead_name":item.name,"first_name":item.name.split(None, 1)[0],"status":"New","lead_owner":OWNER,"email":item.email,SOURCE_FIELD:item.source_key,ELIGIBILITY_FIELD:"review_required"}
+  self.assertEqual(payload[ELIGIBILITY_FIELD],"review_required"); self.assertEqual(payload["status"],"New"); self.assertEqual(payload["lead_owner"],OWNER)
   self.assertFalse(any("consent" in k or "send" in k for k in payload))
 if __name__=="__main__": unittest.main()
 
@@ -25,10 +34,21 @@ class NativeBoundaryTests(unittest.TestCase):
   store=FrappeLeadStore();calls=[]
   store.request=lambda method,path,body: calls.append(body) or {"data":{"name":"CRM-TEST"}}
   store.create(map_item(RAW));payload=calls[0]
-  self.assertEqual(payload["first_name"],"Test");self.assertEqual(payload["last_name"],"Lead")
-  self.assertEqual(payload["lead_owner"],"crm-sync@blockwise.sale")
+  self.assertEqual(payload["first_name"],"Test");self.assertEqual(payload["last_name"],"Lead");self.assertEqual(payload["email"],RAW["lead"]["email"]);self.assertEqual(payload["email"],RAW["lead"]["email"])
+  self.assertEqual(payload["lead_owner"],OWNER)
   self.assertEqual(payload[ELIGIBILITY_FIELD],"review_required")
   self.assertFalse(any("consent" in key for key in payload))
+
+ def test_find_reads_owner_for_guarded_repair(self):
+  store=FrappeLeadStore();calls=[]
+  store.request=lambda method,path,body=None: calls.append((method,path,body)) or {"data":[]}
+  self.assertIsNone(store.find(RAW["sourceKey"]))
+  self.assertIn("lead_owner",urllib.parse.unquote(calls[0][1]))
+ def test_native_owner_repair_updates_only_owner_field(self):
+  store=FrappeLeadStore();calls=[]
+  store.request=lambda method,path,body=None: calls.append((method,path,body)) or {"data":{"name":"CRM-OLD","lead_owner":OWNER}}
+  store.assign_owner("CRM-OLD")
+  self.assertEqual(calls,[('PUT','/api/resource/CRM%20Lead/CRM-OLD',{'lead_owner':OWNER})])
  def test_duplicate_without_same_source_key_is_not_success(self):
   class Conflict(Store):
    def create(self,item):raise DuplicateSource("different unique field")

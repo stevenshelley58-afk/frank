@@ -16,3 +16,14 @@ runuser -u hermes -- /home/hermes/.hermes/hermes-agent/venv/bin/python /home/her
 ```
 
 A successful empty scan does not prove public form-to-CRM acceptance. For an explicitly authorized owner-controlled request, retain its immutable request ID, prove exactly one native Lead with the matching source key and `review_required`, then replay and check that no duplicate was created. The public form owns its separate requested transactional message; this connector never sends it or grants marketing consent.
+
+
+## Native lead ownership
+
+New intake Leads set native `lead_owner` to the dedicated owner System User
+`owner@blockwise.sale`; the integration identity remains the authenticated
+creator only. Replay repairs an older imported Lead only when its immutable
+`custom_blockwise_source_key` matches and its current `lead_owner` is still the
+service identity `crm-sync@blockwise.sale`. It never overwrites another owner.
+The source email maps to the native CRM Lead `email` field; no consent is
+derived from that contact detail.
