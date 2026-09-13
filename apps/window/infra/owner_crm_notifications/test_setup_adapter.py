@@ -45,6 +45,13 @@ class ManifestTests(unittest.TestCase):
         self.assertTrue(desired["webhook_headers"][0]["value"].startswith("Basic "))
         self.assertNotIn("temporary-test-secret", json.dumps(hook))
 
+    def test_frappe_empty_json_normalizes_to_manifest_null_for_field_webhook(self):
+        hook = next(item for item in module.load_manifest(ROOT / "manifest.json") if item["name"] == module.REPLY_HOOK)
+        desired = module._desired(hook, "unused", "r" * 40)
+        actual = dict(desired)
+        actual["webhook_json"] = ""
+        self.assertTrue(module._compatible(actual, desired))
+
     def test_reply_hook_uses_native_security_and_bounded_fields_only(self):
         hook = next(item for item in module.load_manifest(ROOT / "manifest.json") if item["name"] == module.REPLY_HOOK)
         self.assertEqual(hook["request_url"], module.REPLY_URL)

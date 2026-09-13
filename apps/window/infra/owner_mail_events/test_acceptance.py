@@ -78,9 +78,12 @@ class AcceptanceTests(unittest.TestCase):
         with mock.patch.object(module.subprocess, "run", return_value=completed) as run:
             module.enqueue_native_reply("COMM-00011")
         args = run.call_args.args[0]
-        self.assertEqual(args[:6], ["docker", "exec", "-i", "-w", "/home/frappe/frappe-bench", "owner-crm-backend-1"])
+        self.assertEqual(args[:6], ["docker", "exec", "-i", "-w", "/home/frappe/frappe-bench/sites", "owner-crm-backend-1"])
+        self.assertEqual(args[6], "/home/frappe/frappe-bench/env/bin/python")
         program = run.call_args.kwargs["input"]
+        self.assertIn('frappe.init(site="owner.crm.internal", sites_path="/home/frappe/frappe-bench/sites")', program)
         self.assertIn('frappe.get_doc("Communication", "COMM-00011")', program)
+        self.assertIn("frappe.db.commit()", program)
         self.assertNotIn("email_headers", program)
         with self.assertRaises(module.AcceptanceError):
             module.enqueue_native_reply("bad\nname")
@@ -89,6 +92,7 @@ class AcceptanceTests(unittest.TestCase):
         client = mock.Mock()
         client._request.return_value = {"data": [{"name": "LOG-1", "response": '{"status":"stopped"}', "error": None}]}
         self.assertEqual(module.webhook_receipt(client, "COMM-00011"), "LOG-1")
+        self.assertIn("Webhook%20Request%20Log?", client._request.call_args.args[1])
         client._request.return_value = {"data": [{"name": "LOG-2", "response": '{"status":"ignored"}', "error": None}]}
         with self.assertRaises(module.AcceptanceError):
             module.webhook_receipt(client, "COMM-00011")

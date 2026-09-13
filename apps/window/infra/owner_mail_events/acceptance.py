@@ -95,16 +95,17 @@ def enqueue_native_reply(name: str) -> None:
         raise AcceptanceError("unsafe Communication identity")
     program = f'''import frappe
 from frappe.integrations.doctype.webhook.webhook import enqueue_webhook
-frappe.init(site="owner.crm.internal", sites_path="sites")
+frappe.init(site="owner.crm.internal", sites_path="/home/frappe/frappe-bench/sites")
 frappe.connect()
 try:
     doc = frappe.get_doc("Communication", {json.dumps(name)})
     enqueue_webhook(doc, {{"name": {json.dumps(WEBHOOK)}}})
+    frappe.db.commit()
 finally:
     frappe.destroy()
 '''
     result = subprocess.run(
-        ["docker", "exec", "-i", "-w", "/home/frappe/frappe-bench", "owner-crm-backend-1", "env/bin/python", "-"],
+        ["docker", "exec", "-i", "-w", "/home/frappe/frappe-bench/sites", "owner-crm-backend-1", "/home/frappe/frappe-bench/env/bin/python", "-"],
         input=program,
         text=True,
         stdout=subprocess.DEVNULL,
@@ -119,7 +120,7 @@ finally:
 def webhook_receipt(client: notifications.Client, name: str) -> str:
     rows = _frappe_query(
         client,
-        "/api/resource/Webhook Request Log",
+        "/api/resource/Webhook%20Request%20Log",
         [["webhook", "=", WEBHOOK], ["reference_document", "=", name]],
         ["name", "response", "error"],
         1,

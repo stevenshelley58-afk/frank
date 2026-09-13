@@ -148,7 +148,9 @@ def _compatible(actual: Mapping[str, Any], desired: Mapping[str, Any]) -> bool:
     # Frappe omits an unset condition on reads but accepts null on writes.
     if (actual.get("condition") or None) != (desired.get("condition") or None):
         return False
-    for key in ("name","webhook_doctype","webhook_docevent","enabled","request_url","request_method","request_structure","timeout","background_jobs_queue","webhook_json","enable_security"):
+    if (actual.get("webhook_json") or None) != (desired.get("webhook_json") or None):
+        return False
+    for key in ("name","webhook_doctype","webhook_docevent","enabled","request_url","request_method","request_structure","timeout","background_jobs_queue","enable_security"):
         if str(actual.get(key, "")) != str(desired[key]): return False
     headers = actual.get("webhook_headers")
     data = actual.get("webhook_data") or []
