@@ -50,7 +50,8 @@ def main():
         if existing and existing["email_id"]!=ADDRESS:raise RuntimeError("existing mailbox points at another address")
         if not args.apply:
             print(json.dumps({"mode":"preview","native_account_exists":bool(existing),"address":ADDRESS,"activate":args.activate}));return
-        data=payload(credentials()["PURELYMAIL_PASSWORD"],activate=args.activate)
+        active = args.activate or bool(existing and existing.get("enable_incoming") and existing.get("enable_outgoing"))
+        data=payload(credentials()["PURELYMAIL_PASSWORD"],activate=active)
         if existing:
             current=client._request("GET","/api/resource/Email%20Account/"+urllib.parse.quote(NAME,safe=""))["data"]
             # Preserve native IMAP UID state and child record identities on replay.
@@ -58,7 +59,7 @@ def main():
             data["modified"]=current["modified"]
             client._request("PUT","/api/resource/Email%20Account/"+urllib.parse.quote(NAME,safe=""),body=data)
         else:client._request("POST","/api/resource/Email%20Account",body=data)
-        print(json.dumps({"native_account_configured":True,"address":ADDRESS,"incoming_enabled":args.activate,"outgoing_enabled":args.activate,"mail_sent":False}))
+        print(json.dumps({"native_account_configured":True,"address":ADDRESS,"incoming_enabled":active,"outgoing_enabled":active,"mail_sent":False}))
     finally:
         client.logout();client.close()
 
