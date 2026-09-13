@@ -9,3 +9,9 @@ Uses TLS IMAP993 and SMTP465, native Sent-folder copies, no automatic contact im
 After the user rotates the supplied login password, update the external mailbox secret and reapply without resetting UID state. Prefer a dedicated app password when the owner authorizes one. No password is printed by setup or its tests.
 
 `python3 activate.py` is a read-only readiness check after native account activation. `--apply` enables only the native Frappe scheduler/mail from a clean main-reachable committed checkout, using the opt-in `owner-mail` scheduler profile. It refuses pending mail, unreviewed automatic email rules, or unexpected enabled accounts. Verify domain routing before account activation, then send/receive/reply and Sent-folder acceptance after scheduler activation. A failed activation re-mutes mail and disables scheduling without deleting messages.
+
+## Observed owner-only acceptance, 13 September 2026
+
+After a header-only, read-only review of four existing UNSEEN messages, the owner approved their deliberate native baseline synchronization: two provider setup messages became native inbound Communications and two pre-existing controlled self-sends were not duplicated. Native account activation then enabled incoming and outgoing mail, the site mail gate and the opt-in scheduler.
+
+A native outbound Communication from `hello@blockwise.sale` to the owner-controlled `blockwise@purelymail.com` reached the native Sent folder. A reply from that second owner address was pulled into native CRM and threaded to the outbound Communication. A second native receive run created no duplicate Communication. One historical queue record addressed to an unapproved test alias is retained as `Error`, not deleted or dispatched. The root-private receipt is `/srv/frank/verification/owner-crm-final-20260913/mailbox-native-acceptance.json`.
