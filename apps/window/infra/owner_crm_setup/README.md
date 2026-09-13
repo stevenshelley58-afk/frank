@@ -110,3 +110,25 @@ Blockwise remain authoritative for those concerns.
 ## Native owner login
 
 `python3 owner_user.py` previews/verifies the dedicated owner@blockwise.sale System User and its native active HD Agent record. `--apply` creates only missing records without an invitation: the System User has native Sales Manager, Agent Manager, Inbox User and Knowledge Base Editor roles, then native HD Agent creation grants its required Agent role. Replay never resets the password or changes the existing identity; an incompatible identity or duplicate HD Agent fails closed for review. Run this exact native apply entrypoint only from a committed release checkout: `python3 apps/window/infra/owner_crm_setup/owner_user.py --apply`. This is not MFA/device enrollment or proof of mobile reachability.
+
+
+## Native incoming-email follow-up
+
+`incoming_email_assignment.py` owns one native Frappe Assignment Rule named
+`Owner CRM follow-up incoming email`. Its default mode is read-only. It assigns
+only Received Email Communications from `Blockwise Owner Inbox` to
+`owner@blockwise.sale`, excludes Helpdesk-linked mail (which keeps its native
+ticket assignment) and the two owner sender identities, and makes no claim that
+the remaining mail is human. It creates native Communication-linked ToDos only;
+it adds no hook, scheduler, email sender, or custom runtime.
+
+From a committed release checkout, run the drift-guarded dry run before apply:
+
+```bash
+python3 apps/window/infra/owner_crm_setup/incoming_email_assignment.py
+python3 apps/window/infra/owner_crm_setup/incoming_email_assignment.py --apply
+```
+
+Apply creates only a missing exact rule. Replay verifies the exact condition,
+owner, seven-day schedule, priority, enabled state, and Round Robin strategy.
+Any existing-record drift fails closed without mutation.
