@@ -117,7 +117,11 @@ class FakeBridgeMautic:
             return {"contact": next(contact for contact in self.contacts if contact["id"] == contact_id)}
         if method == "PATCH" and path.startswith("contacts/") and path.endswith("/edit"):
             contact = next(contact for contact in self.contacts if contact["id"] == int(path.split("/")[1]))
-            contact["fields"]["all"].update(payload)
+            fields = dict(payload)
+            tags = fields.pop("tags", None)
+            contact["fields"]["all"].update(fields)
+            if tags is not None:
+                contact["tags"] = tags
             return {"contact": contact}
         raise AssertionError((method, path))
 
@@ -250,6 +254,20 @@ class FlowTests(unittest.TestCase):
         self.assertEqual(len(segment_adds), 3)
         self.assertEqual(api.memberships, {(1, 4)})
         self.assertEqual(api.contacts[0]["fields"]["all"]["blockwise_source_event_id"], EVENT_NEW)
+
+    def test_recorded_action_tag_prevents_reenrolment_after_segment_removal(self):
+        api = FakeBridgeMautic(contacts=[bridge_contact()])
+        flows.bridge(api, bridge_args(flow="paid_welcome", source_event_id=EVENT_ONE))
+        self.assertIn(flows.action_tag("paid_welcome", EVENT_ONE), api.contacts[0]["tags"])
+        flows.bridge(api, bridge_args(flow="trial_ended", source_event_id=EVENT_OLD))
+        flows.bridge(api, bridge_args(flow="paid_welcome", source_event_id=EVENT_ONE))
+        paid_adds = [call for call in api.calls if call[1] == "segments/5/contact/1/add"]
+        self.assertEqual(len(paid_adds), 1)
+
+    def test_campaigns_disable_native_restart(self):
+        api = FakeMautic()
+        flows.setup(api, apply=True)
+        self.assertTrue(all(campaign["allowRestart"] is False for campaign in api.store["campaigns"]))
 
     def test_bridge_removes_old_source_paths_before_entering_current_path(self):
         api = FakeBridgeMautic(contacts=[bridge_contact()])

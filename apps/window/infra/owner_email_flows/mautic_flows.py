@@ -10,6 +10,7 @@ PREFIX = "Owner CRM | "
 CONSENT_FIELD = "blockwise_marketing_conse"
 NURTURE_EXIT_FIELD = "blockwise_nurture_exit"
 COLD_RELEASE_FIELD = "blockwise_cold_release"
+ACTION_TAG_PREFIX = "blockwise-flow:"
 MAX_CONTACT_IDENTITY_MATCHES = 20
 CONTACT_LOOKUP_PAGE_SIZE = 10
 UUID_PATTERN = re.compile(
@@ -250,7 +251,7 @@ def campaign_events(flow: Flow, emails: dict[str, int]) -> tuple[list[dict[str, 
 def campaign_payload(flow: Flow, segment_id: int, emails: dict[str, int]) -> dict[str, Any]:
     events, canvas = campaign_events(flow, emails)
     safety = "No send action exists. This is a held draft and no enrolment is permitted." if flow.cold else "Each step checks explicit opted-in consent and active nurture state. Mautic Do Not Contact is enforced by the sender."
-    return {"name": PREFIX + flow.title, "description": f"Unpublished native campaign. Entry: {flow.event}. {safety}", "isPublished": False, "events": events, "forms": [], "lists": [{"id": segment_id}], "canvasSettings": canvas}
+    return {"name": PREFIX + flow.title, "description": f"Unpublished native campaign. Entry: {flow.event}. {safety}", "isPublished": False, "allowRestart": False, "events": events, "forms": [], "lists": [{"id": segment_id}], "canvasSettings": canvas}
 
 
 def event_count(campaign: dict[str, Any]) -> int:
@@ -305,6 +306,8 @@ def ensure_campaigns(api: Mautic, segments: dict[str, int], emails: dict[str, in
         if campaign:
             if campaign.get("isPublished"):
                 raise ApiError(f"campaign must remain unpublished until acceptance: {name}")
+            if campaign.get("allowRestart") is not False:
+                raise ApiError(f"campaign restart must remain disabled: {name}")
             ids[flow.key] = int(campaign["id"])
     return ids
 
@@ -452,6 +455,28 @@ def has_email_dnc(contact: dict[str, Any]) -> bool:
     return False
 
 
+def action_tag(flow: str, action_id: str) -> str:
+    return f"{ACTION_TAG_PREFIX}{flow}:{action_id}"
+
+
+def contact_tag_names(contact: dict[str, Any]) -> set[str]:
+    raw = contact.get("tags", [])
+    if not isinstance(raw, list):
+        raise ApiError("Mautic contact tags were malformed")
+    tags: set[str] = set()
+    for item in raw:
+        if isinstance(item, str):
+            value = item
+        elif isinstance(item, dict):
+            value = item.get("tag")
+        else:
+            raise ApiError("Mautic contact tag was malformed")
+        if not isinstance(value, str):
+            raise ApiError("Mautic contact tag was malformed")
+        tags.add(value)
+    return tags
+
+
 def remove_stale_source_segments(api: Mautic, segments: dict[str, int], contact_id: int, selected_flow: str | None) -> None:
     """Keep only the source path that is currently eligible.
 
@@ -505,6 +530,10 @@ def bridge(api: Mautic, args: argparse.Namespace) -> None:
         raise ApiError("contact has native Mautic Do Not Contact; enrolment refused")
     segments = ensure_segments(api, apply=False)
     remove_stale_source_segments(api, segments, contact_id, flow.key)
+    marker = action_tag(flow.key, args.source_event_id)
+    if marker in contact_tag_names(contact):
+        print("unchanged: native flow action already recorded")
+        return
     api.request("POST", f"segments/{segments[flow.key]}/contact/{contact_id}/add")
     # Segment membership is Mautic's idempotency authority. Record source
     # metadata only after it confirms membership, so a replay repairs a
@@ -512,7 +541,7 @@ def bridge(api: Mautic, args: argparse.Namespace) -> None:
     api.request(
         "PATCH",
         f"contacts/{contact_id}/edit",
-        {"blockwise_source_event_id": args.source_event_id, CONSENT_FIELD: args.consent_state, NURTURE_EXIT_FIELD: "active"},
+        {"blockwise_source_event_id": args.source_event_id, CONSENT_FIELD: args.consent_state, NURTURE_EXIT_FIELD: "active", "tags": sorted((*contact_tag_names(contact), marker))},
     )
     print("enrolled: native campaign remains unpublished")
 
