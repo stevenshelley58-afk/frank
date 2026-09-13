@@ -44,6 +44,9 @@ class FakeMautic:
             item = next(item for item in self.store["campaigns"] if item["id"] == int(path.split("/")[1]))
             item.update(payload)
             return {"campaign": item}
+        if path.startswith("campaigns/") and path.endswith("/delete"):
+            self.store["campaigns"] = [item for item in self.store["campaigns"] if item["id"] != int(path.split("/")[1])]
+            return {}
         raise AssertionError((method, path))
 
 
@@ -91,6 +94,15 @@ class FlowTests(unittest.TestCase):
         desired = flows.campaign_payload(flow, 1, emails)
         legacy = dict(desired, events=[{"type": "email.send", "order": 1, "properties": {"email": 1, "email_type": "transactional"}, "triggerInterval": 0}])
         self.assertTrue(flows.campaign_needs_update(legacy, desired))
+
+    def test_campaign_reconciliation_replaces_stale_unpublished_campaign(self):
+        api = FakeMautic()
+        flows.setup(api, apply=True)
+        campaign = api.store["campaigns"][0]
+        campaign["events"] = [{"type": "email.send", "order": 1, "properties": {"email": 1, "email_type": "transactional"}, "triggerInterval": 0}]
+        api.calls.clear()
+        flows.setup(api, apply=True)
+        self.assertIn(("DELETE", f"campaigns/{campaign['id']}/delete", None), api.calls)
 
     def test_copy_has_opt_out_and_no_em_dash(self):
         for flow in flows.FLOWS:

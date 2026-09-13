@@ -267,7 +267,12 @@ def ensure_campaigns(api: Mautic, segments: dict[str, int], emails: dict[str, in
         elif campaign and apply and campaign_needs_update(campaign, desired):
             if api.total("contacts") != 0:
                 raise ApiError(f"refusing to revise campaign with native contacts: {name}")
-            campaign = api.request("PUT", f"campaigns/{int(campaign['id'])}/edit", desired).get("campaign", {})
+            # Mautic appends graph events when supplied transient new_* IDs on
+            # a campaign edit. With no native contacts and this campaign still
+            # unpublished, replacing only this owner-owned campaign is the
+            # safe idempotent reconciliation path.
+            api.request("DELETE", f"campaigns/{int(campaign['id'])}/delete")
+            campaign = api.request("POST", "campaigns/new", desired).get("campaign", {})
             existing[existing.index(named(existing, name))] = campaign
         if campaign:
             if campaign.get("isPublished"):
