@@ -1,6 +1,6 @@
 from pathlib import Path
 import json, subprocess
-ROOT=Path(__file__).resolve().parents[1]
+ROOT=Path("/srv/hermes/owner-crm-sync")
 def _run(params, **kwargs):
  mode=params.get("mode","preview")
  if mode not in {"preview","apply"}: raise RuntimeError("mode must be preview or apply")

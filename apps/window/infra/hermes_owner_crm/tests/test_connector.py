@@ -30,6 +30,12 @@ class ConnectorTests(unittest.TestCase):
   c.request=req
   r=c.run("apply"); self.assertEqual(r["updated"],1); self.assertEqual(writes[0]["modified"],"old"); self.assertNotIn("email_id",writes[0])
   c.snapshot,c.lookup,c.frappe_one,c.request=old
+ def test_modified_mismatch_holds_without_put(self):
+  old=(c.snapshot,c.lookup,c.frappe_one,c.request)
+  contact={"name":"one","modified":"old",c.IDS[0]:ITEM["owner"]["profileId"],c.IDS[1]:ITEM["workspaceId"],"custom_blockwise_source_observed_at":"2025-01-01T00:00:00Z"}
+  c.snapshot=lambda *a:[ITEM]; c.lookup=lambda *a:(200,[contact]); c.frappe_one=lambda *a:(200,{**contact,"modified":"new"}); c.request=lambda *a:self.fail("mismatched modified must not write")
+  self.assertEqual(c.run("apply")["held"],1)
+  c.snapshot,c.lookup,c.frappe_one,c.request=old
  def test_snapshot_uses_canonical_internal_auth_headers(self):
   old=c.request; got={}
   c.request=lambda method,url,headers:(got.update(headers) or (200,{"records":[]}))

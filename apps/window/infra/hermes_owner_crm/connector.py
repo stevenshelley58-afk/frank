@@ -38,7 +38,7 @@ def snapshot(url,key):
  stamp=str(int(time.time())); nonce=hashlib.sha256(os.urandom(32)).hexdigest(); parsed=urlparse(url); path=parsed.path + (("?" + parsed.query) if parsed.query else ""); canonical='\n'.join(('v1',stamp,nonce,'owner-crm.customer-snapshot','GET',path,hashlib.sha256(b'').hexdigest())); sig=hmac.new(key.encode(),canonical.encode(),hashlib.sha256).hexdigest()
  status,body=request('GET',url,{'x-blockwise-timestamp':stamp,'x-blockwise-nonce':nonce,'x-blockwise-scope':'owner-crm.customer-snapshot','x-blockwise-signature':sig})
  if status!=200 or not isinstance(body,dict): die('snapshot rejected')
- records=body.get('records',body.get('items'))
+ records=body.get('records',body.get('items',body.get('snapshot')))
  if not isinstance(records,list) or len(records)>MAX_PAGES*PAGE_SIZE: die('snapshot records are malformed or exceed bound')
  return records
 def frappe_headers(key,secret): return {'Authorization':f'token {key}:{secret}','Accept':'application/json','Content-Type':'application/json'}
