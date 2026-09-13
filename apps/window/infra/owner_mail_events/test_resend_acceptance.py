@@ -59,14 +59,26 @@ class AcceptanceTests(unittest.TestCase):
         api = FakeApi()
         contact_id, expected = module.create_contact(api, "bounced", "0123456789ab")
         self.assertEqual(contact_id, 41)
-        self.assertEqual(expected[module.CONSENT_FIELD], "opted_in")
-        self.assertEqual(expected[module.NURTURE_EXIT_FIELD], "active")
+        self.assertNotIn(module.CONSENT_FIELD, expected)
+        self.assertNotIn(module.NURTURE_EXIT_FIELD, expected)
         self.assertRegex(expected["blockwise_profile_id"], module.UUID_PATTERN)
         self.assertRegex(expected["blockwise_workspace_id"], module.UUID_PATTERN)
         self.assertEqual(expected["email"], "bounced+owner-crm-0123456789ab@resend.dev")
         payload = next(call[2] for call in api.calls if call[:2] == ("POST", "contacts/new"))
         self.assertEqual(payload["firstname"], "Owner CRM")
         self.assertEqual(payload["lastname"], "Bounced Simulator Acceptance")
+        self.assertEqual(payload[module.CONSENT_FIELD], "opted_in")
+        self.assertEqual(payload[module.NURTURE_EXIT_FIELD], "active")
+
+    def test_contact_identity_survives_mutable_nurture_stop(self):
+        api = FakeApi()
+        contact_id, identity = module.create_contact(api, "bounced", "0123456789ab")
+        api.contact["fields"]["all"][module.NURTURE_EXIT_FIELD] = "stopped"
+        api.contact["doNotContact"] = [{"channel": "email"}]
+        self.assertEqual(
+            module.contact_state(api, contact_id, identity),
+            {"nurture": "stopped", "email_dnc": True},
+        )
 
     def test_native_email_is_unpublished_list_mail_and_respects_dnc(self):
         payload = module.email_payload("run-0123456789ab", 9)
@@ -114,6 +126,27 @@ class AcceptanceTests(unittest.TestCase):
         with mock.patch.object(module.subprocess, "run", return_value=result):
             with self.assertRaises(module.AcceptanceError):
                 module.ensure_marketing_held(Held(), {"isPublished": False})
+
+    def test_failure_receipt_keeps_safe_stage_and_native_ids(self):
+        captured = {}
+
+        def fail(run_id, progress):
+            progress.update({"stage": "awaiting_signed_callback", "native_email_id": 27})
+            progress["cases"].append({"kind": "bounced", "stage": "contact_created", "contact_id": 42})
+            raise module.AcceptanceError("sensitive provider detail")
+
+        def write(run_id, result):
+            captured.update(result)
+            return Path("/private/receipt.json")
+
+        with mock.patch.object(module, "run", side_effect=fail), mock.patch.object(module, "write_receipt", side_effect=write):
+            self.assertEqual(module.main(), 2)
+        self.assertEqual(captured["status"], "failed")
+        self.assertEqual(captured["stage"], "awaiting_signed_callback")
+        self.assertEqual(captured["native_email_id"], 27)
+        self.assertEqual(captured["cases"][0]["contact_id"], 42)
+        self.assertEqual(captured["failure_type"], "AcceptanceError")
+        self.assertNotIn("sensitive provider detail", str(captured))
 
     def test_helper_contains_no_direct_resend_send_or_unsafe_recipient(self):
         source = (ROOT / "resend_acceptance.py").read_text(encoding="utf-8")

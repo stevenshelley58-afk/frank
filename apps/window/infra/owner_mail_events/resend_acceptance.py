@@ -82,6 +82,8 @@ def contact_state(api: Mautic, contact_id: int, expected: dict[str, str]) -> dic
     for key, value in expected.items():
         if fields.get(key) != value:
             raise AcceptanceError(f"native contact identity drift: {key}")
+    if fields.get(CONSENT_FIELD) != "opted_in":
+        raise AcceptanceError("native contact consent drifted")
     records = contact.get("doNotContact")
     if not isinstance(records, list) or any(not isinstance(record, dict) for record in records):
         raise AcceptanceError("native contact DNC readback was malformed")
@@ -96,15 +98,15 @@ def create_contact(api: Mautic, kind: str, token: str) -> tuple[int, dict[str, s
     query = "contacts?" + urllib.parse.urlencode({"search": f"email:{email}", "limit": 2})
     if values(api.request("GET", query).get("contacts"), "contact", 2):
         raise AcceptanceError("controlled simulator contact already exists")
-    expected = {
+    identity = {
         "email": email,
         "blockwise_profile_id": str(uuid.uuid4()),
         "blockwise_workspace_id": str(uuid.uuid4()),
-        CONSENT_FIELD: "opted_in",
-        NURTURE_EXIT_FIELD: "active",
     }
     payload = {
-        **expected,
+        **identity,
+        CONSENT_FIELD: "opted_in",
+        NURTURE_EXIT_FIELD: "active",
         "firstname": "Owner CRM",
         "lastname": f"{kind.title()} Simulator Acceptance",
         "tags": [f"owner-mail-events-e2e:{token}:{kind}"],
@@ -113,8 +115,10 @@ def create_contact(api: Mautic, kind: str, token: str) -> tuple[int, dict[str, s
     if not isinstance(contact, dict):
         raise AcceptanceError("native controlled contact create failed")
     contact_id = decimal_id(contact.get("id"), "contact")
-    contact_state(api, contact_id, expected)
-    return contact_id, expected
+    state = contact_state(api, contact_id, identity)
+    if state != {"nurture": "active", "email_dnc": False}:
+        raise AcceptanceError("native controlled contact was not active and unsuppressed")
+    return contact_id, identity
 
 
 def email_payload(run_id: str, segment_id: int) -> dict[str, Any]:
@@ -225,6 +229,7 @@ def wait_for_provider_and_suppression(
     subject: str,
     event: str,
     segment_id: int,
+    progress: dict[str, Any],
 ) -> dict[str, Any]:
     deadline = time.monotonic() + WAIT_SECONDS
     last_event = None
@@ -236,6 +241,7 @@ def wait_for_provider_and_suppression(
             if not isinstance(raw_id, str) or not UUID_PATTERN.fullmatch(raw_id):
                 raise AcceptanceError("provider email ID was malformed")
             message_id, last_event = raw_id, message.get("last_event")
+            progress["provider_email_id"] = message_id
         state = contact_state(api, contact_id, expected)
         if (
             message_id
@@ -263,13 +269,18 @@ def run_case(
     segment_id: int,
     email_id: int,
     subject: str,
+    progress: dict[str, Any],
 ) -> dict[str, Any]:
+    progress["stage"] = "creating_contact"
     contact_id, expected = create_contact(admin, kind, token)
+    progress.update({"stage": "contact_created", "contact_id": contact_id})
     admin.request("POST", f"segments/{segment_id}/contact/{contact_id}/add")
     if not active_membership(contact_id, segment_id):
         raise AcceptanceError("controlled contact did not enter native source segment")
+    progress["stage"] = "source_segment_joined"
     if not send_native(admin, email_id, contact_id):
         raise AcceptanceError("initial native Mautic marketing send was blocked")
+    progress["stage"] = "awaiting_signed_callback"
     proof = wait_for_provider_and_suppression(
         admin,
         resend,
@@ -278,13 +289,16 @@ def run_case(
         subject=subject,
         event=SIMULATORS[kind],
         segment_id=segment_id,
+        progress=progress,
     )
+    progress.update({"stage": "suppression_verified", **proof})
     before = sent_count(admin, email_id)
     if send_native(admin, email_id, contact_id):
         raise AcceptanceError("native DNC failed to block the negative resend")
     after = sent_count(admin, email_id)
     if after != before:
         raise AcceptanceError("blocked negative resend changed native sent count")
+    progress["stage"] = "negative_resend_verified"
     return {
         "kind": kind,
         "contact_id": contact_id,
@@ -333,7 +347,8 @@ def write_receipt(run_id: str, result: dict[str, Any]) -> Path:
     return path
 
 
-def run() -> dict[str, Any]:
+def run(run_id: str, progress: dict[str, Any]) -> dict[str, Any]:
+    progress["stage"] = "checking_root"
     if os.geteuid() != 0:
         raise AcceptanceError("acceptance must run as root")
     admin_values = provision.read_env(provision.ADMIN_SECRET)
@@ -342,20 +357,37 @@ def run() -> dict[str, Any]:
     resend_key = runtime.get("OWNER_MAIL_EVENTS_RESEND_API_KEY", "")
     if not password or not resend_key:
         raise AcceptanceError("controlled acceptance credentials are unavailable")
+    progress["stage"] = "credentials_loaded"
     admin = Mautic(provision.MAUTIC_URL, "owner", password)
     resend = provision.Resend(resend_key)
     segment = exact_named(admin, "segments", "lists", SOURCE_SEGMENT)
     segment_id = decimal_id(segment.get("id"), "segment")
+    progress.update({"stage": "checking_marketing_hold", "native_segment_id": segment_id})
     ensure_marketing_held(admin, segment)
-    run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + secrets.token_hex(6)
+    progress["stage"] = "creating_native_email"
     email_id, subject = create_email(admin, run_id, segment_id)
-    cases = [
-        run_case(admin, resend, kind=kind, token=run_id[-12:], segment_id=segment_id, email_id=email_id, subject=subject)
-        for kind in SIMULATORS
-    ]
+    progress.update({"stage": "native_email_created", "native_email_id": email_id})
+    cases = []
+    for kind in SIMULATORS:
+        case_progress: dict[str, Any] = {"kind": kind, "stage": "starting"}
+        progress["cases"].append(case_progress)
+        case = run_case(
+            admin,
+            resend,
+            kind=kind,
+            token=run_id[-12:],
+            segment_id=segment_id,
+            email_id=email_id,
+            subject=subject,
+            progress=case_progress,
+        )
+        case_progress.update(case)
+        cases.append(case)
+    progress["stage"] = "accepted"
     return {
         "status": "accepted",
         "run_id": run_id,
+        "native_segment_id": segment_id,
         "native_email_id": email_id,
         "native_email_type": "list",
         "native_email_published": False,
@@ -367,11 +399,33 @@ def run() -> dict[str, Any]:
 
 
 def main() -> int:
+    run_id = time.strftime("%Y%m%dT%H%M%SZ", time.gmtime()) + "-" + secrets.token_hex(6)
+    progress: dict[str, Any] = {
+        "status": "running",
+        "run_id": run_id,
+        "stage": "starting",
+        "simulator_only": True,
+        "cases": [],
+    }
     try:
-        result = run()
-        receipt = write_receipt(result["run_id"], result)
-    except (AcceptanceError, ApiError, OSError, provision.ProvisionError):
-        print('{"status":"failed","error":"owner_mail_events_resend_acceptance_failed"}', file=sys.stderr)
+        result = run(run_id, progress)
+        receipt = write_receipt(run_id, result)
+    except (AcceptanceError, ApiError, OSError, provision.ProvisionError) as error:
+        progress.update({
+            "status": "failed",
+            "error": "owner_mail_events_resend_acceptance_failed",
+            "failure_type": type(error).__name__,
+        })
+        try:
+            receipt = write_receipt(run_id, progress)
+        except (AcceptanceError, OSError):
+            print('{"status":"failed","error":"owner_mail_events_resend_acceptance_failed","receipt":null}', file=sys.stderr)
+            return 2
+        print(json.dumps({
+            "status": "failed",
+            "error": "owner_mail_events_resend_acceptance_failed",
+            "receipt": str(receipt),
+        }, separators=(",", ":"), sort_keys=True), file=sys.stderr)
         return 2
     print(json.dumps({"status": "accepted", "receipt": str(receipt)}, separators=(",", ":"), sort_keys=True))
     return 0
