@@ -51,6 +51,15 @@ Copy was revised from canonical VPS product material, not inferred offers:
   demo-request and booking transactions.
 - src/lib/email/lead-lifecycle.ts and docs/runbooks/transactional-email.md for
   consent, exit rules and the only allowed two-day then three-day cadence.
+- src/lib/email-design/renderer.ts for the maintained Blockwise visual system:
+  quiet-card, personal-letter and operations-brief hierarchy, restrained CTA and
+  real preference links. It was reviewed as inspiration only; no Blockwise code
+  was copied into Frank.
+- /srv/blockwise/previews/email/catalog-builder.py,
+  library-cli-check/weekly-newsletter-SAMPLE.html and
+  notifications-cli-check/daily-digest-quiet-SAMPLE.html as historical visual
+  references only. Their sample prices, dates, addresses and preview URLs are
+  not Blockwise product facts and were not used.
 
 All authored copy avoids invented pricing, trial timing, performance claims and
 support promises. It uses no em dash. Installed Mautic cannot save HTML templates
@@ -97,3 +106,30 @@ adapter needs and does not grant campaign, email, publish, send, delete or admin
 access. Hermes installation creates the no-agent job Owner email consent bridge
 every 15 minutes in a paused state. Root alone may install its dedicated Mautic
 API credential and resume it after the controlled recipient test.
+
+## Native acceptance evidence
+
+On 2026-09-13, the dedicated API identity completed a controlled, no-send
+canary against the live private Mautic API. It read fields, segments, campaigns
+and email metadata; created then replayed exactly one clearly labelled `.invalid`
+contact; rejected a different immutable profile with the same email before a
+POST merge; recorded email Do Not Contact; and was denied campaign creation.
+The canary remains preserved for audit. Campaigns were still unpublished, the
+Hermes job stayed paused, and no email-send endpoint was called.
+
+The actual Mautic 7 route for static membership is
+`POST /api/segments/{segmentId}/contact/{contactId}/add`, not the obsolete
+contact-first route. Native contact totals are returned as decimal JSON strings,
+which the bounded lookup accepts only after strict decimal validation.
+
+## HTML template handoff
+
+The installed `mautic/mautic:7.2-apache` image has no
+`vendor/symfony/dom-crawler` directory, although its lockfile contains optional
+constraints referring to that package. This explains the previously observed
+HTML-link-validation dependency boundary but is not a safe reason to overlay a
+vendor directory. The maintained fix is a separately reviewed, pinned Mautic
+image or Composer build that includes a compatible DomCrawler package, followed
+by a controlled HTML-template save and own-mailbox render test. Until then these
+native templates deliberately remain plain text, with native preference and
+unsubscribe tokens and no tracking pixel.
