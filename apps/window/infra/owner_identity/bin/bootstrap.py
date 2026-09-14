@@ -160,9 +160,17 @@ def ensure(path: str, match_field: str, match_value, body: dict, label: str):
 
 PATCHABLE = {
     "/providers/proxy/": {"external_host", "authorization_flow", "invalidation_flow", "cookie_domain", "mode"},
-    "/providers/oauth2/": {"redirect_uris", "client_type", "authorization_flow", "invalidation_flow",
-                           "property_mappings", "sub_mode", "include_claims_in_id_token",
-                           "access_code_validity", "access_token_validity", "refresh_token_validity"},
+    # grant_types must be patchable: authentik's API does not apply a default
+    # when the field is omitted, so a provider created without it ends up with
+    # an EMPTY grant set. The authorize endpoint then answers every
+    # response_type=code request with `invalid_request` ("otherwise malformed")
+    # from check_grant, because authorization_code is not in the provider's
+    # allowed grant types. That is a silent, confusing failure: the client is
+    # configured correctly and the error names no missing field.
+    "/providers/oauth2/": {"redirect_uris", "client_type", "grant_types", "authorization_flow",
+                           "invalidation_flow", "property_mappings", "sub_mode",
+                           "include_claims_in_id_token", "access_code_validity",
+                           "access_token_validity", "refresh_token_validity"},
     # sign_assertion and sign_response travel together: authentik rejects a
     # patch that leaves both false while a signing keypair is selected, so a
     # patch that changes one must be able to state both.
@@ -348,6 +356,11 @@ def main() -> int:
         "authorization_flow": authz_flow["pk"],
         "invalidation_flow": inval_flow["pk"],
         "client_type": "confidential",
+        # Stated explicitly rather than left to a default. An empty grant set is
+        # accepted at creation and then rejects every authorization request, so
+        # this is the difference between a working login and a misleading
+        # `invalid_request`.
+        "grant_types": ["authorization_code", "refresh_token"],
         # Since 2026.8 each entry is an object, not a bare string. `strict`
         # means the URI must equal the value Frappe builds from its own
         # host_name character for character; regex matching is deliberately
