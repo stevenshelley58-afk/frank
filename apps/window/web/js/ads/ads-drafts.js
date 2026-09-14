@@ -8,50 +8,97 @@
 //
 // What it deliberately is not:
 //
-//   * not a provider writer. A staged draft is a local record of intent. No
-//     submission state is ever advanced here, and `submitted` is never set by
-//     this module.
+//   * not a provider writer. A staged draft is a local record of intent. The
+//     phases this module may set are the local ones (see LOCAL_PHASES); the
+//     provider-owned phases are reserved, and only a real writer that has an
+//     answer from Meta may set them through `applyProviderState`.
 //   * not storage for reporting rows. Only the operator's own draft survives a
 //     reload; provider data is re-read from Frank every session.
 //   * not shared between preview and live. Every record carries its `origin`,
-//     every read filters by it, and a preview draft can never surface in a live
-//     queue.
+//     every read filters by it, and a rehearsal draft can never surface in a
+//     live queue.
 //
 // Draft identity is stable and generated once. A campaign keeps its
 // `campaignId` when its name changes, because tracking identity built from a
 // name splits the reporting history the first time somebody renames something.
+//
+// Two operators, or one operator on two devices, can hold the same draft open.
+// Every save therefore carries the revision it was editing from, and a save
+// built on a stale revision is refused rather than allowed to overwrite the
+// other person's work (see `saveGuarded`).
+
+import { newIdentity, plannedAdFingerprint, reconcilePlanRows, trackingIdentityFor } from "./ads-identity.js";
 
 export const DRAFT_KINDS = Object.freeze(["launch", "budget", "pause"]);
 
-/** `editing` — still being built. `staged` — the operator committed it to the
- *  queue and it is waiting for a gated write that does not exist yet. */
+/**
+ * The life of a staged change, in the order it can move.
+ *
+ * `editing`   — being built. Local only.
+ * `staged`    — committed to Frank's queue, waiting for the owner. Local only.
+ * `approved`  — the owner approved this exact plan. Local only, and the last
+ *               phase this browser may reach on its own.
+ * `submitted` — a real writer sent it and Meta acknowledged it. Reserved: this
+ *               module never sets it, because nothing here can know.
+ * `delivering`— reporting shows it running. Reserved for the reader.
+ */
+export const DRAFT_PHASES = Object.freeze(["editing", "staged", "approved", "submitted", "delivering"]);
+
+export const LOCAL_PHASES = Object.freeze(["editing", "staged", "approved"]);
+export const PROVIDER_PHASES = Object.freeze(["submitted", "delivering"]);
+
+export const PHASE_LABELS = Object.freeze({
+  editing: "Draft",
+  staged: "Staged in Frank",
+  approved: "Approved",
+  submitted: "Submitted to Meta",
+  delivering: "Delivering",
+});
+
+/** The stored approval flag, kept because a view may only need the boolean. */
 export const DRAFT_APPROVAL = Object.freeze(["editing", "staged"]);
 
 export const DRAFT_ORIGINS = Object.freeze(["live", "preview"]);
 
-export const DRAFT_STORAGE_KEY = "frank.ads.drafts.v2";
+/** Where a queue entry lives. `rehearsal` is a preview-origin draft: it is a
+ *  full rehearsal of the flow and it can never be sent. */
+export const DRAFT_SCOPES = Object.freeze(["live", "rehearsal"]);
+
+export const DRAFT_STORAGE_KEY = "frank.ads.drafts.v3";
+export const LEGACY_DRAFT_STORAGE_KEYS = Object.freeze(["frank.ads.drafts.v2"]);
 
 /** Queue states this model may produce. Deliberately a subset: a draft cannot
  *  claim that Meta accepted, reviewed or delivered anything. */
-export const LOCAL_QUEUE_STATES = Object.freeze(["draft", "queued"]);
+export const LOCAL_QUEUE_STATES = Object.freeze(["draft", "queued", "approved"]);
 
-let counter = 0;
+export function phaseIsLocal(phase) {
+  return LOCAL_PHASES.includes(phase);
+}
 
-/** A stable, unique, non-guessable-enough identity for a draft or a campaign.
- *  Date-free on purpose: two drafts created in the same millisecond are still
- *  distinct, and nothing downstream can mistake the id for a timestamp. */
+export function phaseIsProvider(phase) {
+  return PROVIDER_PHASES.includes(phase);
+}
+
+/** `local rehearsal`, `saved draft`, `approved`, … — one label, one meaning,
+ *  used by the queue, the wizard footer and the queue chips. */
+export function phaseLabel(draft) {
+  if (!draft) return "";
+  if (draft.origin === "preview") return draft.phase === "editing" ? "Local rehearsal" : `Rehearsal · ${PHASE_LABELS[draft.phase] || draft.phase}`;
+  return PHASE_LABELS[draft.phase] || draft.phase;
+}
+
+/** A stable, unique identity for a draft. Delegates to the identity module so
+ *  there is exactly one allocator in the workspace. */
 export function newAdsId(prefix = "draft") {
-  counter += 1;
-  const rand = Math.random().toString(36).slice(2, 10);
-  return `${prefix}_${Date.now().toString(36)}${counter.toString(36)}${rand}`;
+  return newIdentity(prefix);
 }
 
 function clean(value) {
   return typeof value === "string" ? value.trim() : value;
 }
 
-/** A slug that is stable for the same text and safe in a URL parameter. Used to
- *  give each variation of an ad its own tracking identity. */
+/** A slug that is stable for the same text and safe in a URL parameter. Kept
+ *  for labels and file names; identity never uses it (see ads-identity.js). */
 export function slugForTracking(value, fallback = "default") {
   const slug = String(value ?? "")
     .toLowerCase()
@@ -63,15 +110,10 @@ export function slugForTracking(value, fallback = "default") {
   return slug || fallback;
 }
 
-/** The stable key for one planned ad: the creative's own identifier plus one
- *  slug per copy axis. Renaming a campaign or reordering headlines cannot
- *  change it, so a tracking join survives both. */
-export function variationKey({ creativeKey, headline = "", body = "", index = 0, total = 1 }) {
-  const parts = [String(creativeKey || "creative")];
-  if (total > 1) parts.push(`h-${slugForTracking(headline)}`);
-  if (String(body || "").trim()) parts.push(`b-${slugForTracking(body)}`);
-  if (total === 0) parts.push(`v${index + 1}`);
-  return parts.join("-");
+/** The stable key for one planned ad: its identity, and nothing derived from
+ *  its copy. Kept as a named function because older callers ask for it. */
+export function variationKey({ adId = "", creativeKey }) {
+  return trackingIdentityFor(adId || creativeKey || "");
 }
 
 /**
@@ -94,6 +136,9 @@ function normalizeCreatives(list) {
   return list.map((item) => ({
     id: String(item?.id ?? ""),
     internalId: String(item?.internalId ?? item?.id ?? ""),
+    creativeId: String(item?.creativeId ?? item?.id ?? ""),
+    versionId: String(item?.versionId ?? item?.creativeVersionId ?? ""),
+    assetKey: String(item?.assetKey ?? item?.internalId ?? item?.id ?? ""),
     name: String(item?.name ?? ""),
     format: item?.format ?? "",
     ratio: item?.preview?.ratio ?? item?.ratio ?? "",
@@ -108,10 +153,12 @@ function normalizeCreatives(list) {
 function normalizeRows(list) {
   if (!Array.isArray(list)) return [];
   return list.map((row, index) => ({
-    id: String(row?.id ?? `${index}`),
+    adId: String(row?.adId ?? ""),
+    id: String(row?.id ?? row?.adId ?? `${index}`),
     name: String(row?.name ?? ""),
     creativeId: String(row?.creativeId ?? ""),
     creativeKey: String(row?.creativeKey ?? row?.creativeId ?? ""),
+    creativeVersionId: String(row?.creativeVersionId ?? row?.creativeKey ?? row?.creativeId ?? ""),
     headline: String(row?.headline ?? ""),
     body: String(row?.body ?? ""),
     trackingKey: String(row?.trackingKey ?? ""),
@@ -121,22 +168,60 @@ function normalizeRows(list) {
   }));
 }
 
+/** Old records stored `approval`/`state`; the phase vocabulary replaces both but
+ *  an upgraded browser must not lose a staged draft. */
+function phaseFromSource(source) {
+  if (DRAFT_PHASES.includes(source.phase)) return source.phase;
+  if (source.approval === "staged" || source.state === "queued") return "staged";
+  if (source.state === "approved") return "approved";
+  return "editing";
+}
+
+function stateForPhase(phase) {
+  if (phase === "editing") return "draft";
+  if (phase === "approved") return "approved";
+  return "queued";
+}
+
+function normalizeHistory(list) {
+  if (!Array.isArray(list)) return [];
+  return list
+    .map((entry) => ({
+      revision: Number(entry?.revision) || 0,
+      at: String(entry?.at || ""),
+      phase: DRAFT_PHASES.includes(entry?.phase) ? entry.phase : "editing",
+      summary: String(entry?.summary || ""),
+      actor: String(entry?.actor || ""),
+    }))
+    .filter((entry) => entry.revision > 0);
+}
+
 /** Coerce anything into one canonical draft record. A draft read back from
  *  storage goes through here, so a hand-edited or older record cannot smuggle a
  *  missing field into the queue. */
 export function normalizeDraft(raw, { id = null, origin = "live", kind = "launch" } = {}) {
   const source = raw && typeof raw === "object" ? raw : {};
   const now = new Date().toISOString();
-  const state = LOCAL_QUEUE_STATES.includes(source.state) ? source.state : "draft";
+  const phase = phaseFromSource(source);
+  const rows = normalizeRows(source.plan?.rows);
   return Object.freeze({
     id: String(source.id || id || newAdsId("draft")),
     kind: DRAFT_KINDS.includes(source.kind) ? source.kind : kind,
     origin: DRAFT_ORIGINS.includes(source.origin) ? source.origin : origin,
-    approval: DRAFT_APPROVAL.includes(source.approval) ? source.approval : "editing",
-    state,
+    phase,
+    approval: phase === "editing" ? "editing" : "staged",
+    state: LOCAL_QUEUE_STATES.includes(source.state) && source.state === stateForPhase(phase) ? source.state : stateForPhase(phase),
+    revision: Number(source.revision) > 0 ? Number(source.revision) : 1,
     title: String(source.title || ""),
     createdAt: String(source.createdAt || now),
     updatedAt: String(source.updatedAt || now),
+    savedAt: String(source.savedAt || ""),
+    approvedAt: String(source.approvedAt || ""),
+    approvedDigest: String(source.approvedDigest || ""),
+    submittedAt: String(source.submittedAt || ""),
+    providerId: String(source.providerId || ""),
+    providerState: String(source.providerState || ""),
+    history: Object.freeze(normalizeHistory(source.history)),
     campaign: Object.freeze({
       campaignId: String(source.campaign?.campaignId || newAdsId("cmp")),
       name: String(source.campaign?.name || ""),
@@ -169,7 +254,12 @@ export function normalizeDraft(raw, { id = null, origin = "live", kind = "launch
       mode: source.plan?.mode === "cross_product" ? "cross_product" : "per_creative",
       total: Number.isFinite(Number(source.plan?.total)) ? Number(source.plan.total) : 0,
       equation: String(source.plan?.equation || ""),
-      rows: Object.freeze(normalizeRows(source.plan?.rows)),
+      rows: Object.freeze(
+        // A record stored before identities existed gets its rows reconciled
+        // against themselves: identities are allocated once, here, and then
+        // they are part of the record.
+        reconcilePlanRows([], rows),
+      ),
     }),
     validation: Object.freeze({
       ok: Boolean(source.validation?.ok),
@@ -183,6 +273,8 @@ export function normalizeDraft(raw, { id = null, origin = "live", kind = "launch
       rows: Object.freeze(
         Array.isArray(source.changes?.rows)
           ? source.changes.rows.map((row) => ({
+              // A budget or pause row points at a real campaign, ad set or ad,
+              // so its key is the record's identity, never its position.
               key: String(row?.key ?? ""),
               name: String(row?.name ?? ""),
               level: String(row?.level ?? ""),
@@ -193,7 +285,7 @@ export function normalizeDraft(raw, { id = null, origin = "live", kind = "launch
           : [],
       ),
     }),
-    submission: null,
+    submission: source.submission && typeof source.submission === "object" ? Object.freeze({ ...source.submission }) : null,
   });
 }
 
@@ -216,11 +308,37 @@ export function draftAdCount(draft) {
   return draft.plan.total;
 }
 
+/** The identity a queue row is keyed on. A launch keeps its ads' identities in
+ *  the summary so two launches of the same creative are still two rows. */
+export function draftScope(draft) {
+  return draft?.origin === "preview" ? "rehearsal" : "live";
+}
+
+function summaryOf(draft) {
+  return `${draftSummary(draft)}${draft.title ? ` · ${draft.title}` : ""}`;
+}
+
 /**
  * The store. In-memory truth with an optional persistence adapter, so a test can
  * drive it without a browser and the app can survive a reload.
+ *
+ * Recovery is part of the contract, not an afterthought:
+ *
+ *   * a record that cannot be parsed is dropped and *counted*, so the queue can
+ *     say "one saved draft could not be read" instead of silently losing it;
+ *   * the previous stored payload is kept as a backup before every write, so a
+ *     half-written value can be restored;
+ *   * a storage failure (private mode, quota) sets `storageError`, and the UI
+ *     says the draft is not being saved instead of pretending it is.
  */
-export function createAdsDrafts({ storage = null, key = DRAFT_STORAGE_KEY, origin = "live", now = () => new Date().toISOString() } = {}) {
+export function createAdsDrafts({
+  storage = null,
+  key = DRAFT_STORAGE_KEY,
+  legacyKeys = LEGACY_DRAFT_STORAGE_KEYS,
+  origin = "live",
+  now = () => new Date().toISOString(),
+  actor = "",
+} = {}) {
   const listeners = new Set();
   // `origin` may be a function, because the workspace switches between live and
   // preview without rebuilding its modules. Resolved on every call so a draft
@@ -229,28 +347,79 @@ export function createAdsDrafts({ storage = null, key = DRAFT_STORAGE_KEY, origi
     const value = typeof origin === "function" ? origin() : origin;
     return DRAFT_ORIGINS.includes(value) ? value : "live";
   };
-  let records = load();
+
+  let discarded = 0;
+  let storageError = "";
+  let restoredFromBackup = false;
+  // `load` runs before `records` is assigned, so it returns its result (and
+  // whether an older key was migrated) instead of assigning during its own
+  // initialisation.
+  const loaded = load();
+  let records = loaded.records;
+  if (loaded.migrated) persist();
+
+  function parse(raw) {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    const kept = [];
+    for (const item of parsed) {
+      try {
+        const draft = normalizeDraft(item);
+        if (DRAFT_KINDS.includes(draft.kind)) kept.push(draft);
+        else discarded += 1;
+      } catch {
+        discarded += 1;
+      }
+    }
+    return kept;
+  }
 
   function load() {
-    if (!storage) return [];
-    try {
-      const raw = storage.getItem(key);
-      if (!raw) return [];
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) return [];
-      // A record written by an older build is normalised rather than trusted.
-      return parsed.map((item) => normalizeDraft(item)).filter((draft) => DRAFT_KINDS.includes(draft.kind));
-    } catch {
-      return [];
+    if (!storage) return { records: [], migrated: false };
+    for (const candidate of [key, ...(legacyKeys || [])]) {
+      try {
+        const raw = storage.getItem(candidate);
+        if (!raw) continue;
+        const parsed = parse(raw);
+        // A record written by an older build is normalised, then written
+        // forward, so a browser upgrade keeps a staged draft.
+        if (parsed.length) return { records: parsed, migrated: candidate !== key };
+        if (Array.isArray(JSON.parse(raw))) continue;
+      } catch {
+        discarded += 1;
+        try {
+          const backup = storage.getItem(`${candidate}.bak`);
+          if (backup) {
+            const restored = parse(backup);
+            if (restored.length) {
+              restoredFromBackup = true;
+              return { records: restored, migrated: false };
+            }
+          }
+        } catch {
+          /* nothing else to try */
+        }
+      }
     }
+    return { records: [], migrated: false };
   }
 
   function persist() {
     if (!storage) return;
     try {
-      storage.setItem(key, JSON.stringify(records));
-    } catch {
-      /* storage is best effort; the in-memory copy stays authoritative */
+      const payload = JSON.stringify(records);
+      try {
+        const previous = storage.getItem(key);
+        if (previous) storage.setItem(`${key}.bak`, previous);
+      } catch {
+        /* the backup is best effort */
+      }
+      storage.setItem(key, payload);
+      storageError = "";
+    } catch (error) {
+      // The in-memory copy stays authoritative; the operator is told that it is
+      // no longer durable rather than being told nothing.
+      storageError = error?.name === "QuotaExceededError" ? "Browser storage is full, so this draft is not being saved." : "This browser is not saving drafts.";
     }
     for (const listener of listeners) {
       try {
@@ -261,8 +430,18 @@ export function createAdsDrafts({ storage = null, key = DRAFT_STORAGE_KEY, origi
     }
   }
 
+  function withRevision(existing, raw, patch = {}) {
+    const at = now();
+    const base = normalizeDraft({ ...existing, ...raw, ...patch }, { id: existing?.id || raw?.id || null, origin: existing?.origin || currentOrigin() });
+    const revision = existing ? Number(existing.revision || 1) + 1 : 1;
+    const history = existing ? [...existing.history] : [];
+    const entry = { revision, at, phase: base.phase, summary: summaryOf(base), actor: String(actor || "") };
+    const trimmed = [...history, entry].slice(-50);
+    return Object.freeze({ ...base, revision, history: Object.freeze(trimmed), updatedAt: at, savedAt: at });
+  }
+
   const store = {
-    /** Every draft for one origin. Preview drafts are never returned to a live
+    /** Every draft for one origin. Rehearsal drafts are never returned to a live
      *  screen, and vice versa. */
     list({ kind = null, scope = null } = {}) {
       const wanted = scope || currentOrigin();
@@ -280,27 +459,89 @@ export function createAdsDrafts({ storage = null, key = DRAFT_STORAGE_KEY, origi
     /** Insert or replace. `updatedAt` is always refreshed here and never by the
      *  caller, so the queue order is the store's own fact. */
     save(raw, { id = null } = {}) {
-      const draft = normalizeDraft(raw, { id, origin: currentOrigin(), kind: raw?.kind || "launch" });
-      const stamped = Object.freeze({ ...draft, updatedAt: now() });
-      const index = records.findIndex((item) => item.id === stamped.id);
-      if (index === -1) records = [stamped, ...records];
-      else records = records.map((item) => (item.id === stamped.id ? stamped : item));
+      const existing = id ? records.find((item) => item.id === String(id)) : null;
+      const draft = withRevision(existing, raw, { id: existing?.id || id || raw?.id || undefined });
+      const index = records.findIndex((item) => item.id === draft.id);
+      if (index === -1) records = [draft, ...records];
+      else records = records.map((item) => (item.id === draft.id ? draft : item));
       persist();
-      return stamped;
+      return draft;
     },
-    update(id, patch) {
+    /**
+     * Save only if the revision the caller was editing from is still current.
+     *
+     * Two operators holding the same draft open is the normal case once drafts
+     * live on the server, and it is already possible across two tabs. The second
+     * save is refused with the winner's record attached, so the screen can show
+     * the conflict instead of silently discarding somebody's work.
+     */
+    saveGuarded(raw, { id = null, baseRevision = null } = {}) {
+      const existing = id ? records.find((item) => item.id === String(id)) : null;
+      if (existing && baseRevision !== null && Number(baseRevision) !== Number(existing.revision)) {
+        return {
+          ok: false,
+          conflict: {
+            expectedRevision: Number(baseRevision),
+            actualRevision: Number(existing.revision),
+            updatedAt: existing.updatedAt,
+            draft: existing,
+          },
+          draft: existing,
+        };
+      }
+      return { ok: true, draft: store.save(raw, { id }) };
+    },
+    update(id, patch, options = {}) {
       const existing = store.get(id);
       if (!existing) return null;
+      if (options.baseRevision !== undefined && options.baseRevision !== null && Number(options.baseRevision) !== Number(existing.revision)) {
+        return null;
+      }
       return store.save({ ...existing, ...patch, id: existing.id }, { id: existing.id });
+    },
+    /** Move within the local phases. A provider phase is refused here by
+     *  construction: only `applyProviderState` may set one. */
+    phase(id, phase) {
+      if (!LOCAL_PHASES.includes(phase)) return null;
+      const existing = store.get(id);
+      if (!existing) return null;
+      return store.update(id, { phase, approval: phase === "editing" ? "editing" : "staged", state: stateForPhase(phase) });
     },
     /** Mark a draft as committed to the queue. This is the only transition that
      *  produces a queue entry, and it stays local: nothing is sent. */
     stage(id) {
-      return store.update(id, { approval: "staged", state: "queued" });
+      return store.phase(id, "staged");
     },
     /** Put a staged draft back into editing. */
     unstage(id) {
-      return store.update(id, { approval: "editing", state: "draft" });
+      return store.phase(id, "editing");
+    },
+    /** The owner's sign-off on one exact plan. Recording the digest is what
+     *  makes the approval meaningful: if the plan changes afterwards, the digest
+     *  no longer matches and the screen says so. */
+    approve(id, { digest = "", by = "" } = {}) {
+      const existing = store.get(id);
+      if (!existing) return null;
+      // A rehearsal draft can be approved as a rehearsal; it is still never
+      // sent, because nothing in this browser has a write path.
+      const approved = store.update(id, { phase: "approved", state: "approved", approvedAt: now(), approvedDigest: String(digest || ""), approvedBy: String(by || actor || "") });
+      return approved;
+    },
+    /**
+     * Record what a real writer heard back from the provider.
+     *
+     * Reserved for the execution service. Nothing in this browser calls it
+     * today, and nothing may call it with a guess: a draft only reaches
+     * `submitted` when something outside this browser says Meta accepted it.
+     */
+    applyProviderState(id, { phase, providerId = "", providerState = "", submission = null } = {}) {
+      if (!PROVIDER_PHASES.includes(phase)) return null;
+      const existing = store.get(id);
+      if (!existing) return null;
+      return store.save(
+        { ...existing, phase, state: "queued", providerId: String(providerId || existing.providerId), providerState: String(providerState || existing.providerState), submittedAt: existing.submittedAt || now(), submission: submission || existing.submission },
+        { id },
+      );
     },
     remove(id) {
       const before = records.length;
@@ -315,7 +556,11 @@ export function createAdsDrafts({ storage = null, key = DRAFT_STORAGE_KEY, origi
     },
     /** Drafts that are waiting for a write, newest first. */
     staged(options = {}) {
-      return store.list(options).filter((draft) => draft.approval === "staged");
+      return store.list(options).filter((draft) => draft.phase !== "editing");
+    },
+    /** Saved work from a previous session that has not been staged. */
+    unfinished(options = {}) {
+      return store.list(options).filter((draft) => draft.phase === "editing");
     },
     subscribe(listener) {
       listeners.add(listener);
@@ -326,8 +571,26 @@ export function createAdsDrafts({ storage = null, key = DRAFT_STORAGE_KEY, origi
     get persistent() {
       return Boolean(storage);
     },
+    /** Diagnostics the queue shows rather than hiding. */
+    get diagnostics() {
+      return Object.freeze({ discarded, storageError, restoredFromBackup });
+    },
+    /** Put the previous payload back, for a record that cannot be read. */
+    restoreBackup() {
+      if (!storage) return false;
+      try {
+        const raw = storage.getItem(`${key}.bak`);
+        if (!raw) return false;
+        records = parse(raw);
+        restoredFromBackup = true;
+        persist();
+        return true;
+      } catch {
+        return false;
+      }
+    },
   };
   return Object.freeze(store);
 }
 
-export const __internals = Object.freeze({ clean, normalizeCreatives, normalizeRows });
+export const __internals = Object.freeze({ clean, normalizeCreatives, normalizeRows, phaseFromSource, stateForPhase, plannedAdFingerprint });

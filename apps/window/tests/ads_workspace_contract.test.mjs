@@ -193,10 +193,20 @@ test("empty values are omitted and an unparseable destination fails loudly", () 
 
 test("a rename cannot change a tracking identity, and variations do not share one", () => {
   const chosen = creatives(2);
-  const rows = planAdRows({ creatives: chosen, headlines: ["one", "two"], bodies: ["body"], mode: "cross_product" });
+  // The identities live in the plan, not in the pre-identity row builder: a row
+  // only becomes an ad once `reconcilePlanRows` has given it an identity, and
+  // that identity is what tracking resolves to.
+  const plan = planAds({ creatives: chosen, headlines: ["one", "two"], bodies: ["body"], mode: "cross_product" });
+  const rows = plan.rows;
   assert.equal(rows.length, 4);
   const identities = rows.map((row) => resolveTrackingValue("{{creative.internal_id}}", { row, campaignId: "cmp_stable" }));
   assert.equal(new Set(identities).size, 4, `variations share an identity: ${identities.join(", ")}`);
+  for (const row of rows) assert.equal(resolveTrackingValue("{{ad.internal_id}}", { row }), row.adId);
+  // The readable label is available, and it is deliberately not the identity:
+  // both variations of one creative share it.
+  assert.equal(resolveTrackingValue("{{ad.label}}", { row: rows[0] }), "cr_int_1");
+  assert.equal(resolveTrackingValue("{{ad.label}}", { row: rows[1] }), "cr_int_1");
+  assert.notEqual(resolveTrackingValue("{{ad.internal_id}}", { row: rows[0] }), resolveTrackingValue("{{ad.internal_id}}", { row: rows[1] }));
 
   const before = buildTrackingUrl({ base: "https://example.invalid/x", fields: trackingFields(), row: rows[0], campaignId: "cmp_stable", campaignName: "Spring" });
   const after = buildTrackingUrl({ base: "https://example.invalid/x", fields: trackingFields(), row: rows[0], campaignId: "cmp_stable", campaignName: "Spring leads 2026" });

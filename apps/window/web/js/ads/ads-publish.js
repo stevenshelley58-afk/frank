@@ -32,7 +32,8 @@ import {
 } from "./ads-ui.js";
 import { formatMoney, formatInt } from "./ads-contracts.js";
 import { createSelection } from "./ads-table.js";
-import { newAdsId, variationKey, draftAdCount, mergeMapping } from "./ads-drafts.js";
+import { newAdsId, draftAdCount, draftScope, mergeMapping } from "./ads-drafts.js";
+import { planDigest, reconcilePlanRows } from "./ads-identity.js";
 
 const PRESET_KEY = "frank.ads.presets.v1";
 
@@ -106,9 +107,11 @@ export function axisValues(list = []) {
  * staging loop count independently, "20 ads" quietly becomes a different number
  * of queued rows — which is the one thing this flow exists to prevent.
  *
- * Each row carries a stable identity built from the creative's own id and the
- * copy slugs, never from a name, so renaming a campaign or reordering headlines
- * cannot change what an ad is called in tracking.
+ * Each row carries identity, not description: the creative's own identity plus
+ * one immutable planned-ad identity per variation, allocated once and carried
+ * through every later edit (see ads-identity.js). A name, a position or a slug of
+ * the copy is never part of it, so renaming a campaign, reordering the creatives
+ * or rewording a headline cannot change what an ad is called in tracking.
  */
 export function planAdRows({
   creatives = [],
@@ -123,27 +126,31 @@ export function planAdRows({
   const bodiesAxis = axisValues(bodies);
   for (const creative of creatives) {
     const creativeKey = String(creative?.internalId || creative?.id || "");
-    // An explicit utm_content on the creative is the base identity; each
-    // variation appends its own copy slug so two variations of one creative are
-    // two different things in tracking.
-    const base = String(mapping?.[creative?.id]?.utmContent || creativeKey);
+    // The mapping's utm_content is the operator's readable *label* for this
+    // creative. It is not an identity: every row gets its own immutable ad
+    // identity, and the label is only ever reachable through `{{ad.label}}`.
+    const label = String(mapping?.[creative?.id]?.utmContent || creativeKey).trim();
     const detail = (problemsByCreative?.get?.(creative?.name) || []).slice();
     const variations =
       mode === "cross_product" ? headlinesAxis.flatMap((headline) => bodiesAxis.map((body) => ({ headline, body }))) : [{ headline: "", body: "" }];
     for (const { headline, body } of variations) {
-      const key = variationKey({ creativeKey: base, headline, body, total: variations.length });
       rows.push(
         Object.freeze({
-          id: key,
-          key,
-          trackingKey: key,
+          // Identity arrives from `reconcilePlanRows`, which carries the
+          // previous plan's identities forward instead of minting new ones.
+          adId: "",
+          id: "",
+          key: "",
+          trackingKey: "",
+          label,
           creativeId: String(creative?.id ?? ""),
           creativeKey,
+          creativeVersionId: String(creative?.versionId || creative?.assetKey || creativeKey),
           creativeName: String(creative?.name ?? ""),
           headline,
           body,
           destination: String(mapping?.[creative?.id]?.destination || ""),
-          utmContent: key,
+          utmContent: "",
           name:
             mode === "cross_product" && (headline || body)
               ? `${creative?.name ?? ""} — ${headline || "(no headline)"}${body ? ` — ${body.slice(0, 24)}` : ""}`
@@ -168,13 +175,16 @@ export function planAdRows({
  * `total` is always `planAdRows(...).length`: the count and the rows cannot
  * disagree, because there is only one function that produces either.
  */
-export function planAds({ creatives = [], headlines = [], bodies = [], mode = "per_creative", mapping = {} }) {
+export function planAds({ creatives = [], headlines = [], bodies = [], mode = "per_creative", mapping = {}, previousRows = [] }) {
   const c = creatives.length;
   const headlinesAxis = axisValues(headlines);
   const bodiesAxis = axisValues(bodies);
   const h = headlinesAxis.filter(Boolean).length;
   const b = bodiesAxis.filter(Boolean).length;
-  const rows = planAdRows({ creatives, headlines, bodies, mode, mapping });
+  // Identities come from the previous plan wherever the row is recognisably the
+  // same ad, so reopening the wizard, reordering the creatives or editing a
+  // headline updates the plan instead of replacing every ad in it.
+  const rows = reconcilePlanRows(previousRows, planAdRows({ creatives, headlines, bodies, mode, mapping }));
   const total = rows.length;
   const plural = (count, singular, pluralForm) => (count === 1 ? singular : pluralForm);
   const factors = [
@@ -222,18 +232,26 @@ export function planAds({ creatives = [], headlines = [], bodies = [], mode = "p
 /**
  * Resolve one tracking value for one planned ad.
  *
- * Identity placeholders resolve to generated, stable identifiers: the draft's
- * own campaign id and the row's variation key. They never resolve to a name,
- * because a name is not an identity and a rename would split the reporting
- * history. `{{campaign.name}}` and `{{ad.name}}` stay available for the
- * operator who explicitly wants the display name, and validation warns about
- * them.
+ * `{{ad.internal_id}}` and `{{creative.internal_id}}` resolve to the ad's
+ * immutable identity: the same value the queue, the draft and the approval
+ * snapshot use, and the only value that is guaranteed distinct per variation.
+ * `{{ad.label}}` resolves to the operator's readable label for the creative,
+ * which is a label and not an identity — two variations can share one, so
+ * validation flags a template that makes it the whole of `utm_content`.
+ * `{{campaign.name}}` and `{{ad.name}}` stay available for the operator who
+ * explicitly wants a display name, and validation warns about them.
  */
 export function resolveTrackingValue(value, { row = null, campaignId = "", campaignName = "", audience = "" } = {}) {
-  const rowKey = String(row?.trackingKey || row?.key || row?.creativeKey || "");
+  const rowKey = String(row?.trackingKey || row?.adId || row?.key || row?.creativeKey || "");
+  const label = String(row?.label || row?.creativeKey || "");
+  const creativeId = String(row?.creativeKey || row?.creativeId || "");
+  const versionId = String(row?.creativeVersionId || creativeId);
   return String(value ?? "")
     .replace(/\{\{creative\.internal_id\}\}/g, rowKey)
     .replace(/\{\{ad\.internal_id\}\}/g, rowKey)
+    .replace(/\{\{ad\.id\}\}/g, rowKey)
+    .replace(/\{\{ad\.label\}\}/g, label)
+    .replace(/\{\{creative\.version_id\}\}/g, versionId)
     .replace(/\{\{campaign\.internal_id\}\}/g, String(campaignId || "cmp_draft"))
     .replace(/\{\{(campaign|ad)\.name\}\}/g, String(campaignName || "unstable_name"))
     .replace(/\{\{platform\}\}/g, "meta")
@@ -483,6 +501,16 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     campaignId: newAdsId("cmp"),
     // The draft this flow is editing, once it has been saved or reopened.
     draftId: null,
+    // The revision of that draft this screen was editing from, so a save built
+    // on a stale copy is refused instead of overwriting the other edit.
+    revision: null,
+    // The plan this wizard last produced. Identities are reconciled against it,
+    // so a rebuild updates ads rather than replacing them.
+    plannedRows: [],
+    // The last state known to have been saved, for the unsaved-work warning.
+    savedSnapshot: "",
+    // Set when a save was refused because the draft moved on elsewhere.
+    conflict: null,
     seed: null,
     loadError: null,
   };
@@ -567,14 +595,25 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
   }
 
   function currentPlan() {
-    return planAds({ creatives: chosenCreatives(), headlines: state.headlines, bodies: state.bodies, mode: state.mode, mapping: state.mapping });
+    // `previousRows` is whatever this wizard last planned. Passing it is what
+    // makes a rebuild carry identities forward instead of minting new ones, so
+    // deselecting a creative and selecting it again does not orphan its ads.
+    const plan = planAds({
+      creatives: chosenCreatives(),
+      headlines: state.headlines,
+      bodies: state.bodies,
+      mode: state.mode,
+      mapping: state.mapping,
+      previousRows: state.plannedRows || [],
+    });
+    state.plannedRows = plan.rows;
+    return plan;
   }
 
   /** The plan's rows with each row's destination resolved, which is what both
    *  the URL preview and the URL validation work from. */
   function currentRows() {
-    const plan = currentPlan();
-    return plan.rows.map((row) => ({ ...row, destination: row.destination || state.config.destination || "" }));
+    return currentPlan().rows.map((row) => ({ ...row, destination: row.destination || state.config.destination || "" }));
   }
 
   function currentValidation() {
@@ -682,7 +721,12 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
       button("Save draft", {
         title: "Keep this setup, including the creatives and their mappings, without staging anything.",
         onClick: () => {
-          const saved = saveDraft({ approval: "editing" });
+          const saved = saveDraft({ phase: "editing" });
+          if (!saved) {
+            ctx.say("This draft changed somewhere else since you opened it, so nothing was overwritten. Reload the draft to see the other change.");
+            render();
+            return;
+          }
           ctx.say(
             `Draft saved with ${formatInt(saved.creatives.length)} creative${saved.creatives.length === 1 ? "" : "s"} and ${formatInt(draftAdCount(saved))} planned ads. Nothing was staged or sent.`,
           );
@@ -1588,15 +1632,17 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
    * the same `plan.rows` the counter displays, so the number on screen and the
    * number of rows in the queue are the same fact.
    */
-  function draftFromState({ approval = "editing" } = {}) {
+  function draftFromState({ phase = "editing" } = {}) {
     const plan = currentPlan();
     const validation = currentValidation();
     return {
       id: state.draftId || undefined,
       kind: "launch",
-      approval,
-      state: approval === "staged" ? "queued" : "draft",
+      phase,
       title: state.config.campaignName || "Untitled launch",
+      // A rehearsal is a full rehearsal of the flow, and it is labelled as one
+      // everywhere it appears. It can never be sent.
+      origin: ctx.isPreview?.() ? "preview" : "live",
       campaign: {
         campaignId: state.campaignId,
         name: state.config.campaignName,
@@ -1617,6 +1663,8 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
         ratio: creative.preview?.ratio || "",
         hasImage: creative.preview?.hasImage ?? null,
         hasVideo: creative.preview?.hasVideo ?? null,
+        assetKey: String(creative.assetKey || creative.internalId || creative.id),
+        versionId: String(creative.versionId || ""),
         mappings: { ...(state.mapping[creative.id] || {}) },
       })),
       headlines: state.headlines.map((headline) => String(headline ?? "")),
@@ -1628,10 +1676,45 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     };
   }
 
-  function saveDraft({ approval = "editing" } = {}) {
-    const saved = ctx.drafts.save(draftFromState({ approval }));
-    state.draftId = saved.id;
-    return saved;
+  /**
+   * Save the draft being edited.
+   *
+   * The revision this screen was editing from goes with the save: if another
+   * tab, the queue, or another device changed the same draft, the save is
+   * refused and the screen reports the conflict rather than overwriting it.
+   */
+  function saveDraft({ phase = "editing" } = {}) {
+    const result = ctx.drafts.saveGuarded(draftFromState({ phase }), { id: state.draftId, baseRevision: state.revision });
+    if (!result.ok) {
+      state.conflict = result.conflict;
+      return null;
+    }
+    state.conflict = null;
+    state.draftId = result.draft.id;
+    state.revision = result.draft.revision;
+    state.savedSnapshot = stateSnapshot();
+    return result.draft;
+  }
+
+  /** A cheap fingerprint of everything the operator can still change, so an
+   *  unsaved change can be recognised without comparing a whole object graph. */
+  function stateSnapshot() {
+    return JSON.stringify([
+      state.config,
+      state.mode,
+      state.headlines,
+      state.bodies,
+      state.mapping,
+      state.tracking,
+      state.creatives.map((creative) => creative.id),
+      selection.keys(),
+    ]);
+  }
+
+  /** True when the screen holds changes that were never saved or staged. */
+  function hasUnsavedWork() {
+    if (state.conflict) return true;
+    return stateSnapshot() !== state.savedSnapshot;
   }
 
   /** The queue's view of a staged draft, kept in the shape the queue step and
@@ -1655,7 +1738,12 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
   function stage() {
     const validation = currentValidation();
     if (!validation.ok) return;
-    const saved = saveDraft({ approval: "staged" });
+    const saved = saveDraft({ phase: "staged" });
+    if (!saved) {
+      ctx.say("This draft changed somewhere else since you opened it, so nothing was staged. Reload the draft to see the other change.");
+      render();
+      return;
+    }
     state.queued = queuedView(saved);
     state.step = STEPS.length - 1;
     ctx.say(`Staged ${formatInt(draftAdCount(saved))} ads in the publishing queue as a draft. Nothing was sent to the provider.`);
@@ -1692,6 +1780,11 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
       fields: draft.tracking.fields.length ? draft.tracking.fields.map((field) => ({ ...field })) : state.tracking.fields,
     };
     state.mapping = Object.fromEntries(draft.creatives.map((creative) => [creative.id, { ...creative.mappings }]));
+    // The reopened plan is the draft's plan, identities included. Rebuilding
+    // from the axes would allocate new ad identities and silently detach the
+    // ads from anything already recorded about them.
+    state.plannedRows = draft.plan.rows.map((row) => ({ ...row }));
+    state.revision = draft.revision;
     // The draft's own creatives seed the picker before the library answers, so
     // the restored plan never briefly reads as an empty selection.
     state.creatives = draft.creatives.map((creative) => ({
@@ -1708,11 +1801,12 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     selection.clear();
     for (const creative of draft.creatives) selection.toggle(String(creative.id));
     pendingSelection = draft.creatives.map((creative) => creative.id);
-    state.queued = draft.approval === "staged" ? queuedView(draft) : null;
+    state.queued = draft.phase === "editing" ? null : queuedView(draft);
     // A staged draft opens on its receipt; a draft still being edited opens on
     // the mapping step, where the variation decisions live.
-    state.step = draft.approval === "staged" ? STEPS.length - 1 : 2;
+    state.step = draft.phase === "editing" ? 2 : STEPS.length - 1;
+    state.savedSnapshot = stateSnapshot();
   }
 
-  return Object.freeze({ open, close, root, state, loadDraft });
+  return Object.freeze({ open, close, root, state, loadDraft, hasUnsavedWork });
 }
