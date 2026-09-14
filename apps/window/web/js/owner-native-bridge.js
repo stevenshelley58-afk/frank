@@ -30,7 +30,7 @@ async function check() {
         credentials: "same-origin", redirect: "manual", cache: "no-store",
         headers: {Accept: "text/html"}, signal: AbortSignal.timeout(10000),
       });
-      location.replace("/s/saml/login");
+      location.replace("/saml/discovery");
       return;
     }
     const response = await fetch(entry.check, {

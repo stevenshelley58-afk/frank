@@ -7,7 +7,7 @@ test("login targets are fixed and never provider callback or arbitrary redirects
   assert.equal(nativeLoginUrl("crm"), "https://crm.frank.fail/api/method/frank_owner_entry.api.enter?app=crm");
   assert.equal(nativeLoginUrl("support"), "https://crm.frank.fail/api/method/frank_owner_entry.api.enter?app=support");
   assert.equal(nativeLoginUrl("mail"), "https://mail.frank.fail/frank/launch?bridge=1");
-  assert.equal(nativeLoginUrl("campaigns"), "https://marketing.frank.fail/saml/discovery");
+  assert.equal(nativeLoginUrl("campaigns"), "https://marketing.frank.fail/frank/connect?app=campaigns");
   assert.equal(nativeLoginUrl("https://evil.test"), null);
 });
 test("session-required messages enforce exact frame, origin, version and app", () => {
@@ -26,4 +26,10 @@ test("native checks do not follow login redirects or export page data", () => {
   assert.match(bridge,/authenticated === true/);
   assert.doesNotMatch(bridge,/document.cookie|localStorage|sessionStorage|response.text/);
   assert.match(bridge,/postMessage[\s\S]*parentOrigin/);
+});
+
+test("campaign discovery preserves native return target", () => {
+  assert.match(bridge, /fetch\("\/s\/frank\/return"/);
+  assert.match(bridge, /location.replace\("\/saml\/discovery"\)/);
+  assert.doesNotMatch(bridge, /location.replace\("\/s\/saml\/login"\)/);
 });
