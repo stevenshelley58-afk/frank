@@ -22,3 +22,13 @@ def test_mautic_update_validates_and_preserves_other_parameters():
     assert 'array_replace($parameters,$w)' in source
     assert 'fileperms($path)' in source
     assert 'cache:clear' in source
+
+def test_native_entry_packages_have_fixed_allowlisted_returns():
+    native = ROOT / "native"
+    frappe = (native / "frappe_owner_entry/frank_owner_entry/api.py").read_text()
+    mautic = (native / "mautic_frank_owner_entry/Controller/EntryController.php").read_text()
+    assert '"crm"' in frappe and '"support"' in frappe
+    assert 'get_oauth2_authorize_url("authentik", target)' in frappe
+    assert 'https://' not in frappe
+    assert "campaigns&return=1" in mautic
+    assert "Request" not in mautic

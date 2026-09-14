@@ -1,0 +1,6 @@
+app_name = "frank_owner_entry"
+app_title = "Frank Owner Entry"
+app_publisher = "Frank"
+app_description = "Fixed owner OIDC entry routes"
+app_email = "owner@blockwise.sale"
+app_license = "MIT"
