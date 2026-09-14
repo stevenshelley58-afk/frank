@@ -408,6 +408,36 @@ test("one screen giving up does not fail a read another screen has joined", asyn
   assert.equal(abortedEarly, false, "the shared request was not cancelled while a caller still wanted it");
 });
 
+test("a caller that arrives just after a cancellation starts its own read", async () => {
+  // The case that made a cold load show a failure it had no reason to show: the
+  // first screen of the first paint is disposed, its read is cancelled, and the
+  // replacement screen asks for the same reader in the same tick. A cancelled
+  // request must not still be joinable.
+  let calls = 0;
+  const flaky = (url, options = {}) => {
+    calls += 1;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => resolve(response(200, { rows: [{ id: "cmp_1", name: "Arrived" }], meta: { status: "ready" } })), 20);
+      options.signal?.addEventListener("abort", () => {
+        clearTimeout(timer);
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    });
+  };
+  const reader = createAdsReader({ fetchImpl: flaky, cache: createAdsCache() });
+  const first = new AbortController();
+  const doomed = reader.read("entities", { level: "campaign" }, { signal: first.signal });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  first.abort();
+  const replacement = await reader.read("entities", { level: "campaign" });
+  assert.equal(replacement.status, "ready", `the replacement was handed ${replacement.status}: ${replacement.detail}`);
+  assert.equal(replacement.data.rows[0].name, "Arrived");
+  assert.equal(calls, 2, "the replacement started its own request rather than joining the cancelled one");
+  assert.equal((await doomed).status, "error", "the caller that gave up is still told it was superseded");
+});
+
 test("a read nobody is waiting for any more is cancelled", async () => {
   let aborted = false;
   const hanging = (url, options = {}) =>

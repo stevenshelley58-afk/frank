@@ -767,10 +767,13 @@ def journey_d_history_and_rail(browser, base_url: str, out: Path) -> None:
         page.locator('.owner-rail-link[data-section="ads"]').first.click()
         remounted = wait_for_workspace_count(page, 1)
         named = url_screen(page)
+        # A fresh mount holds the space with a loading screen until the context
+        # read settles, so wait for the screen itself rather than for the mount.
+        shown, why = wait_only_screen(page, named) if named else (False, "no screen in the URL")
         check(
             "D: returning to Ads mounts the workspace on the screen the URL names",
-            remounted and screens_now(page) == [named],
-            f"url {page.url}",
+            remounted and shown and screens_now(page) == [named],
+            f"url {page.url}; {why}",
             group="D",
             expected=f"screen {named}",
             actual=f"screen={screens_now(page)}",

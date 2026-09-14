@@ -309,7 +309,14 @@ export function createAdsReader({ fetchImpl = globalThis.fetch, cache = createAd
       if (released) return;
       released = true;
       entry.waiters -= 1;
-      if (entry.waiters <= 0) entry.controller.abort();
+      if (entry.waiters <= 0) {
+        entry.controller.abort();
+        // A cancelled request stops being joinable immediately. Without this a
+        // caller that arrives in the same tick as the cancellation — which is
+        // exactly what happens when a screen is replaced during the first paint —
+        // joins a request that is already doomed and is handed its failure.
+        if (inflight.get(key) === entry) inflight.delete(key);
+      }
     };
     signal?.addEventListener?.("abort", release, { once: true });
     try {

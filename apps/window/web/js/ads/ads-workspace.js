@@ -21,6 +21,7 @@ import {
   previewBanner,
   relativeAge,
   errorPanel,
+  skeleton,
 } from "./ads-ui.js";
 import { DATE_PRESETS, COMPARISON_MODES, ATTRIBUTION_WINDOWS, isoDay, formatDay, SYNC_STATES } from "./ads-contracts.js";
 import { createAdsReader, createAdsCache } from "./ads-source.js";
@@ -744,15 +745,22 @@ export function mountAdsWorkspace(host, options = {}) {
    * First paint. Everything here can fail on a browser this build has never seen,
    * and a blank panel is the one outcome the owner cannot interpret, so a
    * failure is drawn as a named panel with a retry rather than thrown away.
+   *
+   * The screen is built once, after the context read has settled, rather than
+   * built and then replaced a moment later. The second build used to dispose the
+   * first screen and cancel the reads it had started — including reads the
+   * replacement then joined, which is how a cold load could end up reporting a
+   * failure it had no reason to report. A skeleton holds the space meanwhile,
+   * so the wait is still visible rather than blank.
    */
   function boot() {
     renderHeadActions();
     renderNav();
     renderContext();
-    renderScreen();
+    showScreenSkeleton();
     loadContext().then(
       () => {
-        if (!state.disposed) renderScreen({ force: true });
+        if (!state.disposed) renderScreen();
       },
       (error) => {
         if (state.disposed) return;
@@ -762,6 +770,16 @@ export function mountAdsWorkspace(host, options = {}) {
         say("The ads context could not be read. The screens below still work and say what they are missing.");
       },
     );
+  }
+
+  /** The shape of a screen, while the context read is in flight. */
+  function showScreenSkeleton() {
+    clear(screensHost);
+    const body = el("div", "ads-screen");
+    body.dataset.screen = "loading";
+    const title = el("h2", "ads-screen-title", ADS_SCREENS.find((s) => s.id === state.screen)?.label || "Ads");
+    body.append(title, el("p", "ads-screen-note", "Reading the account context…"), skeleton(5, 4));
+    screensHost.append(body);
   }
 
   try {
