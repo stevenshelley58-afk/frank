@@ -27,6 +27,14 @@ with urlopen(Request("http://127.0.0.1:9000/api/v3/providers/oauth2/?name=Frappe
 if len(p)!=1: raise SystemExit("expected exactly one Frappe CRM OAuth provider")
 with urlopen(Request("http://127.0.0.1:9000/api/v3/providers/oauth2/%s/"%p[0]["pk"],headers=h),timeout=10) as r: p=json.load(r)
 if not p.get("client_id") or not p.get("client_secret"): raise SystemExit("Frappe CRM OAuth credential missing")
+# Mautic consumes signed assertions at its HTTP-POST ACS, not Redirect.
+# Explicit POST also avoids the IdP silent POST-to-stage shortcut.
+with urlopen(Request("http://127.0.0.1:9000/api/v3/providers/saml/?name=Mautic&page_size=2",headers=h),timeout=10) as response: saml=json.load(response)["results"]
+if len(saml)!=1: raise SystemExit("expected exactly one Mautic SAML provider")
+if saml[0].get("sp_binding") != "post":
+    req=Request("http://127.0.0.1:9000/api/v3/providers/saml/%s/"%saml[0]["pk"],data=json.dumps({"sp_binding":"post"}).encode(),headers={**h,"Content-Type":"application/json"},method="PATCH")
+    with urlopen(req,timeout=10) as response:
+        if json.load(response).get("sp_binding") != "post": raise SystemExit("Mautic POST binding was not applied")
 print(json.dumps({"client_id":p["client_id"],"client_secret":p["client_secret"]}))
 PY
 ) || die "could not read Frappe OAuth credential"

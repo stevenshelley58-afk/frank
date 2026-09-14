@@ -498,7 +498,7 @@ def main() -> int:
         "invalidation_flow": inval_flow["pk"],
         "acs_url": mautic_acs,
         "audience": mautic_entity,
-        "sp_binding": "redirect",
+        "sp_binding": "post",
         "signing_kp": signing["pk"],
         "sign_assertion": True,
         "sign_response": False,
