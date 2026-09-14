@@ -20,7 +20,22 @@ read_value() { sed -n "s/^$1=//p" "$2" | tail -n1; }
 [[ "$(stat -c %a "$mail_secret")" == 600 ]] || die "$mail_secret must be mode 0600"
 
 if [[ -f "$secret_file" && ! -L "$secret_file" ]]; then
-  echo "owner-webmail.env already exists; leaving it untouched"
+  # Keep the recorded revision current without touching any credential.
+  python3 - "$secret_file" "$sha" <<'PY'
+import os, re, sys
+path, sha = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as handle:
+    text = handle.read()
+updated = re.sub(r"^OWNER_WEBMAIL_SOURCE_SHA=.*$", "OWNER_WEBMAIL_SOURCE_SHA=" + sha, text, count=1, flags=re.M)
+if updated != text:
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as handle:
+        handle.write(updated)
+    os.chmod(tmp, 0o600)
+    os.chown(tmp, 0, 0)
+    os.replace(tmp, path)
+PY
+  echo "owner-webmail.env already exists; credentials left untouched"
   exit 0
 fi
 [[ -e "$secret_file" ]] && die "$secret_file exists and is not a regular file"

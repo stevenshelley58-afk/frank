@@ -22,10 +22,11 @@ secret_file_ok() {
 }
 value() { sed -n "s/^$1=//p" "$secret_file" | tail -n1; }
 
+# The applied revision is always the committed revision of this checkout, never
+# a value that can drift in the secret file.
 compose() {
   export OWNER_WEBMAIL_SOURCE_SHA
-  OWNER_WEBMAIL_SOURCE_SHA=$(value OWNER_WEBMAIL_SOURCE_SHA)
-  test -n "$OWNER_WEBMAIL_SOURCE_SHA" || fail "OWNER_WEBMAIL_SOURCE_SHA is not set in $secret_file"
+  OWNER_WEBMAIL_SOURCE_SHA=$(git -C "$root_dir" rev-parse HEAD)
   docker compose --project-directory "$root_dir" --env-file "$secret_file" -f "$root_dir/compose.yaml" "$@"
 }
 

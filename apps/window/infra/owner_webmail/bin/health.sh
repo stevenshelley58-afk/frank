@@ -5,7 +5,8 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 root_dir=$(cd "$script_dir/.." && pwd)
 secret_file=/srv/frank/secrets/owner-webmail.env
 port=$(sed -n "s/^OWNER_WEBMAIL_HOST_PORT=//p" "$secret_file" | tail -n1)
-sha=$(sed -n "s/^OWNER_WEBMAIL_SOURCE_SHA=//p" "$secret_file" | tail -n1)
+root=$(cd "$script_dir/.." && pwd)
+sha=$(git -C "$root" rev-parse HEAD 2>/dev/null || sed -n "s/^OWNER_WEBMAIL_SOURCE_SHA=//p" "$secret_file" | tail -n1)
 port=${port:-18107}
 
 fail() { echo "owner-webmail health: $*" >&2; exit 1; }
