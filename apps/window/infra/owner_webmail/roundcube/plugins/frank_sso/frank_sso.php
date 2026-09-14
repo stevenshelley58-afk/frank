@@ -33,9 +33,35 @@ class frank_sso extends rcube_plugin
     public function init()
     {
         $this->add_hook('startup', [$this, 'startup']);
+        $this->register_action('plugin.frank_session', [$this, 'session_status']);
+        $this->register_action('plugin.frank_return', [$this, 'workspace_return']);
         $this->add_hook('authenticate', [$this, 'authenticate']);
         $this->add_hook('login_after', [$this, 'login_after']);
         $this->add_hook('logout_after', [$this, 'logout_after']);
+    }
+
+    public function workspace_return()
+    {
+        if (empty($_SESSION['user_id'])) {
+            http_response_code(401);
+            exit;
+        }
+        header('Cache-Control: no-store');
+        header('Location: /frank/bridge?app=mail&return=1', true, 303);
+        exit;
+    }
+
+    /** Read-only native session proof, reached through the owner edge. */
+    public function session_status()
+    {
+        $user = rcmail::get_instance()->user;
+        $ready = $user && !empty($user->ID)
+            && hash_equals($this->env('OWNER_WEBMAIL_IMAP_USER'), (string) $user->get_username());
+        header('Content-Type: application/json');
+        header('Cache-Control: no-store');
+        http_response_code($ready ? 200 : 401);
+        echo json_encode(['authenticated' => (bool) $ready]);
+        exit;
     }
 
     /**
@@ -51,6 +77,7 @@ class frank_sso extends rcube_plugin
 
         $this->redemption = $this->redeem();
         if ($this->redemption !== null) {
+            $_SESSION['frank_bridge_return'] = !empty($_GET['frank_bridge']);
             $args['action'] = 'login';
         }
 
@@ -111,6 +138,10 @@ class frank_sso extends rcube_plugin
         // The launch cookie has been spent. Clear it so a used token never
         // stays in the browser for the life of the session.
         $this->clear_launch_cookie();
+        if (!empty($_SESSION['frank_bridge_return'])) {
+            unset($_SESSION['frank_bridge_return']);
+            $args = ['_task' => 'mail', '_action' => 'plugin.frank_return'];
+        }
 
         $wanted = $this->configured_identities();
         // The plugin base class exposes no application property; the

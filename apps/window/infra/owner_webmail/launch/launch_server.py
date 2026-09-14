@@ -38,7 +38,7 @@ import time
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qs
 
 LAUNCH_COOKIE = "frank_launch"
 MAX_BODY = 8192
@@ -253,6 +253,8 @@ class LaunchHandler(BaseHTTPRequestHandler):
             f"SameSite={settings.cookie_samesite}; Max-Age={settings.ttl_seconds}"
         )
         landing = settings.landing_path or "/"
+        if parse_qs(urlsplit(self.path).query).get("bridge") == ["1"]:
+            landing = "/?_task=mail&frank_bridge=1"
         self._send(
             HTTPStatus.SEE_OTHER,
             b"",

@@ -323,6 +323,21 @@ grep -E '^(FRANK_BASIC_AUTH_USER|FRANK_BASIC_AUTH_HASH|FRANK_ACCEPTANCE_AUTH_USE
   echo "missing Caddy basic-auth settings in $secret_file" >&2
   exit 1
 }
+# Device recognition uses a dedicated verifier key, not an owner password.
+owner_device_config=/srv/frank/secrets/owner-trusted-devices.json
+if [[ -f "$owner_device_config" ]]; then
+  python3 - "$owner_device_config" >> "$caddy_tmp" <<'PYDEVICE'
+import json, os, stat, sys
+p=sys.argv[1]
+st=os.lstat(p)
+if not stat.S_ISREG(st.st_mode) or st.st_uid != 0 or stat.S_IMODE(st.st_mode) != 0o600:
+    raise SystemExit("unsafe trusted-device configuration")
+v=json.load(open(p))["gate_secret"]
+if not isinstance(v, str) or len(v) < 32 or not all(c.isalnum() or c in "-_" for c in v):
+    raise SystemExit("invalid trusted-device gate key")
+print("OWNER_DEVICE_GATE_SECRET=" + v)
+PYDEVICE
+fi
 owner_webmail_secret=/srv/frank/secrets/owner-webmail.env
 [[ -f "$owner_webmail_secret" && ! -L "$owner_webmail_secret" ]] || { echo "missing regular owner webmail secret" >&2; exit 1; }
 [[ "$(stat -c %a "$owner_webmail_secret")" = 600 && "$(stat -c %u "$owner_webmail_secret")" = 0 ]] || { echo "owner webmail secret must be root-owned mode 0600" >&2; exit 1; }

@@ -6,10 +6,16 @@ related_targets: [web/owner-dashboard.css]
 ---
 
 ## Approved direction
-The owner rejected the custom dashboard. Use native CRM, Helpdesk, mailbox, marketing and provider interfaces. Frank provides a small launch page only. Custom Ad Radar, database and template tools remain in the existing sidebar.
+Operate mode. The owner rejected the links-only launcher and approved one Frank
+workspace with a combined overview and embedded upstream applications.
+Preserve the incumbent white Inter shell. Only the cross-app overview and
+session bridge are custom; native applications retain their UIs and authority.
 
-## Shipped surface
-White Inter Frank shell, ink primary Open CRM link, grouped text links with hairlines, stacked descriptions, visible private-access requirement and single-column phone layout. No sample records, metrics, copied inbox, iframe or simulated connections. Native apps retain their own authentication. Scheduling is explicitly unavailable.
+## Session interaction
+Recognise explicitly trusted devices. Use normal shared identity and native
+sessions, not stored dashboard passwords. Any sign-in round trip stays in the
+same tab, protects unsaved work, and returns to the intended section.
 
 ## Acceptance boundary
-Known destination links, safe new tabs, technical home preserved and desktop/mobile navigation. App links do not prove SSO, sending, billing or phone notifications.
+Native authenticated session checks and real browser journeys are required.
+Unconfigured providers stay explicitly unconfigured, never zero or connected.

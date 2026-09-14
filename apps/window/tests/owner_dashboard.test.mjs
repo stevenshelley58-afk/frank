@@ -277,7 +277,7 @@ test("the shell composes no application URL of its own and the launcher cannot r
 
 test("the shell keeps provider data out of Frank storage and never reads an app document", () => {
   for (const source of [dashboardSource, hostSource]) {
-    assert.doesNotMatch(source, /localStorage|sessionStorage|indexedDB|document\.cookie/);
+    assert.doesNotMatch(source, /localStorage|indexedDB|document\.cookie/);
     assert.doesNotMatch(source, /contentDocument|innerHTML/);
     assert.doesNotMatch(source, /\bsample\b|\bfictional\b|\blorem\b|\bNorthline\b|Chatwoot|Stalwart/i);
   }
@@ -536,6 +536,11 @@ test("the unload guard asks before discarding retained work, and does not throw"
   appHost.show("mail");
   await appHost.whenSettled();
 
+  const bridge = frameOf(panelOf(slot, "mail"));
+  win.dispatch("message", {
+    origin: "https://mail.frank.fail", source: bridge.contentWindow,
+    data: {channel: "frank.owner-app", version: 1, app: "mail", type: "ready"},
+  });
   assert.equal(appHost.hasUnsavedWork(), true, "a retained mailbox is work Frank cannot verify");
   let prevented = false;
   win.dispatch("beforeunload", { preventDefault() { prevented = true; } });
@@ -568,8 +573,15 @@ test("an authorized application is framed in place, and mail survives a switch",
   appHost.mount(slot);
   appHost.show("mail");
   await appHost.whenSettled();
-  const mailFrame = frameOf(panelOf(slot, "mail"));
-  assert.equal(mailFrame.src, "https://mail.frank.fail/frank/launch");
+  let mailFrame = frameOf(panelOf(slot, "mail"));
+  assert.equal(mailFrame.src, "https://mail.frank.fail/frank/bridge?app=mail");
+  assert.equal(appHost.panelState("mail"), "checking");
+  win.dispatch("message", {
+    origin: "https://mail.frank.fail", source: mailFrame.contentWindow,
+    data: {channel: "frank.owner-app", version: 1, app: "mail", type: "ready"},
+  });
+  mailFrame = frameOf(panelOf(slot, "mail"));
+  assert.equal(mailFrame.src, "https://mail.frank.fail/");
   assert.equal(appHost.panelState("mail"), "ready");
   appHost.show("crm");
   await appHost.whenSettled();

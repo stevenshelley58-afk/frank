@@ -141,7 +141,7 @@ class InfraContractTest(unittest.TestCase):
         # The owner session boundary replaced per-route Basic Auth. The public
         # Mini surfaces must still be matched before it, so they stay reachable
         # without an owner session.
-        gate = caddyfile.index("import owner_identity_session_gate")
+        gate = caddyfile.index("import owner_identity_session_gate", caddyfile.index("frank.fail {"))
         # The Basic Auth break-glass recovery route sits between the public
         # surfaces and the gate, so the public slice ends where it begins.
         recovery = caddyfile.index("@owner_recovery path")

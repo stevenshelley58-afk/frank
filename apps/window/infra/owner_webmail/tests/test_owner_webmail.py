@@ -144,7 +144,10 @@ class PluginContractTests(unittest.TestCase):
 
     def test_launch_token_travels_in_a_cookie_not_a_url(self):
         self.assertIn("$_COOKIE[self::LAUNCH_COOKIE]", self.plugin)
-        self.assertNotIn("$_GET", self.plugin)
+        # The non-secret bridge-return flag may use a query parameter.
+        self.assertNotIn("$_GET[self::LAUNCH_COOKIE]", self.plugin)
+        self.assertNotIn("$_GET['frank_launch']", self.plugin)
+        self.assertNotIn("$_GET['token']", self.plugin)
         self.assertNotIn("$_REQUEST", self.plugin)
 
     def test_login_is_only_forced_after_a_successful_redemption(self):

@@ -165,6 +165,31 @@ the temporary Australia/Perth display assumption and list it for resolution.
 
 ## 7. Authentication contract
 
+Owner clarification, 14 September 2026: the approved laptop and phone should
+recognise the owner without a separate daily login wall. Device recognition
+uses current Tailscale WhoIs and an explicit stable node ID plus owner-user
+allowlist, never a shared public IP or a browser-supplied identity header.
+
+The approved laptop routes only auth.frank.fail over Tailscale. Other owner
+origins keep their existing addresses and normal authenticated sessions.
+A recognised device seeds the intended active Authentik owner and uses the
+normal login/session machinery; unrecognised requests retain password/MFA.
+The phone must first join Tailscale and its actual node must be reviewed and
+added to the allowlist. It is not silently trusted by account membership.
+
+Device removal prevents a new passwordless sign-in. To revoke an already
+issued browser session immediately, revoke that session in Authentik or
+disable the owner, which the app gates check independently. Signing out
+terminates the session; reopening a protected app on a still-approved device
+can sign in again. Remove device trust as well when retiring a device.
+
+Native entry extensions are committed into the Frappe and Mautic images.
+An inert native-origin bridge checks protected native endpoints with that
+origin's browser cookies, refusing redirected login pages. It then reports
+readiness to the exact Frank parent and frame. It never sends cookies, native
+page contents or credentials to Frank. Required authentication stays in the
+same tab with a fixed return target and a bounded retry guard.
+
 - One stable owner identity, with explicit mappings to the native accounts.
 - Frank establishes a **trusted owner session**, not merely hidden navigation.
 - Frappe uses its supported OpenID/OAuth login. Mautic uses its supported SAML

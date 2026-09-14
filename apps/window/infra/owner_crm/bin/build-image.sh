@@ -77,7 +77,7 @@ DOCKER_BUILDKIT=1 docker build \
 # Runtime provisioning may install the app for a site, but never copies source.
 entry_dir=$(cd "$root_dir/../owner_identity/native/frappe_owner_entry" && pwd)
 test -f "$entry_dir/frank_owner_entry/api.py" || { echo "missing packaged Frappe owner entry" >&2; exit 1; }
-printf 'FROM owner-crm-app:%s\nCOPY . /home/frappe/frappe-bench/apps/frank_owner_entry/\nRUN chown -R frappe:frappe /home/frappe/frappe-bench/apps/frank_owner_entry && cd /home/frappe/frappe-bench && ./env/bin/pip install --no-cache-dir -e apps/frank_owner_entry\n' "$tag" | DOCKER_BUILDKIT=1 docker build --tag "owner-crm-app:$tag" --file - "$entry_dir"
+printf 'FROM owner-crm-app:%s\nCOPY --chown=frappe:frappe . /home/frappe/frappe-bench/apps/frank_owner_entry/\nRUN cd /home/frappe/frappe-bench && ./env/bin/pip install --no-cache-dir -e apps/frank_owner_entry\n' "$tag" | DOCKER_BUILDKIT=1 docker build --label "io.frank.owner-crm.entry-source-sha=$(git -C "$root_dir" rev-parse HEAD)" --tag "owner-crm-app:$tag" --file - "$entry_dir"
 docker run --rm --entrypoint bash "owner-crm-app:$tag" -lc \
   'test -d apps/frappe && test -d apps/crm && test -d apps/telephony && test -d apps/helpdesk && test -f apps/frank_owner_entry/frank_owner_entry/api.py && ./env/bin/python -c "import frank_owner_entry.api"'
 echo "built with in-builder commit verification and app check: owner-crm-app:$tag"

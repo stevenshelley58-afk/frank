@@ -16,7 +16,7 @@
 
 export const OWNER_APP_BRIDGE_CHANNEL = "frank.owner-app";
 export const OWNER_APP_BRIDGE_VERSION = 1;
-export const OWNER_APP_BRIDGE_TYPES = Object.freeze(["ready", "dirty", "route"]);
+export const OWNER_APP_BRIDGE_TYPES = Object.freeze(["ready", "dirty", "route", "session_required"]);
 // Bounded retained state: one hidden native panel, never every app forever.
 export const MAX_RETAINED_NATIVE_PANELS = 1;
 export const MAX_APP_PATH_LENGTH = 512;
@@ -206,7 +206,18 @@ export function parseAppBridgeMessage(event, frame, appId) {
     if (!path) return null;
     return Object.freeze({ type: "route", path });
   }
-  return Object.freeze({ type: "ready" });
+  return Object.freeze({ type: data.type });
+}
+
+/** Fixed supported native login, never a URL supplied by a frame message. */
+export function nativeLoginUrl(appId) {
+  const app = ownerApp(appId);
+  if (!app) return null;
+  if (appId === "mail") return app.origin + "/frank/launch?bridge=1";
+  if (appId === "crm" || appId === "support") {
+    return app.origin + "/api/method/frank_owner_entry.api.enter?app=" + appId;
+  }
+  return app.origin + "/frank/connect?app=campaigns";
 }
 
 export function readinessEndpoint(appId) {
@@ -568,14 +579,11 @@ export function createOwnerAppHost(deps = {}) {
     const retry = make(doc, "button", "owner-app-action", "Check again");
     retry.type = "button";
     retry.addEventListener("click", () => check(app.id));
-    const escape = make(doc, "a", "owner-app-escape", `Open ${app.nativeLabel} in a browser tab`);
-    escape.href = app.origin + app.home;
-    escape.target = "_blank";
-    escape.rel = "noopener noreferrer";
-    escape.referrerPolicy = "no-referrer";
-    row.append(retry, escape);
+    const connect = make(doc, "button", "owner-app-action", "Connect inside Frank");
+    connect.type = "button";
+    connect.addEventListener("click", () => connectNative(app.id, true));
+    row.append(retry, connect);
     box.append(row);
-    box.append(make(doc, "p", "home-truth", "Frank never frames an application it has not been authorized to show, and this link leaves Frank and signs in separately."));
     entry.body.append(box);
   }
 
@@ -632,11 +640,10 @@ export function createOwnerAppHost(deps = {}) {
     entry.state = state.state;
     entry.checkedAt = state.checkedAt;
     entry.node.dataset.reason = state.reason || "";
-    if (state.state === "ready" && state.url) {
-      const wanted = entry.requestedPath ? allowedNativeUrl(app.id, entry.requestedPath) : null;
-      mountFrame(entry, app, wanted || state.url);
-      if (wanted) entry.frame.dataset.path = entry.requestedPath;
-      updateChrome(entry, state);
+    if (state.reason === "owner_session_required" || (state.state === "ready" && state.url)) {
+      entry.state = "checking";
+      mountFrame(entry, app, app.origin + "/frank/bridge?app=" + app.id);
+      updateChrome(entry, {state: "checking", chip: "Connecting"});
     } else {
       entry.frame?.remove?.();
       entry.frame = null;
@@ -644,6 +651,32 @@ export function createOwnerAppHost(deps = {}) {
     }
     announcement(`${app.label}: ${entry.chip.textContent}.`);
     return state;
+  }
+
+  function connectNative(appId, explicit = false) {
+    const url = nativeLoginUrl(appId);
+    if (!url) return;
+    const key = "frank.native-connect." + appId;
+    const previous = Number(win.sessionStorage?.getItem(key) || 0);
+    if (!explicit && Date.now() - previous < 60000) {
+      const entry = panels.get(appId);
+      entry.state = "blocked";
+      renderBody(entry, ownerApp(appId), {
+        state: "blocked", chip: "Needs connection",
+        detail: "The application did not finish signing in. Try connecting again.",
+      });
+      return;
+    }
+    const run = () => {
+      win.sessionStorage?.setItem(key, String(Date.now()));
+      win.location.assign(url);
+    };
+    if (dirtyIds().length || retainedOrder.some((id) => isRetainable(id)) || (active && panels.get(active)?.state === "ready" && isRetainable(active))) {
+      setGuard("Connecting will briefly leave Frank. Save any open draft first.", [
+        {label: "Stay here", primary: true, run: () => {}},
+        {label: "Continue sign-in", run},
+      ]);
+    } else run();
   }
 
   function requestReload(appId) {
@@ -768,6 +801,18 @@ export function createOwnerAppHost(deps = {}) {
     if (!payload) return;
     bridgeSeen.add(active);
     const entry = panels.get(active);
+    if (payload.type === "session_required") {
+      connectNative(active);
+      return;
+    }
+    if (payload.type === "ready") {
+      entry.state = "ready";
+      const app = ownerApp(active);
+      win.sessionStorage?.removeItem("frank.native-connect." + active);
+      mountFrame(entry, app, allowedNativeUrl(active, entry.requestedPath || (active === "mail" ? "/" : app.home)));
+      updateChrome(entry, {state: "ready", chip: "Connected"});
+      return;
+    }
     if (payload.type === "dirty") {
       dirty.set(active, payload.dirty);
       entry.node.dataset.dirty = payload.dirty ? "true" : "false";
@@ -800,7 +845,7 @@ export function createOwnerAppHost(deps = {}) {
     // workspace destroys the live panel, so a visible retainable application
     // (the mailbox) is exactly the case the warning exists for; only counting
     // hidden retained panels would miss it.
-    if (active && isRetainable(active)) return true;
+    if (active && panels.get(active)?.state === "ready" && isRetainable(active)) return true;
     return retainedOrder.some((id) => isRetainable(id));
   }
 

@@ -42,6 +42,44 @@
 	}
 }
 
+# Inert native-origin bridge assets contain no records or credentials. Native
+# session checks still pass through the identity gate and native authorization.
+(owner_native_bridge) {
+	handle /frank/connect {
+		import owner_identity_session_gate
+		header Content-Security-Policy "default-src 'none'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+		header Content-Type "text/html; charset=utf-8"
+		header Cache-Control "no-store"
+		rewrite * /owner-native-bridge.html
+		reverse_proxy frank-window:8080 {
+			header_up -Cookie
+			header_up -Authorization
+			header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}
+		}
+	}
+	handle /frank/bridge {
+		header Content-Security-Policy "default-src 'none'; script-src 'self'; connect-src 'self'; frame-ancestors https://frank.fail; base-uri 'none'"
+		header Content-Type "text/html; charset=utf-8"
+		header Cache-Control "no-store"
+		rewrite * /owner-native-bridge.html
+		reverse_proxy frank-window:8080 {
+			header_up -Cookie
+			header_up -Authorization
+			header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}
+		}
+	}
+	handle /frank/bridge.js {
+		header Content-Type "text/javascript; charset=utf-8"
+		header Cache-Control "no-store"
+		rewrite * /js/owner-native-bridge.js
+		reverse_proxy frank-window:8080 {
+			header_up -Cookie
+			header_up -Authorization
+			header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}
+		}
+	}
+}
+
 (owner_identity_session_gate) {
 	# One owner session, checked against the identity provider on every request.
 	# The outpost session lives in authentik's database, so revoking the session
@@ -544,34 +582,32 @@ auth.frank.fail {
 		X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
 	}
 
-	log {
-		output stdout
-		format filter {
-			wrap json
-			fields {
-				request>headers>Authorization delete
-				request>headers>Proxy-Authorization delete
-				request>headers>Referer delete
-				# Cookie and Set-Cookie are deliberately NOT listed here. The
-				# 2.8.x log-filter field-deletion bug documented on the
-				# frank.fail block mutates the live request and response instead
-				# of only the log line, and on this host it stripped Set-Cookie
-				# from the identity provider's own responses, which silently
-				# broke sign-out. Caddy already redacts credentials from logs
-				# while log_credentials is unset.
-				request>uri delete
-			}
-		}
-	}
+	# No access log here: verified device proof is request-local credential material.
+	# Authentik retains its own authentication/security events.
 
 	request_body {
 		max_size 1MB
 	}
 
-	reverse_proxy owner-identity-server:9000 {
-		header_up Host {host}
-		header_up X-Real-IP {remote_host}
-		header_up X-Forwarded-Proto https
+	route {
+		# Never trust a browser-supplied identity or device proof.
+		request_header -X-Frank-Trusted-Device
+		request_header -X-Frank-Device-Address
+		request_header -X-Frank-Device-Gate
+		# Only requests arriving over Tailscale can request device recognition.
+		# The verifier also checks the current node ID and owner via LocalAPI.
+		@tailnet remote_ip 100.64.0.0/10 fd7a:115c:a1e0::/48
+		forward_auth @tailnet 172.31.50.1:18089 {
+			uri /verify
+			header_up X-Frank-Device-Gate {$OWNER_DEVICE_GATE_SECRET}
+			header_up X-Frank-Device-Address {remote_host}
+			copy_headers X-Frank-Trusted-Device
+		}
+		reverse_proxy owner-identity-server:9000 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+		}
 	}
 }
 
@@ -603,6 +639,7 @@ crm.frank.fail {
 	}
 
 	route {
+		import owner_native_bridge
 		import owner_identity_outpost
 		import owner_identity_session_gate
 		import owner_native_app_headers
@@ -653,6 +690,7 @@ marketing.frank.fail {
 	}
 
 	route {
+		import owner_native_bridge
 		import owner_identity_outpost
 		import owner_identity_session_gate
 		import owner_native_app_headers
@@ -697,6 +735,7 @@ mail.frank.fail {
 	}
 
 	route {
+		import owner_native_bridge
 		import owner_identity_outpost
 		import owner_identity_session_gate
 		request_body {

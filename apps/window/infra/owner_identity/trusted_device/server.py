@@ -38,7 +38,7 @@ def validated_tailnet_address(raw:str|None)->str|None:
  except ValueError: return None
  return str(address) if any(address in network for network in TAILNET_RANGES) else None
 class UnixHTTPConnection(http.client.HTTPConnection):
- def __init__(self,socket_path:str,timeout:float): super().__init__("localhost",timeout=timeout); self.socket_path=socket_path
+ def __init__(self,socket_path:str,timeout:float): super().__init__("local-tailscaled.sock",timeout=timeout); self.socket_path=socket_path
  def connect(self)->None:
   self.sock=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM); self.sock.settimeout(self.timeout); self.sock.connect(self.socket_path)
 def whois(socket_path:str,address:str,timeout:float)->dict[str,Any]:

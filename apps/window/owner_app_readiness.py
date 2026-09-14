@@ -196,7 +196,7 @@ def app_readiness(app_id: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict
         reason = "owner_session_required"
         detail = (
             f"{origin} redirected the unauthenticated Frank server check to the owner identity provider. "
-            "Frank has no native browser session bridge yet, so it cannot prove or start an authenticated native panel."
+            "The native browser session bridge must check this browser session before opening the application."
         )
     else:
         frameable = bool(ready)
