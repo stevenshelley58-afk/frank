@@ -52,7 +52,23 @@ export const OWNER_APPS = Object.freeze([
     detail: "Frappe CRM",
     origin: "https://crm.frank.fail",
     pathPrefixes: Object.freeze(["/crm/", "/assets/", "/files/"]),
-    home: "/crm/leads",
+    // Verified against the installed CRM 1.83.0. A list lives at
+    // /crm/<doctype>/view/list and a record at /crm/<doctype>/<name>. Note that
+    // /crm/tasks/<id> is deliberately absent: this version renders a blank
+    // content area for it rather than a record, so it is not offered.
+    lists: Object.freeze([
+      "/crm/dashboard",
+      "/crm/leads/view/list",
+      "/crm/contacts/view/list",
+      "/crm/tasks/view/list",
+      "/crm/notes/view/list",
+      "/crm/deals/view/list",
+    ]),
+    records: Object.freeze({
+      lead: "/crm/leads",
+      contact: "/crm/contacts",
+    }),
+    home: "/crm/leads/view/list",
     nativeLabel: "crm.frank.fail",
     retain: false,
   }),
@@ -62,6 +78,14 @@ export const OWNER_APPS = Object.freeze([
     detail: "Frappe Helpdesk",
     origin: "https://crm.frank.fail",
     pathPrefixes: Object.freeze(["/helpdesk/", "/assets/", "/files/"]),
+    // Verified against the installed Helpdesk 1.30.1.
+    lists: Object.freeze([
+      "/helpdesk/home",
+      "/helpdesk/dashboard",
+      "/helpdesk/tickets",
+      "/helpdesk/kb",
+    ]),
+    records: Object.freeze({ ticket: "/helpdesk/tickets" }),
     home: "/helpdesk/tickets",
     nativeLabel: "crm.frank.fail",
     retain: false,
@@ -72,6 +96,9 @@ export const OWNER_APPS = Object.freeze([
     detail: "Mautic marketing",
     origin: "https://marketing.frank.fail",
     pathPrefixes: Object.freeze(["/s/", "/media/", "/assets/"]),
+    // Verified against the installed Mautic 7.2.0.
+    lists: Object.freeze(["/s/dashboard", "/s/campaigns", "/s/emails"]),
+    records: Object.freeze({ campaign: "/s/campaigns/view", email: "/s/emails/view" }),
     home: "/s/campaigns",
     nativeLabel: "marketing.frank.fail",
     retain: false,
@@ -825,4 +852,32 @@ export function createOwnerAppHost(deps = {}) {
       guard.remove?.();
     },
   };
+}
+
+/**
+ * The allowlisted path for one native record, or null.
+ *
+ * The record kind and identifier are both checked here rather than in the
+ * caller, so a caller cannot build a path the application did not declare.
+ * Identifiers are validated against a conservative grammar and encoded, so a
+ * crafted identifier cannot add a segment or escape the declared prefix.
+ */
+export function nativeRecordPath(appId, kind, identifier) {
+  const app = ownerApp(appId);
+  if (!app || !app.records) return null;
+  const prefix = app.records[String(kind || "")];
+  if (!prefix) return null;
+  const value = String(identifier || "");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) return null;
+  return `${prefix}/${encodeURIComponent(value)}`;
+}
+
+/** The allowlisted path for one native list screen, or null. */
+export function nativeListPath(appId, which) {
+  const app = ownerApp(appId);
+  if (!app) return null;
+  const wanted = String(which || "");
+  if (app.lists && app.lists.includes(wanted)) return wanted;
+  if (wanted === "home" || wanted === "") return app.home;
+  return null;
 }

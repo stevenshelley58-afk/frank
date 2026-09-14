@@ -15,6 +15,7 @@ import {
   ownerSectionView,
   overviewState,
   OWNER_SOURCES,
+  nativeRecordPath,
   parseDrilldownTarget,
   resetOwnerSourceCache,
   resolveOwnerRoute,
@@ -214,8 +215,16 @@ test("every summary item is a typed drill-down and Frank composes the destinatio
   const native = parseDrilldownTarget({ kind: "native-list", app: "crm", path: "/crm/leads?status=Open", label: "New leads" });
   assert.deepEqual(native, { kind: "native-list", app: "crm", section: "crm", path: "/crm/leads?status=Open", label: "New leads" });
   assert.equal(targetPath(native), "/project/blockwise/crm");
-  const record = parseDrilldownTarget({ kind: "native-record", app: "support", path: "/helpdesk/tickets/TICK-14" });
+  // A record target names the record, and Frank composes the path from the
+  // application's own allowlist, so a crafted identifier cannot widen it.
+  const record = parseDrilldownTarget({ kind: "native-record", app: "support", recordKind: "ticket", recordId: "TICK-14" });
+  assert.equal(record.path, "/helpdesk/tickets/TICK-14");
   assert.equal(targetPath(record), "/project/blockwise/support");
+  assert.equal(nativeRecordPath("crm", "lead", "CRM-LEAD-2026-00015"), "/crm/leads/CRM-LEAD-2026-00015");
+  assert.equal(nativeRecordPath("crm", "lead", "../admin"), null);
+  assert.equal(nativeRecordPath("crm", "lead", "a/b"), null);
+  assert.equal(nativeRecordPath("crm", "not-a-kind", "x"), null);
+  assert.equal(parseDrilldownTarget({ kind: "native-record", app: "crm", recordKind: "lead", recordId: "../etc" }), null);
   const section = parseDrilldownTarget({ kind: "owner-section", section: "revenue", filter: "overdue" });
   assert.deepEqual(section, { kind: "owner-section", section: "revenue", filter: "overdue", label: "Revenue" });
   assert.equal(targetPath(section), "/project/blockwise/revenue");
@@ -352,17 +361,17 @@ test("readiness, not an iframe load event, decides whether an app is framed", ()
   assert.equal(readinessEndpoint("crm"), "/api/owner/workspace/apps/crm/readiness");
   const ready = panelStateFromReadiness("crm", readinessBody("crm"));
   assert.equal(ready.state, "ready");
-  assert.equal(ready.url, "https://crm.frank.fail/crm/leads");
+  assert.equal(ready.url, "https://crm.frank.fail/crm/leads/view/list");
   const elsewhere = panelStateFromReadiness("crm", { ...readinessBody("crm"), origin: "https://evil.example" });
   assert.equal(elsewhere.state, "blocked");
   assert.equal(elsewhere.reason, "origin_not_allowed");
   const outside = panelStateFromReadiness("crm", { ...readinessBody("crm"), path: "/helpdesk/tickets" });
   assert.equal(outside.state, "blocked");
   assert.equal(outside.reason, "path_not_allowed");
-  const framed = panelStateFromReadiness("crm", { status: "unavailable", ready: false, frameable: false, reason: "frame_ancestors_none", origin: "https://crm.frank.fail", path: "/crm/leads" });
+  const framed = panelStateFromReadiness("crm", { status: "unavailable", ready: false, frameable: false, reason: "frame_ancestors_none", origin: "https://crm.frank.fail", path: "/crm/leads/view/list" });
   assert.equal(framed.state, "blocked");
   assert.equal(framed.reason, "frame_ancestors_none");
-  const notReady = panelStateFromReadiness("crm", { status: "unavailable", ready: false, frameable: true, origin: "https://crm.frank.fail", path: "/crm/leads" });
+  const notReady = panelStateFromReadiness("crm", { status: "unavailable", ready: false, frameable: true, origin: "https://crm.frank.fail", path: "/crm/leads/view/list" });
   assert.equal(notReady.state, "unavailable");
   assert.equal(panelStateFromResponse("crm", 404, null).reason, "adapter_missing");
   assert.equal(panelStateFromResponse("crm", 403, null).state, "unauthorized");

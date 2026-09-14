@@ -72,9 +72,70 @@ def register_source(source_id: str, reader: Callable[[], dict[str, Any]]) -> Non
     SOURCE_READERS[source_id] = reader
 
 
+# Which native application and record kind an item's source id maps to. The
+# record id in a payload is the reader's own stable identifier, already
+# namespaced as ``<source system>:<record>``. Only the mappings declared here can
+# produce a record deep link; anything else falls back to the owning list, so an
+# unrecognised identifier can never build a path.
+RECORD_TARGETS: dict[str, dict[str, tuple[str, str]]] = {
+    "crm": {"frappe_crm": ("crm", "lead")},
+    "support": {"frappe_helpdesk": ("support", "ticket")},
+    "campaigns": {"mautic": ("campaigns", "campaign")},
+}
+
+# The verified list screen each source opens when an item has no record target.
+SOURCE_LIST_TARGET: dict[str, str] = {
+    "crm": "/crm/leads/view/list",
+    "support": "/helpdesk/tickets",
+    "campaigns": "/s/campaigns",
+    "mail": "/",
+}
+
+
+def _record_target(source_id: str, item_id: str) -> dict[str, Any] | None:
+    """A typed native-record target for an item, or None when it cannot be built.
+
+    The identifier must be namespaced by the source system that owns it, and the
+    system must be declared for this source. That is what keeps a deep link tied
+    to a record the reader actually returned rather than to a guessed URL.
+    """
+    mappings = RECORD_TARGETS.get(source_id)
+    if not mappings:
+        return None
+    prefix, _, record = str(item_id or "").partition(":")
+    if not record:
+        return None
+    mapping = mappings.get(prefix)
+    if not mapping:
+        return None
+    app_id, kind = mapping
+    return {
+        "kind": "native-record",
+        "app": app_id,
+        "recordKind": kind,
+        "recordId": record,
+        "label": "Open this record in its own application",
+    }
+
+
 def _clip(value: Any, limit: int) -> str:
     text = str(value or "").strip()
     return text[:limit]
+
+
+def _list_target(source_id: str) -> dict[str, Any] | None:
+    """The verified native list screen that owns a source's items.
+
+    Uses the route shapes confirmed against the installed applications, so this
+    is a real screen rather than a guessed URL. Falls back to the section target
+    for a source that has no native list.
+    """
+    path = SOURCE_LIST_TARGET.get(source_id)
+    if path:
+        app_id = {"crm": "crm", "support": "support", "campaigns": "campaigns", "mail": "mail"}.get(source_id)
+        if app_id:
+            return {"kind": "native-list", "app": app_id, "path": path, "label": "Open the list"}
+    return SOURCE_FALLBACK_TARGET.get(source_id)
 
 
 def _target_from_link(link: Any, source_id: str) -> dict[str, Any] | None:
@@ -93,9 +154,9 @@ def _target_from_link(link: Any, source_id: str) -> dict[str, Any] | None:
     customer = raw.get("customer")
     if isinstance(customer, str) and customer and "/" not in customer:
         return {"kind": "owner-record", "customerId": customer, "label": label or "Customer overview"}
-    # A source-level item with no explicit destination falls back to the
-    # section that owns it, which is always a real route.
-    return SOURCE_FALLBACK_TARGET.get(source_id)
+    # An item with no explicit destination falls back to the list that owns it,
+    # which is a verified screen, and then to the owning section.
+    return _list_target(source_id)
 
 
 def _payload_from_snapshot(source_id: str, snapshot: dict[str, Any]) -> dict[str, Any]:
@@ -149,21 +210,33 @@ def _payload_from_snapshot(source_id: str, snapshot: dict[str, Any]) -> dict[str
         if not label:
             dropped += 1
             continue
-        # A row from the standard view has no per-record destination; it falls
-        # back to the section that owns it, which is always a real route.
-        target = _target_from_link(raw.get("link"), source_id) if raw.get("link") else SOURCE_FALLBACK_TARGET.get(source_id)
-        if target is None:
-            dropped += 1
-            continue
+        item_id = _clip(raw.get("id"), 120) or f"{source_id}-{index + 1}"
         count = raw.get("count")
-        items.append({
-            "id": _clip(raw.get("id"), 120) or f"{source_id}-{index + 1}",
+        entry: dict[str, Any] = {
+            "id": item_id,
             "label": label,
             "detail": _clip(raw.get("detail"), 200),
             "count": int(count) if isinstance(count, (int, float)) and not isinstance(count, bool) else None,
             "attention": bool(raw.get("attention")),
-            "target": target,
-        })
+        }
+        # Every item can at least reach the list that owns it.
+        list_target = _list_target(source_id)
+        if list_target is not None:
+            entry["target"] = list_target
+        # An item whose identifier names a real source record also gets a record
+        # target, so the owner opens the record itself rather than hunting for it
+        # in a list. Both are emitted: the list stays available if the record
+        # route is unavailable for a particular item.
+        record_target = _record_target(source_id, item_id)
+        if record_target is not None:
+            entry["recordTarget"] = record_target
+        explicit = _target_from_link(raw.get("link"), source_id) if raw.get("link") else None
+        if explicit is not None:
+            entry["target"] = explicit
+        if "target" not in entry and "recordTarget" not in entry:
+            dropped += 1
+            continue
+        items.append(entry)
 
     status = str(snapshot.get("status") or "unavailable").lower()
     if status not in SOURCE_STATUSES:

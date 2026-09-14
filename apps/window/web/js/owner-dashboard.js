@@ -12,7 +12,10 @@
 // authorized Frank endpoints and is never copied into Frank browser storage.
 
 import { ownerPathForCustomer, ownerPathForSection, routeForPath } from "./view-routing.js";
-import { allowedNativePath, createOwnerAppHost, ownerApp } from "./owner-app-host.js";
+import { allowedNativePath, createOwnerAppHost, nativeRecordPath, ownerApp } from "./owner-app-host.js";
+// The panel host owns the native route allowlist; the workspace re-exports the
+// path builders so a consumer has one import for the whole owner surface.
+export { nativeListPath, nativeRecordPath } from "./owner-app-host.js";
 
 const PROJECT_ID = "blockwise";
 const PROJECT_HOME = "/project/blockwise";
@@ -159,7 +162,16 @@ export function parseDrilldownTarget(value) {
   if (kind === "native-list" || kind === "native-record") {
     const app = ownerApp(value.app);
     if (!app) return null;
-    const path = allowedNativePath(app, value.path);
+    // A record target names a record kind and identifier rather than a finished
+    // path, so the path is built from this app's own allowlist and a crafted
+    // identifier cannot widen the route. A pre-built path is still accepted for
+    // a list, where the server already resolved it against a verified screen.
+    let path = null;
+    if (kind === "native-record" && value.recordKind) {
+      path = nativeRecordPath(app.id, value.recordKind, value.recordId);
+    } else {
+      path = allowedNativePath(app, value.path);
+    }
     if (!path) return null;
     return Object.freeze({ kind, app: app.id, section: app.id, path, label: label || app.label });
   }
