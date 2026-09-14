@@ -18,9 +18,9 @@ ExecStart=/usr/bin/python3 $dest/apps/window/infra/cleanup/docker-runtime-retent
 EOF
 cat > /etc/systemd/system/docker-prune.timer <<'EOF'
 [Unit]
-Description=Daily bounded Docker retention
+Description=Hourly bounded Docker retention
 [Timer]
-OnCalendar=*-*-* 04:00:00
+OnCalendar=hourly
 Persistent=true
 [Install]
 WantedBy=timers.target

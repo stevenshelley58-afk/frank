@@ -1,5 +1,6 @@
 # Docker retention
-The installer replaces the existing daily docker-prune service with committed immutable source.
-It keeps every running/stopped container image, runtime selectors, retained Blockwise release tags, and two newest unused image IDs per explicitly owned repository. Upstream and unknown repositories stay untouched.
-Docker removes exact tags without force. BuildKit native prune targets 2GB of cache, excludes cache used in the last 24 hours and never removes active cache. This is a target, not a hard disk quota.
-Volumes and runtime releases are excluded from automatic removal: ownership and dependencies require individual verification. Run the Python script without --apply for a dry run. Tests: python3 test-docker-retention.py.
+Installer activates hourly locked cleanup from committed immutable source.
+BuildKit native unused-cache cleanup targets2GB without an age filter. Docker protects in-use cache. This is an hourly target, not a hard quota during builds.
+Legacy preview expiry accepts only exact blockwise-homepage/process/email-preview-<hex> names, created at least24hours ago, full revision already merged in Blockwise main, no mounts and no extant source task worktree. Other preview families, unmerged work, younger reviews and all production services are excluded. Containers are stopped and removed without volume removal after fresh checks.
+Image retention keeps all container images, runtime selectors, retained releases, plus2unused IDs per allowlisted repository. Upstream images untouched. Volumes never pruned.
+Dry run: python3 docker-runtime-retention.py. Tests: python3 test-docker-retention.py.
