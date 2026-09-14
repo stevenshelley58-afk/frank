@@ -5,7 +5,7 @@ const app = query.get("app");
 const apps = {
   crm: { origin: "https://crm.frank.fail", check: "/api/method/frappe.auth.get_logged_user" },
   support: { origin: "https://crm.frank.fail", check: "/api/method/frappe.auth.get_logged_user" },
-  campaigns: { origin: "https://marketing.frank.fail", check: "/s/dashboard" },
+  campaigns: { origin: "https://marketing.frank.fail", check: "/s/frank/session" },
   mail: { origin: "https://mail.frank.fail", check: "/?_task=mail&_action=plugin.frank_session" },
 };
 const entry = apps[app];
@@ -35,18 +35,15 @@ async function check() {
     }
     const response = await fetch(entry.check, {
       credentials: "same-origin", cache: "no-store", redirect: "manual",
-      headers: {Accept: app === "campaigns" ? "text/html" : "application/json"},
+      headers: {Accept: "application/json"},
       signal: AbortSignal.timeout(10000),
     });
     let ready = response.status === 200 && response.type !== "opaqueredirect";
     if (ready && (app === "crm" || app === "support")) {
       ready = (await response.json()).message === "owner@blockwise.sale";
-    } else if (ready && app === "mail") {
-      ready = (await response.json()).authenticated === true;
     } else if (ready) {
-      // Mautic's native firewall redirects unauthenticated requests. Never
-      // follow that redirect and mistake the public login page for a session.
-      ready = response.headers.get("content-type")?.includes("text/html") === true;
+      ready = (await response.json()).authenticated === true;
+
     }
     report(ready ? "ready" : "session_required");
   } catch {
