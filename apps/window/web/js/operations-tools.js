@@ -1,5 +1,5 @@
 // Legacy operations shortcuts now open the native app launcher.
-import { mountOwnerDashboard } from "./owner-dashboard.js?v=20260914-native-owner-apps-v1";
+import { mountOwnerDashboard } from "./owner-dashboard.js?v=20260914-owner-workspace-v1";
 export const OPERATIONS_TOOLS = Object.freeze([
   { id: "inbox", name: "Mail" }, { id: "calendar", name: "Scheduling" },
   { id: "notifications", name: "Notifications" }, { id: "customers", name: "CRM" },

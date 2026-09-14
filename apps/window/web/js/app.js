@@ -13,12 +13,12 @@ import { mountBlogStudio } from "./blog-studio.js?v=20260831-blog-studio-v1";
 import { mountAdRadar, unmountAdRadar } from "./ad-radar.js?v=20260831-observation-timeline-v1";
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
-import { isOwnerDashboardProject, pathForView, routeForPath } from "./view-routing.js?v=20260914-native-owner-apps-v1";
+import { isOwnerDashboardProject, pathForView, routeForPath } from "./view-routing.js?v=20260914-owner-workspace-v1";
 import { mountAdDb, setAdDbActive } from "./ad-db.js?v=20260907-ad-db-v2";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
-import { mountOwnerDashboard } from "./owner-dashboard.js?v=20260914-native-owner-apps-v1";
+import { mountOwnerDashboard } from "./owner-dashboard.js?v=20260914-owner-workspace-v1";
 import { mountOps } from "./ops.js?v=20260904-ops-v1";
 import { isBlockwiseOperationsPreview } from "./blockwise-operations-preview.js";
 import { operationsTool } from "./operations-tools.js?v=20260914-native-owner-apps-v1";
@@ -59,6 +59,13 @@ function syncViewLocation(id, detail = {}) {
 }
 
 function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}) {
+  // Leaving the owner workspace can destroy a native panel that is holding
+  // unsaved work Frank cannot inspect. Ask before anything is torn down, and
+  // abort the whole navigation if the owner declines. The flag is synchronous
+  // and reads only host state: no panel content is read and nothing is stored.
+  if (id !== "blockwise-dashboard" && disposeOwnerDashboard?.hasUnsavedWork?.()) {
+    if (!window.confirm("The mailbox is still open with work Frank cannot check. Leave the owner workspace?")) return;
+  }
   disposeOwnerDashboard?.();
   disposeOwnerDashboard = null;
   if (id !== "ad-radar") unmountAdRadar();
@@ -137,17 +144,30 @@ function showProject(id, options = {}) {
   currentProject = project;
   if (isOwnerDashboardProject(id, window.location.search)) {
     document.body.classList.remove("blockwise-operations-preview");
+    const technicalView = () => {
+      const technical = document.createElement("a");
+      technical.className = "home-action";
+      technical.href = "/project/blockwise?technical=1";
+      technical.textContent = "Technical view";
+      $("#top-actions").replaceChildren(technical);
+    };
+    // Moving between owner sections must not rebuild the workspace: the host
+    // already keeps the mailbox panel alive for an unsaved draft, and a remount
+    // would discard it. Hand the resolved route to the live host instead.
+    if (disposeOwnerDashboard && currentProject.id === id && $("#owner-dashboard")?.classList.contains("is-on")) {
+      technicalView();
+      window.dispatchEvent(new CustomEvent("frank:owner-route", {
+        detail: { section: options.ownerSection, customerId: options.ownerCustomerId },
+      }));
+      return true;
+    }
     // Carry the owner route detail so the workspace address bar keeps the
     // section or customer in the URL instead of collapsing to the project home.
     const ownerDetail = { projectId: id };
     if (options.ownerSection) ownerDetail.ownerSection = options.ownerSection;
     if (options.ownerCustomerId) ownerDetail.ownerCustomerId = options.ownerCustomerId;
     show("blockwise-dashboard", { ...options, routeDetail: ownerDetail });
-    const technical = document.createElement("a");
-    technical.className = "home-action";
-    technical.href = "/project/blockwise?technical=1";
-    technical.textContent = "Technical view";
-    $("#top-actions").replaceChildren(technical);
+    technicalView();
     disposeOwnerDashboard = mountOwnerDashboard($("#owner-dashboard"), {
       section: options.ownerSection,
       customerId: options.ownerCustomerId,
