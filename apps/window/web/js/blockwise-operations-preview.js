@@ -49,7 +49,7 @@ export const BLOCKWISE_PREVIEW_MANIFESTS = Object.freeze([
 ]);
 
 export function isBlockwiseOperationsPreview() {
-  return new URLSearchParams(window.location.search).get("preview") === PREVIEW_ID;
+  return false; // Retired: native applications replace the operations preview.
 }
 
 function instance(widgetId, index) {

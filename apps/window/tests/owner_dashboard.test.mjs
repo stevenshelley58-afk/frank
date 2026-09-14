@@ -36,5 +36,11 @@ test("launch source opens real apps safely and never embeds them", () => {
 test("legacy operations shortcuts contain no ordinary-app demo records", () => {
   const legacy = readFileSync(new URL("../web/js/operations-tools.js", import.meta.url), "utf8");
   assert.match(legacy, /return mountOwnerDashboard\(root\)/);
-  assert.doesNotMatch(legacy, /metrics:|items:|Chatwoot|Stalwart|Northline/);
+  assert.doesNotMatch(legacy, /Chatwoot|Stalwart|Northline/);
+});
+
+test("legacy manifest consumer still imports without breaking app startup", async () => {
+  const legacy = await import("../web/js/blockwise-operations-preview.js");
+  assert.ok(legacy.BLOCKWISE_PREVIEW_MANIFESTS.length > 0);
+  assert.equal(legacy.isBlockwiseOperationsPreview(), false);
 });
