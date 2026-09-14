@@ -46,6 +46,32 @@ These were observed during this build, not carried over from an older report.
 | Frank can reach the owner services from inside its container | verified | With the two private networks attached, `owner-crm-frontend-1:8080/api/method/ping` returns 200 `pong` and `frank-owner-ntfy:80/v1/health` returns 200 `healthy` |
 | The owner projections read real data in production conditions | verified | Run inside the running `frank-window` container against the live services: support 2 tickets awaiting the owner, CRM 4 new leads and 4 with no first contact, notifications 46 published |
 
+## Browser verification of the integrated workspace
+
+Run against a bounded local preview of the integrated branch, with the real
+generated vendor bundles copied in so the page boots exactly as it does in the
+container. This is a real Chromium browser, not a headless assertion harness.
+
+| Check | Observed |
+| --- | --- |
+| Workspace mounts at `/project/blockwise` | yes, at 1440x900 and 390x844 |
+| Horizontal overflow | none at either width |
+| Owner surface opens an external tab | no anchor in the owner surface carries a blank target |
+| Frames created | none, which is correct: every native origin reports not frameable |
+| All 8 owner routes resolve and survive a reload | 8 of 8, verified by the acceptance harness |
+| Deep link `/project/blockwise/crm` | resolves, and the address keeps `/crm` after reload |
+| Rail section click | moves to `/project/blockwise/support` |
+| Back | returns to `/project/blockwise/crm` |
+| Forward | returns to `/project/blockwise/support` |
+| Unknown section | does not resolve: "No owner workspace section is registered for ..." |
+| JavaScript errors | none |
+| Real source data on the overview | support "2 tickets awaiting the owner, observed 2026-09-14T05:29:12Z" with two named tickets and their assignment; CRM 4 new leads with per-record creation times and an "Open leads" drill-down |
+
+The persisted-draft check is reported as skipped, with its reason, because no
+webmail client runs in this preview. The native embed and post-logout native
+probe report their real failing state, because `crm.frank.fail` has no
+certificate yet. None of the three is reported as a pass.
+
 ## Scope ledger
 
 | # | Item | Software implemented | Live integration accepted |
