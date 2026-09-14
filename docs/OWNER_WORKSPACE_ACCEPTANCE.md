@@ -46,6 +46,42 @@ These were observed during this build, not carried over from an older report.
 | Frank can reach the owner services from inside its container | verified | With the two private networks attached, `owner-crm-frontend-1:8080/api/method/ping` returns 200 `pong` and `frank-owner-ntfy:80/v1/health` returns 200 `healthy` |
 | The owner projections read real data in production conditions | verified | Run inside the running `frank-window` container against the live services: support 2 tickets awaiting the owner, CRM 4 new leads and 4 with no first contact, notifications 46 published |
 
+## Unresolved risks
+
+Recorded because they are load-bearing and not yet proven either way.
+
+### Framing a native app inside Frank is unverified
+
+The identity lane's ingress strips the upstream `X-Frame-Options` and sets a
+scoped CSP `frame-ancestors https://frank.fail` on each app host, with `frame-src`
+naming the app origins on the Frank parent. Whether the browser then actually
+renders the frame is **not yet demonstrated**.
+
+An attempt to prove it in isolation returned "frame blocked", but that result is
+**not trustworthy**: Caddy had not finished issuing the internal certificates for
+the probe hosts, and the TLS handshake failed with
+`TLSV1_ALERT_INTERNAL_ERROR`. A failed connection and a deliberate frame rejection
+are indistinguishable in that outcome, so this is recorded as unverified, not as
+a failure and not as a pass.
+
+What is needed: a test against hosts whose certificates are serving, asserting on
+a positive signal from inside the frame (the frame posts a message back and the
+parent records that it arrived). Absence of a console error is not proof.
+
+Consequence if it does not work: the native application panels cannot render, and
+the workspace would need a different mechanism. It must not be worked around by
+widening `frame-ancestors` to a wildcard or by removing the parent's protection.
+
+### Other open items
+
+- `frame-src` on the Frank parent does not yet name `mail.frank.fail`, so the
+  Mail panel cannot render until the webmail origin is added.
+- The notification view publishes real, deduplicated activity, but it does not yet
+  separate "reviewed in Frank" from "resolved in the source application".
+- Item-level drill-down currently opens the owning filtered list. Opening a
+  specific native record additionally needs the verified route shapes from the
+  native lane, and a guessed URL is deliberately not used in the meantime.
+
 ## Browser verification of the integrated workspace
 
 Run against a bounded local preview of the integrated branch, with the real
