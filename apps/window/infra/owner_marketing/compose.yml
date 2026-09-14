@@ -19,8 +19,8 @@ services:
   mautic:
     image: frank-owner-marketing-mautic:${MAUTIC_SOURCE_SHA:?required}
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: infra/owner_marketing/Dockerfile
     container_name: frank-owner-marketing
     restart: unless-stopped
     depends_on: {db: {condition: service_healthy}}
@@ -54,8 +54,8 @@ services:
   cron:
     image: frank-owner-marketing-mautic:${MAUTIC_SOURCE_SHA:?required}
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: infra/owner_marketing/Dockerfile
     container_name: frank-owner-marketing-cron
     restart: unless-stopped
     profiles: ["owner-marketing-cron"]
@@ -85,8 +85,8 @@ services:
   worker:
     image: frank-owner-marketing-mautic:${MAUTIC_SOURCE_SHA:?required}
     build:
-      context: .
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: infra/owner_marketing/Dockerfile
     container_name: frank-owner-marketing-worker
     restart: unless-stopped
     profiles: ["owner-marketing-worker"]

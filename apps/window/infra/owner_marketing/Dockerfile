@@ -11,3 +11,7 @@ RUN apt-get update \
     && php -r 'require "vendor/autoload.php"; $c=implode(chr(92), ["Symfony","Component","DomCrawler","Crawler"]); exit((new $c("<a href=target>Link</a>"))->filter("a")->count() === 1 ? 0 : 1);' \
     && php -m | grep -Fx imap \
     && rm -rf /var/lib/apt/lists/*
+
+# Immutable packaged native SAML return route. It is not copied into a running container.
+COPY infra/owner_identity/native/mautic_frank_owner_entry /var/www/html/docroot/plugins/FrankOwnerEntryBundle
+RUN chown -R www-data:www-data /var/www/html/docroot/plugins/FrankOwnerEntryBundle
