@@ -65,7 +65,7 @@ def preview_state(containers):
         if c['Name'].lstrip('/') in routing:
             claimed.add((c['Config'].get('Labels') or {}).get('org.opencontainers.image.revision',''))
 
-    for block in run('git','-C','/projects/blockwise','worktree','list','--porcelain').split('\n\n'):
+    for block in run('git','-c','safe.directory=/projects/blockwise','-C','/projects/blockwise','worktree','list','--porcelain').split('\n\n'):
         lines=dict(x.split(' ',1) for x in block.splitlines() if ' ' in x)
         path=lines.get('worktree','')
         if path and Path(path).exists() and not path.startswith('/srv/blockwise/releases/') and path!='/projects/blockwise':
@@ -74,7 +74,7 @@ def preview_state(containers):
     for c in containers:
         if not PREVIEW_RE.fullmatch(c['Name'].lstrip('/')): continue
         sha=(c['Config'].get('Labels') or {}).get('org.opencontainers.image.revision','')
-        if re.fullmatch('[a-f0-9]{40}',sha) and subprocess.run(['git','-C','/projects/blockwise','merge-base','--is-ancestor',sha,'main'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
+        if re.fullmatch('[a-f0-9]{40}',sha) and subprocess.run(['git','-c','safe.directory=/projects/blockwise','-C','/projects/blockwise','merge-base','--is-ancestor',sha,'main'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0:
             merged.add(sha)
     return merged,claimed
 
