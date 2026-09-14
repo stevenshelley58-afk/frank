@@ -120,12 +120,41 @@ certificate yet. None of the three is reported as a pass.
 | 6 | Native Mautic framed inside Frank | in progress | blocked — origin has no certificate yet |
 | 7 | Webmail in Frank, no second password | in progress — Roundcube 1.7.4 component, 34 tests | pending |
 | 8 | Real overview from authorized reads | yes — 3 of 7 sources live, 4 honest unavailable | verified inside the production container |
-| 9 | Customer overview across sources | not started | not started |
-| 10 | Deduplicated notification view | partly — publish activity is real and deduplicated by source id | "reviewed in Frank" is not separated from "resolved in source" yet |
+| 9 | Customer overview across sources | yes — `owner_customers.py`, 13 tests | resolves a real lead record live; subscription context awaits a Stripe credential |
+| 10 | Deduplicated notification view | yes for activity — stable per-source ids, verified unique across refreshes | "reviewed in Frank" vs "resolved in source" still to separate |
 | 11 | Results reporting | not started | not started |
 | 12 | Revenue reporting | not started | not started |
 | 13 | Phone notification receipt | blocked — no device subscriber | blocked |
 | 14 | Public owner booking | not started — needs Google Calendar OAuth | blocked |
+
+## Verified native route shapes
+
+Confirmed against the installed applications in a real browser by the native
+lane, not taken from documentation. These are what the app registry allowlists;
+the negatives matter as much as the positives.
+
+| Screen | Path |
+| --- | --- |
+| CRM dashboard | `/crm/dashboard` |
+| CRM lead list | `/crm/leads/view/list` |
+| CRM lead record | `/crm/leads/<leadName>` |
+| CRM contact record | `/crm/contacts/<contactName>` |
+| CRM task list | `/crm/tasks/view/list` |
+| Helpdesk tickets | `/helpdesk/tickets` |
+| Helpdesk ticket record | `/helpdesk/tickets/<ticketId>` |
+| Mautic campaign record | `/s/campaigns/view/<id>` |
+| Mautic email record | `/s/emails/view/<id>` |
+
+Deliberately **not** allowlisted because they do not work: `/crm/tasks/<id>`
+(renders a blank content area rather than a record), `/crm/notes/list`, and
+`/helpdesk/knowledge-base`.
+
+Sequencing constraint: anonymous `/crm/**` returns 403 with no shell, while
+anonymous `/helpdesk/**` returns a 200 SPA shell that then redirects to `/login`.
+Both applications issue a full-page redirect when unauthenticated, so the Frappe
+session must already exist before a deep link is loaded in a frame, or the login
+page renders inside the panel.
+
 
 ## Defects found and fixed during this build
 
