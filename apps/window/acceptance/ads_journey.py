@@ -22,6 +22,7 @@ import argparse
 import functools
 import http.server
 import json
+import re
 import socketserver
 import threading
 from pathlib import Path
@@ -102,15 +103,67 @@ def mount_preview(page, size: str = "large") -> None:
             page.wait_for_timeout(500)
 
 
+def block_titles(page) -> str:
+    return " | ".join(node.inner_text().strip() for node in page.query_selector_all(".ads-block-title"))
+
+
 def run(page, base_url: str, out: Path, label: str = "desktop") -> None:
     page.goto(base_url, wait_until="domcontentloaded")
-    page.wait_for_function("() => Boolean(window.__adsHarness)")
+    page.wait_for_function("() => typeof window.__adsHarness?.mount === 'function'")
 
     # ---------------------------------------------------------------- preview --
     print("\npreview isolation")
     mount_preview(page, "large")
     check("the preview banner is shown above the screen", bool(page.query_selector(".ads-banner-preview")))
     check("a preview draft cannot be created in live mode", True, "checked after staging below")
+
+    # ------------------------------------------------------- decisions first --
+    # The brief asks the Overview to answer three questions and to make each
+    # answer actionable in place. A recommendation that sends the reader hunting
+    # through three other screens has not answered anything.
+    print("\noverview: three questions, answered in place")
+    page.click(".ads-nav-link:has-text('Overview')")
+    page.wait_for_timeout(800)
+    titles = block_titles(page)
+    check("the overview asks what needs attention", "What needs my attention" in titles, titles[:200])
+    check("the overview asks where spend produces useful outcomes", "Where is spend producing useful outcomes" in titles, titles[:200])
+    check("the overview asks what to test next", "What should I test next" in titles, titles[:200])
+
+    attention = page.query_selector_all(".ads-attention-item")
+    check("attention items are listed with the record they are about", len(attention) > 0, f"{len(attention)} items")
+    if attention:
+        row_text = " ".join(attention[0].inner_text().split())
+        check("an attention item names the immutable id of its record", bool(attention[0].query_selector(".ads-decisions-id")), row_text[:160])
+        check("an attention item says how old the reading is", "ago" in row_text.lower() or "read" in row_text.lower(), row_text[:200])
+        check("an attention item states what it proposes", "Proposed:" in row_text, row_text[:200])
+
+        # The whole point: the evidence and the action open here.
+        page.click(".ads-attention-item:first-child button:has-text('Inspect and act')")
+        page.wait_for_selector(".ads-drawer", timeout=8000)
+        page.wait_for_timeout(300)
+        drawer = text_of(page, ".ads-drawer")
+        # What the drawer must carry is the evidence for this decision. The
+        # evidence a tracking fault needs is not shaped like the evidence a
+        # budget decision needs, so the check is for the evidence, not for one
+        # section's title.
+        evidence_markers = ("The numbers behind it", "How old this reading is", "Records this is about", "Evidence")
+        check(
+            "the supporting rows open in place, without leaving the screen",
+            any(marker in drawer for marker in evidence_markers),
+            drawer[:200],
+        )
+        check("the drawer carries the proposed action", "Proposed action" in drawer, drawer[:200])
+        current = page.query_selector(".ads-screen")
+        check(
+            "the overview is still the screen that is showing",
+            current is not None and current.get_attribute("data-screen") == "overview",
+            current.get_attribute("data-screen") if current else "none",
+        )
+        page.keyboard.press("Escape")
+        page.wait_for_timeout(250)
+        check("Escape closes the evidence and the list is still there", bool(page.query_selector(".ads-attention-item")), "list present")
+    page.screenshot(path=str(out / f"{label}-overview-decisions.png"))
+    check("the overview proposes tests with their own evidence", len(page.query_selector_all(".ads-decisions-record")) > 0, block_titles(page)[:120])
 
     # ------------------------------------------------------ bulk action scope --
     print("\nbulk action: this page versus every matching row")
@@ -274,7 +327,7 @@ def run(page, base_url: str, out: Path, label: str = "desktop") -> None:
     page.screenshot(path=str(out / f"{label}-queue-staged.png"))
 
     page.reload(wait_until="domcontentloaded")
-    page.wait_for_function("() => Boolean(window.__adsHarness)")
+    page.wait_for_function("() => typeof window.__adsHarness?.mount === 'function'")
     mount_preview(page, "large")
     page.click(".ads-nav-link:has-text('Publishing queue')")
     page.wait_for_timeout(500)
@@ -340,13 +393,32 @@ def run(page, base_url: str, out: Path, label: str = "desktop") -> None:
 
     # ------------------------------------------------------- preview isolation --
     print("\npreview isolation: a rehearsal draft never reaches the live queue")
+    # Identity, not wording: the queue may rename its own sections, but a
+    # rehearsal's campaign identity must not appear on the live side at all.
+    page.evaluate("window.__adsHarness.mount({ preview: true })")
+    page.wait_for_timeout(400)
+    page.click(".ads-nav-link:has-text('Publishing queue')")
+    page.wait_for_timeout(600)
+    preview_queue = text_of(page, ".ads-screen")
+    rehearsal_ids = sorted(set(re.findall(r"cmp_[0-9a-z]+", preview_queue)))
+    check("the preview queue lists the staged rehearsal with its campaign identity", bool(rehearsal_ids), preview_queue[:160])
+
     page.evaluate("window.__adsHarness.serve('not_connected')")
     page.evaluate("window.__adsHarness.mount({ preview: false })")
     page.wait_for_timeout(400)
     page.click(".ads-nav-link:has-text('Publishing queue')")
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(600)
     live_queue = text_of(page, ".ads-screen")
-    check("the live queue does not show the preview draft", "Staged in Frank" not in live_queue, live_queue[:160])
+    check(
+        "no rehearsal identity appears in the live queue",
+        all(identity not in live_queue for identity in rehearsal_ids),
+        live_queue[:200],
+    )
+    check(
+        "the live queue explains itself instead of showing a rehearsal row",
+        "Not connected" in live_queue or "No connection" in live_queue or "not connected" in live_queue,
+        live_queue[:200],
+    )
 
 
 def main() -> int:
