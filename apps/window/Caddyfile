@@ -50,6 +50,16 @@
 	forward_auth owner-identity-server:9000 {
 		uri /outpost.goauthentik.io/auth/caddy
 		copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Entitlements X-Authentik-Email X-Authentik-Name X-Authentik-Uid
+		# The outpost reconstructs the original request from these to decide
+		# whether to serve the request or redirect to the sign-in flow. Caddy's
+		# forward_auth does not set them, and without them the outpost answers
+		# 500 "failed to detect a forward URL from Caddy", which the edge then
+		# presents to the browser as a 404. Measured: a request carrying only
+		# the Host header fails, and the same request with this set returns 302.
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Uri {http.request.uri}
+		header_up X-Forwarded-Method {http.request.method}
+		header_up X-Forwarded-Proto {http.request.scheme}
 		# Only the pinned identity-provider ingress subnet may speak for the
 		# client; nothing else on this host can forge X-Forwarded-*.
 		trusted_proxies 172.31.50.0/24
