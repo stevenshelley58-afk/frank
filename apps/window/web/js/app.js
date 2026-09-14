@@ -13,15 +13,15 @@ import { mountBlogStudio } from "./blog-studio.js?v=20260831-blog-studio-v1";
 import { mountAdRadar, unmountAdRadar } from "./ad-radar.js?v=20260831-observation-timeline-v1";
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
-import { isOwnerDashboardProject, pathForView, routeForPath } from "./view-routing.js?v=20260914-owner-dashboard-v1";
+import { isOwnerDashboardProject, pathForView, routeForPath } from "./view-routing.js?v=20260914-native-owner-apps-v1";
 import { mountAdDb, setAdDbActive } from "./ad-db.js?v=20260907-ad-db-v2";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
-import { mountOwnerDashboard } from "./owner-dashboard.js?v=20260914-owner-dashboard-v1";
+import { mountOwnerDashboard } from "./owner-dashboard.js?v=20260914-native-owner-apps-v1";
 import { mountOps } from "./ops.js?v=20260904-ops-v1";
 import { isBlockwiseOperationsPreview } from "./blockwise-operations-preview.js";
-import { mountOperationsTool, operationsTool } from "./operations-tools.js";
+import { operationsTool } from "./operations-tools.js?v=20260914-native-owner-apps-v1";
 import { createMiniServiceRequestsPanel } from "./mini-service-requests.js?v=20260906-mini-operator-v1";
 
 const $ = (s, r) => (r || document).querySelector(s);
@@ -188,14 +188,7 @@ window.addEventListener("frank:operations-tool", (event) => {
     show("connections");
     return;
   }
-  if (tool.id === "customers" && !isBlockwiseOperationsPreview()) {
-    show("ops");
-    return;
-  }
-  show("operations-tool");
-  $("#view-title").textContent = tool.name;
-  $("#view-sub").textContent = `Blockwise · ${tool.provider}`;
-  mountOperationsTool($("#operations-tool"), tool.id, { preview: isBlockwiseOperationsPreview() });
+  showProject("blockwise");
 });
 
 window.addEventListener("frank:project-home", (event) => {

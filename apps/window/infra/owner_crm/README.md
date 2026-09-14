@@ -121,7 +121,7 @@ made by `owner@blockwise.sale`.
 
 ## Private owner web access
 
-`python3 bin/private-access.py` previews existing native Tailscale Serve configuration; `--apply` adds only private HTTPS ports 8445 (CRM) and 8446 (ntfy). Existing Serve services are preserved, occupied ports and public Funnel flags are rejected, and native CRM/ntfy authentication remains required. No public CRM ingress, custom proxy, or new account is created. An enrolled phone with Tailscale plus native ntfy setup is still required for actual mobile notification receipt.
+`python3 bin/private-access.py` previews existing native Tailscale Serve configuration; `--apply` adds only private HTTPS ports 8445 (CRM), 8446 (ntfy), and 8447 (native Mautic admin). Existing Serve services are preserved, occupied ports and public Funnel flags are rejected, and native CRM/ntfy authentication remains required. No public CRM ingress, custom proxy, or new account is created. An enrolled phone with Tailscale plus native ntfy setup is still required for actual mobile notification receipt.
 
 ## Prepared off-host recovery
 
