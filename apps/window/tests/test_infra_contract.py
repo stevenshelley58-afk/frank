@@ -116,6 +116,23 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("request>headers>Idempotency-Key delete", caddyfile)
         self.assertIn("request>headers>Referer delete", caddyfile)
 
+    def test_owner_identity_binds_every_public_owner_application_to_the_owner_group(self):
+        bootstrap = (APP / "infra" / "owner_identity" / "bin" / "bootstrap.py").read_text(
+            encoding="utf-8"
+        )
+        binding_section = bootstrap.split(
+            "# ------------------------------------------- bind apps to the owner group --", 1
+        )[1].split("# ------------------------------------ attach the proxy providers to outpost", 1)[0]
+        for slug in (
+            "frank-window",
+            "frappe-crm",
+            "mautic",
+            "frappe-crm-gate",
+            "mautic-gate",
+            "webmail-gate",
+        ):
+            self.assertIn(f'"{slug}"', binding_section)
+
     def test_mini_routes_are_public_without_exposing_operator_attestation(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         mini_api = caddyfile.index("@mini_api path /api/mini /api/mini/*")

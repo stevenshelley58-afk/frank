@@ -516,7 +516,17 @@ def main() -> int:
     # ------------------------------------------- bind apps to the owner group --
     apps = get(_with_full_list("/core/applications/?page_size=200"))["results"]
     app_by_slug = {a["slug"]: a for a in apps}
-    for slug in ("frank-window", "frappe-crm", "mautic", "webmail-gate"):
+    # Bind both the native SSO clients and the proxy gates. The proxy gates are
+    # the public Caddy forward-auth applications, so leaving either one out
+    # would let any otherwise-authenticated identity reach the native edge.
+    for slug in (
+        "frank-window",
+        "frappe-crm",
+        "mautic",
+        "frappe-crm-gate",
+        "mautic-gate",
+        "webmail-gate",
+    ):
         if slug not in app_by_slug:
             raise SystemExit(f"application {slug} was not created")
         app = app_by_slug[slug]
