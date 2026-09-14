@@ -135,6 +135,10 @@ services:
       # The public mail allowlist terminates at the existing Mautic ingress.
       # Caddy is the only Frank service attached to this network.
       - owner-marketing-ingress
+      # The owner webmail client's ingress. Caddy is again the only Frank
+      # service attached, so the client stays reachable only through the
+      # authenticated edge and publishes no host port of its own.
+      - owner-webmail-ingress
     depends_on:
       frank-window:
         condition: service_healthy
@@ -166,3 +170,8 @@ networks:
   owner-notifications-private:
     external: true
     name: frank_owner_notifications_private
+  # Declared by the owner webmail component, which owns the network and its
+  # ingress service. Frank's edge joins it; nothing else in Frank does.
+  owner-webmail-ingress:
+    external: true
+    name: frank_owner_webmail_ingress
