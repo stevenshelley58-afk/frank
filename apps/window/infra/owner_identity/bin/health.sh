@@ -85,7 +85,10 @@ check_outpost() {
 import sys, urllib.error, urllib.request
 req = urllib.request.Request(
     'http://127.0.0.1:9000/outpost.goauthentik.io/auth/caddy',
-    headers={'X-Forwarded-Host': 'auth.frank.fail', 'X-Forwarded-Proto': 'https', 'X-Forwarded-Uri': '/'},
+    # Probe with a host that actually HAS a proxy provider. The identity
+    # provider's own host deliberately does not, so probing it would return 404
+    # and prove nothing about the path Caddy forward-auths against.
+    headers={'X-Forwarded-Host': 'frank.fail', 'X-Forwarded-Proto': 'https', 'X-Forwarded-Uri': '/'},
 )
 try:
     code = urllib.request.urlopen(req, timeout=5).status
