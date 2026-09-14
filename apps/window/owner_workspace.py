@@ -40,6 +40,7 @@ OWNER_SECTIONS: tuple[str, ...] = (
     "crm",
     "support",
     "campaigns",
+    "ads",
     "revenue",
     "results",
     "notifications",

@@ -13,6 +13,7 @@
 
 import { ownerPathForCustomer, ownerPathForSection, routeForPath } from "./view-routing.js";
 import { allowedNativePath, createOwnerAppHost, nativeRecordPath, ownerApp } from "./owner-app-host.js";
+import { mountAdsWorkspace } from "./ads/ads-workspace.js?v=20260914-ads-workspace-v1";
 // The panel host owns the native route allowlist; the workspace re-exports the
 // path builders so a consumer has one import for the whole owner surface.
 export { nativeListPath, nativeRecordPath } from "./owner-app-host.js";
@@ -38,6 +39,10 @@ export const OWNER_SECTION_VIEWS = Object.freeze([
   Object.freeze({ id: "crm", label: "CRM", kind: "native", app: "crm" }),
   Object.freeze({ id: "support", label: "Support", kind: "native", app: "support" }),
   Object.freeze({ id: "campaigns", label: "Email flows", kind: "native", app: "campaigns" }),
+  // Ads is a Frank read model with no native application to frame, like Revenue
+  // and Results. It is separate from the email flows above: Mautic owns email
+  // campaigns, this section owns paid advertising.
+  Object.freeze({ id: "ads", label: "Ads", kind: "ads" }),
   Object.freeze({ id: "revenue", label: "Revenue", kind: "source" }),
   Object.freeze({ id: "results", label: "Results", kind: "source" }),
   Object.freeze({ id: "notifications", label: "Notifications", kind: "source" }),
@@ -473,6 +478,11 @@ function createOwnerWorkspace({ doc, win, host, options }) {
   root.append(bar, body);
   host.replaceChildren(root);
 
+  // The Ads section is a self-contained workspace with its own chrome and
+  // scrolling. It is mounted into the read slot and disposed whenever the
+  // operator leaves the section, so its readers and drawers never outlive it.
+  let disposeAdsWorkspace = null;
+
   // The host uses the same fetch the workspace uses, so a test or a caller can
   // inject one transport for both.
   const appHost = createOwnerAppHost({
@@ -665,12 +675,34 @@ function createOwnerWorkspace({ doc, win, host, options }) {
   function renderPanel({ focus = false, appPath = "" } = {}) {
     const section = ownerSectionView(state.section) || ownerSectionView("overview");
     if (section.kind === "native") {
+      disposeAdsWorkspace?.();
+      disposeAdsWorkspace = null;
+      readSlot.classList.remove("is-ads");
       readSlot.hidden = true;
       readSlot.replaceChildren();
       appSlot.hidden = false;
       if (focus) appHost.focusHeading();
       return;
     }
+    // Ads owns its own header, context strip, scrolling pane and detail drawers,
+    // so it takes the read slot whole rather than being wrapped in the panel
+    // title every other section gets. `is-ads` removes the slot's padding and
+    // hands scrolling to the workspace inside it, so there is only ever one
+    // scroll container.
+    if (section.kind === "ads") {
+      appSlot.hidden = true;
+      readSlot.hidden = false;
+      disposeAdsWorkspace?.();
+      disposeAdsWorkspace = null;
+      readSlot.replaceChildren();
+      readSlot.classList.add("is-ads");
+      state.tileRefs = new Map();
+      disposeAdsWorkspace = mountAdsWorkspace(readSlot, {});
+      return;
+    }
+    readSlot.classList.remove("is-ads");
+    disposeAdsWorkspace?.();
+    disposeAdsWorkspace = null;
     appSlot.hidden = true;
     readSlot.hidden = false;
     readSlot.replaceChildren();
@@ -920,6 +952,8 @@ function createOwnerWorkspace({ doc, win, host, options }) {
     if (state.disposed) return;
     state.disposed = true;
     state.controller?.abort?.();
+    disposeAdsWorkspace?.();
+    disposeAdsWorkspace = null;
     win?.removeEventListener?.("frank:owner-route", handleOwnerRoute);
     win?.removeEventListener?.("popstate", handlePopState);
     appHost.dispose();

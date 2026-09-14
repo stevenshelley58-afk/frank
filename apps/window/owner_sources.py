@@ -46,6 +46,7 @@ SOURCE_PURPOSE: dict[str, str] = {
     "crm": "leads and follow-ups that need you",
     "support": "tickets waiting on you",
     "campaigns": "email flow and campaign activity",
+    "ads": "paid advertising spend, results and what needs attention",
     "revenue": "recurring revenue and payments",
     "results": "reach and acquisition performance",
     "notifications": "notification publish activity",
@@ -59,6 +60,9 @@ SOURCE_FALLBACK_TARGET: dict[str, dict[str, Any]] = {
     "crm": {"kind": "native-list", "app": "crm", "path": "/crm/leads", "label": "Open leads"},
     "support": {"kind": "native-list", "app": "support", "path": "/helpdesk/tickets", "label": "Open tickets"},
     "campaigns": {"kind": "native-list", "app": "campaigns", "path": "/s/campaigns", "label": "Open campaigns"},
+    # Ads has no native application to frame, so its fallback is the section
+    # itself, like revenue and results.
+    "ads": {"kind": "owner-section", "section": "ads", "label": "Open ads"},
     "revenue": {"kind": "owner-section", "section": "revenue", "label": "Open revenue"},
     "results": {"kind": "owner-section", "section": "results", "label": "Open results"},
     "notifications": {"kind": "owner-section", "section": "notifications", "label": "Open notifications"},

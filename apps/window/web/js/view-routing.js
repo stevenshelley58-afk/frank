@@ -21,7 +21,7 @@ const ENTITY_IDS = new Set([
 // and the only variable segment is an opaque customer identifier.
 const OWNER_PROJECT_ID = "blockwise";
 export const OWNER_SECTIONS = Object.freeze([
-  "mail", "crm", "support", "campaigns", "revenue", "results", "notifications",
+  "mail", "crm", "support", "campaigns", "ads", "revenue", "results", "notifications",
 ]);
 export const OWNER_CUSTOMER_SEGMENT = "customer";
 const OWNER_SECTION_IDS = new Set(OWNER_SECTIONS);

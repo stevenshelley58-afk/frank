@@ -151,6 +151,14 @@
 .owner-panel-app[hidden] {
   display: none;
 }
+/* The Ads workspace brings its own header, context strip and scrolling pane, so
+   it takes the read slot whole. Without this the slot would wrap it in a second
+   scroll container and a second set of padding. */
+.owner-panel-read.is-ads {
+  padding: 0;
+  overflow: hidden;
+  position: relative;
+}
 .owner-panel-app {
   flex: 1;
   min-height: 0;
