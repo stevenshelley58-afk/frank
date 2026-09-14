@@ -29,6 +29,25 @@ def live():
         paths.extend(files)
     return templates,{str(p):digest(p) for p in sorted(set(paths))}
 
+def references():
+    ids=subprocess.check_output(['docker','ps','-aq'],text=True).split()
+    mounts=[]
+    if ids:
+        for container in json.loads(subprocess.check_output(['docker','inspect',*ids],text=True)):
+            mounts.extend(Path(m['Source']).resolve() for m in container.get('Mounts',[]) if m.get('Source'))
+    opened=set()
+    for proc in Path('/proc').glob('[0-9]*'):
+        try:
+            opened.add((proc/'cwd').resolve())
+            for f in (proc/'fd').iterdir():
+                try:opened.add(f.resolve())
+                except OSError:pass
+        except (OSError,PermissionError):pass
+    return mounts,opened
+
+def blocked(path,mounts,opened):
+    return any(path==m or path.is_relative_to(m) or m.is_relative_to(path) for m in mounts) or any(path==o or o.is_relative_to(path) for o in opened)
+
 def states():
     with sqlite3.connect(STATE,uri=True) as db:
         rows=db.execute("select run_id,status from tool_runs where tool_id='ad-template-generator'").fetchall()
@@ -60,14 +79,17 @@ def plan(run,best):
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--apply',action='store_true');args=ap.parse_args()
+    for root in [RUNS,STORAGE]:
+        if not root.is_dir() or root.resolve()!=root:raise RuntimeError('storage root redirect or absence')
     EVIDENCE.mkdir(parents=True,exist_ok=True)
     with open('/run/template-draft-retention.lock','w') as lock:
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
-        templates,assets=live();status=states();remove=[];protected={};skipped=[]
+        templates,assets=live();status=states();remove=[];protected={};skipped=[];mounts,opened=references()
         for rid in sorted({t['library_review_run_id'] for t in templates}):
             if not isinstance(rid,str) or not re.fullmatch(r'trun_[0-9a-f]{32}',rid):raise RuntimeError('invalid published run id')
             run=RUNS/rid;checkpoint=run/'exact-clone-checkpoint.json'
             if not run.is_dir() or run.is_symlink() or not checkpoint.is_file():raise RuntimeError('published source package missing')
+            if blocked(run,mounts,opened):skipped.append({'run':rid,'reason':'open process file or container mount'});continue
             c=json.loads(checkpoint.read_text());best=c.get('bestIteration')
             if status.get(rid)!='completed' or c.get('accepted') is not True or not isinstance(best,int) or best<1:
                 skipped.append({'run':rid,'reason':'not completed accepted checkpoint'});continue
@@ -82,7 +104,8 @@ def main():
         # Persist history separately: later no-op timer runs must not erase evidence.
         receipt=EVIDENCE/('template-'+str(time.time_ns())+'.json')
         def save():
-            payload=json.dumps(record,indent=2);path.write_text(payload);receipt.write_text(payload)
+            payload=json.dumps(record,indent=2);path.write_text(payload)
+            if remove:receipt.write_text(payload)
         save()
         if args.apply:
             fresh,freshassets=live()
@@ -94,6 +117,8 @@ def main():
                 rid=p.relative_to(RUNS).parts[0]
                 if rid!=last_run:
                     states();save();last_run=rid
+                    mounts,opened=references()
+                    if blocked(RUNS/rid,mounts,opened):raise RuntimeError('run became referenced during cleanup')
                 if p.is_symlink() or p.stat().st_mtime_ns!=item['mtime_ns'] or digest(p)!=item['sha256']:raise RuntimeError('draft changed during cleanup')
                 p.unlink();record['deleted_files']+=1;record['deleted_bytes']+=item['bytes']
             current,currentassets=live()

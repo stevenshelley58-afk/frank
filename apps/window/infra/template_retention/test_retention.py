@@ -12,6 +12,10 @@ class Rules(unittest.TestCase):
    p=Path(t);d=p/'iterations/01';d.mkdir(parents=True)
    (d/'artifact.json').write_text('{"assets":[],"template":{},"scores":{}}')
    drop,keep=m.plan(p,3);self.assertEqual(drop,[]);self.assertEqual(len(keep),1)
+ def test_reference_guards(self):
+  self.assertTrue(m.blocked(Path('/runs/a'),[Path('/runs/a/previews')],set()))
+  self.assertTrue(m.blocked(Path('/runs/a'),[],{Path('/runs/a/iterations/01/file.png')}))
+  self.assertFalse(m.blocked(Path('/runs/a'),[Path('/runs/b')],set()))
  def test_symlinks_fail(self):
   with tempfile.TemporaryDirectory() as t:
    p=Path(t);(p/'link').symlink_to('/tmp');self.assertRaises(RuntimeError,m.plan,p,3)
