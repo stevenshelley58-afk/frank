@@ -217,7 +217,9 @@ export function nativeLoginUrl(appId) {
   if (appId === "crm" || appId === "support") {
     return app.origin + "/api/method/frank_owner_entry.api.enter?app=" + appId;
   }
-  return app.origin + "/frank/connect?app=campaigns";
+  // Native discovery selects the sole configured IdP and supplies its required idp parameter.
+  // Calling /s/saml/login directly lacks that parameter on Mautic 7.2.
+  return app.origin + "/saml/discovery";
 }
 
 export function readinessEndpoint(appId) {

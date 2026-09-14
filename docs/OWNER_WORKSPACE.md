@@ -192,8 +192,10 @@ same tab with a fixed return target and a bounded retry guard.
 
 - One stable owner identity, with explicit mappings to the native accounts.
 - Frank establishes a **trusted owner session**, not merely hidden navigation.
-- Frappe uses its supported OpenID/OAuth login. Mautic uses its supported SAML
-  where compatible with the installed version. Helpdesk uses the same intended
+- Frappe uses its supported OpenID/OAuth login. Mautic starts SAML through its
+  native `/saml/discovery` route, which selects the configured IdP before the
+  SAML login endpoint; do not call the parameterless SAML login endpoint.
+  Helpdesk uses the same intended
   owner account and site, not a separate customer account.
 - **No automatic public signup** into the owner workspace. Provisioning is
   restricted to approved identities and least-privilege roles.

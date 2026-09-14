@@ -51,3 +51,9 @@ def test_frappe_app_has_installer_required_metadata_files():
     app = ROOT / "native/frappe_owner_entry/frank_owner_entry"
     assert (app / "modules.txt").is_file()
     assert (app / "patches.txt").is_file()
+
+def test_mautic_provisioner_repairs_web_owned_cache_and_logs_before_clear():
+    source = SCRIPT.read_text()
+    assert "install -d -o www-data -g www-data" in source
+    assert "chown -R www-data:www-data /var/www/html/var/cache /var/www/html/var/logs" in source
+    assert "docker exec -u www-data" in source

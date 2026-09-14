@@ -49,5 +49,9 @@ $path="/var/www/html/config/local.php";$parameters=[];include $path;if(!is_array
 # Install the committed Mautic plugin. Its sole /s/frank/return route is
 # protected by the native /s/ firewall, then redirects to one fixed bridge URL.
 docker exec "$marketing_container" test -f /var/www/html/docroot/plugins/FrankOwnerEntryBundle/Config/config.php || die "Mautic native entry is not packaged in this image"
+# Native cache/log directories must be writable by the web user. Provisioning
+# runs privileged only to atomically update root-owned local.php; do not leave
+# root-owned cache or logs for the application process.
+docker exec "$marketing_container" sh -c 'install -d -o www-data -g www-data /var/www/html/var/cache /var/www/html/var/logs && chown -R www-data:www-data /var/www/html/var/cache /var/www/html/var/logs' || die "Mautic runtime directory ownership repair failed"
 docker exec -u www-data -w /var/www/html/docroot "$marketing_container" php /var/www/html/bin/console cache:clear --no-warmup --no-interaction >/dev/null || die "Mautic cache refresh failed"
 echo "native Frappe OIDC and Mautic SAML configuration reconciled"
