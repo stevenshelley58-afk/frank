@@ -122,8 +122,8 @@ certificate yet. None of the three is reported as a pass.
 | 8 | Real overview from authorized reads | yes — 3 of 7 sources live, 4 honest unavailable | verified inside the production container |
 | 9 | Customer overview across sources | yes — `owner_customers.py`, 13 tests | resolves a real lead record live; subscription context awaits a Stripe credential |
 | 10 | Deduplicated notification view | yes for activity — stable per-source ids, verified unique across refreshes | "reviewed in Frank" vs "resolved in source" still to separate |
-| 11 | Results reporting | not started | not started |
-| 12 | Revenue reporting | not started | not started |
+| 11 | Results reporting | yes — 5 declared sources with measures, authority and limits | none connected: no provider credential exists, reported honestly as unconfigured |
+| 12 | Revenue reporting | yes — Stripe declared, cash and recurring kept separate | none connected: no Stripe read key exists, reported honestly as unconfigured |
 | 13 | Phone notification receipt | blocked — no device subscriber | blocked |
 | 14 | Public owner booking | not started — needs Google Calendar OAuth | blocked |
 
