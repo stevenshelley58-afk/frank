@@ -91,6 +91,18 @@ class OwnerSnapshot(unittest.TestCase):
         self.assertEqual(snap["source_truth"], "provider")
         self.assertEqual(snap["generated_at"], 1000)
 
+    def test_envelope_matches_the_shared_builder_exactly(self):
+        # The owner card is not a second snapshot format. Its envelope keys must
+        # be the shared builder's keys, so a change to the shared shape cannot
+        # silently leave owner cards behind.
+        import home_providers
+
+        reference = home_providers.snapshot("ready", "x", {"a": 1}, [], now=1000)
+        snap = self._snapshot(leads=ow.reading(status="ready", value=3, source="frappe_crm", observed_at=900))
+        self.assertEqual(set(snap), set(reference))
+        self.assertEqual(snap["schema"], reference["schema"])
+        self.assertEqual(snap["source_truth"], reference["source_truth"])
+
     def test_one_unavailable_source_degrades_but_does_not_blank_the_page(self):
         snap = self._snapshot(
             leads=ow.reading(status="ready", value=3, source="frappe_crm", observed_at=900),

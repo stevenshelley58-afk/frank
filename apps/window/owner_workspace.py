@@ -31,6 +31,8 @@ from __future__ import annotations
 import time
 from typing import Any, Callable
 
+import home_providers
+
 # Frozen owner sections. Order matches the navigation contract in
 # docs/OWNER_WORKSPACE.md and web/js/view-routing.js.
 OWNER_SECTIONS: tuple[str, ...] = (
@@ -201,15 +203,10 @@ def owner_snapshot(
         "timezone_is_assumption": True,
         "authority": dict(METRIC_AUTHORITY),
     }
-    return {
-        "schema": "schema://frank.widget-snapshot/v1",
-        "status": envelope_status,
-        "summary": summary,
-        "data": data,
-        "links": list(links or []),
-        "generated_at": generated_at,
-        "source_truth": "provider",
-    }
+    # Delegate the envelope to the shared builder so there is exactly one
+    # definition of the snapshot shape. Only the two owner freshness stamps are
+    # added, inside ``data``, which keeps the addition additive.
+    return home_providers.snapshot(envelope_status, summary, data, list(links or []), now=generated_at)
 
 
 def attention_item(
