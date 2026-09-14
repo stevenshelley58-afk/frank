@@ -24,16 +24,25 @@ for container in owner-webmail owner-webmail-launch; do
   test "$(docker inspect -f '{{.State.Health.Status}}' "$container")" = healthy || fail "$container is not healthy"
 done
 
-healthz=$(curl -fsS "http://127.0.0.1:$port/frank/healthz") || fail "ingress health endpoint is unreachable"
-printf '%s' "$healthz" | jq -e '.ok == true and .service == "owner-webmail-launch"' >/dev/null || fail "unexpected launch health body"
+# Query the private ingress from its own namespace; no host port is published.
+healthz=$(docker exec owner-webmail-ingress wget -qO- http://127.0.0.1/frank/healthz) || fail "ingress health unavailable"
+printf '%s' "$healthz" | jq -e '.ok == true and .service == "owner-webmail-launch"' >/dev/null || fail "unexpected launch health"
+docker inspect owner-webmail-ingress --format '{{json .HostConfig.PortBindings}}' | grep -Eq '^(null|\{\})$' || fail "ingress must not publish host ports"
 
-# The launch broker must refuse a request that carries no authenticated owner.
-code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/frank/launch")
-test "$code" = 401 || fail "launch route returned $code for an unauthenticated request, expected 401"
+# A local process may forge the owner header but cannot mint edge attestation.
+docker exec -i owner-webmail-launch python3 - <<'PY'
+import urllib.request, urllib.error
+req = urllib.request.Request("http://ingress/frank/launch", headers={"X-Frank-Owner": "forged-owner"})
+try:
+    urllib.request.urlopen(req, timeout=8)
+except urllib.error.HTTPError as exc:
+    assert exc.code == 403, exc.code
+else:
+    raise SystemExit("untrusted launch unexpectedly accepted")
+PY
 
-# The client itself must be the real Roundcube, not an error page.
-body=$(curl -fsS "http://127.0.0.1:$port/") || fail "webmail root is unreachable"
-printf '%s' "$body" | grep -qi 'roundcube' || fail "webmail root does not look like Roundcube"
+body=$(docker exec owner-webmail-ingress wget -qO- http://webmail/) || fail "mail client unavailable"
+printf '%s' "$body" | grep -qi 'roundcube' || fail "mail client is not Roundcube"
 
 docker exec owner-webmail test -s /var/www/html/config/config.docker.inc.php || fail "generated docker config is missing"
 docker exec owner-webmail test -s /var/www/html/plugins/frank_sso/frank_sso.php || fail "frank_sso plugin is not mounted"

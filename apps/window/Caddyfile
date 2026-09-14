@@ -710,6 +710,8 @@ mail.frank.fail {
 			# supplied copy is removed before the trusted value is set, so a
 			# forged header cannot survive the edge.
 			header_up -X-Frank-Owner
+			header_up -X-Owner-Webmail-Ingress
+			header_up X-Owner-Webmail-Ingress {$OWNER_WEBMAIL_INGRESS_SECRET}
 			header_up X-Frank-Owner {http.request.header.X-Authentik-Uid}
 			header_up -X-Frame-Options
 		}

@@ -35,10 +35,8 @@ class ComposeContractTests(unittest.TestCase):
         self.assertNotIn(":latest", self.compose)
         self.assertNotIn(":latest", "".join(dockerfiles.values()))
 
-    def test_only_the_ingress_publishes_a_loopback_port(self):
-        self.assertEqual(self.compose.count("ports: ["), 1)
-        self.assertIn('"127.0.0.1:${OWNER_WEBMAIL_HOST_PORT:-18107}:80"', self.compose)
-        self.assertNotIn("0.0.0.0:", self.compose)
+    def test_ingress_does_not_publish_a_host_port(self):
+        self.assertNotIn("ports:", self.compose)
 
     def test_private_network_is_internal_and_only_the_client_has_egress(self):
         self.assertIn("name: frank_owner_webmail_private\n    internal: true", self.compose)
@@ -192,8 +190,15 @@ class IngressContractTests(unittest.TestCase):
         self.assertIn("location = /frank/launch {", self.nginx)
         self.assertNotIn("location /frank/ {", self.nginx)
 
-    def test_ingress_proof_header_is_set_by_the_ingress(self):
-        self.assertIn('proxy_set_header X-Owner-Webmail-Ingress "${OWNER_WEBMAIL_INGRESS_SECRET}";', self.nginx)
+    def test_ingress_passes_only_caddy_proof(self):
+        self.assertIn("proxy_set_header X-Owner-Webmail-Ingress $http_x_owner_webmail_ingress;", self.nginx)
+        self.assertNotIn('${OWNER_WEBMAIL_INGRESS_SECRET}', self.nginx)
+        app = ROOT.parents[1]
+        caddy = (app / "Caddyfile").read_text()
+        self.assertIn("header_up -X-Owner-Webmail-Ingress", caddy)
+        self.assertIn("header_up X-Owner-Webmail-Ingress {$OWNER_WEBMAIL_INGRESS_SECRET}", caddy)
+        deploy = (app / "deploy.sh").read_text()
+        self.assertLess(deploy.index('printf "OWNER_WEBMAIL_INGRESS_SECRET='), deploy.index('mv -f -- "$caddy_tmp" "$caddy_secret_file"'))
 
     def test_client_cannot_impose_a_framing_or_host_policy(self):
         self.assertIn("proxy_hide_header X-Frame-Options;", self.nginx)
@@ -254,15 +259,23 @@ class LaunchSettingsTests(unittest.TestCase):
         settings = launch_server.Settings({
             "OWNER_WEBMAIL_INGRESS_SECRET": "short",
             "OWNER_WEBMAIL_CONSUME_SECRET": "x" * 64,
-            "OWNER_WEBMAIL_OWNER_ID": "*",
+            "OWNER_WEBMAIL_OWNER_ID": "owner-specific",
         })
         self.assertEqual(settings.missing_required(), ["OWNER_WEBMAIL_INGRESS_SECRET"])
+
+    def test_wildcard_owner_is_rejected(self):
+        settings = launch_server.Settings({
+            "OWNER_WEBMAIL_INGRESS_SECRET": "x" * 64,
+            "OWNER_WEBMAIL_CONSUME_SECRET": "y" * 64,
+            "OWNER_WEBMAIL_OWNER_ID": "*",
+        })
+        self.assertEqual(settings.missing_required(), ["OWNER_WEBMAIL_OWNER_ID"])
 
     def test_defaults_are_a_short_lived_lax_session(self):
         settings = launch_server.Settings({
             "OWNER_WEBMAIL_INGRESS_SECRET": "x" * 64,
             "OWNER_WEBMAIL_CONSUME_SECRET": "y" * 64,
-            "OWNER_WEBMAIL_OWNER_ID": "*",
+            "OWNER_WEBMAIL_OWNER_ID": "owner-specific",
         })
         self.assertEqual(settings.missing_required(), [])
         self.assertEqual(settings.ttl_seconds, 120)

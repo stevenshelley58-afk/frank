@@ -20,15 +20,24 @@ read_value() { sed -n "s/^$1=//p" "$2" | tail -n1; }
 [[ "$(stat -c %a "$mail_secret")" == 600 ]] || die "$mail_secret must be mode 0600"
 
 if [[ -f "$secret_file" && ! -L "$secret_file" ]]; then
+  [[ "$(stat -c %a "$secret_file")" == 600 && "$(stat -c %u "$secret_file")" == 0 ]] || die "unsafe existing secret"
+  owner_id="${OWNER_WEBMAIL_OWNER_ID:-$(read_value OWNER_WEBMAIL_OWNER_ID "$secret_file")}"
+  [[ "$owner_id" =~ ^[a-f0-9]{64}$ ]] || die "a verified Authentik owner UID is required"
+
   # Keep the recorded revision current without touching any credential.
-  python3 - "$secret_file" "$sha" <<'PY'
+  python3 - "$secret_file" "$sha" "$owner_id" <<'PY'
 import os, re, sys
-path, sha = sys.argv[1], sys.argv[2]
+path, sha, owner_id = sys.argv[1:4]
 with open(path, encoding="utf-8") as handle:
     text = handle.read()
 updated = re.sub(r"^OWNER_WEBMAIL_SOURCE_SHA=.*$", "OWNER_WEBMAIL_SOURCE_SHA=" + sha, text, count=1, flags=re.M)
+updated = re.sub(r"^OWNER_WEBMAIL_OWNER_ID=.*$", "OWNER_WEBMAIL_OWNER_ID=" + owner_id, updated, count=1, flags=re.M)
+if not re.search(r"^OWNER_WEBMAIL_OWNER_ID=", updated, flags=re.M):
+    updated += "\nOWNER_WEBMAIL_OWNER_ID=" + owner_id + "\n"
 if updated != text:
-    tmp = path + ".tmp"
+    import tempfile
+    fd, tmp = tempfile.mkstemp(prefix=".owner-webmail.", dir=os.path.dirname(path))
+    os.close(fd)
     with open(tmp, "w", encoding="utf-8") as handle:
         handle.write(updated)
     os.chmod(tmp, 0o600)
@@ -40,6 +49,7 @@ PY
 fi
 [[ -e "$secret_file" ]] && die "$secret_file exists and is not a regular file"
 
+[[ "${OWNER_WEBMAIL_OWNER_ID:-}" =~ ^[a-f0-9]{64}$ ]] || die "a verified Authentik owner UID is required"
 mail_user=$(read_value PURELYMAIL_USERNAME "$mail_secret")
 mail_pass=$(read_value PURELYMAIL_PASSWORD "$mail_secret")
 mailbox=$(read_value OWNER_MAIL_ADDRESS "$mail_secret")
@@ -51,7 +61,6 @@ trap 'rm -f "$tmp"' EXIT
 
 {
   printf 'OWNER_WEBMAIL_SOURCE_SHA=%s\n' "$sha"
-  printf 'OWNER_WEBMAIL_HOST_PORT=18107\n'
   printf 'OWNER_WEBMAIL_PUBLIC_URL=https://mail.frank.fail\n'
   printf 'OWNER_WEBMAIL_IMAP_HOST=ssl://imap.purelymail.com:993\n'
   printf 'OWNER_WEBMAIL_IMAP_PLAIN_HOST=imap.purelymail.com\n'
@@ -65,7 +74,7 @@ trap 'rm -f "$tmp"' EXIT
   printf 'OWNER_WEBMAIL_DES_KEY=%s\n' "$(head -c 32 /dev/urandom | base64 | tr -d '\n')"
   printf 'OWNER_WEBMAIL_INGRESS_SECRET=%s\n' "$(head -c 48 /dev/urandom | base64 | tr -d '\n')"
   printf 'OWNER_WEBMAIL_CONSUME_SECRET=%s\n' "$(head -c 48 /dev/urandom | base64 | tr -d '\n')"
-  printf 'OWNER_WEBMAIL_OWNER_ID=%s\n' "${OWNER_WEBMAIL_OWNER_ID:-*}"
+  printf 'OWNER_WEBMAIL_OWNER_ID=%s\n' "${OWNER_WEBMAIL_OWNER_ID}"
   printf 'OWNER_WEBMAIL_OWNER_HEADER=X-Frank-Owner\n'
   printf 'OWNER_WEBMAIL_TOKEN_TTL_SECONDS=120\n'
   printf 'OWNER_WEBMAIL_COOKIE_SAMESITE=%s\n' "${OWNER_WEBMAIL_COOKIE_SAMESITE:-Lax}"

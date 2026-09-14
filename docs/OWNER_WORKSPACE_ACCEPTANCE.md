@@ -461,3 +461,24 @@ An additional owner-only access-policy gap on the CRM and Mautic proxy
 applications is being repaired before publication. Native session launch and
 readiness are under review; no completion claim is made for them here.
 The owner's own MFA enrolment and phone delivery remain outstanding.
+
+### Final review corrections
+
+Owner-only policies now cover all four proxy applications, including CRM and
+Mautic. Mail launch now requires a Caddy-issued secret attestation plus the
+specific configured owner UID; the internal ingress cannot mint that proof.
+Wildcard owner IDs are refused and the ingress no longer publishes a host port.
+Caddy receives only this dedicated launch proof, never the mailbox password.
+The secret provisioner reconciles an explicit verified owner UID without
+changing mailbox credentials. The private health check rejects a forged local
+owner header. Focused webmail tests: 36 passed.
+
+A material integration gap was also found: the readiness probe followed the
+identity redirect and accepted the sign-in page as the native application.
+This false positive is fixed, and Mail's default is the actual /frank/launch
+broker. A server probe without browser cookies cannot verify the owner's native
+session. Consequently the native embedded-session bridge is NOT complete, even
+after personal MFA enrolment. Release of the secure workspace foundation is
+not sign-off of embedded CRM, Helpdesk, Mautic, or Mail. Their native-session
+bridge and browser acceptance remain required work, separately from external
+reporting connections and phone notification enrolment.

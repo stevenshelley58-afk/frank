@@ -139,7 +139,7 @@ class Settings:
             missing.append("OWNER_WEBMAIL_INGRESS_SECRET")
         if len(self.consume_secret) < 32:
             missing.append("OWNER_WEBMAIL_CONSUME_SECRET")
-        if not self.owner_id:
+        if not self.owner_id or self.owner_id == "*":
             missing.append("OWNER_WEBMAIL_OWNER_ID")
         if self.cookie_samesite not in ("Lax", "Strict", "None"):
             missing.append("OWNER_WEBMAIL_COOKIE_SAMESITE")
@@ -243,7 +243,7 @@ class LaunchHandler(BaseHTTPRequestHandler):
                  "detail": "the identity layer did not supply an authenticated owner"},
             )
             return
-        if settings.owner_id != "*" and not _constant_time_eq(owner, settings.owner_id):
+        if not _constant_time_eq(owner, settings.owner_id):
             self._json(HTTPStatus.FORBIDDEN, {"ok": False, "error": "wrong_owner"})
             return
 

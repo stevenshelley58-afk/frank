@@ -106,7 +106,6 @@ services:
       NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
       # Only owner variables are substituted; nginx runtime variables survive.
       NGINX_ENVSUBST_FILTER: ^OWNER_WEBMAIL_
-    ports: ["127.0.0.1:${OWNER_WEBMAIL_HOST_PORT:-18107}:80"]
     volumes:
       - ./ingress/default.conf.template:/etc/nginx/templates/default.conf.template:ro
     networks: [owner-webmail-private, owner-webmail-ingress]

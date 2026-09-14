@@ -180,3 +180,14 @@ in depth rather than the load-bearing step. The strip stays as belt and braces.
 **Caveat to carry forward:** this is XFO/CSP precedence as observed on that
 Chromium build. It is a browser behaviour, not a specification guarantee, so the
 strip must not be removed on the strength of it.
+
+## Release security correction, 14 September 2026
+
+The ingress has no published host port. Caddy alone overwrites and supplies
+X-Owner-Webmail-Ingress using the dedicated launch secret derived by the Window
+release. Nginx only passes that proof; it never manufactures it. The broker
+requires both the proof and the exact Authentik User.uid, not the user's UUID,
+and refuses a wildcard. Set OWNER_WEBMAIL_OWNER_ID explicitly when invoking
+bin/owner-webmail secret to reconcile an existing protected configuration.
+Health probes run inside the private ingress network and include a forged-header
+negative check. Existing mailbox credentials and volumes are preserved.

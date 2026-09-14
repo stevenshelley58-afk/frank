@@ -323,6 +323,13 @@ grep -E '^(FRANK_BASIC_AUTH_USER|FRANK_BASIC_AUTH_HASH|FRANK_ACCEPTANCE_AUTH_USE
   echo "missing Caddy basic-auth settings in $secret_file" >&2
   exit 1
 }
+owner_webmail_secret=/srv/frank/secrets/owner-webmail.env
+[[ -f "$owner_webmail_secret" && ! -L "$owner_webmail_secret" ]] || { echo "missing regular owner webmail secret" >&2; exit 1; }
+[[ "$(stat -c %a "$owner_webmail_secret")" = 600 && "$(stat -c %u "$owner_webmail_secret")" = 0 ]] || { echo "owner webmail secret must be root-owned mode 0600" >&2; exit 1; }
+owner_webmail_ingress_secret="$(sed -n "s/^OWNER_WEBMAIL_INGRESS_SECRET=//p" "$owner_webmail_secret" | tail -n1)"
+[[ ${#owner_webmail_ingress_secret} -ge 32 ]] || { echo "owner webmail ingress secret is missing" >&2; exit 1; }
+printf "OWNER_WEBMAIL_INGRESS_SECRET=%s\n" "$owner_webmail_ingress_secret" >> "$caddy_tmp"
+unset owner_webmail_ingress_secret
 chmod 0600 "$caddy_tmp"
 mv -f -- "$caddy_tmp" "$caddy_secret_file"
 

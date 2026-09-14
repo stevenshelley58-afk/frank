@@ -35,9 +35,8 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto https;
 
-        # Proof that the request came through this ingress. Any client-supplied
-        # copy is replaced, so the broker can trust it.
-        proxy_set_header X-Owner-Webmail-Ingress "${OWNER_WEBMAIL_INGRESS_SECRET}";
+        # Caddy supplies this attestation after forward auth; ingress never mints it.
+        proxy_set_header X-Owner-Webmail-Ingress $http_x_owner_webmail_ingress;
 
         # The broker answers with a redirect and a cookie; it never reads a body.
         proxy_pass_request_body off;
