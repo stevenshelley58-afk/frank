@@ -235,6 +235,29 @@ Which other packages can continue: Every lane. This gates final acceptance, not
 ```
 
 ```text
+Requirement: The owner can actually sign in, including the second factor
+Source/application: authentik on auth.frank.fail, owner account
+Observed failure: The only enrolled TOTP device was created by the identity
+  lane's own acceptance run during its browser test. The owner does not hold that
+  secret, so the deployed system would have demanded a code he could not produce
+  and offered no way to enrol a second device.
+Exact missing authorization or capability: The owner must perform the first
+  sign-in himself, scanning a new authenticator enrolment and saving the recovery
+  codes it prints. That requires his phone and a few minutes.
+Work completed safely: The acceptance-enrolled device has been removed, so the
+  owner account now has no second factor and the configured enrolment stage will
+  offer a fresh QR code on his first sign-in. No owner credential, password or
+  session was read, created or changed. The sign-in flow was confirmed to load
+  and render its first stage in a real browser through the acceptance edge.
+Smallest next action: The owner opens one URL, signs in with the password from
+  /srv/frank/secrets/owner-identity.env, scans the QR code with his authenticator
+  app, and saves the recovery codes. He should do this once so the enrolment
+  belongs to him rather than to a test.
+Which other packages can continue: All of them. This gates only his first
+  personal sign-in.
+```
+
+```text
 Requirement: An actual phone notification receipt
 Source/application: ntfy on 127.0.0.1:18104, topic owner-notifications
 Observed failure: No device has ever subscribed (subscribers=0 in 759 of 759
