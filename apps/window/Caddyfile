@@ -46,15 +46,17 @@
 # session checks still pass through the identity gate and native authorization.
 (owner_native_bridge) {
 	handle /frank/connect {
-		import owner_identity_session_gate
-		header Content-Security-Policy "default-src 'none'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
-		header Content-Type "text/html; charset=utf-8"
-		header Cache-Control "no-store"
-		rewrite * /owner-native-bridge.html
-		reverse_proxy frank-window:8080 {
-			header_up -Cookie
-			header_up -Authorization
-			header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}
+		route {
+			import owner_identity_session_gate
+			header Content-Security-Policy "default-src 'none'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'"
+			header Content-Type "text/html; charset=utf-8"
+			header Cache-Control "no-store"
+			rewrite * /owner-native-bridge.html
+			reverse_proxy frank-window:8080 {
+				header_up -Cookie
+				header_up -Authorization
+				header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}
+			}
 		}
 	}
 	handle /frank/bridge {

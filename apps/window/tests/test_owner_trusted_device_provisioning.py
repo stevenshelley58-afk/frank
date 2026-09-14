@@ -15,3 +15,8 @@ class Tests(unittest.TestCase):
  def test_stock_guards_and_local_hashing(self):
   s=SCRIPT.read_text(); self.assertIn('set_all(password,"password")',s); self.assertIn('set_all(mfa,"MFA")',s); self.assertIn('set_all(user_login,"User Login")',s); self.assertIn('attach(password,skip,"password",True)',s); self.assertIn('attach(mfa,skip,"MFA",True)',s); self.assertIn('attach(user_login,login,"User Login",False)',s)
   w=SCRIPT.with_suffix(".sh").read_text(); self.assertIn("hashlib.sha256",w); self.assertIn("OWNER_IDENTITY_SOURCE_SHA",w); self.assertNotIn('-e "proof_secret=',w); self.assertIn("test ! -L",w)
+ def test_native_connect_preserves_original_uri_until_auth(self):
+  caddy=(SCRIPT.parents[3]/"Caddyfile").read_text()
+  block=caddy.split("handle /frank/connect {",1)[1].split("handle /frank/bridge {",1)[0]
+  self.assertIn("route {",block)
+  self.assertLess(block.index("import owner_identity_session_gate"),block.index("rewrite * /owner-native-bridge.html"))
