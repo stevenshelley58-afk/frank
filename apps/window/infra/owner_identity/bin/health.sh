@@ -81,8 +81,19 @@ sys.exit(0 if r.status == 200 else 1)
 # be answered by the outpost (401 or a redirect), never by a connection error
 # and never by a 200.
 check_outpost() {
+  # An unauthenticated request must be answered by the outpost itself: a 3xx to
+  # the authorize endpoint, or 401/403. The redirect must NOT be followed - its
+  # target is the public https hostname, which inside this network resolves to
+  # nothing, so following it turns a correct answer into a TLS error.
   compose exec -T server python3 -c "
 import sys, urllib.error, urllib.request
+
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+opener = urllib.request.build_opener(NoRedirect)
 req = urllib.request.Request(
     'http://127.0.0.1:9000/outpost.goauthentik.io/auth/caddy',
     # Probe with a host that actually HAS a proxy provider. The identity
@@ -91,7 +102,7 @@ req = urllib.request.Request(
     headers={'X-Forwarded-Host': 'frank.fail', 'X-Forwarded-Proto': 'https', 'X-Forwarded-Uri': '/'},
 )
 try:
-    code = urllib.request.urlopen(req, timeout=5).status
+    code = opener.open(req, timeout=8).status
 except urllib.error.HTTPError as exc:
     code = exc.code
 except Exception:
