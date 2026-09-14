@@ -13,6 +13,12 @@
  * process environment, which comes from /srv/frank/secrets/owner-webmail.env.
  */
 
+// The image entrypoint generates config.docker.inc.php from ROUNDCUBEMAIL_*
+// environment variables and merges its plugin list into $config['plugins'].
+// Roundcube loads this file with an empty $config, so the key it merges into
+// has to exist before the include.
+$config['plugins'] = [];
+
 include __DIR__ . '/config.docker.inc.php';
 
 $env = static function (string $name, string $default = ''): string {
