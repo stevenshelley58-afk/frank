@@ -82,7 +82,9 @@ export function createCampaignsScreen(ctx, host) {
   };
 
   const selection = createSelection({ getKey: rowKey });
-  const drawer = createDrawer({ host: node, title: "Record" });
+  // The drawer is hosted beside the screen node, not inside it: every render
+  // clears the screen node, which used to take an open drawer with it.
+  const drawer = createDrawer({ host, title: "Record" });
 
   // ------------------------------------------------------------- loading --
 
@@ -598,6 +600,9 @@ export function createCampaignsScreen(ctx, host) {
                 ? `Staged a pause for ${formatInt(saved.changes.rows.length)} rows in the publishing queue. Nothing has been sent to the provider.`
                 : `Staged a ${percent > 0 ? "+" : ""}${percent}% budget change for ${formatInt(saved.changes.rows.length)} rows in the publishing queue. Nothing has been sent to the provider.`,
             );
+            // The staged rows are in the queue now; leaving them selected
+            // invites the same bulk action a second time.
+            selection.clear();
             close();
             render();
           },

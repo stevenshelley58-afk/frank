@@ -181,7 +181,9 @@ export function createBlogsScreen(ctx, host) {
 
   let disposed = false;
   const controller = new AbortController();
-  const drawer = createDrawer({ host: node, title: "Article" });
+  // The drawer is hosted beside the screen node, not inside it: every render
+  // clears the screen node, which used to take an open drawer with it.
+  const drawer = createDrawer({ host, title: "Article" });
 
   // Group rows sort independently of the article table, and this object is
   // reused across renders so the reader's sort survives a filter change.
