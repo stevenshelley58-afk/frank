@@ -114,14 +114,29 @@ def _settle(page, timeout_ms: int = DEFAULT_TIMEOUT_MS) -> None:
         pass
 
 
-def login(base_url: str, user: str, password: str, out: Path, insecure: bool, headless: bool) -> int:
+# The owner hosts a browser must reach. When acceptance runs against the
+# loopback acceptance edge rather than production, every one of these has to be
+# mapped to that edge or the sign-in round trip leaves the browser on a hostname
+# it cannot resolve to the right port.
+OWNER_HOSTS = ("frank.fail", "auth.frank.fail", "crm.frank.fail", "marketing.frank.fail", "mail.frank.fail")
+
+
+def _resolver_args(edge: str | None) -> list[str]:
+    if not edge:
+        return []
+    rules = ", ".join(f"MAP {host} {edge}" for host in OWNER_HOSTS) + ", EXCLUDE localhost"
+    return [f"--host-resolver-rules={rules}", "--ignore-certificate-errors"]
+
+
+def login(base_url: str, user: str, password: str, out: Path, insecure: bool, headless: bool,
+          edge: str | None = None) -> int:
     from playwright.sync_api import sync_playwright
 
     out.parent.mkdir(parents=True, exist_ok=True)
     target = base_url.rstrip("/") + "/project/blockwise"
 
     with sync_playwright() as p:
-        browser = p.chromium.launch(args=["--no-sandbox"], headless=headless)
+        browser = p.chromium.launch(args=["--no-sandbox", *_resolver_args(edge)], headless=headless)
         context = browser.new_context(ignore_https_errors=insecure, viewport={"width": 1280, "height": 900})
         page = context.new_page()
         try:
@@ -185,6 +200,11 @@ def main(argv: list[str]) -> int:
     parser.add_argument("--out", required=True)
     parser.add_argument("--insecure", action="store_true", help="accept a self-signed certificate")
     parser.add_argument("--headed", action="store_true", help="show the browser, useful when enrolling MFA")
+    parser.add_argument(
+        "--edge", default=os.environ.get("FRANK_ACCEPTANCE_EDGE", ""),
+        help="host:port of the loopback acceptance edge, e.g. 127.0.0.1:9443; "
+             "maps every owner hostname to it so the round trip stays on the edge",
+    )
     args = parser.parse_args(argv)
 
     user = os.environ.get("FRANK_OWNER_LOGIN_USER", "").strip()
@@ -197,7 +217,8 @@ def main(argv: list[str]) -> int:
         )
         return 2
 
-    return login(args.base_url, user, password, Path(args.out), args.insecure, not args.headed)
+    return login(args.base_url, user, password, Path(args.out), args.insecure, not args.headed,
+                 args.edge or None)
 
 
 if __name__ == "__main__":
