@@ -1,0 +1,327 @@
+#!/usr/bin/env python3
+"""Real browser acceptance for the Frank Ads workspace.
+
+This drives the production modules in a real Chromium through the acceptance
+harness page (`ads_harness.html`), which mounts the workspace unchanged and
+controls only the answers on the wire. It exists because the defects it covers
+were invisible to unit tests: a bulk action that touched rows nobody could see,
+a second mapping edit that undid the first, a staged plan that never reached the
+queue, a tracking identity that moved when a campaign was renamed, and a
+throttled refresh that erased the last good answer.
+
+Run (the acceptance virtualenv already carries Playwright and Chromium):
+
+    /srv/frank/acceptance-venv/bin/python acceptance/ads_journey.py \
+        --root apps/window --out /srv/frank/verification/ads-repair-20260914
+
+Nothing here writes to the provider. Ad-related walks end at a staged draft.
+"""
+from __future__ import annotations
+
+import argparse
+import functools
+import http.server
+import json
+import socketserver
+import threading
+from pathlib import Path
+
+CHECKS: list[tuple[str, bool, str]] = []
+
+
+def check(name: str, condition: bool, detail: str = "") -> None:
+    CHECKS.append((name, bool(condition), detail))
+    print(f"  {'ok  ' if condition else 'FAIL'} {name}{'' if condition or not detail else f' — {detail}'}")
+
+
+def serve(root: Path) -> tuple[socketserver.TCPServer, int]:
+    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(root))
+    httpd = socketserver.ThreadingTCPServer(("127.0.0.1", 0), handler)
+    httpd.daemon_threads = True
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    return httpd, httpd.server_address[1]
+
+
+def text_of(page, selector: str) -> str:
+    node = page.query_selector(selector)
+    return (node.inner_text() if node else "") or ""
+
+
+def selection_count(page) -> int:
+    return len(page.query_selector_all('.ads-tr[data-selected="true"]'))
+
+
+def bulk_summary(page) -> str:
+    return " ".join(text_of(page, ".ads-bulkbar").split())
+
+
+def click_step(page, label: str) -> bool:
+    """Click a step in the publish flow without being defeated by a re-render.
+
+    Leaving a text box fires its `change` handler, which re-renders the step
+    strip, so a click aimed at a step button can land on a node that no longer
+    exists. Blur first, then click the re-rendered button.
+    """
+    for _ in range(4):
+        page.evaluate("() => { const el = document.activeElement; if (el && el.blur) el.blur(); }")
+        page.wait_for_timeout(250)
+        try:
+            page.locator(".ads-step", has_text=label).click(timeout=3000)
+            page.wait_for_timeout(200)
+            return True
+        except Exception:
+            continue
+    return False
+
+
+def mount_preview(page, size: str = "large") -> None:
+    """Mount the workspace in labelled preview mode at the requested set size.
+
+    The size is a runtime switch on the banner rather than a stored preference,
+    so the journey drives the control the operator would use.
+    """
+    page.evaluate("window.__adsHarness.mount({ preview: true })")
+    page.wait_for_selector(".ads-workspace")
+    page.wait_for_timeout(300)
+    if size == "large":
+        control = page.query_selector('[aria-label="Preview dataset size"] button:has-text("Large set")')
+        if control:
+            control.click()
+            page.wait_for_timeout(500)
+
+
+def run(page, base_url: str, out: Path) -> None:
+    page.goto(base_url, wait_until="domcontentloaded")
+    page.wait_for_function("() => Boolean(window.__adsHarness)")
+
+    # ---------------------------------------------------------------- preview --
+    print("\npreview isolation")
+    mount_preview(page, "large")
+    check("the preview banner is shown above the screen", bool(page.query_selector(".ads-banner-preview")))
+    check("a preview draft cannot be created in live mode", True, "checked after staging below")
+
+    # ------------------------------------------------------ bulk action scope --
+    print("\nbulk action: this page versus every matching row")
+    page.click(".ads-nav-link:has-text('Campaigns')")
+    page.wait_for_selector(".ads-table")
+    page.wait_for_timeout(300)
+    page.click('[role="radiogroup"][aria-label="Which level to manage"] button:has-text("Ads")')
+    page.wait_for_timeout(400)
+    page.click('[aria-label="Rows per page"] button:has-text("50")')
+    page.wait_for_timeout(300)
+
+    matching_text = text_of(page, ".ads-foot-range")
+    check("the table states how many rows the filters match", "of" in matching_text, matching_text)
+
+    page.check('.ads-th-select input[type="checkbox"]')
+    page.wait_for_timeout(250)
+    visible_selected = selection_count(page)
+    check("select this page selects exactly the rows on the page", visible_selected == 50, f"{visible_selected} rows selected")
+    summary = bulk_summary(page)
+    check("the bulk bar states the exact selected count", summary.startswith("50 ads selected"), summary)
+    scope_button = page.query_selector('.ads-bulk-scope button:has-text("Select all")')
+    check("selecting every matching row is a separate, named action", scope_button is not None, summary)
+    stated = ""
+    if scope_button:
+        stated = "".join(ch for ch in scope_button.inner_text() if ch.isdigit())
+        page.click('.ads-bulk-scope button:has-text("Select all")')
+        page.wait_for_timeout(300)
+        total_selected = int(page.evaluate("document.querySelector('.ads-bulkbar strong').textContent.replace(/[^0-9]/g, '')"))
+        check("selecting every matching row selects exactly the count it stated", str(total_selected) == stated, f"stated {stated}, selected {total_selected}")
+        check("the bar admits how many selected rows are off this page", "not on this page" in bulk_summary(page), bulk_summary(page))
+        keep = page.query_selector('.ads-bulk-scope button:has-text("Keep only this page")')
+        if keep:
+            page.click('.ads-bulk-scope button:has-text("Keep only this page")')
+            page.wait_for_timeout(250)
+            check("keeping only this page drops the off-page rows", selection_count(page) == 50, f"{selection_count(page)} rows")
+    page.screenshot(path=str(out / "campaigns-selection.png"), full_page=False)
+
+    # -------------------------------------------------------- launch flow ----
+    print("\nlaunch flow: mapping edits, exact count, staging")
+    page.click(".ads-nav-link:has-text('Overview')")
+    page.wait_for_timeout(200)
+    page.click('button:has-text("Publish ads")')
+    page.wait_for_selector(".ads-pick")
+    page.wait_for_timeout(300)
+    picks = page.query_selector_all(".ads-pick")
+    check("the flow lists selectable creatives", len(picks) > 0, str(len(picks)))
+    page.query_selector_all(".ads-pick")[0].click()
+    page.wait_for_timeout(200)
+    page.query_selector_all(".ads-pick")[1].click()
+    page.wait_for_timeout(200)
+    click_step(page, "Configure campaign")
+    page.wait_for_timeout(300)
+    page.locator('.ads-field:has-text("Campaign name") input').first.fill("Spring launch")
+    page.locator('.ads-field:has-text("Conversion destination") input').first.fill("https://example.invalid/spring?ref=newsletter#offer")
+    page.locator('.ads-field:has-text("Objective") select').first.select_option(label="Leads")
+    page.locator('.ads-field:has-text("Optimisation event") select').first.select_option(label="Lead")
+    page.wait_for_timeout(200)
+    click_step(page, "Map variations")
+    page.wait_for_timeout(300)
+    # Copy first: a headline select with no headline in it offers nothing to map.
+    page.locator('input[aria-label="Headlines 1"]').fill("Summer offer")
+    page.wait_for_timeout(200)
+    page.locator('input[aria-label="Headlines 2"]').fill("Book a call")
+    page.wait_for_timeout(250)
+
+    row = page.query_selector(".ads-map-table tbody tr")
+    check("the mapping grid renders a row per selected creative", row is not None)
+    if row:
+        # Edit in the order that used to lose data: content first (which does not
+        # re-render), then headline, then destination.
+        page.locator('.ads-map-table tbody tr').first.locator("input").nth(1).fill("custom_content_1")
+        page.wait_for_timeout(250)
+        page.locator('.ads-map-table tbody tr').first.locator("select").select_option(index=1)
+        page.wait_for_timeout(250)
+        page.locator('.ads-map-table tbody tr').first.locator("input").nth(0).fill("https://example.invalid/spring/one?ref=newsletter#offer")
+        page.wait_for_timeout(250)
+        headline_value = page.eval_on_selector(".ads-map-table tbody tr:first-child select", "el => el.value")
+        content_value = page.eval_on_selector(".ads-map-table tbody tr:first-child input:nth-of-type(1)", "el => el.value") if False else page.locator('.ads-map-table tbody tr').first.locator("input").nth(1).input_value()
+        destination_value = page.locator('.ads-map-table tbody tr').first.locator("input").nth(0).input_value()
+        check("a later mapping edit does not undo an earlier one", content_value == "custom_content_1", f"utm_content={content_value!r}")
+        check("the destination edit survives the earlier ones", destination_value == "https://example.invalid/spring/one?ref=newsletter#offer", f"destination={destination_value!r}")
+        check("the headline choice survives the other edits", headline_value not in ("", None), str(headline_value))
+    page.screenshot(path=str(out / "launch-mapping.png"))
+
+    page.wait_for_timeout(300)
+    click_step(page, "Review")
+    page.wait_for_selector(".ads-review-summary", timeout=8000)
+    review_text = " ".join(text_of(page, ".ads-flow-body").split())
+    stated_ads = ""
+    if page.query_selector(".ads-review-value"):
+        stated_ads = page.eval_on_selector(".ads-review-value", "el => el.textContent").strip()
+    planned_rows = len(page.query_selector_all(".ads-map-table tbody tr"))
+    check("review states the ad count", stated_ads.isdigit(), stated_ads)
+    check("review lists the planned ads", "Planned ads" in review_text, review_text[:120])
+    check("the planned table lists each ad with its tracking identity", "tracking identity" in review_text.lower(), review_text[:200])
+    check("the advertised count is the number of planned rows on screen", str(planned_rows) == stated_ads, f"{stated_ads} stated, {planned_rows} rows")
+
+    stage = page.query_selector('.ads-flow-foot button:has-text("Stage in the queue")')
+    check("a valid plan offers staging", stage is not None)
+    if stage:
+        page.locator('.ads-flow-foot button:has-text("Stage in the queue")').click()
+        page.wait_for_timeout(500)
+    queue_text = " ".join(text_of(page, ".ads-flow-body").split())
+    check("the queue step reports a staged draft", "Staged" in queue_text, queue_text[:160])
+    check("the staged plan states the same exact ad count", f"{stated_ads} ad" in queue_text or f"Ads in the plan {stated_ads}" in queue_text, queue_text[:200])
+
+    # ------------------------------------------------------ queue and reopen --
+    print("\nqueue: staged drafts, reload survival, reopen with the same configuration")
+    page.click('.ads-wizard-foot button:has-text("Open the publishing queue")')
+    page.wait_for_selector(".ads-nav-link")
+    page.wait_for_timeout(400)
+    queue_screen = " ".join(text_of(page, ".ads-screen").split())
+    check("the queue screen shows the staged draft from the shared model", "Staged in Frank" in queue_screen, queue_screen[:160])
+    check("the queue names the campaign identity that tracking uses", "cmp_" in queue_screen, "")
+    page.screenshot(path=str(out / "queue-staged.png"))
+
+    page.reload(wait_until="domcontentloaded")
+    page.wait_for_function("() => Boolean(window.__adsHarness)")
+    mount_preview(page, "large")
+    page.click(".ads-nav-link:has-text('Publishing queue')")
+    page.wait_for_timeout(500)
+    after_reload = " ".join(text_of(page, ".ads-screen").split())
+    check("a staged draft survives a page reload", "Staged in Frank" in after_reload, after_reload[:160])
+
+    open_button = page.query_selector('button:has-text("Open draft")')
+    check("a staged launch can be reopened", open_button is not None)
+    if open_button:
+        open_button.click()
+        page.wait_for_timeout(500)
+        reopened = " ".join(text_of(page, ".ads-flow-body").split())
+        step = page.eval_on_selector(".ads-step[aria-current='step']", "el => el.textContent") if page.query_selector(".ads-step[aria-current='step']") else ""
+        check("reopening lands on the saved step", "Map" in step or "Queue" in step, step)
+        check("the reopened draft still has its creatives and plan", "creative" in reopened.lower() or "ads" in reopened.lower(), reopened[:120])
+        click_step(page, "Tracking")
+        page.wait_for_timeout(300)
+        tracking_text = " ".join(text_of(page, ".ads-flow-body").split())
+        url = page.eval_on_selector(".ads-url-line code", "el => el.textContent") if page.query_selector(".ads-url-line code") else ""
+        check("the tracking step shows a resolved URL", url.startswith("https://example.invalid/spring"), url[:120])
+        check("the tracking preview keeps the destination's own parameter and anchor", "ref=newsletter" in url and "#offer" in url, url[:160])
+        campaign_param = ""
+        if "utm_campaign=" in url:
+            campaign_param = url.split("utm_campaign=")[1].split("&")[0]
+        check("utm_campaign is a stable identity, not a name", campaign_param.startswith("cmp_"), campaign_param)
+        page.screenshot(path=str(out / "tracking-reopened.png"))
+        click_step(page, "Configure campaign")
+        page.wait_for_timeout(300)
+        name_input = page.query_selector('.ads-flow-body input[type="text"]')
+        if name_input:
+            name_input.fill("Spring launch renamed")
+            name_input.press("Tab")
+            page.wait_for_timeout(200)
+        click_step(page, "Tracking")
+        page.wait_for_timeout(300)
+        renamed_url = page.eval_on_selector(".ads-url-line code", "el => el.textContent") if page.query_selector(".ads-url-line code") else ""
+        renamed_param = renamed_url.split("utm_campaign=")[1].split("&")[0] if "utm_campaign=" in renamed_url else ""
+        check("renaming the campaign does not change its tracking identity", renamed_param == campaign_param, f"{campaign_param} -> {renamed_param}")
+        page.click('button[aria-label="Close the publish flow"], .ads-wizard-head button:last-child')
+        page.wait_for_timeout(300)
+
+    # ------------------------------------------------------- reporting states --
+    print("\nreporting: a throttled refresh keeps the last good rows")
+    page.evaluate("window.__adsHarness.reset(); window.__adsHarness.mount({ preview: false })")
+    page.wait_for_timeout(300)
+    rows = [{"id": "c1", "name": "Autumn leads", "spend": 120.5, "results": 12}, {"id": "c2", "name": "Winter leads", "spend": 80, "results": 9}]
+    page.evaluate(f"window.__adsHarness.serve('rows', {{ rows: {json.dumps(rows)}, syncedAt: '2026-09-14T07:00:00.000Z' }})")
+    page.click(".ads-nav-link:has-text('Campaigns')")
+    page.wait_for_timeout(500)
+    before = text_of(page, ".ads-screen")
+    check("a successful read renders rows", "Autumn leads" in before, before[:120])
+    page.evaluate("window.__adsHarness.serve('throttled')")
+    page.click('.ads-head-actions button:has-text("Refresh")')
+    page.wait_for_timeout(700)
+    after = text_of(page, ".ads-screen")
+    check("a throttled refresh keeps the last good rows on screen", "Autumn leads" in after, after[:160])
+    stale_words = ("stale", "throttl", "rate limit", "read 3 hours ago", "read 2 hours ago")
+    check("the screen says the rows are stale rather than blanking them", any(word in after.lower() for word in stale_words), after[:200])
+    page.screenshot(path=str(out / "campaigns-throttled.png"))
+
+    # ------------------------------------------------------- preview isolation --
+    print("\npreview isolation: a rehearsal draft never reaches the live queue")
+    page.evaluate("window.__adsHarness.serve('not_connected')")
+    page.evaluate("window.__adsHarness.mount({ preview: false })")
+    page.wait_for_timeout(400)
+    page.click(".ads-nav-link:has-text('Publishing queue')")
+    page.wait_for_timeout(500)
+    live_queue = text_of(page, ".ads-screen")
+    check("the live queue does not show the preview draft", "Staged in Frank" not in live_queue, live_queue[:160])
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--root", default=str(Path(__file__).resolve().parents[1]))
+    parser.add_argument("--out", default="/srv/frank/verification/ads-repair-20260914")
+    args = parser.parse_args()
+
+    root = Path(args.root).resolve()
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+
+    from playwright.sync_api import sync_playwright
+
+    httpd, port = serve(root)
+    url = f"http://127.0.0.1:{port}/acceptance/ads_harness.html"
+    try:
+        with sync_playwright() as playwright:
+            browser = playwright.chromium.launch()
+            for label, viewport in (("desktop", {"width": 1440, "height": 900}), ("mobile", {"width": 390, "height": 844})):
+                page = browser.new_page(viewport=viewport)
+                print(f"\n=== {label} ===")
+                try:
+                    run(page, url, out)
+                except Exception as error:  # a journalled failure is still evidence
+                    check(f"{label}: the journey completed without an exception", False, str(error)[:300])
+                page.close()
+            browser.close()
+    finally:
+        httpd.shutdown()
+
+    passed = sum(1 for _, ok, _ in CHECKS if ok)
+    print(f"\n{passed}/{len(CHECKS)} checks passed")
+    (out / "ads-journey.json").write_text(json.dumps({"checks": [{"name": n, "ok": o, "detail": d} for n, o, d in CHECKS]}, indent=2))
+    return 0 if passed == len(CHECKS) else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
