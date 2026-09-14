@@ -67,6 +67,11 @@ export const OWNER_APPS = Object.freeze([
     records: Object.freeze({
       lead: "/crm/leads",
       contact: "/crm/contacts",
+      deal: "/crm/deals",
+      organization: "/crm/organizations",
+      // Task and note records are deliberately absent: this CRM version has no
+      // detail route for them, so a link would open a blank content area. Their
+      // list screens are allowlisted instead.
     }),
     home: "/crm/leads/view/list",
     nativeLabel: "crm.frank.fail",
@@ -882,8 +887,15 @@ export function nativeRecordPath(appId, kind, identifier) {
   if (!app || !app.records) return null;
   const prefix = app.records[String(kind || "")];
   if (!prefix) return null;
-  const value = String(identifier || "");
-  if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value)) return null;
+  const value = String(identifier || "").trim();
+  // Real records carry names, not slugs: the installed CRM serves
+  // /crm/contacts/John%20Doe. So a space and a few ordinary name characters are
+  // allowed and then percent-encoded. Everything that could act as a separator,
+  // a scheme, a traversal segment or a control character is still refused, and
+  // the value is encoded rather than concatenated, so it can never add a path
+  // segment or escape the declared prefix.
+  if (!/^[\p{L}\p{N}][\p{L}\p{N} ._'+()-]{0,127}$/u.test(value)) return null;
+  if (value.includes("..") || value.includes("/") || value.includes("\\")) return null;
   return `${prefix}/${encodeURIComponent(value)}`;
 }
 

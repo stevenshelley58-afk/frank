@@ -221,9 +221,20 @@ test("every summary item is a typed drill-down and Frank composes the destinatio
   assert.equal(record.path, "/helpdesk/tickets/TICK-14");
   assert.equal(targetPath(record), "/project/blockwise/support");
   assert.equal(nativeRecordPath("crm", "lead", "CRM-LEAD-2026-00015"), "/crm/leads/CRM-LEAD-2026-00015");
+  assert.equal(nativeRecordPath("crm", "deal", "D-1"), "/crm/deals/D-1");
+  // The installed CRM serves a contact as /crm/contacts/John%20Doe, so a real
+  // name must be accepted and encoded rather than refused.
+  assert.equal(nativeRecordPath("crm", "contact", "John Doe"), "/crm/contacts/John%20Doe");
+  assert.equal(nativeRecordPath("support", "ticket", "0003"), "/helpdesk/tickets/0003");
+  // A traversal-shaped or separator-bearing identifier is still refused, and so
+  // is a record kind this application version has no route for.
   assert.equal(nativeRecordPath("crm", "lead", "../admin"), null);
   assert.equal(nativeRecordPath("crm", "lead", "a/b"), null);
+  assert.equal(nativeRecordPath("crm", "lead", "a\\b"), null);
+  assert.equal(nativeRecordPath("crm", "lead", ".."), null);
+  assert.equal(nativeRecordPath("crm", "task", "T-1"), null);
   assert.equal(nativeRecordPath("crm", "not-a-kind", "x"), null);
+  assert.equal(nativeRecordPath("crm", "lead", ""), null);
   assert.equal(parseDrilldownTarget({ kind: "native-record", app: "crm", recordKind: "lead", recordId: "../etc" }), null);
   const section = parseDrilldownTarget({ kind: "owner-section", section: "revenue", filter: "overdue" });
   assert.deepEqual(section, { kind: "owner-section", section: "revenue", filter: "overdue", label: "Revenue" });
