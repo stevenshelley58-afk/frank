@@ -77,23 +77,38 @@ def _auth_context(browser: Any, viewport: dict[str, int], storage_state: str | N
 
 
 def _resolve_auth() -> tuple[str | None, dict | None]:
-    """Return (storage_state_path, http_credentials). Never returns secret values."""
+    """Return (storage_state_path, http_credentials). Never returns secret values.
+
+    The owner boundary is an identity provider, so a saved owner session is the
+    supported path. The legacy edge credential is still accepted because it
+    remains valid on the restricted recovery route, but it no longer protects the
+    owner surfaces, so using it here would prove nothing about the deployment.
+    """
     raw = os.environ.get("FRANK_OWNER_STORAGE_STATE", "").strip()
     if raw:
         path = Path(raw)
         if path.is_symlink() or not path.is_file():
             raise Blocked("FRANK_OWNER_STORAGE_STATE must be a regular storage-state file")
         return str(path), None
+
     user = os.environ.get("FRANK_BROWSER_BASIC_AUTH_USER", "").strip()
     password = os.environ.get("FRANK_BROWSER_BASIC_AUTH_PASSWORD", "")
-    if bool(user) != bool(password):
-        raise Blocked("FRANK_BROWSER_BASIC_AUTH_USER and _PASSWORD must be supplied together")
-    if not user:
-        raise Blocked(
-            "no owner session available: set FRANK_OWNER_STORAGE_STATE, or "
-            "FRANK_BROWSER_BASIC_AUTH_USER and FRANK_BROWSER_BASIC_AUTH_PASSWORD"
+    if user and password:
+        print(
+            "warning: authenticating with the legacy edge credential. That credential "
+            "now protects only the restricted recovery route, so this run does not "
+            "exercise the owner session. Prefer a session created by "
+            "acceptance/owner_session.py.",
+            file=sys.stderr,
         )
-    return None, {"username": user, "password": password}
+        return None, {"username": user, "password": password}
+
+    raise Blocked(
+        "no owner session available. Create one with "
+        "acceptance/owner_session.py and pass it as FRANK_OWNER_STORAGE_STATE; "
+        "the owner surfaces are behind the identity provider and there is no "
+        "anonymous or credential-in-URL path to them."
+    )
 
 
 def _goto(page: Any, url: str, purpose: str, timeout: int = 45000) -> Any:
