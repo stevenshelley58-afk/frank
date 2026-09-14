@@ -26,6 +26,8 @@ from pathlib import Path
 from flask import Flask, Response, abort, jsonify, redirect, request, send_file, send_from_directory, stream_with_context
 from werkzeug.exceptions import HTTPException
 
+import owner_sources
+import owner_sources_setup
 import owner_app_readiness
 import home_platform
 import home_defaults
@@ -4620,6 +4622,9 @@ home_platform.configure(
 )
 app.register_blueprint(home_platform.api)
 app.register_blueprint(owner_app_readiness.create_blueprint())
+# Attach the owner read projections, then serve them to the workspace host.
+owner_sources_setup.attach_owner_sources()
+app.register_blueprint(owner_sources.create_blueprint())
 app.register_blueprint(create_graph_blueprint(_graph_provider))
 app.register_blueprint(control_plane_view.api)
 app.register_blueprint(ops_projections.create_blueprint())
