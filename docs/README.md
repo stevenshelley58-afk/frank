@@ -46,7 +46,21 @@ the current checkout or production state.
 The vendored documentation under `apps/window/vendor/` belongs to its
 upstream projects and is not Frank operational guidance.
 
-## Owner CRM private foundations
+## Owner workspace
+
+[Owner workspace contract](OWNER_WORKSPACE.md) is the current contract for the
+hybrid owner workspace: the owner route grammar, the native application
+registry, the read-model and metric rules, the authentication boundary, app
+hosting and isolation, and the mail ownership boundary. Read it before changing
+any owner surface. It records the two rejected implementations as explicit
+anti-examples.
+
+- [Blockwise owner workspace frontend](OWNER_DASHBOARD_FRONTEND.md) covers the
+  frontend routes, native application panels, overview and design.
+- [Owner workspace discovery](OWNER_WORKSPACE_DISCOVERY.md) is a dated,
+  evidence-backed inventory of the identity providers, native application auth
+  capability, mail connectivity, notification state, ingress seam and existing
+  read projections. It is point-in-time evidence, not a current guarantee.
 
 [Owner CRM contract](OWNER_CRM.md) records the owner/customer boundary and
 remaining activation gates. Component runbooks: [native CRM and Helpdesk](../apps/window/infra/owner_crm/README.md),
@@ -56,4 +70,3 @@ remaining activation gates. Component runbooks: [native CRM and Helpdesk](../app
 [native CRM alert hooks](../apps/window/infra/owner_crm_notifications/README.md).
 These are private foundations, not a completed customer-lifecycle acceptance.
 
-- [Blockwise owner dashboard frontend](OWNER_DASHBOARD_FRONTEND.md) records the sample-only frontend and future connection boundary.
