@@ -32,3 +32,11 @@ def test_native_entry_packages_have_fixed_allowlisted_returns():
     assert 'https://' not in frappe
     assert "campaigns&return=1" in mautic
     assert "Request" not in mautic
+
+def test_mautic_session_proof_requires_exact_native_owner():
+    controller = (ROOT / "native/mautic_frank_owner_entry/Controller/EntryController.php").read_text()
+    config = (ROOT / "native/mautic_frank_owner_entry/Config/config.php").read_text()
+    assert "/s/frank/session" in config
+    assert "getUserIdentifier() === 'owner'" in controller
+    assert "['authenticated' => $authenticated]" in controller
+    assert "403" in controller
