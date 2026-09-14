@@ -15,6 +15,28 @@ mapped into MAUTIC_URL. configure_site.sh synchronizes Mautic's native
 config/local.php site_url after restart without printing configuration
 secrets. Fresh installation uses the same URL.
 
+`MAUTIC_PUBLIC_URL` stays `https://mail.blockwise.sale` deliberately. Mautic
+builds every recipient unsubscribe and do-not-contact link from `site_url`, and
+`mail.blockwise.sale` is the deliberately tiny public boundary where only
+`/email/unsubscribe/*` and `/email/dnc/*` are reachable. Repointing `site_url` at
+an admin origin would move future opt-out links behind the owner's identity and
+break the one public path recipients must always be able to use.
+
+The owner's admin origin is therefore a second origin, not a replacement.
+Mautic emits relative admin URLs (the rendered dashboard was checked and contains
+no absolute `mail.blockwise.sale` reference), so `marketing.frank.fail` serves the
+admin UI correctly while `site_url` is unchanged.
+
+`config/local.php` holds the monitored-mailbox credential, the database password
+and Mautic's `secret_key` in clear. Every write to it preserves whatever mode the
+file already had, so a world-readable file stayed world-readable forever.
+`configure_site.sh` and `reply_setup.sh` now normalise ownership and mode to
+`root:www-data 0640` after every write, and `check.sh` fails if the live file is
+anything else. `OWNER_MARKETING_LOCAL_PHP_MODE` exists because Mautic's own
+Configuration screen writes this file as the web server account; the default
+keeps it read-only to that account, and 0660 is the documented alternative if
+that screen has to persist changes.
+
 The pinned upstream image roles are used for opt-in background execution:
 
     MAUTIC_RUNTIME_PROFILES=owner-marketing-cron,owner-marketing-worker ./deploy.sh

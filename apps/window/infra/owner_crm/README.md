@@ -119,6 +119,37 @@ the marker in the decoded read-only mailbox body. Administrator credentials are
 used only for the thread-parent and Email Queue proofs. The reply itself is
 made by `owner@blockwise.sale`.
 
+## Owner workspace origin, branding and start screens
+
+`bin/configure-owner-locale.sh` owns `host_name`, which is the base URL every
+generated link, asset and redirect uses. It now defaults to
+`https://crm.frank.fail` (override with `OWNER_CRM_PUBLIC_URL`). The private
+Tailscale Serve address remains a fallback transport but is no longer the base
+URL, because the owner's browser has to be able to follow the links the app
+emits.
+
+`bin/configure-owner-workspace.sh` owns everything else the owner-facing
+workspace needs and verifies rather than assumes:
+
+```bash
+apps/window/infra/owner_crm/bin/configure-owner-workspace.sh            # preview
+apps/window/infra/owner_crm/bin/configure-owner-workspace.sh --apply
+```
+
+* sets `System Settings.app_name`, `FCRM Settings.brand_name` and
+  `HD Settings.brand_name` to the workspace brand, so the native chrome does not
+  present a second, conflicting product identity inside Frank;
+* asserts the base URL through `frappe.utils.get_url()`, the value the
+  application actually uses;
+* asserts the owner's native roles, that the owner does **not** hold
+  `System Manager`, and that the native `HD Agent` record exists;
+* reports the native start screens (`/crm/dashboard`, `/helpdesk/home`).
+
+Only supported Frappe settings are changed. No application file is patched and
+no navigation is hidden by forking an app: Frappe CRM 1.83 and Helpdesk 1.30 do
+not expose a supported setting that removes their own sidebar, so the sidebar
+stays.
+
 ## Private owner web access
 
 `python3 bin/private-access.py` previews existing native Tailscale Serve configuration; `--apply` adds only private HTTPS ports 8445 (CRM), 8446 (ntfy), and 8447 (native Mautic admin). Existing Serve services are preserved, occupied ports and public Funnel flags are rejected, and native CRM/ntfy authentication remains required. No public CRM ingress, custom proxy, or new account is created. An enrolled phone with Tailscale plus native ntfy setup is still required for actual mobile notification receipt.
