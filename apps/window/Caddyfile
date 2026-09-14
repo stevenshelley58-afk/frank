@@ -746,10 +746,9 @@ mail.frank.fail {
 			header_up X-Real-IP {remote_host}
 			header_up X-Forwarded-Proto https
 			# The stable owner identity the launch broker reads. Any client
-			# supplied copy is removed before the trusted value is set, so a
-			# forged header cannot survive the edge.
-			header_up -X-Frank-Owner
-			header_up -X-Owner-Webmail-Ingress
+			# supplied copy is overwritten with a single trusted value, so a
+			# forged header cannot survive the edge. Do not combine Set and
+			# Delete for the same upstream header.
 			header_up X-Owner-Webmail-Ingress {$OWNER_WEBMAIL_INGRESS_SECRET}
 			header_up X-Frank-Owner {http.request.header.X-Authentik-Uid}
 			header_up -X-Frame-Options

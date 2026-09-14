@@ -198,7 +198,7 @@ class IngressContractTests(unittest.TestCase):
         self.assertNotIn('${OWNER_WEBMAIL_INGRESS_SECRET}', self.nginx)
         app = ROOT.parents[1]
         caddy = (app / "Caddyfile").read_text()
-        self.assertIn("header_up -X-Owner-Webmail-Ingress", caddy)
+        self.assertNotIn("header_up +X-Owner-Webmail-Ingress", caddy)
         self.assertIn("header_up X-Owner-Webmail-Ingress {$OWNER_WEBMAIL_INGRESS_SECRET}", caddy)
         deploy = (app / "deploy.sh").read_text()
         self.assertLess(deploy.index('printf "OWNER_WEBMAIL_INGRESS_SECRET='), deploy.index('mv -f -- "$caddy_tmp" "$caddy_secret_file"'))
