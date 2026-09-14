@@ -1693,6 +1693,23 @@ export function createCreativeScreen(ctx, host) {
     if (state.status === "ready" && state.rows) {
       ctx.say(`${formatInt(state.rows.length)} creative${state.rows.length === 1 ? "" : "s"} loaded.`);
     }
+    // A drill-down from another screen arrives before these rows exist.
+    const pending = ctx.takePendingRecord?.();
+    if (pending) focusRecord(pending);
+  }
+
+  /**
+   * Show one creative another screen asked for, by identity. Returns false when
+   * it is not in this reader's rows, so the caller can name what it could not
+   * find rather than opening nothing.
+   */
+  function focusRecord({ id = "" } = {}) {
+    const wanted = String(id || "");
+    if (!wanted) return false;
+    const row = (state.rows || []).find((candidate) => rowKey(candidate) === wanted || String(candidate?.id || "") === wanted);
+    if (!row) return false;
+    openDetail(row);
+    return true;
   }
 
   const settled = load();
@@ -1708,5 +1725,6 @@ export function createCreativeScreen(ctx, host) {
     },
     settled: () => settled,
     reload: (options = {}) => load({ force: Boolean(options.force) }),
+    focusRecord,
   };
 }

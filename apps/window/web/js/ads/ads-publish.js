@@ -651,9 +651,62 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     renderHead();
     renderSteps();
     clear(body);
+    const conflict = conflictBanner();
+    if (conflict) body.append(conflict);
     const renderer = [renderSelect, renderConfigure, renderMap, renderTracking, renderReview, renderQueue][state.step];
     renderer(body);
     renderFoot();
+  }
+
+  /**
+   * The conflict, said plainly and with both ways out.
+   *
+   * A refused save is not an error to retry: another copy of this draft is
+   * newer, and the honest choices are to look at it or to leave this screen
+   * alone. Silently retrying would overwrite somebody's work.
+   */
+  function conflictBanner() {
+    const conflict = state.conflict;
+    if (!conflict) return null;
+    const banner = el("div", "ads-banner");
+    banner.dataset.tone = "warn";
+    banner.setAttribute("role", "alert");
+    banner.append(svg(ICONS.alert, { size: 14, width: 1.8 }));
+    banner.append(
+      el(
+        "span",
+        "",
+        `This draft changed somewhere else while you were editing it (you were on revision ${conflict.expectedRevision}, the saved copy is revision ${conflict.actualRevision}). Nothing was overwritten.`,
+      ),
+    );
+    banner.append(
+      button("Load the saved revision", {
+        onClick: () => {
+          const latest = ctx.drafts.get(state.draftId);
+          state.conflict = null;
+          if (latest) loadDraft(latest);
+          render();
+          ctx.say("Loaded the saved revision. The changes on this screen were discarded.");
+        },
+      }),
+    );
+    banner.append(
+      button("Keep editing mine", {
+        variant: "quiet",
+        onClick: () => {
+          state.conflict = null;
+          // Adopt the newer revision as the base, and say so: the next save
+          // then replaces it deliberately rather than by accident.
+          const latest = ctx.drafts.get(state.draftId);
+          if (latest) {
+            state.revision = latest.revision;
+            ctx.say("Keeping your version. The next save replaces the other revision.");
+          }
+          render();
+        },
+      }),
+    );
+    return banner;
   }
 
   function renderHead() {
@@ -762,6 +815,23 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     const plan = currentPlan();
     const validation = currentValidation();
     const summary = el("span", "ads-flow-summary");
+    // Where this plan currently stands, in the same words the queue uses. The
+    // distinction that matters is local-only: a draft this browser is holding,
+    // a draft Frank has saved, and a plan the queue is holding are three
+    // different states, and none of them is "sent".
+    const unsaved = hasUnsavedWork();
+    summary.append(
+      statusBadge(state.queued ? "queued" : unsaved ? "uncertain" : "ready", {
+        label: state.queued ? "Staged in Frank" : unsaved ? "Unsaved changes" : state.draftId ? "Saved draft" : "New draft",
+        title: state.queued
+          ? "This plan is in the Frank queue. Nothing has been sent to the provider."
+          : unsaved
+            ? "This plan has changes that are not saved. Closing the flow would lose them."
+            : state.draftId
+              ? `Saved revision ${state.revision ?? 1} in this browser.`
+              : "Not saved yet.",
+      }),
+    );
     if (state.step > 0) {
       summary.append(el("span", "", `${plan.total} ad${plan.total === 1 ? "" : "s"} planned`));
       if (validation.errors) summary.append(statusBadge("failed", { label: `${validation.errors} blocking` }));

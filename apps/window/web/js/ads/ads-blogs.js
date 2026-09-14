@@ -270,6 +270,22 @@ export function createBlogsScreen(ctx, host) {
     const creativeRows = Array.isArray(creatives.data?.rows) ? creatives.data.rows : null;
     if (creativeRows) state.creatives = creativeRows;
     render();
+    // A drill-down from another screen arrives before these rows exist.
+    const pending = ctx.takePendingRecord?.();
+    if (pending) focusRecord(pending);
+  }
+
+  /**
+   * Show one article another screen asked for. Returns false when the article is
+   * not in this reader's rows, so the caller can name what it could not find.
+   */
+  function focusRecord({ id = "" } = {}) {
+    const wanted = String(id || "");
+    if (!wanted) return false;
+    const row = state.rows.find((candidate) => rowKey(candidate) === wanted || String(candidate?.id || "") === wanted);
+    if (!row) return false;
+    openDetail(row);
+    return true;
   }
 
   // ------------------------------------------------------- the reader's shape --
@@ -1574,5 +1590,6 @@ export function createBlogsScreen(ctx, host) {
     },
     settled: () => settled,
     reload: (options = {}) => load({ force: Boolean(options.force) }),
+    focusRecord,
   };
 }

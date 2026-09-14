@@ -108,6 +108,34 @@ export function createCampaignsScreen(ctx, host) {
     if (rows) state.rows = rows.map((row) => ({ ...row, ...(row.totals || {}) }));
     selection.setMatching(state.rows);
     render();
+    // A drill-down from another screen arrives before these rows exist, so the
+    // request waits for them and is honoured here, once.
+    const pending = ctx.takePendingRecord?.();
+    if (pending) void focusRecord(pending);
+  }
+
+  /**
+   * Show one record another screen asked for, at the level that record lives at.
+   *
+   * Returns false when the record is not in this reader's rows, so the caller
+   * can say so instead of pretending a drawer opened.
+   */
+  async function focusRecord({ kind = "", id = "" } = {}) {
+    const wanted = String(id || "");
+    if (!wanted) return false;
+    const level = ENTITY_LEVELS.includes(String(kind)) ? String(kind) : "";
+    if (level && level !== state.level) {
+      state.level = level;
+      state.rows = [];
+      selection.clear();
+      ctx.store.update({ level });
+      await load();
+      if (disposed) return false;
+    }
+    const row = state.rows.find((candidate) => rowKey(candidate) === wanted || String(candidate?.id || "") === wanted);
+    if (!row) return false;
+    openDetail(row);
+    return true;
   }
 
   // ------------------------------------------------------------- columns --
@@ -970,5 +998,6 @@ export function createCampaignsScreen(ctx, host) {
     },
     settled: () => Promise.resolve(),
     reload: (options = {}) => load({ force: Boolean(options.force) }),
+    focusRecord,
   };
 }

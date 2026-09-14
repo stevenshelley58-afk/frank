@@ -20,6 +20,7 @@ import {
   ICONS,
   previewBanner,
   relativeAge,
+  errorPanel,
 } from "./ads-ui.js";
 import { DATE_PRESETS, COMPARISON_MODES, ATTRIBUTION_WINDOWS, isoDay, formatDay, SYNC_STATES } from "./ads-contracts.js";
 import { createAdsReader, createAdsCache } from "./ads-source.js";
@@ -61,7 +62,23 @@ function defaultParams() {
   });
 }
 
-function readPreviewFlag() {
+/**
+ * Preview is a rehearsal switch, and it has to be switchable *from the link*.
+ *
+ * A deep link is the one piece of context a fresh browser has, so `?preview=1`
+ * wins over the stored preference: an approval link that opens the workspace
+ * must open it in the labelled rehearsal the owner was invited to look at,
+ * without anybody having to set something up first. Everything downstream still
+ * labels those rows as synthetic.
+ */
+function readPreviewFlag(win) {
+  try {
+    const value = new URLSearchParams(win?.location?.search || "").get("preview");
+    if (value === "1" || value === "true") return true;
+    if (value === "0" || value === "false") return false;
+  } catch {
+    /* a browser without URLSearchParams keeps the stored preference */
+  }
   try {
     return globalThis.localStorage?.getItem(PREVIEW_STORAGE_KEY) === "1";
   } catch {
@@ -89,7 +106,7 @@ export function mountAdsWorkspace(host, options = {}) {
   const win = doc.defaultView || globalThis;
   const cache = createAdsCache();
   const preview = createAdsPreview({ size: "small" });
-  preview.setEnabled(options.preview ?? readPreviewFlag());
+  preview.setEnabled(options.preview ?? readPreviewFlag(win));
 
   const reader = createAdsReader({ fetchImpl: win.fetch?.bind(win), cache, preview });
 
@@ -121,6 +138,8 @@ export function mountAdsWorkspace(host, options = {}) {
     screens: new Map(),
     controller: new AbortController(),
     restoredFromUrl: false,
+    // A record another screen asked for, waiting for that screen to load.
+    pendingRecord: null,
   };
 
   // ---------------------------------------------------------------- chrome --
@@ -179,9 +198,24 @@ export function mountAdsWorkspace(host, options = {}) {
   function renderContext() {
     clear(contextBar);
     const ctx = state.context;
+    // While the context read is in flight the strip says so. A dash where a
+    // currency belongs reads as "the currency is nothing", which is a claim
+    // this screen is not entitled to make.
+    const loading = state.contextStatus === "loading";
+    const missing = state.contextStatus === "not_connected" ? "Not connected" : "Not available";
     const accountValue = el("div", "ads-context-value");
-    accountValue.append(el("span", "", ctx?.account?.name || (state.contextStatus === "not_connected" ? "Not connected" : "—")));
+    accountValue.append(el("span", "", ctx?.account?.name || (loading ? "Loading…" : missing)));
     contextBar.append(contextItem("Account", accountValue));
+
+    const currencyValue = el("div", "ads-context-value");
+    currencyValue.append(el("span", "", ctx?.account?.currency || (loading ? "Loading…" : missing)));
+    contextBar.append(contextItem("Currency", currencyValue));
+
+    const timezoneValue = el("div", "ads-context-value");
+    timezoneValue.append(el("span", "", ctx?.account?.timezone || (loading ? "Loading…" : missing)));
+    const timezoneItem = contextItem("Time zone", timezoneValue);
+    timezoneItem.title = "Reporting days are cut in the account's own time zone, not the reader's.";
+    contextBar.append(timezoneItem);
 
     const rangeBtn = buttonValue(
       state.params.preset === "custom" ? `${formatDay(state.params.from)} – ${formatDay(state.params.to)}` : DATE_PRESETS.find((p) => p.id === state.params.preset)?.label || "Last 28 days",
@@ -376,6 +410,15 @@ export function mountAdsWorkspace(host, options = {}) {
     } catch {
       /* preference is best-effort */
     }
+    // The link keeps describing what is on screen, so it can be handed on
+    // without the recipient seeing something different from the sender.
+    try {
+      const url = new URL(win.location.href);
+      url.searchParams.set("preview", on ? "1" : "0");
+      win.history?.replaceState?.(win.history.state, "", url.toString());
+    } catch {
+      /* a browser that refuses the rewrite still switches the view */
+    }
     reader.clear();
     state.context = null;
     state.contextStatus = "loading";
@@ -416,19 +459,40 @@ export function mountAdsWorkspace(host, options = {}) {
 
   function go(screenId, { focus = true } = {}) {
     if (!SCREEN_IDS.has(screenId) || screenId === state.screen) return;
-    state.screens.get(state.screen)?.dispose?.();
+    const leaving = state.screens.get(state.screen);
+    leaving?.dispose?.();
     state.screens.delete(state.screen);
     state.screen = screenId;
-    // replaceState rather than pushState: the owner workspace owns the back
-    // stack for its sections, and adding entries here would make Back leave the
-    // section instead of stepping within it.
+    // One history entry per screen, so Back steps through the screens the owner
+    // actually visited and Forward returns along the same path. Replacing the
+    // entry instead would make Back leave the section entirely, which reads as
+    // "Back is broken" to anyone who has used a browser before.
     try {
-      win?.history?.replaceState?.({ view: "blockwise-dashboard", projectId: "blockwise", ownerSection: "ads", adsScreen: screenId }, "", screenHref(screenId));
+      win?.history?.pushState?.({ view: "blockwise-dashboard", projectId: "blockwise", ownerSection: "ads", adsScreen: screenId }, "", screenHref(screenId));
     } catch {
       /* history is best-effort */
     }
     renderNav();
     renderScreen({ focus });
+  }
+
+  /**
+   * Follow the address bar.
+   *
+   * The shell already listens for popstate and re-mounts the section, which
+   * covers Back and Forward on its own. This listener covers the case where the
+   * workspace is mounted somewhere that does not: the screen named in the URL is
+   * the screen shown, whatever brought the URL there.
+   */
+  function onPopState() {
+    const wanted = readScreenFromUrl(win) || "overview";
+    if (wanted === state.screen) return;
+    const leaving = state.screens.get(state.screen);
+    leaving?.dispose?.();
+    state.screens.delete(state.screen);
+    state.screen = wanted;
+    renderNav();
+    renderScreen({ focus: false });
   }
 
   function renderNav() {
@@ -463,9 +527,51 @@ export function mountAdsWorkspace(host, options = {}) {
       drafts,
       openPublish: (seed) => openPublish(seed),
       openDraft: (id) => openDraft(id),
+      openRecord: (request) => openRecord(request),
+      /**
+       * A record another screen asked this one to show. A screen calls this
+       * once its rows exist; the request is consumed so a later render does not
+       * reopen a drawer the operator has already closed.
+       */
+      takePendingRecord: () => {
+        const request = state.pendingRecord && state.pendingRecord.screen === screenId ? state.pendingRecord : null;
+        state.pendingRecord = null;
+        return request;
+      },
     });
   }
 
+  /**
+   * Open one record in the screen that owns it.
+   *
+   * The request travels through the workspace rather than through a URL because
+   * the record is what matters, not a link somebody could paste: a campaign id
+   * means nothing outside this workspace, and the screen that owns it already
+   * knows how to show it.
+   */
+  function openRecord({ kind = "", id = "", screen = "" } = {}) {
+    const target = SCREEN_IDS.has(String(screen)) ? String(screen) : state.screen;
+    const request = Object.freeze({ kind: String(kind || ""), id: String(id || ""), screen: target });
+    if (target === state.screen) {
+      const handled = state.screens.get(target)?.focusRecord?.(request);
+      if (!handled) say(`That record is in ${target}, but it is not in the rows on screen.`);
+      return Boolean(handled);
+    }
+    // The other screen has to load before it can show anything, so the request
+    // waits for it instead of being lost to the navigation.
+    state.pendingRecord = request;
+    go(target, { focus: false });
+    return true;
+  }
+
+  /**
+   * Render one screen, and never leave the owner looking at nothing.
+   *
+   * A screen that throws while it is being built used to take the whole mount
+   * with it, which is indistinguishable from a dead page. The failure is named
+   * on screen, the rest of the workspace keeps working, and the retry is the
+   * same code path as any other re-render.
+   */
   function renderScreen({ focus = false, force = false } = {}) {
     const screen = ADS_SCREENS.find((s) => s.id === state.screen) || ADS_SCREENS[0];
     const existing = state.screens.get(screen.id);
@@ -505,10 +611,30 @@ export function mountAdsWorkspace(host, options = {}) {
       }
 
       const factory = SCREEN_FACTORIES[screen.id];
-      const instance = factory(screenContext(screen.id), content);
-      state.screens.set(screen.id, instance);
+      let instance = null;
+      try {
+        instance = factory(screenContext(screen.id), content);
+      } catch (error) {
+        instance = null;
+        renderScreenFailure(content, screen, error);
+        say(`${screen.label} could not be shown. The rest of the workspace still works.`);
+        if (win?.console?.error) win.console.error(`ads: ${screen.id} failed to build`, error);
+      }
+      state.screens.set(screen.id, instance || { dispose: () => {} });
       if (focus) title.focus({ preventScroll: true });
     }
+  }
+
+  /** The named failure that replaces a blank screen. */
+  function renderScreenFailure(content, screen, error) {
+    clear(content);
+    content.append(
+      errorPanel({
+        title: `${screen.label} could not be shown`,
+        detail: `The screen failed while it was being built, so nothing here is a reading. The other screens are unaffected. ${String(error?.message || error || "unknown error")}`,
+        onRetry: () => renderScreen({ force: true, focus: true }),
+      }),
+    );
   }
 
   // ------------------------------------------------------------ publish flow --
@@ -559,15 +685,56 @@ export function mountAdsWorkspace(host, options = {}) {
     }
   };
   win?.addEventListener?.("storage", onStorage);
+  win?.addEventListener?.("popstate", onPopState);
 
-  renderHeadActions();
-  renderNav();
-  renderContext();
-  renderScreen();
+  /**
+   * Leaving with unsaved work is the one silent loss this screen can prevent.
+   * The browser asks; the wizard's own footer says which draft is unsaved.
+   */
+  const onBeforeUnload = (event) => {
+    if (!publishFlow?.hasUnsavedWork?.()) return undefined;
+    event.preventDefault();
+    event.returnValue = "";
+    return "";
+  };
+  win?.addEventListener?.("beforeunload", onBeforeUnload);
 
-  loadContext().then(() => {
-    if (!state.disposed) renderScreen({ force: true });
-  });
+  /**
+   * First paint. Everything here can fail on a browser this build has never seen,
+   * and a blank panel is the one outcome the owner cannot interpret, so a
+   * failure is drawn as a named panel with a retry rather than thrown away.
+   */
+  function boot() {
+    renderHeadActions();
+    renderNav();
+    renderContext();
+    renderScreen();
+    loadContext().then(
+      () => {
+        if (!state.disposed) renderScreen({ force: true });
+      },
+      (error) => {
+        if (state.disposed) return;
+        state.contextStatus = "error";
+        state.contextDetail = String(error?.message || error || "the context read failed");
+        renderContext();
+        say("The ads context could not be read. The screens below still work and say what they are missing.");
+      },
+    );
+  }
+
+  try {
+    boot();
+  } catch (error) {
+    clear(host);
+    host.append(
+      errorPanel({
+        title: "The ads workspace could not start",
+        detail: `Nothing is wrong with your data. This browser refused something the workspace needs before it could draw anything. ${String(error?.message || error || "unknown error")}`,
+      }),
+    );
+    if (win?.console?.error) win.console.error("ads: workspace failed to start", error);
+  }
 
   const dispose = () => {
     if (state.disposed) return;
@@ -576,6 +743,8 @@ export function mountAdsWorkspace(host, options = {}) {
     for (const screen of state.screens.values()) screen.dispose?.();
     state.screens.clear();
     win?.removeEventListener?.("storage", onStorage);
+    win?.removeEventListener?.("popstate", onPopState);
+    win?.removeEventListener?.("beforeunload", onBeforeUnload);
     root.remove();
   };
   dispose.whenSettled = async () => {
