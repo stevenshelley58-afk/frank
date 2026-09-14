@@ -435,11 +435,19 @@ class UiContractTest(unittest.TestCase):
         tools = (WEB / "js" / "operations-tools.js").read_text(encoding="utf-8")
 
         self.assertIn('data-view="operations-tool"', html)
-        self.assertIn('new URLSearchParams(window.location.search).get("preview")', preview)
+        # The operations preview is retired: native applications replaced it, so
+        # the surface must stay off for every query string rather than being
+        # re-enabled by a URL parameter.
+        self.assertIn("export function isBlockwiseOperationsPreview()", preview)
+        self.assertIn("return false;", preview)
+        self.assertNotIn('get("preview")', preview)
         self.assertIn('import { OPERATIONS_TOOLS, operationsTool } from "./operations-tools.js"', preview)
         self.assertIn('for (const tool of OPERATIONS_TOOLS.filter', widgets)
-        self.assertIn('mountOperationsTool($("#operations-tool"), tool.id', app)
+        # The shared registry is still the single source for both the legacy
+        # preview manifests and the owner workspace, so the tool list must be
+        # consumed rather than duplicated here.
         self.assertIn('window.addEventListener("frank:operations-tool"', app)
+        self.assertIn("showProject(\"blockwise\")", app)
         self.assertIn('window.addEventListener("frank:project-home"', app)
         self.assertIn('blockwisePreviewSnapshot(instance)', homes)
         self.assertIn('target.view === "operations-tool"', homes)
@@ -448,7 +456,12 @@ class UiContractTest(unittest.TestCase):
             self.assertIn(f'"operations-{tool_id}"', preview)
         self.assertIn('title: "Email flows"', widgets)
         self.assertIn("Stalwart is the open-source sending path", widgets)
-        self.assertIn('provider: "SnagTime native calendar"', tools)
+        # Every operations tool now hands off to the native application that
+        # owns the work, so the shared registry must not carry a bespoke
+        # provider string or a bespoke scheduling vendor.
+        self.assertIn('provider: "Native app"', tools)
+        self.assertIn('description: "Open the native application from Blockwise."', tools)
+        self.assertNotIn("SnagTime", tools)
         self.assertNotIn("Google Calendar", tools)
         self.assertNotIn("Google Meet", tools)
 

@@ -42,5 +42,17 @@ if (file_put_contents($tmp, $data, LOCK_EX) === false || !chmod($tmp, $mode) || 
     exit(3);
 }
 ' || die site-url-update-failed
+# local.php holds the monitored-mailbox credential, the database password and
+# Mautic's secret_key in clear. Every write above preserves whatever mode the
+# file already had, so a world-readable file would stay world-readable forever.
+# Normalise ownership and mode on every run instead.
+# 0660, not 0640: Mautic's own Configuration screen writes this file as the web
+# server account, so 0640 would make that native screen fail to save. 0660 still
+# removes every other local user, which was the actual defect at 0755.
+local_php_mode="${OWNER_MARKETING_LOCAL_PHP_MODE:-0660}"
+if docker exec frank-owner-marketing test -f /var/www/html/config/local.php; then
+  docker exec frank-owner-marketing chown root:www-data /var/www/html/config/local.php
+  docker exec frank-owner-marketing chmod "$local_php_mode" /var/www/html/config/local.php
+fi
 docker exec -u www-data -w /var/www/html/docroot frank-owner-marketing php /var/www/html/bin/console cache:clear --no-warmup --no-interaction >/dev/null || die native-config-cache-refresh-failed
 echo "native Mautic site_url synchronized"

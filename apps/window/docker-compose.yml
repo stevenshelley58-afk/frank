@@ -49,6 +49,12 @@ services:
       VAULT_METADATA_FILE: /data/vault-metadata.json
       VPS_ROOT: /vps
       PORT: "8080"
+      # Owner read projections. These are private service addresses on the
+      # attached owner networks, never a published host port: Frank reads the
+      # owner services directly rather than through an exposed edge.
+      OWNER_CRM_BASE_URL: http://owner-crm-frontend-1:8080
+      OWNER_CRM_SITE: owner.crm.internal
+      OWNER_NTFY_BASE_URL: http://frank-owner-ntfy:80
     ports:
       - "127.0.0.1:18080:8080"
     volumes:
@@ -67,8 +73,15 @@ services:
       # only from the generated override (see
       # apps/window/scripts/generate_workspace_override.py).
       - /projects/frank:/vps/projects/frank:ro
+      # Existing 0600 owner read credentials. Frank never writes them and never
+      # returns a value from them. Read-only mounts keep the owner services
+      # reachable without giving the Window container any write path.
+      - /srv/frank/secrets/owner-crm-login.env:/srv/frank/secrets/owner-crm-login.env:ro
+      - /srv/frank/secrets/owner-notifications/owner-notifications.env:/srv/frank/secrets/owner-notifications/owner-notifications.env:ro
     networks:
       - frank
+      - owner-crm-ingress
+      - owner-notifications-private
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=4)"]
       interval: 10s
@@ -122,6 +135,13 @@ services:
       # The public mail allowlist terminates at the existing Mautic ingress.
       # Caddy is the only Frank service attached to this network.
       - owner-marketing-ingress
+      # The owner webmail client's ingress. Caddy is again the only Frank
+      # service attached, so the client stays reachable only through the
+      # authenticated edge and publishes no host port of its own.
+      - owner-webmail-ingress
+      # Required on every recreation, not only after identity bootstrap.
+      - owner-identity-ingress
+      - owner-crm-ingress
     depends_on:
       frank-window:
         condition: service_healthy
@@ -144,3 +164,21 @@ networks:
   owner-marketing-ingress:
     external: true
     name: frank_owner_marketing_ingress
+  # Private owner service networks. Attaching the Window container to these is
+  # least privilege: it reaches the owner CRM and notification services by their
+  # internal names and nothing on these networks is published to the host.
+  owner-crm-ingress:
+    external: true
+    name: owner-crm_owner-crm-ingress
+  owner-notifications-private:
+    external: true
+    name: frank_owner_notifications_private
+  # Declared by the owner webmail component, which owns the network and its
+  # ingress service. Frank's edge joins it; nothing else in Frank does.
+  owner-webmail-ingress:
+    external: true
+    name: frank_owner_webmail_ingress
+
+  owner-identity-ingress:
+    external: true
+    name: owner-identity_owner-identity-ingress

@@ -475,7 +475,7 @@ function connectionOptions(instance, manifest) {
   return label;
 }
 
-const SNAPSHOT_STATUSES = new Set(["ready", "recorded", "verified", "empty", "setup_needed", "attention", "error", "unavailable"]);
+const SNAPSHOT_STATUSES = new Set(["ready", "recorded", "verified", "empty", "setup_needed", "attention", "stale", "error", "unavailable"]);
 const INTERNAL_VIEWS = new Set(["hub", "files", "tools", "trace", "releases", "project", "entity-home", "accounts", "connections", "widget-builder", "campaigns", "operations-tool"]);
 const INTERNAL_KINDS = new Set(["project", "tool", "agent", "service"]);
 
@@ -513,6 +513,7 @@ function appendStatusNote(body, snapshot) {
     verified: "Verified by the configured provider adapter.",
     setup_needed: "Setup is required before live data is available.",
     attention: "This provider needs attention before it can be treated as healthy.",
+    stale: "This reading is cached. It keeps the time it was actually observed and is not a live figure.",
     error: "The provider returned an error; check the linked setup or service status.",
     empty: "No records are available yet.",
     unavailable: "Live data is unavailable from this provider.",
@@ -527,6 +528,10 @@ function validInternalTarget(item) {
     const internal = { view: target.view };
     if (target.view === "connections" && target.action === "add") internal.action = "add";
     if (target.view === "connections" && /^[a-z0-9][a-z0-9._-]{0,79}$/.test(String(target.provider || ""))) internal.provider = String(target.provider);
+    // An owner drill-down names the workspace section it belongs to. Without
+    // forwarding it the button would land on the project home instead of the
+    // section the summary line is about.
+    if (target.view === "project" && /^[a-z0-9][a-z0-9-]{0,39}$/.test(String(target.section || ""))) internal.section = String(target.section);
     if (target.view === "operations-tool" && /^[a-z0-9][a-z0-9-]{0,79}$/.test(String(target.id || ""))) {
       internal.id = String(target.id);
       internal.name = String(target.name || target.id).slice(0, 80);
@@ -560,6 +565,10 @@ function appendSnapshotAction(parent, item) {
         window.dispatchEvent(new CustomEvent("frank:connections", { detail: internal }));
       } else if (internal.view === "operations-tool") {
         window.dispatchEvent(new CustomEvent("frank:operations-tool", { detail: internal }));
+      } else if (internal.section) {
+        // The owner workspace keeps its host alive and follows this event, so
+        // the section changes without rebuilding the surface.
+        window.dispatchEvent(new CustomEvent("frank:owner-route", { detail: { section: internal.section } }));
       } else if (internal.view) window.dispatchEvent(new CustomEvent("frank:view", { detail: internal.view }));
       else window.dispatchEvent(new CustomEvent("frank:entity-home", { detail: internal }));
     }, "home-inline-button");

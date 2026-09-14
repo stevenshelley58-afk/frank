@@ -1,0 +1,205 @@
+#!/usr/bin/env bash
+# The only supported operator entrypoint for the owner identity provider.
+#
+# It owns exactly four runtime concerns: the secret file, the state directory
+# outside Git, the Compose project, and the single Caddy network attachment
+# that lets the Frank edge reach the embedded outpost.
+#
+# SAFETY: the authentik server owns a database migration lock, and two servers
+# migrating the same database concurrently interleave the migration graph into
+# an unrecoverable state. Never start a second server or worker against this
+# database by hand (`docker run ... server`, `docker compose run ... server`).
+# Use `owner-identity probe` for one-off commands: it runs them against a
+# throwaway database, never against the live identity store.
+set -euo pipefail
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+root_dir=$(cd "$script_dir/.." && pwd)
+repo_root=$(cd "$root_dir/../../../.." && pwd)
+secret_file=/srv/frank/secrets/owner-identity.env
+runtime_root=/srv/frank/owner-identity
+marker=$runtime_root/.owner-identity-runtime
+project=owner-identity
+ingress_network=${project}_owner-identity-ingress
+
+# The authentik container runs as this uid:gid, which has no account on the
+# host. uid 1000 is deliberately NOT used: it is the real `ubuntu` login
+# account, and the identity store must not be owned by a login account.
+authentik_uid=10001
+authentik_gid=10001
+postgres_uid=70
+postgres_gid=70
+
+usage() {
+  cat >&2 <<'USAGE'
+usage: owner-identity {config|up|down|status|health|bootstrap|provision-native|outpost|probe|reset-database|acceptance}
+
+  config            validate the Compose file and the pinned image inputs
+  up                create runtime state, attach the Frank edge, start the stack
+  down              stop and remove this Compose project's containers
+  status            show container state for this Compose project
+  health            prove the running stack actually serves the owner session
+  bootstrap         idempotently create the owner identity, groups, providers,
+                    applications and access policies through the authentik API
+  provision-native  idempotently wire Frappe (OIDC) and Mautic (SAML) to it
+  outpost           print the exact Caddy directives this deployment requires
+  probe CMD...      run CMD in a throwaway server container attached to a
+                    scratch database; never touches the live identity store
+  reset-database    destroy and recreate the identity database. Refuses while
+                    any user, provider or application exists unless --force
+  acceptance        run the end-to-end browser proof and write a receipt
+USAGE
+  exit 2
+}
+fail() { echo "owner-identity: $*" >&2; exit 1; }
+
+clean_source() {
+  test -z "$(git -C "$repo_root" status --porcelain)" || fail "source checkout is not clean"
+  git -C "$repo_root" rev-parse --verify HEAD^{commit} >/dev/null
+}
+
+secret_file_ok() {
+  test -f "$secret_file" && test ! -L "$secret_file" || fail "secret file must be a regular file: $secret_file"
+  test "$(stat -c %a "$secret_file")" = 600 || fail "secret file must be mode 0600"
+  test "$(stat -c %u "$secret_file")" = 0 || fail "secret file must be root-owned"
+}
+
+value() { sed -n "s/^$1=//p" "$secret_file" | tail -n1; }
+
+fixed_settings_ok() {
+  local tag digest
+  tag=$(value OWNER_IDENTITY_TAG)
+  digest=$(value OWNER_IDENTITY_DIGEST)
+  test "$tag" = "2026.8.2" || fail "OWNER_IDENTITY_TAG is not the accepted release (got '${tag:-unset}')"
+  test "$digest" = "sha256:ff8489a5af4f4fe415ffd180a8e3c10b120bc2592d13d79dac050d977f7b9ecd" \
+    || fail "OWNER_IDENTITY_DIGEST is not the accepted digest (got '${digest:-unset}')"
+  local key
+  for key in OWNER_IDENTITY_SECRET_KEY OWNER_IDENTITY_DB_PASSWORD; do
+    test -n "$(value "$key")" || fail "$key must be set in $secret_file"
+  done
+  test "$(value OWNER_IDENTITY_DB_PASSWORD)" != "changeme" || fail "OWNER_IDENTITY_DB_PASSWORD is a placeholder"
+}
+
+prepare_runtime() {
+  if test -e "$runtime_root" || test -L "$runtime_root"; then
+    test -d "$runtime_root" && test ! -L "$runtime_root" || fail "runtime root is not a directory"
+    test -f "$marker" && test ! -L "$marker" || fail "refusing an unmarked runtime root"
+  else
+    install -d -m 0700 -o root -g root "$runtime_root"
+    install -m 0600 -o root -g root /dev/null "$marker"
+  fi
+  local spec name rest uid gid
+  for spec in \
+    "data:$authentik_uid:$authentik_gid" \
+    "certs:$authentik_uid:$authentik_gid" \
+    "blueprints:$authentik_uid:$authentik_gid" \
+    "postgresql:$postgres_uid:$postgres_gid"; do
+    name=${spec%%:*}; rest=${spec#*:}; uid=${rest%%:*}; gid=${rest##*:}
+    test ! -L "$runtime_root/$name" || fail "runtime path is a symlink: $name"
+    install -d -m 0700 -o "$uid" -g "$gid" "$runtime_root/$name"
+    # A wrong owner is a silent failure mode, not a cosmetic one: the container
+    # would either fail to start or write as an unrelated host account.
+    test "$(stat -c %u "$runtime_root/$name")" = "$uid" || fail "$runtime_root/$name is not owned by uid $uid"
+    test "$(stat -c %g "$runtime_root/$name")" = "$gid" || fail "$runtime_root/$name is not owned by gid $gid"
+  done
+}
+
+compose() {
+  docker compose --project-directory "$root_dir" --env-file "$secret_file" -f "$root_dir/compose.yaml" "$@"
+}
+
+attach_edge() {
+  # The Frank edge is the only permitted route in. Attaching is idempotent and
+  # scoped to this one network; no other Frank container joins it.
+  if docker network inspect "$ingress_network" --format '{{range .Containers}}{{.Name}} {{end}}' 2>/dev/null | grep -qw frank-caddy; then
+    return 0
+  fi
+  docker network connect "$ingress_network" frank-caddy
+}
+
+# Refuse to start the stack while an unmanaged authentik server or worker is
+# running against the same database. This is the guard the identity store needs:
+# two concurrent migrators corrupt the migration graph beyond repair.
+assert_no_foreign_runtime() {
+  local foreign
+  foreign=$(docker ps \
+    --filter "ancestor=ghcr.io/goauthentik/server:2026.8.2@sha256:ff8489a5af4f4fe415ffd180a8e3c10b120bc2592d13d79dac050d977f7b9ecd" \
+    --format '{{.Names}}' 2>/dev/null | grep -v -E "^${project}-(server|worker)-1$" || true)
+  if test -n "$foreign"; then
+    fail "another authentik server/worker is running against this database: $(echo "$foreign" | tr '\n' ' '). Two concurrent migrators corrupt the migration graph. Stop it, then retry."
+  fi
+}
+
+clean_source
+secret_file_ok
+fixed_settings_ok
+source_sha=$(git -C "$repo_root" rev-parse HEAD)
+# Exported, not just passed per-command: compose.yaml requires it for its
+# runtime labels, and bin/check-compose.py re-invokes docker compose itself.
+export OWNER_IDENTITY_SOURCE_SHA=$source_sha
+
+case ${1:-} in
+  config)
+    compose config -q
+    "$script_dir/check-compose.py" "$root_dir"
+    ;;
+  up)
+    assert_no_foreign_runtime
+    prepare_runtime
+    compose up -d
+    attach_edge
+    "$script_dir/health.sh" --wait
+    ;;
+  down)
+    compose down
+    ;;
+  status)
+    compose ps
+    ;;
+  health)
+    shift
+    "$script_dir/health.sh" "$@"
+    ;;
+  bootstrap)
+    "$script_dir/bootstrap.sh"
+    ;;
+  provision-native)
+    "$script_dir/provision-native.sh"
+    ;;
+  outpost)
+    cat "$root_dir/caddy/owner_identity.caddy"
+    ;;
+  probe)
+    shift
+    test $# -gt 0 || usage
+    assert_no_foreign_runtime
+    prepare_runtime
+    probe_db=authentik_probe_$$
+    compose exec -T postgresql psql -U authentik -d postgres -c "CREATE DATABASE $probe_db" >/dev/null
+    trap "compose exec -T postgresql psql -U authentik -d postgres -c 'DROP DATABASE IF EXISTS $probe_db' >/dev/null 2>&1 || true" EXIT
+    compose run --rm --no-deps \
+      -e AUTHENTIK_POSTGRESQL__NAME="$probe_db" \
+      --entrypoint sh server -c "$*"
+    ;;
+  reset-database)
+    shift
+    force=0
+    test "${1:-}" = "--force" && force=1
+    if (( ! force )); then
+      counts=$(compose exec -T postgresql psql -U authentik -d authentik -tAc \
+        "SELECT (SELECT count(*) FROM authentik_core_user)
+              + (SELECT count(*) FROM authentik_core_application)
+              + (SELECT count(*) FROM authentik_providers_oauth2_oauth2provider)
+              + (SELECT count(*) FROM authentik_providers_saml_samlprovider)" 2>/dev/null || echo unknown)
+      test "$counts" = "0" || fail "identity database is not empty (or unreadable): $counts provisioned object(s). Re-run with --force only after verifying this is disposable."
+    fi
+    compose stop server worker
+    compose exec -T postgresql psql -U authentik -d postgres -c "DROP DATABASE IF EXISTS authentik" >/dev/null
+    compose exec -T postgresql psql -U authentik -d postgres -c "CREATE DATABASE authentik OWNER authentik" >/dev/null
+    echo "owner identity database recreated empty; run 'owner-identity up' to migrate it cleanly"
+    ;;
+  acceptance)
+    shift
+    "$script_dir/acceptance.sh" "$@"
+    ;;
+  *) usage ;;
+esac

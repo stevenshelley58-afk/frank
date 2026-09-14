@@ -55,6 +55,18 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn('"import connections_agent, home_platform, server, tool_apps;', deploy)
         self.assertIn("import memory_inspector, mini, mini_frank", deploy)
 
+    def test_owner_release_contains_modules_and_durable_edge_networks(self):
+        dockerfile = (APP / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("COPY apps/window/owner_*.py ./", dockerfile)
+        compose = yaml.safe_load((APP / "docker-compose.yml").read_text(encoding="utf-8"))
+        edge = compose["services"]["frank-caddy"]["networks"]
+        for name in ("owner-identity-ingress", "owner-crm-ingress", "owner-webmail-ingress"):
+            self.assertIn(name, edge)
+            self.assertTrue(compose["networks"][name]["external"])
+        self.assertEqual(compose["networks"]["owner-identity-ingress"]["name"],
+                         "owner-identity_owner-identity-ingress")
+        self.assertNotIn("owner-identity-ingress", compose["services"]["frank-window"]["networks"])
+
     def test_ci_invokes_the_single_window_verification_runner(self):
         workflow = (ROOT / ".github" / "workflows" / "verify.yml").read_text(encoding="utf-8")
         package = (APP / "package.json").read_text(encoding="utf-8")
@@ -109,15 +121,29 @@ class InfraContractTest(unittest.TestCase):
         mini_api = caddyfile.index("@mini_api path /api/mini /api/mini/*")
         mini_ui = caddyfile.index("@mini_ui path /mini-frank /mini-frank/* /frank /frank/* /mini /mini/*")
         fallback = caddyfile.index("        handle {\n            import frank_private_response_headers", mini_ui)
-        basic_auth = caddyfile.index("basic_auth")
-        self.assertLess(mini_api, basic_auth)
-        self.assertLess(mini_ui, basic_auth)
-        public_routes = caddyfile[mini_api:basic_auth]
+        # The owner session boundary replaced per-route Basic Auth. The public
+        # Mini surfaces must still be matched before it, so they stay reachable
+        # without an owner session.
+        gate = caddyfile.index("import owner_identity_session_gate")
+        # The Basic Auth break-glass recovery route sits between the public
+        # surfaces and the gate, so the public slice ends where it begins.
+        recovery = caddyfile.index("@owner_recovery path")
+        self.assertLess(mini_api, recovery)
+        self.assertLess(mini_ui, recovery)
+        self.assertLess(recovery, gate)
+        public_routes = caddyfile[mini_api:recovery]
         mini_api_route = caddyfile[mini_api:mini_ui]
-        mini_ui_route = caddyfile[mini_ui:fallback]
+        # The Mini UI route ends where the recovery route begins; the catch-all
+        # handler is now further away because the owner session gate sits between
+        # them, so slicing to the catch-all would sweep in unrelated routes.
+        mini_ui_route = caddyfile[mini_ui:recovery]
         api_policy = caddyfile.split("(frank_mini_api_response_headers) {", 1)[1].split("}", 2)[0]
         ui_policy = caddyfile.split("(frank_mini_ui_response_headers) {", 1)[1].split("}", 2)[0]
+        # The public slice must never carry the operator attestation secret. The
+        # Basic Auth break-glass recovery route sits after it and is asserted
+        # separately, so it is not part of this slice.
         self.assertNotIn("{$FRANK_BASIC_AUTH_HASH}", public_routes)
+        self.assertNotIn("@owner_recovery", public_routes)
         self.assertIn("header_up -X-Frank-Operator-Attestation", public_routes)
         self.assertIn("import frank_mini_api_response_headers", mini_api_route)
         self.assertIn("import frank_mini_ui_response_headers", mini_ui_route)
@@ -185,9 +211,18 @@ class InfraContractTest(unittest.TestCase):
     def test_private_response_policy_is_scoped_to_pavone_and_authenticated_frank(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
         self.assertIn("import frank_common_security_headers", caddyfile)
-        self.assertEqual(caddyfile.count("import frank_private_response_headers"), 3)
+        # Four surfaces carry the private policy: the three original ones plus
+        # the Basic Auth break-glass recovery route, which is retained until the
+        # owner session and its own recovery path have both passed acceptance.
+        self.assertEqual(caddyfile.count("import frank_private_response_headers"), 4)
         fallback = caddyfile[caddyfile.index("        handle {\n            import frank_private_response_headers"):]
-        self.assertLess(fallback.index("import frank_private_response_headers"), fallback.index("basic_auth"))
+        # The catch-all carries the private policy, and every route before it
+        # that is not the recovery route sits behind the owner session boundary.
+        self.assertIn("import owner_identity_session_gate", caddyfile)
+        self.assertLess(
+            caddyfile.index("import owner_identity_session_gate"),
+            caddyfile.index("        handle {\n            import frank_private_response_headers"),
+        )
 
     def test_map_artifacts_allow_authenticated_same_origin_embedding(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
@@ -196,7 +231,12 @@ class InfraContractTest(unittest.TestCase):
         route = caddyfile[matcher:fallback]
         policy = caddyfile.split("(frank_map_artifact_response_headers) {", 1)[1].split("}\n", 1)[0]
         self.assertIn("import frank_map_artifact_response_headers", route)
-        self.assertIn("basic_auth", route)
+        # The artifact route is Frank's own surface, so the owner session gate is
+        # applied before it is reached. The gate is a single import earlier in
+        # the block rather than a per-route directive, so assert the ordering.
+        self.assertIn("import owner_identity_session_gate", caddyfile)
+        self.assertLess(caddyfile.index("import owner_identity_session_gate"), matcher)
+        self.assertNotIn("basic_auth", route)
         self.assertIn('X-Frame-Options "SAMEORIGIN"', policy)
         self.assertIn("frame-ancestors 'self'", policy)
         self.assertIn("script-src 'self' 'unsafe-inline'", policy)

@@ -1,129 +1,632 @@
-.owner-launch {
+/* Frank owner workspace.
+   Micro-labels (timestamps, reasons, source captions, chips) stay at 10-11px:
+   DESIGN.md sets a 10px uppercase group caption for the rail, and app.css uses
+   the same dense metadata steps (.home-truth 11px, .home-status-pill 10px).
+   Every interactive or body-adjacent size uses the documented 13px label step.
+   Route-aware content host for /project/blockwise: one combined overview and
+   one visible native application panel. Scoped to .owner-workspace and
+   .owner-app-* so no other Frank surface changes. Tokens: web/tokens.css. */
+
+.owner-workspace {
   height: 100%;
   min-height: 0;
-  overflow: auto;
-  padding: 28px 32px 40px;
-  color: #111;
-  background: #fff;
-  font: 13px/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  color: var(--ink);
+  font: 13px/1.5 var(--font);
 }
-.owner-launch * {
+.owner-workspace *,
+.owner-workspace *::before,
+.owner-workspace *::after {
   box-sizing: border-box;
 }
-.owner-launch-header {
-  max-width: 660px;
-  padding-bottom: 28px;
-  border-bottom: 1px solid #ececec;
+.owner-workspace ::selection {
+  background: var(--ink);
+  color: var(--bg);
 }
-.owner-launch h1,
-.owner-launch h2,
-.owner-launch p {
+.owner-workspace :focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 2px;
+  border-radius: var(--r-sm);
+}
+.owner-workspace p,
+.owner-workspace h2,
+.owner-workspace h3,
+.owner-workspace h4,
+.owner-workspace ul,
+.owner-workspace dl,
+.owner-workspace dd,
+.owner-workspace dt {
   margin: 0;
-}
-.owner-launch h1 {
-  font-size: 30px;
-  font-weight: 500;
-  line-height: 1;
-  letter-spacing: -0.04em;
-}
-.owner-launch-header > p {
-  margin-top: 8px;
-  color: #666;
-}
-.owner-launch-primary,
-.owner-launch-link {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  color: #111;
-  text-decoration: none;
-}
-.owner-launch-primary {
-  width: fit-content;
-  min-height: 38px;
-  align-items: center;
-  margin-top: 18px;
-  border-radius: 999px;
-  padding: 8px 13px;
-  color: #fff;
-  background: #111;
-}
-.owner-launch-primary span,
-.owner-launch-primary small {
-  display: none;
-}
-.owner-launch-primary:hover {
-  background: #333;
-}
-.owner-launch-groups {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(245px, 1fr));
-  gap: 28px 36px;
-  max-width: 900px;
-  padding-top: 28px;
-}
-.owner-launch-group h2 {
-  color: #666;
-  font-size: 10px;
-  font-weight: 500;
-  line-height: 1.4;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-.owner-launch-list {
-  margin: 9px 0 0;
   padding: 0;
-  border-top: 1px solid #ececec;
+}
+.owner-workspace ul {
   list-style: none;
 }
-.owner-launch-row {
-  min-height: 52px;
-  border-bottom: 1px solid #ececec;
+
+/* Workspace bar: one truthful line about the sources, one action. */
+.owner-bar {
+  flex: none;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--line);
 }
-.owner-launch-link,
-.owner-launch-row.is-unavailable {
-  min-height: 52px;
-  padding: 10px 0;
+.owner-bar-truth {
+  min-width: 0;
+  color: var(--mute);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
 }
-.owner-launch-link:hover strong,
-.owner-launch-link:focus-visible strong {
+.owner-bar-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.owner-action {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--ink);
+  font: 500 13px/1 var(--font);
+  text-decoration: none;
+  cursor: pointer;
+}
+.owner-action:hover {
+  border-color: var(--ink);
+}
+.owner-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Section rail. Flat items; the current one carries the Frank red dot. */
+.owner-body {
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 196px minmax(0, 1fr);
+}
+.owner-rail {
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 8px;
+  border-right: 1px solid var(--line);
+}
+.owner-rail-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.owner-rail-link {
+  position: relative;
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 7px 10px 7px 18px;
+  border-radius: var(--r-sm);
+  color: var(--mute);
+  text-decoration: none;
+}
+.owner-rail-link:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+.owner-rail-link[aria-current="page"] {
+  color: var(--ink);
+  font-weight: 500;
+}
+.owner-rail-link[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  left: 6px;
+  width: 6px;
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--mark);
+}
+
+/* Panel area: the read-model slot and the native app slot never both show. */
+.owner-panel {
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.owner-panel-read {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 20px 24px 40px;
+}
+.owner-panel-read[hidden],
+.owner-panel-app[hidden] {
+  display: none;
+}
+.owner-panel-app {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.owner-panel-title {
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+.owner-panel-title:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+.owner-panel-note {
+  max-width: 62ch;
+  margin-top: 6px;
+  color: var(--mute);
+}
+.owner-panel-from {
+  margin-top: 8px;
+  color: var(--faint);
+  font-size: 11px;
+}
+.owner-filter-chip {
+  display: inline-block;
+  margin-top: 10px;
+  padding: 4px 9px;
+  border-radius: var(--r-pill);
+  background: var(--chip);
+  color: var(--mute);
+  font-size: 11px;
+}
+.owner-region-title {
+  margin: 26px 0 10px;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+/* What needs you: a list, not a card. */
+.owner-attention-body[data-state="unavailable"] {
+  border-left: 0;
+}
+.owner-items {
+  border-top: 1px solid var(--line);
+}
+.owner-item {
+  padding: 9px 0;
+  border-bottom: 1px solid var(--line);
+}
+.owner-item-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.owner-item-count {
+  flex: none;
+  min-width: 22px;
+  color: var(--ink);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.owner-item-count:empty {
+  display: none;
+}
+.owner-item-label {
+  min-width: 0;
+  font-weight: 500;
+}
+.owner-item-detail {
+  margin-top: 2px;
+  color: var(--mute);
+  font-size: 13px;
+}
+.owner-item-source {
+  margin-left: auto;
+  flex: none;
+  color: var(--faint);
+  font-size: 11px;
+}
+.owner-drilldown,
+.owner-item-link {
+  min-width: 0;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  color: var(--ink);
+  text-decoration: none;
+}
+.owner-item-link:hover,
+.owner-drilldown:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.owner-launch-link strong,
-.owner-launch-row strong {
-  flex: none;
+.owner-drilldown-go {
+  color: var(--faint);
+  font-size: 12px;
+}
+.owner-chip-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.owner-missing-link {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  color: var(--mute);
+  font-size: 11px;
+  text-decoration: none;
+}
+.owner-missing-link:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.owner-source-empty {
+  color: var(--mute);
+}
+.owner-back {
+  margin-top: 16px;
+}
+
+/* Source tiles: the standard Frank widget grid, one tile per read model. */
+.owner-source-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+.owner-source {
+  min-width: 0;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--card);
+}
+.owner-source-panel {
+  max-width: 760px;
+  margin-top: 18px;
+}
+.owner-source-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.owner-source-title {
+  min-width: 0;
   font-size: 13px;
   font-weight: 600;
 }
-.owner-launch-link span,
-.owner-launch-row span {
-  min-width: 0;
-  color: #666;
-}
-.owner-launch-link small {
+.owner-source-chip {
+  margin-left: auto;
   flex: none;
-  color: #666;
-  font-size: 10px;
 }
-.owner-launch-row.is-unavailable {
+.owner-source-purpose {
+  margin-top: 3px;
+  color: var(--mute);
+  font-size: 13px;
+}
+.owner-source-body {
+  margin-top: 12px;
+  min-height: 86px;
+}
+.owner-source-body > * + * {
+  margin-top: 10px;
+}
+.owner-source-summary {
+  color: var(--ink);
+}
+.owner-source-stale {
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+  color: var(--mute);
+  font-size: 13px;
+}
+.owner-source-reason {
+  color: var(--faint);
+  font-size: 11px;
+}
+.owner-source-foot {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.owner-source-stamp {
+  margin-left: auto;
+  flex: none;
+}
+.owner-source-stamp .home-timestamp {
+  color: var(--faint);
+  font-size: 11px;
+}
+.owner-metrics {
   display: grid;
-  gap: 2px;
-  color: #666;
+  grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  gap: 8px;
 }
-.owner-launch :focus-visible {
-  outline: 2px solid #111;
-  outline-offset: 3px;
+.owner-metric {
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
 }
-/* Keep names and access requirements readable in narrow columns. */
-.owner-launch-link { display: grid; grid-template-columns: 1fr auto; gap: 3px 8px; }
-.owner-launch-link strong { grid-column: 1; grid-row: 1; }
-.owner-launch-link small { grid-column: 2; grid-row: 1; }
-.owner-launch-link span { grid-column: 1 / -1; grid-row: 2; }
-.owner-launch-group h2 { font-size: 12px; font-weight: 600; text-transform: none; letter-spacing: 0; }
-.owner-launch-primary { min-height: 44px; }
-.owner-launch-access { font-size: 12px; }
+.owner-metric dt {
+  color: var(--faint);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.owner-metric dd {
+  margin-top: 2px;
+  font-size: 15px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+.owner-source-retry {
+  align-self: flex-start;
+}
+
+/* Loading: a skeleton, never a spinner in the middle of content. */
+.owner-skeleton {
+  height: 9px;
+  border-radius: var(--r-pill);
+  background: var(--chip);
+  animation: owner-pulse 1.4s var(--ease) infinite;
+}
+.owner-skeleton.is-short {
+  width: 58%;
+}
+@keyframes owner-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.45; }
+}
+
+/* Native application panel. One visible at a time; a retained panel is hidden
+   rather than destroyed so an owner's draft survives a section switch. */
+.owner-app-host {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.owner-app-guard {
+  flex: none;
+  margin: 12px 24px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  background: var(--chip);
+}
+.owner-app-guard[hidden] {
+  display: none;
+}
+.owner-app-guard-copy {
+  color: var(--ink);
+  font-size: 13px;
+}
+.owner-app-guard-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
+.owner-app-guard-primary,
+.owner-app-guard-secondary {
+  min-height: 32px;
+  padding: 6px 12px;
+  border-radius: var(--r-pill);
+  font: 500 13px/1 var(--font);
+  cursor: pointer;
+}
+.owner-app-guard-primary {
+  border: 1px solid var(--ink);
+  background: var(--bg);
+  color: var(--ink);
+}
+.owner-app-guard-secondary {
+  border: 1px solid var(--ink);
+  background: var(--ink);
+  color: var(--bg);
+}
+.owner-app-panel {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.owner-app-panel[hidden] {
+  display: none;
+}
+.owner-app-bar {
+  flex: none;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 8px 24px;
+  border-bottom: 1px solid var(--line);
+}
+.owner-app-ident {
+  min-width: 0;
+}
+.owner-app-title {
+  font-size: 15px;
+  font-weight: 500;
+  letter-spacing: -0.01em;
+}
+.owner-app-title:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: 4px;
+}
+.owner-app-source {
+  color: var(--faint);
+  font-size: 11px;
+}
+.owner-app-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.owner-app-action {
+  min-height: 30px;
+  padding: 5px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--bg);
+  color: var(--ink);
+  font: 500 13px/1 var(--font);
+  cursor: pointer;
+}
+.owner-app-action:hover {
+  border-color: var(--ink);
+}
+.owner-app-action:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+.owner-app-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.owner-app-body > .owner-app-frame {
+  flex: 1;
+  min-height: 0;
+}
+.owner-app-frame {
+  width: 100%;
+  height: 100%;
+  border: 0;
+  background: var(--bg);
+}
+.owner-app-host .owner-app-state {
+  flex: 1;
+  align-items: flex-start;
+  justify-content: flex-start;
+  max-width: 560px;
+  margin: 0;
+  padding: 28px 24px 24px;
+  text-align: left;
+}
+.owner-app-state > * + * {
+  margin-top: 6px;
+}
+.owner-app-state strong {
+  font-size: 14px;
+}
+.owner-app-state span {
+  color: var(--mute);
+}
+.owner-app-reason {
+  color: var(--faint) !important;
+  font-size: 11px;
+}
+.owner-app-state-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 12px;
+}
+.owner-app-escape {
+  color: var(--mute);
+  font-size: 13px;
+  text-underline-offset: 3px;
+}
+.owner-app-escape:hover {
+  color: var(--ink);
+}
+
+/* Phone: the rail becomes one horizontally scrollable strip of real links. */
+@media (max-width: 900px) {
+  .owner-bar {
+    padding: 8px 16px;
+  }
+  .owner-body {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .owner-rail {
+    padding: 6px 8px;
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+  .owner-rail-list {
+    flex-direction: row;
+    gap: 4px;
+  }
+  .owner-rail-link {
+    min-height: 44px;
+    padding: 10px 12px;
+    white-space: nowrap;
+  }
+  .owner-rail-link[aria-current="page"]::before {
+    left: 50%;
+    top: 8px;
+    transform: translateX(-50%);
+  }
+  .owner-rail-link[aria-current="page"] {
+    padding-top: 16px;
+  }
+  .owner-panel-read {
+    padding: 16px 16px 32px;
+  }
+  /* A long record name moves to its own line instead of breaking mid-phrase
+     beside its count. */
+  .owner-items .owner-item-line {
+    flex-wrap: wrap;
+  }
+  .owner-item-source {
+    margin-left: 0;
+    width: 100%;
+  }
+  .owner-app-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+    padding: 8px 16px;
+  }
+  .owner-app-actions {
+    margin-left: 0;
+    width: 100%;
+  }
+  .owner-app-guard {
+    margin: 10px 16px 0;
+  }
+  .owner-app-state {
+    max-width: none;
+  }
+}
+
 @media (max-width: 620px) {
-  .owner-launch { padding: 20px 16px 28px; }
-  .owner-launch-groups { grid-template-columns: 1fr; gap: 24px; }
+  .owner-source-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .owner-panel-title {
+    font-size: 18px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .owner-skeleton {
+    animation: none;
+  }
 }

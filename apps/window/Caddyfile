@@ -31,10 +31,62 @@
     }
 }
 
+(owner_identity_outpost) {
+	# The embedded outpost's own path must answer without a session, and must
+	# be handled before anything else on a gated host. It runs inside the
+	# authentik server process; there is no separate outpost container.
+	reverse_proxy /outpost.goauthentik.io/* owner-identity-server:9000 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+}
+
+(owner_identity_session_gate) {
+	# One owner session, checked against the identity provider on every request.
+	# The outpost session lives in authentik's database, so revoking the session
+	# or disabling the user blocks the next request even when the native
+	# application's own upstream session is still alive.
+	forward_auth owner-identity-server:9000 {
+		uri /outpost.goauthentik.io/auth/caddy
+		copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Entitlements X-Authentik-Email X-Authentik-Name X-Authentik-Uid
+		# The outpost reconstructs the original request from these to decide
+		# whether to serve the request or redirect to the sign-in flow. Caddy's
+		# forward_auth does not set them, and without them the outpost answers
+		# 500 "failed to detect a forward URL from Caddy", which the edge then
+		# presents to the browser as a 404. Measured: a request carrying only
+		# the Host header fails, and the same request with this set returns 302.
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Uri {http.request.uri}
+		header_up X-Forwarded-Method {http.request.method}
+		header_up X-Forwarded-Proto {http.request.scheme}
+		# Only the pinned identity-provider ingress subnet may speak for the
+		# client; nothing else on this host can forge X-Forwarded-*.
+		trusted_proxies 172.31.50.0/24
+	}
+}
+
+# Applied to a native application host that Frank is allowed to frame.
+(owner_native_app_headers) {
+	header {
+		# The upstream apps answer X-Frame-Options, which compares origins and
+		# therefore rejects the same-site Frank parent. Replace that one header
+		# with an explicit CSP allowlist naming only the Frank origin. Only
+		# frame-ancestors is set, so no other app behaviour is restricted.
+		-X-Frame-Options
+		Content-Security-Policy "frame-ancestors https://frank.fail"
+		X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+	}
+}
+
 (frank_private_response_headers) {
     header {
         X-Frame-Options "DENY"
-        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'"
+        # frame-src is the parent half of the framing decision: default-src
+        # would otherwise fall back to 'self' and block the owner workspace from
+        # opening a native owner application in the same window. frame-ancestors
+        # stays 'none', so Frank itself is still unframeable.
+        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; frame-src 'self' https://crm.frank.fail https://marketing.frank.fail https://mail.frank.fail; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; media-src 'self' blob:; worker-src 'self' blob:; manifest-src 'self'"
         Cache-Control "no-store, private"
         X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
     }
@@ -129,6 +181,11 @@ frank.fail {
     }
 
     route {
+        # The identity provider's own path is the only thing on this host that
+        # answers without an owner session. It must stay ahead of every other
+        # route so the sign-in round trip can complete.
+        import owner_identity_outpost
+
         # Claude MCP connector -> mcp-vps.service on the host, port 8787.
         # The MCP server validates the Authorization bearer token itself, so
         # this route must stay ahead of the operator Basic Auth fallback.
@@ -290,8 +347,38 @@ frank.fail {
             }
         }
 
+        # ---- owner session boundary -------------------------------------
+        # Break-glass recovery, kept until the owner session and its own
+        # recovery path have both passed acceptance. It is Basic Auth only:
+        # there is no anonymous route into Frank anywhere on this host, because
+        # the old remote_ip bypass is removed in the same change.
+        @owner_recovery path /__owner-recovery /__owner-recovery/*
+        handle @owner_recovery {
+            uri strip_prefix /__owner-recovery
+            import frank_private_response_headers
+            basic_auth {
+                {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
+                {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
+            }
+            reverse_proxy frank-window:8080 {
+                header_up Host {host}
+                header_up X-Real-IP {remote_host}
+                header_up X-Forwarded-Proto https
+                header_up -Authorization
+                header_up -Proxy-Authorization
+                header_up -X-Frank-Operator-Attestation
+                header_up X-Frank-Operator-Attestation {$FRANK_BASIC_AUTH_HASH}
+                header_down -Set-Cookie
+            }
+        }
+
+        # Everything below this line requires the shared owner session. The
+        # named matcher is gone: `forward_auth` writes the outpost's redirect
+        # when there is no session, so the request never reaches the app.
+        import owner_identity_session_gate
+
         # Live keeps the pinned AgentTrail board's native inline viewer and
-        # read controls while remaining behind the operator Basic Auth edge.
+        # read controls while remaining behind the owner session boundary.
         @agenttrail_mutation path /agenttrail/setup /agenttrail/setup/ /agenttrail/setup-board /agenttrail/setup-board/ /agenttrail/spawn /agenttrail/spawn/ /agenttrail/hook /agenttrail/hook/ /agenttrail/nudge /agenttrail/nudge/
         handle @agenttrail_mutation {
             respond "AgentTrail mutation routes are not available through Frank" 403
@@ -299,13 +386,7 @@ frank.fail {
 
         @agenttrail path /agenttrail /agenttrail/*
         handle @agenttrail {
-            # Only the owner laptop on the private Tailscale network bypasses Basic Auth.
-            @frank_operator_auth not remote_ip 100.86.154.37
             import frank_agenttrail_response_headers
-            basic_auth @frank_operator_auth {
-                {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
-                {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
-            }
             reverse_proxy frank-window:8080 {
                 header_up Host {host}
                 header_up X-Real-IP {remote_host}
@@ -321,12 +402,7 @@ frank.fail {
 
         @map_artifact path /api/control/maps/artifact /api/control/projections/*/artifact
         handle @map_artifact {
-            @frank_operator_auth not remote_ip 100.86.154.37
             import frank_map_artifact_response_headers
-            basic_auth @frank_operator_auth {
-                {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
-                {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
-            }
             reverse_proxy frank-window:8080 {
                 header_up Host {host}
                 header_up X-Real-IP {remote_host}
@@ -340,13 +416,8 @@ frank.fail {
 
         handle {
             import frank_private_response_headers
-            @frank_operator_auth not remote_ip 100.86.154.37
             request_body {
                 max_size 260MB
-            }
-            basic_auth @frank_operator_auth {
-                {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
-                {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
             }
             reverse_proxy frank-window:8080 {
                 header_up Host {host}
@@ -442,6 +513,207 @@ mail.blockwise.sale {
     handle {
         respond 404
     }
+}
+
+# ---------------------------------------------------------------------------
+# Owner identity provider.
+#
+# The sign-in form lives here and only here. It is never framed: the outpost
+# answers an unauthenticated request from any gated host with a redirect to
+# this origin, and the browser performs a same-tab round trip that returns to
+# the intended Frank route. There is no iframe anywhere in the sign-in path.
+# ---------------------------------------------------------------------------
+auth.frank.fail {
+	encode zstd gzip
+	import frank_common_security_headers
+	header {
+		X-Frame-Options "DENY"
+		# Only frame-ancestors is set here, deliberately.
+		#
+		# The requirement is that the owner's sign-in form is never rendered
+		# inside a frame, and frame-ancestors 'none' plus X-Frame-Options DENY
+		# achieves exactly that. An earlier revision of this block also pinned
+		# default-src/script-src/style-src/connect-src. Loading the real flow
+		# page in a browser showed that broke authentik's own inline bootstrap
+		# scripts ("Executing inline script violates ... 'script-src 'self''"),
+		# and a partially broken identity provider is a worse failure than an
+		# otherwise unrestricted page that nothing is allowed to frame. The
+		# remaining directives are therefore omitted rather than guessed at.
+		Content-Security-Policy "frame-ancestors 'none'"
+		Cache-Control "no-store, private"
+		X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+	}
+
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers>Authorization delete
+				request>headers>Proxy-Authorization delete
+				request>headers>Referer delete
+				# Cookie and Set-Cookie are deliberately NOT listed here. The
+				# 2.8.x log-filter field-deletion bug documented on the
+				# frank.fail block mutates the live request and response instead
+				# of only the log line, and on this host it stripped Set-Cookie
+				# from the identity provider's own responses, which silently
+				# broke sign-out. Caddy already redacts credentials from logs
+				# while log_credentials is unset.
+				request>uri delete
+			}
+		}
+	}
+
+	request_body {
+		max_size 1MB
+	}
+
+	reverse_proxy owner-identity-server:9000 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Frappe CRM + Helpdesk, published for the owner workspace.
+#
+# The native application keeps its own session, its own CSRF protection and its
+# own password login. This edge adds the shared owner session boundary in front
+# of it and scopes who may frame it. Frappe's sid cookie stays a host-only
+# cookie on crm.frank.fail; it is never promoted to a .frank.fail cookie.
+# ---------------------------------------------------------------------------
+crm.frank.fail {
+	encode zstd gzip
+	import frank_common_security_headers
+
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers>Authorization delete
+				request>headers>Proxy-Authorization delete
+				request>headers>Referer delete
+				# See the auth.frank.fail block: Set-Cookie must not be listed
+				# in a log filter on this Caddy version.
+				request>uri delete
+			}
+		}
+	}
+
+	route {
+		import owner_identity_outpost
+		import owner_identity_session_gate
+		import owner_native_app_headers
+		request_body {
+			# Frappe attachments and site backups; well below the public edge's
+			# 260MB because this host serves no anonymous uploads.
+			max_size 64MB
+		}
+		reverse_proxy owner-crm-frontend-1:8080 {
+			# Frappe serves a site by Host header. The public name is not the
+			# internal site name, so the internal name is restored here and the
+			# public one is preserved for the application to read.
+			header_up Host owner.crm.internal
+			header_up X-Forwarded-Host crm.frank.fail
+			header_up X-Real-IP {remote_host}
+			# Frappe sets Secure on its sid cookie only when the request scheme
+			# is https, which it reads from this header via the WSGI proxy fix.
+			header_up X-Forwarded-Proto https
+			header_down -X-Frame-Options
+		}
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Mautic admin, published for the owner workspace.
+#
+# This is an additive hostname. The public marketing boundary stays exactly as
+# it is on mail.blockwise.sale, including /email/unsubscribe/* and /email/dnc/*;
+# nothing in this block changes the public opt-out path.
+# ---------------------------------------------------------------------------
+marketing.frank.fail {
+	encode zstd gzip
+	import frank_common_security_headers
+
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers>Authorization delete
+				request>headers>Proxy-Authorization delete
+				request>headers>Referer delete
+				# See the auth.frank.fail block: Set-Cookie must not be listed
+				# in a log filter on this Caddy version.
+				request>uri delete
+			}
+		}
+	}
+
+	route {
+		import owner_identity_outpost
+		import owner_identity_session_gate
+		import owner_native_app_headers
+		request_body {
+			max_size 64MB
+		}
+		reverse_proxy frank-owner-marketing-ingress:80 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+			header_down -X-Frame-Options
+		}
+	}
+}
+
+# ---------------------------------------------------------------------------
+# Owner webmail.
+#
+# One upstream serves both the Roundcube client and the small launch broker in
+# front of it. This block deliberately does NOT set X-Frame-Options and does NOT
+# add a Content-Security-Policy of its own: the ingress already sends
+# `frame-ancestors 'self' https://frank.fail`, and 'self' is load-bearing
+# because Roundcube frames its own message list and message body. Narrowing that
+# to the Frank origin alone renders the mailbox empty.
+# ---------------------------------------------------------------------------
+mail.frank.fail {
+	encode zstd gzip
+	import frank_common_security_headers
+
+	log {
+		output stdout
+		format filter {
+			wrap json
+			fields {
+				request>headers>Authorization delete
+				request>headers>Proxy-Authorization delete
+				request>headers>Referer delete
+				# Set-Cookie must not be listed here; see the auth.frank.fail block.
+				request>uri delete
+			}
+		}
+	}
+
+	route {
+		import owner_identity_outpost
+		import owner_identity_session_gate
+		request_body {
+			max_size 64MB
+		}
+		reverse_proxy owner-webmail-ingress:80 {
+			header_up Host {host}
+			header_up X-Real-IP {remote_host}
+			header_up X-Forwarded-Proto https
+			# The stable owner identity the launch broker reads. Any client
+			# supplied copy is removed before the trusted value is set, so a
+			# forged header cannot survive the edge.
+			header_up -X-Frank-Owner
+			header_up X-Frank-Owner {http.request.header.X-Authentik-Uid}
+			header_up -X-Frame-Options
+		}
+	}
 }
 
 preview.frank.fail {

@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Native owner-only locale and reachable private login links; no custom auth.
 set -euo pipefail
-[[ ${1:-} == --apply ]] || { echo 'preview: set private owner CRM URL and Australia/Perth locale'; exit 0; }
+[[ ${1:-} == --apply ]] || { echo "preview: set owner CRM URL ${OWNER_CRM_PUBLIC_URL:-https://crm.frank.fail} and Australia/Perth locale"; exit 0; }
 container=owner-crm-backend-1
 site=owner.crm.internal
-url=https://srv1625369.tail3084c0.ts.net:8445
+# The owner-facing origin is the workspace hostname. The private Tailscale Serve
+# address stays available as a fallback transport but is no longer the base URL,
+# because every link, asset and redirect the app generates must point at the
+# origin the owner's browser actually uses.
+url=${OWNER_CRM_PUBLIC_URL:-https://crm.frank.fail}
 docker exec "$container" bench --site "$site" set-config host_name "$url"
 docker exec "$container" bench --site "$site" execute frappe.client.set_value --kwargs '{"doctype":"System Settings","name":"System Settings","fieldname":{"time_zone":"Australia/Perth","country":"Australia","language":"en","date_format":"dd/mm/yyyy"}}' >/dev/null
 # Run the native setup stages, rather than bypassing the wizard-completion flags.

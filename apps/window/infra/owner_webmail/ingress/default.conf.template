@@ -1,0 +1,72 @@
+# Owner webmail ingress.
+#
+# One upstream for the identity layer: everything the browser needs arrives
+# here, and this file decides which internal service answers. The nginx image
+# renders it from this committed template with envsubst, so the ingress shared
+# secret never lives in Git and the identity headers cannot be spoofed by a
+# client (nginx replaces them on the launch route).
+#
+# Only OWNER_WEBMAIL_* variables are substituted; nginx runtime variables such
+# as $host and $remote_addr are preserved by NGINX_ENVSUBST_FILTER.
+
+server {
+    listen 80 default_server;
+    server_name _;
+
+    # Roundcube sends no X-Frame-Options of its own (see
+    # roundcube/config.inc.php). The framing policy is stated once, here.
+    #
+    # 'self' is required: the client renders message bodies, the message list
+    # and its watermark in same-origin frames of its own. Without it those
+    # frames are blocked and the mailbox renders empty. Only the approved Frank
+    # parent origin may frame the client from outside.
+    proxy_hide_header X-Frame-Options;
+    add_header Content-Security-Policy "frame-ancestors 'self' ${OWNER_WEBMAIL_FRAME_ANCESTORS}" always;
+
+    client_max_body_size ${OWNER_WEBMAIL_MAX_UPLOAD};
+
+    # The launch broker. Exact match only: no prefix, no trailing segment.
+    location = /frank/launch {
+        proxy_pass http://launch:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        # Proof that the request came through this ingress. Any client-supplied
+        # copy is replaced, so the broker can trust it.
+        proxy_set_header X-Owner-Webmail-Ingress "${OWNER_WEBMAIL_INGRESS_SECRET}";
+
+        # The broker answers with a redirect and a cookie; it never reads a body.
+        proxy_pass_request_body off;
+        proxy_set_header Content-Length "";
+        proxy_buffering off;
+        proxy_redirect off;
+    }
+
+    location = /frank/healthz {
+        proxy_pass http://launch:8080/healthz;
+        proxy_set_header Host $host;
+        access_log off;
+    }
+
+    # Everything else is the mail client.
+    location / {
+        proxy_pass http://webmail:80;
+        proxy_http_version 1.1;
+
+        # Roundcube's trusted_host_patterns and force_https depend on these.
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Host $host;
+
+        proxy_redirect off;
+        proxy_buffering off;
+        proxy_read_timeout 300s;
+        proxy_send_timeout 300s;
+    }
+}

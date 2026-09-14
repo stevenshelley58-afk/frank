@@ -38,6 +38,8 @@ WORKDIR /app
 COPY apps/window/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY apps/window/server.py .
+# Owner API routes import these modules during server startup.
+COPY apps/window/owner_*.py ./
 COPY apps/window/blog_studio.py .
 COPY apps/window/ad_radar.py .
 COPY apps/window/review_chat.py .

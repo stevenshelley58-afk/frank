@@ -1,0 +1,56 @@
+# Acceptance edge for the owner workspace.
+#
+# This is NOT production. It is a throwaway second Caddy that serves the same
+# committed site blocks on loopback ports, so the owner sign-in round trip, the
+# framed native application and the logout/denial behaviour can be proven with
+# a real browser without touching frank-caddy or issuing a public certificate.
+#
+# It joins the same Docker networks the production edge joins, so every
+# upstream name resolves exactly as it does in production.
+#
+# Start and stop it only through ../bin/acceptance-edge.sh.
+name: owner-identity-acceptance
+
+services:
+  acceptance-edge:
+    image: caddy:2.8-alpine
+    pull_policy: never
+    container_name: owner-identity-acceptance-edge
+    restart: "no"
+    ports:
+      - "127.0.0.1:9443:9443"
+      - "127.0.0.1:9080:9080"
+    environment:
+      # Deliberately NOT the real credentials. The acceptance edge proves the
+      # recovery route fails closed; it does not exercise the owner's own
+      # break-glass password, and it must not hold a copy of that hash.
+      # The hash below is bcrypt of the throwaway string
+      # "acceptance-not-a-real-credential" and protects nothing.
+      FRANK_BASIC_AUTH_USER: acceptance-recovery
+      FRANK_BASIC_AUTH_HASH: $2a$14$6AnEQX2XCMwji8KJSy5mruhUPuzi6R4Pra7vcpQY/H9n6pda.cWci
+      FRANK_ACCEPTANCE_AUTH_USER: acceptance-recovery-secondary
+      FRANK_ACCEPTANCE_AUTH_HASH: $2a$14$6AnEQX2XCMwji8KJSy5mruhUPuzi6R4Pra7vcpQY/H9n6pda.cWci
+    volumes:
+      - /srv/frank/owner-identity/acceptance/Caddyfile:/etc/caddy/Caddyfile:ro
+      - /srv/frank/previews:/srv/frank/previews:ro
+    networks:
+      - frank
+      - owner-identity-ingress
+      - owner-marketing-ingress
+      - owner-crm-ingress
+
+networks:
+  # Every network is owned by another committed component; this edge only joins
+  # them, exactly as frank-caddy does.
+  frank:
+    external: true
+    name: frank
+  owner-identity-ingress:
+    external: true
+    name: owner-identity_owner-identity-ingress
+  owner-marketing-ingress:
+    external: true
+    name: frank_owner_marketing_ingress
+  owner-crm-ingress:
+    external: true
+    name: owner-crm_owner-crm-ingress

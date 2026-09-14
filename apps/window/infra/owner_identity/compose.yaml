@@ -1,0 +1,154 @@
+# Owner identity provider for Frank.
+#
+# One shared owner sign-in for the Frank Window and the native owner
+# applications (Frappe CRM/Helpdesk, Mautic). It is the only authentication
+# authority for the owner workspace; it never joins a customer network, never
+# publishes a host port, and never holds customer data.
+#
+# Deployment seam (all outside Git):
+#   Secrets    /srv/frank/secrets/owner-identity.env   mode 0600, root-owned
+#   State      /srv/frank/owner-identity/              mode 0700, root-owned
+#   Ingress    owner-identity-ingress bridge network, attached to frank-caddy
+#
+# Runtime state never lives in this checkout. The only supported operator
+# entrypoint is bin/owner-identity.
+#
+# Deliberate omissions:
+#   * No Redis. authentik removed its Redis dependency in 2025.10.4 and
+#     2026.8.1/2026.8.2 do not read AUTHENTIK_REDIS__* at all.
+#   * No /var/run/docker.sock. The upstream Compose example mounts it so the
+#     worker can spawn *separate* outpost containers. This deployment uses the
+#     embedded outpost that already runs inside the server process, so the
+#     worker needs no Docker access and is not given any.
+name: owner-identity
+
+x-runtime-labels: &runtime-labels
+  io.frank.owner-identity.applied-source-sha: ${OWNER_IDENTITY_SOURCE_SHA:?OWNER_IDENTITY_SOURCE_SHA is required}
+
+x-authentik: &authentik
+  image: ghcr.io/goauthentik/server:${OWNER_IDENTITY_TAG:?OWNER_IDENTITY_TAG is required}@${OWNER_IDENTITY_DIGEST:?OWNER_IDENTITY_DIGEST is required}
+  pull_policy: never
+  restart: unless-stopped
+  labels: *runtime-labels
+  shm_size: 512mb
+  # The image's default uid is 1000, which on this host is the real `ubuntu`
+  # login account. The identity store must not be owned by an account that can
+  # log in, so the container runs as a dedicated uid with no host account.
+  # Override with OWNER_IDENTITY_UID/GID only if the runtime tree is re-owned
+  # to match; bin/owner-identity fails closed on a mismatch.
+  user: "${OWNER_IDENTITY_UID:-10001}:${OWNER_IDENTITY_GID:-10001}"
+  environment: &authentik-environment
+    AUTHENTIK_SECRET_KEY: ${OWNER_IDENTITY_SECRET_KEY:?OWNER_IDENTITY_SECRET_KEY is required}
+    AUTHENTIK_POSTGRESQL__HOST: postgresql
+    AUTHENTIK_POSTGRESQL__PORT: "5432"
+    AUTHENTIK_POSTGRESQL__NAME: authentik
+    AUTHENTIK_POSTGRESQL__USER: authentik
+    AUTHENTIK_POSTGRESQL__PASSWORD: ${OWNER_IDENTITY_DB_PASSWORD:?OWNER_IDENTITY_DB_PASSWORD is required}
+    AUTHENTIK_ERROR_REPORTING__ENABLED: "false"
+    AUTHENTIK_DISABLE_UPDATE_CHECK: "true"
+    AUTHENTIK_DISABLE_STARTUP_ANALYTICS: "true"
+    # Read only while the database is empty. The token becomes the permanent
+    # API credential of the built-in `akadmin` account, which is what
+    # bin/bootstrap.py authenticates with and what the component treats as
+    # break-glass. Leaving it unset does NOT disable provisioning; it silently
+    # produces an unusable akadmin, so bin/health.sh checks that it works.
+    AUTHENTIK_BOOTSTRAP_TOKEN: ${OWNER_IDENTITY_BOOTSTRAP_TOKEN:?OWNER_IDENTITY_BOOTSTRAP_TOKEN is required}
+    AUTHENTIK_BOOTSTRAP_PASSWORD: ${OWNER_IDENTITY_BOOTSTRAP_PASSWORD:?OWNER_IDENTITY_BOOTSTRAP_PASSWORD is required}
+    AUTHENTIK_BOOTSTRAP_EMAIL: ${OWNER_IDENTITY_BOOTSTRAP_EMAIL:-akadmin@frank.fail}
+    AUTHENTIK_LOG_LEVEL: ${OWNER_IDENTITY_LOG_LEVEL:-info}
+    # Only the identity provider's own session cookie age is set here; the
+    # authenticated session lifetime is owned by the User Login stage and is
+    # created by bin/bootstrap.py.
+    AUTHENTIK_SESSIONS__UNAUTHENTICATED_AGE: ${OWNER_IDENTITY_UNAUTHENTICATED_AGE:-minutes=30}
+    # Caddy is the only hop in front of authentik, and the ingress subnet is
+    # pinned at the bottom of this file, so the trust boundary is explicit
+    # rather than "any peer on any private range".
+    # This one setting is a comma-separated string, not a scalar host and not a
+    # JSON/YAML list. authentik's Rust listener parses each comma-separated
+    # entry as a CIDR and aborts startup with "invalid IP address syntax" for a
+    # space-separated string, a JSON array, or an empty value. Verified against
+    # ghcr.io/goauthentik/server:2026.8.2.
+    AUTHENTIK_LISTEN__TRUSTED_PROXY_CIDRS: "127.0.0.0/8,${OWNER_IDENTITY_INGRESS_SUBNET:-172.31.50.0/24}"
+    # No outbound email: the owner identity is provisioned by bin/bootstrap.py,
+    # not by invitation or self-service email flows.
+    AUTHENTIK_EMAIL__HOST: localhost
+    AUTHENTIK_EMAIL__PORT: "25"
+  volumes:
+    - /srv/frank/owner-identity/data:/data
+    - /srv/frank/owner-identity/certs:/certs
+    - /srv/frank/owner-identity/blueprints:/blueprints/custom:ro
+  # Default placement for the worker; the server overrides this so the Frank
+  # edge can reach it by a stable name on the ingress network.
+  networks: [owner-identity-internal]
+
+services:
+  postgresql:
+    image: postgres:16-alpine@sha256:cf78e76683b9ca8c5733cbbdce6c9262b45b6767934dd0a95e671f9a0fc20685
+    pull_policy: never
+    restart: unless-stopped
+    labels: *runtime-labels
+    environment:
+      POSTGRES_DB: authentik
+      POSTGRES_USER: authentik
+      POSTGRES_PASSWORD: ${OWNER_IDENTITY_DB_PASSWORD:?OWNER_IDENTITY_DB_PASSWORD is required}
+      # The identity database is a first-class recovery target. Keep encoding
+      # and collation deterministic so a restore cannot silently change them.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - /srv/frank/owner-identity/postgresql:/var/lib/postgresql/data
+    networks: [owner-identity-internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U authentik -d authentik -h 127.0.0.1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+
+  server:
+    <<: *authentik
+    command: server
+    depends_on:
+      postgresql: {condition: service_healthy}
+    networks:
+      owner-identity-internal: {}
+      # A stable alias, so the Frank edge never depends on a Compose-generated
+      # container name.
+      owner-identity-ingress:
+        aliases: [owner-identity-server]
+    healthcheck:
+      # The image ships Python but no HTTP client binary.
+      test:
+        - CMD
+        - python3
+        - -c
+        - "import sys,urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:9000/-/health/ready/', timeout=5).status == 200 else 1)"
+      interval: 20s
+      timeout: 10s
+      retries: 15
+      start_period: 120s
+
+  worker:
+    <<: *authentik
+    command: worker
+    # The background worker has no reason to serve HTTP to the edge.
+    networks: [owner-identity-internal]
+    depends_on:
+      postgresql: {condition: service_healthy}
+      # healthy, not started: the server owns the migration lock, and a worker
+      # that races it is how a migration graph gets interleaved.
+      server: {condition: service_healthy}
+
+networks:
+  # Database and application stay private. Nothing here needs outbound
+  # internet access at runtime.
+  owner-identity-internal:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${OWNER_IDENTITY_INTERNAL_SUBNET:-172.31.51.0/24}
+  # The only route in. frank-caddy attaches to this network; nothing else does.
+  owner-identity-ingress:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: ${OWNER_IDENTITY_INGRESS_SUBNET:-172.31.50.0/24}

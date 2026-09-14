@@ -9,11 +9,22 @@ const TEMPLATE_PATH = "/ad-studio/templates/";
 const TEMPLATE_ID = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
 const OPERATE_PATHS = { "/live": "live", "/map": "map", "/control": "control" };
 const STATIC_PATHS = { "/tools": "tools", "/files": "files", "/connections": "connections", "/accounts": "accounts", "/trace": "trace", "/releases": "releases" };
-const HOME_PATH = /^\/(project|entity)\/([^/]+)(?:\/([^/]+))?\/?$/;
+const HOME_PATH = /^\/(project|entity)\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?\/?$/;
 const ENTITY_IDS = new Set([
   "tool:connections", "tool:accounts", "tool:mail", "tool:widget-builder", "tool:campaigns", "tool:ad-templates",
   "tool:ad-template-generator", "agent:hermes", "service:umami", "service:activepieces", "service:frank-window",
 ]);
+
+// The owner workspace lives inside the Blockwise project home so the existing
+// project, rail and technical-view contracts stay intact. Each section is a
+// fixed allowlisted identifier: a section is never an arbitrary user string,
+// and the only variable segment is an opaque customer identifier.
+const OWNER_PROJECT_ID = "blockwise";
+export const OWNER_SECTIONS = Object.freeze([
+  "mail", "crm", "support", "campaigns", "revenue", "results", "notifications",
+]);
+export const OWNER_CUSTOMER_SEGMENT = "customer";
+const OWNER_SECTION_IDS = new Set(OWNER_SECTIONS);
 
 function validId(value) {
   return /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/.test(String(value || ""));
@@ -23,8 +34,32 @@ export function isOwnerDashboardProject(projectId, search = "") {
   return projectId === "blockwise" && new URLSearchParams(search).get("technical") !== "1";
 }
 
+function ownerRoute(segment) {
+  if (segment === undefined) return { view: "project", projectId: OWNER_PROJECT_ID };
+  if (OWNER_SECTION_IDS.has(segment)) {
+    return { view: "project", projectId: OWNER_PROJECT_ID, ownerSection: segment };
+  }
+  return null;
+}
+
+export function ownerPathForSection(section) {
+  if (!OWNER_SECTION_IDS.has(section)) return `/project/${OWNER_PROJECT_ID}`;
+  return `/project/${OWNER_PROJECT_ID}/${section}`;
+}
+
+export function ownerPathForCustomer(customerId) {
+  if (!validId(customerId)) return `/project/${OWNER_PROJECT_ID}`;
+  return `/project/${OWNER_PROJECT_ID}/${OWNER_CUSTOMER_SEGMENT}/${encodeURIComponent(customerId)}`;
+}
+
 export function routeForPath(pathname) {
-  const path = pathname.replace(/\/+$/, "") || "/";
+  // A caller may hand us a full relative URL. Parsing the path alone keeps
+  // query parameters such as `?technical=1` from becoming part of an identifier,
+  // which previously turned a valid home into an invalid one.
+  const raw = String(pathname ?? "");
+  const queryIndex = raw.search(/[?#]/);
+  const pathOnly = queryIndex === -1 ? raw : raw.slice(0, queryIndex);
+  const path = pathOnly.replace(/\/+$/, "") || "/";
   if (path === AD_TEMPLATE_GENERATOR_PATH || path === LEGACY_AD_STUDIO_PATH) return { view: "ad-template-generator" };
   if (path === BLOG_STUDIO_PATH) return { view: "blog-studio" };
   if (path === AD_RADAR_PATH) return { view: "ad-radar" };
@@ -34,7 +69,32 @@ export function routeForPath(pathname) {
   if (STATIC_PATHS[path]) return { view: STATIC_PATHS[path] };
   const match = path.match(HOME_PATH);
   if (match?.[1] === "project" && validId(match[2]) && !match[3]) return { view: "project", projectId: decodeURIComponent(match[2]) };
-  if (match?.[1] === "entity" && validId(match[2]) && validId(match[3])) {
+  if (match?.[1] === "project" && validId(match[2]) && match[3]) {
+    const projectId = decodeURIComponent(match[2]);
+    const segment = decodeURIComponent(match[3]);
+    if (projectId !== OWNER_PROJECT_ID) return { view: "hub", invalid: true, message: "That Frank home address is not valid." };
+    const base = ownerRoute(segment);
+    if (!base) {
+      // Decode before validating: a percent-encoded identifier is only
+      // acceptable when what it decodes to is itself a valid identifier, so
+      // encoded separators such as %2F can never widen the route.
+      let customerId = "";
+      try {
+        customerId = decodeURIComponent(match[4] ?? "");
+      } catch {
+        customerId = "";
+      }
+      if (segment === OWNER_CUSTOMER_SEGMENT && match[4] !== undefined && validId(customerId)) {
+        return { view: "project", projectId, ownerCustomerId: customerId };
+      }
+      return { view: "hub", invalid: true, message: `No owner workspace section is registered for “${segment}”.` };
+    }
+    // A customer deep link is exactly two segments; a trailing segment is invalid
+    // rather than silently ignored, so a mistyped shareable link fails loudly.
+    if (match[4] !== undefined) return { view: "hub", invalid: true, message: "That Frank home address is not valid." };
+    return base;
+  }
+  if (match?.[1] === "entity" && validId(match[2]) && validId(match[3]) && match[4] === undefined) {
     const kind = decodeURIComponent(match[2]);
     const id = decodeURIComponent(match[3]);
     if (ENTITY_IDS.has(`${kind}:${id}`)) return { view: "entity-home", entity: { kind, id } };
@@ -52,11 +112,17 @@ export function pathForView(view, detail = {}) {
   if (view === "ad-template-generator") return AD_TEMPLATE_GENERATOR_PATH;
   if (view === "ad-db") return AD_DB_PATH;
   if (view === "ops") return OPS_PATH;
-  if (view === "blockwise-dashboard") return "/project/blockwise";
+  if (view === "blockwise-dashboard") return ownerPathForSection(detail.ownerSection);
   if (view === "blog-studio") return BLOG_STUDIO_PATH;
   if (view === "ad-radar") return AD_RADAR_PATH;
   if (view === "live" || view === "map" || view === "control") return `/${view}`;
   if (Object.values(STATIC_PATHS).includes(view)) return `/${view}`;
+  if (view === "project" && detail.projectId === OWNER_PROJECT_ID && validId(detail.ownerCustomerId)) {
+    return ownerPathForCustomer(detail.ownerCustomerId);
+  }
+  if (view === "project" && detail.projectId === OWNER_PROJECT_ID && detail.ownerSection !== undefined) {
+    return ownerPathForSection(detail.ownerSection);
+  }
   if (view === "project" && validId(detail.projectId)) return `/project/${encodeURIComponent(detail.projectId)}`;
   if (view === "entity-home" && validId(detail.entity?.kind) && validId(detail.entity?.id)) return `/entity/${encodeURIComponent(detail.entity.kind)}/${encodeURIComponent(detail.entity.id)}`;
   return "/";

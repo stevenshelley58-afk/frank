@@ -97,7 +97,7 @@ class PublicFrankRouteTest(unittest.TestCase):
         self.assertRegex(route, r"handle \{\s+respond 404\s+\}", msg=route)
         for forbidden in ("/s/*", "/api/*", "/admin/*", "/webviews/*"):
             self.assertNotIn(forbidden, route.lower())
-        self.assertNotIn("basic_auth", route)
+        self.assertNotIn("forward_auth", route)
         self.assertNotIn("/r/*", route)
 
     def test_caddy_uses_existing_private_mautic_ingress_network(self):
@@ -111,14 +111,33 @@ class PublicFrankRouteTest(unittest.TestCase):
             compose,
         )
 
-    def test_root_remains_protected_by_caddy_fallback(self):
+    def test_root_remains_protected_by_the_owner_session_boundary(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
-        public = caddyfile.index("@mini_ui path /mini-frank /mini-frank/* /frank /frank/* /mini /mini/*")
-        fallback = caddyfile.index("        handle {\n            import frank_private_response_headers", public)
-        self.assertLess(public, caddyfile.index("basic_auth"))
-        self.assertIn("basic_auth", caddyfile[fallback:])
-        public_route = caddyfile[public:fallback]
-        self.assertIn("reverse_proxy frank-window:8080", public_route)
+        frank_start = caddyfile.index("frank.fail {")
+        frank_end = caddyfile.index("\nblockwise.sale {", frank_start)
+        frank = caddyfile[frank_start:frank_end]
+
+        # The gate is applied once, before every owner route, so a request with
+        # no session is answered by the outpost redirect before it can reach the
+        # application. This replaced per-route Basic Auth, so the historical
+        # matcher is asserted absent rather than merely unused.
+        self.assertIn("import owner_identity_session_gate", frank)
+        gate = frank.index("import owner_identity_session_gate")
+        # The AgentTrail board and map artifacts are Frank's own surfaces, so the
+        # owner session must be checked before they are reached.
+        for route in ("@agenttrail path", "@map_artifact path"):
+            self.assertTrue(frank.index(route) > gate, f"{route} must sit behind the gate")
+        # /mcpx is deliberately ahead of the gate: the MCP server validates its
+        # own bearer token and answers 401 itself, and the sign-in round trip
+        # cannot complete if this route is gated. Asserted here so a future edit
+        # neither gates it silently nor assumes the gateway is what protects it.
+        self.assertLess(frank.index("@claude_mcp path"), gate)
+        self.assertNotIn('respond "Frank is running."', frank)
+
+        # The public Mini surfaces stay reachable and stay before the gate.
+        public = frank.index("@mini_ui path /mini-frank /mini-frank/* /frank /frank/* /mini /mini/*")
+        self.assertLess(public, gate)
+        self.assertIn("reverse_proxy frank-window:8080", frank[public:gate])
         self.assertNotIn("/srv/mini-frank-site", caddyfile)
 
 

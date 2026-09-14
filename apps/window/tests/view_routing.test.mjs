@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isOwnerDashboardProject, blockwiseTemplateUrl, pathForView, routeForPath, viewForPath } from "../web/js/view-routing.js";
+import { isOwnerDashboardProject, blockwiseTemplateUrl, OWNER_SECTIONS, ownerPathForCustomer, ownerPathForSection, pathForView, routeForPath, viewForPath } from "../web/js/view-routing.js";
 
 test("Ad Template Generator has a canonical deep link and every other view returns home", () => {
   assert.equal(viewForPath("/ad-template-generator"), "ad-template-generator");
@@ -72,3 +72,83 @@ test("owner frontend belongs only to Blockwise and retains technical home", () =
   assert.equal(isOwnerDashboardProject("other", "?preview=blockwise-operations"), false);
   assert.equal(pathForView("blockwise-dashboard"), "/project/blockwise");
 });
+
+test("owner workspace sections are allowlisted nested routes under the Blockwise home", () => {
+  // The plain project home keeps its exact historical shape.
+  assert.deepEqual(routeForPath("/project/blockwise"), { view: "project", projectId: "blockwise" });
+  assert.deepEqual(routeForPath("/project/blockwise/"), { view: "project", projectId: "blockwise" });
+
+  for (const section of OWNER_SECTIONS) {
+    assert.deepEqual(routeForPath(`/project/blockwise/${section}`), {
+      view: "project",
+      projectId: "blockwise",
+      ownerSection: section,
+    });
+    // A trailing slash is the same route, so shared links survive both spellings.
+    assert.deepEqual(routeForPath(`/project/blockwise/${section}/`), {
+      view: "project",
+      projectId: "blockwise",
+      ownerSection: section,
+    });
+    assert.equal(pathForView("project", { projectId: "blockwise", ownerSection: section }), `/project/blockwise/${section}`);
+  }
+
+  // A section is never an arbitrary user string.
+  const unknown = routeForPath("/project/blockwise/not-a-section");
+  assert.equal(unknown.invalid, true);
+  assert.equal(unknown.view, "hub");
+  assert.match(unknown.message, /No owner workspace section is registered/);
+
+  // The technical project home is still reachable for every owner section.
+  assert.deepEqual(routeForPath("/project/blockwise?technical=1"), { view: "project", projectId: "blockwise" });
+});
+
+test("owner customer deep links accept only one opaque identifier", () => {
+  assert.deepEqual(routeForPath("/project/blockwise/customer/abc-123_XYZ"), {
+    view: "project",
+    projectId: "blockwise",
+    ownerCustomerId: "abc-123_XYZ",
+  });
+  assert.deepEqual(routeForPath("/project/blockwise/customer/abc-123_XYZ/"), {
+    view: "project",
+    projectId: "blockwise",
+    ownerCustomerId: "abc-123_XYZ",
+  });
+  assert.equal(pathForView("project", { projectId: "blockwise", ownerCustomerId: "abc-123" }), "/project/blockwise/customer/abc-123");
+
+  // Percent-encoded identifiers decode without becoming a path separator, and
+  // encodings that cannot name a record are rejected instead of half-decoded.
+  assert.equal(routeForPath("/project/blockwise/customer/a%2Eb").ownerCustomerId, "a.b");
+  assert.equal(ownerPathForCustomer("a/b"), "/project/blockwise");
+  assert.equal(ownerPathForCustomer("a b"), "/project/blockwise");
+  assert.equal(routeForPath("/project/blockwise/customer/a%2Fb").invalid, true);
+  assert.equal(routeForPath("/project/blockwise/customer/a%20b").invalid, true);
+
+  // No identifier, an empty identifier, and extra segments are all rejected
+  // rather than silently resolving to a neighbouring route.
+  assert.equal(routeForPath("/project/blockwise/customer").invalid, true);
+  assert.equal(routeForPath("/project/blockwise/customer/").invalid, true);
+  assert.equal(routeForPath("/project/blockwise/customer/abc/extra").invalid, true);
+  assert.equal(routeForPath("/project/blockwise/customer/../secret").invalid, true);
+  assert.equal(routeForPath("/project/blockwise/crm/extra").invalid, true);
+});
+
+test("owner routing does not widen other projects or entity homes", () => {
+  // Another project keeps the historical project view and gains no owner section.
+  assert.deepEqual(routeForPath("/project/mini-frank"), { view: "project", projectId: "mini-frank" });
+  assert.equal(routeForPath("/project/mini-frank/crm").invalid, true);
+  assert.equal(routeForPath("/project/mini-frank/crm").view, "hub");
+  assert.deepEqual(routeForPath("/project/blockwise?technical=1"), { view: "project", projectId: "blockwise" });
+
+  // Entity homes are unchanged, including their two-segment limit.
+  assert.deepEqual(routeForPath("/entity/tool/accounts"), { view: "entity-home", entity: { kind: "tool", id: "accounts" } });
+  assert.equal(routeForPath("/entity/tool/accounts/extra").invalid, true);
+  assert.equal(routeForPath("/entity/tool/not-registered").invalid, true);
+
+  // Unrelated static routes are untouched by the wider path pattern.
+  assert.equal(viewForPath("/tools"), "tools");
+  assert.equal(viewForPath("/ops"), "ops");
+  assert.equal(pathForView("ops"), "/ops");
+  assert.equal(ownerPathForSection("not-a-section"), "/project/blockwise");
+});
+
