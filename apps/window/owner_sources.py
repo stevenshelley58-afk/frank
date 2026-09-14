@@ -197,8 +197,14 @@ def _payload_from_snapshot(source_id: str, snapshot: dict[str, Any]) -> dict[str
 
     items: list[dict[str, Any]] = []
     dropped = 0
+    # A reader may publish its rows inside the frozen owner snapshot shape
+    # (data.rows), as the standard view does, or at the top level of its own
+    # payload, as a reporting section does. Both are accepted here so a reader
+    # does not have to adopt the other's internal shape.
     raw_items: list[Any] = []
-    if isinstance(data.get("items"), list):
+    if isinstance(snapshot.get("items"), list):
+        raw_items = snapshot["items"]
+    elif isinstance(data.get("items"), list):
         raw_items = data["items"]
     elif isinstance(data.get("rows"), list):
         raw_items = data["rows"]
@@ -247,7 +253,7 @@ def _payload_from_snapshot(source_id: str, snapshot: dict[str, Any]) -> dict[str
         status = "error"
         summary = summary or "The source answered, but nothing in it had a destination the owner could open."
 
-    return {
+    payload: dict[str, Any] = {
         "source": source_id,
         "status": status,
         "summary": summary,
@@ -259,6 +265,14 @@ def _payload_from_snapshot(source_id: str, snapshot: dict[str, Any]) -> dict[str
         "unavailable_sources": data.get("unavailable_sources") or [],
         "target": SOURCE_FALLBACK_TARGET.get(source_id),
     }
+    # A reporting section carries its per-source detail alongside the summary.
+    # Preserve it rather than flattening it, so the owner can see which sources
+    # are connected, which are not, and what each one would measure. These are
+    # read-only projections of already-declared metadata, never credentials.
+    for key in ("reports", "ready_sources", "unconfigured_sources", "errored_sources", "connection_state"):
+        if snapshot.get(key) is not None:
+            payload[key] = snapshot[key]
+    return payload
 
 
 def unavailable_payload(source_id: str, detail: str) -> dict[str, Any]:

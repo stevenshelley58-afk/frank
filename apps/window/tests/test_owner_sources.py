@@ -182,14 +182,25 @@ class RouteContract(unittest.TestCase):
 
 class AttachmentIsExplicit(unittest.TestCase):
     def test_attaching_reports_exactly_which_sources_are_live(self):
+        import owner_reporting
         import owner_sources_setup
 
-        with mock.patch.dict(osrc.SOURCE_READERS, {}, clear=True):
+        with mock.patch.dict(osrc.SOURCE_READERS, {}, clear=True), \
+             mock.patch.dict(owner_reporting.REPORTING_READERS, {}, clear=True):
             attached = owner_sources_setup.attach_owner_sources()
-            self.assertEqual(sorted(attached), ["crm", "notifications", "support"])
-            self.assertEqual(sorted(osrc.SOURCE_READERS), ["crm", "notifications", "support"])
-            # A source with no adapter stays honestly unavailable.
+            # Three sources have a real projection reader. Results and Revenue
+            # are attached to the reporting framework even though no provider
+            # credential exists for them yet, because their sections report what
+            # each source measures and the connection step it needs.
+            self.assertEqual(
+                sorted(attached),
+                ["crm", "notifications", "results", "revenue", "support"],
+            )
+            self.assertEqual(sorted(osrc.SOURCE_READERS), sorted(attached))
+            # A source with no reader and no declaration stays honestly unavailable.
             self.assertEqual(osrc.source_payload("campaigns")["status"], "unavailable")
+            # A declared-but-unconnected source is unavailable and says why.
+            self.assertEqual(osrc.source_payload("revenue")["connection_state"], "unconfigured")
 
 
 if __name__ == "__main__":

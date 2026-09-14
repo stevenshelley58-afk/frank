@@ -11,6 +11,7 @@ unavailable by name, which is the honest answer before its adapter exists.
 from __future__ import annotations
 
 import owner_projections
+import owner_reporting
 import owner_sources
 
 
@@ -28,4 +29,9 @@ def attach_owner_sources() -> tuple[str, ...]:
     ):
         owner_sources.register_source(source_id, reader)
         attached.append(source_id)
+    # Results and Revenue are connected to the framework that reports them, even
+    # though no provider credential exists for them yet. Their sections therefore
+    # render what each source measures, which authority owns it, its limits, and
+    # the exact connection step it needs, instead of an empty panel.
+    attached.extend(owner_reporting.attach_reporting_sources())
     return tuple(attached)
