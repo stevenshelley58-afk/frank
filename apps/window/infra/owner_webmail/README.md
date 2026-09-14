@@ -151,9 +151,22 @@ approved parent origin. Session cookies are host-only (`session_domain` empty),
 ranges).
 
 The guaranteed flow is a **same-tab** navigation: the identity layer's cookie is
-sent on a top-level request, so `SameSite=Lax` is enough everywhere. Embedding
-the panel in an iframe additionally requires `SameSite=None` on the identity
-layer's session cookie and on the launch and client session cookies, because a
-sibling subdomain is a different site. That is a browser third-party-cookie
-policy question, so it is enabled by setting
-`OWNER_WEBMAIL_COOKIE_SAMESITE=None` and is not the default.
+sent on a top-level request, so `SameSite=Lax` is enough.
+
+`SameSite=Lax` is also enough for a **framed** panel. `SameSite` compares the
+registrable domain (eTLD+1), not the origin, and `frank.fail` and
+`mail.frank.fail` share `frank.fail`, so a `Lax` cookie is sent on a same-site
+subresource request inside an iframe. `SameSite=None` is therefore not required
+for framing and is not the default; `OWNER_WEBMAIL_COOKIE_SAMESITE` exists for
+the case where the parent origin is genuinely a different site.
+
+The real framing obstacle is `X-Frame-Options`, which does compare origins. That
+is why the client sends none of its own and the ingress owns the policy as a CSP
+`frame-ancestors` list.
+
+**Unproven, do not rely on it yet:** that this host renders a framed application
+under a scoped `frame-ancestors` once `X-Frame-Options` is stripped has not been
+demonstrated. An isolated attempt returned a block, but it was contaminated by a
+failed TLS handshake, so a broken connection and a deliberate frame rejection
+were indistinguishable. Framing is a design that should work, not a verified
+result.

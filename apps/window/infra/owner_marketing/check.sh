@@ -20,7 +20,7 @@ if docker exec frank-owner-marketing test -f /var/www/html/config/local.php; the
   }
   ' || die native-site-url-or-click-tracking-mismatch
   local_php_stat="$(docker exec frank-owner-marketing stat -c '%U:%G:%a' /var/www/html/config/local.php)"
-  [[ "$local_php_stat" == "root:www-data:${OWNER_MARKETING_LOCAL_PHP_MODE:-640}" ]] || die native-config-file-permissions-unsafe
+  [[ "$local_php_stat" == "root:www-data:${OWNER_MARKETING_LOCAL_PHP_MODE:-660}" ]] || die native-config-file-permissions-unsafe
 fi
 [[ "$preinstall" == --preinstall ]] && { echo "healthy: private Mautic setup reachable through pinned loopback ingress"; exit 0; }
 login_page="$(curl --fail --silent --show-error --max-time 10 "http://127.0.0.1:${MAUTIC_HOST_PORT:-18106}/s/login")"; printf '%s' "$login_page" | grep -Eqi 'mautic|login|sign in' || die native-login-unavailable

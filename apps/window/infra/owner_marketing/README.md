@@ -31,11 +31,13 @@ admin UI correctly while `site_url` is unchanged.
 and Mautic's `secret_key` in clear. Every write to it preserves whatever mode the
 file already had, so a world-readable file stayed world-readable forever.
 `configure_site.sh` and `reply_setup.sh` now normalise ownership and mode to
-`root:www-data 0640` after every write, and `check.sh` fails if the live file is
-anything else. `OWNER_MARKETING_LOCAL_PHP_MODE` exists because Mautic's own
-Configuration screen writes this file as the web server account; the default
-keeps it read-only to that account, and 0660 is the documented alternative if
-that screen has to persist changes.
+`root:www-data 0660` after every write, and `check.sh` fails if the live file is
+anything else. 0660 rather than 0640 is deliberate: at 0755 every local user in
+the container could read the mailbox credential, and 0660 closes exactly that
+hole while leaving the file writable by the account Mautic runs as, so Mautic's
+own Configuration screen keeps working. A read-only 0640 silently breaks that
+native screen, which would trade a security win for a functional regression.
+`OWNER_MARKETING_LOCAL_PHP_MODE` stays as the override.
 
 The pinned upstream image roles are used for opt-in background execution:
 
