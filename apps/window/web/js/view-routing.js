@@ -19,6 +19,10 @@ function validId(value) {
   return /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/.test(String(value || ""));
 }
 
+export function isOwnerDashboardProject(projectId, search = "") {
+  return projectId === "blockwise" && new URLSearchParams(search).get("technical") !== "1";
+}
+
 export function routeForPath(pathname) {
   const path = pathname.replace(/\/+$/, "") || "/";
   if (path === AD_TEMPLATE_GENERATOR_PATH || path === LEGACY_AD_STUDIO_PATH) return { view: "ad-template-generator" };
@@ -48,6 +52,7 @@ export function pathForView(view, detail = {}) {
   if (view === "ad-template-generator") return AD_TEMPLATE_GENERATOR_PATH;
   if (view === "ad-db") return AD_DB_PATH;
   if (view === "ops") return OPS_PATH;
+  if (view === "blockwise-dashboard") return "/project/blockwise";
   if (view === "blog-studio") return BLOG_STUDIO_PATH;
   if (view === "ad-radar") return AD_RADAR_PATH;
   if (view === "live" || view === "map" || view === "control") return `/${view}`;

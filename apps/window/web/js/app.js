@@ -13,11 +13,12 @@ import { mountBlogStudio } from "./blog-studio.js?v=20260831-blog-studio-v1";
 import { mountAdRadar, unmountAdRadar } from "./ad-radar.js?v=20260831-observation-timeline-v1";
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
-import { pathForView, routeForPath } from "./view-routing.js?v=20260906-ad-template-generator-v1";
+import { isOwnerDashboardProject, pathForView, routeForPath } from "./view-routing.js?v=20260914-owner-dashboard-v1";
 import { mountAdDb, setAdDbActive } from "./ad-db.js?v=20260907-ad-db-v2";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
+import { mountOwnerDashboard } from "./owner-dashboard.js?v=20260914-owner-dashboard-v1";
 import { mountOps } from "./ops.js?v=20260904-ops-v1";
 import { isBlockwiseOperationsPreview } from "./blockwise-operations-preview.js";
 import { mountOperationsTool, operationsTool } from "./operations-tools.js";
@@ -29,6 +30,7 @@ const $$ = (s, r) => Array.from((r || document).querySelectorAll(s));
 const TITLES = {
   hub: ["Home", ""],
   project: ["Project", ""],
+  "blockwise-dashboard": ["Blockwise", ""],
   files: ["Files", ""],
   tools: ["Tools", "Start a factory, watch its trace"],
   "ad-template-generator": ["Ad Template Generator", "Source image → ad template"],
@@ -49,6 +51,7 @@ const TITLES = {
 };
 
 let projects = { projects: [] };
+let disposeOwnerDashboard = null;
 
 function syncViewLocation(id, detail = {}) {
   const target = pathForView(id, detail);
@@ -56,6 +59,8 @@ function syncViewLocation(id, detail = {}) {
 }
 
 function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}) {
+  disposeOwnerDashboard?.();
+  disposeOwnerDashboard = null;
   if (id !== "ad-radar") unmountAdRadar();
   const editorWasOpen = closeHomeEditors({ restoreFocus: false });
   if (id !== "project" && id !== "entity-home") clearHomeActions();
@@ -68,7 +73,7 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   $$(".rail-item[data-view]").forEach((b) => b.classList.toggle("is-on", b.dataset.view === railView));
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
-  if (id === "project") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
+  if (id === "project" || id === "blockwise-dashboard") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
   if (id !== "project") miniOperatorPanel.setActive(false);
   if (syncHistory) syncViewLocation(id, routeDetail);
   const more = $("#more-nav");
@@ -130,8 +135,20 @@ function showProject(id, options = {}) {
   const project = projects.projects.find((x) => x.id === id);
   if (!project) { show("hub", options); return false; }
   currentProject = project;
+  if (isOwnerDashboardProject(id, window.location.search)) {
+    document.body.classList.remove("blockwise-operations-preview");
+    show("blockwise-dashboard", { ...options, routeDetail: { projectId: id } });
+    const technical = document.createElement("a");
+    technical.className = "home-action";
+    technical.href = "/project/blockwise?technical=1";
+    technical.textContent = "Technical view";
+    $("#top-actions").replaceChildren(technical);
+    disposeOwnerDashboard = mountOwnerDashboard($("#owner-dashboard"));
+    return true;
+  }
   document.body.classList.toggle("blockwise-operations-preview", id === "blockwise" && isBlockwiseOperationsPreview());
   show("project", { ...options, routeDetail: { projectId: id } });
+  $("#owner-dashboard-return").hidden = id !== "blockwise";
   openProjectHome(currentProject);
   miniOperatorPanel.setActive(id === "mini-frank");
   return true;

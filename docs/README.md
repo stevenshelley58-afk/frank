@@ -55,3 +55,5 @@ remaining activation gates. Component runbooks: [native CRM and Helpdesk](../app
 [private ntfy](../apps/window/infra/owner_notifications/README.md), and
 [native CRM alert hooks](../apps/window/infra/owner_crm_notifications/README.md).
 These are private foundations, not a completed customer-lifecycle acceptance.
+
+- [Blockwise owner dashboard frontend](OWNER_DASHBOARD_FRONTEND.md) records the sample-only frontend and future connection boundary.

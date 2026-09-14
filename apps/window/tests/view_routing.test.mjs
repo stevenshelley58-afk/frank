@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { blockwiseTemplateUrl, pathForView, routeForPath, viewForPath } from "../web/js/view-routing.js";
+import { isOwnerDashboardProject, blockwiseTemplateUrl, pathForView, routeForPath, viewForPath } from "../web/js/view-routing.js";
 
 test("Ad Template Generator has a canonical deep link and every other view returns home", () => {
   assert.equal(viewForPath("/ad-template-generator"), "ad-template-generator");
@@ -61,4 +61,14 @@ test("Blockwise editor links require a safe imported template identity", () => {
     }),
     "",
   );
+});
+
+
+test("owner frontend belongs only to Blockwise and retains technical home", () => {
+  assert.equal(isOwnerDashboardProject("blockwise"), true);
+  assert.equal(isOwnerDashboardProject("blockwise", "?preview=blockwise-operations"), true);
+  assert.equal(isOwnerDashboardProject("blockwise", "?technical=1"), false);
+  assert.equal(isOwnerDashboardProject("mini-frank"), false);
+  assert.equal(isOwnerDashboardProject("other", "?preview=blockwise-operations"), false);
+  assert.equal(pathForView("blockwise-dashboard"), "/project/blockwise");
 });

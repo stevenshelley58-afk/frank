@@ -139,7 +139,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('renderModelProfile(run, detail)', studio)
         self.assertIn('ChatGPT/Codex OAuth — not OpenAI API dashboard', (WEB.parent / "server.py").read_text(encoding="utf-8"))
         self.assertIn('/app.css?v=20260908-review-stability-v3', html)
-        self.assertIn('/js/app.js?v=20260908-review-stability-v3', html)
+        self.assertIn('/js/app.js?v=20260914-owner-dashboard-v1', html)
         self.assertIn('./ad-template-generator.js?v=20260908-review-stability-v3', app)
         self.assertIn('groupAdTemplateGeneratorRuns(runs)', studio)
         self.assertIn('Superseded attempts (${group.superseded.length})', studio)
