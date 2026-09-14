@@ -37,7 +37,7 @@ from typing import Any
 # the workspace host also keeps; the host independently refuses any origin that
 # is not its own declared value, so the two must agree.
 OWNER_APPS: dict[str, dict[str, Any]] = {
-    "mail": {"origin": "https://mail.frank.fail", "home": "/", "label": "Mail"},
+    "mail": {"origin": "https://mail.frank.fail", "home": "/frank/launch", "label": "Mail"},
     "crm": {"origin": "https://crm.frank.fail", "home": "/crm/leads", "label": "CRM"},
     "support": {"origin": "https://crm.frank.fail", "home": "/helpdesk/tickets", "label": "Support"},
     "campaigns": {"origin": "https://marketing.frank.fail", "home": "/s/campaigns", "label": "Email flows"},
@@ -48,10 +48,24 @@ APPROVED_FRAME_ANCESTOR = "https://frank.fail"
 
 DEFAULT_TIMEOUT_SECONDS = 4.0
 
-# Statuses that mean "the application is there". A login redirect or an auth
-# requirement is a healthy application, not a failure: the owner session is a
-# separate concern from whether the app is reachable.
+# Statuses that mean "the application is there". A native application 3xx or
+# auth challenge can be healthy. A redirect to the identity provider is handled
+# separately below because it proves only that the edge intercepted this
+# unauthenticated server probe.
 HEALTHY_STATUSES = frozenset({200, 301, 302, 303, 307, 308, 401, 403})
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Expose the first origin response instead of silently following it.
+
+    The default urllib opener follows a native-host 302 to Authentik. Authentik
+    then answers 200, which describes the identity page, not the application we
+    were asked to probe. Readiness must decide from the approved origin's first
+    response.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ARG002
+        return None
 
 
 def _now() -> int:
@@ -113,12 +127,18 @@ def _identity_redirect(location: str) -> bool:
 
 
 def _probe_origin(app_id: str, timeout: float) -> tuple[bool | None, int | None, str]:
-    """Fetch the application origin. Returns (ready, status, reason)."""
+    """Fetch the application's first origin response.
+
+    Redirects are deliberately not followed: a redirect to Authentik proves
+    only that the edge intercepted this unauthenticated server probe. No later
+    response can prove a native browser session exists.
+    """
     app = OWNER_APPS[app_id]
     url = app["origin"] + app["home"]
     request = urllib.request.Request(url, method="GET", headers={"User-Agent": "frank-owner-readiness/1"})
     try:
-        with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - constant https origin
+        opener = urllib.request.build_opener(_NoRedirect())
+        with opener.open(request, timeout=timeout) as response:  # noqa: S310 - constant https origin
             # A redirect to the identity provider means the edge answered, not
             # the application. Report it as not ready with the real reason so the
             # host shows an honest state instead of a frame that will bounce.
@@ -168,14 +188,15 @@ def app_readiness(app_id: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict
         reason = "origin_probe_unknown"
         detail = f"Frank could not reach {origin} to decide whether it may be framed."
     elif ready_reason == "identity_provider_redirect":
-        # The edge is up and the certificate is good, but the application did not
-        # answer: the owner has not signed in yet. Framing now would show the
-        # identity provider's page inside the panel, which is never acceptable.
+        # The edge is up and the certificate is good, but this server-side probe
+        # has no native browser cookies and the application did not answer.
+        # Framing now would show the identity provider inside the panel, which is
+        # never acceptable.
         frameable = False
         reason = "owner_session_required"
         detail = (
-            f"{origin} is behind the owner sign-in and did not answer Frank directly. "
-            "The owner must sign in before this application can be shown here."
+            f"{origin} redirected the unauthenticated Frank server check to the owner identity provider. "
+            "Frank has no native browser session bridge yet, so it cannot prove or start an authenticated native panel."
         )
     else:
         frameable = bool(ready)

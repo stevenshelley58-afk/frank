@@ -393,6 +393,8 @@ test("readiness, not an iframe load event, decides whether an app is framed", ()
 test("a native path is normalized inside the declared application origin", () => {
   assert.equal(allowedNativePath(ownerApp("crm"), "/crm/leads"), "/crm/leads");
   assert.equal(allowedNativePath(ownerApp("crm"), "/crm/leads?status=Open#top"), "/crm/leads?status=Open#top");
+  assert.equal(ownerApp("mail").home, "/frank/launch");
+  assert.equal(allowedNativePath(ownerApp("mail"), "/frank/launch"), "/frank/launch");
   assert.equal(allowedNativePath(ownerApp("mail"), "/?_task=mail"), "/?_task=mail");
   assert.equal(allowedNativeUrl("crm", "/crm/leads"), "https://crm.frank.fail/crm/leads");
   assert.equal(allowedNativeUrl("support", "/crm/leads"), null);
@@ -567,7 +569,7 @@ test("an authorized application is framed in place, and mail survives a switch",
   appHost.show("mail");
   await appHost.whenSettled();
   const mailFrame = frameOf(panelOf(slot, "mail"));
-  assert.equal(mailFrame.src, "https://mail.frank.fail/");
+  assert.equal(mailFrame.src, "https://mail.frank.fail/frank/launch");
   assert.equal(appHost.panelState("mail"), "ready");
   appHost.show("crm");
   await appHost.whenSettled();

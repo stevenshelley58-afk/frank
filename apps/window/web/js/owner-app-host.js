@@ -40,7 +40,9 @@ export const OWNER_APPS = Object.freeze([
     detail: "Owner mailbox",
     origin: "https://mail.frank.fail",
     pathPrefixes: Object.freeze(["/"]),
-    home: "/",
+    // The broker mints the one-use Roundcube session and redirects to its
+    // native mail view. Going straight to / would show Roundcube's own login.
+    home: "/frank/launch",
     nativeLabel: "mail.frank.fail",
     // Webmail is the one surface where an owner may be mid-draft, so it is the
     // panel Frank preserves across a switch.

@@ -49,7 +49,8 @@ class UnverifiableIsNotAFailure(unittest.TestCase):
         self.assertEqual(reason, "tls_timeout")
 
     def test_probe_timeout_is_unknown(self):
-        with mock.patch.object(readiness.urllib.request, "urlopen", side_effect=socket.timeout):
+        with mock.patch.object(readiness.urllib.request, "build_opener") as build_opener:
+            build_opener.return_value.open.side_effect = socket.timeout
             ready, status, reason = readiness._probe_origin("crm", 1.0)
         self.assertIsNone(ready)
         self.assertIsNone(status)
@@ -98,7 +99,8 @@ class AuthChallengeIsAHealthyApplication(unittest.TestCase):
         import urllib.error
 
         error = urllib.error.HTTPError("https://crm.frank.fail/crm/leads", 302, "Found", {}, None)
-        with mock.patch.object(readiness.urllib.request, "urlopen", side_effect=error):
+        with mock.patch.object(readiness.urllib.request, "build_opener") as build_opener:
+            build_opener.return_value.open.side_effect = error
             ready, status, reason = readiness._probe_origin("crm", 1.0)
         self.assertTrue(ready)
         self.assertEqual(status, 302)
@@ -108,7 +110,8 @@ class AuthChallengeIsAHealthyApplication(unittest.TestCase):
         import urllib.error
 
         error = urllib.error.HTTPError("https://crm.frank.fail/crm/leads", 401, "Unauthorized", {}, None)
-        with mock.patch.object(readiness.urllib.request, "urlopen", side_effect=error):
+        with mock.patch.object(readiness.urllib.request, "build_opener") as build_opener:
+            build_opener.return_value.open.side_effect = error
             ready, _status, _reason = readiness._probe_origin("crm", 1.0)
         self.assertTrue(ready)
 
@@ -116,7 +119,8 @@ class AuthChallengeIsAHealthyApplication(unittest.TestCase):
         import urllib.error
 
         error = urllib.error.HTTPError("https://crm.frank.fail/crm/leads", 500, "Server Error", {}, None)
-        with mock.patch.object(readiness.urllib.request, "urlopen", side_effect=error):
+        with mock.patch.object(readiness.urllib.request, "build_opener") as build_opener:
+            build_opener.return_value.open.side_effect = error
             ready, status, _reason = readiness._probe_origin("crm", 1.0)
         self.assertFalse(ready)
         self.assertEqual(status, 500)
@@ -142,13 +146,15 @@ class OwnerSignInIsNotReadiness(unittest.TestCase):
             "https://crm.frank.fail/crm/leads/view/list", 302, "Found",
             {"Location": "https://auth.frank.fail/application/o/authorize/?client_id=x"}, None,
         )
-        with mock.patch.object(readiness.urllib.request, "urlopen", side_effect=error), \
+        with mock.patch.object(readiness.urllib.request, "build_opener") as build_opener, \
              mock.patch.object(readiness, "_certificate_covers", return_value=(True, "certificate_present")):
+            build_opener.return_value.open.side_effect = error
             payload = readiness.app_readiness("crm")
         self.assertFalse(payload["ready"])
         self.assertFalse(payload["frameable"])
         self.assertEqual(payload["reason"], "owner_session_required")
-        self.assertIn("sign in", payload["detail"])
+        self.assertIn("native browser session bridge", payload["detail"])
+        self.assertNotIn("must sign in", payload["detail"])
 
     def test_an_application_auth_challenge_is_still_ready(self):
         # A 401 from the application itself is a live application. Only a
@@ -156,11 +162,33 @@ class OwnerSignInIsNotReadiness(unittest.TestCase):
         import urllib.error
 
         error = urllib.error.HTTPError("https://crm.frank.fail/x", 401, "Unauthorized", {}, None)
-        with mock.patch.object(readiness.urllib.request, "urlopen", side_effect=error):
+        with mock.patch.object(readiness.urllib.request, "build_opener") as build_opener:
+            build_opener.return_value.open.side_effect = error
             ready, status, reason = readiness._probe_origin("crm", 1.0)
         self.assertTrue(ready)
         self.assertEqual(status, 401)
         self.assertEqual(reason, "answered_with_status")
+
+
+    def test_probe_never_follows_an_identity_redirect_to_a_final_200(self):
+        """Authentik's later 200 is never evidence the native app answered."""
+        import urllib.error
+
+        redirect = urllib.error.HTTPError(
+            "https://crm.frank.fail/crm/leads/view/list", 302, "Found",
+            {"Location": "https://auth.frank.fail/application/o/authorize/?client_id=x"}, None,
+        )
+        with mock.patch.object(readiness.urllib.request, "build_opener") as build_opener:
+            build_opener.return_value.open.side_effect = redirect
+            ready, status, reason = readiness._probe_origin("crm", 1.0)
+            handler = build_opener.call_args.args[0]
+        self.assertFalse(ready)
+        self.assertEqual(status, 302)
+        self.assertEqual(reason, "identity_provider_redirect")
+        self.assertIsInstance(handler, readiness._NoRedirect)
+
+    def test_mail_starts_at_the_authenticated_launch_broker(self):
+        self.assertEqual(readiness.OWNER_APPS["mail"]["home"], "/frank/launch")
 
 
 class RegistryContract(unittest.TestCase):
