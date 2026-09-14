@@ -74,8 +74,19 @@ function defaultParams() {
 function readPreviewFlag(win) {
   try {
     const value = new URLSearchParams(win?.location?.search || "").get("preview");
-    if (value === "1" || value === "true") return true;
-    if (value === "0" || value === "false") return false;
+    if (value === "1" || value === "true" || value === "0" || value === "false") {
+      const on = value === "1" || value === "true";
+      // An explicit instruction in the link is remembered, because the owner
+      // reaches this workspace from a link, then moves between screens and
+      // sections, and a reload has to land where the link intended. Without
+      // this, `?preview=1` survives exactly until the first click.
+      try {
+        globalThis.localStorage?.setItem(PREVIEW_STORAGE_KEY, on ? "1" : "0");
+      } catch {
+        /* the preference is best effort; the link still decides this visit */
+      }
+      return on;
+    }
   } catch {
     /* a browser without URLSearchParams keeps the stored preference */
   }
@@ -452,9 +463,22 @@ export function mountAdsWorkspace(host, options = {}) {
     renderScreen({ force: true });
   }
 
+  /**
+   * The address for one screen.
+   *
+   * Every existing parameter is kept, so moving between screens does not quietly
+   * drop the one that said this is a rehearsal. A link that loses its own
+   * instructions on the first click is a link nobody can rely on.
+   */
   function screenHref(screenId) {
-    const path = win?.location?.pathname || "/project/blockwise/ads";
-    return `${path}?screen=${encodeURIComponent(screenId)}`;
+    try {
+      const url = new URL(win.location.href);
+      url.searchParams.set("screen", screenId);
+      return `${url.pathname}${url.search}`;
+    } catch {
+      const path = win?.location?.pathname || "/project/blockwise/ads";
+      return `${path}?screen=${encodeURIComponent(screenId)}`;
+    }
   }
 
   function go(screenId, { focus = true } = {}) {
@@ -560,9 +584,18 @@ export function mountAdsWorkspace(host, options = {}) {
   function openRecord({ kind = "", id = "", screen = "" } = {}) {
     const target = SCREEN_IDS.has(String(screen)) ? String(screen) : state.screen;
     const request = Object.freeze({ kind: String(kind || ""), id: String(id || ""), screen: target });
+    const miss = () => say(`That record is in ${target}, but it is not in the rows on screen.`);
     if (target === state.screen) {
       const handled = state.screens.get(target)?.focusRecord?.(request);
-      if (!handled) say(`That record is in ${target}, but it is not in the rows on screen.`);
+      // A screen that has to change level or wait for a read answers with a
+      // promise; a drill-down must not report success before it knows.
+      if (handled && typeof handled.then === "function") {
+        handled.then((opened) => {
+          if (!opened) miss();
+        }, miss);
+        return true;
+      }
+      if (!handled) miss();
       return Boolean(handled);
     }
     // The other screen has to load before it can show anything, so the request
