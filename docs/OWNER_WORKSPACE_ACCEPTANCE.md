@@ -366,6 +366,47 @@ observation; and Stripe reports cash collected and recurring revenue as two
 different quantities, never summed across currencies, with cancelled and free
 plans excluded from paying customers.
 
+## Release readiness
+
+Reviewed at candidate `9e601cd`, 78 files changed against `main`, and **not yet
+deployed**. Every precondition checked out:
+
+| Check | Result |
+| --- | --- |
+| Clean fast-forward from `main` | yes, `main` is an ancestor; no merge conflicts |
+| Worktree clean | yes |
+| Secrets committed | none. The two files matching a secret-shaped name are a digest pins file that states it holds no secrets, and a provisioning script that generates its values from `/dev/urandom` |
+| External networks exist | all three (`owner-crm_owner-crm-ingress`, `frank_owner_notifications_private`, `frank_owner_webmail_ingress`) |
+| Read credentials present and restricted | both owner read files exist at mode 0600 |
+| Caddyfile validates | yes, in the real Caddy 2.8 binary |
+
+### Why this is held rather than released
+
+Two reasons, both about the owner rather than the code.
+
+1. **The owner cannot sign in until he enrols a second factor.** The only TOTP
+   device was created by the identity lane's own browser test. It has been
+   removed, so the enrolment stage now offers a fresh QR code, but the first
+   sign-in has to be his.
+2. **The early integration checkpoint has to be proven in his browser.** The
+   brief makes that checkpoint mandatory before expanding further, and it is the
+   one thing this host cannot observe: the Codex in-app browser has no drivable
+   instance here.
+
+Deploying now would therefore hand him a workspace he cannot enter, behind a
+sign-in he has never completed, with only a restricted recovery route as a way
+back. Holding until he is present is the safer sequencing, and it is a
+scheduling decision rather than an unfinished one: the candidate is complete and
+verified, and the release is a single command.
+
+### What the release does when it runs
+
+It publishes the committed Caddyfile, which issues four HTTP-01 certificates for
+`auth`, `crm`, `marketing` and `mail.frank.fail` (no Cloudflare token needed, and
+no DNS change), and replaces the legacy operator password prompt with the owner
+sign-in. The restricted `/__owner-recovery` route is retained until the owner
+session and its own recovery path have both passed.
+
 ## Verification commands actually run
 
 ```bash
