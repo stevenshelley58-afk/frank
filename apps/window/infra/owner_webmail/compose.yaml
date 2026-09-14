@@ -1,0 +1,141 @@
+# Owner webmail: the native mail client for the owner mailbox.
+#
+# Three services, three networks. The mail client is the only container with
+# outbound access; the launch broker never leaves the private network; the
+# ingress is the single seam the identity layer connects to.
+name: owner-webmail
+
+x-source-labels: &source-labels
+  io.frank.owner-webmail.applied-source-sha: ${OWNER_WEBMAIL_SOURCE_SHA:?OWNER_WEBMAIL_SOURCE_SHA is required}
+
+services:
+  # Roundcube 1.7.4 on the pinned upstream image, plus this repository's
+  # committed configuration and frank_sso plugin baked into the application
+  # tree at build time. The running image is tagged with the applied revision.
+  webmail:
+    image: frank-owner-webmail:${OWNER_WEBMAIL_SOURCE_SHA:?required}
+    build:
+      context: ./roundcube
+      dockerfile: Dockerfile
+    pull_policy: never
+    container_name: owner-webmail
+    restart: unless-stopped
+    labels: *source-labels
+    depends_on:
+      launch: {condition: service_healthy}
+    environment:
+      ROUNDCUBEMAIL_DB_TYPE: sqlite
+      ROUNDCUBEMAIL_DB_DIR: /var/roundcube/db
+      ROUNDCUBEMAIL_DB_NAME: roundcube
+      ROUNDCUBEMAIL_DES_KEY: ${OWNER_WEBMAIL_DES_KEY:?required}
+      ROUNDCUBEMAIL_SKIN: elastic
+      ROUNDCUBEMAIL_REQUEST_PATH: /
+      ROUNDCUBEMAIL_DEFAULT_HOST: ${OWNER_WEBMAIL_IMAP_PLAIN_HOST:?required}
+      ROUNDCUBEMAIL_DEFAULT_PORT: "993"
+      ROUNDCUBEMAIL_SMTP_SERVER: ${OWNER_WEBMAIL_SMTP_PLAIN_HOST:?required}
+      ROUNDCUBEMAIL_SMTP_PORT: "465"
+      ROUNDCUBEMAIL_UPLOAD_MAX_FILESIZE: ${OWNER_WEBMAIL_MAX_UPLOAD:-30M}
+      # Read by roundcube/config.inc.php and plugins/frank_sso.
+      OWNER_WEBMAIL_IMAP_HOST: ${OWNER_WEBMAIL_IMAP_HOST:?required}
+      OWNER_WEBMAIL_SMTP_HOST: ${OWNER_WEBMAIL_SMTP_HOST:?required}
+      OWNER_WEBMAIL_IMAP_USER: ${OWNER_WEBMAIL_IMAP_USER:?required}
+      OWNER_WEBMAIL_IMAP_PASSWORD: ${OWNER_WEBMAIL_IMAP_PASSWORD:?required}
+      OWNER_WEBMAIL_MAILBOX: ${OWNER_WEBMAIL_MAILBOX:?required}
+      OWNER_WEBMAIL_IDENTITIES: ${OWNER_WEBMAIL_IDENTITIES:-}
+      OWNER_WEBMAIL_DISPLAY_NAME: ${OWNER_WEBMAIL_DISPLAY_NAME:-}
+      OWNER_WEBMAIL_LAUNCH_URL: http://launch:8080
+      OWNER_WEBMAIL_CONSUME_SECRET: ${OWNER_WEBMAIL_CONSUME_SECRET:?required}
+      OWNER_WEBMAIL_COOKIE_SAMESITE: ${OWNER_WEBMAIL_COOKIE_SAMESITE:-Lax}
+      OWNER_WEBMAIL_TRUSTED_HOSTS: ${OWNER_WEBMAIL_TRUSTED_HOSTS:-}
+    volumes:
+      - owner_webmail_app:/var/www/html
+      - owner_webmail_db:/var/roundcube/db
+    networks: [owner-webmail-private, owner-webmail-egress]
+    security_opt: [no-new-privileges:true]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS -o /dev/null -H 'Host: localhost' http://127.0.0.1/ || exit 1"]
+      interval: 20s
+      timeout: 8s
+      retries: 15
+      start_period: 60s
+
+  # Mints the single-use launch token after the identity layer has
+  # authenticated the owner. It holds the ingress secret and the token store,
+  # never a mailbox credential, and it has no outbound network.
+  launch:
+    image: frank-owner-webmail-launch:${OWNER_WEBMAIL_SOURCE_SHA:?required}
+    build:
+      context: ./launch
+      dockerfile: Dockerfile
+    pull_policy: never
+    container_name: owner-webmail-launch
+    restart: unless-stopped
+    labels: *source-labels
+    environment:
+      OWNER_WEBMAIL_STATE_DIR: /var/lib/owner-webmail-launch
+      OWNER_WEBMAIL_LAUNCH_PORT: "8080"
+      OWNER_WEBMAIL_INGRESS_SECRET: ${OWNER_WEBMAIL_INGRESS_SECRET:?required}
+      OWNER_WEBMAIL_CONSUME_SECRET: ${OWNER_WEBMAIL_CONSUME_SECRET:?required}
+      OWNER_WEBMAIL_OWNER_ID: ${OWNER_WEBMAIL_OWNER_ID:?required}
+      OWNER_WEBMAIL_OWNER_HEADER: ${OWNER_WEBMAIL_OWNER_HEADER:-X-Frank-Owner}
+      OWNER_WEBMAIL_MAILBOX: ${OWNER_WEBMAIL_MAILBOX:?required}
+      OWNER_WEBMAIL_TOKEN_TTL_SECONDS: ${OWNER_WEBMAIL_TOKEN_TTL_SECONDS:-120}
+      OWNER_WEBMAIL_COOKIE_SAMESITE: ${OWNER_WEBMAIL_COOKIE_SAMESITE:-Lax}
+    volumes:
+      - owner_webmail_launch_state:/var/lib/owner-webmail-launch
+    networks: [owner-webmail-private]
+    read_only: true
+    tmpfs: [/tmp]
+    security_opt: [no-new-privileges:true]
+
+  # The single upstream the identity layer proxies to.
+  ingress:
+    image: nginx:1.28.0-alpine@sha256:30f1c0d78e0ad60901648be663a710bdadf19e4c10ac6782c235200619158284
+    pull_policy: never
+    container_name: owner-webmail-ingress
+    restart: unless-stopped
+    labels: *source-labels
+    depends_on:
+      webmail: {condition: service_started}
+      launch: {condition: service_healthy}
+    environment:
+      OWNER_WEBMAIL_INGRESS_SECRET: ${OWNER_WEBMAIL_INGRESS_SECRET:?required}
+      OWNER_WEBMAIL_FRAME_ANCESTORS: ${OWNER_WEBMAIL_FRAME_ANCESTORS:-'none'}
+      OWNER_WEBMAIL_MAX_UPLOAD: ${OWNER_WEBMAIL_MAX_UPLOAD:-30m}
+      NGINX_ENVSUBST_TEMPLATE_DIR: /etc/nginx/templates
+      NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
+      # Only owner variables are substituted; nginx runtime variables survive.
+      NGINX_ENVSUBST_FILTER: ^OWNER_WEBMAIL_
+    ports: ["127.0.0.1:${OWNER_WEBMAIL_HOST_PORT:-18107}:80"]
+    volumes:
+      - ./ingress/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+    networks: [owner-webmail-private, owner-webmail-ingress]
+    read_only: true
+    tmpfs: [/var/cache/nginx, /var/run, /etc/nginx/conf.d]
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [CHOWN, SETUID, SETGID, NET_BIND_SERVICE]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/frank/healthz || exit 1"]
+      interval: 15s
+      timeout: 8s
+      retries: 15
+      start_period: 10s
+
+volumes:
+  owner_webmail_app: {name: frank_owner_webmail_app}
+  owner_webmail_db: {name: frank_owner_webmail_db}
+  owner_webmail_launch_state: {name: frank_owner_webmail_launch_state}
+
+networks:
+  # No route off the host: the launch broker and the client's internal calls.
+  owner-webmail-private:
+    name: frank_owner_webmail_private
+    internal: true
+  # The mail client alone needs IMAP and SMTP egress.
+  owner-webmail-egress:
+    name: frank_owner_webmail_egress
+  # The seam the identity layer's proxy joins. Declared external from the Frank
+  # side so the proxy owner attaches to exactly this network.
+  owner-webmail-ingress:
+    name: frank_owner_webmail_ingress

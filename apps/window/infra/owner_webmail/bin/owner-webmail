@@ -1,0 +1,87 @@
+#!/usr/bin/env bash
+# The only supported operator entrypoint for the owner webmail component.
+set -euo pipefail
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+root_dir=$(cd "$script_dir/.." && pwd)
+secret_file=/srv/frank/secrets/owner-webmail.env
+mail_secret=/srv/frank/secrets/owner-mail.env
+
+usage() {
+  echo "usage: owner-webmail {secret|config|build|up|down|restart|health|routes|logs|status|token-check}" >&2
+  exit 2
+}
+fail() { echo "owner-webmail: $*" >&2; exit 1; }
+clean_source() {
+  test -z "$(git -C "$root_dir" status --porcelain)" || fail "source checkout is not clean; commit before running this component"
+  git -C "$root_dir" rev-parse --verify HEAD^{commit} >/dev/null
+}
+secret_file_ok() {
+  test -f "$secret_file" && test ! -L "$secret_file" || fail "secret file must be a regular file: $secret_file"
+  test "$(stat -c %a "$secret_file")" = 600 || fail "secret file must be mode 0600"
+  test "$(stat -c %u "$secret_file")" = 0 || fail "secret file must be root-owned"
+}
+value() { sed -n "s/^$1=//p" "$secret_file" | tail -n1; }
+
+# The applied revision is always the committed revision of this checkout, never
+# a value that can drift in the secret file.
+compose() {
+  export OWNER_WEBMAIL_SOURCE_SHA
+  OWNER_WEBMAIL_SOURCE_SHA=$(git -C "$root_dir" rev-parse HEAD)
+  docker compose --project-directory "$root_dir" --env-file "$secret_file" -f "$root_dir/compose.yaml" "$@"
+}
+
+case ${1:-} in
+  secret)
+    clean_source
+    "$script_dir/provision-secret.sh" "${@:2}"
+    ;;
+  config)
+    secret_file_ok
+    compose config -q
+    echo "owner webmail compose configuration is valid"
+    ;;
+  build)
+    clean_source
+    secret_file_ok
+    compose build launch
+    ;;
+  up)
+    clean_source
+    secret_file_ok
+    # --wait blocks until every healthcheck has settled, so the health summary
+    # that follows describes a running service rather than a starting one.
+    compose up -d --wait
+    "$script_dir/health.sh"
+    ;;
+  down)
+    secret_file_ok
+    compose down
+    ;;
+  restart)
+    secret_file_ok
+    compose restart
+    ;;
+  health) shift; "$script_dir/health.sh" "$@" ;;
+  routes)
+    secret_file_ok
+    compose ps
+    ;;
+  status)
+    secret_file_ok
+    compose ps --format 'table {{.Service}}\t{{.Status}}\t{{.Ports}}'
+    ;;
+  logs)
+    secret_file_ok
+    shift
+    compose logs --tail="${1:-80}" "${@:2}"
+    ;;
+  token-check)
+    secret_file_ok
+    # The diagnostic talks to the broker on its own private address, so it runs
+    # inside the broker container with that container's environment.
+    test "$(docker inspect -f '{{.State.Running}}' owner-webmail-launch 2>/dev/null)" = true \
+      || fail "owner-webmail-launch is not running"
+    docker exec -i owner-webmail-launch python3 - < "$script_dir/token-check.py"
+    ;;
+  *) usage ;;
+esac
