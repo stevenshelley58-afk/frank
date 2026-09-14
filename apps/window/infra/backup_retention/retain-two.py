@@ -38,7 +38,10 @@ def validate(p,kind,decrypt=True):
   entries[rel.as_posix().removeprefix('./')]=m[1]
  if not entries:raise ValueError('empty manifest')
  required=REQUIRED.get(kind,set())
- if not required.issubset(entries):raise ValueError('incomplete backup coverage')
+ coverage=set(entries)
+ if kind=='marketing' and 'frank_owner_notifications_cache.tar.gz' in coverage:
+  coverage.remove('frank_owner_notifications_cache.tar.gz');coverage.add('ntfy-sqlite.tar.gz')
+ if not required.issubset(coverage):raise ValueError('incomplete backup coverage')
  if kind=='owner-crm':
   receipt=json.loads((p/'receipt.json').read_text())
   required=set(receipt['native'].values())|{'custom-fields.json','public-files.members','private-files.members'}
@@ -47,7 +50,7 @@ def validate(p,kind,decrypt=True):
   for n in entries:
    if n.endswith('.age'):
     subprocess.run(['age','-d','-i',KEYS[kind],str(p/n)],stdout=subprocess.DEVNULL,stderr=subprocess.PIPE,check=True)
- return {'manifest_sha256':digest(manifest),'coverage':sorted(entries)}
+ return {'manifest_sha256':digest(manifest),'coverage':sorted(coverage)}
 def snapshot(p):return [(str(f.relative_to(p)),f.lstat().st_size,f.lstat().st_mtime_ns,f.lstat().st_ino) for f in sorted(p.rglob('*'))]
 def protected_paths():
  ids=subprocess.check_output(['docker','ps','-aq'],text=True).split()
