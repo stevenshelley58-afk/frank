@@ -1,0 +1,32 @@
+[Unit]
+Description=Frank owner trusted Tailscale device verifier
+After=network-online.target tailscaled.service
+Wants=network-online.target
+Requires=tailscaled.service
+[Service]
+Type=simple
+DynamicUser=true
+LoadCredential=config:/srv/frank/secrets/owner-trusted-devices.json
+ExecStart=/usr/bin/python3 /srv/frank/releases/trusted-device/CURRENT/apps/window/infra/owner_identity/trusted_device/server.py --bind 172.31.50.1 --port 18089
+Restart=on-failure
+RestartSec=2s
+TimeoutStartSec=10s
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectHome=true
+ProtectSystem=strict
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077
+[Install]
+WantedBy=multi-user.target
