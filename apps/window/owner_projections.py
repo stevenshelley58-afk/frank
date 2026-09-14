@@ -1325,12 +1325,17 @@ def _attach_standard_view(
         for entry in item["value"]:
             if not isinstance(entry, dict):
                 continue
-            rows.append(
-                {
-                    "name": _short(entry.get("label") or entry.get("id"), 80),
-                    "detail": _short(entry.get("detail"), 80),
-                }
-            )
+            row = {
+                "name": _short(entry.get("label") or entry.get("id"), 80),
+                "detail": _short(entry.get("detail"), 80),
+            }
+            # Carry the source's own stable identifier through to the rendered
+            # row. Without it a source payload has to fall back to a positional
+            # id, which changes as new records arrive and so cannot deduplicate
+            # or recognise the same record across two refreshes.
+            if entry.get("id"):
+                row["id"] = _short(entry.get("id"), 120)
+            rows.append(row)
     if rows:
         snapshot["data"]["rows"] = rows
 

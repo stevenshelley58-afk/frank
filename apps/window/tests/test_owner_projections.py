@@ -725,7 +725,44 @@ class StandardView(unittest.TestCase):
             now=1000,
         )
         op._attach_standard_view(snapshot, metrics=[], row_reading="b")
-        self.assertEqual(snapshot["data"]["rows"], [{"name": "One", "detail": "d"}])
+        self.assertEqual(snapshot["data"]["rows"], [{"name": "One", "detail": "d", "id": "i1"}])
+
+    def test_a_row_keeps_the_source_own_stable_identifier(self):
+        # The rendered row must carry the source's own id. A positional id would
+        # change as new records arrive, so it could not deduplicate or recognise
+        # the same record across two refreshes.
+        items = [
+            ow.attention_item(item_id="ntfy:abc123", label="One", source="s", detail="d"),
+            ow.attention_item(item_id="ntfy:def456", label="Two", source="s", detail="d"),
+        ]
+        snapshot = ow.owner_snapshot(
+            summary="x",
+            readings={"b": ow.reading(status="ready", value=items, source="s")},
+            now=1000,
+        )
+        op._attach_standard_view(snapshot, metrics=[], row_reading="b")
+        self.assertEqual([row["id"] for row in snapshot["data"]["rows"]], ["ntfy:abc123", "ntfy:def456"])
+
+    def test_the_same_records_keep_the_same_ids_across_two_reads(self):
+        # Two refreshes that see the same records must produce the same ids, and
+        # a newer record arriving must not renumber the older ones.
+        def build(labels):
+            items = [
+                ow.attention_item(item_id=f"ntfy:{name}", label=name, source="s", detail="d")
+                for name in labels
+            ]
+            snapshot = ow.owner_snapshot(
+                summary="x",
+                readings={"b": ow.reading(status="ready", value=items, source="s")},
+                now=1000,
+            )
+            op._attach_standard_view(snapshot, metrics=[], row_reading="b")
+            return {row["name"]: row["id"] for row in snapshot["data"]["rows"]}
+
+        first = build(["alpha", "bravo"])
+        second = build(["alpha", "bravo", "charlie"])
+        self.assertEqual(first["alpha"], second["alpha"])
+        self.assertEqual(first["bravo"], second["bravo"])
 
 
 if __name__ == "__main__":
