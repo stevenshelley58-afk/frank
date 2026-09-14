@@ -69,6 +69,20 @@ class ComposeContractTests(unittest.TestCase):
         self.assertIn("build:\n      context: ./roundcube", self.compose)
         self.assertIn("./ingress/default.conf.template:/etc/nginx/templates/default.conf.template:ro", self.compose)
 
+    def test_every_runtime_variable_the_config_reads_is_passed_in(self):
+        import re as _re
+
+        webmail, _, _ = self._blocks()
+        readers = (ROOT / "roundcube" / "config.inc.php").read_text(encoding="utf-8")
+        readers += (ROOT / "roundcube" / "plugins" / "frank_sso" / "frank_sso.php").read_text(encoding="utf-8")
+        wanted = {
+            name
+            for name in _re.findall(r"OWNER_WEBMAIL_[A-Z_]+", readers)
+            if name not in {"OWNER_WEBMAIL_LAUNCH_URL", "OWNER_WEBMAIL_STATE_DIR", "OWNER_WEBMAIL_LAUNCH_PORT"}
+        }
+        for name in sorted(wanted):
+            self.assertIn("%s:" % name, webmail, name)
+
     def test_running_containers_are_stamped_with_the_applied_revision(self):
         self.assertEqual(self.compose.count("labels: *source-labels"), 3)
         self.assertIn("io.frank.owner-webmail.applied-source-sha", self.compose)

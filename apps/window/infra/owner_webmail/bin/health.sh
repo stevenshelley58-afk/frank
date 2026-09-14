@@ -25,7 +25,7 @@ for container in owner-webmail owner-webmail-launch; do
 done
 
 healthz=$(curl -fsS "http://127.0.0.1:$port/frank/healthz") || fail "ingress health endpoint is unreachable"
-printf '%s' "$healthz" | grep -q '"service":"owner-webmail-launch"' || fail "unexpected launch health body"
+printf '%s' "$healthz" | jq -e '.ok == true and .service == "owner-webmail-launch"' >/dev/null || fail "unexpected launch health body"
 
 # The launch broker must refuse a request that carries no authenticated owner.
 code=$(curl -s -o /dev/null -w '%{http_code}' "http://127.0.0.1:$port/frank/launch")
