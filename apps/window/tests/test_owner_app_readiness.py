@@ -122,6 +122,47 @@ class AuthChallengeIsAHealthyApplication(unittest.TestCase):
         self.assertEqual(status, 500)
 
 
+class OwnerSignInIsNotReadiness(unittest.TestCase):
+    """An identity-provider redirect must never be reported as a frameable app."""
+
+    def test_identity_redirect_is_recognised(self):
+        self.assertTrue(readiness._identity_redirect("https://auth.frank.fail/application/o/authorize/?client_id=x"))
+        self.assertTrue(readiness._identity_redirect("https://crm.frank.fail/outpost.goauthentik.io/start?rd=/"))
+        self.assertFalse(readiness._identity_redirect(""))
+        self.assertFalse(readiness._identity_redirect("https://crm.frank.fail/crm/leads/view/list"))
+        self.assertFalse(readiness._identity_redirect(None))
+
+    def test_a_redirect_to_sign_in_is_not_ready_and_not_frameable(self):
+        # The real edge answers an unauthenticated probe with a 302 to the
+        # identity provider. That is the edge talking, not the application, and
+        # framing it would put the sign-in page inside the panel.
+        import urllib.error
+
+        error = urllib.error.HTTPError(
+            "https://crm.frank.fail/crm/leads/view/list", 302, "Found",
+            {"Location": "https://auth.frank.fail/application/o/authorize/?client_id=x"}, None,
+        )
+        with mock.patch.object(readiness.urllib.request, "urlopen", side_effect=error), \
+             mock.patch.object(readiness, "_certificate_covers", return_value=(True, "certificate_present")):
+            payload = readiness.app_readiness("crm")
+        self.assertFalse(payload["ready"])
+        self.assertFalse(payload["frameable"])
+        self.assertEqual(payload["reason"], "owner_session_required")
+        self.assertIn("sign in", payload["detail"])
+
+    def test_an_application_auth_challenge_is_still_ready(self):
+        # A 401 from the application itself is a live application. Only a
+        # redirect at the identity provider is treated as not yet usable.
+        import urllib.error
+
+        error = urllib.error.HTTPError("https://crm.frank.fail/x", 401, "Unauthorized", {}, None)
+        with mock.patch.object(readiness.urllib.request, "urlopen", side_effect=error):
+            ready, status, reason = readiness._probe_origin("crm", 1.0)
+        self.assertTrue(ready)
+        self.assertEqual(status, 401)
+        self.assertEqual(reason, "answered_with_status")
+
+
 class RegistryContract(unittest.TestCase):
     def test_every_registered_app_uses_https(self):
         for app_id, app in readiness.OWNER_APPS.items():

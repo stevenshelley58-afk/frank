@@ -98,6 +98,20 @@ def _certificate_covers(hostname: str, origin: str, timeout: float) -> tuple[boo
         return None, f"network_error:{exc.errno if exc.errno is not None else type(exc).__name__}"
 
 
+def _identity_redirect(location: str) -> bool:
+    """Whether a redirect target is the owner identity provider.
+
+    The ingress authenticates every owner app before it reaches the upstream, so
+    an unauthenticated readiness probe is answered with a redirect to the
+    identity provider. That is not the application answering, and treating it as
+    healthy would report an app as frameable before anyone has signed in.
+    """
+    target = str(location or "").strip().lower()
+    if not target:
+        return False
+    return "/application/o/" in target or "outpost.goauthentik.io" in target
+
+
 def _probe_origin(app_id: str, timeout: float) -> tuple[bool | None, int | None, str]:
     """Fetch the application origin. Returns (ready, status, reason)."""
     app = OWNER_APPS[app_id]
@@ -105,9 +119,16 @@ def _probe_origin(app_id: str, timeout: float) -> tuple[bool | None, int | None,
     request = urllib.request.Request(url, method="GET", headers={"User-Agent": "frank-owner-readiness/1"})
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 - constant https origin
+            # A redirect to the identity provider means the edge answered, not
+            # the application. Report it as not ready with the real reason so the
+            # host shows an honest state instead of a frame that will bounce.
+            if _identity_redirect(response.headers.get("Location", "")):
+                return False, response.status, "identity_provider_redirect"
             return response.status in HEALTHY_STATUSES, response.status, "answered"
     except urllib.error.HTTPError as exc:
-        # An auth challenge is a live application, not an outage.
+        # An auth challenge from the application itself is a live application.
+        if _identity_redirect(exc.headers.get("Location", "") if exc.headers else ""):
+            return False, exc.code, "identity_provider_redirect"
         return exc.code in HEALTHY_STATUSES, exc.code, "answered_with_status"
     except urllib.error.URLError as exc:
         return False, None, f"unreachable:{type(exc.reason).__name__}"
@@ -146,6 +167,16 @@ def app_readiness(app_id: str, timeout: float = DEFAULT_TIMEOUT_SECONDS) -> dict
         frameable = None
         reason = "origin_probe_unknown"
         detail = f"Frank could not reach {origin} to decide whether it may be framed."
+    elif ready_reason == "identity_provider_redirect":
+        # The edge is up and the certificate is good, but the application did not
+        # answer: the owner has not signed in yet. Framing now would show the
+        # identity provider's page inside the panel, which is never acceptable.
+        frameable = False
+        reason = "owner_session_required"
+        detail = (
+            f"{origin} is behind the owner sign-in and did not answer Frank directly. "
+            "The owner must sign in before this application can be shown here."
+        )
     else:
         frameable = bool(ready)
         reason = "allowed" if ready else "origin_unreachable"
