@@ -70,7 +70,7 @@ def main():
                     if any(overlaps(p,x) for x in refs) or p.is_symlink() or p.stat().st_ino != item['inode']: continue
                     shutil.rmtree(p)
                     result['deleted'].append(item);result['freed_allocated_bytes']+=item['allocated_bytes']
-                    if a.result:
+                    if a.result and len(result['deleted']) % 100 == 0:
                         out=pathlib.Path(a.result);out.parent.mkdir(parents=True,exist_ok=True)
                         tmp=out.with_suffix('.tmp');tmp.write_text(json.dumps(result));tmp.replace(out)
     if a.result:
