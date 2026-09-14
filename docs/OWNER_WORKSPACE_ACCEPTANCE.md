@@ -181,6 +181,8 @@ Recorded because each one was a real fault, not a formatting preference.
 | Source items were given positional ids | The same notification became `notifications-1` on one refresh and `notifications-2` on the next, which makes deduplication and cross-refresh recognition impossible | Rows now carry the reader's own stable namespaced id, and a test proves a newer record does not renumber older ones |
 | The unsaved-work guard threw on every unload | The unload protection was silently absent, and the browser logged a page error | The check is defined once in the closure; a live retainable panel now counts as work Frank cannot verify |
 | Readiness counted an identity-provider redirect as a healthy app | An app would have been reported frameable before sign-in, and the panel would have rendered the sign-in page inside Frank | A redirect to the identity provider reports not ready and not frameable with reason `owner_session_required` |
+| The outpost could not authorise any gated host | Every owner surface returned 404 to an anonymous visitor instead of redirecting to sign-in, so the workspace was unreachable | `forward_auth` now forwards `X-Forwarded-Host`, `-Uri`, `-Method` and `-Proto`; all four gated hosts redirect with their own client id |
+| The Frappe OIDC provider had an empty `grant_types` | Frappe's own login failed with `invalid_request` before issuing a code | `grant_types` is stated explicitly and made patchable in the bootstrap |
 
 ## Changes made outside a release
 
@@ -365,6 +367,19 @@ still unconfigured while no reader exists, because a recorded state is not an
 observation; and Stripe reports cash collected and recurring revenue as two
 different quantities, never summed across currencies, with cancelled and free
 plans excluded from paying customers.
+
+## First sign-in
+
+The owner account currently has **no second factor**, which is deliberate: the
+only device was created by the identity lane's own browser test, so he could not
+have used it. The configured enrolment stage offers a fresh QR code on his first
+sign-in, and enrolment is re-enterable, so an interrupted attempt simply offers
+the QR code again.
+
+The first-sign-in path was verified against a throwaway user in the same owner
+group, driven through the real flow in a real browser: the gate redirects, the
+flow renders, credentials are accepted, and enrolment is offered. That probe user
+and its password were removed afterwards, and the owner account was not touched.
 
 ## Release readiness
 
