@@ -37,7 +37,19 @@ import {
   rowsReadNote,
 } from "./ads-ui.js";
 import { createTable, column, createSelection, columnChooser, sortControl } from "./ads-table.js";
-import { applyFilters, field, filterBar, bulkBar, hiddenSelectionNotice } from "./ads-views.js";
+import {
+  applyFilters,
+  field,
+  filterBar,
+  bulkBar,
+  hiddenSelectionNotice,
+  accountCurrency,
+  formatAccountMoney,
+  formatAccountMoneyDelta,
+  summariseChangeEntries,
+  appliedViewSentence,
+  CURRENCY_UNKNOWN_NOTE,
+} from "./ads-views.js";
 import { isUnresolved } from "./ads-source.js";
 import {
   ENTITY_LEVELS,
@@ -48,9 +60,7 @@ import {
   metricValue,
   evidenceFor,
   compareRates,
-  formatDelta,
   formatInt,
-  formatMoney,
   formatPercent,
   formatRatio,
   formatDay,
@@ -62,6 +72,39 @@ import {
   DELIVERY_STATE_LABELS,
   DELIVERY_PROOF_STATES,
 } from "./ads-contracts.js";
+
+/**
+ * The parent a row sits under, as an identity.
+ *
+ * The reader names the parent field differently depending on how it was built,
+ * so all the spellings are accepted — but only ever a value that is an id. A
+ * parent *name* is not a parent: two campaigns may share one, and a filter on
+ * the name would show rows from both.
+ */
+export function parentIdentity(row) {
+  if (!row) return { id: "", name: "" };
+  const id = row.level === "ad" ? row.adsetId ?? row.parentId : row.campaignId ?? row.parentId;
+  const name = row.level === "ad" ? row.adsetName ?? row.parentName : row.campaignName ?? row.parentName;
+  return { id: id === null || id === undefined ? "" : String(id), name: name ? String(name) : "" };
+}
+
+/** The parent field a level filters on, and what that filter is called. */
+export const PARENT_FIELD = Object.freeze({
+  adset: Object.freeze({ id: "campaignId", label: "In campaign", noun: "campaign" }),
+  ad: Object.freeze({ id: "adsetId", label: "In ad set", noun: "ad set" }),
+});
+
+/**
+ * The filter a drill-down applies: one parent, by id.
+ *
+ * Stated as a function because it is the whole contract of the drill-down — the
+ * child rows are selected by the parent's identity and by nothing else.
+ */
+export function parentFilterFor(level, id) {
+  const fieldDef = PARENT_FIELD[level];
+  if (!fieldDef || !id) return null;
+  return Object.freeze({ field: fieldDef.id, op: "is", value: String(id) });
+}
 
 export function createCampaignsScreen(ctx, host) {
   const node = el("div", "ads-campaigns");
@@ -83,6 +126,8 @@ export function createCampaignsScreen(ctx, host) {
   };
 
   const selection = createSelection({ getKey: rowKey });
+  // The URL-applied view is announced once per mount, not on every render.
+  let announcedUrlView = false;
   // The drawer is hosted beside the screen node, not inside it: every render
   // clears the screen node, which used to take an open drawer with it.
   const drawer = createDrawer({ host, title: "Record" });
@@ -108,6 +153,14 @@ export function createCampaignsScreen(ctx, host) {
     if (rows) state.rows = rows.map((row) => ({ ...row, ...(row.totals || {}) }));
     selection.setMatching(state.rows);
     render();
+    // A view that arrived in the link is announced once, because a screen that
+    // silently opens filtered is a screen somebody will misread.
+    if (!announcedUrlView && ctx.store.urlView?.applied) {
+      announcedUrlView = true;
+      ctx.say(
+        `Opened with the ${ctx.store.urlView.kind === "built-in" ? "built-in" : "saved"} view "${ctx.store.urlView.name}" from this link. Removing a filter chip leaves the view.`,
+      );
+    }
     // A drill-down from another screen arrives before these rows exist, so the
     // request waits for them and is honoured here, once.
     const pending = ctx.takePendingRecord?.();
@@ -129,17 +182,94 @@ export function createCampaignsScreen(ctx, host) {
     if (!wanted) return false;
     const level = ENTITY_LEVELS.includes(String(kind)) ? String(kind) : "";
     if (level && level !== state.level) {
-      state.level = level;
-      state.rows = [];
-      selection.clear();
-      ctx.store.update({ level });
-      await load();
+      await switchLevel(level);
       if (disposed) return false;
     }
     const row = state.rows.find((candidate) => rowKey(candidate) === wanted || String(candidate?.id || "") === wanted);
     if (!row) return false;
     openDetail(row);
     return true;
+  }
+
+  // ------------------------------------------------------------ hierarchy --
+
+  /** The row's delivery state as a word this read actually carried. `stateOf`
+   *  falls back to "draft" for an unknown value, which is right for a badge's
+   *  tone and wrong for a before/after review, where it would claim a state. */
+  function stateText(row) {
+    const raw = reviewState(row);
+    if (!raw) return "—";
+    return DELIVERY_STATE_LABELS[raw] || raw;
+  }
+
+  /** The same state, but empty when this read did not carry one. The review's
+   *  arithmetic keys off emptiness: "—" is a display, and counting it as a state
+   *  would make an unmeasured row look like a row that changes. */
+  function reviewState(row) {
+    return String(row?.state || row?.status || "").toLowerCase();
+  }
+
+  /** The one sentence a screen shows when the context read carried no
+   *  currency. Shown wherever a money figure appears, because a figure whose
+   *  unit was assumed is a wrong number. */
+  function currencyNote() {
+    const note = el("p", "ads-currency-note");
+    note.append(svg(ICONS.info, { size: 12, width: 1.8 }), el("span", "", CURRENCY_UNKNOWN_NOTE));
+    return note;
+  }
+
+  /**
+   * Move to another level, keeping only the filters that level can evaluate.
+   *
+   * A filter naming a field the new level has no definition for would match
+   * nothing at all (see the unknown-field path in `matchesFilter`), so the table
+   * would read as empty. Dropping the filter and saying so is the only honest
+   * option: the alternative is a blank table nobody can explain.
+   */
+  async function switchLevel(level, { filters = null, say = "" } = {}) {
+    if (!ENTITY_LEVELS.includes(level)) return false;
+    const allowed = new Set(buildFields(level).map((def) => def.id));
+    const wanted = filters || ctx.store.state.filters;
+    const kept = wanted.filter((f) => allowed.has(f.field));
+    const dropped = wanted.filter((f) => !allowed.has(f.field));
+    state.level = level;
+    // The rows on screen answer the old level's question. Keeping them under the
+    // new level's heading would describe a table that is not the one being asked
+    // for, and a failed read must not leave them there.
+    state.rows = [];
+    state.compareKeys = [];
+    selection.clear();
+    ctx.store.update({ level, filters: kept });
+    await load();
+    if (disposed) return false;
+    if (dropped.length) {
+      ctx.say(
+        `${dropped.length} filter${dropped.length === 1 ? "" : "s"} (${dropped.map((f) => f.field).join(", ")}) do not apply at the ${ENTITY_LEVEL_LABELS[level].toLowerCase()} level and ${dropped.length === 1 ? "was" : "were"} removed.`,
+      );
+    } else if (say) {
+      ctx.say(say);
+    }
+    return true;
+  }
+
+  /**
+   * Drill down from a row to the level below it, filtered to that one parent —
+   * by id, never by name. The filter is an ordinary filter chip: it is visible
+   * in the bar, it can be removed like any other, and the screen says which
+   * record the table is narrowed to.
+   */
+  function drillDown(row) {
+    const level = row.level === "campaign" ? "adset" : row.level === "adset" ? "ad" : "";
+    if (!level) return;
+    const id = String(rowKey(row));
+    if (!id) {
+      ctx.say(`This ${ENTITY_LEVEL_LABELS[row.level] || row.level} row did not carry an identity, so there is nothing to filter the next level by.`);
+      return;
+    }
+    void switchLevel(level, {
+      filters: [parentFilterFor(level, id)],
+      say: `Showing the ${level === "adset" ? "ad sets" : "ads"} in this ${ENTITY_LEVEL_LABELS[row.level].toLowerCase()}, ${id}. The filter is in the bar and can be removed.`,
+    });
   }
 
   // ------------------------------------------------------------- columns --
@@ -180,9 +310,11 @@ export function createCampaignsScreen(ctx, host) {
         return statusBadge(unstable ? "blocked" : "validated", { label: unstable ? "Unstable id" : "Stable id", title: unstable ? "A parameter uses the ad or campaign name, so renaming will split reporting." : "Every parameter uses a stable internal identifier." });
       }
       case "budget":
-        return row.budget === undefined || row.budget === null ? "—" : `${formatMoney(row.budget, currency)}${row.budgetKind === "daily" ? "/day" : row.budgetKind === "lifetime" ? " lifetime" : ""}`;
+        return row.budget === undefined || row.budget === null
+          ? "—"
+          : `${formatAccountMoney(row.budget, currency)}${row.budgetKind === "daily" ? "/day" : row.budgetKind === "lifetime" ? " lifetime" : ""}`;
       case "budgetDelta":
-        return row.budgetDelta === undefined || row.budgetDelta === null ? "—" : formatDelta(row.budgetDelta / 100, { kind: "currency", currency });
+        return row.budgetDelta === undefined || row.budgetDelta === null ? "—" : formatAccountMoneyDelta(row.budgetDelta / 100, currency);
       case "spendTrend":
         return sparkline((row.series || []).map((p) => p.spend), { width: 76, height: 20 });
       case "lastEdit":
@@ -204,7 +336,7 @@ export function createCampaignsScreen(ctx, host) {
     const measurement = metric.measurement || "";
     const formatted =
       metric.kind === "currency"
-        ? formatMoney(value, currency)
+        ? formatAccountMoney(value, currency) ?? "—"
         : metric.kind === "percent"
           ? formatPercent(value)
           : metric.kind === "ratio"
@@ -233,6 +365,20 @@ export function createCampaignsScreen(ctx, host) {
     if (row.level === "ad" && row.format) bits.push(row.format);
     if (!DELIVERY_PROOF_STATES.includes(stateOf(row)) && stateOf(row) !== "draft") bits.push(DELIVERY_STATE_LABELS[stateOf(row)] || stateOf(row));
     if (bits.length) wrap.append(el("span", "ads-cell-sub", bits.join(" · ")));
+    // The path, not just the leaf. An ad that does not say which ad set holds it
+    // is a name floating in a list, and the id is what makes the path real: two
+    // ad sets can share a name, and only the id says which one this is.
+    const parent = parentIdentity(row);
+    if (row.level !== "campaign") {
+      const line = el("span", "ads-cell-parent");
+      const fieldDef = PARENT_FIELD[row.level === "ad" ? "ad" : "adset"];
+      line.append(el("span", "ads-cell-parent-label", fieldDef ? fieldDef.label : "In"));
+      const idNode = el("span", "ads-cell-parent-id", parent.id || "—");
+      idNode.title = parent.id ? "The parent's immutable id. The filter uses this, never the name." : "This read did not carry the parent's identity, so the path cannot be shown.";
+      line.append(idNode);
+      if (parent.name) line.append(el("span", "ads-cell-parent-name", parent.name));
+      wrap.append(line);
+    }
     if ((row.issues || []).length) {
       const flag = el("span", "ads-flag");
       flag.append(svg(ICONS.alert, { size: 11, width: 2 }));
@@ -256,6 +402,10 @@ export function createCampaignsScreen(ctx, host) {
           id,
           label,
           align,
+          // The name cell *is* the row's identity: it says which record this is
+          // and, for a child row, which parent it hangs under. On a phone it is
+          // pinned to the leading edge so the subject never scrolls away.
+          identity: id === "name",
           title: metric?.definition || COLUMN_TITLES[id] || "",
           sortable: true,
           sortValue:
@@ -319,6 +469,22 @@ export function createCampaignsScreen(ctx, host) {
       ],
     }[level];
 
+    // The parent filter is an ordinary filter: it appears as a chip with the id
+    // in it, it can be removed like any other, and it joins on the identity the
+    // drill-down used. A name would match every campaign that shares it.
+    const parentField = PARENT_FIELD[level]
+      ? [
+          field({
+            id: PARENT_FIELD[level].id,
+            label: PARENT_FIELD[level].label,
+            kind: "text",
+            group: "Hierarchy",
+            hint: `The ${PARENT_FIELD[level].noun}'s immutable id, never its name`,
+            get: (row) => parentIdentity(row).id,
+          }),
+        ]
+      : [];
+
     return [
       field({
         id: "name",
@@ -335,6 +501,7 @@ export function createCampaignsScreen(ctx, host) {
         get: (row) => stateOf(row),
         group: "Row",
       }),
+      ...parentField,
       ...dimensionFields,
       field({ id: "spend", label: "Spend", kind: "number", group: "Cost and results" }),
       field({ id: "results", label: "Results (Meta-attributed)", kind: "number", group: "Cost and results" }),
@@ -388,9 +555,10 @@ export function createCampaignsScreen(ctx, host) {
   function compareRows() {
     const chosen = state.compareKeys.map((key) => state.rows.find((row) => rowKey(row) === key)).filter(Boolean);
     if (chosen.length < 2) return;
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
     drawer.setTitle(`Compare ${chosen.length} rows`);
     drawer.show((body) => {
+      if (!currency) body.append(currencyNote());
       const note = el("p", "ads-screen-note");
       note.append(
         document.createTextNode(
@@ -414,7 +582,11 @@ export function createCampaignsScreen(ctx, host) {
             el(
               "span",
               "ads-num",
-              metric.kind === "currency" ? formatMoney(value, currency) : metric.kind === "percent" ? formatPercent(value) : formatInt(value),
+              metric.kind === "currency"
+                ? formatAccountMoney(value, currency) ?? "—"
+                : metric.kind === "percent"
+                  ? formatPercent(value)
+                  : formatInt(value),
             ),
           );
           values.append(line);
@@ -475,7 +647,7 @@ export function createCampaignsScreen(ctx, host) {
         ["Delivery state", (r) => DELIVERY_STATE_LABELS[stateOf(r)] || stateOf(r)],
         ["Objective", (r) => r.objective || "—"],
         ["Optimisation", (r) => r.optimisation || "—"],
-        ["Budget", (r) => (r.budget === null || r.budget === undefined ? "—" : `${formatMoney(r.budget, currency)}${r.budgetKind === "daily" ? "/day" : ""}`)],
+        ["Budget", (r) => (r.budget === null || r.budget === undefined ? "—" : `${formatAccountMoney(r.budget, currency) ?? "—"}${r.budgetKind === "daily" ? "/day" : ""}`)],
         ["Last edit", (r) => formatWhen(r.lastEdit)],
         ["Flags", (r) => (r.issues || []).map((i) => i.detail).join("; ") || "None"],
         ["Evidence", (r) => {
@@ -513,7 +685,7 @@ export function createCampaignsScreen(ctx, host) {
     // exact set the operator chose and the exact set the review lists.
     const chosen = selection.keys().map((key) => state.filtered.find((row) => rowKey(row) === key)).filter(Boolean);
     if (!chosen.length) return;
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
     drawer.setTitle(kind === "pause" ? "Review a bulk pause" : "Review a bulk budget change");
     drawer.show((body, close) => {
       const intro = el("p", "ads-screen-note");
@@ -525,6 +697,7 @@ export function createCampaignsScreen(ctx, host) {
         ),
       );
       body.append(intro);
+      if (!currency) body.append(currencyNote());
 
       let percent = 10;
       const preview = el("div", "ads-bulk-preview");
@@ -539,41 +712,77 @@ export function createCampaignsScreen(ctx, host) {
 
       const beforeAfter = () => {
         clear(rowsHost);
-        let beforeTotal = 0;
-        let afterTotal = 0;
-        let unknown = 0;
-        for (const row of chosen) {
-          const before = num(row.budget);
-          const after = afterBudget(before);
-          if (before === null || after === null) unknown += 1;
-          else {
-            beforeTotal += before;
-            afterTotal += after;
-          }
+        // One arithmetic, shared with the queue's review: unknown values are
+        // excluded from the totals rather than counted as zero, and the count of
+        // excluded rows is stated.
+        const plan = summariseChangeEntries(
+          kind,
+          chosen.map((row) => ({
+            key: rowKey(row),
+            name: rowName(row),
+            // The row's own state is carried through the arithmetic so the
+            // review never has to guess it back from a name.
+            state: stateText(row),
+            before: kind === "pause" ? reviewState(row) : num(row.budget),
+            after: kind === "pause" ? "Paused" : afterBudget(num(row.budget)),
+          })),
+        );
+        for (const entry of plan.entries) {
           const line = el("div", "ads-ba-row");
-          line.append(el("span", "ads-ba-name", rowName(row)));
-          line.append(el("span", "ads-ba-state", DELIVERY_STATE_LABELS[stateOf(row)] || stateOf(row)));
+          const named = el("span", "ads-ba-name");
+          named.append(el("span", "", entry.name));
+          // The identity, beside the name. Names repeat across a hierarchy —
+          // "Broad 1" exists in every campaign — so a review that lists names
+          // alone cannot be checked against the rows it will change.
+          named.append(el("span", "ads-ba-id", entry.key || "no identity in this read"));
+          line.append(named);
+          // The row's own state, never a guessed one: a "before" column that
+          // says Delivering for a paused row is a claim about delivery.
+          line.append(el("span", "ads-ba-state", entry.state));
           const ba = el("span", "ads-ba-values");
-          ba.append(el("span", "ads-ba-before", kind === "pause" ? "Delivering" : before === null ? "—" : formatMoney(before, currency)));
+          const beforeText = kind === "pause" ? (entry.before ? DELIVERY_STATE_LABELS[entry.before] || entry.before : "—") : formatAccountMoney(entry.before, currency);
+          const afterText = kind === "pause" ? "Paused" : formatAccountMoney(entry.after, currency);
+          const beforeNode = el("span", "ads-ba-before", beforeText ?? "—");
+          if (!entry.known && kind !== "pause") beforeNode.title = "This read did not carry a budget for this row. A missing value is not zero.";
+          ba.append(beforeNode);
           ba.append(svg(ICONS.chevronRight, { size: 12, width: 2 }));
-          ba.append(el("span", "ads-ba-after", kind === "pause" ? "Paused" : after === null ? "—" : formatMoney(after, currency)));
+          const afterNode = el("span", "ads-ba-after", afterText ?? "—");
+          if (!entry.known && kind !== "pause") afterNode.title = "Without a before value the after value cannot be computed.";
+          ba.append(afterNode);
           line.append(ba);
           rowsHost.append(line);
         }
-        const counted = chosen.length - unknown;
+        const counted = plan.known.length;
+        const excluded = plan.unknown.length;
+        const excludedNote = excluded ? ` · ${formatInt(excluded)} excluded (no ${kind === "pause" ? "state" : "budget"} in this read)` : "";
         const total = el("div", "ads-ba-total");
         total.append(
-          el("span", "", kind === "pause" ? `${chosen.length} rows stop delivering` : `Combined daily budget (${counted} of ${chosen.length} rows)`),
+          el(
+            "span",
+            "",
+            counted === 0
+              ? // Every affected row is unknown, so there is no total to state.
+                // "0 of 4 rows stop delivering" would be a claim about rows this
+                // read never measured.
+                `— · nothing to total: ${excluded ? `all ${formatInt(excluded)} rows carry no ${kind === "pause" ? "state" : "budget"} in this read` : "no rows are affected"}`
+              : kind === "pause"
+                ? `${formatInt(plan.changed)} of ${formatInt(plan.entries.length)} rows stop delivering${excludedNote}`
+                : `Combined daily budget (${formatInt(counted)} of ${formatInt(plan.entries.length)} rows)${excludedNote}`,
+          ),
         );
-        total.append(
-          el("span", "ads-ba-values", kind === "pause" ? "" : counted ? `${formatMoney(beforeTotal, currency)} → ${formatMoney(afterTotal, currency)}` : "—"),
-        );
+        const totals =
+          plan.beforeTotal === null || plan.afterTotal === null
+            ? "—"
+            : `${formatAccountMoney(plan.beforeTotal, currency) ?? "—"} → ${formatAccountMoney(plan.afterTotal, currency) ?? "—"}`;
+        total.append(el("span", "ads-ba-values", kind === "pause" ? "" : totals));
         rowsHost.append(total);
-        if (unknown && kind !== "pause") {
+        if (excluded) {
           const note = el(
             "p",
             "ads-field-hint",
-            `${unknown} selected row${unknown === 1 ? " has" : "s have"} no budget in this read, so ${unknown === 1 ? "it is" : "they are"} shown as — and left out of the total. A missing budget is not zero.`,
+            kind === "pause"
+              ? `${formatInt(excluded)} selected row${excluded === 1 ? " did" : "s did"} not carry a delivery state in this read, so ${excluded === 1 ? "it is" : "they are"} shown as — and excluded from the count above. An unknown state is not "delivering".`
+              : `${formatInt(excluded)} selected row${excluded === 1 ? " has" : "s have"} no budget in this read, so ${excluded === 1 ? "it is" : "they are"} shown as — and excluded from both totals above. A missing budget is not zero.`,
           );
           rowsHost.append(note);
         }
@@ -605,6 +814,8 @@ export function createCampaignsScreen(ctx, host) {
         el(
           "span",
           "",
+          // The exclusion count is stated under the totals, where it is refreshed
+          // whenever the percentage changes; this sentence is written once.
           `${chosen.length} row${chosen.length === 1 ? "" : "s"} will change, each listed above with its before and after value. A row hidden by the current filters cannot be in this selection: selecting a page or every matching row only ever selects rows the filters keep.`,
         ),
       );
@@ -671,9 +882,10 @@ export function createCampaignsScreen(ctx, host) {
 
   /** Delivery inspection: why a row is in the state it is in, not just that it is. */
   function openDetail(row) {
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
     drawer.setTitle(rowName(row));
     drawer.show((body) => {
+      if (!currency) body.append(currencyNote());
       const head = el("div", "ads-detail-head");
       head.append(statusBadge(stateOf(row)));
       head.append(el("span", "ads-detail-id", String(row.internalId || row.id)));
@@ -712,7 +924,11 @@ export function createCampaignsScreen(ctx, host) {
       if (row.schedule) fact("Schedule", row.schedule);
       if (row.creativeName) fact("Creative", row.creativeName);
       if (row.destination) fact("Destination", row.destination);
-      if (row.budget !== null && row.budget !== undefined) fact("Budget", `${formatMoney(row.budget, currency)} ${row.budgetKind || ""}`.trim());
+      // The parent's identity, so the record says where it sits in the
+      // hierarchy rather than implying it sits nowhere.
+      const parent = parentIdentity(row);
+      if (row.level !== "campaign") fact(PARENT_FIELD[row.level === "ad" ? "ad" : "adset"].label, `${parent.id || "—"}${parent.name ? ` · ${parent.name}` : ""}`);
+      if (row.budget !== null && row.budget !== undefined) fact("Budget", `${formatAccountMoney(row.budget, currency) ?? "—"} ${row.budgetKind || ""}`.trim());
       fact("Last edit", formatWhen(row.lastEdit));
       body.append(facts);
 
@@ -752,9 +968,9 @@ export function createCampaignsScreen(ctx, host) {
         for (const point of series.slice(-14).reverse()) {
           const tr = el("tr");
           tr.append(el("td", "ads-map-fixed", formatDay(point.date)));
-          tr.append(el("td", "ads-num", formatMoney(point.spend, currency)));
+          tr.append(el("td", "ads-num", formatAccountMoney(point.spend, currency) ?? "—"));
           tr.append(el("td", "ads-num", formatInt(point.results)));
-          tr.append(el("td", "ads-num", formatMoney(point.results ? point.spend / point.results : null, currency)));
+          tr.append(el("td", "ads-num", formatAccountMoney(point.results ? point.spend / point.results : null, currency) ?? "—"));
           tbody.append(tr);
         }
         table.append(thead, tbody);
@@ -782,15 +998,11 @@ export function createCampaignsScreen(ctx, host) {
       state.level,
       (level) => {
         if (level === state.level) return;
-        state.level = level;
-        state.compareKeys = [];
-        // The rows on screen answer the old level's question. Drop them: keeping
-        // them under the new level's heading would describe a table that is not
-        // the one being asked for, and a failed read must not leave them there.
-        state.rows = [];
-        selection.clear();
-        ctx.store.update({ level });
-        void load();
+        void switchLevel(level, {
+          // Filters that only exist at the old level are dropped by
+          // `switchLevel`, which says which ones and why.
+          say: `Showing ${ENTITY_LEVEL_LABELS[level].toLowerCase()}. Same window, same attribution setting.`,
+        });
       },
       { label: "Which level to manage" },
     );
@@ -851,7 +1063,7 @@ export function createCampaignsScreen(ctx, host) {
     node.append(rowsReadNote(state.fetchedAt, { suffix: "Filters, sorting and the level switch re-read the saved rows; nothing here calls the provider." }));
 
     const { fields } = applyView();
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
 
     const bar = filterBar({
       fields,
@@ -866,20 +1078,33 @@ export function createCampaignsScreen(ctx, host) {
         render();
       },
       savedViews: ctx.store.saved(),
+      builtInViews: ctx.store.builtIn(),
+      activeView: ctx.store.activeView(),
       onSaveView: (name) => {
         ctx.store.save(name);
         render();
-        ctx.say(`Saved the view "${name}".`);
+        ctx.say(`Saved the view "${name}". It is your own view, beside the built-in ones.`);
       },
       onApplyView: (view) => {
-        ctx.store.apply(view);
+        ctx.store.apply(view, { fields });
         state.compareKeys = [];
         render();
-        ctx.say(`Applied the view "${view.name}".`);
+        ctx.say(appliedViewSentence(ctx.store, view));
+      },
+      onUpdateView: (view) => {
+        ctx.store.updateSaved(view.id);
+        render();
+        ctx.say(`Saved the columns, sort and filters on screen to your view "${view.name}".`);
+      },
+      onRenameView: (view, name) => {
+        ctx.store.rename(view.id, name);
+        render();
+        ctx.say(`Renamed the saved view "${view.name}" to "${name}".`);
       },
       onRemoveView: (view) => {
         ctx.store.remove(view.id);
         render();
+        ctx.say(`Deleted your saved view "${view.name}". The built-in views are unchanged.`);
       },
       resultCount: state.filtered.length,
       totalCount: state.rows.length,
@@ -910,6 +1135,9 @@ export function createCampaignsScreen(ctx, host) {
             render();
           },
         }),
+        // No currency in the context read means no unit is invented anywhere on
+        // this screen; the figures say so rather than borrowing sterling.
+        ...(currency ? [] : [currencyNote()]),
       ],
     });
     node.append(bar);
@@ -930,11 +1158,35 @@ export function createCampaignsScreen(ctx, host) {
       getKey: rowKey,
       state: ctx.store.state,
       selection,
-      onSelectionChange: () => render(),
+      onSelectionChange: (current) => {
+        render();
+        // The count is announced as well as shown: the bulk bar is the last
+        // thing on the screen, and a keyboard operator should not have to go
+        // looking for it to know what they just selected.
+        const count = current.size();
+        ctx.say(count ? `${formatInt(count)} ${count === 1 ? "row" : "rows"} selected at the ${ENTITY_LEVEL_LABELS[state.level].toLowerCase()} level.` : "Selection cleared.");
+      },
       onSort: (sort) => ctx.store.update({ sort }),
       onRowActivate: (row) => openDetail(row),
       rowTone: (row) => ((row.issues || []).some((i) => i.kind === "rejected") ? "bad" : (row.issues || []).length ? "warn" : null),
       renderRowMeta: (row) => {
+        const group = el("div", "ads-row-actions");
+        // The drill-down lives on the parent row, where the question is asked.
+        // It switches level and filters by the record's id, so the table below is
+        // exactly that record's children.
+        const childLevel = row.level === "campaign" ? "adset" : row.level === "adset" ? "ad" : "";
+        if (childLevel) {
+          const drill = button(childLevel === "adset" ? "Show its ad sets" : "Show its ads", {
+            variant: "quiet",
+            title: `Switches to the ${ENTITY_LEVEL_LABELS[childLevel].toLowerCase()} level and filters to this record's id (${rowKey(row)}), never its name.`,
+            onClick: (event) => {
+              event.stopPropagation();
+              drillDown(row);
+            },
+          });
+          drill.classList.add("ads-row-action");
+          group.append(drill);
+        }
         const inCompare = state.compareKeys.includes(rowKey(row));
         const action = button(inCompare ? "In compare" : "Compare", {
           variant: "quiet",
@@ -947,7 +1199,8 @@ export function createCampaignsScreen(ctx, host) {
         // Revealed on hover, focus or selection on pointer devices; always
         // visible on touch, where there is no hover to discover it with.
         action.classList.add("ads-row-action");
-        return action;
+        group.append(action);
+        return group;
       },
       emptyNode: emptyPanel({
         title: state.rows.length ? "No row matches these filters" : "Nothing in this window",

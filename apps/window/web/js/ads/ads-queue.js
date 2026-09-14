@@ -27,10 +27,9 @@ import {
   isUncertainWrite,
   formatWhen,
   formatInt,
-  formatMoney,
-  formatDelta,
   num,
   rowName,
+  rowKey,
 } from "./ads-contracts.js";
 import {
   el,
@@ -53,8 +52,26 @@ import {
   visuallyHidden,
 } from "./ads-ui.js";
 import { createTable, column, createSelection, columnChooser, sortControl } from "./ads-table.js";
-import { field, filterBar, bulkBar, applyFilters, hiddenSelectionNotice } from "./ads-views.js";
-import { draftSummary } from "./ads-drafts.js";
+import {
+  field,
+  filterBar,
+  bulkBar,
+  applyFilters,
+  hiddenSelectionNotice,
+  accountCurrency,
+  formatAccountMoney,
+  formatAccountMoneyDelta,
+  summariseChangeEntries,
+  appliedViewSentence,
+  CURRENCY_UNKNOWN_NOTE,
+} from "./ads-views.js";
+import {
+  PHASE_LABELS,
+  LOCAL_PHASES,
+  PROVIDER_PHASES,
+  draftSummary,
+} from "./ads-drafts.js";
+import { planDigest } from "./ads-identity.js";
 import { ADS_ENDPOINT_BASE, READER_PATHS, READER_REQUIREMENTS } from "./ads-source.js";
 
 // ---------------------------------------------------------------------------
@@ -271,6 +288,121 @@ function flowNote(state) {
 }
 
 // ---------------------------------------------------------------------------
+// Draft lifecycle
+// ---------------------------------------------------------------------------
+//
+// The queue lists staged work, and a staged change has a life of its own that
+// has nothing to do with delivery. These three functions are the whole of that
+// life: what phase a draft is in, what exactly was approved, and whether the
+// approval still describes what is on screen. They are pure so they can be
+// driven directly by the rule tests.
+
+/**
+ * The phase of a staged change, in words an operator can act on.
+ *
+ * `Draft (unsaved)` and `Saved draft` are the two halves of the model's
+ * `editing`: a record that has never been written anywhere durable is not the
+ * same thing as one this browser saved and can reopen. `Submitted to Meta` and
+ * `Delivering` are reported exactly as the model records them and are marked
+ * read-only, because nothing in this browser may set them: only an execution
+ * service that heard from the provider can.
+ */
+export function queuePhaseLabel(draft) {
+  const phase = String(draft?.phase || "");
+  const origin = draft?.origin === "preview" ? "preview" : "live";
+  const readOnly = PROVIDER_PHASES.includes(phase);
+  let label;
+  if (phase === "editing") label = draft?.savedAt ? "Saved draft" : "Draft (unsaved)";
+  else label = PHASE_LABELS[phase] || (phase ? phase : "Phase unknown");
+  if (origin === "preview") label = `Local rehearsal · ${label}`;
+  return Object.freeze({
+    phase,
+    origin,
+    label,
+    readOnly,
+    rehearsal: origin === "preview",
+    // Writable here means "this browser may move the record into this phase".
+    // A local phase is writable, but only through the draft model's own
+    // transitions: the queue never writes storage itself. A rehearsal draft is
+    // writable as a rehearsal and still can never be sent.
+    settable: LOCAL_PHASES.includes(phase),
+    reason: readOnly
+      ? "Recorded by the execution service from a provider answer. This browser never sets it and nothing here can."
+      : phase === "editing" && !draft?.savedAt
+        ? "Being built in the publishing flow. It is not in the queue yet and it is not saved in this browser."
+        : origin === "preview"
+          ? "A rehearsal draft. It is stored apart from live work and can never be sent."
+          : "A local phase. Nothing has been sent to Meta.",
+  });
+}
+
+/**
+ * The rows an approval covers.
+ *
+ * A launch is approved against its planned ads (`planDigest` of `plan.rows`).
+ * A budget or pause change has no planned ads, so its digest covers the rows it
+ * would change — keyed on the record's identity and its before/after values.
+ * Approving a launch against an empty digest would make every approval of it
+ * look valid forever, which is exactly what an approval must not do.
+ */
+export function draftDigestRows(draft) {
+  if (!draft) return [];
+  if (draft.kind === "launch") return (draft.plan?.rows || []).map((row) => ({ ...row }));
+  return (draft.changes?.rows || []).map((row) => ({
+    adId: String(row.key || ""),
+    creativeVersionId: String(row.level || ""),
+    // The row's *name* is deliberately absent: a rename is a label change, and an
+    // approval that expired because somebody reworded a label would train people
+    // to re-approve without reading.
+    headline: "",
+    // The before and after values are the substance of a budget or pause change,
+    // so the digest has to move when either of them does. "unknown" is spelled
+    // out so an absent value cannot collide with the string "null".
+    body: `${row.before === null || row.before === undefined ? "unknown" : row.before}→${row.after === null || row.after === undefined ? "unknown" : row.after}`,
+    destination: "",
+    trackingKey: String(row.state || ""),
+  }));
+}
+
+export function draftDigest(draft) {
+  return planDigest(draftDigestRows(draft));
+}
+
+/**
+ * Whether a recorded approval still describes the draft on screen.
+ *
+ * `stale` is the interesting answer: the plan changed after the sign-off, so
+ * the approval is history rather than permission. An approval with no digest at
+ * all is `undigested` and is also treated as not covering the plan, because
+ * there is nothing it could be checked against.
+ */
+export function approvalStatus(draft) {
+  const digest = draftDigest(draft);
+  const approvedDigest = String(draft?.approvedDigest || "");
+  const approvedAt = String(draft?.approvedAt || "");
+  if (!approvedAt) return Object.freeze({ status: "none", digest, approvedDigest, approvedAt, reason: "Not approved. An approval is the owner's sign-off on one exact plan, recorded locally." });
+  if (!approvedDigest) {
+    return Object.freeze({
+      status: "undigested",
+      digest,
+      approvedDigest,
+      approvedAt,
+      reason: "Approved before this build recorded a plan digest, so there is nothing to check the approval against. Approve again to pin it to the current plan.",
+    });
+  }
+  if (approvedDigest !== digest) {
+    return Object.freeze({
+      status: "stale",
+      digest,
+      approvedDigest,
+      approvedAt,
+      reason: "The plan changed after it was approved, so this approval no longer describes what is on screen. Approve the current plan again.",
+    });
+  }
+  return Object.freeze({ status: "approved", digest, approvedDigest, approvedAt, reason: "Approved against this exact plan. The digest still matches." });
+}
+
+// ---------------------------------------------------------------------------
 // Screen
 // ---------------------------------------------------------------------------
 
@@ -330,25 +462,25 @@ export function createQueueScreen(ctx, host) {
 
   // The account currency comes from the context read. Without it a money figure
   // would be a number with an invented unit, so the unit is withheld and said to
-  // be missing rather than guessed.
+  // be missing rather than guessed — never GBP by default.
   function currency() {
-    return String(ctx.context?.account?.currency || "");
+    return accountCurrency(ctx.context);
   }
 
   function money(value) {
-    const n = num(value);
-    if (n === null) return null;
-    const code = currency();
-    return code ? formatMoney(n, code) : `${n.toFixed(2)} (account currency not connected)`;
+    return formatAccountMoney(value, currency());
   }
 
   function moneyDelta(value) {
-    const n = num(value);
-    if (n === null) return null;
-    const code = currency();
-    if (code) return formatDelta(n, { kind: "currency", currency: code });
-    const sign = n > 0 ? "+" : n < 0 ? "−" : "";
-    return `${sign}${Math.abs(n).toFixed(2)} (account currency not connected)`;
+    return formatAccountMoneyDelta(value, currency());
+  }
+
+  /** The sentence shown wherever a money figure appears with no currency read. */
+  function currencyNote() {
+    if (currency()) return null;
+    const note = el("p", "ads-currency-note");
+    note.append(svg(ICONS.info, { size: 12, width: 1.8 }), el("span", "", CURRENCY_UNKNOWN_NOTE));
+    return note;
   }
 
   function numberCell(value) {
@@ -405,13 +537,40 @@ export function createQueueScreen(ctx, host) {
     return dash;
   }
 
-  function persistView() {
-    store?.update({
-      columns: state.view.columns,
-      sort: state.view.sort,
-      filters: state.view.filters,
-      pageSize: state.view.pageSize,
-    });
+  function persistView({ marksModified = true } = {}) {
+    store?.update(
+      {
+        columns: state.view.columns,
+        sort: state.view.sort,
+        filters: state.view.filters,
+        pageSize: state.view.pageSize,
+      },
+      { marksModified },
+    );
+  }
+
+  /**
+   * Apply a built-in or saved view: columns, sort and filters together.
+   *
+   * The store owns the view state (so `?view=` and "which view is showing" work
+   * the same here as on every other screen) while this screen keeps `state.view`
+   * for the table. They are written in one place, and `persistView` runs last so
+   * the two agree instead of the store quietly holding the older half.
+   */
+  function applyScreenView(view) {
+    store?.apply(view, { fields: FIELDS });
+    const builtIn = view.kind === "built-in";
+    if (Array.isArray(view.columns) && view.columns.length) state.view.columns = normalizeColumns(view.columns);
+    else if (!builtIn) state.view.columns = normalizeColumns(null);
+    if (view.sort) state.view.sort = { ...view.sort };
+    else if (!builtIn) state.view.sort = { id: "updated", dir: "desc" };
+    state.view.filters = (Array.isArray(view.filters) ? view.filters : [])
+      .filter((filter) => FIELDS.some((def) => def.id === filter.field))
+      .map((filter) => ({ ...filter }));
+    state.view.page = 0;
+    persistView({ marksModified: false });
+    renderAll();
+    ctx.say(appliedViewSentence(store || { skipped: null }, view));
   }
 
   /**
@@ -782,26 +941,35 @@ export function createQueueScreen(ctx, host) {
         renderBulk();
       },
       savedViews: store ? store.saved() : [],
+      builtInViews: store ? store.builtIn() : [],
+      activeView: store ? store.activeView() : null,
       onSaveView: store
         ? (name) => {
             store.save(name);
             renderSummary();
-            ctx.say(`View "${name}" saved for this screen.`);
+            ctx.say(`View "${name}" saved for this screen. It sits beside the built-in views, which cannot be edited.`);
           }
         : null,
-      onApplyView: (view) => {
-        state.view.columns = normalizeColumns(view.columns);
-        state.view.sort = view.sort || state.view.sort;
-        state.view.filters = Array.isArray(view.filters) ? view.filters.slice() : [];
-        state.view.page = 0;
-        persistView();
-        renderAll();
-        ctx.say(`View "${view.name}" applied.`);
-      },
+      onApplyView: (view) => applyScreenView(view),
+      onUpdateView: store
+        ? (view) => {
+            store.updateSaved(view.id);
+            renderSummary();
+            ctx.say(`Saved the columns, sort and filters on screen to your view "${view.name}".`);
+          }
+        : null,
+      onRenameView: store
+        ? (view, name) => {
+            store.rename(view.id, name);
+            renderSummary();
+            ctx.say(`Renamed the saved view "${view.name}" to "${name}".`);
+          }
+        : null,
       onRemoveView: store
         ? (view) => {
             store.remove(view.id);
             renderSummary();
+            ctx.say(`Deleted your saved view "${view.name}". The built-in views are unchanged.`);
           }
         : null,
       search: state.search,
@@ -853,6 +1021,9 @@ export function createQueueScreen(ctx, host) {
       id: "name",
       label: "Batch",
       title: "The launch batch. Press Enter on a row to open its ads.",
+      // The one cell that says which batch the row is. Pinned on a phone, so the
+      // subject of a row never scrolls out of sight.
+      identity: true,
       sortValue: (batch) => rowName(batch).toLowerCase(),
     },
     state: { id: "state", label: "State", title: "Where the batch is. The word is the state; the title says what it proves." },
@@ -1065,10 +1236,13 @@ export function createQueueScreen(ctx, host) {
    * value before and the value after. Anything this read cannot compute is
    * listed as unknown instead of being dropped, and a row whose "after" cannot
    * be shown blocks the confirm.
+   *
+   * The arithmetic lives in `summariseChangeEntries`, shared with the campaigns
+   * table, so "unknown is not zero" and "the total covers the known rows" cannot
+   * drift between the two screens that stage a bulk change.
    */
   function reviewPlan(review, selected) {
     const entries = [];
-    const unknown = [];
     const gaps = [];
     const amount = signedAmount(review);
     for (const batch of selected) {
@@ -1082,28 +1256,21 @@ export function createQueueScreen(ctx, host) {
         gaps.push(`${rowName(batch)}: this read carries ${formatInt(rows.length)} of its ${formatInt(recorded)} ads`);
       }
       for (const row of rows) {
-        const entry = { batch, row };
-        if (review.kind === "pause") {
-          entry.before = rawState(row.state);
-          entry.after = "paused";
-          entry.changed = entry.before !== "paused";
-          if (!entry.before) unknown.push(entry);
-        } else {
-          const before = num(row.budget);
-          entry.before = before;
-          entry.after = before === null || amount === null ? null : before + amount;
-          entry.changed = entry.after !== null && entry.after !== before;
-          if (entry.after === null) unknown.push(entry);
-        }
-        entries.push(entry);
+        const before = review.kind === "pause" ? rawState(row.state) : num(row.budget);
+        entries.push({
+          batch,
+          row,
+          // The ad's identity, not only its name: two batches can hold ads that
+          // share a name, and a review has to be checkable against the rows it
+          // would change.
+          key: String(rowKey(row) || ""),
+          name: rowName(row),
+          before,
+          after: review.kind === "pause" ? "paused" : before === null || amount === null ? null : before + amount,
+        });
       }
     }
-    const known = entries.filter((entry) => !unknown.includes(entry));
-    const total =
-      review.kind === "budget"
-        ? known.reduce((sum, entry) => sum + (num(entry.after) - num(entry.before)), 0)
-        : known.filter((entry) => entry.changed).length;
-    return { entries, unknown, gaps, total, amount, changed: entries.filter((entry) => entry.changed).length };
+    return { ...summariseChangeEntries(review.kind, entries), gaps, amount };
   }
 
   function beforeAfter(beforeNode, afterNode) {
@@ -1147,7 +1314,6 @@ export function createQueueScreen(ctx, host) {
     );
     panel.append(head);
 
-    const unknown = new Set(plan.unknown);
     if (!isPause) {
       const control = el("div", "ads-state-strip");
       const amountId = nextId("amount");
@@ -1178,9 +1344,8 @@ export function createQueueScreen(ctx, host) {
       );
       control.append(label, amount, direction);
       panel.append(control);
-      if (!currency()) {
-        panel.append(el("p", "ads-block-note", "The account currency is not connected, so each figure carries its number only and no unit is invented."));
-      }
+      const note = currencyNote();
+      if (note) panel.append(note);
     }
 
     const list = el("div", "ads-block-rows");
@@ -1206,7 +1371,7 @@ export function createQueueScreen(ctx, host) {
       title: "Stages this change on this screen. Nothing is sent: the queue has no write endpoint in this build.",
       onClick: () => stageChange(review),
     });
-    const actions = el("div", "ads-state-strip");
+    const actions = el("div", "ads-state-strip ads-stage-bar");
     actions.append(confirm, el("span", "ads-badge ads-badge-quiet", "Staged here only"), ackLabel, button("Cancel", { variant: "quiet", onClick: () => closeReview() }));
     panel.append(actions);
 
@@ -1215,30 +1380,41 @@ export function createQueueScreen(ctx, host) {
       for (const entry of plan.entries) {
         const row = el("div", "ads-def-row");
         const term = el("div");
-        term.append(el("span", "", rowName(entry.row)));
+        term.append(el("span", "", entry.name));
+        // The identity travels with the name: an approval is of specific ads,
+        // and a name is not enough to tell two of them apart.
+        term.append(el("span", "ads-cell-sub ads-ba-id", entry.key || "no identity in this read"));
         if (entry.batch) term.append(el("span", "ads-cell-sub", rowName(entry.batch)));
         const value = el("div");
-        const beforeNode = isPause ? stateBadge(entry.before) : moneyNode(entry.before, unknown.has(entry));
-        const afterNode = isPause
-          ? stateBadge(entry.after)
-          : moneyNode(entry.after, unknown.has(entry));
+        const beforeNode = isPause ? stateBadge(entry.before) : moneyNode(entry.before, !entry.known);
+        const afterNode = isPause ? stateBadge(entry.after) : moneyNode(entry.after, !entry.known);
         value.append(beforeAfter(beforeNode, afterNode));
-        if (!entry.changed) value.append(el("span", "ads-cell-sub", isPause ? "already paused — no change" : "no change"));
+        if (!entry.known) value.append(el("span", "ads-cell-sub", isPause ? "state not in this read — not counted" : "no budget in this read — not counted"));
+        else if (!entry.changed) value.append(el("span", "ads-cell-sub", isPause ? "already paused — no change" : "no change"));
         row.append(term, value);
         list.append(row);
       }
       if (!plan.entries.length) list.append(el("p", "ads-block-note", "No ad in this read is affected."));
 
       clear(totalRow);
-      const known = plan.entries.length - plan.unknown.length;
+      const known = plan.known.length;
+      const excluded = plan.unknown.length;
+      const excludedNote = excluded ? ` · ${formatInt(excluded)} excluded (no ${isPause ? "state" : "budget"} in this read)` : "";
       totalRow.append(
         defRow(
           isPause ? "Total" : "Total change",
           isPause
-            ? `${formatInt(plan.changed)} of ${formatInt(plan.entries.length)} ads move to Paused`
-            : plan.total === null
-              ? "—"
-              : `${moneyDelta(plan.total)} per day across ${formatInt(known)} ads`,
+            ? known === 0
+              ? // Every affected ad's state is unknown, so there is no count to
+                // state: "0 of 4 ads move to Paused" would be a claim about ads
+                // this read never measured.
+                `— · nothing to count: all ${formatInt(plan.entries.length)} ads carry no state in this read`
+              : `${formatInt(plan.changed)} of ${formatInt(plan.entries.length)} ads move to Paused${excludedNote}`
+            : known === 0
+              ? // An unknown value is not zero, so a change computed from no
+                // known rows prints a dash and says why, never "0 per day".
+                `— · nothing to total: all ${formatInt(plan.entries.length)} ads carry no budget in this read`
+              : `${moneyDelta(plan.total)} per day across ${formatInt(known)} ads${excludedNote}`,
         ),
       );
       if (plan.gaps.length) totalRow.append(el("p", "ads-block-note", `Covered here: ${plan.gaps.join("; ")}. The change would apply to the whole batch; the ads not in this read cannot be shown before and after.`));
@@ -1261,12 +1437,11 @@ export function createQueueScreen(ctx, host) {
     function refresh() {
       const next = reviewPlan(review, selected);
       plan.entries = next.entries;
+      plan.known = next.known;
       plan.unknown = next.unknown;
       plan.gaps = next.gaps;
       plan.total = next.total;
       plan.changed = next.changed;
-      unknown.clear();
-      for (const entry of next.unknown) unknown.add(entry);
       update();
     }
 
@@ -1304,7 +1479,7 @@ export function createQueueScreen(ctx, host) {
     const selected = selectedBatches();
     const plan = reviewPlan(review, selected);
     const isPause = review.kind === "pause";
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
     const rows = plan.entries.map((entry) => ({
       key: String(rowKey(entry.row)),
       name: rowName(entry.row),
@@ -1549,16 +1724,236 @@ export function createQueueScreen(ctx, host) {
   }
 
   /**
+   * The phase vocabulary, printed beside the records that use it.
+   *
+   * A staged change has a life of its own that has nothing to do with delivery,
+   * and the two provider phases are listed here precisely because this browser
+   * must never be able to set them: they are shown as read-only facts.
+   */
+  function phaseLegend() {
+    const list = el("dl");
+    const row = (term, phase, sentence) => {
+      const label = queuePhaseLabel(phase);
+      const strip = el("div", "ads-state-strip");
+      strip.append(el("span", "ads-badge ads-badge-quiet", label.label));
+      if (label.readOnly) strip.append(el("span", "ads-badge ads-badge-mute", "Read-only"));
+      strip.append(el("span", "ads-cell-sub", sentence));
+      list.append(defRow(term, strip));
+    };
+    row("Draft (unsaved)", { phase: "editing", origin: "live" }, "Being built in the publishing flow. Not staged, and not yet saved in this browser.");
+    row("Saved draft", { phase: "editing", origin: "live", savedAt: "x" }, "Saved locally and reopenable. Still not staged, still not sent.");
+    row("Staged in Frank", { phase: "staged", origin: "live" }, "Waiting for the owner's sign-off. Nothing has reached Meta.");
+    row("Approved", { phase: "approved", origin: "live" }, "The owner signed off on one exact plan, recorded with its digest. Local, and not a submission.");
+    row("Submitted to Meta", { phase: "submitted", origin: "live" }, "A write was acknowledged by the provider. Never set from this browser, and not proof of delivery.");
+    row("Delivering", { phase: "delivering", origin: "live" }, "The provider is serving it. Recorded by the execution service from a provider answer.");
+    return list;
+  }
+
+  /**
+   * Recovery, said out loud.
+   *
+   * The draft store drops a record it cannot read, keeps a backup before every
+   * write, and reports a storage failure instead of pretending. Every one of
+   * those is a way work disappears, so every one of them is surfaced here rather
+   * than left in the console.
+   */
+  function recoveryBlock() {
+    const diagnostics = ctx.drafts.diagnostics || {};
+    const unfinished = ctx.drafts.unfinished();
+    const nodes = [];
+
+    if (diagnostics.storageError) {
+      const banner = el("div", "ads-banner");
+      banner.dataset.tone = "warn";
+      banner.setAttribute("role", "status");
+      banner.append(svg(ICONS.alert, { size: 13, width: 1.8 }));
+      banner.append(
+        el(
+          "span",
+          "",
+          `${diagnostics.storageError} Staged changes in this tab are held in memory only: closing the tab loses them.`,
+        ),
+      );
+      nodes.push(banner);
+    }
+    if (diagnostics.discarded) {
+      const banner = el("div", "ads-banner");
+      banner.dataset.tone = "warn";
+      banner.setAttribute("role", "status");
+      banner.append(svg(ICONS.alert, { size: 13, width: 1.8 }));
+      const n = diagnostics.discarded;
+      banner.append(el("span", "", `${formatInt(n)} saved draft${n === 1 ? "" : "s"} could not be read and ${n === 1 ? "was" : "were"} dropped rather than shown as something ${n === 1 ? "it is" : "they are"} not.`));
+      if (typeof ctx.drafts.restoreBackup === "function") {
+        banner.append(
+          button("Restore the previous copy", {
+            title: "Puts back the payload written before the last save. Anything saved after that copy is not in it.",
+            onClick: () => {
+              const restored = ctx.drafts.restoreBackup();
+              renderAll();
+              ctx.say(restored ? "Restored the previous saved copy of the drafts." : "There was no backup copy to restore.");
+            },
+          }),
+        );
+      }
+      nodes.push(banner);
+    }
+    if (diagnostics.restoredFromBackup) {
+      const banner = el("div", "ads-banner");
+      banner.dataset.tone = "mute";
+      banner.setAttribute("role", "status");
+      banner.append(svg(ICONS.info, { size: 13, width: 1.8 }));
+      banner.append(el("span", "", "These drafts were restored from the backup copy Frank wrote before its last save, because the current record could not be read."));
+      nodes.push(banner);
+    }
+
+    if (unfinished.length) {
+      const section = block("You left these unfinished", {
+        note: "Saved work that was never staged, so it is not in the queue and nothing has been sent. It was kept rather than dropped.",
+      });
+      for (const draft of unfinished) {
+        const list = el("dl");
+        list.append(
+          defRow("Draft", draft.title || draftSummary(draft)),
+          defRow("Phase", phaseBadge(draft)),
+          defRow("Rows", formatInt(draft.kind === "launch" ? draft.plan.rows.length : draft.changes.rows.length)),
+          defRow("Revision", revisionText(draft)),
+          defRow("Last saved", savedText(draft)),
+        );
+        const actions = el("div", "ads-state-strip");
+        if (draft.kind === "launch") {
+          actions.append(
+            button("Reopen draft", {
+              variant: "ink",
+              title: "Reopen this launch in the publishing flow, exactly as it was saved.",
+              onClick: () => ctx.openDraft(draft.id),
+            }),
+          );
+        } else {
+          actions.append(
+            button("Open the campaigns table", {
+              variant: "ink",
+              title: "A budget or pause change is staged from the table that shows its rows. Re-run it there; the saved rows here are what it covered.",
+              onClick: () => {
+                ctx.navigate("campaigns");
+                ctx.say("Re-stage this change from the campaigns table. The unfinished record here is kept until you discard it.");
+              },
+            }),
+          );
+        }
+        actions.append(
+          button("Discard", {
+            variant: "quiet",
+            title: "Remove this unfinished draft. Nothing was sent, so there is nothing to undo at the provider.",
+            onClick: () => {
+              ctx.drafts.remove(draft.id);
+              renderAll();
+              ctx.say("Unfinished draft discarded. Nothing was sent to the provider.");
+            },
+          }),
+        );
+        section.append(list, actions);
+      }
+      nodes.push(section);
+    }
+
+    if (!nodes.length) return null;
+    const wrap = el("div", "ads-recovery");
+    for (const node of nodes) wrap.append(node);
+    return wrap;
+  }
+
+  /** A draft's phase, stated with the word and what it does and does not mean. */
+  function phaseBadge(draft) {
+    const info = queuePhaseLabel(draft);
+    const badge = el("span", "ads-badge ads-badge-quiet", info.label);
+    badge.dataset.phase = info.phase;
+    badge.dataset.origin = info.origin;
+    badge.title = info.reason;
+    return badge;
+  }
+
+  /** Revision and last-saved time, so two people can see they are looking at
+   *  different revisions of the same record before either of them acts. */
+  function revisionText(draft) {
+    const revision = Number(draft?.revision) > 0 ? Number(draft.revision) : null;
+    return revision === null ? "—" : `Revision ${formatInt(revision)}`;
+  }
+
+  function savedText(draft) {
+    const at = Date.parse(String(draft?.savedAt || draft?.updatedAt || ""));
+    if (!Number.isFinite(at)) return "This record does not say when it was last saved.";
+    const node = el("span", "", formatWhen(at));
+    node.title = new Date(at).toLocaleString("en-GB");
+    return node;
+  }
+
+  /**
+   * Approve one staged draft: the owner's sign-off on one exact plan, recorded
+   * locally with the plan's digest.
+   *
+   * The revision is checked first. A list drawn a moment ago can be a revision
+   * behind — another tab, or another person — and approving a plan that has
+   * already changed would record a sign-off on something nobody read.
+   */
+  function approveDraft(draft) {
+    const current = ctx.drafts.get(draft.id);
+    if (!current) {
+      ctx.say("That draft is no longer in Frank's records. Nothing was approved.");
+      renderAll();
+      return;
+    }
+    if (Number(current.revision) !== Number(draft.revision)) {
+      ctx.say(
+        `This draft changed since the list was drawn: revision ${formatInt(draft.revision)} is now revision ${formatInt(current.revision)}. Read the current revision before approving it.`,
+      );
+      renderAll();
+      return;
+    }
+    const digest = draftDigest(current);
+    const approved = ctx.drafts.approve(current.id, { digest });
+    if (!approved) {
+      ctx.say("That draft could not be approved. Nothing was changed.");
+      return;
+    }
+    ctx.say(
+      `Approved "${current.title || draftSummary(current)}" locally, against plan digest ${digest}. This is Frank's own record of your sign-off on revision ${formatInt(current.revision)}; nothing was sent to Meta.`,
+    );
+    renderAll();
+  }
+
+  /**
    * Everything staged in Frank, read from the shared draft model. This renders
    * in every mode, including Not connected: a staged draft is a fact about this
    * workspace, not about the provider reader.
    */
   function stagedBlock() {
-    const drafts = ctx.drafts.list();
-    if (!drafts.length) return null;
-    const section = block("Staged in Frank", {
-      note: "One shared record per staged change, written by the launch flow, the campaigns table and this queue alike. Frank has no write endpoint in this build, so none of them has been sent to Meta and none of them is claimed as delivered.",
+    // Staged and approved records only. An unfinished draft is saved work that
+    // never reached the queue, and it is listed once, under its own heading in
+    // the recovery block, rather than twice with two sets of actions.
+    const drafts = ctx.drafts.staged();
+    const legend = block("What each phase means", {
+      note: "The phase of a staged change, in the words this screen and the launch flow both use. Approval is a local sign-off, not a submission, and the last two phases are read-only here.",
     });
+    legend.append(phaseLegend());
+
+    if (!drafts.length) {
+      const empty = block("Staged in Frank");
+      empty.append(
+        el(
+          "p",
+          "ads-block-note",
+          "Nothing is staged. A change staged from the launch flow, the campaigns table or this queue appears here with its phase, its revision and its approval.",
+        ),
+      );
+      const wrap = el("div", "ads-staged");
+      wrap.append(empty, legend);
+      return wrap;
+    }
+
+    const section = block("Staged in Frank", {
+      note: "One shared record per staged change, written by the launch flow, the campaigns table and this queue alike. Frank has no write endpoint in this build, so none of them has been sent to Meta and none of them is claimed as delivered. The revision and time are shown so two people can see when they are looking at different revisions.",
+    });
+    const unsavedWarning = ctx.drafts.persistent === false;
     for (const draft of drafts) {
       const list = el("dl");
       if (draft.kind === "launch") {
@@ -1568,8 +1963,6 @@ export function createQueueScreen(ctx, host) {
           defRow("Planned rows stored", formatInt(draft.plan.rows.length)),
           defRow("Creatives", formatInt(draft.creatives.length)),
           defRow("Campaign identity", draft.campaign.campaignId),
-          defRow("State", draft.approval === "staged" ? "Staged — waiting for a write path" : "Still being edited"),
-          defRow("Updated", formatWhen(Date.parse(draft.updatedAt) || Date.now())),
         );
       } else {
         const changes = draft.changes || {};
@@ -1577,41 +1970,99 @@ export function createQueueScreen(ctx, host) {
           defRow("Change", draft.title || draftSummary(draft)),
           defRow("Rows covered", formatInt((changes.rows || []).length)),
           defRow("Batches", (changes.batches || []).join(", ") || "—"),
-          defRow("State", draft.approval === "staged" ? "Staged — waiting for a write path" : "Still being edited"),
-          defRow("Updated", formatWhen(Date.parse(draft.updatedAt) || Date.now())),
         );
         if ((changes.gaps || []).length) list.append(defRow("Not covered", changes.gaps.join("; ")));
       }
-      const actions = el("div", "ads-state-strip");
-      if (draft.kind === "launch") {
-        actions.append(
-          button("Open draft", {
-            variant: "ink",
-            title: "Reopen this launch in the publishing flow, exactly as it was saved.",
-            onClick: () => ctx.openDraft(draft.id),
-          }),
+      // The lifecycle, stated honestly and never implying a provider write.
+      list.append(defRow("Phase", phaseBadge(draft)));
+      list.append(defRow("Revision", revisionText(draft)));
+      list.append(defRow("Last saved", savedText(draft)));
+      if (unsavedWarning) {
+        list.append(
+          defRow(
+            "Saved?",
+            "No — this browser is not saving drafts, so this record exists only in this tab.",
+          ),
         );
       }
-      actions.append(
-        button("Discard", {
-          variant: "quiet",
-          title: "Remove this staged draft. Nothing was sent, so there is nothing to undo at the provider.",
-          onClick: () => {
-            ctx.drafts.remove(draft.id);
-            renderAll();
-            ctx.say("Staged draft discarded. Nothing was sent to the provider.");
-          },
+      const approval = approvalStatus(draft);
+      list.append(defRow("Approval", approvalRow(draft, approval)));
+      section.append(list);
+      section.append(draftActions(draft, approval));
+    }
+    const wrap = el("div", "ads-staged");
+    wrap.append(section, legend);
+    return wrap;
+  }
+
+  /** The approval line: when, by whom, against which digest, and whether that
+   *  approval still describes what is on screen. */
+  function approvalRow(draft, approval) {
+    const strip = el("div", "ads-state-strip");
+    if (approval.status === "none") {
+      strip.append(el("span", "ads-cell-sub", approval.reason));
+      return strip;
+    }
+    const at = Date.parse(approval.approvedAt);
+    const when = Number.isFinite(at) ? formatWhen(at) : "at an unknown time";
+    const badge = el("span", `ads-badge ads-badge-${approval.status === "approved" ? "ok" : "warn"}`, approval.status === "approved" ? "Approved locally" : approval.status === "stale" ? "Approval is stale" : "Approval has no digest");
+    badge.title = approval.reason;
+    strip.append(badge, el("span", "ads-cell-sub", `${when}${draft.approvedBy ? ` by ${draft.approvedBy}` : ""} · digest ${approval.approvedDigest || "not recorded"}`));
+    strip.append(el("span", "ads-cell-sub", approval.reason));
+    return strip;
+  }
+
+  /**
+   * The actions for one draft. Approve is offered on a staged draft — and on an
+   * approved draft whose plan has moved on, because an approval that no longer
+   * matches the plan is history, not permission. Nothing here is a submission.
+   */
+  function draftActions(draft, approval) {
+    const bar = el("div", "ads-state-strip ads-draft-bar");
+    if (draft.kind === "launch") {
+      bar.append(
+        button("Open draft", {
+          variant: "ink",
+          title: "Reopen this launch in the publishing flow, exactly as it was saved.",
+          onClick: () => ctx.openDraft(draft.id),
         }),
       );
-      section.append(list, actions);
     }
-    return section;
+    const canApprove = draft.phase === "staged" || approval.status === "stale" || approval.status === "undigested";
+    if (canApprove) {
+      bar.append(
+        button(approval.status === "approved" ? "Approve again" : "Approve", {
+          variant: approval.status === "none" || approval.status === "stale" ? "ink" : "ghost",
+          icon: ICONS.check,
+          title: `Records your approval of this exact plan (revision ${draft.revision}) against its digest. It is a local sign-off: nothing is sent to Meta.`,
+          onClick: () => approveDraft(draft),
+        }),
+      );
+      bar.append(el("span", "ads-badge ads-badge-quiet", "Local approval — not a submission"));
+    } else if (draft.phase === "editing") {
+      bar.append(el("span", "ads-cell-sub", "Not staged yet, so there is nothing to approve. Open it and stage it first."));
+    }
+    bar.append(
+      button("Discard", {
+        variant: "quiet",
+        title: "Remove this staged draft. Nothing was sent, so there is nothing to undo at the provider.",
+        onClick: () => {
+          ctx.drafts.remove(draft.id);
+          renderAll();
+          ctx.say("Staged draft discarded. Nothing was sent to the provider.");
+        },
+      }),
+    );
+    return bar;
   }
 
   function renderAttention() {
     const box = region("attention");
     clear(box);
-    for (const node of [stagedBlock(), uncertainBlock(), changesBlock()]) if (node) box.append(node);
+    // The staged drafts and the recovery notices are rendered by `renderStaged`
+    // above the table — once each. Rendering the staged block here as well put
+    // two Approve buttons for one draft on the screen.
+    for (const node of [uncertainBlock(), changesBlock()]) if (node) box.append(node);
   }
 
   // --------------------------------------------------------------- activity --
@@ -1779,12 +2230,13 @@ export function createQueueScreen(ctx, host) {
 
   // ----------------------------------------------------------------- render --
 
-  /** The shared staged drafts, above whatever the provider reader answered. */
+  /** The shared staged drafts and the recovery notices, above whatever the
+   *  provider reader answered. Rendered once, in every mode — a staged draft is
+   *  a fact about this workspace, not about the reader. */
   function renderStaged() {
     const box = region("staged");
     clear(box);
-    const section = stagedBlock();
-    if (section) box.append(section);
+    for (const node of [recoveryBlock(), stagedBlock()]) if (node) box.append(node);
   }
 
   function renderNotConnected() {

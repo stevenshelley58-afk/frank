@@ -16,9 +16,14 @@ import { el, clear, svg, ICONS, button, popover, menuItem, menuGroup, segmented 
 export const PAGE_SIZES = Object.freeze([25, 50, 100, 200]);
 
 /** A column is declarative: it knows how to render and how to sort. Nothing
- *  else in the app reaches into a row's shape. */
-export function column({ id, label, align = "start", width = "", sortable = true, title = "", render, sortValue = null, metric = null, sticky = false }) {
-  return Object.freeze({ id, label, align, width, sortable, title, render, sortValue, metric, sticky });
+ *  else in the app reaches into a row's shape.
+ *
+ *  `identity` marks the one cell that says which record the row *is* (its name
+ *  and its immutable id). On a phone that cell is pinned to the leading edge
+ *  while the rest of the table scrolls, because a row whose subject has
+ *  scrolled away is a row of numbers with no referent. */
+export function column({ id, label, align = "start", width = "", sortable = true, title = "", render, sortValue = null, metric = null, sticky = false, identity = false }) {
+  return Object.freeze({ id, label, align, width, sortable, title, render, sortValue, metric, sticky, identity });
 }
 
 /**
@@ -229,6 +234,7 @@ export function createTable({
     if (selection) {
       const th = el("th", "ads-th ads-th-select");
       th.scope = "col";
+      th.dataset.role = "select";
       const box = el("input", "ads-check");
       box.type = "checkbox";
       box.setAttribute("aria-label", "Select every row on this page");
@@ -244,6 +250,7 @@ export function createTable({
     for (const col of columns) {
       const th = el("th", `ads-th ads-th-${col.align}${col.sticky ? " is-sticky" : ""}`);
       th.scope = "col";
+      if (col.identity) th.dataset.role = "identity";
       if (col.width) th.style.width = typeof col.width === "number" ? `${col.width}px` : col.width;
       const active = state.sort?.id === col.id;
       th.setAttribute("aria-sort", active ? (state.sort.dir === "desc" ? "descending" : "ascending") : "none");
@@ -270,6 +277,7 @@ export function createTable({
     if (renderRowMeta) {
       const th = el("th", "ads-th ads-th-end");
       th.scope = "col";
+      th.dataset.role = "action";
       th.append(el("span", "ads-visually-hidden", "Actions"));
       headRow.append(th);
     }
@@ -308,6 +316,7 @@ export function createTable({
 
       if (selection) {
         const td = el("td", "ads-td ads-td-select");
+        td.dataset.role = "select";
         const box = el("input", "ads-check");
         box.type = "checkbox";
         box.checked = selection.has(key);
@@ -325,6 +334,9 @@ export function createTable({
       for (const col of columns) {
         const td = el("td", `ads-td ads-td-${col.align}${col.sticky ? " is-sticky" : ""}`);
         if (col.metric) td.dataset.metric = col.metric;
+        // The role is data, not styling: the phone layout pins the identity cell
+        // and the decision cell without this module knowing the stylesheet.
+        if (col.identity) td.dataset.role = "identity";
         const content = col.render ? col.render(row) : row?.[col.id];
         if (content instanceof Node) td.append(content);
         else td.append(document.createTextNode(content === null || content === undefined ? "—" : String(content)));
@@ -333,6 +345,7 @@ export function createTable({
 
       if (renderRowMeta) {
         const td = el("td", "ads-td ads-td-end");
+        td.dataset.role = "action";
         td.append(renderRowMeta(row));
         tr.append(td);
       }

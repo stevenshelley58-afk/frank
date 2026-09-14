@@ -9,8 +9,8 @@
 // which sort, and the operator's own named views. Reporting rows are never
 // written to browser storage; they are re-read from Frank every session.
 
-import { el, button, chip, popover, menuItem, menuGroup, svg, ICONS } from "./ads-ui.js";
-import { formatInt, num } from "./ads-contracts.js";
+import { el, clear, button, chip, popover, menuItem, menuGroup, svg, ICONS } from "./ads-ui.js";
+import { EVIDENCE_FLOOR, formatInt, formatMoney, num } from "./ads-contracts.js";
 
 const STORAGE_KEY = "frank.ads.views.v1";
 
@@ -21,6 +21,11 @@ export const OPERATORS = Object.freeze([
   Object.freeze({ id: "not_contains", label: "does not contain", kinds: ["text"], arity: 1 }),
   Object.freeze({ id: "in", label: "is any of", kinds: ["enum"], arity: "many" }),
   Object.freeze({ id: "gt", label: "is more than", kinds: ["number"], arity: 1 }),
+  // "at least" and "at most" exist because a floor is an inclusive threshold:
+  // "more than 24 results" is the same set as "at least 25" only for as long as
+  // nobody changes the floor, and a built-in view has to say what it means.
+  Object.freeze({ id: "gte", label: "is at least", kinds: ["number"], arity: 1 }),
+  Object.freeze({ id: "lte", label: "is at most", kinds: ["number"], arity: 1 }),
   Object.freeze({ id: "lt", label: "is less than", kinds: ["number"], arity: 1 }),
   Object.freeze({ id: "between", label: "is between", kinds: ["number"], arity: 2 }),
   Object.freeze({ id: "is_true", label: "is true", kinds: ["boolean"], arity: 0 }),
@@ -61,6 +66,16 @@ function matchesFilter(row, filter, fields) {
     return left >= Math.min(low, high) && left <= Math.max(low, high);
   }
 
+  // A threshold comparison never matches an unknown value: a row whose figure
+  // this read did not carry is not "at least", and it is not "below" either. It
+  // is unknown, and it stays out of both sides of a floor.
+  if (op === "gte" || op === "lte") {
+    const left = num(raw);
+    const right = num(target);
+    if (left === null || right === null) return false;
+    return op === "gte" ? left >= right : left <= right;
+  }
+
   const text = raw === null || raw === undefined ? "" : String(raw);
   const haystack = text.toLowerCase();
   const needle = String(target ?? "").toLowerCase();
@@ -90,12 +105,282 @@ export function applyFilters(rows, filters, fields) {
 }
 
 // ---------------------------------------------------------------------------
+// Built-in views
+// ---------------------------------------------------------------------------
+
+/**
+ * A built-in view is a named filter, sort and column set that is **defined in
+ * this file** and always exists. It is not stored, so it cannot be renamed,
+ * edited or deleted, and it is never confused with the operator's own views:
+ * every one carries `kind: "built-in"` and an id under the `builtin.` prefix,
+ * while a saved view's id is always allocated as `view_…`.
+ *
+ * Each one is a claim, so each one states its own condition in `hint` — the
+ * menu shows that sentence under the name, and the name never claims more than
+ * the filter does. A built-in that filtered on a field a screen does not have
+ * is refused rather than applied half-way (see `apply` and `skipped`).
+ *
+ * Built-ins are keyed by the store's screen key, which the workspace allocates
+ * as `screen.<id>`.
+ */
+function builtIn(id, name, { hint, filters, sort = null, columns = null }) {
+  return Object.freeze({
+    id: `builtin.${id}`,
+    name,
+    hint,
+    kind: "built-in",
+    filters: Object.freeze((filters || []).map((f) => Object.freeze({ ...f }))),
+    sort: sort ? Object.freeze({ ...sort }) : null,
+    columns: columns ? Object.freeze(columns.slice()) : null,
+  });
+}
+
+const FLOOR = EVIDENCE_FLOOR.results;
+// The columns a campaigns built-in may ask for exist at all three levels, so
+// applying one at another level restores what it can instead of blanking a
+// column that level has never had.
+const CAMPAIGN_VIEW_COLUMNS = ["name", "status", "spend", "results", "costPerResult", "qualifiedLeads", "spendTrend", "issues"];
+
+export const BUILT_IN_VIEWS = Object.freeze({
+  "screen.campaigns": Object.freeze([
+    builtIn("campaigns.needs-attention", "Needs attention", {
+      hint: "Rows the sync has raised a flag against, most spend first.",
+      filters: [{ field: "hasIssues", op: "is_true", value: true }],
+      sort: { id: "spend", dir: "desc" },
+      columns: CAMPAIGN_VIEW_COLUMNS,
+    }),
+    builtIn("campaigns.spending-no-outcome", "Spending with no observed outcome", {
+      hint: `Spend above zero and this read records no CRM-qualified lead. A row whose leads are unknown is not in this view.`,
+      filters: [
+        { field: "spend", op: "gt", value: 0 },
+        { field: "qualifiedLeads", op: "lt", value: 1 },
+      ],
+      sort: { id: "spend", dir: "desc" },
+      columns: CAMPAIGN_VIEW_COLUMNS,
+    }),
+    builtIn("campaigns.below-evidence-floor", "Below the evidence floor", {
+      hint: `Fewer than ${FLOOR} attributed results in this window: too little to rank.`,
+      filters: [{ field: "insufficient", op: "is_true", value: true }],
+      sort: { id: "spend", dir: "desc" },
+      columns: CAMPAIGN_VIEW_COLUMNS,
+    }),
+  ]),
+  "screen.creative": Object.freeze([
+    builtIn("creative.winners", "Winners", {
+      hint: `At or above the ${FLOOR}-result evidence floor, ordered by cost per result. Passing a floor is a bar for reading, not a verdict: two rows whose intervals overlap are still a tie.`,
+      filters: [{ field: "results", op: "gte", value: FLOOR }],
+      sort: { id: "costPerResult", dir: "asc" },
+      columns: ["name", "spend", "results", "costPerResult", "qualifiedLeads", "costPerQualifiedLead", "ctr"],
+    }),
+    builtIn("creative.awaiting-evidence", "Awaiting evidence", {
+      hint: `Fewer than ${FLOOR} attributed results in this window, most spend first. Nothing here can be ranked yet.`,
+      filters: [{ field: "results", op: "lte", value: FLOOR - 1 }],
+      sort: { id: "spend", dir: "desc" },
+    }),
+    builtIn("creative.near-duplicates", "Near-duplicates", {
+      hint: "Creatives that share a concept, hook and format, or that somebody marked as a near-duplicate. A question to answer, not a verdict.",
+      filters: [{ field: "nearDuplicate", op: "is_true", value: true }],
+    }),
+  ]),
+  "screen.blogs": Object.freeze([
+    builtIn("blogs.promoted", "Promoted", {
+      hint: "Articles an ad in this account points at.",
+      filters: [{ field: "promoted", op: "is_true", value: true }],
+    }),
+    builtIn("blogs.converting", "Converting", {
+      hint: "This read records at least one CRM-qualified lead against the article. Observed, not Meta-attributed.",
+      filters: [{ field: "qualifiedLeads", op: "gte", value: 1 }],
+      sort: { id: "qualifiedLeads", dir: "desc" },
+    }),
+    builtIn("blogs.no-promotion", "No promotion", {
+      hint: "Articles no ad in this account points at. Candidates for a launch, not a judgement on them.",
+      filters: [{ field: "promoted", op: "is_false", value: true }],
+    }),
+  ]),
+  "screen.queue": Object.freeze([
+    builtIn("queue.awaiting-confirmation", "Awaiting confirmation", {
+      hint: "A write was acknowledged and delivery is unconfirmed. Not proof the ad is serving.",
+      filters: [{ field: "awaiting", op: "is_true", value: true }],
+      sort: { id: "updated", dir: "desc" },
+      columns: ["name", "state", "ads", "attempts", "updated"],
+    }),
+    builtIn("queue.needs-reconcile", "Needs reconcile", {
+      hint: "A write was accepted and delivery was never confirmed. Reconcile before retrying, so a retry cannot create a duplicate ad.",
+      filters: [{ field: "needsReconcile", op: "is_true", value: true }],
+      sort: { id: "updated", dir: "desc" },
+      columns: ["name", "state", "attempts", "lastError", "updated"],
+    }),
+    builtIn("queue.proof-of-delivery", "Proof of delivery", {
+      hint: "Only Delivering — and Paused, which was served before it stopped — prove the provider served the ad.",
+      filters: [{ field: "proven", op: "is_true", value: true }],
+      sort: { id: "updated", dir: "desc" },
+      columns: ["name", "state", "ads", "updated"],
+    }),
+    builtIn("queue.failed-rows", "Has failed rows", {
+      hint: "Batches carrying at least one failed ad. A failure stays on its own row.",
+      filters: [{ field: "hasFailures", op: "is_true", value: true }],
+      sort: { id: "updated", dir: "desc" },
+      columns: ["name", "state", "ads", "attempts", "lastError", "updated"],
+    }),
+  ]),
+});
+
+export const BUILT_IN_VIEW_PREFIX = "builtin.";
+
+export function isBuiltInViewId(id) {
+  return String(id || "").startsWith(BUILT_IN_VIEW_PREFIX);
+}
+
+export function builtInViewsFor(screenKey) {
+  const list = BUILT_IN_VIEWS[String(screenKey || "")];
+  return Array.isArray(list) ? list.slice() : [];
+}
+
+export function findBuiltInView(screenKey, id) {
+  const wanted = String(id || "");
+  if (!wanted) return null;
+  return builtInViewsFor(screenKey).find((view) => view.id === wanted) || null;
+}
+
+// ---------------------------------------------------------------------------
+// URL reflection
+// ---------------------------------------------------------------------------
+
+/**
+ * The `?view=` parameter. A screen links to a view; the link is the view.
+ *
+ * Unknown ids are ignored rather than treated as an error: a link written
+ * before a built-in was renamed, or a view belonging to another screen, should
+ * open the screen with its stored configuration, not a failure page.
+ */
+export function readViewParam(win = globalThis) {
+  try {
+    return String(new URLSearchParams(win?.location?.search || "").get("view") || "");
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * Write one view id into the URL, keeping every other parameter (`screen`,
+ * `preview`) exactly as it was. `replaceState` rather than `pushState`: a view
+ * change is not a navigation, and filling Back with forty view applications
+ * would make Back leave the section.
+ */
+export function reflectViewParam(id, { win = globalThis } = {}) {
+  try {
+    const url = new URL(win.location.href);
+    if (id) url.searchParams.set("view", String(id));
+    else url.searchParams.delete("view");
+    win.history?.replaceState?.(win.history.state, "", url.toString());
+    return true;
+  } catch {
+    // A browser that refuses the rewrite still shows the applied view.
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Currency
+// ---------------------------------------------------------------------------
+
+/**
+ * The account currency, or `""` when the context has not answered.
+ *
+ * Deliberately not `|| "GBP"`: a figure with an invented unit is a wrong
+ * number, and a screen that assumes sterling for a euro account is worse than
+ * one that says it does not know. A value that is not an ISO 4217 code is
+ * treated as unknown rather than passed to Intl.
+ */
+export function accountCurrency(context) {
+  const code = String(context?.account?.currency || "").trim().toUpperCase();
+  return /^[A-Z]{3}$/.test(code) ? code : "";
+}
+
+/** The sentence every screen uses when it has no currency to name. */
+export const CURRENCY_UNKNOWN_NOTE = "The account currency is not connected in this read, so money figures carry their number and no unit.";
+
+/**
+ * A money figure with its unit, or a figure that admits the unit is unknown.
+ * A missing value stays `null` so the caller can render its own dash — never 0.
+ */
+export function formatAccountMoney(value, currency, { minor = false } = {}) {
+  const n = num(value);
+  if (n === null) return null;
+  const amount = minor ? n / 100 : n;
+  const code = accountCurrency({ account: { currency } });
+  if (code) return formatMoney(amount, code);
+  return `${amount.toFixed(2)} (currency unknown)`;
+}
+
+/** A signed money delta with the same rule about its unit. */
+export function formatAccountMoneyDelta(value, currency, { minor = false } = {}) {
+  const n = num(value);
+  if (n === null) return null;
+  const amount = minor ? n / 100 : n;
+  const sign = amount > 0 ? "+" : amount < 0 ? "−" : "";
+  const code = accountCurrency({ account: { currency } });
+  return `${sign}${code ? formatMoney(Math.abs(amount), code) : `${Math.abs(amount).toFixed(2)} (currency unknown)`}`;
+}
+
+/**
+ * The arithmetic of a before/after review, in one place.
+ *
+ * Three rules live here, and both screens that stage a bulk change read them
+ * from the same function so they cannot drift apart:
+ *
+ *   1. a row whose value this read did not carry is **unknown**, and unknown is
+ *      never counted as 0;
+ *   2. the total covers the known rows only, and the caller states how many were
+ *      excluded;
+ *   3. a row whose value does not actually change is still listed, and says so.
+ */
+export function summariseChangeEntries(kind, entries = []) {
+  const isPause = kind === "pause";
+  const list = entries.map((entry) => {
+    const before = isPause ? String(entry.before ?? "") : num(entry.before);
+    const after = isPause ? String(entry.after ?? "paused") : num(entry.after);
+    const known = isPause ? before !== "" : before !== null && after !== null;
+    return { ...entry, before, after, known, changed: known && before !== after };
+  });
+  const known = list.filter((entry) => entry.known);
+  const unknown = list.filter((entry) => !entry.known);
+  const total = isPause
+    ? known.filter((entry) => entry.changed).length
+    : known.reduce((sum, entry) => sum + (entry.after - entry.before), 0);
+  return Object.freeze({
+    entries: list,
+    known: Object.freeze(known),
+    unknown: Object.freeze(unknown),
+    total,
+    changed: list.filter((entry) => entry.changed).length,
+    beforeTotal: isPause || !known.length ? null : known.reduce((sum, entry) => sum + entry.before, 0),
+    afterTotal: isPause || !known.length ? null : known.reduce((sum, entry) => sum + entry.after, 0),
+  });
+}
+
+/**
+ * What an applied view did, in the operator's words. A screen that silently
+ * opens filtered — or silently ignores half a view — is a screen somebody will
+ * misread, so the sentence names the view, its kind and anything that could not
+ * be applied here.
+ */
+export function appliedViewSentence(store, view) {
+  const kind = view?.kind === "built-in" ? "Built-in view" : "Saved view";
+  const skipped = store?.skipped?.fields || [];
+  if (skipped.length) {
+    return `${kind} "${view.name}" applied, except ${skipped.length} condition${skipped.length === 1 ? "" : "s"} (${skipped.join(", ")}) this screen has no field for. Nothing was hidden by them.`;
+  }
+  return `${kind} "${view.name}" applied: its columns, sort and filters are the ones on screen now. The address bar carries ?view=${view.id}, so this screen can be linked to.`;
+}
+
+// ---------------------------------------------------------------------------
 // View store
 // ---------------------------------------------------------------------------
 
-function readStore() {
+function readStore(storage) {
   try {
-    const raw = globalThis.localStorage?.getItem(STORAGE_KEY);
+    const raw = storage?.getItem(STORAGE_KEY);
     const parsed = raw ? JSON.parse(raw) : null;
     return parsed && typeof parsed === "object" ? parsed : {};
   } catch {
@@ -103,21 +388,46 @@ function readStore() {
   }
 }
 
-function writeStore(store) {
+function writeStore(store, storage) {
   try {
-    globalThis.localStorage?.setItem(STORAGE_KEY, JSON.stringify(store));
+    storage?.setItem(STORAGE_KEY, JSON.stringify(store));
   } catch {
     // A browser with storage disabled still gets a working, unsaved session.
   }
+}
+
+/** A saved view that survived storage. Anything without an id this module can
+ *  apply is dropped rather than listed as a view that does nothing. */
+function normalizeSaved(list) {
+  return (Array.isArray(list) ? list : [])
+    .filter((view) => view && typeof view === "object" && String(view.id || "") && String(view.name || ""))
+    .map((view) => ({
+      ...view,
+      id: String(view.id),
+      name: String(view.name).slice(0, 60),
+      kind: "saved",
+      filters: Array.isArray(view.filters) ? view.filters : [],
+      columns: Array.isArray(view.columns) ? view.columns : null,
+      sort: view.sort && typeof view.sort === "object" ? view.sort : null,
+    }));
 }
 
 /**
  * Per-screen view configuration: columns, sort, filters and named saved views.
  * `screenKey` scopes everything, so the campaign table and the creative table
  * cannot leak settings into each other.
+ *
+ * Three things live here rather than in a screen, because every screen must
+ * agree on them:
+ *
+ *   * a **built-in view** is code, not storage, and never appears in `saved()`;
+ *   * applying a view **restores columns, sort and filters together** and says
+ *     which view is showing, so a screen can never restore half a view;
+ *   * the applied view is **reflected in `?view=<id>`**, and a link carrying one
+ *     is applied when the screen opens.
  */
-export function createViewStore(screenKey) {
-  const store = readStore();
+export function createViewStore(screenKey, { storage = globalThis.localStorage, win = globalThis } = {}) {
+  const store = readStore(storage);
   const scope = store[screenKey] && typeof store[screenKey] === "object" ? store[screenKey] : {};
   let current = {
     columns: Array.isArray(scope.columns) ? scope.columns : null,
@@ -129,12 +439,67 @@ export function createViewStore(screenKey) {
     view: scope.view || "",
     density: scope.density === "compact" ? "compact" : "comfortable",
   };
-  let saved = Array.isArray(scope.saved) ? scope.saved.slice() : [];
+  let saved = normalizeSaved(scope.saved);
+  // The view the current configuration came from, if any, and whether the
+  // operator has changed something since. Both are needed: a chip that says
+  // "Needs attention" after the filters were edited is a lie, and a chip that
+  // disappears silently reads as a bug.
+  let activeViewId = "";
+  let viewModified = false;
+  let skipped = Object.freeze({ field: "", fields: Object.freeze([]) });
+  let urlView = Object.freeze({ id: readViewParam(win), applied: false });
 
   function persist() {
-    const all = readStore();
+    const all = readStore(storage);
     all[screenKey] = { ...current, page: undefined, saved };
-    writeStore(all);
+    writeStore(all, storage);
+  }
+
+  function resolve(id) {
+    const wanted = String(id || "");
+    if (!wanted) return null;
+    return saved.find((view) => view.id === wanted) || findBuiltInView(screenKey, wanted) || null;
+  }
+
+  function restore(view, { fields = null } = {}) {
+    const dropped = [];
+    const kept = [];
+    for (const filter of Array.isArray(view.filters) ? view.filters : []) {
+      // A condition whose field this screen does not have would silently filter
+      // everything out (an unknown field matches nothing), so it is dropped and
+      // counted instead. Silence there would look like an empty result set.
+      if (fields && !fields.some((def) => def.id === filter.field)) dropped.push(String(filter.field));
+      else kept.push({ ...filter });
+    }
+    // A saved view records exactly what was on screen when it was saved, so a
+    // missing column list or sort means "default" and is restored as such. A
+    // built-in that does not name columns or a sort has not asked for one, so
+    // the operator's own choice is left alone rather than silently reset.
+    const builtIn = view.kind === "built-in";
+    const columns = Array.isArray(view.columns) && view.columns.length ? view.columns.slice() : builtIn ? current.columns : null;
+    const sort = view.sort ? { ...view.sort } : builtIn ? current.sort : null;
+    current = {
+      ...current,
+      columns,
+      sort,
+      filters: kept,
+      groupBy: view.groupBy || (builtIn ? current.groupBy : ""),
+      page: 0,
+    };
+    activeViewId = view.id;
+    viewModified = false;
+    skipped = Object.freeze({ field: view.name, fields: Object.freeze(dropped) });
+    return dropped;
+  }
+
+  // A link that carries a view is the operator asking for that view. An
+  // unresolvable id is ignored: the screen opens with its stored configuration.
+  if (urlView.id) {
+    const found = resolve(urlView.id);
+    if (found) {
+      restore(found);
+      urlView = Object.freeze({ id: urlView.id, applied: true, name: found.name, kind: found.kind });
+    }
   }
 
   return Object.freeze({
@@ -144,15 +509,52 @@ export function createViewStore(screenKey) {
     saved() {
       return saved.slice();
     },
-    update(patch, { persist: shouldPersist = true } = {}) {
+    /** The built-in views this screen always has. Code, never storage. */
+    builtIn() {
+      return builtInViewsFor(screenKey);
+    },
+    /** The view the current configuration came from, for the bar's chip. */
+    activeView() {
+      const view = resolve(activeViewId);
+      if (!view) return null;
+      return Object.freeze({ id: view.id, name: view.name, kind: view.kind, modified: viewModified });
+    },
+    /** The `?view=` id this screen opened with, and whether it was applied. */
+    get urlView() {
+      return urlView;
+    },
+    /** Conditions a view asked for that this screen cannot evaluate. */
+    get skipped() {
+      return skipped;
+    },
+    /**
+     * Patch the stored configuration.
+     *
+     * `marksModified: false` exists for the one caller that writes the applied
+     * view's own configuration straight back — a screen that keeps its own copy
+     * of the view state must be able to sync it without the bar claiming the
+     * operator edited a view they only just applied.
+     */
+    update(patch, { persist: shouldPersist = true, marksModified = true } = {}) {
       current = { ...current, ...patch };
+      // Editing the configuration by hand means the named view is no longer what
+      // is on screen. The id is kept so the bar can say which one was modified.
+      if (marksModified && ["filters", "columns", "sort", "groupBy"].some((key) => key in patch)) viewModified = true;
       if (shouldPersist) persist();
       return current;
     },
+    /**
+     * Create a view from the current configuration.
+     *
+     * Identities are allocated, never derived from the name: two views may
+     * share a name (an operator's "Winners" beside the built-in one), and a
+     * rename must never merge or split a view.
+     */
     save(name, { pinned = false } = {}) {
       const view = {
-        id: `view_${Date.now().toString(36)}`,
+        id: `view_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`,
         name: String(name || "Untitled view").slice(0, 60),
+        kind: "saved",
         pinned: Boolean(pinned),
         columns: current.columns,
         sort: current.sort,
@@ -160,28 +562,47 @@ export function createViewStore(screenKey) {
         groupBy: current.groupBy,
         createdAt: new Date().toISOString(),
       };
-      saved = [view, ...saved.filter((v) => v.name !== view.name)].slice(0, 40);
+      saved = [view, ...saved].slice(0, 40);
+      activeViewId = view.id;
+      viewModified = false;
       persist();
+      reflectViewParam(view.id, { win });
       return view;
     },
-    apply(view) {
-      current = {
-        ...current,
-        columns: view.columns || null,
-        sort: view.sort || null,
-        filters: Array.isArray(view.filters) ? view.filters : [],
-        groupBy: view.groupBy || "",
-        page: 0,
-      };
+    /** Save the current columns, sort and filters over an existing view. */
+    updateSaved(viewId) {
+      const existing = saved.find((view) => view.id === String(viewId));
+      if (!existing) return null;
+      const next = { ...existing, columns: current.columns, sort: current.sort, filters: current.filters, groupBy: current.groupBy, updatedAt: new Date().toISOString() };
+      saved = saved.map((view) => (view.id === next.id ? next : view));
+      activeViewId = next.id;
+      viewModified = false;
       persist();
+      reflectViewParam(next.id, { win });
+      return next;
+    },
+    /** Apply a view object or its id, restoring columns, sort and filters. */
+    apply(viewOrId, { fields = null, reflect = true } = {}) {
+      const view = typeof viewOrId === "string" ? resolve(viewOrId) : viewOrId;
+      if (!view) return null;
+      restore(view, { fields });
+      persist();
+      if (reflect) reflectViewParam(view.id, { win });
       return current;
     },
     remove(viewId) {
-      saved = saved.filter((v) => v.id !== viewId);
+      const wanted = String(viewId);
+      saved = saved.filter((view) => view.id !== wanted);
+      if (activeViewId === wanted) {
+        activeViewId = "";
+        viewModified = false;
+        reflectViewParam("", { win });
+      }
       persist();
     },
     rename(viewId, name) {
-      saved = saved.map((v) => (v.id === viewId ? { ...v, name: String(name).slice(0, 60) } : v));
+      const wanted = String(viewId);
+      saved = saved.map((view) => (view.id === wanted ? { ...view, name: String(name).slice(0, 60) } : view));
       persist();
     },
   });
@@ -202,8 +623,12 @@ export function filterBar({
   filters,
   onChange,
   savedViews = [],
+  builtInViews = [],
+  activeView = null,
   onSaveView = null,
   onApplyView = null,
+  onUpdateView = null,
+  onRenameView = null,
   onRemoveView = null,
   search = "",
   onSearch = null,
@@ -360,46 +785,102 @@ export function filterBar({
   }
   for (const node of extra) tail.append(node);
 
-  const viewsBtn = button("Views", { icon: ICONS.layers, title: "Saved filters and columns" });
+  // Which view the configuration on screen came from. Built-in and saved views
+  // are named differently here precisely so the two are never confused: one is
+  // shipped in the app, the other was made by this operator in this browser.
+  if (activeView) {
+    const marker = el("span", "ads-view-active");
+    marker.dataset.kind = activeView.kind === "built-in" ? "builtin" : "saved";
+    marker.append(
+      el("span", "ads-view-tag", activeView.kind === "built-in" ? "Built-in" : "Saved"),
+      el("span", "ads-view-active-name", activeView.name),
+    );
+    if (activeView.modified) {
+      const edited = el("span", "ads-view-modified", "modified");
+      edited.title = "The filters, columns or sort have been changed since this view was applied, so it is no longer exactly what the view describes.";
+      marker.append(edited);
+    }
+    tail.append(marker);
+  }
+
+  const viewsBtn = button("Views", { icon: ICONS.layers, title: "Built-in views, saved views, filters and columns" });
   viewsBtn.setAttribute("aria-expanded", "false");
   tail.append(
     popover({
       trigger: viewsBtn,
-      label: "Saved views",
+      label: "Views",
       align: "end",
-      width: 280,
+      width: 320,
       render(panel, close) {
-        if (savedViews.length) {
-          const group = menuGroup("Saved");
-          for (const view of savedViews) {
+        if (builtInViews.length) {
+          const group = menuGroup("Built-in views");
+          group.append(
+            el("p", "ads-menu-empty", "Defined in the app, not saved in this browser. They always exist and cannot be edited or deleted; save one as your own view to change it."),
+          );
+          for (const view of builtInViews) {
             const item = menuItem(view.name, {
-              hint: `${(view.filters || []).length} filter${(view.filters || []).length === 1 ? "" : "s"}${view.columns ? `, ${view.columns.length} columns` : ""}`,
+              hint: view.hint,
+              checked: activeView?.id === view.id,
               onClick: () => {
                 onApplyView?.(view);
                 close();
               },
             });
-            const row = el("div", "ads-menu-row");
-            row.append(item);
-            row.append(
-              button("", {
-                icon: ICONS.close,
-                variant: "quiet",
-                ariaLabel: `Delete view ${view.name}`,
-                onClick: (event) => {
-                  event.stopPropagation();
-                  onRemoveView?.(view);
-                },
-              }),
-            );
+            const row = el("div", "ads-view-row");
+            row.append(item, el("span", "ads-view-tag", "Built-in"));
             group.append(row);
           }
           panel.append(group);
-        } else {
-          panel.append(el("p", "ads-menu-empty", "No saved views yet. Set up the columns and filters you want, then save them here."));
         }
+
+        const group = menuGroup("Your saved views");
+        if (savedViews.length) {
+          for (const view of savedViews) {
+            const item = menuItem(view.name, {
+              hint: `${(view.filters || []).length} filter${(view.filters || []).length === 1 ? "" : "s"}${view.columns ? `, ${view.columns.length} columns` : ""}`,
+              checked: activeView?.id === view.id,
+              onClick: () => {
+                onApplyView?.(view);
+                close();
+              },
+            });
+            const row = el("div", "ads-view-row");
+            row.append(item);
+            // Managing a view happens in this same popover — a name field and
+            // three buttons, opened in place. A second modal system for four
+            // controls would be a new thing to learn for no new capability.
+            const manage = button("Manage", {
+              variant: "quiet",
+              ariaLabel: `Manage the view ${view.name}`,
+              title: "Rename this view, save the current columns and filters over it, or delete it.",
+            });
+            const editorId = `view-editor-${String(view.id).replace(/[^a-zA-Z0-9_-]/g, "")}`;
+            manage.setAttribute("aria-expanded", "false");
+            manage.setAttribute("aria-controls", editorId);
+            const editor = el("div", "ads-view-editor");
+            editor.id = editorId;
+            editor.hidden = true;
+            manage.addEventListener("click", () => {
+              const opening = editor.hidden;
+              editor.hidden = !opening;
+              manage.setAttribute("aria-expanded", opening ? "true" : "false");
+              if (opening) {
+                clear(editor);
+                editor.append(viewEditor(view, close));
+                editor.querySelector("input")?.focus();
+                editor.querySelector("input")?.select?.();
+              }
+            });
+            row.append(manage);
+            group.append(row, editor);
+          }
+        } else {
+          group.append(el("p", "ads-menu-empty", "No saved views yet. Set up the columns and filters you want, then save them here."));
+        }
+        panel.append(group);
+
         if (onSaveView) {
-          const group = menuGroup("Save the current view");
+          const saveGroup = menuGroup("Save the current view as");
           const input = el("input", "ads-input");
           input.placeholder = "Name this view";
           input.setAttribute("aria-label", "Name for the saved view");
@@ -417,13 +898,97 @@ export function filterBar({
           });
           const row = el("div", "ads-menu-save");
           row.append(input, save);
-          group.append(row);
-          panel.append(group);
+          saveGroup.append(row);
+          panel.append(saveGroup);
         }
       },
     }),
   );
   bar.append(tail);
+
+  /**
+   * The inline editor for one saved view: rename it, save the current columns,
+   * sort and filters over it, or delete it. Deleting asks a second time, in
+   * place, because a saved view is work somebody did and a single click beside
+   * a menu item is how work disappears by accident.
+   */
+  function viewEditor(view, close) {
+    const box = el("div", "ads-view-editor-body");
+    const inputId = `view-name-${String(view.id).replace(/[^a-zA-Z0-9_-]/g, "")}`;
+    const label = el("label", "ads-field-label", "View name");
+    label.setAttribute("for", inputId);
+    const input = el("input", "ads-input");
+    input.id = inputId;
+    input.value = view.name;
+    input.setAttribute("aria-label", `Name for the saved view ${view.name}`);
+    box.append(label, input);
+
+    const actions = el("div", "ads-view-editor-actions");
+    if (onRenameView) {
+      actions.append(
+        button("Save name", {
+          variant: "ink",
+          onClick: () => {
+            const name = input.value.trim();
+            if (!name) {
+              input.focus();
+              return;
+            }
+            onRenameView(view, name);
+            close();
+          },
+        }),
+      );
+    }
+    if (onUpdateView) {
+      actions.append(
+        button("Save changes to this view", {
+          title: "Replaces this view's columns, sort and filters with what is on screen now.",
+          onClick: () => {
+            onUpdateView(view);
+            close();
+          },
+        }),
+      );
+    }
+    box.append(actions);
+
+    if (onRemoveView) {
+      const confirm = el("div", "ads-view-confirm");
+      const ask = button("Delete this view", {
+        variant: "quiet",
+        onClick: () => {
+          confirm.hidden = false;
+          ask.hidden = true;
+          confirm.querySelector("button")?.focus();
+        },
+      });
+      const row = el("div", "ads-view-confirm-actions");
+      row.hidden = true;
+      row.append(
+        el("span", "", `Delete “${view.name}”?`),
+        button("Delete", {
+          variant: "ink",
+          onClick: () => {
+            onRemoveView(view);
+            close();
+          },
+        }),
+        button("Keep", {
+          variant: "quiet",
+          onClick: () => {
+            row.hidden = true;
+            ask.hidden = false;
+            ask.focus();
+          },
+        }),
+      );
+      confirm.append(ask, row);
+      box.append(confirm);
+    }
+    return box;
+  }
+
   return bar;
 }
 
@@ -451,7 +1016,15 @@ export function bulkBar({
   // "batch" must not become "batchs". Only append the bare s when the noun
   // actually pluralises that way.
   const plural = count === 1 || /(s|x|z|ch|sh)$/.test(noun) ? noun : `${noun}s`;
-  summary.append(el("strong", "", `${count.toLocaleString("en-GB")} ${plural} selected`));
+  const counted = el("strong", "ads-bulk-count", `${count.toLocaleString("en-GB")} ${plural} selected`);
+  // The count is never abbreviated, and never the only thing that says what the
+  // scope is: "1.2k selected" is how an operator approves a bulk change to rows
+  // they never intended to touch.
+  counted.title = `${count.toLocaleString("en-GB")} ${plural} in this selection. The next bulk action touches exactly these.`;
+  summary.append(counted);
+  if (matchingCount > count) {
+    summary.append(el("span", "ads-bulk-note", `of ${formatInt(matchingCount)} the current filters match`));
+  }
   // Say plainly how many of the selected rows are not on this page. A count
   // that silently includes off-screen rows is how a bulk edit surprises its
   // operator after the fact.
