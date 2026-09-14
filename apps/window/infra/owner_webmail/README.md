@@ -160,13 +160,23 @@ subresource request inside an iframe. `SameSite=None` is therefore not required
 for framing and is not the default; `OWNER_WEBMAIL_COOKIE_SAMESITE` exists for
 the case where the parent origin is genuinely a different site.
 
-The real framing obstacle is `X-Frame-Options`, which does compare origins. That
-is why the client sends none of its own and the ingress owns the policy as a CSP
-`frame-ancestors` list.
+The framing decision is made by a CSP `frame-ancestors` list, which the ingress
+owns. `X-Frame-Options` compares origins and is still enforced when it is the
+only signal present, so the client sends none of its own.
 
-**Unproven, do not rely on it yet:** that this host renders a framed application
-under a scoped `frame-ancestors` once `X-Frame-Options` is stripped has not been
-demonstrated. An isolated attempt returned a block, but it was contaminated by a
-failed TLS handshake, so a broken connection and a deliberate frame rejection
-were indistinguishable. Framing is a design that should work, not a verified
-result.
+**Verified**, on an isolated two-host test with standard-equivalent origins and
+real certificates, in Chromium:
+
+| App response headers | Result |
+| --- | --- |
+| `X-Frame-Options: SAMEORIGIN` only, no CSP | **BLOCKED** |
+| `X-Frame-Options: SAMEORIGIN` **and** a scoped `frame-ancestors` | **FRAMED OK** |
+| no `X-Frame-Options`, scoped `frame-ancestors` only | **FRAMED OK** |
+
+A scoped CSP `frame-ancestors` overrides `X-Frame-Options` when both are present,
+so the CSP is what grants permission and stripping `X-Frame-Options` is defence
+in depth rather than the load-bearing step. The strip stays as belt and braces.
+
+**Caveat to carry forward:** this is XFO/CSP precedence as observed on that
+Chromium build. It is a browser behaviour, not a specification guarantee, so the
+strip must not be removed on the strength of it.
