@@ -168,6 +168,9 @@ Recorded because each one was a real fault, not a formatting preference.
 | Authentik migration history corrupted | The stack crash-looped 29 times | Caused by my own diagnostic probes migrating the same live database concurrently. The database held zero users, so it was reset cleanly |
 | Three assertions in `test_ui_contract.py` described already-removed behaviour | The suite could not pass at `8b166cf`, masking real regressions | Assertions now describe the current contract; the suite passes for the first time |
 | `homes.js` lacked a `stale` status and dropped `target.section` | Cached data was labelled unavailable, and an owner drill-down landed on the project home instead of its section | Both added, with the section dispatching the live owner-route event |
+| Source items were given positional ids | The same notification became `notifications-1` on one refresh and `notifications-2` on the next, which makes deduplication and cross-refresh recognition impossible | Rows now carry the reader's own stable namespaced id, and a test proves a newer record does not renumber older ones |
+| The unsaved-work guard threw on every unload | The unload protection was silently absent, and the browser logged a page error | The check is defined once in the closure; a live retainable panel now counts as work Frank cannot verify |
+| Readiness counted an identity-provider redirect as a healthy app | An app would have been reported frameable before sign-in, and the panel would have rendered the sign-in page inside Frank | A redirect to the identity provider reports not ready and not frameable with reason `owner_session_required` |
 
 ## Changes made outside a release
 
@@ -252,21 +255,33 @@ Which other packages can continue: Everything except the app-password variant of
   the webmail launch.
 ```
 
-## Changes made outside a release
+## Reporting connection state
 
-Recorded for honesty. Production is otherwise untouched.
+Results and Revenue are implemented as a reporting framework that declares, for
+every source, what it measures, which authority owns the number, the limits of
+what it can tell the owner, and the exact connection step it needs. None of them
+is connected, and none of them is presented as a number.
 
-```text
-Change: Mautic config/local.php mode tightened from 0755 to 0640 root:www-data
-Where: /var/lib/docker/volumes/frank_owner_marketing_config/_data/local.php
-Why: The file holds the Purelymail monitored-mailbox credential in plaintext and
-  was readable by every local user in the container.
-Verified: stat shows 640 root:www-data on the host and in the container, and
-  Mautic still serves /s/login with HTTP 200.
-Durability: The path is on a named volume, so the mode survives container
-  recreation. The owner_marketing configure procedure will enforce it on write.
-Rollback: chmod 0644 and chown root:root on the same path.
-```
+| Section | Sources | State |
+| --- | --- | --- |
+| Results | GA4, Search Console, Meta Ads, Google Ads, Clarity | all unconfigured |
+| Revenue | Stripe | unconfigured |
+
+The framework enforces a three-state rule so "not connected" can never be read as
+a measurement:
+
+- `ready` — a reader returned observed data, with the values and the moment they
+  were observed.
+- `unconfigured` — no usable credential. Explicitly not an empty result and not a
+  zero. The owner learns which connection is missing.
+- `error` — a credential exists but the read failed, reported with the failure
+  category so a transient outage is never mistaken for a measurement.
+
+Two guards worth naming: a connector recorded as ready in the environment is
+still unconfigured while no reader exists, because a recorded state is not an
+observation; and Stripe reports cash collected and recurring revenue as two
+different quantities, never summed across currencies, with cancelled and free
+plans excluded from paying customers.
 
 ## Verification commands actually run
 
