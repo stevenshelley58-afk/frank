@@ -38,7 +38,7 @@ import { createQueueScreen } from "./ads-queue.js";
 const PREVIEW_STORAGE_KEY = "frank.ads.preview";
 
 export const ADS_SCREENS = Object.freeze([
-  Object.freeze({ id: "overview", label: "Overview", note: "Spend, results and what needs attention." }),
+  Object.freeze({ id: "overview", label: "Overview", note: "What needs attention, where spend works, and what to test next." }),
   Object.freeze({ id: "campaigns", label: "Campaigns", note: "Campaigns, ad sets and ads in one management table." }),
   Object.freeze({ id: "creative", label: "Creative intelligence", note: "Which concepts, hooks and formats are actually different from each other." }),
   Object.freeze({ id: "blogs", label: "Blogs & destinations", note: "Which articles attract traffic, convert, and work as ad destinations." }),

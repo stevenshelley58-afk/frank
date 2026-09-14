@@ -368,6 +368,67 @@ function response(status, payload) {
   };
 }
 
+test("one screen giving up does not fail a read another screen has joined", async () => {
+  // The first paint renders a screen, then the context read lands and the screen
+  // is replaced. The replacement used to join the first screen's request and
+  // then be handed "superseded" when the first screen was disposed — an error it
+  // could never recover from, on about one cold load in ten.
+  let calls = 0;
+  let abortedEarly = false;
+  const slow = (url, options = {}) => {
+    calls += 1;
+    return new Promise((resolve, reject) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        settled = true;
+        resolve(response(200, { rows: [{ id: "cmp_1", name: "Kept" }], meta: { status: "ready" } }));
+      }, 30);
+      options.signal?.addEventListener("abort", () => {
+        if (settled) return;
+        abortedEarly = true;
+        clearTimeout(timer);
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    });
+  };
+  const reader = createAdsReader({ fetchImpl: slow, cache: createAdsCache() });
+  const first = new AbortController();
+  const second = new AbortController();
+  const abandoned = reader.read("entities", { level: "campaign" }, { signal: first.signal });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const joined = reader.read("entities", { level: "campaign" }, { signal: second.signal });
+  first.abort();
+  const result = await joined;
+  assert.equal(result.status, "ready", `the joiner was handed ${result.status}: ${result.detail}`);
+  assert.equal(result.data.rows[0].name, "Kept");
+  assert.equal(calls, 1, "both screens shared one request");
+  await abandoned;
+  assert.equal(abortedEarly, false, "the shared request was not cancelled while a caller still wanted it");
+});
+
+test("a read nobody is waiting for any more is cancelled", async () => {
+  let aborted = false;
+  const hanging = (url, options = {}) =>
+    new Promise((resolve, reject) => {
+      options.signal?.addEventListener("abort", () => {
+        aborted = true;
+        const error = new Error("aborted");
+        error.name = "AbortError";
+        reject(error);
+      });
+    });
+  const reader = createAdsReader({ fetchImpl: hanging, cache: createAdsCache() });
+  const only = new AbortController();
+  const pending = reader.read("entities", { level: "ad" }, { signal: only.signal });
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  only.abort();
+  const result = await pending;
+  assert.equal(aborted, true, "the last caller letting go stops the request");
+  assert.equal(result.status, "error");
+});
+
 test("a throttled re-read keeps the last good rows and their observation time", async () => {
   const observedAt = "2026-09-14T07:00:00.000Z";
   let mode = "ready";

@@ -60,7 +60,7 @@ import {
   createDrawer,
 } from "./ads-ui.js";
 import { createTable, column, createSelection, columnChooser, sortControl } from "./ads-table.js";
-import { field, filterBar, applyFilters, bulkBar } from "./ads-views.js";
+import { field, filterBar, applyFilters, bulkBar, accountCurrency } from "./ads-views.js";
 import {
   DEFAULT_COLUMNS,
   COLUMN_CATALOG,
@@ -291,7 +291,7 @@ export function createCreativeScreen(ctx, host) {
 
   const seriesOf = (row) => (Array.isArray(row?.series) ? row.series.filter((point) => point && typeof point.date === "string") : []);
 
-  const currencyOf = () => ctx.context?.account?.currency || "GBP";
+  const currencyOf = () => accountCurrency(ctx.context);
 
   /** Names are for reading; keys are for joining. A pair can name a creative the
    *  current filters exclude, and then the id is the honest label. */
@@ -1244,15 +1244,30 @@ export function createCreativeScreen(ctx, host) {
           render();
         },
         savedViews: view.saved(),
+        // The built-in views are code, so they are always there and never mixed
+        // into the operator's own saved list. Without them the menu on this
+        // screen offers nothing until somebody has saved a view of their own.
+        builtInViews: view.builtIn(),
+        activeView: view.activeView(),
         onSaveView: (name) => {
           view.save(name);
           render();
           ctx.say(`Saved the view “${name}”.`);
         },
         onApplyView: (saved) => {
-          view.apply(saved);
+          view.apply(saved, { fields });
           render();
           ctx.say(`Applied the view “${saved.name}”.`);
+        },
+        onUpdateView: (saved) => {
+          view.updateSaved(saved.id);
+          render();
+          ctx.say(`Saved the columns, sort and filters on screen to your view “${saved.name}”.`);
+        },
+        onRenameView: (saved, name) => {
+          view.rename(saved.id, name);
+          render();
+          ctx.say(`Renamed the saved view “${saved.name}” to “${name}”.`);
         },
         onRemoveView: (saved) => {
           view.remove(saved.id);

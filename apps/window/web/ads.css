@@ -1736,6 +1736,29 @@
 
 /* --------------------------------------------------------------- mobile --- */
 
+@media (max-width: 640px) {
+  /* Six screens on a phone.
+     The nav used to be a horizontal scroller at every width, which meant four of
+     the six destinations sat outside the visible box: reachable by swiping, but
+     invisible, and an owner checking on a phone cannot tap what they cannot see.
+     Wrapping into rows puts all six on screen at once. */
+  .ads-nav {
+    flex-wrap: wrap;
+    overflow-x: visible;
+    padding-top: 4px;
+    padding-bottom: 0;
+    row-gap: 0;
+  }
+  .ads-nav-link {
+    padding: 10px 10px 9px;
+    font-size: 12.5px;
+  }
+  .ads-nav-link[aria-current="page"]::after {
+    left: 10px;
+    right: 10px;
+  }
+}
+
 @media (max-width: 900px) {
   .ads-head,
   .ads-nav {
@@ -2383,4 +2406,384 @@
   flex: none;
   margin-right: 3px;
   vertical-align: -1px;
+}
+
+/* ads-overview -----------------------------------------------------------------
+   The Overview answers three questions and stops, so its styles are the three
+   answer shapes and nothing else: the reading strip at the top, the ranked
+   item lists, and the lanes the outcomes are ranked in. Layout only — the
+   cards, badges, tiles, drawer and table hairline all come from the shared
+   vocabulary above. Numbers are tabular everywhere, and nothing here carries a
+   colour that is not already a token.
+   ----------------------------------------------------------------------------- */
+
+.ads-overview {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+/* ------------------------------------------------------------- reading --- */
+
+.ads-overview-strip {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.ads-decisions-strip {
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 12px 14px;
+  background: var(--card);
+}
+.ads-decisions-strip-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+}
+.ads-decisions-fact {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ads-decisions-fact-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ads-decisions-fact-label {
+  color: var(--mute);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+}
+.ads-decisions-fact-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 500;
+}
+.ads-decisions-strip-note {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  color: var(--mute);
+  max-width: 88ch;
+}
+
+/* ----------------------------------------------------- ranked item list --- */
+
+/* The item's name is the primary control, so it is a real button that looks
+   like the heading it replaces rather than a link nobody can Tab to. */
+.ads-attention-title {
+  font: inherit;
+  font-weight: 500;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.ads-attention-title:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.ads-decisions-id {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  color: var(--faint);
+  background: var(--chip);
+  border-radius: var(--r-pill);
+  padding: 1px 7px;
+  white-space: nowrap;
+}
+.ads-decisions-evidence {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 18px;
+  margin-top: 2px;
+}
+.ads-decisions-ev {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-size: 12px;
+  min-width: 0;
+}
+.ads-decisions-ev-label {
+  color: var(--faint);
+  font-size: 11px;
+}
+.ads-decisions-ev-url {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 11px;
+  color: var(--mute);
+  max-width: 42ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ads-decisions-ev-more {
+  color: var(--faint);
+  font-size: 11px;
+}
+.ads-decisions-age {
+  color: var(--faint);
+  font-size: 11px;
+}
+.ads-decisions-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 4px;
+}
+.ads-decisions-proposal {
+  color: var(--mute);
+  font-size: 12px;
+}
+.ads-decisions-whatif {
+  color: var(--mute);
+  max-width: 88ch;
+}
+.ads-decisions-whatif strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+.ads-decisions-whatif-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--mute);
+}
+.ads-decisions-whatif-list li {
+  padding-left: 14px;
+  position: relative;
+}
+.ads-decisions-whatif-list li::before {
+  content: "—";
+  position: absolute;
+  left: 0;
+  color: var(--faint);
+}
+.ads-decisions-more {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* --------------------------------------------------------------- lanes --- */
+
+.ads-lanes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 16px;
+  align-items: start;
+}
+.ads-lane {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  padding: 14px;
+  background: var(--card);
+  min-width: 0;
+}
+.ads-lane-wide {
+  grid-column: 1 / -1;
+}
+.ads-lane-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ads-lane-title {
+  font-size: 14px;
+  font-weight: 500;
+}
+.ads-lane-subtitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mute);
+  padding-top: 4px;
+  border-top: 1px solid var(--line);
+  margin-top: 4px;
+}
+.ads-lane-note {
+  color: var(--faint);
+  font-size: 12px;
+  max-width: 70ch;
+}
+.ads-lane-leader {
+  color: var(--mute);
+  font-size: 12px;
+}
+.ads-lane-leader strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------- table --- */
+
+.ads-decisions-table-wrap {
+  overflow-x: auto;
+}
+.ads-decisions-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+.ads-decisions-th {
+  text-align: left;
+  font-weight: 500;
+  font-size: 11px;
+  color: var(--faint);
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+.ads-decisions-td {
+  padding: 7px 8px;
+  border-bottom: 1px solid var(--line);
+  vertical-align: baseline;
+}
+/* Every column after the record is a value or a badge: they stay on one line,
+   so a narrow lane wraps the record rather than the figures. */
+.ads-decisions-table th:nth-child(n + 3),
+.ads-decisions-table td:nth-child(n + 3) {
+  white-space: nowrap;
+}
+.ads-decisions-table td:first-child {
+  min-width: 168px;
+}
+.ads-decisions-tr:last-child .ads-decisions-td {
+  border-bottom: 0;
+}
+.ads-decisions-start {
+  text-align: left;
+}
+.ads-decisions-end {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+/* A value the read did not carry says so in words, and words are not numbers:
+   they take the muted tone so a column of figures still reads as figures. */
+.ads-decisions-missing {
+  color: var(--faint);
+}
+.ads-decisions-name {
+  font: inherit;
+  color: var(--ink);
+  background: none;
+  border: 0;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+.ads-decisions-name:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* The id belongs to the record, so it sits under the name rather than beside
+   it: side by side, a long id squeezes the name into three lines. */
+.ads-decisions-table .ads-decisions-id {
+  display: block;
+  margin-top: 3px;
+  width: fit-content;
+}
+
+/* ------------------------------------------------------------ records --- */
+
+.ads-decisions-records {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.ads-decisions-record {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.ads-decisions-record:last-child {
+  border-bottom: 0;
+}
+.ads-decisions-record-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------ staging --- */
+
+.ads-decisions-staging {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  align-items: flex-start;
+}
+.ads-decisions-staging-note {
+  border-left: 2px solid var(--line);
+  padding-left: 10px;
+  color: var(--mute);
+  max-width: 78ch;
+}
+.ads-decisions-staging-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.ads-decisions-staging-foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ads-decisions-percent {
+  display: inline-flex;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  overflow: hidden;
+}
+.ads-decisions-percent-option {
+  font: inherit;
+  font-size: 12px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  background: var(--card);
+  color: var(--mute);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.ads-decisions-percent-option:last-child {
+  border-right: 0;
+}
+.ads-decisions-percent-option[aria-pressed="true"] {
+  background: var(--ink);
+  color: var(--bg);
+}
+.ads-decisions-percent-option:focus-visible {
+  outline: 2px solid var(--ink);
+  outline-offset: -2px;
+}
+
+@media (max-width: 900px) {
+  .ads-lanes {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .ads-decisions-fact-value {
+    font-size: 13px;
+  }
 }

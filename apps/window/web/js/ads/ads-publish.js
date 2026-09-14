@@ -33,6 +33,7 @@ import {
 import { formatMoney, formatInt } from "./ads-contracts.js";
 import { createSelection } from "./ads-table.js";
 import { newAdsId, draftAdCount, draftScope, mergeMapping } from "./ads-drafts.js";
+import { accountCurrency } from "./ads-views.js";
 import { planDigest, reconcilePlanRows, versionIdFor } from "./ads-identity.js";
 
 const PRESET_KEY = "frank.ads.presets.v1";
@@ -359,7 +360,7 @@ export function validateTrackingUrls({ rows = [], fields = [], campaignId = "", 
  * Validate the plan. Every finding names the row it belongs to, because a
  * validation list that only says "3 problems" makes the operator hunt.
  */
-export function validatePlan({ creatives, config, mapping, tracking, mode, currency = "GBP" }) {
+export function validatePlan({ creatives, config, mapping, tracking, mode, currency = "" }) {
   const problems = [];
   const add = (severity, kind, scope, scopeName, detail) => problems.push({ severity, kind, scope, scopeName, detail });
 
@@ -639,7 +640,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
       mapping: state.mapping,
       tracking: state.tracking,
       mode: state.mode,
-      currency: ctx.context?.account?.currency || "GBP",
+      currency: accountCurrency(ctx.context),
     });
     // The URLs are validated after they are built for the exact planned rows, so
     // the problem list describes the links that would really ship.
@@ -746,7 +747,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
           for (const preset of presets) {
             group.append(
               menuItem(preset.name, {
-                hint: `${preset.config.objective} · ${formatMoney(preset.config.budget, ctx.context?.account?.currency || "GBP")}/day · ${(preset.config.placements || []).join(", ")}`,
+                hint: `${preset.config.objective} · ${formatMoney(preset.config.budget, accountCurrency(ctx.context))}/day · ${(preset.config.placements || []).join(", ")}`,
                 onClick: () => {
                   state.config = { ...state.config, ...preset.config };
                   state.tracking = { ...state.tracking, ...preset.tracking };
@@ -1043,7 +1044,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
   // --------------------------------------------------------- 2. configure --
 
   function renderConfigure(container) {
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
     const form = el("div", "ads-grid-form");
 
     const text = (label, key, { hint = "", placeholder = "" } = {}) => {
@@ -1520,7 +1521,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
   function renderReview(container) {
     const plan = currentPlan();
     const validation = currentValidation();
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
     const chosen = chosenCreatives();
 
     const summary = el("div", "ads-review-summary");
@@ -1743,7 +1744,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
         budget: state.config.budget,
         budgetKind: state.config.budgetKind,
         adsetCount: state.config.adsetCount,
-        currency: ctx.context?.account?.currency || "GBP",
+        currency: accountCurrency(ctx.context),
       },
       creatives: chosenCreatives().map((creative) => ({
         id: String(creative.id),

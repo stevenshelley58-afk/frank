@@ -263,30 +263,61 @@ export function createAdsReader({ fetchImpl = globalThis.fetch, cache = createAd
     if (preview?.enabled?.()) {
       return preview.read(reader, params);
     }
+    // A caller that has already given up is answered without starting a read at
+    // all, rather than being handed somebody else's request.
+    if (signal?.aborted) return envelope("error", { detail: "superseded", origin: "live" });
     if (!force) {
       const hit = cache.get(reader, params);
       if (hit && !hit.expired) return hit;
     }
     // Deduplicate identical concurrent reads: a filter change that returns to
     // the same parameters rejoins the request already in flight.
+    //
+    // The shared request owns its own lifetime. It used to borrow the first
+    // caller's abort signal, which made one screen's disposal cancel a read that
+    // another screen had already joined — and the joiner was then handed
+    // "superseded", an error it could not recover from, on the first paint.
+    // Instead the request lives while at least one caller is still interested,
+    // and is cancelled when the last of them lets go.
     const key = cache.key(reader, params);
-    if (inflight.has(key)) return inflight.get(key);
-    const promise = readAds(reader, params, { fetchImpl, signal })
-      .then((result) => {
-        // A throttled, failed or superseded re-read must not take rows off the
-        // screen. Answer with the last good copy, marked stale, and let the
-        // screen say which read failed. A read that carried a payload, and a
-        // first read with nothing cached, are returned as themselves.
-        if (isUnresolved(result) && !carriesPayload(result)) {
-          const lastGood = cache.lastGood(reader, params);
-          if (lastGood) return retainedResult(result, lastGood);
-        }
-        cache.set(reader, params, result);
-        return result;
-      })
-      .finally(() => inflight.delete(key));
-    inflight.set(key, promise);
-    return promise;
+    let entry = inflight.get(key);
+    if (!entry) {
+      const controller = new AbortController();
+      const promise = readAds(reader, params, { fetchImpl, signal: controller.signal })
+        .then((result) => {
+          // A throttled, failed or superseded re-read must not take rows off the
+          // screen. Answer with the last good copy, marked stale, and let the
+          // screen say which read failed. A read that carried a payload, and a
+          // first read with nothing cached, are returned as themselves.
+          if (isUnresolved(result) && !carriesPayload(result)) {
+            const lastGood = cache.lastGood(reader, params);
+            if (lastGood) return retainedResult(result, lastGood);
+          }
+          cache.set(reader, params, result);
+          return result;
+        })
+        .finally(() => {
+          if (inflight.get(key) === entry) inflight.delete(key);
+        });
+      entry = { promise, controller, waiters: 0 };
+      inflight.set(key, entry);
+    }
+
+    entry.waiters += 1;
+    let released = false;
+    const release = () => {
+      if (released) return;
+      released = true;
+      entry.waiters -= 1;
+      if (entry.waiters <= 0) entry.controller.abort();
+    };
+    signal?.addEventListener?.("abort", release, { once: true });
+    try {
+      return await entry.promise;
+    } finally {
+      signal?.removeEventListener?.("abort", release);
+      release();
+    }
   }
 
   return Object.freeze({

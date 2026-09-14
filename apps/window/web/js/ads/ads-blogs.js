@@ -46,7 +46,7 @@ import {
   createDrawer,
 } from "./ads-ui.js";
 import { createTable, column, createSelection, columnChooser, sortControl } from "./ads-table.js";
-import { field, filterBar, applyFilters, bulkBar } from "./ads-views.js";
+import { field, filterBar, applyFilters, bulkBar, accountCurrency } from "./ads-views.js";
 import {
   DEFAULT_COLUMNS,
   COLUMN_CATALOG,
@@ -897,15 +897,29 @@ export function createBlogsScreen(ctx, host) {
           restoreSearchFocus();
         },
         savedViews: ctx.store.saved(),
+        // The built-in views are code, so they are always there and never mixed
+        // into the operator's own saved list.
+        builtInViews: ctx.store.builtIn(),
+        activeView: ctx.store.activeView(),
         onSaveView: (name) => {
           ctx.store.save(name);
           render();
           ctx.say(`Saved the view "${name}".`);
         },
         onApplyView: (view) => {
-          ctx.store.apply(view);
+          ctx.store.apply(view, { fields });
           render();
           ctx.say(`Applied the view "${view.name}".`);
+        },
+        onUpdateView: (view) => {
+          ctx.store.updateSaved(view.id);
+          render();
+          ctx.say(`Saved the columns, sort and filters on screen to your view "${view.name}".`);
+        },
+        onRenameView: (view, name) => {
+          ctx.store.rename(view.id, name);
+          render();
+          ctx.say(`Renamed the saved view "${view.name}" to "${name}".`);
         },
         onRemoveView: (view) => {
           ctx.store.remove(view.id);
@@ -1261,7 +1275,7 @@ export function createBlogsScreen(ctx, host) {
   }
 
   function openDetail(row) {
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
     const totals = totalsOf(row);
     const evidence = evidenceForArticle(row);
     drawer.setTitle(rowName(row));
@@ -1387,7 +1401,7 @@ export function createBlogsScreen(ctx, host) {
   }
 
   function openCompare() {
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
     const chosen = selection
       .keys()
       .map((key) => (state.rows || []).find((row) => rowKey(row) === key))
@@ -1569,7 +1583,7 @@ export function createBlogsScreen(ctx, host) {
     }
     content.append(rowsReadNote(state.fetchedAt, { suffix: "Nothing on this screen calls the provider." }));
 
-    const currency = ctx.context?.account?.currency || "GBP";
+    const currency = accountCurrency(ctx.context);
     indexCreatives();
     const { fields, filtered } = applyView();
 

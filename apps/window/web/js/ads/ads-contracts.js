@@ -610,14 +610,19 @@ export function formatMoney(value, currency = "GBP", { minor = false } = {}) {
   const n = num(value);
   if (n === null) return "—";
   const amount = minor ? n / 100 : n;
+  const code = String(currency || "").trim().toUpperCase();
+  // A figure whose currency is unknown says so instead of borrowing one. The
+  // account's currency comes from the connected account, and when that read has
+  // not answered, printing somebody else's unit is a claim about their money.
+  if (!/^[A-Z]{3}$/.test(code)) return `${amount.toFixed(2)} (currency unknown)`;
   try {
     return new Intl.NumberFormat("en-GB", {
       style: "currency",
-      currency,
+      currency: code,
       maximumFractionDigits: amount < 100 ? 2 : 0,
     }).format(amount);
   } catch {
-    return `${currency} ${amount.toFixed(2)}`;
+    return `${code} ${amount.toFixed(2)}`;
   }
 }
 
