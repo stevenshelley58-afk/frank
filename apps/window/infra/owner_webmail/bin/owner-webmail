@@ -43,7 +43,7 @@ case ${1:-} in
   build)
     clean_source
     secret_file_ok
-    compose build launch
+    compose build launch webmail
     ;;
   up)
     clean_source
