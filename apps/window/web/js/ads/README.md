@@ -131,7 +131,8 @@ Individually:
 ```bash
 cd apps/window
 node --test tests/ads_identity.test.mjs tests/ads_drafts.test.mjs \
-    tests/ads_workspace_contract.test.mjs tests/ads_tracking.test.mjs
+    tests/ads_workspace_contract.test.mjs tests/ads_tracking.test.mjs \
+    tests/ads_overview.test.mjs tests/ads_controls.test.mjs
 python3 -m pytest tests/test_owner_ads.py -q
 /srv/frank/acceptance-venv/bin/python acceptance/ads_journey.py \
     --root . --out /srv/frank/verification/ads-repair-20260914
