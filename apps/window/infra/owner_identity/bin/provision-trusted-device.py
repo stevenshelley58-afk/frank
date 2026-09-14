@@ -52,13 +52,21 @@ def binding(flow,name):
  found=[x for x in rows if x.get("stage_obj",{}).get("name")==name]
  if len(found)!=1 or not found[0].get("re_evaluate_policies"): fail(f"expected one run-time-re-evaluated {name} binding")
  return found[0]
-def attach(b,p,label):
+def attach(b,p,label,failure_result):
  target=b.get("policybindingmodel_ptr_id")
  if not target: fail(f"{label} has no policy-binding target")
  rows=bootstrap.get(f"/policies/bindings/?target={target}&page_size=100")["results"]
- if any(x.get("policy")==p["pk"] for x in rows): bootstrap.unchanged.append(f"trusted-device binding: {label}"); return
+ existing=next((x for x in rows if x.get("policy")==p["pk"]),None)
+ wanted={"order":0,"enabled":True,"negate":False,"timeout":30,"failure_result":failure_result}
+ if existing:
+  drift={k:v for k,v in wanted.items() if existing.get(k)!=v}
+  if drift:
+   if bootstrap.DRY_RUN: bootstrap.updated.append(f"trusted-device binding: {label} [dry-run]")
+   else: bootstrap.call("PATCH",f"/policies/bindings/{existing['pk']}/",drift); bootstrap.updated.append(f"trusted-device binding: {label}")
+  else: bootstrap.unchanged.append(f"trusted-device binding: {label}")
+  return
  if bootstrap.DRY_RUN: bootstrap.created.append(f"trusted-device binding: {label} [dry-run]"); return
- bootstrap.call("POST","/policies/bindings/",{"target":target,"policy":p["pk"],"order":0,"enabled":True,"negate":False,"timeout":30,"failure_result":False}); bootstrap.created.append(f"trusted-device binding: {label}")
+ bootstrap.call("POST","/policies/bindings/",dict(target=target,policy=p["pk"],**wanted)); bootstrap.created.append(f"trusted-device binding: {label}")
 def set_all(b,label):
  if b.get("policy_engine_mode")=="all": bootstrap.unchanged.append(f"trusted-device mode: {label}=all"); return
  if bootstrap.DRY_RUN: bootstrap.updated.append(f"trusted-device mode: {label}=all [dry-run]"); return
@@ -68,8 +76,14 @@ def main():
  if not flow or flow.get("designation")!="authentication": fail("default authentication flow missing")
  seed,skip,login=(policy(n,e) for n,e in zip(("frank-trusted-device-seed-owner","frank-trusted-device-skip-factor","frank-trusted-device-login-guard"),expressions(proof_hash())))
  ident=binding(flow,"default-authentication-identification"); password=binding(flow,"default-authentication-password"); mfa=binding(flow,"default-authentication-mfa-validation"); user_login=binding(flow,"default-authentication-login")
- if ident.get("policy_engine_mode")!="any": fail("stock identification binding must retain policy_engine_mode=any")
- if user_login.get("policy_engine_mode")!="any": fail("stock User Login binding must retain policy_engine_mode=any")
- attach(ident,seed,"identification"); attach(password,skip,"password"); attach(mfa,skip,"MFA"); set_all(password,"password"); set_all(mfa,"MFA"); attach(user_login,login,"User Login")
+ # Identification was stock-empty at review time. Refuse an unknown policy rather
+ # than letting it silently change the meaning of the trusted skip.
+ ident_target=ident.get("policybindingmodel_ptr_id")
+ ident_rows=bootstrap.get(f"/policies/bindings/?target={ident_target}&page_size=100")["results"]
+ known={seed["pk"]}
+ if any(row.get("policy") not in known for row in ident_rows): fail("identification has an unexpected stock policy")
+ attach(ident,seed,"identification",True); attach(password,skip,"password",True); attach(mfa,skip,"MFA",True); attach(user_login,login,"User Login",False)
+ # ALL means an unexpected passing policy can never bypass a false trusted guard.
+ set_all(ident,"identification"); set_all(password,"password"); set_all(mfa,"MFA"); set_all(user_login,"User Login")
  print("trusted-device: provisioned flow bindings (proof hash only; no secret printed)")
 if __name__=="__main__": raise SystemExit(main())

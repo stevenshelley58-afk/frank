@@ -13,6 +13,7 @@ if not isinstance(proof,str) or not proof: raise SystemExit("owner-trusted-devic
 print(hashlib.sha256(proof.encode()).hexdigest())
 PY
 )
+export OWNER_IDENTITY_SOURCE_SHA="$(git -C "$(cd "$root_dir/../../../.." && pwd)" rev-parse HEAD)"
 compose=(docker compose --project-directory "$root_dir" --env-file "$identity_secret" -f "$root_dir/compose.yaml")
 server_id=$("${compose[@]}" ps -q server); test -n "$server_id" || fail "the owner identity server is not running"
 test "$(docker inspect -f '{{.State.Health.Status}}' "$server_id")" = healthy || fail "the owner identity server is not healthy"

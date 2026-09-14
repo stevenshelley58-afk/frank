@@ -13,5 +13,5 @@ class Tests(unittest.TestCase):
   with patch.dict(os.environ,{"OWNER_TRUSTED_DEVICE_PROOF_SHA256":"bad"},clear=True):
    with self.assertRaises(SystemExit): self.load().proof_hash()
  def test_stock_guards_and_local_hashing(self):
-  s=SCRIPT.read_text(); self.assertIn('set_all(password,"password")',s); self.assertIn('set_all(mfa,"MFA")',s); self.assertIn('stock User Login binding must retain policy_engine_mode=any',s)
-  w=SCRIPT.with_suffix(".sh").read_text(); self.assertIn("hashlib.sha256",w); self.assertNotIn('-e "proof_secret=',w); self.assertIn("test ! -L",w)
+  s=SCRIPT.read_text(); self.assertIn('set_all(password,"password")',s); self.assertIn('set_all(mfa,"MFA")',s); self.assertIn('set_all(user_login,"User Login")',s); self.assertIn('attach(password,skip,"password",True)',s); self.assertIn('attach(mfa,skip,"MFA",True)',s); self.assertIn('attach(user_login,login,"User Login",False)',s)
+  w=SCRIPT.with_suffix(".sh").read_text(); self.assertIn("hashlib.sha256",w); self.assertIn("OWNER_IDENTITY_SOURCE_SHA",w); self.assertNotIn('-e "proof_secret=',w); self.assertIn("test ! -L",w)
