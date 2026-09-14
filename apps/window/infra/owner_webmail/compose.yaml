@@ -9,11 +9,14 @@ x-source-labels: &source-labels
   io.frank.owner-webmail.applied-source-sha: ${OWNER_WEBMAIL_SOURCE_SHA:?OWNER_WEBMAIL_SOURCE_SHA is required}
 
 services:
-  # Roundcube 1.7.4, pinned upstream image. The application source is the
-  # upstream image; the committed configuration and the frank_sso plugin are
-  # mounted read-only over it so production still runs committed source.
+  # Roundcube 1.7.4 on the pinned upstream image, plus this repository's
+  # committed configuration and frank_sso plugin baked into the application
+  # tree at build time. The running image is tagged with the applied revision.
   webmail:
-    image: roundcube/roundcubemail:1.7.4-apache@sha256:8a4f88846145c6c8801654d9c3b330071e162f0110b64d08af8e94aca50ffb89
+    image: frank-owner-webmail:${OWNER_WEBMAIL_SOURCE_SHA:?required}
+    build:
+      context: ./roundcube
+      dockerfile: Dockerfile
     pull_policy: never
     container_name: owner-webmail
     restart: unless-stopped
@@ -46,8 +49,6 @@ services:
     volumes:
       - owner_webmail_app:/var/www/html
       - owner_webmail_db:/var/roundcube/db
-      - ./roundcube/config.inc.php:/var/www/html/config/config.inc.php:ro
-      - ./roundcube/plugins/frank_sso:/var/www/html/plugins/frank_sso:ro
     networks: [owner-webmail-private, owner-webmail-egress]
     security_opt: [no-new-privileges:true]
     healthcheck:

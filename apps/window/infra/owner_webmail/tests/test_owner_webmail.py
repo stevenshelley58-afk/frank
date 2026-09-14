@@ -25,10 +25,15 @@ class ComposeContractTests(unittest.TestCase):
         self.compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
 
     def test_images_are_pinned_by_digest(self):
-        self.assertIn("roundcube/roundcubemail:1.7.4-apache@sha256:", self.compose)
+        dockerfiles = {
+            "roundcube": (ROOT / "roundcube" / "Dockerfile").read_text(encoding="utf-8"),
+            "launch": (ROOT / "launch" / "Dockerfile").read_text(encoding="utf-8"),
+        }
+        self.assertIn("roundcube/roundcubemail:1.7.4-apache@sha256:", dockerfiles["roundcube"])
+        self.assertIn("python:3.12-alpine@sha256:", dockerfiles["launch"])
         self.assertIn("nginx:1.28.0-alpine@sha256:", self.compose)
-        self.assertIn("python:3.12-alpine@sha256:", (ROOT / "launch" / "Dockerfile").read_text(encoding="utf-8"))
         self.assertNotIn(":latest", self.compose)
+        self.assertNotIn(":latest", "".join(dockerfiles.values()))
 
     def test_only_the_ingress_publishes_a_loopback_port(self):
         self.assertEqual(self.compose.count("ports: ["), 1)
@@ -56,9 +61,12 @@ class ComposeContractTests(unittest.TestCase):
         self.assertIn("cap_drop", self.compose)
         self.assertIn("security_opt: [no-new-privileges:true]", launch)
 
-    def test_committed_configuration_is_mounted_over_the_pinned_image(self):
-        self.assertIn("./roundcube/config.inc.php:/var/www/html/config/config.inc.php:ro", self.compose)
-        self.assertIn("./roundcube/plugins/frank_sso:/var/www/html/plugins/frank_sso:ro", self.compose)
+    def test_committed_configuration_ships_in_the_image_not_as_a_runtime_edit(self):
+        dockerfile = (ROOT / "roundcube" / "Dockerfile").read_text(encoding="utf-8")
+        self.assertIn("COPY config.inc.php /usr/src/roundcubemail/config/config.inc.php", dockerfile)
+        self.assertIn("COPY plugins/frank_sso /usr/src/roundcubemail/plugins/frank_sso", dockerfile)
+        self.assertIn("php -l", dockerfile)
+        self.assertIn("build:\n      context: ./roundcube", self.compose)
         self.assertIn("./ingress/default.conf.template:/etc/nginx/templates/default.conf.template:ro", self.compose)
 
     def test_running_containers_are_stamped_with_the_applied_revision(self):
