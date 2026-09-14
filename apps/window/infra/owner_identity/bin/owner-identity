@@ -104,7 +104,6 @@ prepare_runtime() {
 }
 
 compose() {
-  OWNER_IDENTITY_SOURCE_SHA=$source_sha \
   docker compose --project-directory "$root_dir" --env-file "$secret_file" -f "$root_dir/compose.yaml" "$@"
 }
 
@@ -134,6 +133,9 @@ clean_source
 secret_file_ok
 fixed_settings_ok
 source_sha=$(git -C "$repo_root" rev-parse HEAD)
+# Exported, not just passed per-command: compose.yaml requires it for its
+# runtime labels, and bin/check-compose.py re-invokes docker compose itself.
+export OWNER_IDENTITY_SOURCE_SHA=$source_sha
 
 case ${1:-} in
   config)

@@ -229,9 +229,37 @@ So: the detector demonstrably fires, the control refuses as designed, and the
 Frappe origin does **not** refuse. **Framing of `crm.frank.fail` by
 `https://frank.fail` is VERIFIED.**
 
+The coordinator ran an independent three-case test on real certificates, which
+sharpens *why* this works. Varying only the framed app's headers:
+
+| Framed app response headers | Result |
+| --- | --- |
+| `X-Frame-Options: SAMEORIGIN` only | blocked |
+| `X-Frame-Options: SAMEORIGIN` **and** scoped CSP `frame-ancestors https://frank.fail` | **framed** |
+| scoped CSP `frame-ancestors https://frank.fail` only | **framed** |
+
+Two consequences, and the first corrects an emphasis in an earlier draft of this
+record:
+
+1. **The scoped CSP `frame-ancestors` is what grants permission.** It overrides a
+   conflicting `X-Frame-Options` when both are present. The
+   `-X-Frame-Options` strip in `owner_native_app_headers` is therefore
+   **defence in depth, not the mechanism**. It is kept deliberately: the control
+   case shows XFO is still enforced when it is the only signal, and this is
+   browser behaviour observed on one Chromium build rather than a specification
+   guarantee.
+2. **The parent must name each app origin in its own `frame-src`.**
+   `frame-ancestors 'none'` on Frank does not stop Frank framing others; Frank's
+   own `frame-src` is what permits it. `crm`, `marketing` and `mail` are all
+   named. Any further app origin needs adding there as well as receiving its own
+   scoped `frame-ancestors`.
+
 `mail.frank.fail` produced no refusal message either, but its response status was
-not captured in the same run (the webmail ingress was not resolved at that
-moment), so **webmail framing is recorded as UNVERIFIED**, not as passing.
+not captured in the same run, so **webmail framing is recorded as UNVERIFIED by
+this lane's own test** rather than as passing on that evidence alone. It does not
+import `owner_native_app_headers` at all: the ingress's own
+`frame-ancestors 'self' https://frank.fail` is passed through untouched, because
+`'self'` is load-bearing for Roundcube's own message panes.
 
 An initial attempt to detect blocking with the `securitypolicyviolation` DOM
 event is recorded here as a **failed method**: the control produced zero
