@@ -30,6 +30,7 @@ import owner_customers
 import owner_sources
 import owner_sources_setup
 import owner_app_readiness
+import owner_ads
 import home_platform
 import home_defaults
 import mini_frank
@@ -4623,6 +4624,9 @@ home_platform.configure(
 )
 app.register_blueprint(home_platform.api)
 app.register_blueprint(owner_app_readiness.create_blueprint())
+# The ads reader routes answer with a typed "not implemented" until the
+# reporting import exists, rather than falling through to the SPA page.
+app.register_blueprint(owner_ads.create_blueprint())
 # Attach the owner read projections, then serve them to the workspace host.
 owner_sources_setup.attach_owner_sources()
 app.register_blueprint(owner_sources.create_blueprint())

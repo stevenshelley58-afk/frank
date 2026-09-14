@@ -1,0 +1,333 @@
+/* Ads workspace: the control surfaces.
+ *
+ * Kept beside ads.css rather than inside it because this file is about the
+ * operator's controls — saved views, the column chooser, the hierarchy
+ * drill-down, the lifecycle states and the phone layout for approving — while
+ * ads.css is about how a reading is presented. Everything here is scoped under
+ * `.ads-workspace`, like the rest of the surface, so it cannot leak into the
+ * customer product that shares this stylesheet origin.
+ *
+ * Nothing here introduces a colour, a shadow or a gradient: the tokens are the
+ * ones ads.css already uses, so the two files cannot drift apart visually.
+ */
+
+/* ------------------------------------------------------------------ views -- */
+
+/* Which view the configuration on screen came from. The tag is what makes the
+   two kinds obvious at a glance: one ships with the app, the other was saved by
+   this operator in this browser. */
+.ads-workspace .ads-view-active {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  font-size: 11px;
+  color: var(--mute);
+  max-width: 100%;
+}
+.ads-workspace .ads-view-active-name {
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 22ch;
+}
+.ads-workspace .ads-view-modified {
+  color: var(--faint);
+  font-style: italic;
+}
+.ads-workspace .ads-view-tag {
+  flex: none;
+  padding: 1px 6px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  font-size: 10px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.ads-workspace .ads-view-active[data-kind="builtin"] .ads-view-tag {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+
+/* A view row is the menu item plus its kind tag. The row must not wrap: the tag
+   belongs beside the view it labels, not under the next one. */
+.ads-workspace .ads-view-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.ads-workspace .ads-view-row .ads-menu-item {
+  flex: 1;
+  min-width: 0;
+}
+.ads-workspace .ads-view-row .ads-btn {
+  flex: none;
+}
+
+/* The inline view editor: rename, save over, delete — inside the same popover,
+   because a second modal system for four controls is a new thing to learn. */
+.ads-workspace .ads-view-editor {
+  padding: 6px 8px 8px;
+  border-top: 1px solid var(--line);
+}
+.ads-workspace .ads-view-editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ads-workspace .ads-view-editor-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.ads-workspace .ads-view-confirm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+.ads-workspace .ads-view-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--mute);
+}
+
+/* The bulk bar's count is never abbreviated and never clipped: "1.2k selected"
+   is how a bulk change reaches rows the operator never looked at. */
+.ads-workspace .ads-bulk-count {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* -------------------------------------------------------------- hierarchy -- */
+
+/* The path a row sits on, under its name. The id leads, because the id is what
+   the drill-down filter uses and what makes the path unambiguous. */
+.ads-workspace .ads-cell-parent {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px;
+  font-size: 11px;
+  color: var(--faint);
+}
+.ads-workspace .ads-cell-parent-id {
+  font-variant-numeric: tabular-nums;
+  color: var(--mute);
+  overflow-wrap: anywhere;
+}
+.ads-workspace .ads-cell-parent-name {
+  color: var(--faint);
+}
+.ads-workspace .ads-row-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+/* The affected record's identity in a before/after review. It is set apart from
+   the name because it is the part that cannot be guessed from the name. */
+.ads-workspace .ads-ba-name {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  flex: 1;
+  min-width: 0;
+}
+.ads-workspace .ads-ba-name > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ads-workspace .ads-ba-id {
+  font-size: 10px;
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+/* ------------------------------------------------------- currency context -- */
+
+/* Shown wherever a money figure appears with no currency read. The figure
+   itself already says "currency unknown"; this is the sentence that explains
+   why, so nobody reads the number as pounds. */
+.ads-workspace .ads-currency-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 0;
+  font-size: 11px;
+  color: var(--faint);
+}
+.ads-workspace .ads-currency-note svg {
+  flex: none;
+  margin-top: 2px;
+}
+
+/* ---------------------------------------------------- drafts and recovery -- */
+
+.ads-workspace .ads-recovery,
+.ads-workspace .ads-staged {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* The phase badge carries its phase as data, so a screen reader and a stylesheet
+   can both tell a local phase from a provider one without parsing the label. */
+.ads-workspace .ads-badge[data-phase][data-origin="preview"] {
+  border-style: dashed;
+}
+.ads-workspace .ads-badge[data-phase="submitted"],
+.ads-workspace .ads-badge[data-phase="delivering"] {
+  border-style: dashed;
+  color: var(--mute);
+}
+
+/* The approve / discard strip for one draft. On a phone it sticks to the bottom
+   of the viewport while the draft it belongs to is on screen, so approving is
+   reachable with a thumb instead of a scroll. */
+.ads-workspace .ads-draft-bar,
+.ads-workspace .ads-stage-bar {
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+/* ------------------------------------------------------------------ phone -- */
+
+@media (max-width: 640px) {
+  /* A table on a phone is a horizontally scrollable region with the identity and
+     the decision pinned: the subject of a row must never scroll out of sight,
+     and the action that acts on it must never be off the edge. The table keeps
+     its minimum width so the numbers stay aligned rather than collapsing into
+     two characters a line; the region scrolls, the page does not. */
+  .ads-workspace .ads-table {
+    min-width: 560px;
+  }
+  .ads-workspace .ads-table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .ads-workspace .ads-table td[data-role="select"],
+  .ads-workspace .ads-table th[data-role="select"] {
+    position: sticky;
+    left: 0;
+    z-index: 4;
+    background: var(--card);
+  }
+  .ads-workspace .ads-table td[data-role="identity"],
+  .ads-workspace .ads-table th[data-role="identity"] {
+    position: sticky;
+    /* 34px is the selection column's width, so the identity sits beside it
+       rather than under it. */
+    left: 34px;
+    z-index: 4;
+    background: var(--card);
+    box-shadow: 1px 0 0 var(--line);
+    max-width: 60vw;
+  }
+  .ads-workspace .ads-table td[data-role="identity"] .ads-cell-name strong {
+    white-space: normal;
+  }
+  .ads-workspace .ads-table td[data-role="action"],
+  .ads-workspace .ads-table th[data-role="action"] {
+    position: sticky;
+    right: 0;
+    z-index: 4;
+    background: var(--card);
+    box-shadow: -1px 0 0 var(--line);
+  }
+  /* A pinned cell has to paint its own row state, or the rows scrolling under it
+     show through and the table reads as overlapping text. */
+  .ads-workspace .ads-table .ads-tr:hover td[data-role],
+  .ads-workspace .ads-table .ads-tr:focus-within td[data-role] {
+    background: var(--hover);
+  }
+  .ads-workspace .ads-table .ads-tr[data-selected="true"] td[data-role] {
+    background: #f4f6fa;
+  }
+  /* The action cell's reveal-on-hover is a pointer nicety; on a touch screen the
+     decision is always visible and always big enough to hit. */
+  .ads-workspace .ads-table-wrap .ads-row-action {
+    opacity: 1;
+  }
+  .ads-workspace .ads-row-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ads-workspace .ads-row-actions .ads-btn {
+    min-height: 44px;
+    justify-content: center;
+  }
+
+  /* Approving and staging are the two decisions made on a phone, so they get a
+     bar that stays in reach and targets that are a thumb wide. */
+  .ads-workspace .ads-draft-bar,
+  .ads-workspace .ads-stage-bar {
+    position: sticky;
+    bottom: 0;
+    z-index: 25;
+    margin: 0 -12px;
+    padding: 10px 12px;
+    background: var(--card);
+    border-top: 1px solid var(--line);
+  }
+  .ads-workspace .ads-draft-bar .ads-btn,
+  .ads-workspace .ads-stage-bar .ads-btn {
+    min-height: 44px;
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .ads-workspace .ads-bulk-actions .ads-btn,
+  .ads-workspace .ads-bulk-scope .ads-btn {
+    min-height: 44px;
+  }
+  .ads-workspace .ads-bulkbar {
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  /* The before/after row stacks: name and identity, then the two values. Side by
+     side, an id and two currency figures run off the drawer. */
+  .ads-workspace .ads-ba-row,
+  .ads-workspace .ads-ba-total {
+    flex-wrap: wrap;
+    align-items: flex-start;
+    gap: 4px 12px;
+  }
+  .ads-workspace .ads-ba-name {
+    flex: 1 1 100%;
+  }
+  .ads-workspace .ads-ba-values {
+    flex: 1 1 100%;
+    justify-content: flex-start;
+  }
+  /* Nothing in a reading surface may push the page sideways: long ids, URLs and
+     unbroken labels wrap instead. */
+  .ads-workspace .ads-mono-cell,
+  .ads-workspace .ads-detail-id,
+  .ads-workspace .ads-cell-parent-id {
+    overflow-wrap: anywhere;
+    white-space: normal;
+  }
+  .ads-workspace .ads-filter-tail {
+    margin-left: 0;
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  .ads-workspace .ads-view-active-name {
+    max-width: 14ch;
+  }
+}

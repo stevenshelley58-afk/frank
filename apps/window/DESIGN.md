@@ -132,3 +132,46 @@ retained when switching sections, and leaving for sign-in warns about an open
 draft. There are no new-tab escape links. Other Frank routes and the technical
 project home remain unchanged. A passing health check is not native-session
 acceptance; desktop and mobile browser evidence is recorded separately.
+
+## Ads workspace
+
+`/project/blockwise/ads` is the owner's paid-advertising section, beside Mail,
+CRM and Email flows. It is a Frank read model with no native application to
+frame, so it takes the read slot whole rather than being wrapped in the panel
+title every other section gets.
+
+It extends the incumbent white, compact system rather than adding a second one:
+the same tokens, the same Inter steps, the same hairlines, the same pill
+actions. What changes is density. An ads screen is an Operate surface read
+against a table, so it adds:
+
+- **A context strip that never scrolls.** Account, date range, comparison
+  period, attribution setting and last successful sync sit above the screen nav
+  and stay put while the rows move.
+- **One management table, three altitudes.** Campaigns, ad sets and ads share a
+  table with sortable headers, choosable columns, saved filter views, row
+  selection with shift-range, and paging. Numbers are right-aligned with tabular
+  figures so a column can be read down the page.
+- **Measurement labels at the point of display.** Meta-attributed and
+  website/CRM-observed numbers are different facts. They never share a column or
+  a total, and an observed metric carries its source inline.
+- **Evidence instead of a winner badge.** Low volume renders *Insufficient
+  evidence*, not a crown, and a comparison refuses a verdict while the
+  confidence intervals overlap.
+- **A record drawer, not a second page.** Rows open a trailing panel so the list
+  behind it survives; Escape closes it and focus returns to where it was.
+
+The red `--mark` stays what it is everywhere else: the active marker only. No
+new accent, no tinted panel and no chart wall — the overview carries exactly one
+chart, because a screen where every metric has its own sparkline is a screen
+nobody reads.
+
+Motion follows the same restraint: entering surfaces (drawer, popover, bulk bar,
+publish flow) get a short custom ease-out because they explain a state change,
+repeat-use controls get a bounded transition and nothing more, and everything
+collapses under `prefers-reduced-motion`.
+
+`web/ads.css` owns how a reading is presented and `web/ads-controls.css` owns
+the operator's controls — saved views, columns, hierarchy, lifecycle and the
+phone layout. Both are scoped to `.ads-workspace`, so no other Frank surface
+changes.
