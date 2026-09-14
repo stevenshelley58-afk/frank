@@ -538,6 +538,14 @@ export function mountAdsWorkspace(host, options = {}) {
         state.pendingRecord = null;
         return request;
       },
+      /** A screen calls this when a record it was asked for is not in its rows,
+       *  so a drill-down that cannot be honoured is said out loud rather than
+       *  looking like a link that did nothing. */
+      recordMiss: (request) => {
+        const kind = String(request?.kind || "").trim();
+        const id = String(request?.id || "").trim();
+        say(`${kind ? `${kind[0].toUpperCase()}${kind.slice(1)} ` : "That record "}${id} is not in the rows this screen can read.`);
+      },
     });
   }
 

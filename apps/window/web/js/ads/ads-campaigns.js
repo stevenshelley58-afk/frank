@@ -111,7 +111,11 @@ export function createCampaignsScreen(ctx, host) {
     // A drill-down from another screen arrives before these rows exist, so the
     // request waits for them and is honoured here, once.
     const pending = ctx.takePendingRecord?.();
-    if (pending) void focusRecord(pending);
+    if (pending) {
+      void Promise.resolve(focusRecord(pending)).then((opened) => {
+        if (!opened) ctx.recordMiss?.(pending);
+      });
+    }
   }
 
   /**

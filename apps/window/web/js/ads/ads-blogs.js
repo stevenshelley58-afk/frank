@@ -272,7 +272,7 @@ export function createBlogsScreen(ctx, host) {
     render();
     // A drill-down from another screen arrives before these rows exist.
     const pending = ctx.takePendingRecord?.();
-    if (pending) focusRecord(pending);
+    if (pending && !focusRecord(pending)) ctx.recordMiss?.(pending);
   }
 
   /**
