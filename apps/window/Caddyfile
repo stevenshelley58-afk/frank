@@ -70,6 +70,48 @@
     }
 }
 
+# The owner browser probe is a bounded diagnostic. The owner's Codex in-app
+# browser cannot be observed or driven from this VPS, so its engine and its
+# third-party cookie policy have to be reported by the browser itself before the
+# native-app panels can rely on framed cross-origin sessions.
+#
+# It is deliberately narrow: one host, one directory, static files only, no
+# credential, no outbound request. It is also the cheapest live test that Caddy
+# can obtain a certificate for a new *.frank.fail name, which the native app
+# subdomains depend on.
+(frank_owner_probe_response_headers) {
+    header {
+        X-Frame-Options "SAMEORIGIN"
+        Content-Security-Policy "default-src 'self'; base-uri 'none'; object-src 'none'; form-action 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; frame-src 'self'; img-src 'none'; font-src 'none'"
+        Cache-Control "no-store, private"
+        X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+    }
+}
+
+# Owner browser probe host. The probe reports the owner browser's engine and its
+# cross-origin frame/cookie behaviour, because that browser cannot be observed
+# or driven from this VPS. The static files live under /srv/frank/previews,
+# which is already mounted into the Caddy container, so enabling this costs one
+# certificate and no new mount.
+#
+# It is an approved-identity surface like every other owner entry: Basic Auth
+# today, the owner session boundary once it lands. It reads nothing, writes
+# nothing and makes no outbound request.
+#
+# Retire this block once the owner's real browser has been characterised: it is
+# a diagnostic, not part of the owner workspace.
+probe.frank.fail {
+    encode zstd gzip
+    import frank_common_security_headers
+    basic_auth {
+        {$FRANK_BASIC_AUTH_USER} {$FRANK_BASIC_AUTH_HASH}
+        {$FRANK_ACCEPTANCE_AUTH_USER} {$FRANK_ACCEPTANCE_AUTH_HASH}
+    }
+    import frank_owner_probe_response_headers
+    root * /srv/frank/previews/owner-browser-probe
+    file_server
+}
+
 (frank_mini_ui_response_headers) {
     header {
         X-Frame-Options "SAMEORIGIN"
