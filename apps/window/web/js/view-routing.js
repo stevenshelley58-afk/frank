@@ -112,7 +112,7 @@ export function pathForView(view, detail = {}) {
   if (view === "ad-template-generator") return AD_TEMPLATE_GENERATOR_PATH;
   if (view === "ad-db") return AD_DB_PATH;
   if (view === "ops") return OPS_PATH;
-  if (view === "blockwise-dashboard") return "/project/blockwise";
+  if (view === "blockwise-dashboard") return ownerPathForSection(detail.ownerSection);
   if (view === "blog-studio") return BLOG_STUDIO_PATH;
   if (view === "ad-radar") return AD_RADAR_PATH;
   if (view === "live" || view === "map" || view === "control") return `/${view}`;
