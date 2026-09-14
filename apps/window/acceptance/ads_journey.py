@@ -107,7 +107,7 @@ def block_titles(page) -> str:
     return " | ".join(node.inner_text().strip() for node in page.query_selector_all(".ads-block-title"))
 
 
-def run(page, base_url: str, out: Path, label: str = "desktop") -> None:
+def run(page, base_url: str, out: Path, label: str = "desktop", context=None) -> None:
     page.goto(base_url, wait_until="domcontentloaded")
     page.wait_for_function("() => typeof window.__adsHarness?.mount === 'function'")
 
@@ -293,6 +293,20 @@ def run(page, base_url: str, out: Path, label: str = "desktop") -> None:
         check("the headline choice survives the other edits", headline_value not in ("", None), str(headline_value))
     page.screenshot(path=str(out / f"{label}-launch-mapping.png"))
 
+    # Two headlines that agree for their first twenty characters. An identity
+    # built from a slug of the copy would fuse them; the plan must not.
+    page.locator('input[aria-label="Headlines 1"]').fill("Book a free valuation")
+    page.wait_for_timeout(200)
+    page.locator('input[aria-label="Headlines 2"]').fill("Book a free valuation today")
+    page.wait_for_timeout(300)
+    page.locator('[role="radiogroup"][aria-label="Combination mode"] button:has-text("One ad per combination")').click()
+    page.wait_for_timeout(400)
+    confirm_box = page.query_selector(".ads-confirm input[type=checkbox]")
+    check("multiplying the axes asks for an explicit confirmation", confirm_box is not None)
+    if confirm_box:
+        confirm_box.check()
+        page.wait_for_timeout(300)
+
     page.wait_for_timeout(300)
     click_step(page, "Review")
     page.wait_for_selector(".ads-review-summary", timeout=8000)
@@ -305,6 +319,36 @@ def run(page, base_url: str, out: Path, label: str = "desktop") -> None:
     check("review lists the planned ads", "Planned ads" in review_text, review_text[:120])
     check("the planned table lists each ad with its tracking identity", "tracking identity" in review_text.lower(), review_text[:200])
     check("the advertised count is the number of planned rows on screen", str(planned_rows) == stated_ads, f"{stated_ads} stated, {planned_rows} rows")
+
+    # The pass criterion, proved in the browser rather than in a rule test:
+    # similar copy stays distinguishable, and no identity leaks the copy.
+    identity_rows = page.evaluate(
+        """() => Array.from(document.querySelectorAll('.ads-flow-body table.ads-map-table tbody tr')).map((tr) => ({
+            name: tr.children[0] ? tr.children[0].innerText.trim() : '',
+            identity: tr.children[1] ? tr.children[1].innerText.trim() : '',
+        }))"""
+    )
+    identities = [row["identity"] for row in identity_rows if row["identity"]]
+    check(
+        "every planned ad carries a tracking identity",
+        len(identities) == len(identity_rows) and len(identities) > 0,
+        f"{len(identities)} of {len(identity_rows)} rows",
+    )
+    check(
+        "similar headlines stay distinguishable",
+        len(set(identities)) == len(identities),
+        f"{len(set(identities))} distinct of {len(identities)}: {identities[:4]}",
+    )
+    check(
+        "no tracking identity is derived from the ad's copy",
+        all(not any(word in identity.lower() for word in ("book", "valuation", "free", "summer", "offer")) for identity in identities),
+        f"identities {identities[:4]}",
+    )
+    check(
+        "every identity is one the workspace allocated",
+        all(identity.startswith("ad_") for identity in identities),
+        f"identities {identities[:4]}",
+    )
 
     stage = page.query_selector('.ads-flow-foot button:has-text("Stage in the queue")')
     check("a valid plan offers staging", stage is not None)
@@ -367,6 +411,42 @@ def run(page, base_url: str, out: Path, label: str = "desktop") -> None:
         renamed_url = page.eval_on_selector(".ads-url-line code", "el => el.textContent") if page.query_selector(".ads-url-line code") else ""
         renamed_param = renamed_url.split("utm_campaign=")[1].split("&")[0] if "utm_campaign=" in renamed_url else ""
         check("renaming the campaign does not change its tracking identity", renamed_param == campaign_param, f"{campaign_param} -> {renamed_param}")
+
+        # ------------------------------------------- two tabs, one draft -------
+        # The same draft open in two tabs is the normal way two people collide.
+        # The second save must be refused rather than quietly overwriting the
+        # other revision.
+        print("\ntwo tabs: a save built on a stale revision is refused")
+        other = (context or page.context).new_page()
+        try:
+            other.goto(base_url, wait_until="domcontentloaded")
+            other.wait_for_function("() => typeof window.__adsHarness?.mount === 'function'")
+            other.evaluate("window.__adsHarness.mount({ preview: true })")
+            other.wait_for_timeout(500)
+            other.click(".ads-nav-link:has-text('Publishing queue')")
+            other.wait_for_timeout(700)
+            scroll_to_staged(other)
+            approve = other.query_selector('button:has-text("Approve")')
+            check("the other tab can act on the same draft", approve is not None)
+            if approve:
+                approve.click()
+                other.wait_for_timeout(700)
+
+            # The first tab still holds the draft at the revision it opened.
+            page.locator('.ads-wizard-head button:has-text("Save draft"), .ads-flow-head button:has-text("Save draft")').first.click()
+            page.wait_for_timeout(700)
+            conflict = " ".join(text_of(page, ".ads-flow-body").split())
+            check("a save built on a stale revision is refused", "changed somewhere else" in conflict, conflict[:200])
+            check("the refusal reports both revisions", "revision" in conflict, conflict[:220])
+            check(
+                "the refusal offers both ways out rather than retrying over the other edit",
+                page.query_selector('button:has-text("Load the saved revision")') is not None
+                and page.query_selector('button:has-text("Keep editing mine")') is not None,
+                conflict[:200],
+            )
+            page.screenshot(path=str(out / f"{label}-draft-conflict.png"))
+        finally:
+            other.close()
         page.click('button[aria-label="Close the publish flow"], .ads-wizard-head button:last-child')
         page.wait_for_timeout(300)
 
@@ -392,6 +472,65 @@ def run(page, base_url: str, out: Path, label: str = "desktop") -> None:
     page.screenshot(path=str(out / f"{label}-live-not-connected.png"))
 
     # ------------------------------------------------------- preview isolation --
+    # ------------------------------------------------------ partial failure --
+    # One source failing must not take the account's other answers off the
+    # screen, and it must be named rather than quietly dropped.
+    print("\npartial failure: one reader down, the rest still answering")
+    page.evaluate("window.__adsHarness.reset()")
+    page.evaluate("window.__adsHarness.serve('rows', { rows: [], failReaders: ['blogs'] })")
+    page.evaluate("window.__adsHarness.mount({ preview: false })")
+    page.wait_for_timeout(700)
+    page.click(".ads-nav-link:has-text('Overview')")
+    page.wait_for_timeout(900)
+    partial = " ".join(text_of(page, ".ads-screen").innerText if False else text_of(page, ".ads-screen").split())
+    check(
+        "a failing reader is named on the screen that composes it",
+        "did not complete" in partial.lower() and ("article" in partial.lower() or "blog" in partial.lower()),
+        partial[:240],
+    )
+    check(
+        "the sections that did answer are still on the screen",
+        "What needs my attention" in partial and "Where is spend producing useful outcomes" in partial,
+        f"{len(partial)} characters: {partial[:200]}",
+    )
+    check(
+        "the failure does not blank the screen",
+        len(partial) > 200 and "Not connected" not in partial,
+        f"{len(partial)} characters: {partial[:180]}",
+    )
+    check(
+        "the screen offers a retry rather than a dead end",
+        page.query_selector('button:has-text("Retry")') is not None or page.query_selector('button:has-text("Refresh")') is not None,
+        partial[:160],
+    )
+    page.screenshot(path=str(out / f"{label}-partial-failure.png"))
+    page.evaluate("window.__adsHarness.reset()")
+
+    print("\nrecovery: a record that cannot be read is reported, not hidden")
+    page.evaluate(
+        """() => {
+            const key = "frank.ads.drafts.v3";
+            const raw = JSON.parse(window.localStorage.getItem(key) || "[]");
+            raw.push({ kind: "not-a-draft-at-all", id: "junk_1", plan: { rows: [] } });
+            window.localStorage.setItem(key, JSON.stringify(raw));
+        }"""
+    )
+    page.evaluate("window.__adsHarness.mount({ preview: true })")
+    page.wait_for_timeout(600)
+    page.click(".ads-nav-link:has-text('Publishing queue')")
+    page.wait_for_timeout(700)
+    recovery_text = " ".join(text_of(page, ".ads-screen").split())
+    check(
+        "a stored record that cannot be read is reported on the queue",
+        "could not be read" in recovery_text,
+        recovery_text[:220],
+    )
+    check(
+        "the queue offers to put the previous copy back",
+        page.query_selector('button:has-text("Restore the previous copy")') is not None,
+        recovery_text[:160],
+    )
+
     print("\npreview isolation: a rehearsal draft never reaches the live queue")
     # Identity, not wording: the queue may rename its own sections, but a
     # rehearsal's campaign identity must not appear on the live side at all.
@@ -439,13 +578,17 @@ def main() -> int:
         with sync_playwright() as playwright:
             browser = playwright.chromium.launch()
             for label, viewport in (("desktop", {"width": 1440, "height": 900}), ("mobile", {"width": 390, "height": 844})):
-                page = browser.new_page(viewport=viewport)
+                # An explicit context per viewport, so the journey can open a
+                # second tab that shares this browser's storage: two tabs on one
+                # draft is how two people collide.
+                context = browser.new_context(viewport=viewport)
+                page = context.new_page()
                 print(f"\n=== {label} ===")
                 try:
-                    run(page, url, out, label)
+                    run(page, url, out, label, context)
                 except Exception as error:  # a journalled failure is still evidence
                     check(f"{label}: the journey completed without an exception", False, str(error)[:300])
-                page.close()
+                context.close()
             browser.close()
     finally:
         httpd.shutdown()

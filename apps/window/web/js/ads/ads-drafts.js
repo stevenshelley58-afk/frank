@@ -442,6 +442,31 @@ export function createAdsDrafts({
     }
   }
 
+  /**
+   * The revision actually written down for one draft.
+   *
+   * The in-memory copy is this tab's view. Another tab has its own, and it is
+   * the stored revision that decides whether a save would overwrite somebody
+   * else's work — comparing against this tab's memory would let two tabs each
+   * believe they were current and the later save would silently win.
+   */
+  function storedRevision(id) {
+    if (!storage || !id) return null;
+    for (const candidate of [key, ...(legacyKeys || [])]) {
+      try {
+        const raw = storage.getItem(candidate);
+        if (!raw) continue;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) continue;
+        const found = parsed.find((item) => item && String(item.id) === String(id));
+        if (found) return Number(found.revision) > 0 ? Number(found.revision) : 1;
+      } catch {
+        /* an unreadable payload is reported elsewhere */
+      }
+    }
+    return null;
+  }
+
   function withRevision(existing, raw, patch = {}) {
     const at = now();
     const base = normalizeDraft({ ...existing, ...raw, ...patch }, { id: existing?.id || raw?.id || null, origin: existing?.origin || currentOrigin() });
@@ -489,19 +514,39 @@ export function createAdsDrafts({
      */
     saveGuarded(raw, { id = null, baseRevision = null } = {}) {
       const existing = id ? records.find((item) => item.id === String(id)) : null;
-      if (existing && baseRevision !== null && Number(baseRevision) !== Number(existing.revision)) {
+      const stored = storedRevision(id);
+      const actual = stored === null ? (existing ? Number(existing.revision) : null) : stored;
+      if (id && baseRevision !== null && actual !== null && Number(baseRevision) !== Number(actual)) {
+        // Bring the store's own copy up to date, so the screen offering to load
+        // the other revision loads the other revision rather than this tab's.
+        store.reload();
+        const conflict = store.get(id) || existing;
         return {
           ok: false,
           conflict: {
             expectedRevision: Number(baseRevision),
-            actualRevision: Number(existing.revision),
-            updatedAt: existing.updatedAt,
-            draft: existing,
+            actualRevision: Number(actual),
+            updatedAt: conflict?.updatedAt || "",
+            draft: conflict,
           },
-          draft: existing,
+          draft: conflict,
         };
       }
       return { ok: true, draft: store.save(raw, { id }) };
+    },
+    /** Re-read what is stored, for a tab that has been told it changed. */
+    reload() {
+      if (!storage) return records.slice();
+      const loaded = load();
+      if (loaded.records.length || !records.length) records = loaded.records;
+      for (const listener of listeners) {
+        try {
+          listener(records.slice());
+        } catch {
+          /* a listener must not break a read */
+        }
+      }
+      return records.slice();
     },
     update(id, patch, options = {}) {
       const existing = store.get(id);

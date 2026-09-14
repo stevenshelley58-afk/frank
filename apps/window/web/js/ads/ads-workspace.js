@@ -25,7 +25,7 @@ import {
 } from "./ads-ui.js";
 import { DATE_PRESETS, COMPARISON_MODES, ATTRIBUTION_WINDOWS, isoDay, formatDay, SYNC_STATES } from "./ads-contracts.js";
 import { createAdsReader, createAdsCache } from "./ads-source.js";
-import { createAdsDrafts } from "./ads-drafts.js";
+import { createAdsDrafts, DRAFT_STORAGE_KEY } from "./ads-drafts.js";
 import { createAdsPreview } from "./ads-preview-data.js";
 import { createViewStore } from "./ads-views.js";
 import { createPublishFlow } from "./ads-publish.js";
@@ -725,6 +725,11 @@ export function mountAdsWorkspace(host, options = {}) {
       const next = event.newValue === "1";
       if (next !== preview.enabled()) setPreview(next);
     }
+    // A draft written by another tab is somebody else's work. This tab's store
+    // re-reads it so the queue shows it, while the publishing flow's open copy is
+    // deliberately left where it is: a save built on the older revision is then
+    // refused instead of quietly replacing the other edit.
+    if (event.key === DRAFT_STORAGE_KEY) drafts.reload();
   };
   win?.addEventListener?.("storage", onStorage);
   win?.addEventListener?.("popstate", onPopState);

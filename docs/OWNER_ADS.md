@@ -198,6 +198,14 @@ newer revision is named, and the screen offers both ways out instead of retrying
 over somebody's work. Each save records a bounded history of what changed and
 when.
 
+Two tabs, or two people, holding the same draft is the normal case, and each
+tab has its own view of it. A guarded save therefore compares the revision it
+was editing from against the revision that is **stored**, not against its own
+memory: comparing against memory would let two tabs each believe they were
+current and the later save would silently destroy the other's approval. When the
+save is refused, the store reloads so the screen offering the other revision
+really shows the other revision.
+
 Recovery is part of the model rather than an afterthought: a record that cannot
 be parsed is counted and reported instead of vanishing, the previous stored
 payload is kept as a backup before every write, and a browser that refuses to

@@ -40,12 +40,23 @@
         if (options.rows) harness.rows = options.rows;
         if (options.syncedAt) harness.syncedAt = options.syncedAt;
         if (options.delayMs !== undefined) harness.delayMs = options.delayMs;
+        // Named readers can fail on their own, which is what a partial failure
+        // looks like: the rest of the account answers and one source does not.
+        harness.failReaders = Array.isArray(options.failReaders) ? options.failReaders.map(String) : [];
+        harness.throttleReaders = Array.isArray(options.throttleReaders) ? options.throttleReaders.map(String) : [];
       };
       const jsonResponse = (status, payload) =>
         new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
+      const readerOf = (url) => {
+        const match = String(url).match(/\/api\/owner\/ads\/([a-z_]+)/);
+        return match ? match[1] : "";
+      };
       window.fetch = async (url) => {
         harness.requests.push(String(url));
         if (harness.delayMs) await new Promise((resolve) => setTimeout(resolve, harness.delayMs));
+        // A named reader answers on its own, before the mode decides the rest.
+        if (harness.failReaders.includes(readerOf(url))) return jsonResponse(500, { detail: "this reader failed" });
+        if (harness.throttleReaders.includes(readerOf(url))) return jsonResponse(429, {});
         if (harness.mode === "not_connected") return jsonResponse(404, {});
         if (harness.mode === "throttled") return jsonResponse(429, {});
         if (harness.mode === "failed") throw new Error("the read model did not answer");

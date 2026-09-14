@@ -165,6 +165,37 @@ test("a save built on a stale revision is refused, and names both revisions", ()
   assert.equal(drafts.get(draft.id).revision, 3);
 });
 
+test("two tabs on one draft cannot each believe they are current", () => {
+  // Each tab holds its own in-memory copy, so comparing a save against *this*
+  // tab's memory proves nothing: the other tab's write is what a stale save would
+  // destroy. The guard therefore reads the revision that is actually stored.
+  const storage = fakeStorage();
+  const tabA = createAdsDrafts({ storage, origin: "live" });
+  const draft = tabA.save(launchDraft());
+  assert.equal(draft.revision, 1);
+
+  // The second tab is opened later, so it reads what is already stored.
+  const tabB = createAdsDrafts({ storage, origin: "live" });
+  assert.equal(tabB.get(draft.id).revision, 1);
+
+  // Tab B approves the same draft, which writes revision 2 to storage.
+  tabB.approve(draft.id, { digest: planDigest(draft.plan.rows) });
+  assert.equal(tabB.get(draft.id).phase, "approved");
+
+  // Tab A still holds revision 1 in memory. Its save must be refused, and it must
+  // be shown the other tab's revision rather than its own stale copy.
+  const refused = tabA.saveGuarded({ ...draft, title: "Tab A edit" }, { id: draft.id, baseRevision: 1 });
+  assert.equal(refused.ok, false, "a stale save must not overwrite the other tab's approval");
+  assert.equal(refused.conflict.actualRevision, 2);
+  assert.equal(refused.conflict.draft.phase, "approved");
+  assert.equal(tabA.get(draft.id).title, draft.title, "nothing was overwritten");
+
+  // Adopting the newer revision lets the save through.
+  const accepted = tabA.saveGuarded({ ...draft, title: "Tab A edit" }, { id: draft.id, baseRevision: 2 });
+  assert.equal(accepted.ok, true);
+  assert.equal(tabA.get(draft.id).revision, 3);
+});
+
 /* --------------------------------------------------------------- recovery --- */
 
 test("a record that cannot be read is counted, not silently dropped", () => {
