@@ -29,6 +29,9 @@ class frank_sso extends rcube_plugin
     /** Consume result for this request, or null when there is nothing to redeem. */
     private ?array $redemption = null;
 
+    /** Non-secret, request-scoped return intent; survives native session reset. */
+    private bool $bridgeReturn = false;
+
     #[\Override]
     public function init()
     {
@@ -71,13 +74,24 @@ class frank_sso extends rcube_plugin
      */
     public function startup($args)
     {
+        $bridgeRequested = !empty($_GET['frank_bridge']);
+
+        // A broker arrival can happen after the native session already exists.
+        // Spend its one-use token before returning, otherwise it remains a
+        // replayable launch cookie. The method exits with the fixed redirect.
         if (!empty($_SESSION['user_id'])) {
+            if ($bridgeRequested && $this->redeem() !== null) {
+                $this->clear_launch_cookie();
+                $this->workspace_return();
+            }
             return $args;
         }
 
         $this->redemption = $this->redeem();
         if ($this->redemption !== null) {
-            $_SESSION['frank_bridge_return'] = !empty($_GET['frank_bridge']);
+            // Roundcube regenerates PHP session during login, but this plugin
+            // object stays alive for the request through login_after.
+            $this->bridgeReturn = $bridgeRequested;
             $args['action'] = 'login';
         }
 
@@ -138,8 +152,7 @@ class frank_sso extends rcube_plugin
         // The launch cookie has been spent. Clear it so a used token never
         // stays in the browser for the life of the session.
         $this->clear_launch_cookie();
-        if (!empty($_SESSION['frank_bridge_return'])) {
-            unset($_SESSION['frank_bridge_return']);
+        if ($this->bridgeReturn) {
             $args = ['_task' => 'mail', '_action' => 'plugin.frank_return'];
         }
 

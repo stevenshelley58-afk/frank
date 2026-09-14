@@ -321,3 +321,23 @@ class SecretHygieneTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FrankSsoBridgeReturnTests(unittest.TestCase):
+    def setUp(self):
+        self.plugin = (ROOT / "roundcube" / "plugins" / "frank_sso" / "frank_sso.php").read_text(encoding="utf-8")
+
+    def test_bridge_intent_is_request_scoped_not_lost_php_session_state(self):
+        startup = self.plugin[self.plugin.index("public function startup"):self.plugin.index("public function authenticate")]
+        login_after = self.plugin[self.plugin.index("public function login_after"):self.plugin.index("public function logout_after")]
+        self.assertIn("private bool $bridgeReturn = false;", self.plugin)
+        self.assertIn("$this->bridgeReturn = $bridgeRequested;", startup)
+        self.assertNotIn("frank_bridge_return", self.plugin)
+        self.assertIn("if ($this->bridgeReturn)", login_after)
+        self.assertIn("plugin.frank_return", login_after)
+
+    def test_existing_native_session_spends_broker_token_before_fixed_return(self):
+        startup = self.plugin[self.plugin.index("public function startup"):self.plugin.index("public function authenticate")]
+        self.assertIn("if ($bridgeRequested && $this->redeem() !== null)", startup)
+        self.assertIn("$this->clear_launch_cookie();", startup)
+        self.assertIn("$this->workspace_return();", startup)
