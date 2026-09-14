@@ -33,7 +33,7 @@ import {
 import { formatMoney, formatInt } from "./ads-contracts.js";
 import { createSelection } from "./ads-table.js";
 import { newAdsId, draftAdCount, draftScope, mergeMapping } from "./ads-drafts.js";
-import { planDigest, reconcilePlanRows } from "./ads-identity.js";
+import { planDigest, reconcilePlanRows, versionIdFor } from "./ads-identity.js";
 
 const PRESET_KEY = "frank.ads.presets.v1";
 
@@ -145,7 +145,9 @@ export function planAdRows({
           label,
           creativeId: String(creative?.id ?? ""),
           creativeKey,
-          creativeVersionId: String(creative?.versionId || creative?.assetKey || creativeKey),
+          // The rendition the ad would show, addressed by its own content so
+          // the same asset names the same version everywhere it is planned.
+          creativeVersionId: String(creative?.versionId || versionIdFor(creative)),
           creativeName: String(creative?.name ?? ""),
           headline,
           body,
@@ -511,6 +513,11 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     savedSnapshot: "",
     // Set when a save was refused because the draft moved on elsewhere.
     conflict: null,
+    // The side of the preview line this plan was built on, fixed when the flow
+    // opened so a rehearsal cannot be saved into the live queue.
+    origin: "live",
+    // Set when a save was refused because the preview switch moved under it.
+    originChanged: false,
     seed: null,
     loadError: null,
   };
@@ -532,9 +539,18 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     root.hidden = false;
     requestAnimationFrame(() => root.classList.add("is-open"));
     doc.addEventListener("keydown", onKey, true);
+    // Which side of the preview line this plan belongs to is decided once, when
+    // the flow opens. Rehearsal rows must not become a live draft because the
+    // preview switch moved between choosing the creatives and saving them.
+    if (!state.draftId) state.origin = originNow();
     render();
     title.focus({ preventScroll: true });
     if (!state.creatives.length) void loadCreatives();
+  }
+
+  /** Which side of the preview line this screen is on right now. */
+  function originNow() {
+    return ctx.isPreview?.() ? "preview" : "live";
   }
 
   function close() {
@@ -776,7 +792,11 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
         onClick: () => {
           const saved = saveDraft({ phase: "editing" });
           if (!saved) {
-            ctx.say("This draft changed somewhere else since you opened it, so nothing was overwritten. Reload the draft to see the other change.");
+            ctx.say(
+              state.originChanged
+                ? "This plan was built from rehearsal rows and the preview switch has moved since. Nothing was saved into the live queue. Save it with preview back on, or turn preview off and rebuild the plan from real creatives."
+                : "This draft changed somewhere else since you opened it, so nothing was overwritten. Reload the draft to see the other change.",
+            );
             render();
             return;
           }
@@ -1712,7 +1732,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
       title: state.config.campaignName || "Untitled launch",
       // A rehearsal is a full rehearsal of the flow, and it is labelled as one
       // everywhere it appears. It can never be sent.
-      origin: ctx.isPreview?.() ? "preview" : "live",
+      origin: state.origin,
       campaign: {
         campaignId: state.campaignId,
         name: state.config.campaignName,
@@ -1734,7 +1754,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
         hasImage: creative.preview?.hasImage ?? null,
         hasVideo: creative.preview?.hasVideo ?? null,
         assetKey: String(creative.assetKey || creative.internalId || creative.id),
-        versionId: String(creative.versionId || ""),
+        versionId: String(creative.versionId || versionIdFor(creative)),
         mappings: { ...(state.mapping[creative.id] || {}) },
       })),
       headlines: state.headlines.map((headline) => String(headline ?? "")),
@@ -1754,6 +1774,14 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
    * refused and the screen reports the conflict rather than overwriting it.
    */
   function saveDraft({ phase = "editing" } = {}) {
+    // The preview switch can move while this flow is open. A plan built from
+    // rehearsal rows is never written into the live queue, and a live plan is
+    // never quietly re-labelled as a rehearsal.
+    if (originNow() !== state.origin) {
+      state.originChanged = true;
+      return null;
+    }
+    state.originChanged = false;
     const result = ctx.drafts.saveGuarded(draftFromState({ phase }), { id: state.draftId, baseRevision: state.revision });
     if (!result.ok) {
       state.conflict = result.conflict;
@@ -1810,7 +1838,11 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     if (!validation.ok) return;
     const saved = saveDraft({ phase: "staged" });
     if (!saved) {
-      ctx.say("This draft changed somewhere else since you opened it, so nothing was staged. Reload the draft to see the other change.");
+      ctx.say(
+        state.originChanged
+          ? "This plan was built from rehearsal rows and the preview switch has moved since, so nothing was staged. A rehearsal is never queued into the live queue."
+          : "This draft changed somewhere else since you opened it, so nothing was staged. Reload the draft to see the other change.",
+      );
       render();
       return;
     }
@@ -1855,6 +1887,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     // ads from anything already recorded about them.
     state.plannedRows = draft.plan.rows.map((row) => ({ ...row }));
     state.revision = draft.revision;
+    state.origin = draft.origin;
     // The draft's own creatives seed the picker before the library answers, so
     // the restored plan never briefly reads as an empty selection.
     state.creatives = draft.creatives.map((creative) => ({

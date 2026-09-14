@@ -7,7 +7,13 @@ campaigns and audiences, this section owns paid advertising.
 
 Open it at `https://frank.fail/project/blockwise/ads`. A screen can be deep
 linked with `?screen=`, for example
-`/project/blockwise/ads?screen=creative`.
+`/project/blockwise/ads?screen=creative`, and a link may carry `?preview=1` to
+open the labelled rehearsal without anything being set up first.
+
+The workspace is one implementation with one entry: the same build is what the
+owner shell mounts at that route, and what a review instance serves at the same
+route. The address this section was first shared under (a static page describing
+the workspace) now redirects into the workspace itself.
 
 ## What it is
 
@@ -60,6 +66,39 @@ banner above every screen and a small/large set switch for testing realistic
 row counts. Preview is a rehearsal surface, is stored as a browser preference
 only, and is never mixed with live rows.
 
+## Identity
+
+Reporting history joins on identity, so an identity may never be derived from a
+name, a position in a list, or a piece of copy: each of those splits or merges a
+join the first time somebody renames, reorders or rewords something.
+`web/js/ads/ads-identity.js` owns the rule.
+
+- A **campaign** is `cmp_…`, allocated when Frank first plans it, or the
+  provider's own id when the campaign already exists in Meta. Its name is a label
+  attached to that identity. Renaming a campaign cannot move its history or
+  change `utm_campaign`.
+- A **creative version** is `crvv_…`, addressed by the rendition itself: the
+  asset key, the format and the crop. Re-generating the asset mints a new
+  version; renaming, reclassifying, adding a note, reordering or editing an ad's
+  copy does not. The full descriptor is stored beside the id, so two renditions
+  compare equal only when they really are the same. The policy is stated in
+  `VERSION_POLICY`, in code, so the screens, the tests and the future writer read
+  the same sentence.
+- A **planned ad** is `ad_…`, allocated when the row is first planned and carried
+  through every later edit. Rebuilding the plan reconciles identities in two
+  passes — exact content first, then the creative a leftover row came from — so
+  editing a headline in place, reordering creatives or deselecting and
+  reselecting a creative updates the ads instead of replacing them.
+- The **tracking identity** of a planned ad is that ad's identity and nothing
+  else. `{{ad.internal_id}}` and `{{creative.internal_id}}` resolve to it;
+  `{{ad.label}}` resolves to the operator's readable label for the creative,
+  which is deliberately *not* an identity, because two variations of one creative
+  share one label. Validation flags a template that would collide.
+- An **approval** is an approval *of* something: `planDigest()` hashes the plan's
+  identities and copy in identity order, so the same ads approved in another
+  order are the same snapshot and any later edit makes the recorded approval
+  stale.
+
 ## Data contract
 
 | Reader | Endpoint | Returns |
@@ -77,6 +116,13 @@ origin, cached }`. `status` is one of `ready`, `syncing`, `stale`, `throttled`,
 `error`, `not_connected`, `empty`. `404` and `501` are the honest
 "not built yet" answers and map to `not_connected`; they are never treated as an
 empty result.
+
+The routes exist before their readers do. `apps/window/owner_ads.py` answers
+every reader name with `501` and the typed envelope naming what that reader
+still needs, so an unimplemented reader is never answered by the single-page
+catch-all with a page of HTML. The browser vocabulary and the server vocabulary
+are held together by `tests/test_owner_ads.py`, which fails if the two lists or
+the requirement sentences drift.
 
 Parameters accepted by the reporting readers: `from`, `to`, `comparison`,
 `attribution`, `level`.
@@ -133,20 +179,42 @@ launch flow, the campaigns table and the publishing queue alike, and read back
 by the queue. A draft keeps the selected creatives and their mappings, the
 campaign configuration and tracking, the planned rows and their validation, the
 proposed budget or pause changes with before/after values, and its own identity
-and approval state. Saving keeps the creatives (an earlier build dropped them,
-so a reopened draft lost its plan); staging moves `editing → staged` and
-`draft → queued`; nothing in the model can set a submission state. Drafts
-survive a reload, and preview drafts are stored under their own origin and never
-appear in the live queue.
+and lifecycle. Saving keeps the creatives (an earlier build dropped them, so a
+reopened draft lost its plan). Drafts survive a reload, and rehearsal drafts are
+stored under their own origin and never appear in the live queue.
+
+### Lifecycle, revisions and recovery
+
+The local states are **Draft** (being built), **Saved draft**, **Staged in
+Frank** and **Approved**. **Submitted to Meta** and **Delivering** are reserved:
+only a real writer that heard back from the provider may set them, through
+`applyProviderState`, and nothing in this browser calls it. The wizard footer
+states which local state the plan is in and whether it has unsaved changes;
+leaving with unsaved work asks first.
+
+Every save carries the revision the screen was editing from. If the same draft
+changed somewhere else — another tab, another device — the save is refused, the
+newer revision is named, and the screen offers both ways out instead of retrying
+over somebody's work. Each save records a bounded history of what changed and
+when.
+
+Recovery is part of the model rather than an afterthought: a record that cannot
+be parsed is counted and reported instead of vanishing, the previous stored
+payload is kept as a backup before every write, and a browser that refuses to
+store (private mode, quota) sets a flag the queue shows, so "saved" never means
+"saved into a void". Records written by an older build are migrated forward.
 
 Nothing is sent to the provider from this build. Staging adds a local draft to
-the queue. Publishing is a gated write and is not wired yet; the interface says
-so rather than implying a successful launch.
+the queue, and approving records the owner's sign-off on one exact plan digest.
+Publishing is a gated write and is not wired yet; the interface says so rather
+than implying a successful launch.
 
 ## Where the files are
 
 `apps/window/web/js/ads/` — see `README.md` in that directory for the module
-guide. `apps/window/web/ads.css` owns every style, scoped to `.ads-workspace`.
+guide. `apps/window/web/ads.css` owns how a reading is presented and
+`apps/window/web/ads-controls.css` owns the operator's controls; both are scoped
+to `.ads-workspace`.
 
 ## Verification
 
@@ -159,7 +227,8 @@ Rule-level regression tests, including one per defect this section describes:
 
 ```bash
 cd apps/window
-node --test tests/ads_workspace_contract.test.mjs tests/ads_tracking.test.mjs
+node --test tests/ads_identity.test.mjs tests/ads_workspace_contract.test.mjs tests/ads_tracking.test.mjs
+python3 -m pytest tests/test_owner_ads.py
 ```
 
 The interactive journey runs the production modules in a real Chromium through
@@ -177,9 +246,26 @@ draft with the same configuration and ad count, a rename that must not move the
 tracking identity, a throttled refresh that must keep the last good rows, and
 the preview/live isolation of drafts, on desktop and at 390x844.
 
+The **entry journey** drives the real application instead of the harness — a
+fresh browser, no test-only setup, the exact link, the real shell around the
+workspace:
+
+```bash
+cd apps/window
+/srv/frank/acceptance-venv/bin/python acceptance/ads_entry_journey.py \
+    --base-url http://127.0.0.1:18090 \
+    --out /srv/frank/verification/ads-plan-a-20260914
+```
+
+It covers the fresh entry, all six screens and the return, reload and deep links,
+Back and Forward across screens and sections, the honest disconnected state with
+preview off, a phone viewport, keyboard navigation, and preview isolation.
+
 ## Not yet built
 
-- The scheduled incremental reporting sync behind `/api/owner/ads/*`.
+- The scheduled incremental reporting sync behind `/api/owner/ads/*`. The routes
+  exist and answer `501` with the reader's requirement; the rows behind them do
+  not exist yet.
 - Adaptive refresh for active versus historical campaigns, bounded concurrency,
   usage-header monitoring, and backoff with jitter.
 - Asynchronous reporting for large requests, and deduplicated or queued manual

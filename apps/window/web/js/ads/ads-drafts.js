@@ -364,9 +364,21 @@ export function createAdsDrafts({
     const kept = [];
     for (const item of parsed) {
       try {
-        const draft = normalizeDraft(item);
-        if (DRAFT_KINDS.includes(draft.kind)) kept.push(draft);
-        else discarded += 1;
+        // The kind is checked *before* normalising, because normalising would
+        // make any object look like a launch draft. A record of an unknown kind
+        // is somebody else's data or a corrupt write, and it is counted as such
+        // rather than promoted into the queue. A missing kind is an older launch
+        // record and is accepted.
+        if (!item || typeof item !== "object" || Array.isArray(item)) {
+          discarded += 1;
+          continue;
+        }
+        const kind = item.kind === undefined ? "launch" : String(item.kind || "");
+        if (!DRAFT_KINDS.includes(kind)) {
+          discarded += 1;
+          continue;
+        }
+        kept.push(normalizeDraft(item));
       } catch {
         discarded += 1;
       }

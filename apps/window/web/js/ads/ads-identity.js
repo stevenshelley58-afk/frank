@@ -198,6 +198,19 @@ export function sourceFingerprint(source) {
   });
 }
 
+/**
+ * The identity of one rendition, derived from its content alone.
+ *
+ * Content-addressed rather than allocated at random, because a version has to
+ * mean the same thing to everybody who asks: the same asset at the same crop is
+ * the same version in this browser, in another browser, and in whatever reads
+ * the plan later. Equality is always decided on the full fingerprint (stored on
+ * the version), so a digest that collided could not merge two renditions.
+ */
+export function versionIdFor(source) {
+  return `crvv_${fingerprintDigest(sourceFingerprint(source))}`;
+}
+
 function freezeVersion(version) {
   return Object.freeze({
     versionId: String(version.versionId),
@@ -232,7 +245,7 @@ export function resolveVersion(creative, source = {}, { now = null } = {}) {
     return { creative: Object.freeze({ ...base, creativeId, versions: Object.freeze(versions) }), version: existing, created: false };
   }
   const version = freezeVersion({
-    versionId: newIdentity("version"),
+    versionId: versionIdFor(source),
     creativeId,
     assetKey: source?.assetKey ?? source?.asset?.key ?? source?.internalId ?? source?.id ?? "",
     format: source?.format ?? source?.asset?.format ?? "",

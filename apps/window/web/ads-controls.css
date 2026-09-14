@@ -1,0 +1,9 @@
+/* Ads workspace: the control surfaces.
+ *
+ * Kept beside ads.css rather than inside it because this file is about the
+ * operator's controls — saved views, the column chooser, the hierarchy
+ * drill-down, the lifecycle states and the phone layout for approving — while
+ * ads.css is about how a reading is presented. Everything here is scoped under
+ * `.ads-workspace`, like the rest of the surface, so it cannot leak into the
+ * customer product that shares this stylesheet origin.
+ */

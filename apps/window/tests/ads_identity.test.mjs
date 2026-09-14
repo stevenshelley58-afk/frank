@@ -30,6 +30,7 @@ import {
   slotKey,
   sourceFingerprint,
   trackingIdentityFor,
+  versionIdFor,
 } from "../web/js/ads/ads-identity.js";
 
 const plannedRow = (over = {}) => ({
@@ -140,6 +141,21 @@ test("reverting to an earlier asset reuses that version instead of forking histo
   assert.equal(reverted.created, false);
   assert.equal(reverted.version.versionId, first.version.versionId);
   assert.equal(reverted.creative.versions.length, 2);
+});
+
+test("a version identity is reproducible from the rendition alone", () => {
+  // Two browsers that have never met, given the same asset, must name the same
+  // version: otherwise the same ad is two versions depending on who looked.
+  const source = { assetKey: "asset-77", format: "Feed", ratio: "4:5" };
+  const here = resolveVersion({ creativeId: "cr_0011" }, source);
+  const elsewhere = resolveVersion({ creativeId: "cr_0011" }, { ...source });
+  assert.equal(here.version.versionId, elsewhere.version.versionId);
+  assert.equal(here.version.versionId, versionIdFor(source));
+
+  // The full descriptor is stored beside the id, so equality never rests on the
+  // digest alone.
+  assert.equal(here.version.fingerprint, creativeFingerprint(source));
+  assert.notEqual(versionIdFor(source), versionIdFor({ ...source, ratio: "9:16" }));
 });
 
 test("a reader creative's rendition comes from its asset identity, not from its name", () => {
