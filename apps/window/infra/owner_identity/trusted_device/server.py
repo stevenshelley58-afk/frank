@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Callable
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 TAILNET_RANGES=(ipaddress.ip_network("100.64.0.0/10"),ipaddress.ip_network("fd7a:115c:a1e0::/48")); MAX_WHOIS_BYTES=1024*1024
 class ConfigurationError(ValueError): pass
 def identifier(value: Any)->str:
@@ -69,7 +69,7 @@ def serve(config:Config,bind:str,port:int,socket_path:str,timeout:float)->None:
   server_version=""; sys_version=""
   def log_message(self,_format:str,*_args:object)->None:return
   def do_GET(self)->None:
-   if self.path!="/verify":self.send_error(404);return
+   if urlsplit(self.path).path!="/verify":self.send_error(404);return
    presented=self.headers.get("X-Frank-Device-Gate")
    if not isinstance(presented,str) or not hmac.compare_digest(presented,config.gate_secret):self.send_response(403);self.send_header("Content-Length","0");self.end_headers();return
    proof=trusted_proof(config,self.headers.get("X-Frank-Device-Address"),lookup);self.send_response(200)
