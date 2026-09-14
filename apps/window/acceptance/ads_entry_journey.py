@@ -1212,6 +1212,387 @@ def journey_h_preview_isolation(browser, base_url: str, out: Path) -> None:
         context.close()
 
 
+# ------------------------------------------------------- journey I: controls --
+
+
+def journey_i_controls(browser, base_url: str, out: Path) -> None:
+    """The professional controls, driven through the real entry.
+
+    Rule tests can show that a view applies and that an approval digest goes
+    stale. Only the real screens can show that the operator can actually reach
+    them: a menu that never opens, a drill-down that filters by name, an Approve
+    button that reports a submission, or a phone bar behind the fold would all
+    pass a rule test.
+    """
+    context, probe = new_probe(browser, DESKTOP)
+    page = probe.page
+    try:
+        mounted, why = open_workspace(probe, base_url, "preview=1")
+        check("I: the entry mounts for the controls journey", mounted, why, group="I")
+        if not mounted:
+            return
+
+        # ------------------------------------------------------- saved views --
+        click_nav(page, "Campaigns")
+        wait_screen_content(page, "campaigns", MIN_SCREEN_TEXT)
+        wait_settled(page, "campaigns")
+
+        def open_views_menu():
+            page.click('.ads-filterbar button:has-text("Views")')
+            page.wait_for_selector('.ads-menu-group:has-text("Built-in views")', timeout=SETTLE_MS)
+            return page
+
+        open_views_menu()
+        built_in_rows = page.locator('.ads-menu-group:has-text("Built-in views") .ads-menu-item').count()
+        check(
+            "I: the campaigns views menu offers built-in views before anything is saved",
+            built_in_rows > 0,
+            f"{built_in_rows} built-in view(s)",
+            group="I",
+            expected="at least one built-in view in its own group",
+            actual=str(built_in_rows),
+        )
+
+        first_built_in = page.locator('.ads-menu-group:has-text("Built-in views") .ads-menu-item').first
+        built_in_name = compact(first_built_in.inner_text(), 60)
+        first_built_in.click()
+        page.wait_for_timeout(500)
+        applied = page.evaluate(
+            """() => ({
+                chips: Array.from(document.querySelectorAll('.ads-filter-chip')).map((n) => n.innerText.replace(/\\s+/g, ' ').trim()),
+                url: location.search,
+                rows: document.querySelectorAll('.ads-table tbody tr').length,
+            })"""
+        )
+        check(
+            "I: applying a built-in view states its filter on screen",
+            len(applied["chips"]) > 0,
+            f"{built_in_name}: chips {applied['chips']}, {applied['rows']} row(s)",
+            group="I",
+            expected="at least one removable filter chip after applying a built-in view",
+            actual=json.dumps(applied),
+        )
+        check(
+            "I: the applied view is named in the address, so the screen can be linked to",
+            "view=" in applied["url"],
+            applied["url"],
+            group="I",
+            expected="?view=<id> in the location",
+            actual=applied["url"],
+        )
+
+        # Save a view of my own, then prove it survives a reload.
+        open_views_menu()
+        page.fill('.ads-pop:not([hidden]) input[aria-label="Name for the saved view"]', "My checks")
+        page.click('.ads-pop:not([hidden]) button:has-text("Save view")')
+        page.wait_for_timeout(400)
+        open_views_menu()
+        mine = page.locator('.ads-menu-group:has-text("Your saved views") .ads-view-row').count()
+        check(
+            "I: a saved view is kept apart from the built-in ones",
+            mine > 0,
+            f"{mine} saved view(s)",
+            group="I",
+            expected="the operator's own view listed under its own group",
+            actual=str(mine),
+        )
+        page.keyboard.press("Escape")
+        page.reload(wait_until="domcontentloaded")
+        wait_screen_content(page, "campaigns", MIN_SCREEN_TEXT)
+        wait_settled(page, "campaigns")
+        open_views_menu()
+        after_reload = page.locator('.ads-menu-group:has-text("Your saved views") .ads-view-row').count()
+        check(
+            "I: a saved view survives a reload",
+            after_reload > 0,
+            f"{after_reload} saved view(s) after reload",
+            group="I",
+            expected="the saved view is still offered after a reload",
+            actual=str(after_reload),
+        )
+        page.locator('.ads-menu-group:has-text("Your saved views") .ads-view-row .ads-menu-item').first.click()
+        page.wait_for_timeout(500)
+        reapplied = page.locator(".ads-filter-chip").count()
+        check(
+            "I: reopening a saved view restores its filters",
+            reapplied > 0,
+            f"{reapplied} chip(s)",
+            group="I",
+            expected="the saved view's filters are on screen again",
+            actual=str(reapplied),
+        )
+        shot(page, out, "desktop", "controls-views")
+
+        # ---------------------------------------------------------- hierarchy --
+        page.click('[role="radiogroup"][aria-label="Which level to manage"] button:has-text("Ads")')
+        page.wait_for_timeout(700)
+        wait_settled(page, "campaigns")
+        parent_note = page.evaluate(
+            """() => {
+                const row = document.querySelector('.ads-table tbody tr');
+                if (!row) return { text: '', id: '' };
+                const text = row.innerText.replace(/\\s+/g, ' ').trim();
+                const match = text.match(/In (?:campaign|ad set)\\s+(\\S+)/);
+                return { text, id: match ? match[1] : '' };
+            }"""
+        )
+        check(
+            "I: a child row names the record it belongs to, by id",
+            bool(parent_note["id"]),
+            compact(parent_note["text"], 160),
+            group="I",
+            expected="'In ad set <id>' (or 'In campaign <id>') on the row",
+            actual=compact(parent_note["text"], 200),
+        )
+
+        page.click('[role="radiogroup"][aria-label="Which level to manage"] button:has-text("Campaigns")')
+        page.wait_for_timeout(700)
+        wait_settled(page, "campaigns")
+        drill = page.locator('button:has-text("Show its ad sets")').first
+        check(
+            "I: a campaign row offers its children",
+            drill.count() > 0,
+            f"{drill.count()} drill-down control(s)",
+            group="I",
+            expected="a 'Show its ad sets' action on a campaign row",
+            actual=str(drill.count()),
+        )
+        if drill.count():
+            drill.click()
+            page.wait_for_timeout(700)
+            wait_settled(page, "campaigns")
+            drilled = page.evaluate(
+                """() => ({
+                    level: (document.querySelector('[role="radiogroup"][aria-label="Which level to manage"] [aria-checked="true"]') || {}).innerText || '',
+                    // A filter chip is a control, not a sentence: the operator and
+                    // the value live in a select and an input, so the value has to
+                    // be read from the control rather than from the text.
+                    values: Array.from(document.querySelectorAll('.ads-filter-chip')).flatMap(
+                        (chip) => Array.from(chip.querySelectorAll('input, select')).map((control) => String(control.value)),
+                    ),
+                })"""
+            )
+            text = " | ".join(drilled["values"])
+            # The filter must carry the record's identity, not its name: the name
+            # is a label that can change under the filter.
+            filtered_by_id = bool(re.search(r"cmp_[0-9a-z]+", text))
+            check(
+                "I: drilling into a campaign switches level and filters by that id",
+                "ad set" in drilled["level"].lower() and filtered_by_id,
+                f"level {drilled['level']!r}, filter values {drilled['values']}",
+                group="I",
+                expected="the ad set level with a removable filter carrying the campaign's immutable id",
+                actual=json.dumps(drilled),
+            )
+            page.click('.ads-filter-chip button[aria-label^="Remove"]')
+            page.wait_for_timeout(500)
+            check(
+                "I: the drilled filter is removable like any other",
+                page.locator(".ads-filter-chip").count() == 0,
+                f"{page.locator('.ads-filter-chip').count()} chip(s) left",
+                group="I",
+                expected="no filter chips after removing the drill-down filter",
+                actual=str(page.locator(".ads-filter-chip").count()),
+            )
+        shot(page, out, "desktop", "controls-hierarchy")
+
+        # ------------------------------------------------- lifecycle: approve --
+        page.check('.ads-th-select input[type="checkbox"]')
+        page.wait_for_timeout(400)
+        page.click('.ads-bulkbar button:has-text("Change budgets")')
+        page.wait_for_selector(".ads-bulk-preview", timeout=SETTLE_MS)
+        page.click('.ads-segment:has-text("+25%")')
+        page.wait_for_timeout(300)
+        page.click('button:has-text("Stage the budget change")')
+        page.wait_for_timeout(600)
+        still_selected = page.locator(".ads-bulkbar").count()
+        check(
+            "I: staging a change clears the selection",
+            still_selected == 0,
+            f"{still_selected} bulk bar(s) still on screen",
+            group="I",
+            expected="the bulk bar is gone, because nothing is selected any more",
+            actual=str(still_selected),
+        )
+
+        click_nav(page, "Publishing queue")
+        wait_screen_content(page, "queue", MIN_SCREEN_TEXT)
+        wait_settled(page, "queue")
+        staged = page.evaluate(
+            """() => {
+                const text = (document.querySelector('.ads-screen')?.innerText || '').replace(/\\s+/g, ' ');
+                return { text, picker: Boolean(document.querySelector('.ads-nav')) };
+            }"""
+        )
+        check(
+            "I: the queue shows the staged change with its phase",
+            "Staged in Frank" in staged["text"],
+            compact(staged["text"], 200),
+            group="I",
+            expected="a draft labelled 'Staged in Frank'",
+            actual=compact(staged["text"], 260),
+        )
+        approve = page.locator('button:has-text("Approve")').first
+        check(
+            "I: a staged draft offers the owner's approval",
+            approve.count() > 0,
+            f"{approve.count()} approve control(s)",
+            group="I",
+            expected="an Approve action on the staged draft",
+            actual=str(approve.count()),
+        )
+        if approve.count():
+            approve.click()
+            page.wait_for_timeout(700)
+            approved = page.evaluate(
+                """() => (document.querySelector('.ads-screen')?.innerText || '').replace(/\\s+/g, ' ')"""
+            )
+            check(
+                "I: approving records a local sign-off, not a submission",
+                "Approved" in approved and "not a submission" in approved.lower(),
+                compact(approved, 220),
+                group="I",
+                expected="an Approved phase and a plain statement that it is not a submission",
+                actual=compact(approved, 300),
+            )
+            # The words "sent to Meta" appear on this screen inside a denial, so
+            # the check is on what each staged record is *labelled*, not on a
+            # substring: a record may not carry a provider state, and the screen
+            # must say plainly that nothing was sent.
+            records = page.evaluate(
+                """() => Array.from(document.querySelectorAll('.ads-draft-bar')).map(
+                    (bar) => (bar.closest('.ads-block') || bar.parentElement).innerText.replace(/\\s+/g, ' '),
+                )"""
+            )
+            check(
+                "I: no staged record is labelled as accepted or delivered by Meta",
+                bool(records) and all(("Submitted to Meta" not in row and "Delivering" not in row) for row in records),
+                f"{len(records)} staged record(s): {compact(' || '.join(records), 200)}",
+                group="I",
+                expected="every staged record carries a local phase only",
+                actual=compact(" || ".join(records), 300),
+            )
+            check(
+                "I: the queue states plainly that nothing has been sent",
+                "not been sent" in approved.lower() or "no write endpoint" in approved.lower(),
+                compact(approved, 200),
+                group="I",
+                expected="a sentence saying no staged change has been sent",
+                actual=compact(approved, 260),
+            )
+        shot(page, out, "desktop", "controls-lifecycle")
+
+        # The provider phases are shown as facts the browser cannot set.
+        legend = page.evaluate(
+            """() => (document.querySelector('.ads-screen')?.innerText || '').replace(/\\s+/g, ' ')"""
+        )
+        check(
+            "I: the queue states which phases are read-only",
+            "Read-only" in legend and "Submitted to Meta" in legend,
+            compact(legend, 200),
+            group="I",
+            expected="the provider phases listed as read-only",
+            actual=compact(legend, 260),
+        )
+
+        check(
+            "I: the controls journey raised no page error and no failed asset",
+            not probe.page_errors and not probe.asset_problems(),
+            f"{len(probe.page_errors)} error(s), {len(probe.asset_problems())} asset problem(s)",
+            group="I",
+            expected="no pageerror and every /js/ads/ request answered",
+            actual=compact("; ".join(probe.page_errors + probe.asset_problems()) or "none", 240),
+        )
+    finally:
+        context.close()
+
+    # The same controls on a phone, where approving has to be possible with a
+    # thumb: the staged record's actions must be reachable and big enough, and no
+    # screen may push the page sideways.
+    phone_context, phone_probe = new_probe(browser, PHONE, is_mobile=True, has_touch=True, device_scale_factor=1)
+    phone = phone_probe.page
+    try:
+        mounted, why = open_workspace(phone_probe, base_url, "preview=1")
+        if not mounted:
+            check("I: the controls are reachable on a phone", False, why, group="I")
+            return
+        click_nav(phone, "Campaigns")
+        wait_screen_content(phone, "campaigns", MIN_SCREEN_TEXT)
+        wait_settled(phone, "campaigns")
+        phone.check('.ads-th-select input[type="checkbox"]')
+        phone.wait_for_timeout(500)
+        phone_sizes = phone.evaluate(
+            """() => {
+                const buttons = Array.from(document.querySelectorAll('.ads-bulkbar button'));
+                return {
+                    overflow: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
+                    smallest: buttons.length ? Math.min(...buttons.map((b) => Math.round(b.getBoundingClientRect().height))) : 0,
+                    count: buttons.length,
+                };
+            }"""
+        )
+        check(
+            "I: the bulk actions are thumb-sized on a phone",
+            phone_sizes["count"] > 0 and phone_sizes["smallest"] >= 44,
+            f"{phone_sizes['count']} action(s), smallest {phone_sizes['smallest']}px",
+            group="I",
+            expected="every bulk action at least 44px tall",
+            actual=json.dumps(phone_sizes),
+        )
+        check(
+            "I: the phone page does not scroll sideways while a selection is active",
+            phone_sizes["overflow"][0] <= phone_sizes["overflow"][1] + 2,
+            f"{phone_sizes['overflow'][0]}px of content in {phone_sizes['overflow'][1]}px",
+            group="I",
+            expected="scrollWidth <= clientWidth + 2",
+            actual=str(phone_sizes["overflow"]),
+        )
+        # Stage the change on the phone as well: a fresh browser context has its
+        # own drafts, and the point of this pass is that the whole decision —
+        # select, review, stage, approve — is possible with a thumb.
+        phone.click('.ads-bulkbar button:has-text("Change budgets")')
+        phone.wait_for_selector(".ads-bulk-preview", timeout=SETTLE_MS)
+        phone.click('.ads-segment:has-text("+25%")')
+        phone.wait_for_timeout(300)
+        phone.click('button:has-text("Stage the budget change")')
+        phone.wait_for_timeout(700)
+
+        click_nav(phone, "Publishing queue")
+        wait_screen_content(phone, "queue", MIN_SCREEN_TEXT)
+        wait_settled(phone, "queue")
+        queue_phone = phone.evaluate(
+            """() => {
+                const bars = Array.from(document.querySelectorAll('.ads-draft-bar'));
+                const buttons = bars.flatMap((bar) => Array.from(bar.querySelectorAll('button')));
+                return {
+                    bars: bars.length,
+                    buttons: buttons.length,
+                    smallest: buttons.length ? Math.min(...buttons.map((b) => Math.round(b.getBoundingClientRect().height))) : 0,
+                    overflow: [document.documentElement.scrollWidth, document.documentElement.clientWidth],
+                };
+            }"""
+        )
+        check(
+            "I: the staged record's actions on a phone are reachable and thumb-sized",
+            queue_phone["buttons"] > 0 and queue_phone["smallest"] >= 44,
+            f"{queue_phone['buttons']} action(s) in {queue_phone['bars']} bar(s), smallest {queue_phone['smallest']}px",
+            group="I",
+            expected="every staged-record action at least 44px tall on a phone",
+            actual=json.dumps(queue_phone),
+        )
+        check(
+            "I: the phone queue does not scroll sideways",
+            queue_phone["overflow"][0] <= queue_phone["overflow"][1] + 2,
+            f"{queue_phone['overflow'][0]}px of content in {queue_phone['overflow'][1]}px",
+            group="I",
+            expected="scrollWidth <= clientWidth + 2",
+            actual=str(queue_phone["overflow"]),
+        )
+        shot(phone, out, "phone", "controls-queue")
+    finally:
+        phone_context.close()
+
+
 # ------------------------------------------------------------------- main -----
 
 
@@ -1258,7 +1639,7 @@ def main() -> int:
     parser.add_argument(
         "--only",
         default="",
-        help="comma-separated journey letters to run (default: all of A,B,C,D,E,F,G,H)",
+        help="comma-separated journey letters to run (default: all of A,B,C,D,E,F,G,H,I)",
     )
     args = parser.parse_args()
 
@@ -1294,6 +1675,8 @@ def main() -> int:
                 journey("G keyboard", journey_g_keyboard, browser, base_url, out)
             if wants("H"):
                 journey("H preview isolation", journey_h_preview_isolation, browser, base_url, out)
+            if wants("I"):
+                journey("I controls", journey_i_controls, browser, base_url, out)
         finally:
             browser.close()
 

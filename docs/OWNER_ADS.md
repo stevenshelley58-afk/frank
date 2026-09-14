@@ -259,7 +259,12 @@ cd apps/window
 
 It covers the fresh entry, all six screens and the return, reload and deep links,
 Back and Forward across screens and sections, the honest disconnected state with
-preview off, a phone viewport, keyboard navigation, and preview isolation.
+preview off, a phone viewport, keyboard navigation, preview isolation, and the
+operator's controls driven through the real screens: built-in and saved views
+(applied, linked in the address and surviving a reload), the hierarchy drill-down
+that filters by the parent's immutable id, the lifecycle from staging to a local
+approval that says it is not a submission, and the same staging done on a phone
+with thumb-sized actions and no sideways scroll.
 
 ## Not yet built
 
