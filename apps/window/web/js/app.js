@@ -137,13 +137,21 @@ function showProject(id, options = {}) {
   currentProject = project;
   if (isOwnerDashboardProject(id, window.location.search)) {
     document.body.classList.remove("blockwise-operations-preview");
-    show("blockwise-dashboard", { ...options, routeDetail: { projectId: id } });
+    // Carry the owner route detail so the workspace address bar keeps the
+    // section or customer in the URL instead of collapsing to the project home.
+    const ownerDetail = { projectId: id };
+    if (options.ownerSection) ownerDetail.ownerSection = options.ownerSection;
+    if (options.ownerCustomerId) ownerDetail.ownerCustomerId = options.ownerCustomerId;
+    show("blockwise-dashboard", { ...options, routeDetail: ownerDetail });
     const technical = document.createElement("a");
     technical.className = "home-action";
     technical.href = "/project/blockwise?technical=1";
     technical.textContent = "Technical view";
     $("#top-actions").replaceChildren(technical);
-    disposeOwnerDashboard = mountOwnerDashboard($("#owner-dashboard"));
+    disposeOwnerDashboard = mountOwnerDashboard($("#owner-dashboard"), {
+      section: options.ownerSection,
+      customerId: options.ownerCustomerId,
+    });
     return true;
   }
   document.body.classList.toggle("blockwise-operations-preview", id === "blockwise" && isBlockwiseOperationsPreview());
@@ -236,7 +244,11 @@ function openPathView() {
   const canonicalPath = pathForView(route.view, route);
   if (window.location.pathname !== canonicalPath) window.history.replaceState({ view: route.view }, "", `${canonicalPath}${window.location.search}`);
   if (route.view === "project") {
-    if (showProject(route.projectId, { syncHistory: false })) return;
+    if (showProject(route.projectId, {
+      syncHistory: false,
+      ownerSection: route.ownerSection,
+      ownerCustomerId: route.ownerCustomerId,
+    })) return;
     window.history.replaceState({ view: "hub" }, "", `/${window.location.search}`);
     $("#view-title").textContent = "Project not found";
     $("#view-sub").textContent = `No registered project exists for “${route.projectId}”.`;
