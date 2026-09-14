@@ -108,6 +108,10 @@ class frank_sso extends rcube_plugin
      */
     public function login_after($args)
     {
+        // The launch cookie has been spent. Clear it so a used token never
+        // stays in the browser for the life of the session.
+        $this->clear_launch_cookie();
+
         $wanted = $this->configured_identities();
         $user = $this->rcmail->user ?? null;
         if (!$wanted || !$user || empty($user->ID)) {

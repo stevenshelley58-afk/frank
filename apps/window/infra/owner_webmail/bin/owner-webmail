@@ -48,7 +48,9 @@ case ${1:-} in
   up)
     clean_source
     secret_file_ok
-    compose up -d
+    # --wait blocks until every healthcheck has settled, so the health summary
+    # that follows describes a running service rather than a starting one.
+    compose up -d --wait
     "$script_dir/health.sh"
     ;;
   down)
@@ -75,8 +77,11 @@ case ${1:-} in
     ;;
   token-check)
     secret_file_ok
-    shift
-    python3 "$script_dir/token-check.py" "${@:2}"
+    # The diagnostic talks to the broker on its own private address, so it runs
+    # inside the broker container with that container's environment.
+    test "$(docker inspect -f '{{.State.Running}}' owner-webmail-launch 2>/dev/null)" = true \
+      || fail "owner-webmail-launch is not running"
+    docker exec -i owner-webmail-launch python3 - < "$script_dir/token-check.py"
     ;;
   *) usage ;;
 esac

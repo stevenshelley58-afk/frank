@@ -14,10 +14,14 @@ server {
     server_name _;
 
     # Roundcube sends no X-Frame-Options of its own (see
-    # roundcube/config.inc.php). The framing policy is stated once, here, and
-    # names only the approved Frank parent origin.
+    # roundcube/config.inc.php). The framing policy is stated once, here.
+    #
+    # 'self' is required: the client renders message bodies, the message list
+    # and its watermark in same-origin frames of its own. Without it those
+    # frames are blocked and the mailbox renders empty. Only the approved Frank
+    # parent origin may frame the client from outside.
     proxy_hide_header X-Frame-Options;
-    add_header Content-Security-Policy "frame-ancestors ${OWNER_WEBMAIL_FRAME_ANCESTORS}" always;
+    add_header Content-Security-Policy "frame-ancestors 'self' ${OWNER_WEBMAIL_FRAME_ANCESTORS}" always;
 
     client_max_body_size ${OWNER_WEBMAIL_MAX_UPLOAD};
 

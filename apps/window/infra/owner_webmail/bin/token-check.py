@@ -39,11 +39,21 @@ def record(name: str, ok: bool, detail: str) -> None:
     results.append((name, ok, detail))
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """The mint response is a 303 whose cookie we must read, not follow."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: D102
+        return None
+
+
+_opener = urllib.request.build_opener(_NoRedirect)
+
+
 def request(path: str, headers: dict[str, str], method: str = "GET", body: bytes | None = None):
     """Return (status, headers, body-bytes) without raising on 4xx/5xx."""
     req = urllib.request.Request(BASE + path, data=body, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=10) as response:
+        with _opener.open(req, timeout=10) as response:
             return response.status, dict(response.headers), response.read()
     except urllib.error.HTTPError as error:
         return error.code, dict(error.headers), error.read()

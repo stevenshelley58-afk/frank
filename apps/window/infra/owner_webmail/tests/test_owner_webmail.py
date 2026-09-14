@@ -165,6 +165,8 @@ class PluginContractTests(unittest.TestCase):
 
     def test_token_is_cleared_and_not_logged(self):
         self.assertIn("clear_launch_cookie", self.plugin)
+        login_after = self.plugin[self.plugin.index("public function login_after"):self.plugin.index("public function logout_after")]
+        self.assertIn("$this->clear_launch_cookie();", login_after)
         # Every diagnostic carries a fixed label. A token, a password or a shared
         # secret must never be interpolated into a log or error message.
         for message in re.findall(r"\$this->fail\((.*?)\);", self.plugin):
@@ -191,7 +193,8 @@ class IngressContractTests(unittest.TestCase):
 
     def test_client_cannot_impose_a_framing_or_host_policy(self):
         self.assertIn("proxy_hide_header X-Frame-Options;", self.nginx)
-        self.assertIn("frame-ancestors ${OWNER_WEBMAIL_FRAME_ANCESTORS}", self.nginx)
+        # 'self' must stay: the client frames its own message list and body.
+        self.assertIn("frame-ancestors 'self' ${OWNER_WEBMAIL_FRAME_ANCESTORS}", self.nginx)
 
     def test_only_owner_variables_are_substituted(self):
         compose = (ROOT / "compose.yaml").read_text(encoding="utf-8")
