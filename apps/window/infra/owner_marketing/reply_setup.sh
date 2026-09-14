@@ -55,7 +55,10 @@ if [[ "$listed" != *"$remote_script"* ]]; then run_sieve --localsieve "/work/$re
 # local.php carries the monitored-mailbox credential, the database password and
 # Mautic's secret_key in clear. Refuse to leave it readable by anyone but root
 # and the web server account.
-local_php_mode="${OWNER_MARKETING_LOCAL_PHP_MODE:-0640}"
+# 0660, not 0640: Mautic's own Configuration screen writes this file as the web
+# server account, so 0640 would make that native screen fail to save. 0660 still
+# removes every other local user, which was the actual defect at 0755.
+local_php_mode="${OWNER_MARKETING_LOCAL_PHP_MODE:-0660}"
 docker exec "$container" chown root:www-data /var/www/html/config/local.php
 docker exec "$container" chmod "$local_php_mode" /var/www/html/config/local.php
 docker exec -u www-data -w /var/www/html/docroot "$container" php /var/www/html/bin/console cache:clear --no-warmup --no-interaction >/dev/null || die native-config-cache-refresh-failed
