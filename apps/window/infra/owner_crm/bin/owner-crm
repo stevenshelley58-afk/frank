@@ -11,6 +11,8 @@ mariadb_uid=999
 mariadb_gid=999
 redis_uid=999
 redis_gid=1000
+# shellcheck source=/dev/null
+source "$root_dir/pins.env"
 
 usage() { echo "usage: owner-crm {config|up|create-site|archive-failed-site|health|backup|restore-drill|backup-preflight}" >&2; exit 2; }
 fail() { echo "owner-crm: $*" >&2; exit 1; }
@@ -25,8 +27,21 @@ secret_file_ok() {
 }
 value() { sed -n "s/^$1=//p" "$secret_file" | tail -n1; }
 fixed_settings_ok() {
-  test "$(value OWNER_CRM_IMAGE)" = owner-crm-app || fail "OWNER_CRM_IMAGE must be owner-crm-app"
-  test "$(value OWNER_CRM_TAG)" = frappe15.120.1-crm1.83.0-helpdesk1.30.1 || fail "OWNER_CRM_TAG is not the accepted image tag"
+  local image tag base sha label
+  image=$(value OWNER_CRM_IMAGE); tag=$(value OWNER_CRM_TAG)
+  base=frappe15.120.1-crm1.83.0-helpdesk1.30.1
+  test "$image" = owner-crm-app || fail "OWNER_CRM_IMAGE must be owner-crm-app"
+  # The original upstream-only image remains accepted for historical recovery.
+  test "$tag" = "$base" && return 0
+  [[ "$tag" =~ ^${base}-owner-([0-9a-f]{40})$ ]] || fail "OWNER_CRM_TAG is not an accepted immutable owner-entry tag"
+  sha=${BASH_REMATCH[1]}
+  docker image inspect "$image:$tag" >/dev/null 2>&1 || fail "owner-entry image is not built"
+  label=$(docker image inspect -f '{{index .Config.Labels "io.frank.owner-crm.entry-source-sha"}}' "$image:$tag")
+  test "$label" = "$sha" || fail "owner-entry image source label does not match its tag"
+  for pair in "org.opencontainers.image.frappe-revision:${FRAPPE_SHA}" "org.opencontainers.image.crm-revision:${CRM_SHA}" "org.opencontainers.image.helpdesk-revision:${HELPDESK_SHA}" "org.opencontainers.image.telephony-revision:${TELEPHONY_SHA}"; do
+    key=${pair%%:*}; expected=${pair#*:}; actual=$(docker image inspect -f "{{index .Config.Labels \"$key\"}}" "$image:$tag")
+    test "$actual" = "$expected" || fail "owner-entry image lost pinned $key label"
+  done
 }
 prepare_runtime() {
   if test -e "$runtime_root" || test -L "$runtime_root"; then

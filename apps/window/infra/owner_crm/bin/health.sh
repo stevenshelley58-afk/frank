@@ -17,6 +17,13 @@ case "$mode" in
   *) echo "usage: owner-crm health [--mail-enabled]" >&2; exit 2 ;;
 esac
 export OWNER_CRM_SOURCE_SHA=$(git -C "$root_dir" rev-parse HEAD)
+base_tag=frappe15.120.1-crm1.83.0-helpdesk1.30.1
+crm_tag=$(sed -n 's/^OWNER_CRM_TAG=//p' "$secret_file" | tail -n1)
+if [[ "$crm_tag" =~ ^${base_tag}-owner-([0-9a-f]{40})$ ]]; then
+  expected_entry_sha=${BASH_REMATCH[1]}
+else
+  expected_entry_sha=""
+fi
 compose=(docker compose --project-directory "$root_dir" --env-file "$secret_file" -f "$root_dir/compose.yaml")
 services=(db redis-cache redis-queue backend websocket queue-short queue-long frontend)
 [[ "$mode" == mail-enabled ]] && services+=(scheduler)
@@ -29,6 +36,9 @@ for service in "${services[@]}"; do
   test -n "$container_id"
   test "$(docker inspect -f '{{.State.Status}}' "$container_id")" = running
   test "$(docker inspect -f '{{index .Config.Labels "io.frank.owner-crm.applied-source-sha"}}' "$container_id")" = "$OWNER_CRM_SOURCE_SHA"
+  if [[ -n "$expected_entry_sha" ]]; then
+    test "$(docker inspect -f '{{index .Config.Labels "io.frank.owner-crm.entry-source-sha"}}' "$container_id")" = "$expected_entry_sha"
+  fi
 done
 for service in db redis-cache redis-queue backend frontend; do
   container_id=$("${compose[@]}" ps -q "$service")
