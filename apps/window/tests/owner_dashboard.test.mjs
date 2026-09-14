@@ -621,6 +621,11 @@ test("a dirty application triggers the guard before Frank destroys a protected p
   appHost.mount(slot);
   appHost.show("mail");
   await appHost.whenSettled();
+  const readyMail = frameOf(panelOf(slot, "mail"));
+  win.dispatch("message", {
+    origin: "https://mail.frank.fail", source: readyMail.contentWindow,
+    data: {channel:"frank.owner-app",version:1,app:"mail",type:"ready"},
+  });
   appHost.show("crm");
   await appHost.whenSettled();
   const crmFrame = frameOf(panelOf(slot, "crm"));

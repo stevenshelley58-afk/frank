@@ -447,7 +447,7 @@ export function createOwnerAppHost(deps = {}) {
 
   function isRetainable(appId) {
     const app = ownerApp(appId);
-    return Boolean(app?.retain) || dirty.get(appId) === true;
+    return Boolean(app?.retain && panels.get(appId)?.state === "ready") || dirty.get(appId) === true;
   }
 
   function announcement(text) {
@@ -670,6 +670,16 @@ export function createOwnerAppHost(deps = {}) {
     const run = () => {
       win.sessionStorage?.setItem(key, String(Date.now()));
       win.location.assign(url);
+      win.setTimeout?.(() => {
+        const entry = panels.get(appId);
+        if (!disposed && entry?.state === "checking") {
+          entry.state = "blocked";
+          renderBody(entry, ownerApp(appId), {
+            state: "blocked", chip: "Needs connection",
+            detail: "Sign-in did not finish. Choose Connect inside Frank to try again.",
+          });
+        }
+      }, 12000);
     };
     if (dirtyIds().length || retainedOrder.some((id) => isRetainable(id)) || (active && panels.get(active)?.state === "ready" && isRetainable(active))) {
       setGuard("Connecting will briefly leave Frank. Save any open draft first.", [
@@ -682,7 +692,7 @@ export function createOwnerAppHost(deps = {}) {
   function requestReload(appId) {
     const app = ownerApp(appId);
     if (!app) return;
-    if (reloadNeedsConfirmation(appId, { dirty: dirtyIds(), retainable: (id) => Boolean(ownerApp(id)?.retain) })) {
+    if (reloadNeedsConfirmation(appId, { dirty: dirtyIds(), retainable: isRetainable })) {
       pending = {
         kind: "reload",
         app: appId,
@@ -743,7 +753,7 @@ export function createOwnerAppHost(deps = {}) {
         next: appId,
         retained: [...retainedOrder],
         dirty: dirtyIds(),
-        retainable: (id) => Boolean(ownerApp(id)?.retain),
+        retainable: isRetainable,
       });
       if (plan.action === "confirm") {
         const protectedApp = ownerApp(plan.warning.app);
@@ -780,7 +790,7 @@ export function createOwnerAppHost(deps = {}) {
       next: null,
       retained: [...retainedOrder],
       dirty: dirtyIds(),
-      retainable: (id) => Boolean(ownerApp(id)?.retain),
+      retainable: isRetainable,
     });
     if (plan.action === "confirm") {
       pending = { kind: "hide", app: plan.warning.app, next: null, run: () => { applyPlan(plan); active = null; } };
