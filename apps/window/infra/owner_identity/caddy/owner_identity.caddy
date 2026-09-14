@@ -1,0 +1,58 @@
+# Owner session boundary — canonical Caddy snippets.
+#
+# These definitions are duplicated verbatim inside apps/window/Caddyfile,
+# because Frank's release ships only that one file to the edge
+# (/var/lib/frank/release/immutable-config/<sha>/Caddyfile). This file is the
+# readable source of truth; `bin/owner-identity config` fails if the two copies
+# drift, so they cannot silently diverge.
+#
+# Routing contract
+# ----------------
+#   auth.frank.fail       the identity provider itself. Never framed.
+#   crm.frank.fail        Frappe CRM + Helpdesk, framed only by https://frank.fail
+#   marketing.frank.fail  Mautic admin,    framed only by https://frank.fail
+#   frank.fail            the parent. It frames the two app origins above.
+#
+# Never put an IdP login form in an iframe. The outpost answers an
+# unauthenticated request with a redirect to https://auth.frank.fail/...,
+# and the browser performs a same-tab round trip that returns to the intended
+# Frank route. `frame-ancestors` on auth.frank.fail stays 'none'.
+
+(owner_identity_outpost) {
+	# The embedded outpost's own path must answer without a session, and must
+	# be handled before anything else on a gated host. It runs inside the
+	# authentik server process; there is no separate outpost container.
+	reverse_proxy /outpost.goauthentik.io/* owner-identity-server:9000 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-Proto https
+	}
+}
+
+(owner_identity_session_gate) {
+	# One owner session, checked against the identity provider on every request.
+	# The outpost session lives in authentik's database, so revoking the session
+	# or disabling the user blocks the next request even when the native
+	# application's own upstream session is still alive.
+	forward_auth owner-identity-server:9000 {
+		uri /outpost.goauthentik.io/auth/caddy
+		copy_headers X-Authentik-Username X-Authentik-Groups X-Authentik-Entitlements X-Authentik-Email X-Authentik-Name X-Authentik-Uid
+		# Only the pinned identity-provider ingress subnet may speak for the
+		# client; nothing else on this host can forge X-Forwarded-*.
+		trusted_proxies 172.31.50.0/24
+	}
+}
+
+# Applied to a native application host that Frank is allowed to frame.
+# `header` with a plain directive name replaces, and `-Name` deletes.
+(owner_native_app_headers) {
+	header {
+		# The upstream apps answer X-Frame-Options, which compares origins and
+		# therefore rejects the same-site Frank parent. Replace that one header
+		# with an explicit CSP allowlist naming only the Frank origin. Only
+		# frame-ancestors is set, so no other app behaviour is restricted.
+		-X-Frame-Options
+		Content-Security-Policy "frame-ancestors https://frank.fail"
+		X-Robots-Tag "noindex, nofollow, noarchive, nosnippet"
+	}
+}
