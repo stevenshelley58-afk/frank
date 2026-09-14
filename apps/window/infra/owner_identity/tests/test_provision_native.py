@@ -57,3 +57,21 @@ def test_mautic_provisioner_repairs_web_owned_cache_and_logs_before_clear():
     assert "install -d -o www-data -g www-data" in source
     assert "chown -R www-data:www-data /var/www/html/var/cache /var/www/html/var/logs" in source
     assert "docker exec -u www-data" in source
+
+
+def test_mautic_keeps_public_audience_but_idp_posts_to_native_acs():
+    bootstrap = (ROOT / "bin/bootstrap.py").read_text()
+    source = SCRIPT.read_text()
+    example = (ROOT / ".env.example").read_text()
+    assert '"https://mail.blockwise.sale"' in bootstrap
+    assert 'f"{MARKETING_ORIGIN}/s/saml/login_check"' in bootstrap
+    assert 'OWNER_IDENTITY_MAUTIC_ACS_URL must be the native marketing SAML ACS' in bootstrap
+    assert 'MAUTIC_SAML_ACS_URL="$mautic_acs"' in source
+    assert 'if saml[0].get("acs_url") != expected_acs' in source
+    assert 'OWNER_IDENTITY_MAUTIC_ACS_URL=https://marketing.frank.fail/s/saml/login_check' in example
+
+def test_identity_adr_records_the_native_acs_without_a_public_saml_route():
+    adr = (ROOT.parents[3] / "docs/OWNER_IDENTITY_ADR.md").read_text()
+    assert 'LightSAML AuthnRequest does not supply an ACS override' in adr
+    assert 'https://marketing.frank.fail/s/saml/login_check' in adr
+    assert 'without adding any SAML route to it' in adr
