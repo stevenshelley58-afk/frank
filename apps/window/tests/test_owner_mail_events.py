@@ -15,16 +15,16 @@ def signed(event):
  return raw,{"svix-id":ident,"svix-timestamp":stamp,"svix-signature":"v1,"+sig}
 
 class FakeHttp:
- def __init__(self,collision=False,unavailable=False,provider_to=None,write_error=False): self.calls=[]; self.collision=collision; self.unavailable=unavailable; self.provider_to=provider_to or ['"Owner, CRM" <owner@example.test>']; self.write_error=write_error
+ def __init__(self,collision=False,unavailable=False,provider_to=None,write_error=False,statistic_email="owner@example.test"): self.calls=[]; self.collision=collision; self.unavailable=unavailable; self.provider_to=provider_to or ['"Owner, CRM" <owner@example.test>']; self.write_error=write_error; self.statistic_email=statistic_email
  def request(self,method,url,headers,payload=None):
   self.calls.append((method,url,payload))
   if self.write_error and method in {"POST","PATCH"}: raise events.OwnerMailEventError("native-secret-marker")
   if self.unavailable and "api.resend.com" in url: raise events.OwnerMailEventUnavailable("temporary")
   if "api.resend.com" in url: return {"id":EMAIL,"to":self.provider_to,"html":"https://mail.blockwise.sale/email/unsubscribe/abc123/recipient/secret"}
   if "/stats/" in url:
-   row={"email_address":"owner@example.test","lead_id":"7"}
+   row={"email_address":self.statistic_email,"lead_id":"7"}
    return {"stats":[row,row] if self.collision else [row]}
-  if "/contacts/7" in url and method=="GET": return {"contact":{"id":7,"fields":{"all":{"email":"owner@example.test","blockwise_profile_id":PROFILE,"blockwise_workspace_id":WORKSPACE}},"doNotContact":[]}}
+  if "/contacts/7" in url and method=="GET": return {"contact":{"id":7,"fields":{"all":{"email":self.statistic_email,"blockwise_profile_id":PROFILE,"blockwise_workspace_id":WORKSPACE}},"doNotContact":[]}}
   if "/segments?" in url: return {"lists":{str(i):{"id":i,"name":name} for i,name in enumerate(events.SOURCE_SEGMENT_NAMES,1)}}
   return {}
 
@@ -71,6 +71,23 @@ class OwnerMailEventsTests(unittest.TestCase):
   payload=self.payload();payload["data"]["to"]=["not-an-address"];raw,headers=signed(payload)
   with self.assertRaises(events.OwnerMailEventError) as captured: events.process_event(raw,headers,self.cfg,FakeHttp(),1000)
   self.assertEqual(captured.exception.safe_code,"callback_recipient_rejected")
+ def test_resend_simulator_callback_alias_is_accepted(self):
+  statistic="complained+owner-crm-4d3ee9dc7b42@resend.dev"
+  fake=FakeHttp(statistic_email=statistic,provider_to=[f"Owner CRM Complained Simulator Acceptance <{statistic}>"])
+  raw,headers=signed({"type":"email.complained","data":{"email_id":EMAIL,"to":["Owner CRM Complained Simulator Acceptance <complaint+owner-crm-4d3ee9dc7b42@simulator.amazonses.com>"]}})
+  self.assertEqual(events.process_event(raw,headers,self.cfg,fake,1000),"suppressed")
+  self.assertTrue(any(method=="PATCH" for method,_,_ in fake.calls))
+ def test_simulator_alias_does_not_accept_a_different_callback_recipient(self):
+  statistic="complained+owner-crm-4d3ee9dc7b42@resend.dev"
+  fake=FakeHttp(statistic_email=statistic,provider_to=[f"Owner CRM Complained Simulator Acceptance <{statistic}>"])
+  raw,headers=signed({"type":"email.complained","data":{"email_id":EMAIL,"to":["complaint+owner-crm-000000000000@simulator.amazonses.com"]}})
+  with self.assertRaises(events.OwnerMailEventError) as captured: events.process_event(raw,headers,self.cfg,fake,1000)
+  self.assertEqual(captured.exception.safe_code,"recipient_mismatch")
+  self.assertFalse(any(method in {"PATCH","POST"} for method,_,_ in fake.calls))
+ def test_only_resend_simulator_recipients_gain_an_alias(self):
+  self.assertEqual(events._provider_recipient_aliases("owner@example.test"),frozenset({"owner@example.test"}))
+  self.assertEqual(events._provider_recipient_aliases("complained+owner-crm-4d3ee9dc7b42@resend.dev"),frozenset({"complained+owner-crm-4d3ee9dc7b42@resend.dev","complaint+owner-crm-4d3ee9dc7b42@simulator.amazonses.com"}))
+  self.assertEqual(events._provider_recipient_aliases("complained+owner-crm-4d3ee9dc7b42@example.test"),frozenset({"complained+owner-crm-4d3ee9dc7b42@example.test"}))
  def test_wrong_immutable_scope_is_rejected(self):
   raw,headers=signed(self.payload()); fake=FakeHttp()
   original=fake.request

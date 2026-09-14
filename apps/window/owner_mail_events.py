@@ -9,6 +9,9 @@ from typing import Any, Mapping, Protocol
 EVENT_TYPES=frozenset({"email.bounced","email.complained"})
 UUID=re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$",re.I)
 UNSUBSCRIBE_HASH=re.compile(r"https://mail\.blockwise\.sale/email/unsubscribe/([A-Za-z0-9]+)/")
+RESEND_SIMULATOR_RECIPIENT=re.compile(r"^(?P<kind>bounced|complained)(?P<label>\+[^@]+)?@resend\.dev$")
+RESEND_SIMULATOR_LOCAL={"bounced":"bounce","complained":"complaint"}
+RESEND_SIMULATOR_HOST="simulator.amazonses.com"
 MAX_BODY_BYTES=64*1024
 SVIX_TOLERANCE_SECONDS=300
 SOURCE_SEGMENT_NAMES=("Owner CRM | Onboarding and trial help","Owner CRM | Trial ending","Owner CRM | Trial ended","Owner CRM | Opted-in education","Owner CRM | Paid welcome","Owner CRM | Cancellation follow-up","Owner CRM | Winback")
@@ -85,6 +88,15 @@ def _recipients(value,safe_code="provider_recipient_rejected"):
  if isinstance(item,dict) and display: raise OwnerMailEventError("recipient was malformed",safe_code=safe_code)
  if len(address)>254 or not re.fullmatch(r"[^\s<>,;@]+@[^\s<>,;@]+",address): raise OwnerMailEventError("recipient was malformed",safe_code=safe_code)
  return {address}
+def _provider_recipient_aliases(address):
+ # Resend delivers its own simulator mailboxes under an internal simulator
+ # host with a normalised local part. That rewrite is exact and closed, so it
+ # is the only provider-side alias accepted for a statistic recipient; every
+ # other address must match the statistic byte for byte.
+ match=RESEND_SIMULATOR_RECIPIENT.fullmatch(address)
+ if match is None: return frozenset({address})
+ label=match.group("label") or ""
+ return frozenset({address,f"{RESEND_SIMULATOR_LOCAL[match.group('kind')]}{label}@{RESEND_SIMULATOR_HOST}"})
 def _tracking_hash(provider):
  # Resend's returned stored render is the proof. Do not accept a matching
  # string in provider metadata, tags or a webhook-controlled field.
@@ -121,7 +133,8 @@ def process_event(raw:bytes,headers:Mapping[str,str],cfg:OwnerMailEventsConfig,h
  if not isinstance(email,str) or isinstance(lead,bool) or not isinstance(lead,int) or lead<1: raise OwnerMailEventError("Mautic email statistic was malformed")
  provider_recipients=_recipients(provider.get("to"),"provider_recipient_rejected")
  callback_recipients=_recipients(data.get("to"),"callback_recipient_rejected")
- if provider_recipients != {email.strip().lower()} or callback_recipients != {email.strip().lower()}: raise OwnerMailEventError("recipient did not match native statistic",safe_code="recipient_mismatch")
+ statistic_email=email.strip().lower()
+ if provider_recipients != {statistic_email} or not callback_recipients <= _provider_recipient_aliases(statistic_email): raise OwnerMailEventError("recipient did not match native statistic",safe_code="recipient_mismatch")
  contact=_lookup(client,"GET",cfg.mautic_url+f"/api/contacts/{lead}",mautic_headers).get("contact")
  if not isinstance(contact,dict) or contact.get("id") not in (lead,str(lead)): raise OwnerMailEventError("Mautic statistic contact did not resolve exactly")
  profile,workspace=_contact_value(contact,"blockwise_profile_id"),_contact_value(contact,"blockwise_workspace_id")

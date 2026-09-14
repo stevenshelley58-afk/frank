@@ -162,6 +162,13 @@ contact ID, contact email, immutable Blockwise profile ID and workspace ID must
 all agree. Address matching alone is never authority. An unprovable relationship
 does not change Mautic.
 
+Resend delivers its own simulator mailboxes under an internal host, rewriting
+`bounced+...@resend.dev` to `bounce+...@simulator.amazonses.com` and
+`complained+...@resend.dev` to `complaint+...@simulator.amazonses.com`. The
+callback recipient must therefore be the statistic address itself or that one
+exact, closed simulator alias. The provider-stored recipient must still equal
+the statistic address byte for byte, and every other recipient is rejected.
+
 After proof, the receiver removes non-cold owner source segments and writes
 native email Do Not Contact plus `blockwise_nurture_exit=stopped`. These native
 operations are replay-safe. Temporary Resend or Mautic failure returns 503 for
