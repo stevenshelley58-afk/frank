@@ -68,6 +68,103 @@ clear actions. Never reuse their fictional sample prices, addresses, expiry
 periods or preview links as verified business facts. Frank must not import
 Blockwise source; use native Mautic templates for its own flow engine.
 
+## Acceptance ledger update, 14 September 2026
+
+This supersedes the 13 September ledger above for current runtime state. It is not
+a completed-CRM or launch approval. Runtime facts below were verified on the VPS
+at approximately 2026-09-14 04:00 UTC.
+
+### Verified runtime state
+
+- Blockwise product revision `29807016c747bda2f60d864d7b373334ffe38748`; `/api/health`
+  reports `ready` on both the loopback ingress and the public host, and matches
+  `/srv/blockwise/releases/.autodeploy.sha`.
+- Frank/Window running image `frank-window:fbebd0499da9b402c405eb0cd4262dd3c856fc73`.
+- Owner CRM stack (`owner-crm-*`): all eight containers up, frontend and backend healthy.
+- Owner marketing: Mautic `a47a2aa68fff2680206282255743fe18654b2492` healthy.
+  `frank-owner-marketing-ingress` returned to healthy at 04:08 UTC.
+- ntfy `v2.14.0` healthy on loopback 18104; anonymous reads and writes still rejected.
+- `owner-mail-events.service` active, serving the revision `3034623` receiver.
+
+### Completed and evidenced on 14 September
+
+- Signed bounce and complaint callback acceptance now passes; see the corrected
+  gate above and `/srv/frank/verification/owner-mail-events-callback-fix-20260914/receipt.json`.
+- Read-only credential and backup-tooling audit:
+  `/srv/frank/verification/owner-crm-access-20260914/access-audit.md`.
+- Read-only email flow inventory (eight draft campaigns, ten native flow emails,
+  one unpublished newsletter):
+  `/srv/frank/verification/owner-email-flows-20260914/flow-inventory.md`.
+- Cold-outreach transport recommendation, research only:
+  `/srv/frank/verification/owner-outreach-20260914/cold-outreach-recommendation.md`.
+- The Hermes owner-email consent bridge is installed as a **paused** no-agent job
+  (`68e3f7e23be0`, `enabled=false`, `paused_reason="awaiting root controlled email
+  test"`, `last_run_at=null`). It was observed not to fire while the other four jobs
+  advanced, and a read-only preview returned `ungranted=5` with zero eligible
+  enrolments. Receipt:
+  `/srv/frank/verification/owner-email-flows-20260914/bridge-install-receipt.md`.
+
+### Remaining gates, each with its exact next action and blocker
+
+1. **Credential cleanup (Resend key).** Not done. Three unrevoked candidates exist
+   (`302b4d04`, `c0c50815`, `f84682da`); none can be conclusively identified as the
+   previously exposed key because no exposure artefact on the host names it, and
+   revoking `f84682da` would break the live product transactional mail. Next action:
+   locate or reconstruct the exposure artefact, or decide to rotate the product key
+   and then revoke the orphaned candidates. Blocker: the exposure record plus an owner decision.
+2. **Purelymail shared password.** Rotation status is not covered by the audit and
+   remains unknown. Next action: confirm whether the shared password is still live,
+   then rotate through the supported process. Blocker: owner mailbox admin login.
+3. **Automatic off-site backup.** Not done. The Cloudflare token is zone-scoped
+   (cache/WAF only) and returns 403 on R2. Missing: an account-scoped token with
+   Workers R2 Storage:Edit, an R2 bucket, an S3 access key and secret,
+   `/srv/frank/secrets/owner-backup-r2.env`, the `restic` binary, and the
+   `OWNER_CRM_BACKUP_RECIPIENT` / `OWNER_CRM_BACKUP_ROOT` values. No schedule exists
+   for any owner backup. Blocker: owner Cloudflare access and R2 enablement.
+4. **Email flow wiring.** Partially done. The bridge is installed but paused and has
+   never run in `run` mode against Mautic. Missing: a reply source and a conversion
+   fact in the snapshot, and a human publish decision for the newsletter. Next action:
+   run the controlled own-mailbox test, then resume.
+5. **Customer journey tests.** Not done; depends on items 3 and 4.
+6. **Phone notifications.** Not done. No public authenticated route to ntfy exists and
+   no device is subscribed. Next action: owner confirms the phone OS and login, a public
+   TLS route is added, upstream push is configured if iOS, and a device is subscribed.
+7. **Booking service.** Not deployed at all: no SnagTime container, image, unit or route
+   exists. The running product has `BOOKING_PROVIDER=calcom` with every `SNAGTIME_*`
+   value empty, so readiness is false and the booking page reports unavailable. Next
+   action: stand up the SnagTime production runtime and complete Google Calendar OAuth.
+   Blocker: owner calendar access plus the availability decisions.
+8. **Booking integration.** Blocked by item 7.
+9. **Cold outreach eligibility and transport.** Recommendation exists; live sending
+   remains held. Next action: owner resolves the unresolved business and
+   recipient-eligibility decisions.
+10. **Outreach sequence.** Held until item 9 is resolved.
+11. **Final consolidated browser acceptance.** Not done.
+
+### Held, and confirmed held
+
+- Marketing: ten campaigns, all `is_published = 0`; `campaign_leads` empty; five leads;
+  nine published emails; eight published segments; newsletter email 11 and segment 9
+  unpublished. Mautic cron and workers remain off. Verified 14 September.
+- Cold outreach: campaign 16 remains blocked by the bridge release gate.
+- No charge, provider write, prospect enrolment or customer outreach was performed
+  on 14 September.
+
+### Known open defects
+
+- Mautic `trusted_proxies` holds a container address written by `configure_site.sh`.
+  It goes stale whenever the owner-marketing stack is recreated outside `deploy.sh`,
+  which silently breaks every loopback API client. There is no durable guard yet.
+- `docker-prune.service` failed at 03:05 UTC with
+  `git -C /projects/blockwise worktree list --porcelain` exiting 128, then succeeded at
+  03:09 UTC. Intermittent and not yet reproduced.
+- `/projects/frank` carries an uncommitted `AGENTS.md` modification from another
+  session. It was left untouched.
+- Six preview containers owned by other tasks are running
+  (`family-tablet-preview`, `blockwise-meta-connect-preview-*`,
+  `blockwise-homepage-preview-*`, `blockwise-email-preview-*`, two
+  `blockwise-process-preview-*`). They are not task-owned here and were left untouched.
+
 ## Authorities and boundaries
 
 - A dedicated Frappe site owns the owner sales pipeline, contacts, tasks and
