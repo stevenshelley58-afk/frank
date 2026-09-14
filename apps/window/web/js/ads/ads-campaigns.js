@@ -55,6 +55,7 @@ import {
   formatRatio,
   formatDay,
   formatWhen,
+  num,
   rowName,
   rowKey,
   stateOf,
@@ -497,34 +498,53 @@ export function createCampaignsScreen(ctx, host) {
       const preview = el("div", "ads-bulk-preview");
       const rowsHost = el("div", "ads-bulk-rows");
 
-      const afterBudget = (row) => {
-        const before = Number(row.budget) || 0;
-        return kind === "pause" ? before : Math.max(1, Math.round(before * (1 + percent / 100) * 100) / 100);
-      };
+      // A budget the read did not carry is unknown, not zero. Turning it into
+      // £0 made the review promise a change from nothing to £1, which is a
+      // number Frank invented; an unknown value is shown as — and left out of
+      // the total, and the rows it affects are named.
+      const afterBudget = (before) =>
+        before === null ? null : kind === "pause" ? before : Math.max(1, Math.round(before * (1 + percent / 100) * 100) / 100);
 
       const beforeAfter = () => {
         clear(rowsHost);
         let beforeTotal = 0;
         let afterTotal = 0;
+        let unknown = 0;
         for (const row of chosen) {
-          const before = Number(row.budget) || 0;
-          const after = afterBudget(row);
-          beforeTotal += before;
-          afterTotal += after;
+          const before = num(row.budget);
+          const after = afterBudget(before);
+          if (before === null || after === null) unknown += 1;
+          else {
+            beforeTotal += before;
+            afterTotal += after;
+          }
           const line = el("div", "ads-ba-row");
           line.append(el("span", "ads-ba-name", rowName(row)));
           line.append(el("span", "ads-ba-state", DELIVERY_STATE_LABELS[stateOf(row)] || stateOf(row)));
           const ba = el("span", "ads-ba-values");
-          ba.append(el("span", "ads-ba-before", kind === "pause" ? "Delivering" : formatMoney(before, currency)));
+          ba.append(el("span", "ads-ba-before", kind === "pause" ? "Delivering" : before === null ? "—" : formatMoney(before, currency)));
           ba.append(svg(ICONS.chevronRight, { size: 12, width: 2 }));
-          ba.append(el("span", "ads-ba-after", kind === "pause" ? "Paused" : formatMoney(after, currency)));
+          ba.append(el("span", "ads-ba-after", kind === "pause" ? "Paused" : after === null ? "—" : formatMoney(after, currency)));
           line.append(ba);
           rowsHost.append(line);
         }
+        const counted = chosen.length - unknown;
         const total = el("div", "ads-ba-total");
-        total.append(el("span", "", kind === "pause" ? `${chosen.length} rows stop delivering` : "Combined daily budget"));
-        total.append(el("span", "ads-ba-values", kind === "pause" ? "" : `${formatMoney(beforeTotal, currency)} → ${formatMoney(afterTotal, currency)}`));
+        total.append(
+          el("span", "", kind === "pause" ? `${chosen.length} rows stop delivering` : `Combined daily budget (${counted} of ${chosen.length} rows)`),
+        );
+        total.append(
+          el("span", "ads-ba-values", kind === "pause" ? "" : counted ? `${formatMoney(beforeTotal, currency)} → ${formatMoney(afterTotal, currency)}` : "—"),
+        );
         rowsHost.append(total);
+        if (unknown && kind !== "pause") {
+          const note = el(
+            "p",
+            "ads-field-hint",
+            `${unknown} selected row${unknown === 1 ? " has" : "s have"} no budget in this read, so ${unknown === 1 ? "it is" : "they are"} shown as — and left out of the total. A missing budget is not zero.`,
+          );
+          rowsHost.append(note);
+        }
       };
 
       if (kind !== "pause") {
@@ -585,14 +605,17 @@ export function createCampaignsScreen(ctx, host) {
                 direction: percent < 0 ? "decrease" : "increase",
                 batches: [],
                 gaps: [],
-                rows: chosen.map((row) => ({
-                  key: rowKey(row),
-                  name: rowName(row),
-                  level: state.level,
-                  state: stateOf(row),
-                  before: Number(row.budget) || 0,
-                  after: afterBudget(row),
-                })),
+                rows: chosen.map((row) => {
+                  const before = num(row.budget);
+                  return {
+                    key: rowKey(row),
+                    name: rowName(row),
+                    level: state.level,
+                    state: stateOf(row),
+                    before,
+                    after: afterBudget(before),
+                  };
+                }),
               },
             });
             ctx.say(

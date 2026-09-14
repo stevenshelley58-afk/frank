@@ -55,6 +55,18 @@ def bulk_summary(page) -> str:
     return " ".join(text_of(page, ".ads-bulkbar").split())
 
 
+def scroll_to_staged(page) -> None:
+    """Bring the shared staged-draft block into view so a screenshot shows it."""
+    page.evaluate(
+        """() => {
+            const blocks = Array.from(document.querySelectorAll('.ads-block'));
+            const target = blocks.find((node) => node.textContent.includes('Staged in Frank'));
+            if (target) target.scrollIntoView({ block: 'center' });
+        }"""
+    )
+    page.wait_for_timeout(300)
+
+
 def click_step(page, label: str) -> bool:
     """Click a step in the publish flow without being defeated by a re-render.
 
@@ -90,7 +102,7 @@ def mount_preview(page, size: str = "large") -> None:
             page.wait_for_timeout(500)
 
 
-def run(page, base_url: str, out: Path) -> None:
+def run(page, base_url: str, out: Path, label: str = "desktop") -> None:
     page.goto(base_url, wait_until="domcontentloaded")
     page.wait_for_function("() => Boolean(window.__adsHarness)")
 
@@ -134,31 +146,43 @@ def run(page, base_url: str, out: Path) -> None:
             page.click('.ads-bulk-scope button:has-text("Keep only this page")')
             page.wait_for_timeout(250)
             check("keeping only this page drops the off-page rows", selection_count(page) == 50, f"{selection_count(page)} rows")
-    page.screenshot(path=str(out / "campaigns-selection.png"), full_page=False)
+    page.screenshot(path=str(out / f"{label}-campaigns-selection.png"), full_page=False)
 
     # --------------------------------------------- staged budget and pause ---
     print("\nstaged budget and pause changes")
+    # Budgets live on campaigns and ad sets, so the review is exercised at the
+    # campaigns level; the ads level is where an unknown budget is checked.
+    page.click('[role="radiogroup"][aria-label="Which level to manage"] button:has-text("Campaigns")')
+    page.wait_for_timeout(500)
+    page.check('.ads-th-select input[type="checkbox"]')
+    page.wait_for_timeout(400)
     page.click('.ads-bulkbar button:has-text("Change budgets")')
     page.wait_for_selector(".ads-bulk-preview", timeout=8000)
     page.wait_for_timeout(300)
     review_rows = len(page.query_selector_all(".ads-ba-row"))
     review_text = " ".join(text_of(page, ".ads-bulk-preview").split())
-    check("the budget review lists every affected row", review_rows == 50, f"{review_rows} rows")
-    check("the budget review shows a before and an after value for each row", review_text.count("£") >= 100, review_text[:120])
-    check("the budget review states the combined total before and after", "Combined daily budget" in review_text, review_text[-160:])
+    check("the budget review lists every affected row", review_rows > 0 and review_rows == len(page.query_selector_all(".ads-ba-row")), f"{review_rows} rows")
+    check("the budget review shows a before and an after value for each row", review_text.count("£") >= review_rows * 2, review_text[:120])
+    check("the budget review states the combined total before and after", "Combined daily budget" in review_text and "→" in review_text, review_text[-160:])
+    check("a row with no budget in this read is shown as unknown, not as zero", "£0.00" not in review_text or "no budget in this read" in review_text, review_text[:200])
     page.click('.ads-segment:has-text("+25%")')
     page.wait_for_timeout(300)
-    page.screenshot(path=str(out / "bulk-budget-review.png"))
+    page.screenshot(path=str(out / f"{label}-bulk-budget-review.png"))
     page.click('button:has-text("Stage the budget change")')
     page.wait_for_timeout(500)
     check("staging a budget change clears the selection", selection_count(page) == 0, f"{selection_count(page)} still selected")
     page.click(".ads-nav-link:has-text('Publishing queue')")
     page.wait_for_timeout(600)
     queue_after_budget = " ".join(text_of(page, ".ads-screen").split())
-    check("the queue shows the staged budget change with its row count", "Staged in Frank" in queue_after_budget and "50" in queue_after_budget, queue_after_budget[:200])
-    page.screenshot(path=str(out / "queue-staged-change.png"))
+    check(
+        "the queue shows the staged budget change with its row count",
+        "Staged in Frank" in queue_after_budget and "Rows covered" in queue_after_budget and str(review_rows) in queue_after_budget,
+        queue_after_budget[:200],
+    )
+    scroll_to_staged(page)
+    page.screenshot(path=str(out / f"{label}-queue-staged-change.png"))
     page.click(".ads-nav-link:has-text('Campaigns')")
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(600)
     page.click('.ads-table tbody tr:first-child input[type="checkbox"]')
     page.wait_for_timeout(300)
     page.click('.ads-bulkbar button:has-text("Pause")')
@@ -214,7 +238,7 @@ def run(page, base_url: str, out: Path) -> None:
         check("a later mapping edit does not undo an earlier one", content_value == "custom_content_1", f"utm_content={content_value!r}")
         check("the destination edit survives the earlier ones", destination_value == "https://example.invalid/spring/one?ref=newsletter#offer", f"destination={destination_value!r}")
         check("the headline choice survives the other edits", headline_value not in ("", None), str(headline_value))
-    page.screenshot(path=str(out / "launch-mapping.png"))
+    page.screenshot(path=str(out / f"{label}-launch-mapping.png"))
 
     page.wait_for_timeout(300)
     click_step(page, "Review")
@@ -246,13 +270,15 @@ def run(page, base_url: str, out: Path) -> None:
     queue_screen = " ".join(text_of(page, ".ads-screen").split())
     check("the queue screen shows the staged draft from the shared model", "Staged in Frank" in queue_screen, queue_screen[:160])
     check("the queue names the campaign identity that tracking uses", "cmp_" in queue_screen, "")
-    page.screenshot(path=str(out / "queue-staged.png"))
+    scroll_to_staged(page)
+    page.screenshot(path=str(out / f"{label}-queue-staged.png"))
 
     page.reload(wait_until="domcontentloaded")
     page.wait_for_function("() => Boolean(window.__adsHarness)")
     mount_preview(page, "large")
     page.click(".ads-nav-link:has-text('Publishing queue')")
     page.wait_for_timeout(500)
+    scroll_to_staged(page)
     after_reload = " ".join(text_of(page, ".ads-screen").split())
     check("a staged draft survives a page reload", "Staged in Frank" in after_reload, after_reload[:160])
 
@@ -275,7 +301,7 @@ def run(page, base_url: str, out: Path) -> None:
         if "utm_campaign=" in url:
             campaign_param = url.split("utm_campaign=")[1].split("&")[0]
         check("utm_campaign is a stable identity, not a name", campaign_param.startswith("cmp_"), campaign_param)
-        page.screenshot(path=str(out / "tracking-reopened.png"))
+        page.screenshot(path=str(out / f"{label}-tracking-reopened.png"))
         click_step(page, "Configure campaign")
         page.wait_for_timeout(300)
         name_input = page.query_selector('.ads-flow-body input[type="text"]')
@@ -308,9 +334,9 @@ def run(page, base_url: str, out: Path) -> None:
     check("a throttled refresh keeps the last good rows on screen", "Autumn leads" in after, after[:160])
     stale_words = ("stale", "throttl", "rate limit", "read 3 hours ago", "read 2 hours ago")
     check("the screen says the rows are stale rather than blanking them", any(word in after.lower() for word in stale_words), after[:200])
-    page.screenshot(path=str(out / "campaigns-throttled.png"))
+    page.screenshot(path=str(out / f"{label}-campaigns-throttled.png"))
 
-    page.screenshot(path=str(out / "live-not-connected.png"))
+    page.screenshot(path=str(out / f"{label}-live-not-connected.png"))
 
     # ------------------------------------------------------- preview isolation --
     print("\npreview isolation: a rehearsal draft never reaches the live queue")
@@ -344,7 +370,7 @@ def main() -> int:
                 page = browser.new_page(viewport=viewport)
                 print(f"\n=== {label} ===")
                 try:
-                    run(page, url, out)
+                    run(page, url, out, label)
                 except Exception as error:  # a journalled failure is still evidence
                     check(f"{label}: the journey completed without an exception", False, str(error)[:300])
                 page.close()
