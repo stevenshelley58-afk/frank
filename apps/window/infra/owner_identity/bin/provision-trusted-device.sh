@@ -17,4 +17,12 @@ export OWNER_IDENTITY_SOURCE_SHA="$(git -C "$(cd "$root_dir/../../../.." && pwd)
 compose=(docker compose --project-directory "$root_dir" --env-file "$identity_secret" -f "$root_dir/compose.yaml")
 server_id=$("${compose[@]}" ps -q server); test -n "$server_id" || fail "the owner identity server is not running"
 test "$(docker inspect -f '{{.State.Health.Status}}' "$server_id")" = healthy || fail "the owner identity server is not healthy"
-{ printf 'import sys\nbootstrap=sys.modules[__name__]\n'; sed '/^if __name__ == "__main__":/,$d' "$script_dir/bootstrap.py"; cat "$script_dir/provision-trusted-device.py"; } | "${compose[@]}" exec -T -e "OWNER_IDENTITY_BOOTSTRAP_TOKEN=$token" -e "OWNER_TRUSTED_DEVICE_PROOF_SHA256=$proof_hash" server python3 -
+python3 - "$script_dir" <<'PYRUNNER' | "${compose[@]}" exec -T -e "OWNER_IDENTITY_BOOTSTRAP_TOKEN=$token" -e "OWNER_TRUSTED_DEVICE_PROOF_SHA256=$proof_hash" server python3 -
+from pathlib import Path
+import sys
+root=Path(sys.argv[1])
+print("import types, sys")
+print("bootstrap=types.ModuleType('bootstrap'); sys.modules['bootstrap']=bootstrap")
+print("exec(compile(" + repr((root/'bootstrap.py').read_text()) + ", 'bootstrap.py', 'exec'), bootstrap.__dict__)")
+print("exec(compile(" + repr((root/'provision-trusted-device.py').read_text()) + ", 'provision-trusted-device.py', 'exec'))")
+PYRUNNER
