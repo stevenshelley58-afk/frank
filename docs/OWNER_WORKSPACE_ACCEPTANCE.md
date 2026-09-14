@@ -46,31 +46,41 @@ These were observed during this build, not carried over from an older report.
 | Frank can reach the owner services from inside its container | verified | With the two private networks attached, `owner-crm-frontend-1:8080/api/method/ping` returns 200 `pong` and `frank-owner-ntfy:80/v1/health` returns 200 `healthy` |
 | The owner projections read real data in production conditions | verified | Run inside the running `frank-window` container against the live services: support 2 tickets awaiting the owner, CRM 4 new leads and 4 with no first contact, notifications 46 published |
 
-## Unresolved risks
+## Risks
 
-Recorded because they are load-bearing and not yet proven either way.
+Load-bearing questions. Each is marked resolved with its evidence, or still
+open with the test that would settle it.
 
-### Framing a native app inside Frank is unverified
+### Framing a native app inside Frank is VERIFIED
 
-The identity lane's ingress strips the upstream `X-Frame-Options` and sets a
-scoped CSP `frame-ancestors https://frank.fail` on each app host, with `frame-src`
-naming the app origins on the Frank parent. Whether the browser then actually
-renders the frame is **not yet demonstrated**.
+Confirmed in Chromium against two hosts with real certificates, testing three
+cases. The parent carried `frame-ancestors 'none'` and named the app in its
+`frame-src`; the framed app varied only its own response headers.
 
-An attempt to prove it in isolation returned "frame blocked", but that result is
-**not trustworthy**: Caddy had not finished issuing the internal certificates for
-the probe hosts, and the TLS handshake failed with
-`TLSV1_ALERT_INTERNAL_ERROR`. A failed connection and a deliberate frame rejection
-are indistinguishable in that outcome, so this is recorded as unverified, not as
-a failure and not as a pass.
+| App response headers | Result |
+| --- | --- |
+| `X-Frame-Options: SAMEORIGIN` only | **blocked** |
+| `X-Frame-Options: SAMEORIGIN` **and** a scoped CSP `frame-ancestors https://<parent>` | **framed** |
+| A scoped CSP `frame-ancestors https://<parent>` only | **framed** |
 
-What is needed: a test against hosts whose certificates are serving, asserting on
-a positive signal from inside the frame (the frame posts a message back and the
-parent records that it arrived). Absence of a console error is not proof.
+Two conclusions, and the second is the one that matters:
 
-Consequence if it does not work: the native application panels cannot render, and
-the workspace would need a different mechanism. It must not be worked around by
-widening `frame-ancestors` to a wildcard or by removing the parent's protection.
+1. A scoped CSP `frame-ancestors` **overrides** `X-Frame-Options` when both are
+   present. So the identity lane's approach works, and stripping the upstream
+   `X-Frame-Options` is defence-in-depth rather than the step that grants
+   permission — the CSP is what grants it.
+2. `X-Frame-Options` is still enforced when it is the only signal, which the
+   blocked control proves. Nothing here licenses removing framing protection
+   globally.
+
+Caveat recorded deliberately: this is browser behaviour, proven on one Chromium
+build. It is not a specification guarantee, which is why the header strip stays
+rather than being removed as redundant.
+
+An earlier attempt at this test returned "blocked" and was recorded as unverified
+because Caddy had not finished issuing certificates: a failed TLS handshake and a
+deliberate frame rejection are indistinguishable in that outcome. This result
+supersedes it.
 
 ### Other open items
 

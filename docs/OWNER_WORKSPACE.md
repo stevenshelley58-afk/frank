@@ -194,6 +194,13 @@ the temporary Australia/Perth display assumption and list it for resolution.
 - Framing is permitted **only** by approved Frank parent origins. Clickjacking
   protection is not removed globally and one broad domain session cookie is not
   shared across all apps.
+- Verified in Chromium: a scoped CSP `frame-ancestors` overrides a present
+  `X-Frame-Options`, while `X-Frame-Options` alone is still enforced. So the
+  scoped CSP is what grants permission for a native app panel, and stripping the
+  upstream header is defence-in-depth. The parent must also name the app origin
+  in its own `frame-src`. This is browser behaviour proven on one build; it is
+  not a specification guarantee, so neither the strip nor the scoped policy is
+  removed as redundant.
 - Source-application CSRF protections, cookies, redirects, assets, attachments
   and streaming are preserved.
 - **Never proxy arbitrary user-supplied URLs.** App IDs, origins and route shapes
