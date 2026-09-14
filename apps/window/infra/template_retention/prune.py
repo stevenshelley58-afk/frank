@@ -37,7 +37,7 @@ def states():
 
 def eligible(relative,best):
     parts=relative.parts
-    if relative.suffix.lower() not in MEDIA or not parts:return False
+    if (relative.suffix.lower() not in MEDIA and relative.name!='artifact.json') or not parts:return False
     if parts[0]=='reusable-validation':return True
     if parts[0]=='iterations':return len(parts)>2 and parts[1]!=f'{best:02d}' and parts[1]!=str(best)
     if parts[0]=='previews':return not re.match(r'iteration-0*'+str(best)+r'[-.]',parts[-1])
@@ -50,7 +50,12 @@ def plan(run,best):
         for name in files:
             p=Path(base)/name
             if p.is_symlink():raise RuntimeError('symlink in run')
-            (remove if eligible(p.relative_to(run),best) else keep).append(p)
+            selected=eligible(p.relative_to(run),best)
+            # These are redundant editable test/draft packages, not score history.
+            # Fail closed for any evolved schema that might carry review records.
+            if selected and p.name=='artifact.json':
+                selected=set(json.loads(p.read_text()))=={'assets','template'}
+            (remove if selected else keep).append(p)
     return remove,keep
 
 def main():
@@ -72,7 +77,7 @@ def main():
             if not (run/'final/artifact.json').is_file():raise RuntimeError('editable final artifact missing')
             protected.update({str(p):digest(p) for p in keep})
             remove.extend({'path':str(p),'bytes':p.stat().st_size,'sha256':digest(p),'mtime_ns':p.stat().st_mtime_ns} for p in drop)
-        record={'policy':'terminal-published-draft-raster-v1','apply':args.apply,'created_at':time.time(),'active_templates':len(templates),'active_assets':len(assets),'active_asset_hashes':assets,'protected_hashes':protected,'planned_files':remove,'planned_bytes':sum(x['bytes'] for x in remove),'skipped':skipped,'deleted_files':0,'deleted_bytes':0}
+        record={'policy':'terminal-published-draft-media-and-packages-v1','apply':args.apply,'created_at':time.time(),'active_templates':len(templates),'active_assets':len(assets),'active_asset_hashes':assets,'protected_hashes':protected,'planned_files':remove,'planned_bytes':sum(x['bytes'] for x in remove),'skipped':skipped,'deleted_files':0,'deleted_bytes':0}
         path=EVIDENCE/('template-results.json' if args.apply else 'template-dry-run.json')
         # Persist history separately: later no-op timer runs must not erase evidence.
         receipt=EVIDENCE/('template-'+str(time.time_ns())+'.json')
@@ -83,8 +88,12 @@ def main():
             fresh,freshassets=live()
             if fresh!=templates or freshassets!=assets:raise RuntimeError('library changed during planning')
             states()
+            last_run=None
             for item in remove:
                 p=Path(item['path'])
+                rid=p.relative_to(RUNS).parts[0]
+                if rid!=last_run:
+                    states();save();last_run=rid
                 if p.is_symlink() or p.stat().st_mtime_ns!=item['mtime_ns'] or digest(p)!=item['sha256']:raise RuntimeError('draft changed during cleanup')
                 p.unlink();record['deleted_files']+=1;record['deleted_bytes']+=item['bytes']
             current,currentassets=live()
