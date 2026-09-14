@@ -196,3 +196,52 @@ def render_readiness(app_id: str, payload: dict[str, Any]) -> tuple[int, str, st
     return 200, "application/json", body
 
 
+def create_blueprint():
+    """The readiness routes the owner workspace host calls.
+
+    Read-only and same-origin. The host asks the server whether an application
+    may be framed, so the browser is never the authority on that.
+    """
+    from flask import Blueprint, abort, jsonify, request
+
+    api = Blueprint("owner_app_readiness", __name__)
+
+    def _timeout() -> float:
+        # A bounded, caller-tunable probe timeout, clamped so a request cannot
+        # hold a worker open for an unreasonable time.
+        try:
+            value = float(request.args.get("timeout", ""))
+        except (TypeError, ValueError):
+            return DEFAULT_TIMEOUT_SECONDS
+        return min(max(value, 0.5), 15.0)
+
+    def _respond(payload: dict[str, Any]):
+        if not payload.get("known"):
+            abort(404, description="unknown owner application")
+        response = jsonify(payload)
+        # Readiness is a live observation, never a cacheable claim.
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @api.get("/api/owner/workspace/apps")
+    def owner_apps_list():
+        response = jsonify({
+            "schema": "schema://frank.owner-app-readiness/v1",
+            "apps": {app_id: dict(app) for app_id, app in OWNER_APPS.items()},
+            "approved_frame_ancestor": APPROVED_FRAME_ANCESTOR,
+            "checked_at": _now(),
+        })
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @api.get("/api/owner/workspace/apps/<app_id>/readiness")
+    def owner_app_readiness(app_id: str):
+        return _respond(app_readiness(app_id, _timeout()))
+
+    @api.get("/api/owner/workspace/readiness")
+    def owner_workspace_readiness():
+        response = jsonify(workspace_readiness(_timeout()))
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    return api
