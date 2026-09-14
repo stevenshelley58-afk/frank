@@ -432,6 +432,7 @@ export function createOwnerAppHost(deps = {}) {
   let pending = null; // { kind: "switch"|"reload", app, next, onConfirm }
   let controller = null;
   let disposed = false;
+  let approvedNativeNavigation = false;
   let host = null;
   let checkPromise = null;
   let onStateChange = deps.onStateChange || null;
@@ -467,8 +468,7 @@ export function createOwnerAppHost(deps = {}) {
       button.type = "button";
       button.addEventListener("click", () => {
         setGuard(null, []);
-        pending = null;
-        action.run();
+        try { action.run(); } finally { pending = null; }
       });
       row.append(button);
     }
@@ -669,8 +669,11 @@ export function createOwnerAppHost(deps = {}) {
     }
     const run = () => {
       win.sessionStorage?.setItem(key, String(Date.now()));
+      // The workspace warning was explicitly accepted (or no panel needed it).
+      approvedNativeNavigation = true;
       win.location.assign(url);
       win.setTimeout?.(() => {
+        approvedNativeNavigation = false;
         const entry = panels.get(appId);
         if (!disposed && entry?.state === "checking") {
           entry.state = "blocked";
@@ -860,7 +863,7 @@ export function createOwnerAppHost(deps = {}) {
   }
 
   function handleBeforeUnload(event) {
-    if (!hasUnsavedWork()) return;
+    if (approvedNativeNavigation || !hasUnsavedWork()) return;
     event.preventDefault();
     event.returnValue = "";
     return "";
