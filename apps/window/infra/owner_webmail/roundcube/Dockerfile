@@ -16,7 +16,9 @@ LABEL org.opencontainers.image.title="frank-owner-webmail" \
 
 COPY config.inc.php /usr/src/roundcubemail/config/config.inc.php
 COPY plugins/frank_sso /usr/src/roundcubemail/plugins/frank_sso
+COPY entrypoint/10-restore-committed-config.sh /entrypoint-tasks/post-setup/10-restore-committed-config.sh
 
 # Fail the build rather than ship a broken plugin or config.
 RUN php -l /usr/src/roundcubemail/config/config.inc.php \
- && php -l /usr/src/roundcubemail/plugins/frank_sso/frank_sso.php
+ && php -l /usr/src/roundcubemail/plugins/frank_sso/frank_sso.php \
+ && chmod 0755 /entrypoint-tasks/post-setup/10-restore-committed-config.sh

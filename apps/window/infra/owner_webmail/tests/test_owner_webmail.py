@@ -66,6 +66,10 @@ class ComposeContractTests(unittest.TestCase):
         self.assertIn("COPY config.inc.php /usr/src/roundcubemail/config/config.inc.php", dockerfile)
         self.assertIn("COPY plugins/frank_sso /usr/src/roundcubemail/plugins/frank_sso", dockerfile)
         self.assertIn("php -l", dockerfile)
+        self.assertIn(
+            "COPY entrypoint/10-restore-committed-config.sh /entrypoint-tasks/post-setup/10-restore-committed-config.sh",
+            dockerfile,
+        )
         self.assertIn("build:\n      context: ./roundcube", self.compose)
         self.assertIn("./ingress/default.conf.template:/etc/nginx/templates/default.conf.template:ro", self.compose)
 

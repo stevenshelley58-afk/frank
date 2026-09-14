@@ -122,7 +122,6 @@ $config['x_frame_options'] = false;
 // Errors only, to stdout, and never a credential: Roundcube's logger records
 // the IMAP/SMTP server response, not the password.
 $config['log_driver'] = 'stdout';
-$config['debug_level'] = 1;
 $config['log_logins'] = false;
 $config['per_user_logging'] = false;
 $config['sql_debug'] = false;
