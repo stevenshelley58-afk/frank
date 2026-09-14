@@ -265,6 +265,56 @@ Which other packages can continue: Everything except the app-password variant of
   the webmail launch.
 ```
 
+## Owner identity acceptance
+
+The identity lane proved the owner session boundary in a real browser, 12 of 15
+steps. The load-bearing ones all pass:
+
+| Claim | Result |
+| --- | --- |
+| An anonymous visit to `frank.fail` redirects to the identity provider | pass |
+| Multi-factor authentication is demanded, not merely available | pass, TOTP enrolled and a second factor accepted |
+| The round trip returns to the intended Frank route | pass |
+| `crm.frank.fail` accepts the owner session at the edge | pass |
+| The app sends a scoped `frame-ancestors` and no `X-Frame-Options` | pass |
+| Logout revokes the session | pass |
+| A direct native URL is denied after logout | pass |
+| Zero CSP violations | pass |
+
+Framing was confirmed twice, independently, with a positive control: Frank itself
+raised Chrome's refusal message under `frame-ancestors 'none'`, proving the
+detector fires, while the CRM produced no refusal under its scoped policy.
+
+Three defects were found only by running it, and are recorded so they are not
+rediscovered: `Set-Cookie` must not appear in a Caddy 2.8 `log format filter`
+(it stripped the header from the identity provider's own responses and broke
+sign-out); outpost `sign_out` only clears the cookie for the host it is served
+on, so logout must call it on every gated host; and a vhost with no matching
+identity application gets 404 HTML from the outpost instead of a redirect.
+
+### Frappe native login: root cause found and fixed
+
+The lane recorded Frappe's own OIDC login as blocked, with authentik answering
+`invalid_request` before issuing a code. The cause was found and fixed here:
+
+**authentik applies no default for a provider's `grant_types` when the field is
+omitted, so the Frappe provider was created with an empty grant set.** The
+authorize endpoint therefore found `authorization_code` missing from the
+provider's grant types and raised `invalid_request`. The error names no missing
+field, which is why it presented as a malformed request rather than a
+misconfigured provider.
+
+Evidence: the live row showed `grant_types = {}` while every working provider
+showed `{authorization_code,client_credentials,password}`. Setting
+`{authorization_code,refresh_token}` changed the identical request from the
+`invalid_request` error to a 302 into the sign-in flow. The bootstrap now states
+the grant types explicitly and includes the field in its patchable set, so the
+fix survives a rebuild and converges on an existing provider. A full bootstrap
+run reports `created=0 updated=0 unchanged=28`.
+
+This is software-complete. It is not yet live, because that needs the Caddyfile
+deployed, which is the release step.
+
 ## Reporting connection state
 
 Results and Revenue are implemented as a reporting framework that declares, for
