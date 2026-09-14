@@ -510,6 +510,36 @@ test("a drill-down opens the application panel that owns the record", async () =
   dispose();
 });
 
+test("the unload guard asks before discarding retained work, and does not throw", async () => {
+  // Regression: the guard referenced a name that only existed as a method on the
+  // returned API, so every unload threw instead of warning and the protection was
+  // silently absent. The retained mailbox counts as work Frank cannot check.
+  const { doc, win } = world({
+    fetchImpl: async (url) => (url.includes("/apps/") ? jsonResponse(200, readinessBody("mail")) : jsonResponse(404, null)),
+  });
+  const appHost = createOwnerAppHost({ document: doc, window: win, fetch: win.fetch });
+  const slot = doc.createElement("div");
+  appHost.mount(slot);
+  appHost.show("mail");
+  await appHost.whenSettled();
+
+  assert.equal(appHost.hasUnsavedWork(), true, "a retained mailbox is work Frank cannot verify");
+  let prevented = false;
+  win.dispatch("beforeunload", { preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, "the owner is asked before a refresh discards retained work");
+
+  // With nothing open there is nothing to protect, so the guard stays quiet.
+  // A separate window is used because listeners accumulate per window, and the
+  // first host's guard would otherwise answer for the second.
+  const quietWorld = world({ fetchImpl: async () => jsonResponse(404, null) });
+  const quiet = createOwnerAppHost({ document: quietWorld.doc, window: quietWorld.win, fetch: quietWorld.win.fetch });
+  quiet.mount(quietWorld.doc.createElement("div"));
+  assert.equal(quiet.hasUnsavedWork(), false, "nothing is open, so nothing needs protecting");
+  let quietPrevented = false;
+  quietWorld.win.dispatch("beforeunload", { preventDefault() { quietPrevented = true; } });
+  assert.equal(quietPrevented, false);
+});
+
 test("an authorized application is framed in place, and mail survives a switch", async () => {
   const { doc, win } = world({
     fetchImpl: async (url) => {

@@ -779,6 +779,24 @@ export function createOwnerAppHost(deps = {}) {
     announcement("Connection restored. Frank rechecks the open panel.");
   }
 
+  /**
+   * Whether the host is holding work that only the application can save.
+   *
+   * Defined in the closure rather than on the returned API because the unload
+   * guard needs it too: it previously existed only as a method on the returned
+   * object, so `handleBeforeUnload` referenced a name that was not in scope and
+   * threw on every unload, which disabled the guard entirely.
+   */
+  function hasUnsavedWork() {
+    if (dirtyIds().length) return true;
+    // A panel the owner is looking at right now counts too. Leaving the
+    // workspace destroys the live panel, so a visible retainable application
+    // (the mailbox) is exactly the case the warning exists for; only counting
+    // hidden retained panels would miss it.
+    if (active && isRetainable(active)) return true;
+    return retainedOrder.some((id) => isRetainable(id));
+  }
+
   function handleBeforeUnload(event) {
     if (!hasUnsavedWork()) return;
     event.preventDefault();
@@ -829,10 +847,7 @@ export function createOwnerAppHost(deps = {}) {
     activeApp() {
       return active;
     },
-    hasUnsavedWork() {
-      if (this.dirtyIds().length) return true;
-      return retainedOrder.some((id) => isRetainable(id));
-    },
+    hasUnsavedWork,
     hideAll,
     whenSettled() {
       return checkPromise ? checkPromise.catch(() => null) : Promise.resolve(null);
