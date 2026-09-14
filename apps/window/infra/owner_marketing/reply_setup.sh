@@ -52,6 +52,12 @@ docker exec -u www-data -w /var/www/html/docroot "$container" php -r '
   $parameters=[];include "/var/www/html/config/local.php";$mail=$parameters["monitored_email"]["general"]??[];$base=sprintf("{%s:%s/imap%s}",$mail["host"],$mail["port"],$mail["encryption"]);$stream=@imap_open($base."INBOX",$mail["user"],$mail["password"],OP_HALFOPEN);if(!$stream)exit(2);$target=imap_utf7_encode($base."Mautic Replies");if(!imap_createmailbox($stream,$target)&&!imap_reopen($stream,$target,OP_HALFOPEN)){imap_close($stream);exit(3);}imap_close($stream);
 ' || die native-imap-folder-create-or-check-failed
 if [[ "$listed" != *"$remote_script"* ]]; then run_sieve --localsieve "/work/$remote_script.sieve" --remotesieve "$remote_script" --upload || die managesieve-upload-failed; run_sieve --remotesieve "$remote_script" --activate || die managesieve-activate-failed; fi
+# local.php carries the monitored-mailbox credential, the database password and
+# Mautic's secret_key in clear. Refuse to leave it readable by anyone but root
+# and the web server account.
+local_php_mode="${OWNER_MARKETING_LOCAL_PHP_MODE:-0640}"
+docker exec "$container" chown root:www-data /var/www/html/config/local.php
+docker exec "$container" chmod "$local_php_mode" /var/www/html/config/local.php
 docker exec -u www-data -w /var/www/html/docroot "$container" php /var/www/html/bin/console cache:clear --no-warmup --no-interaction >/dev/null || die native-config-cache-refresh-failed
 "$script_dir/reply_check.sh"
 printf 'native Mautic reply monitoring configured for the dedicated folder\n'

@@ -178,6 +178,10 @@ class PluginContractTests(unittest.TestCase):
     def test_identities_use_roundcubes_own_api(self):
         self.assertIn("$user->insert_identity(", self.plugin)
         self.assertIn("$user->list_identities()", self.plugin)
+        # rcube_plugin exposes no $this->rcmail property; using it silently
+        # disabled identity reconciliation once already.
+        self.assertNotIn("$this->rcmail", self.plugin)
+        self.assertIn("rcmail::get_instance()->user", self.plugin)
 
 
 class IngressContractTests(unittest.TestCase):

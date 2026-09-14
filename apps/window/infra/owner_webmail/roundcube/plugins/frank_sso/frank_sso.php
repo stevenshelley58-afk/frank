@@ -113,7 +113,9 @@ class frank_sso extends rcube_plugin
         $this->clear_launch_cookie();
 
         $wanted = $this->configured_identities();
-        $user = $this->rcmail->user ?? null;
+        // The plugin base class exposes no application property; the
+        // documented singleton accessor is the supported way to reach it.
+        $user = rcmail::get_instance()->user ?? null;
         if (!$wanted || !$user || empty($user->ID)) {
             return $args;
         }
