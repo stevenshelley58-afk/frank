@@ -130,8 +130,16 @@ class FakeDocument {
 function fakeWindow({ pathname = "/project/blockwise", onLine = true } = {}) {
   const listeners = new Map();
   const win = {
-    location: { pathname, search: "", href: `https://frank.fail${pathname}` },
+    location: { pathname, search: "", href: `https://frank.fail${pathname}`, assigned: [], assign(url) { this.assigned.push(url); this.href = url; } },
     navigator: { onLine },
+    sessionStorage: {
+      values: new Map(),
+      getItem(key) { return this.values.get(key) || null; },
+      setItem(key, value) { this.values.set(key, String(value)); },
+      removeItem(key) { this.values.delete(key); },
+    },
+    timers: [],
+    setTimeout(fn, ms) { this.timers.push({ fn, ms }); return this.timers.length; },
     history: {
       pushed: [],
       replaced: [],
@@ -680,4 +688,55 @@ test("the legacy operations shortcut still starts the real workspace host", asyn
   assert.equal(walk(workspace).find((node) => node.dataset.section === "overview").getAttribute("aria-current"), "page");
   assert.equal(walk(workspace).filter((node) => node.tagName === "IFRAME").length, 0);
   dispose();
+});
+
+
+function buttonNamed(root, label) {
+  return walk(root).find((node) => node.tagName === "BUTTON" && node.textContent === label) || null;
+}
+
+test("guard actions run while pending, and approved native sign-in bypasses then rearms unload protection", async () => {
+  const { doc, win } = world({
+    fetchImpl: async (url) => jsonResponse(url.includes("/mail/") ? 200 : 401, url.includes("/mail/") ? readinessBody("mail") : null),
+  });
+  const appHost = createOwnerAppHost({ document: doc, window: win, fetch: win.fetch });
+  const slot = doc.createElement("div");
+  appHost.mount(slot);
+  appHost.show("mail");
+  await appHost.whenSettled();
+  const mailFrame = frameOf(panelOf(slot, "mail"));
+  win.dispatch("message", { origin: "https://mail.frank.fail", source: mailFrame.contentWindow, data: { channel: "frank.owner-app", version: 1, app: "mail", type: "ready" } });
+
+  // Reload is a real rendered guard action. Its closure depends on pending still
+  // existing when it runs, so this catches clearing pending too early.
+  const originalMailPanel = panelOf(slot, "mail");
+  appHost.reload("mail");
+  const reload = buttonNamed(slot, "Reload Mail");
+  assert.ok(reload);
+  reload.dispatch("click");
+  assert.equal(appHost.pendingWarning(), null);
+  assert.notEqual(panelOf(slot, "mail"), originalMailPanel, "reload action ran before the guard cleared pending");
+  await appHost.whenSettled();
+  const reloadedMailFrame = frameOf(panelOf(slot, "mail"));
+  win.dispatch("message", { origin: "https://mail.frank.fail", source: reloadedMailFrame.contentWindow, data: { channel: "frank.owner-app", version: 1, app: "mail", type: "ready" } });
+
+  appHost.show("crm");
+  await appHost.whenSettled();
+  const connect = buttonNamed(slot, "Connect inside Frank");
+  assert.ok(connect);
+  connect.dispatch("click");
+  const continueSignIn = buttonNamed(slot, "Continue sign-in");
+  assert.ok(continueSignIn, "retained mail still protects ordinary navigation");
+  continueSignIn.dispatch("click");
+  assert.equal(win.location.assigned.at(-1), "https://crm.frank.fail/api/method/frank_owner_entry.api.enter?app=crm");
+  let prevented = false;
+  win.dispatch("beforeunload", { preventDefault() { prevented = true; } });
+  assert.equal(prevented, false, "explicitly approved sign-in is not blocked again");
+  const timeout = win.timers.find((timer) => timer.ms === 12000);
+  assert.ok(timeout);
+  timeout.fn();
+  prevented = false;
+  win.dispatch("beforeunload", { preventDefault() { prevented = true; } });
+  assert.equal(prevented, true, "timeout re-arms normal retained-mail protection");
+  appHost.dispose();
 });
