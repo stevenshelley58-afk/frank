@@ -92,8 +92,32 @@ def run_series(root,pattern,kind,apply=False,refs=(),decrypt=True):
    if is_protected(p,protected_paths()):raise ValueError('backup became busy')
    shutil.rmtree(p);out['deleted'].append(str(p))
  return out
+
+def run_router_backups(apply=False,root=Path('/srv/family-tablet/router-backups')):
+ if not root.exists():return {'status':'absent','kept':[],'deleted':[]}
+ if root.resolve()!=root:raise ValueError('router backup root redirected')
+ files=sorted([p for p in root.iterdir() if re.fullmatch(r'router-before-\d{8}T\d{6,12}Z.json',p.name)],reverse=True)
+ result={'kept':[],'deleted':[],'planned':[],'invalid_retained':[]};valid=[]
+ for p in files:
+  try:
+   if p.is_symlink() or not p.is_file():raise ValueError('not ordinary file')
+   data=json.loads(p.read_text())
+   if not isinstance(data,dict) or not data:raise ValueError('invalid config backup')
+   valid.append((p,digest(p),set(data)))
+  except (ValueError,OSError):result['invalid_retained'].append(str(p))
+ result['kept']=[str(x[0]) for x in valid[:2]]
+ if len(valid)<3:return result
+ for p,h,keys in valid[2:]:
+  if not all(keys.issubset(k[2]) for k in valid[:2]):continue
+  if is_protected(p,protected_paths()):continue
+  result['planned'].append(str(p))
+  if apply:
+   if p.resolve().parent!=root or digest(p)!=h or any(digest(k[0])!=k[1] for k in valid[:2]):raise ValueError('router backup changed')
+   p.unlink();result['deleted'].append(str(p))
+ return result
+
 def main():
- ap=argparse.ArgumentParser();ap.add_argument('--apply',action='store_true');ap.add_argument('--series',choices=list(SERIES));args=ap.parse_args()
+ ap=argparse.ArgumentParser();ap.add_argument('--apply',action='store_true');ap.add_argument('--series',choices=list(SERIES)+['kids-router']);args=ap.parse_args()
  with open('/run/lock/vps-backup-retention.lock','w') as lock:
   try:fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
   except BlockingIOError:print('retention already running');return
@@ -102,6 +126,9 @@ def main():
    if args.series and name!=args.series:continue
    try:result['series'][name]=run_series(Path(root),pattern,kind,args.apply,refs)
    except Exception as e:result['series'][name]={'error':str(e)[:180],'status':'retained_on_error'}
+  if not args.series or args.series=='kids-router':
+   try:result['series']['kids-router']=run_router_backups(args.apply)
+   except Exception as e:result['series']['kids-router']={'error':str(e)[:180],'status':'retained_on_error'}
   print(json.dumps(result,indent=2))
   if any('error' in x for x in result['series'].values()):sys.exit(1)
 if __name__=='__main__':main()

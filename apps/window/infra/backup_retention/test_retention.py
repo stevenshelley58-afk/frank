@@ -34,4 +34,12 @@ class RetentionTests(unittest.TestCase):
   for n in range(1,4):self.backup(n)
   p=self.root/'20260101T000000Z';(p/'extra').write_bytes(b'x');h=hashlib.sha256(b'x').hexdigest();f=p/'SHA256SUMS';f.write_text(f.read_text()+f'{h}  extra\n')
   self.assertEqual(m.run_series(self.root,m.STAMP,'manifest')['planned'],[])
+ def test_router_keeps_two_valid_complete_copies(self):
+  import json
+  for n in range(1,5):(self.root/f'router-before-2026010{n}T000000Z.json').write_text(json.dumps({'routes':n}))
+  original=m.protected_paths;m.protected_paths=lambda:[]
+  try:out=m.run_router_backups(True,self.root)
+  finally:m.protected_paths=original
+  self.assertEqual(len(out['deleted']),2)
+  self.assertEqual(len(list(self.root.iterdir())),2)
 if __name__=='__main__':unittest.main()
