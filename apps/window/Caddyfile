@@ -598,7 +598,11 @@ auth.frank.fail {
 		request_header -X-Frank-Device-Gate
 		# Only requests arriving over Tailscale can request device recognition.
 		# The verifier also checks the current node ID and owner via LocalAPI.
-		@tailnet remote_ip 100.64.0.0/10 fd7a:115c:a1e0::/48
+		@tailnet {
+			remote_ip 100.64.0.0/10 fd7a:115c:a1e0::/48
+			# Public IdP assets carry no identity and must not flood WhoIs.
+			not path /static/*
+		}
 		forward_auth @tailnet 172.31.50.1:18089 {
 			uri /verify
 			header_up X-Frank-Device-Gate {$OWNER_DEVICE_GATE_SECRET}
