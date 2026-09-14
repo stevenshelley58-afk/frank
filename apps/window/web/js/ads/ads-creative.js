@@ -55,6 +55,7 @@ import {
   errorPanel,
   skeleton,
   staleBanner,
+  rowsReadNote,
   definitionRow,
   createDrawer,
 } from "./ads-ui.js";
@@ -83,7 +84,7 @@ import {
   rowName,
   rowKey,
 } from "./ads-contracts.js";
-import { READER_REQUIREMENTS } from "./ads-source.js";
+import { READER_REQUIREMENTS, isUnresolved } from "./ads-source.js";
 
 // A tag below this confidence wears the dashed marker. It matches the threshold
 // the saved rows themselves use for `needsReview`, so the table's review flag
@@ -216,6 +217,7 @@ export function createCreativeScreen(ctx, host) {
   const state = {
     loading: true,
     status: "loading",
+    readStatus: "",
     detail: "",
     fetchedAt: null,
     rows: null,
@@ -334,16 +336,40 @@ export function createCreativeScreen(ctx, host) {
       // The verdict is computed on the aggregated row, exactly as the contract
       // intends: a concept is judged on everything spent behind it.
       group.evidence = evidenceFor(group, { metric: "results" });
+      // A ranking may only lean on the quantity it ranks, so each ranking below
+      // carries the verdict for its own counter. Provider results cannot vouch
+      // for a CRM lead count, and neither can vouch for a click count.
+      group.leadEvidence = evidenceFor(
+        { results: group.qualifiedLeads, linkClicks: group.linkClicks, spend: group.spend },
+        { metric: "results" },
+      );
+      group.clickEvidence = evidenceFor(
+        { clicks: group.linkClicks, impressions: group.impressions, spend: group.spend },
+        { metric: "clicks" },
+      );
       return group;
     });
   }
 
   /** The one ranking this screen is allowed to state: groups that clear the
-   *  evidence floor and have a computable cost per qualified lead. */
+   *  evidence floor on CRM-qualified leads — the quantity this ranking is stated
+   *  in — and have a computable cost per qualified lead. */
   function rankByQualifiedLead(groups) {
     return groups
-      .filter((group) => group.evidence.level !== "insufficient" && group.costPerQualifiedLead !== null)
+      .filter((group) => group.leadEvidence.level !== "insufficient" && group.costPerQualifiedLead !== null)
       .sort(byNumber((group) => group.costPerQualifiedLead));
+  }
+
+  /**
+   * Why a ranking was refused, in the units that ranking uses. The contract's
+   * own reason names its `metric` ("results"), which would misname the CRM
+   * counter the qualified-lead answers rank on.
+   */
+  function rankingFloorReason(fullest, { count, floor, noun }) {
+    const value = num(count);
+    if (value === null || value <= 0) return `No measured ${noun} in this window, so there is nothing to rank.`;
+    if (value < floor) return `${formatInt(value)} ${noun} of the ${formatInt(floor)} a ranking on ${noun} needs before it means anything.`;
+    return "";
   }
 
   // ---------------------------------------------------------------- trends ---
@@ -741,10 +767,12 @@ export function createCreativeScreen(ctx, host) {
   }
 
   /** The fullest group is the honest one to quote a floor reason from: it is the
-   *  row that came closest to being rankable. A group whose result count is
-   *  unknown is not "fullest", so it sorts last like every other missing value. */
-  function fullestGroup(groups) {
-    return groups.slice().sort(byNumber((group) => group.results, "desc"))[0] || null;
+   *  row that came closest to being rankable. It is measured on the counter the
+   *  ranking uses, so the reason names a quantity the reader can check. A group
+   *  whose count is unknown is not "fullest", so it sorts last like every other
+   *  missing value. */
+  function fullestGroup(groups, counter) {
+    return groups.slice().sort(byNumber((group) => group[counter], "desc"))[0] || null;
   }
 
   function qualifiedAnswer(groups, emptyText, tail) {
@@ -755,8 +783,11 @@ export function createCreativeScreen(ctx, host) {
     }
     const ranked = rankByQualifiedLead(groups);
     if (!ranked.length) {
-      const fullest = fullestGroup(groups);
-      insufficientAnswer(nodes, fullest?.evidence?.reason);
+      const fullest = fullestGroup(groups, "qualifiedLeads");
+      insufficientAnswer(
+        nodes,
+        rankingFloorReason(fullest, { count: fullest?.qualifiedLeads, floor: EVIDENCE_FLOOR.results, noun: "CRM-qualified leads" }),
+      );
       return nodes;
     }
     const shown = ranked.slice(0, 3);
@@ -779,10 +810,14 @@ export function createCreativeScreen(ctx, host) {
   function cheapClickAnswer(groups, bestLead) {
     const nodes = el("span");
     const withCost = groups
-      .filter((group) => group.evidence.level !== "insufficient" && group.costPerClick !== null)
+      .filter((group) => group.clickEvidence.level !== "insufficient" && group.costPerClick !== null)
       .sort(byNumber((group) => group.costPerClick));
     if (!withCost.length) {
-      insufficientAnswer(nodes, fullestGroup(groups)?.evidence?.reason);
+      const fullest = fullestGroup(groups, "linkClicks");
+      insufficientAnswer(
+        nodes,
+        rankingFloorReason(fullest, { count: fullest?.linkClicks, floor: EVIDENCE_FLOOR.clicks, noun: "link clicks" }),
+      );
       return nodes;
     }
     const cheapest = withCost[0];
@@ -816,7 +851,7 @@ export function createCreativeScreen(ctx, host) {
     const note = el("p", "ads-block-note");
     note.append(
       doc.createTextNode(
-        `Computed from the ${formatInt(rows.length)} creative${rows.length === 1 ? "" : "s"} in view and nothing else, under the same evidence floor as the comparison above. Nothing here predicts what a creative will do next; it describes what the saved window already shows.`,
+        `Computed from the ${formatInt(rows.length)} creative${rows.length === 1 ? "" : "s"} in view and nothing else. Each answer is floored on the quantity it ranks: ${formatInt(EVIDENCE_FLOOR.results)} provider results for the cost-per-result comparison above, ${formatInt(EVIDENCE_FLOOR.results)} CRM-qualified leads for the qualified-lead answers and ${formatInt(EVIDENCE_FLOOR.clicks)} link clicks for the cheap-click answer. Nothing here predicts what a creative will do next; it describes what the saved window already shows.`,
       ),
     );
     section.querySelector(".ads-block-head").append(note);
@@ -1279,8 +1314,21 @@ export function createCreativeScreen(ctx, host) {
       section.append(
         bulkBar({
           count: selection.size(),
+          matchingCount: selection.matchingSize(),
+          pageCount: selection.pageSize(),
+          hiddenCount: selection.hiddenKeys().length,
           noun: "creative",
           note: "Space selects a row, Enter opens it. Selecting never writes anything.",
+          onSelectMatching: () => {
+            const total = selection.matchingSize();
+            selection.selectMatching();
+            ctx.say(`Selected all ${total} creatives the current filters match. Nothing has been changed.`);
+            render();
+          },
+          onSelectPage: () => {
+            selection.retain(selection.pageKeys());
+            render();
+          },
           onClear: () => {
             selection.clear();
             render();
@@ -1545,11 +1593,14 @@ export function createCreativeScreen(ctx, host) {
       );
       return;
     }
-    if (state.status === "error") {
+    // A read that did not complete and left no rows on screen says that,
+    // instead of the "answered without rows" panel, which describes a different
+    // failure.
+    if (isUnresolved(state.status) && !state.rows) {
       content.append(
         errorPanel({
           title: "The creative rows did not load",
-          detail: state.detail,
+          detail: state.detail || "The Frank read model did not answer, and no earlier rows are held for this window.",
           onRetry: () => void load({ force: true }),
         }),
       );
@@ -1576,22 +1627,26 @@ export function createCreativeScreen(ctx, host) {
       return;
     }
 
-    // Cached rows stay visible through a throttled or stale sync, with their
-    // age stated. Any other status that still carried rows is not a state this
-    // banner can describe honestly, so it is not shown.
-    if (state.status === "stale" || state.status === "throttled" || state.status === "syncing") {
+    // Rows the reader kept from an earlier read stay visible through a
+    // throttled, stale or failed re-read, with the reason and their age stated.
+    if (isUnresolved(state.status)) {
       content.append(
         staleBanner({
-          status: state.status,
+          status: state.readStatus,
           fetchedAt: state.fetchedAt,
           detail: state.detail,
-          onRefresh: () => ctx.refresh(),
+          onRefresh: () => void load({ force: true }),
         }),
       );
     }
+    content.append(rowsReadNote(state.fetchedAt, { suffix: "Nothing on this screen calls the provider." }));
 
     const fields = buildFields();
     const rows = applyView(state.rows, fields);
+    // Tell the selection which rows the filters leave, so "select all matching"
+    // can state an exact count and stay a separate, named action from selecting
+    // the page.
+    selection.setMatching(rows);
 
     content.append(compareSection(rows));
     content.append(answersSection(rows));
@@ -1614,17 +1669,24 @@ export function createCreativeScreen(ctx, host) {
 
     state.loading = false;
     state.status = result.status;
+    // Which read actually failed, when the rows on screen came from an earlier
+    // one the reader kept.
+    state.readStatus = result.failedStatus || result.status;
     state.detail = result.detail || "";
     state.fetchedAt = result.fetchedAt || null;
     // A missing row list and an empty row list are different facts, and the
-    // render keeps them apart.
-    state.rows = Array.isArray(result.data?.rows) ? result.data.rows : null;
-    views.clear();
-    trends.clear();
-    // The duplicate index is a fact about the library, so it is built once per
-    // read over every loaded row and not over the filtered view.
-    duplicates = buildDuplicates(state.rows || []);
-    selection.retain((state.rows || []).map(rowKey));
+    // render keeps them apart. A read that carried no row list at all must not
+    // blank rows already on screen.
+    const rows = Array.isArray(result.data?.rows) ? result.data.rows : null;
+    if (rows) {
+      state.rows = rows;
+      views.clear();
+      trends.clear();
+      // The duplicate index is a fact about the library, so it is built once per
+      // read over every loaded row and not over the filtered view.
+      duplicates = buildDuplicates(state.rows || []);
+      selection.retain((state.rows || []).map(rowKey));
+    }
     render();
     if (state.status === "ready" && state.rows) {
       ctx.say(`${formatInt(state.rows.length)} creative${state.rows.length === 1 ? "" : "s"} loaded.`);
@@ -1643,5 +1705,6 @@ export function createCreativeScreen(ctx, host) {
       drawer.close({ restoreFocus: false });
     },
     settled: () => settled,
+    reload: (options = {}) => load({ force: Boolean(options.force) }),
   };
 }

@@ -10,7 +10,7 @@
 // written to browser storage; they are re-read from Frank every session.
 
 import { el, button, chip, popover, menuItem, menuGroup, svg, ICONS } from "./ads-ui.js";
-import { num } from "./ads-contracts.js";
+import { formatInt, num } from "./ads-contracts.js";
 
 const STORAGE_KEY = "frank.ads.views.v1";
 
@@ -432,7 +432,18 @@ export function filterBar({
  * count, and offers only actions that apply to the selection. It never hides
  * what is selected behind a count alone.
  */
-export function bulkBar({ count, noun = "row", actions = [], onClear = null, note = "" }) {
+export function bulkBar({
+  count,
+  noun = "row",
+  actions = [],
+  onClear = null,
+  note = "",
+  matchingCount = 0,
+  pageCount = 0,
+  hiddenCount = 0,
+  onSelectMatching = null,
+  onSelectPage = null,
+}) {
   const bar = el("div", "ads-bulkbar");
   bar.setAttribute("role", "region");
   bar.setAttribute("aria-label", "Bulk actions");
@@ -441,12 +452,40 @@ export function bulkBar({ count, noun = "row", actions = [], onClear = null, not
   // actually pluralises that way.
   const plural = count === 1 || /(s|x|z|ch|sh)$/.test(noun) ? noun : `${noun}s`;
   summary.append(el("strong", "", `${count.toLocaleString("en-GB")} ${plural} selected`));
+  // Say plainly how many of the selected rows are not on this page. A count
+  // that silently includes off-screen rows is how a bulk edit surprises its
+  // operator after the fact.
+  if (hiddenCount > 0) {
+    summary.append(el("span", "ads-bulk-note", `${formatInt(hiddenCount)} not on this page`));
+  }
   if (note) summary.append(el("span", "ads-bulk-note", note));
   bar.append(summary);
+
+  // Scope controls. These two are deliberately separate buttons with different
+  // names, because "this page" and "every matching row" are different
+  // decisions. Neither is the default: the operator has to choose one.
+  const scope = el("div", "ads-bulk-scope");
+  if (onSelectMatching && matchingCount > count) {
+    scope.append(
+      button(`Select all ${formatInt(matchingCount)} matching`, {
+        title: `Selects every row the current filters match, including the ${formatInt(matchingCount - count)} not shown on this page.`,
+        onClick: onSelectMatching,
+      }),
+    );
+  }
+  if (onSelectPage && hiddenCount > 0) {
+    scope.append(
+      button(`Keep only this page (${formatInt(pageCount)})`, {
+        title: "Drops the selected rows that are not on this page, so the next bulk action touches only what you can see.",
+        onClick: onSelectPage,
+      }),
+    );
+  }
+
   const group = el("div", "ads-bulk-actions");
   for (const action of actions) group.append(action);
   group.append(button("Clear selection", { variant: "quiet", onClick: onClear }));
-  bar.append(group);
+  bar.append(scope, group);
   return bar;
 }
 

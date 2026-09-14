@@ -10,6 +10,7 @@ Meta because a tab opened or a filter changed.
 | File | Owns |
 | --- | --- |
 | `ads-workspace.js` | The shell: account bar, context strip, screen nav, preview switch, reader wiring |
+| `ads-drafts.js` | The shared draft model: one record per staged change, its identity, approval state and storage |
 | `ads-contracts.js` | Metric definitions, controlled vocabularies, evidence maths, formatters |
 | `ads-source.js` | Reader endpoints, the result envelope, cache, dedupe, preview delegation |
 | `ads-preview-data.js` | Synthetic fixtures. **Only** reachable when preview is on |
@@ -47,6 +48,17 @@ export function createMyScreen(ctx, host) {
 (polite live region), `store` (per-screen saved views), `openPublish`, `win`,
 `doc`.
 
+## Staged changes
+
+The launch flow, the campaigns table and the publishing queue all write the same
+record through `ads-drafts.js`. A draft keeps the creatives and their mappings,
+the campaign configuration and tracking, the planned rows with their validation,
+the proposed budget or pause changes with before/after values, and its own
+identity and approval state. `stage()` is the only transition that produces a
+queue entry (`editing → staged`, `draft → queued`), it stays local, and no code
+path in this module sets a submission state. Drafts survive a reload; preview
+drafts carry `origin: "preview"` and never surface in a live queue.
+
 ## Non-negotiables
 
 1. **Never invent a number.** A missing value renders `—`. A missing reader
@@ -82,4 +94,17 @@ npm run verify                         # compiles python, checks every JS file
 ```
 
 `npm run verify` is the declared runner in `docs/DEVELOPMENT.md`. It is not a
-browser test; the interactive acceptance pass is separate and manual.
+browser test; the interactive acceptance pass is separate:
+
+```bash
+cd apps/window
+node --test tests/ads_workspace_contract.test.mjs tests/ads_tracking.test.mjs
+/srv/frank/acceptance-venv/bin/python acceptance/ads_journey.py \
+    --root . --out /srv/frank/verification/ads-repair-20260914
+```
+
+The journey mounts these modules unchanged in a real Chromium through
+`acceptance/ads_harness.html`, which stubs only what a server would answer, and
+covers the bulk-selection scope, the mapping edits, the launch-to-queue
+handoff, reopening a staged draft, tracking identity stability, a throttled
+refresh and preview isolation.

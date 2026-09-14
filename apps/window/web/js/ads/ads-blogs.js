@@ -40,6 +40,8 @@ import {
   emptyPanel,
   errorPanel,
   skeleton,
+  staleBanner,
+  rowsReadNote,
   definitionRow,
   createDrawer,
 } from "./ads-ui.js";
@@ -59,11 +61,10 @@ import {
   formatPercent,
   formatMoney,
   formatDay,
-  ageState,
   rowName,
   rowKey,
 } from "./ads-contracts.js";
-import { READER_REQUIREMENTS } from "./ads-source.js";
+import { READER_REQUIREMENTS, isUnresolved } from "./ads-source.js";
 
 // The three populations a reader can look at. "All traffic" is the default
 // because it is what the article actually received, and the split is printed
@@ -189,6 +190,7 @@ export function createBlogsScreen(ctx, host) {
   const state = {
     loading: true,
     status: "loading",
+    readStatus: "",
     detail: "",
     fetchedAt: null,
     rows: null,
@@ -222,11 +224,16 @@ export function createBlogsScreen(ctx, host) {
       state.selectionFocus = String(key || "");
       baseToggle(key, options);
     };
-    const baseSelectAll = model.selectAllVisible.bind(model);
-    model.selectAllVisible = (on) => {
-      state.selectionFocus = HEADER_SELECT;
-      baseSelectAll(on);
-    };
+    // The header box is the page-scoped select-all. Wrapping it records that the
+    // move came from the header rather than a row, so the next render can put
+    // focus back on the box.
+    if (typeof model.selectPage === "function") {
+      const baseSelectPage = model.selectPage.bind(model);
+      model.selectPage = (on) => {
+        state.selectionFocus = HEADER_SELECT;
+        baseSelectPage(on);
+      };
+    }
   }
 
   let creativeIndex = new Map();
@@ -248,15 +255,27 @@ export function createBlogsScreen(ctx, host) {
 
     state.loading = false;
     state.status = blogs.status;
+    // Which read actually failed, when the rows on screen came from an earlier
+    // one the reader kept.
+    state.readStatus = blogs.failedStatus || blogs.status;
     state.detail = blogs.detail || "";
     state.fetchedAt = blogs.fetchedAt || null;
-    state.rows = Array.isArray(blogs.data?.rows) ? blogs.data.rows : null;
+    // A read that carried no row list must not blank the rows already on
+    // screen; the render tells a missing list from an empty one.
+    const blogRows = Array.isArray(blogs.data?.rows) ? blogs.data.rows : null;
+    if (blogRows) state.rows = blogRows;
     state.creativesStatus = creatives.status;
-    state.creatives = Array.isArray(creatives.data?.rows) ? creatives.data.rows : [];
+    const creativeRows = Array.isArray(creatives.data?.rows) ? creatives.data.rows : null;
+    if (creativeRows) state.creatives = creativeRows;
     render();
   }
 
   // ------------------------------------------------------- the reader's shape --
+
+  /** The ad join reads the creative rows, not the read's status: rows kept from
+   *  an earlier read still join, and only a read with nothing behind it leaves
+   *  the join unavailable. */
+  const joinAvailable = () => state.creativesStatus === "ready" || state.creatives.length > 0;
 
   const totalsOf = (row) => row?.totals || {};
   const bySourceOf = (row) => row?.bySource || {};
@@ -487,7 +506,7 @@ export function createBlogsScreen(ctx, host) {
     const filtered = applyFilters(state.rows || [], ctx.store.state.filters, fields).filter(matchesSearch);
     // The visible set first, so a shift range or a select-all can never sweep in
     // a filtered-out row; then drop ticks whose row is no longer on screen.
-    selection.setVisible(filtered);
+    selection.setMatching(filtered);
     selection.retain(filtered.map(rowKey));
     return { fields, filtered };
   }
@@ -942,8 +961,21 @@ export function createBlogsScreen(ctx, host) {
       section.append(
         bulkBar({
           count: selection.size(),
+          matchingCount: selection.matchingSize(),
+          pageCount: selection.pageSize(),
+          hiddenCount: selection.hiddenKeys().length,
           noun: "article",
           note: "A comparison is read-only. Nothing is sent, and no ranking is claimed below the evidence floor.",
+          onSelectMatching: () => {
+            const total = selection.matchingSize();
+            selection.selectMatching();
+            ctx.say(`Selected all ${total} articles the current filters match.`);
+            render();
+          },
+          onSelectPage: () => {
+            selection.retain(selection.pageKeys());
+            render();
+          },
           actions: [
             button("Compare selected", {
               icon: ICONS.compare,
@@ -1106,7 +1138,7 @@ export function createBlogsScreen(ctx, host) {
       note: `Evidence for a group is judged on its articles' totals — the floor is ${floorSentence(currency)} — because the reader does not split qualified leads by traffic source. A group below the floor is listed as "Insufficient evidence", never as a winner.`,
     });
 
-    if ((state.dimension === "hook" || state.dimension === "family") && state.creativesStatus !== "ready") {
+    if ((state.dimension === "hook" || state.dimension === "family") && !joinAvailable()) {
       section.append(
         emptyPanel({
           title: "The creative join is unavailable",
@@ -1185,15 +1217,11 @@ export function createBlogsScreen(ctx, host) {
       ),
     );
     section.append(list);
-    const age = ageState(state.fetchedAt);
     section.append(
-      el(
-        "p",
-        "ads-screen-note",
-        state.fetchedAt
-          ? `Rows read ${age.label}. Frank re-fetches a recent window on every sync to pick up delayed attribution, so the last few days can still move. Nothing on this screen calls the provider.`
-          : "The read model did not report when these rows were read, so their age is unknown.",
-      ),
+      rowsReadNote(state.fetchedAt, {
+        suffix:
+          "When the reporting sync runs it re-fetches a recent window to pick up delayed attribution, so the last few days can still move. Nothing on this screen calls the provider.",
+      }),
     );
     return section;
   }
@@ -1261,7 +1289,7 @@ export function createBlogsScreen(ctx, host) {
       const joinBlock = el("div", "ads-block");
       joinBlock.append(el("h3", "ads-block-title", "Ads joined to this article"));
       const joined = creativesFor(row);
-      if (state.creativesStatus !== "ready") {
+      if (!joinAvailable()) {
         joinBlock.append(el("p", "ads-block-note", "The creative read did not answer for this window, so the ad join is unavailable."));
       } else if (!joined.length) {
         joinBlock.append(el("p", "ads-block-note", "No creative in this window carries this article's blog topic, so there is nothing to join."));
@@ -1486,19 +1514,42 @@ export function createBlogsScreen(ctx, host) {
       );
       return;
     }
-    if (state.status !== "ready" || !Array.isArray(state.rows)) {
+    // A read that did not complete and left no rows on screen is reported as
+    // that, rather than as a reader answering without a row list.
+    if (isUnresolved(state.status) && !Array.isArray(state.rows)) {
       content.append(
         errorPanel({
-          title: state.status === "ready" ? "That read answered without rows" : "That read did not complete",
-          detail:
-            state.status === "ready"
-              ? "The blogs reader answered but carried no row list, so there is nothing truthful to draw. Retrying re-reads the saved window."
-              : state.detail || `The blogs reader answered "${state.status}" for this window. Retrying re-reads the same saved rows.`,
+          title: "That read did not complete",
+          detail: state.detail || "The Frank read model did not answer, and no earlier rows are held for this window.",
           onRetry: () => void load({ force: true }),
         }),
       );
       return;
     }
+    if (state.status === "ready" && !Array.isArray(state.rows)) {
+      content.append(
+        errorPanel({
+          title: "That read answered without rows",
+          detail: "The blogs reader answered but carried no row list, so there is nothing truthful to draw. Retrying re-reads the saved window.",
+          onRetry: () => void load({ force: true }),
+        }),
+      );
+      return;
+    }
+
+    // Rows the reader kept from an earlier read stay visible through a
+    // throttled, stale or failed re-read, with the reason and their age stated.
+    if (isUnresolved(state.status)) {
+      content.append(
+        staleBanner({
+          status: state.readStatus,
+          fetchedAt: state.fetchedAt,
+          detail: state.detail,
+          onRefresh: () => void load({ force: true }),
+        }),
+      );
+    }
+    content.append(rowsReadNote(state.fetchedAt, { suffix: "Nothing on this screen calls the provider." }));
 
     const currency = ctx.context?.account?.currency || "GBP";
     indexCreatives();
@@ -1520,5 +1571,6 @@ export function createBlogsScreen(ctx, host) {
       drawer.close({ restoreFocus: false });
     },
     settled: () => settled,
+    reload: (options = {}) => load({ force: Boolean(options.force) }),
   };
 }

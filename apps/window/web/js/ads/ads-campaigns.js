@@ -33,9 +33,12 @@ import {
   skeleton,
   definitionRow,
   createDrawer,
+  staleBanner,
+  rowsReadNote,
 } from "./ads-ui.js";
 import { createTable, column, createSelection, columnChooser, sortControl } from "./ads-table.js";
 import { applyFilters, field, filterBar, bulkBar, hiddenSelectionNotice } from "./ads-views.js";
+import { isUnresolved } from "./ads-source.js";
 import {
   ENTITY_LEVELS,
   ENTITY_LEVEL_LABELS,
@@ -72,7 +75,9 @@ export function createCampaignsScreen(ctx, host) {
     search: "",
     loading: true,
     status: "loading",
+    readStatus: "",
     detail: "",
+    fetchedAt: null,
     compareKeys: [],
   };
 
@@ -88,11 +93,17 @@ export function createCampaignsScreen(ctx, host) {
     if (disposed) return;
     state.loading = false;
     state.status = result.status;
+    // Which read actually failed, when the rows on screen came from an earlier
+    // one the reader kept.
+    state.readStatus = result.failedStatus || result.status;
     state.detail = result.detail || "";
+    state.fetchedAt = result.fetchedAt || null;
     // Metrics read from the row directly, so the level's totals are lifted to
-    // the top level once here instead of in every column renderer.
-    state.rows = (result.data?.rows || []).map((row) => ({ ...row, ...(row.totals || {}) }));
-    selection.setVisible(state.rows);
+    // the top level once here instead of in every column renderer. A read that
+    // carried no row list must not replace rows already on screen with none.
+    const rows = Array.isArray(result.data?.rows) ? result.data.rows : null;
+    if (rows) state.rows = rows.map((row) => ({ ...row, ...(row.totals || {}) }));
+    selection.setMatching(state.rows);
     render();
   }
 
@@ -330,7 +341,7 @@ export function createCampaignsScreen(ctx, host) {
       return rowName(row).toLowerCase().includes(needle) || String(row.internalId || row.id).toLowerCase().includes(needle);
     });
     state.filtered = filtered;
-    selection.setVisible(filtered);
+    selection.setMatching(filtered);
     // A row hidden by a filter must not stay selected into a bulk action.
     selection.retain(filtered.map(rowKey));
     return { fields, filtered };
@@ -463,7 +474,9 @@ export function createCampaignsScreen(ctx, host) {
    * single easiest way to spend money by accident.
    */
   function openBulkReview(kind) {
-    const chosen = selection.keys().map((key) => state.rows.find((row) => rowKey(row) === key)).filter(Boolean);
+    // Only rows the current filters keep can be selected, so this is both the
+    // exact set the operator chose and the exact set the review lists.
+    const chosen = selection.keys().map((key) => state.filtered.find((row) => rowKey(row) === key)).filter(Boolean);
     if (!chosen.length) return;
     const currency = ctx.context?.account?.currency || "GBP";
     drawer.setTitle(kind === "pause" ? "Review a bulk pause" : "Review a bulk budget change");
@@ -482,13 +495,18 @@ export function createCampaignsScreen(ctx, host) {
       const preview = el("div", "ads-bulk-preview");
       const rowsHost = el("div", "ads-bulk-rows");
 
+      const afterBudget = (row) => {
+        const before = Number(row.budget) || 0;
+        return kind === "pause" ? before : Math.max(1, Math.round(before * (1 + percent / 100) * 100) / 100);
+      };
+
       const beforeAfter = () => {
         clear(rowsHost);
         let beforeTotal = 0;
         let afterTotal = 0;
         for (const row of chosen) {
           const before = Number(row.budget) || 0;
-          const after = kind === "pause" ? before : Math.max(1, Math.round(before * (1 + percent / 100) * 100) / 100);
+          const after = afterBudget(row);
           beforeTotal += before;
           afterTotal += after;
           const line = el("div", "ads-ba-row");
@@ -533,7 +551,7 @@ export function createCampaignsScreen(ctx, host) {
         el(
           "span",
           "",
-          `${chosen.length} row${chosen.length === 1 ? "" : "s"} will change. Rows hidden by the current filters were removed from this selection before it was counted.`,
+          `${chosen.length} row${chosen.length === 1 ? "" : "s"} will change, each listed above with its before and after value. A row hidden by the current filters cannot be in this selection: selecting a page or every matching row only ever selects rows the filters keep.`,
         ),
       );
       preview.append(guard);
@@ -546,12 +564,42 @@ export function createCampaignsScreen(ctx, host) {
         button(kind === "pause" ? "Stage the pause" : "Stage the budget change", {
           variant: "ink",
           onClick: () => {
+            // One shared draft record, so this staged change appears in the
+            // publishing queue with the same before/after rows the operator just
+            // approved, rather than living only in this drawer.
+            const saved = ctx.drafts.save({
+              kind: kind === "pause" ? "pause" : "budget",
+              approval: "staged",
+              state: "queued",
+              title:
+                kind === "pause"
+                  ? `Pause ${chosen.length} ${state.level === "ad" ? "ads" : state.level === "adset" ? "ad sets" : "campaigns"}`
+                  : `${percent > 0 ? "+" : ""}${percent}% budget across ${chosen.length} ${state.level === "ad" ? "ads" : state.level === "adset" ? "ad sets" : "campaigns"}`,
+              campaign: { currency, budgetKind: "daily" },
+              changes: {
+                kind: kind === "pause" ? "pause" : "budget",
+                percent: kind === "pause" ? 0 : percent,
+                amount: null,
+                direction: percent < 0 ? "decrease" : "increase",
+                batches: [],
+                gaps: [],
+                rows: chosen.map((row) => ({
+                  key: rowKey(row),
+                  name: rowName(row),
+                  level: state.level,
+                  state: stateOf(row),
+                  before: Number(row.budget) || 0,
+                  after: afterBudget(row),
+                })),
+              },
+            });
             ctx.say(
               kind === "pause"
-                ? `Staged a pause for ${chosen.length} rows. Nothing has been sent to the provider.`
-                : `Staged a ${percent > 0 ? "+" : ""}${percent}% budget change for ${chosen.length} rows. Nothing has been sent to the provider.`,
+                ? `Staged a pause for ${formatInt(saved.changes.rows.length)} rows in the publishing queue. Nothing has been sent to the provider.`
+                : `Staged a ${percent > 0 ? "+" : ""}${percent}% budget change for ${formatInt(saved.changes.rows.length)} rows in the publishing queue. Nothing has been sent to the provider.`,
             );
             close();
+            render();
           },
         }),
       );
@@ -676,6 +724,10 @@ export function createCampaignsScreen(ctx, host) {
         if (level === state.level) return;
         state.level = level;
         state.compareKeys = [];
+        // The rows on screen answer the old level's question. Drop them: keeping
+        // them under the new level's heading would describe a table that is not
+        // the one being asked for, and a failed read must not leave them there.
+        state.rows = [];
         selection.clear();
         ctx.store.update({ level });
         void load();
@@ -709,10 +761,34 @@ export function createCampaignsScreen(ctx, host) {
       );
       return;
     }
-    if (state.status === "error") {
-      node.append(errorPanel({ detail: state.detail, onRetry: () => void load({ force: true }) }));
+
+    // A read that did not complete and left no rows on screen is reported as
+    // that, not as an empty window: the table's empty state would otherwise
+    // claim the sync returned no rows.
+    if (isUnresolved(state.status) && !state.rows.length) {
+      node.append(
+        errorPanel({
+          title: "That read did not complete",
+          detail: state.detail || "The Frank read model did not answer, and no earlier rows are held for this window.",
+          onRetry: () => void load({ force: true }),
+        }),
+      );
       return;
     }
+
+    // Rows kept from an earlier read, with the reason they may be old and the
+    // time they were observed.
+    if (isUnresolved(state.status)) {
+      node.append(
+        staleBanner({
+          status: state.readStatus,
+          fetchedAt: state.fetchedAt,
+          detail: state.detail,
+          onRefresh: () => void load({ force: true }),
+        }),
+      );
+    }
+    node.append(rowsReadNote(state.fetchedAt, { suffix: "Filters, sorting and the level switch re-read the saved rows; nothing here calls the provider." }));
 
     const { fields } = applyView();
     const currency = ctx.context?.account?.currency || "GBP";
@@ -826,8 +902,22 @@ export function createCampaignsScreen(ctx, host) {
       node.append(
         bulkBar({
           count: selection.size(),
+          matchingCount: selection.matchingSize(),
+          pageCount: selection.pageSize(),
+          hiddenCount: selection.hiddenKeys().length,
           noun: state.level === "ad" ? "ad" : state.level === "adset" ? "ad set" : "campaign",
           note: "Nothing is sent from this screen. Bulk changes are staged for a before/after review.",
+          onSelectMatching: () => {
+            const total = selection.matchingSize();
+            selection.selectMatching();
+            ctx.say(`Selected all ${total} rows the current filters match. Nothing has been changed.`);
+            render();
+          },
+          onSelectPage: () => {
+            selection.retain(selection.pageKeys());
+            ctx.say("Selection reduced to the rows on this page.");
+            render();
+          },
           actions: [
             button("Change budgets", { icon: ICONS.arrowUp, onClick: () => openBulkReview("budget") }),
             button("Pause", { icon: ICONS.minus, onClick: () => openBulkReview("pause") }),
@@ -851,5 +941,6 @@ export function createCampaignsScreen(ctx, host) {
       drawer.close({ restoreFocus: false });
     },
     settled: () => Promise.resolve(),
+    reload: (options = {}) => load({ force: Boolean(options.force) }),
   };
 }

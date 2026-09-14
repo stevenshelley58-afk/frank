@@ -52,35 +52,56 @@ export function sortRows(rows, columns, sort) {
     })
     .map((entry) => entry.row);
 }
-
 /**
  * Selection model with shift-range support, because an operator who wants rows
  * 3 to 40 should click twice, not thirty-eight times.
+ *
+ * Two different sets are tracked deliberately, because "select this page" and
+ * "select every matching row" are different decisions with different blast
+ * radii, and an interface that blurs them is how someone pauses 900 campaigns
+ * while looking at 50:
+ *
+ *   page     — the rows actually rendered on the current page
+ *   matching — every row the current filters leave in the result set
+ *
+ * The header checkbox and Select this page act on `page`. Selecting the whole
+ * matching set is a separate, named action that states the count first.
  */
 export function createSelection({ rows = [], getKey = (row) => String(row?.id ?? "") } = {}) {
   const selected = new Set();
   let anchor = null;
+  let page = [];
+  let matching = Array.isArray(rows) ? rows : [];
 
   function keysOf(list) {
     return list.map((row) => getKey(row)).filter(Boolean);
-  }
-
-  function setVisible(list) {
-    rows = list;
   }
 
   return {
     has(key) {
       return selected.has(String(key));
     },
-    /** Tell the selection which rows the current filters leave visible. Shift
-     *  ranges and select-all are computed against this list, never against the
-     *  full result, so a range can never sweep in a hidden row. */
-    setVisible(list) {
-      rows = Array.isArray(list) ? list : [];
+    /** The rows the current filters leave in the result set. Selecting all of
+     *  them is always a separate, explicit action. */
+    setMatching(list) {
+      matching = Array.isArray(list) ? list : [];
     },
-    visibleKeys() {
-      return keysOf(rows);
+    /** The rows rendered on the current page, reported by the table itself on
+     *  every render so a page change can never leave this stale. */
+    setPage(list) {
+      page = Array.isArray(list) ? list : [];
+    },
+    matchingKeys() {
+      return keysOf(matching);
+    },
+    pageKeys() {
+      return keysOf(page);
+    },
+    matchingSize() {
+      return keysOf(matching).length;
+    },
+    pageSize() {
+      return keysOf(page).length;
     },
     keys() {
       return Array.from(selected);
@@ -91,18 +112,32 @@ export function createSelection({ rows = [], getKey = (row) => String(row?.id ??
     count() {
       return selected.size;
     },
-    isAllVisibleSelected() {
-      const keys = keysOf(rows);
+    /** True when every row on this page is selected. */
+    isAllPageSelected() {
+      const keys = keysOf(page);
       return keys.length > 0 && keys.every((k) => selected.has(k));
     },
-    isSomeVisibleSelected() {
-      const keys = keysOf(rows);
+    isSomePageSelected() {
+      const keys = keysOf(page);
       return keys.some((k) => selected.has(k)) && !keys.every((k) => selected.has(k));
+    },
+    /** True when every row the filters leave selected is selected too. */
+    isAllMatchingSelected() {
+      const keys = keysOf(matching);
+      return keys.length > 0 && keys.every((k) => selected.has(k));
+    },
+    /** Selected rows that the table is not currently showing, so a bulk action
+     *  can say how many rows it would touch that the operator cannot see. */
+    hiddenKeys() {
+      const onPage = new Set(keysOf(page));
+      return Array.from(selected).filter((key) => !onPage.has(key));
     },
     toggle(key, { shift = false } = {}) {
       const k = String(key);
       if (shift && anchor && anchor !== k) {
-        const keys = keysOf(rows);
+        // Ranges are computed against the rendered page, so a shift-click can
+        // never sweep in a row that is not on screen.
+        const keys = keysOf(page);
         const from = keys.indexOf(anchor);
         const to = keys.indexOf(k);
         if (from !== -1 && to !== -1) {
@@ -119,11 +154,17 @@ export function createSelection({ rows = [], getKey = (row) => String(row?.id ??
       else selected.add(k);
       anchor = k;
     },
-    selectAllVisible(on) {
-      for (const key of keysOf(rows)) {
+    /** Select or clear exactly the rows on this page. */
+    selectPage(on) {
+      for (const key of keysOf(page)) {
         if (on) selected.add(key);
         else selected.delete(key);
       }
+    },
+    /** Select every row the current filters match, including rows on other
+     *  pages. Only ever called from a named action that stated the count. */
+    selectMatching() {
+      for (const key of keysOf(matching)) selected.add(key);
     },
     clear() {
       selected.clear();
@@ -191,10 +232,10 @@ export function createTable({
       const box = el("input", "ads-check");
       box.type = "checkbox";
       box.setAttribute("aria-label", "Select every row on this page");
-      box.checked = selection.isAllVisibleSelected();
-      box.indeterminate = selection.isSomeVisibleSelected();
+      box.checked = selection.isAllPageSelected();
+      box.indeterminate = selection.isSomePageSelected();
       box.addEventListener("change", () => {
-        selection.selectAllVisible(box.checked);
+        selection.selectPage(box.checked);
         onSelectionChange?.(selection);
       });
       th.append(box);
@@ -244,6 +285,10 @@ export function createTable({
     state.page = page;
     const start = page * pageSize;
     const pageRows = sorted.slice(start, start + pageSize);
+    // The table is the only thing that knows which rows it actually rendered,
+    // so it tells the selection on every render. "Select this page" and the
+    // header checkbox then mean exactly what they say.
+    selection?.setPage(pageRows);
     if (!pageRows.length) {
       const tr = el("tr");
       const td = el("td", "ads-td ads-td-empty");

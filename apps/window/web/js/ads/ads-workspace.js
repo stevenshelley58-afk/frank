@@ -23,6 +23,7 @@ import {
 } from "./ads-ui.js";
 import { DATE_PRESETS, COMPARISON_MODES, ATTRIBUTION_WINDOWS, isoDay, formatDay, SYNC_STATES } from "./ads-contracts.js";
 import { createAdsReader, createAdsCache } from "./ads-source.js";
+import { createAdsDrafts } from "./ads-drafts.js";
 import { createAdsPreview } from "./ads-preview-data.js";
 import { createViewStore } from "./ads-views.js";
 import { createPublishFlow } from "./ads-publish.js";
@@ -95,6 +96,18 @@ export function mountAdsWorkspace(host, options = {}) {
   const root = el("div", "ads-workspace");
   root.setAttribute("role", "region");
   root.setAttribute("aria-label", "Ads");
+
+  // One draft store for the whole workspace, shared by the publishing flow, the
+  // campaign screens and the publishing queue. Its origin follows the preview
+  // switch, so a rehearsal draft can never appear in the live queue.
+  const draftStorage = (() => {
+    try {
+      return win?.localStorage || null;
+    } catch {
+      return null;
+    }
+  })();
+  const drafts = createAdsDrafts({ storage: draftStorage, origin: () => (preview.enabled() ? "preview" : "live") });
 
   const state = {
     disposed: false,
@@ -304,12 +317,19 @@ export function mountAdsWorkspace(host, options = {}) {
     const sync = ctx?.sync;
     const syncValue = el("div", "ads-context-value");
     const dot = el("span", "ads-sync-dot");
-    const syncState = sync?.status || (state.contextStatus === "not_connected" ? "not_connected" : "error");
+    // The read that failed is what the owner needs to see, even while the kept
+    // record still says the last sync succeeded.
+    const syncState = ["throttled", "error", "stale"].includes(state.contextStatus)
+      ? state.contextStatus
+      : sync?.status || (state.contextStatus === "not_connected" ? "not_connected" : "error");
     dot.dataset.state = SYNC_STATES.includes(syncState) ? syncState : "error";
     syncValue.append(dot);
     syncValue.append(el("span", "", sync?.lastSuccessAt ? relativeAge(sync.lastSuccessAt) : "never"));
     const syncItem = contextItem("Last sync", syncValue);
     if (sync?.detail) syncItem.title = sync.detail;
+    // The failed read is said out loud, not only in the dot: the kept record's
+    // own detail would otherwise describe a sync that has since failed.
+    if (state.contextDetail) syncItem.title = `${syncItem.title ? `${syncItem.title} ` : ""}${state.contextDetail}`.trim();
     if (sync?.settleDays) {
       syncItem.title = `${syncItem.title || ""} Attribution continues to settle for about ${sync.settleDays} days, so a recent window is re-fetched rather than frozen.`.trim();
     }
@@ -334,7 +354,7 @@ export function mountAdsWorkspace(host, options = {}) {
     headActions.append(
       button("Refresh", {
         icon: ICONS.refresh,
-        title: "Queue a sync. Frank keeps showing the cached rows until it completes.",
+        title: "Re-read this screen's saved rows. Nothing is sent to the provider.",
         disabled: state.syncing,
         onClick: () => queueRefresh(),
       }),
@@ -370,13 +390,15 @@ export function mountAdsWorkspace(host, options = {}) {
   async function queueRefresh() {
     state.syncing = true;
     renderHeadActions();
-    say("Refresh queued. Frank keeps serving the saved rows until the sync completes.");
-    // The read is deduplicated and queued server-side; the UI re-reads the same
-    // rows and shows the sync state rather than pretending the numbers moved.
-    await loadContext({ force: true });
+    // Refresh re-reads the saved rows for the screen that is actually open. It
+    // does not claim to have queued a provider sync: there is no sync queue in
+    // this build, and saying otherwise would be a promise Frank cannot keep.
+    const current = state.screens.get(state.screen);
+    await Promise.allSettled([loadContext({ force: true }), current?.reload?.({ force: true })]);
     state.syncing = false;
     renderHeadActions();
     renderContext();
+    say("Re-read the saved rows for this screen. Last known good rows stay on screen if the read fails.");
   }
 
   // ---------------------------------------------------------------- routing --
@@ -437,7 +459,10 @@ export function mountAdsWorkspace(host, options = {}) {
       refresh: () => queueRefresh(),
       say,
       store: createViewStore(`screen.${screenId}`),
+      // The shared draft model. Every screen reads and writes the same records.
+      drafts,
       openPublish: (seed) => openPublish(seed),
+      openDraft: (id) => openDraft(id),
     });
   }
 
@@ -493,8 +518,24 @@ export function mountAdsWorkspace(host, options = {}) {
     // One flow instance per workspace: reopening it keeps whatever the operator
     // had staged, rather than silently discarding a half-built plan.
     if (!publishFlow) publishFlow = createPublishFlow(screenContext("queue"), { host: root });
-    if (seed) publishFlow.state.seed = seed;
+    if (seed?.draft) publishFlow.loadDraft(seed.draft);
+    else if (seed) publishFlow.state.seed = seed;
     publishFlow.open();
+  }
+
+  /** Reopen a staged launch from the queue, exactly as it was saved. */
+  function openDraft(id) {
+    const draft = drafts.get(id);
+    if (!draft) {
+      say("That draft is no longer in this workspace.");
+      renderScreen({ force: true });
+      return;
+    }
+    if (draft.kind !== "launch") {
+      say("That staged change is not a launch. Its rows are reviewed in the queue.");
+      return;
+    }
+    openPublish({ draft });
   }
 
   // ------------------------------------------------------------- lifecycle --
@@ -502,9 +543,11 @@ export function mountAdsWorkspace(host, options = {}) {
   async function loadContext({ force = false } = {}) {
     const result = await reader.read("context", {}, { force, signal: state.controller.signal });
     if (state.disposed) return result;
-    state.contextStatus = result.status;
+    // The read that actually failed, when the record is one the reader kept.
+    state.contextStatus = result.failedStatus || result.status;
     state.contextDetail = result.detail || "";
-    state.context = result.status === "ready" ? result.data.meta : null;
+    // A failed re-read must not erase the last successful sync the header states.
+    if (result.data?.meta) state.context = result.data.meta;
     renderContext();
     return result;
   }

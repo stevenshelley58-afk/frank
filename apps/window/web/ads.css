@@ -1323,6 +1323,15 @@
   color: var(--faint);
   font-size: 12px;
 }
+/* Scope controls sit between the count and the actions: "select this page" and
+   "select all matching" are different decisions, so they read as their own
+   group rather than as one more action. */
+.ads-bulk-scope {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
 .ads-bulk-actions {
   margin-left: auto;
   display: flex;
@@ -1785,6 +1794,9 @@
   }
   .ads-bulk-actions {
     margin-left: 0;
+    width: 100%;
+  }
+  .ads-bulk-scope {
     width: 100%;
   }
   .ads-step {

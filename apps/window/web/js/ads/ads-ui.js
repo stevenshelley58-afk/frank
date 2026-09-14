@@ -519,7 +519,7 @@ export function errorPanel({ title = "That read failed", detail = "", onRetry = 
   const head = el("div", "ads-panel-note-head");
   head.append(svg(ICONS.alert, { size: 15, width: 1.7 }), el("h3", "", title));
   panel.append(head);
-  panel.append(el("p", "", detail || "The Frank read model did not answer. Cached rows stay visible while this is retried."));
+  panel.append(el("p", "", detail || "The Frank read model did not answer. Nothing is sent to the provider from this screen."));
   if (onRetry) {
     const actions = el("div", "ads-panel-note-actions");
     actions.append(button("Retry", { variant: "ink", onClick: onRetry }));
@@ -566,12 +566,29 @@ export function staleBanner({ status, fetchedAt, detail = "", onRefresh = null }
   const when = age && !Number.isNaN(age.getTime()) ? ` Showing results read ${relativeAge(age)}.` : " Read time unknown.";
   banner.append(el("span", "", `${text}${when}`));
   if (detail) banner.append(el("span", "ads-banner-detail", detail));
-  if (onRefresh) banner.append(button("Refresh now", { onClick: onRefresh, title: "Queue a refresh. Frank serves cached rows until the sync completes." }));
+  if (onRefresh) banner.append(button("Refresh now", { onClick: onRefresh, title: "Re-read the saved rows for this screen. Nothing is sent to the provider." }));
   return banner;
 }
 
+/**
+ * When the rows on screen were observed, in the one wording every screen uses.
+ *
+ * `fetchedAt` is the sync time the reader reported. When the reader reported
+ * none, the age is said to be unknown rather than dated from the browser clock,
+ * which would make an undated answer look fresh.
+ */
+export function rowsReadNote(fetchedAt, { suffix = "" } = {}) {
+  const sentence = fetchedAt
+    ? `Rows read ${relativeAge(fetchedAt)}.`
+    : "The read model did not report when these rows were read, so their age is unknown.";
+  return el("p", "ads-screen-note", suffix ? `${sentence} ${suffix}` : sentence);
+}
+
 export function relativeAge(date, now = Date.now()) {
-  const t = date instanceof Date ? date.getTime() : Date.parse(String(date || ""));
+  // Timestamps arrive three ways here: an ISO string from the context record, a
+  // Date built by a banner, and the epoch milliseconds the reader envelope
+  // carries. All three have to mean the same thing.
+  const t = date instanceof Date ? date.getTime() : typeof date === "number" ? date : Date.parse(String(date || ""));
   if (!Number.isFinite(t)) return "at an unknown time";
   const seconds = Math.max(0, Math.round((now - t) / 1000));
   if (seconds < 90) return "less than a minute ago";

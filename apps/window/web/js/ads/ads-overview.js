@@ -24,6 +24,8 @@ import {
   skeleton,
   definitionRow,
   sourceNote,
+  staleBanner,
+  rowsReadNote,
 } from "./ads-ui.js";
 import {
   METRICS,
@@ -32,8 +34,8 @@ import {
   formatMoney,
   formatPercent,
   formatDay,
-  ageState,
 } from "./ads-contracts.js";
+import { isUnresolved } from "./ads-source.js";
 
 export function createOverviewScreen(ctx, host) {
   const node = el("div", "ads-overview");
@@ -41,10 +43,10 @@ export function createOverviewScreen(ctx, host) {
   let disposed = false;
   const controller = new AbortController();
 
-  async function load() {
+  async function load({ force = false } = {}) {
     clear(node);
     node.append(skeleton(5, 5));
-    const result = await ctx.reader.read("overview", ctx.params, { signal: controller.signal });
+    const result = await ctx.reader.read("overview", ctx.params, { signal: controller.signal, force });
     if (disposed) return;
     clear(node);
 
@@ -61,15 +63,37 @@ export function createOverviewScreen(ctx, host) {
       );
       return;
     }
-    if (result.status === "error") {
-      node.append(errorPanel({ detail: result.detail, onRetry: () => void load() }));
-      return;
-    }
 
     const data = result.data?.meta;
     if (!data || !data.totals) {
+      // A read that did not complete is not an empty window, and saying "the
+      // sync returned nothing" would be a claim about the data that nothing
+      // observed.
+      if (isUnresolved(result)) {
+        node.append(
+          errorPanel({
+            title: "That read did not complete",
+            detail: result.detail || "The Frank read model did not answer.",
+            onRetry: () => void load({ force: true }),
+          }),
+        );
+        return;
+      }
       node.append(emptyPanel({ title: "No rows for this window", detail: "The sync returned nothing for the selected dates and attribution setting." }));
       return;
+    }
+
+    // The reader kept an earlier copy because this read did not complete: show
+    // the rows, and say which read failed and how old they are.
+    if (isUnresolved(result)) {
+      node.append(
+        staleBanner({
+          status: result.failedStatus || result.status,
+          fetchedAt: result.fetchedAt,
+          detail: result.detail,
+          onRefresh: () => void load({ force: true }),
+        }),
+      );
     }
 
     render(data, result);
@@ -378,14 +402,7 @@ export function createOverviewScreen(ctx, host) {
     }
     section.append(list);
 
-    const age = ageState(result.fetchedAt);
-    const foot = el("p", "ads-screen-note");
-    foot.append(
-      document.createTextNode(
-        `Rows read ${age.label}. Frank re-fetches a recent window on every sync to pick up delayed attribution, so the last few days can still move. Nothing on this screen calls the provider.`,
-      ),
-    );
-    section.append(foot);
+    section.append(rowsReadNote(result.fetchedAt, { suffix: "When the reporting sync runs it re-fetches a recent window to pick up delayed attribution, so the last few days can still move. Nothing on this screen calls the provider." }));
     return section;
   }
 
@@ -397,5 +414,6 @@ export function createOverviewScreen(ctx, host) {
       controller.abort();
     },
     settled: () => settled,
+    reload: (options = {}) => load({ force: Boolean(options.force) }),
   };
 }

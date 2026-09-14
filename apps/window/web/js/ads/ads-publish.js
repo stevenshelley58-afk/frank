@@ -32,9 +32,9 @@ import {
 } from "./ads-ui.js";
 import { formatMoney, formatInt } from "./ads-contracts.js";
 import { createSelection } from "./ads-table.js";
+import { newAdsId, variationKey, draftAdCount, mergeMapping } from "./ads-drafts.js";
 
 const PRESET_KEY = "frank.ads.presets.v1";
-const DRAFT_KEY = "frank.ads.drafts.v1";
 
 export const STEPS = Object.freeze([
   Object.freeze({ id: "select", label: "Select creatives" }),
@@ -84,40 +84,132 @@ function writeJson(key, value) {
 }
 
 /**
+ * One copy axis, with the two rules that keep an advertised count honest:
+ *
+ *   * a blank or whitespace-only entry is not a variation. It is not copy, and
+ *     multiplying by it invented ads that would have been created empty.
+ *   * an axis with nothing in it contributes exactly one empty value, so a plan
+ *     with no primary text still produces the ads the counter promises, each
+ *     carrying no primary text, instead of collapsing to zero rows.
+ */
+export function axisValues(list = []) {
+  const values = (Array.isArray(list) ? list : [])
+    .map((value) => String(value ?? ""))
+    .filter((value) => value.trim().length > 0);
+  return values.length ? values : [""];
+}
+
+/**
+ * Every ad a plan would create, in order. This is the single source of truth for
+ * the plan: the number the flow advertises is `planAdRows(...).length`, and the
+ * rows the queue stages are exactly these objects. When the counter and the
+ * staging loop count independently, "20 ads" quietly becomes a different number
+ * of queued rows — which is the one thing this flow exists to prevent.
+ *
+ * Each row carries a stable identity built from the creative's own id and the
+ * copy slugs, never from a name, so renaming a campaign or reordering headlines
+ * cannot change what an ad is called in tracking.
+ */
+export function planAdRows({
+  creatives = [],
+  headlines = [],
+  bodies = [],
+  mode = "per_creative",
+  mapping = {},
+  problemsByCreative = null,
+} = {}) {
+  const rows = [];
+  const headlinesAxis = axisValues(headlines);
+  const bodiesAxis = axisValues(bodies);
+  for (const creative of creatives) {
+    const creativeKey = String(creative?.internalId || creative?.id || "");
+    // An explicit utm_content on the creative is the base identity; each
+    // variation appends its own copy slug so two variations of one creative are
+    // two different things in tracking.
+    const base = String(mapping?.[creative?.id]?.utmContent || creativeKey);
+    const detail = (problemsByCreative?.get?.(creative?.name) || []).slice();
+    const variations =
+      mode === "cross_product" ? headlinesAxis.flatMap((headline) => bodiesAxis.map((body) => ({ headline, body }))) : [{ headline: "", body: "" }];
+    for (const { headline, body } of variations) {
+      const key = variationKey({ creativeKey: base, headline, body, total: variations.length });
+      rows.push(
+        Object.freeze({
+          id: key,
+          key,
+          trackingKey: key,
+          creativeId: String(creative?.id ?? ""),
+          creativeKey,
+          creativeName: String(creative?.name ?? ""),
+          headline,
+          body,
+          destination: String(mapping?.[creative?.id]?.destination || ""),
+          utmContent: key,
+          name:
+            mode === "cross_product" && (headline || body)
+              ? `${creative?.name ?? ""} — ${headline || "(no headline)"}${body ? ` — ${body.slice(0, 24)}` : ""}`
+              : String(creative?.name ?? ""),
+          problems: detail,
+          detail: detail.join(" "),
+        }),
+      );
+    }
+  }
+  return rows;
+}
+
+/**
  * The combination maths, isolated so it can be reasoned about and stated
  * plainly in the UI.
  *
  * `cross_product` multiplies every axis. `per_creative` keeps one ad per
  * creative and attaches the text as alternatives, so the count is the number of
  * creatives regardless of how many headlines were written.
+ *
+ * `total` is always `planAdRows(...).length`: the count and the rows cannot
+ * disagree, because there is only one function that produces either.
  */
-export function planAds({ creatives = [], headlines = [], bodies = [], mode = "per_creative" }) {
+export function planAds({ creatives = [], headlines = [], bodies = [], mode = "per_creative", mapping = {} }) {
   const c = creatives.length;
-  const h = headlines.filter((x) => String(x || "").trim()).length;
-  const b = bodies.filter((x) => String(x || "").trim()).length;
+  const headlinesAxis = axisValues(headlines);
+  const bodiesAxis = axisValues(bodies);
+  const h = headlinesAxis.filter(Boolean).length;
+  const b = bodiesAxis.filter(Boolean).length;
+  const rows = planAdRows({ creatives, headlines, bodies, mode, mapping });
+  const total = rows.length;
   const plural = (count, singular, pluralForm) => (count === 1 ? singular : pluralForm);
   const factors = [
     { id: "creatives", label: plural(c, "creative", "creatives"), count: c },
     { id: "headlines", label: plural(h || 1, "headline", "headlines"), count: h || 1, implied: h === 0 },
     { id: "bodies", label: plural(b || 1, "primary text", "primary texts"), count: b || 1, implied: b === 0 },
   ];
+  const missing = [];
+  if (h === 0) missing.push("headline");
+  if (b === 0) missing.push("primary text");
+  const missingNote = missing.length
+    ? ` No ${missing.join(" or ")} copy is set yet, so each of those ads would carry none.`
+    : "";
   if (mode === "cross_product") {
     return Object.freeze({
       mode,
       factors,
-      total: c * (h || 1) * (b || 1),
-      equation: `${c} × ${h || 1} × ${b || 1}`,
-      multiplies: true,
+      rows,
+      total,
+      equation: `${c} × ${headlinesAxis.length} × ${bodiesAxis.length}`,
+      multiplies: h > 1 || b > 1,
+      // "One ad per creative" describes the per-creative mode. In cross-product
+      // mode the axes are still axes, so the sentence states the real product
+      // and names any copy that would be empty.
       note:
-        c * (h || 1) * (b || 1) === c
+        total === c && !missing.length
           ? "One ad per creative, because only one headline and one body text are in play."
-          : `This creates ${formatInt(c * (h || 1) * (b || 1))} ads from ${c} creatives. Each one is a separate ad with its own delivery and its own reporting line.`,
+          : `This creates ${formatInt(total)} ads from ${c} creatives. Each one is a separate ad with its own delivery and its own reporting line.${missingNote}`,
     });
   }
   return Object.freeze({
     mode,
     factors,
-    total: c,
+    rows,
+    total,
     equation: `${c} × 1`,
     multiplies: false,
     note:
@@ -125,6 +217,122 @@ export function planAds({ creatives = [], headlines = [], bodies = [], mode = "p
         ? `${formatInt(c)} ads, each carrying ${h || 0} headline${h === 1 ? "" : "s"} and ${b || 0} primary text${b === 1 ? "" : "s"} as alternatives. The axes are not multiplied.`
         : `${formatInt(c)} ads.`,
   });
+}
+
+/**
+ * Resolve one tracking value for one planned ad.
+ *
+ * Identity placeholders resolve to generated, stable identifiers: the draft's
+ * own campaign id and the row's variation key. They never resolve to a name,
+ * because a name is not an identity and a rename would split the reporting
+ * history. `{{campaign.name}}` and `{{ad.name}}` stay available for the
+ * operator who explicitly wants the display name, and validation warns about
+ * them.
+ */
+export function resolveTrackingValue(value, { row = null, campaignId = "", campaignName = "", audience = "" } = {}) {
+  const rowKey = String(row?.trackingKey || row?.key || row?.creativeKey || "");
+  return String(value ?? "")
+    .replace(/\{\{creative\.internal_id\}\}/g, rowKey)
+    .replace(/\{\{ad\.internal_id\}\}/g, rowKey)
+    .replace(/\{\{campaign\.internal_id\}\}/g, String(campaignId || "cmp_draft"))
+    .replace(/\{\{(campaign|ad)\.name\}\}/g, String(campaignName || "unstable_name"))
+    .replace(/\{\{platform\}\}/g, "meta")
+    .replace(/\{\{audience\.key\}\}/g, String(audience || "").toLowerCase().replace(/[^a-z0-9]+/g, "_"));
+}
+
+/**
+ * The tracking URL for one planned ad.
+ *
+ * The destination may already carry query parameters and a `#anchor`; both are
+ * preserved, existing parameters are kept, and a parameter the template also
+ * sets is replaced rather than appended a second time. An unparseable
+ * destination returns an empty string, which validation turns into a blocking
+ * problem instead of a URL that merely looks plausible.
+ *
+ * This is the only place a tracking URL is built, so the string that is
+ * validated is exactly the string that is shown.
+ */
+export function buildTrackingUrl({ base = "", fields = [], row = null, campaignId = "", campaignName = "", audience = "" } = {}) {
+  let url;
+  try {
+    url = new URL(String(base));
+  } catch {
+    return "";
+  }
+  for (const field of fields) {
+    const key = String(field?.key || "").trim();
+    if (!key) continue;
+    const raw = String(field?.value ?? "");
+    // An empty value is not written: an empty parameter is noise, not data.
+    if (!raw.trim()) continue;
+    url.searchParams.set(key, resolveTrackingValue(raw, { row, campaignId, campaignName, audience }));
+  }
+  return url.toString();
+}
+
+/**
+ * Check the URLs that would actually ship, one per planned ad. Person-level
+ * information has no business in a UTM, and two ads that resolve to the same
+ * tracking identity are a reporting collision rather than two rows.
+ */
+export function validateTrackingUrls({ rows = [], fields = [], campaignId = "", campaignName = "", audience = "" } = {}) {
+  const problems = [];
+  const identities = new Map();
+  // An address can arrive already percent-encoded, and a URL parameter is
+  // decoded once when it is read back. Decoding before the check is what makes
+  // `lead%40example.invalid` fail the same test as `lead@example.invalid`,
+  // instead of passing as a harmless string with no "@" in it.
+  const readable = (value) => {
+    const text = String(value ?? "");
+    try {
+      return decodeURIComponent(text);
+    } catch {
+      return text;
+    }
+  };
+  for (const row of rows) {
+    const base = row.destination;
+    if (!base) continue; // the plan-level missing-destination error already covers this
+    const url = buildTrackingUrl({ base, fields, row, campaignId, campaignName, audience });
+    if (!url) {
+      problems.push({
+        severity: "error",
+        kind: "invalid_url",
+        scope: "creative",
+        scopeName: row.name,
+        detail: `The destination "${base}" is not a URL a browser can open, so the tracking parameters cannot be applied to it.`,
+      });
+      continue;
+    }
+    const parsed = new URL(url);
+    for (const [key, value] of parsed.searchParams) {
+      const decoded = readable(value);
+      if (/@/.test(decoded) || /\b\d{7,}\b/.test(decoded)) {
+        problems.push({
+          severity: "error",
+          kind: "pii",
+          scope: "creative",
+          scopeName: row.name,
+          detail: `${key} would carry something that looks like personal information (${decoded}). A UTM identifies traffic; it must never identify a person.`,
+        });
+      }
+    }
+    const identity = parsed.searchParams.get("utm_content") || "";
+    if (identity) {
+      if (identities.has(identity)) {
+        problems.push({
+          severity: "warning",
+          kind: "duplicate_tracking",
+          scope: "creative",
+          scopeName: row.name,
+          detail: `utm_content is "${identity}", which another ad in this plan also uses. Two variations with one identity cannot be told apart in reporting.`,
+        });
+      } else {
+        identities.set(identity, row);
+      }
+    }
+  }
+  return problems;
 }
 
 /**
@@ -269,9 +477,22 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     layout: "cards",
     queued: null,
     open: false,
+    // Stable identity for this campaign, generated once and persisted with the
+    // draft. Tracking that used the campaign name split in two on the first
+    // rename; this cannot.
+    campaignId: newAdsId("cmp"),
+    // The draft this flow is editing, once it has been saved or reopened.
+    draftId: null,
+    seed: null,
+    loadError: null,
   };
 
   const selection = createSelection({ getKey: (row) => String(row.id) });
+  // Creative ids a draft or a seed wants selected once the library has loaded.
+  let pendingSelection = null;
+  // The mapping grid's headline controls, so a newly typed headline appears in
+  // them without rebuilding the step under the operator's cursor.
+  let headlineControls = [];
   let presets = readJson(PRESET_KEY, []);
   let lastFocus = null;
 
@@ -309,17 +530,33 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     render();
     const result = await ctx.reader.read("creatives", ctx.params, {});
     if (result.status === "not_connected" || result.status === "error") {
-      state.creatives = [];
       state.loadError = result.status === "not_connected" ? "not_connected" : result.detail;
+      // A reopened draft keeps its own creatives. They are the operator's saved
+      // intent, and dropping them because the asset reader is unavailable would
+      // silently change the plan the draft already promised.
+      selection.setMatching(state.creatives);
+      applyPendingSelection();
       render();
       return;
     }
-    state.creatives = (result.data?.rows || []).map((row) => ({ ...row, ...(row.totals || {}) }));
-    selection.setVisible(state.creatives);
-    if (seed?.creativeIds?.length) {
-      for (const id of seed.creativeIds) selection.toggle(id);
-    }
+    const loaded = (result.data?.rows || []).map((row) => ({ ...row, ...(row.totals || {}) }));
+    const seen = new Set(loaded.map((row) => String(row.id)));
+    state.creatives = [...loaded, ...state.creatives.filter((row) => !seen.has(String(row.id)))];
+    selection.setMatching(state.creatives);
+    applyPendingSelection();
     render();
+  }
+
+  /** Select the creatives a seed or a reopened draft asks for, ignoring any id
+   *  the library no longer has instead of silently selecting nothing. */
+  function applyPendingSelection() {
+    const wanted = pendingSelection || state.seed?.creativeIds || seed?.creativeIds || null;
+    if (!wanted?.length) return;
+    selection.clear();
+    for (const id of wanted) {
+      if (state.creatives.some((row) => String(row.id) === String(id))) selection.toggle(String(id));
+    }
+    pendingSelection = null;
   }
 
   // --------------------------------------------------------------- derived --
@@ -330,17 +567,42 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
   }
 
   function currentPlan() {
-    return planAds({ creatives: chosenCreatives(), headlines: state.headlines, bodies: state.bodies, mode: state.mode });
+    return planAds({ creatives: chosenCreatives(), headlines: state.headlines, bodies: state.bodies, mode: state.mode, mapping: state.mapping });
+  }
+
+  /** The plan's rows with each row's destination resolved, which is what both
+   *  the URL preview and the URL validation work from. */
+  function currentRows() {
+    const plan = currentPlan();
+    return plan.rows.map((row) => ({ ...row, destination: row.destination || state.config.destination || "" }));
   }
 
   function currentValidation() {
-    return validatePlan({
+    const base = validatePlan({
       creatives: chosenCreatives(),
       config: state.config,
       mapping: state.mapping,
       tracking: state.tracking,
       mode: state.mode,
       currency: ctx.context?.account?.currency || "GBP",
+    });
+    // The URLs are validated after they are built for the exact planned rows, so
+    // the problem list describes the links that would really ship.
+    const extra = validateTrackingUrls({
+      rows: currentRows(),
+      fields: state.tracking.fields,
+      campaignId: state.campaignId,
+      campaignName: state.config.campaignName,
+      audience: state.config.audience,
+    });
+    if (!extra.length) return base;
+    const problems = [...base.problems, ...extra];
+    return Object.freeze({
+      problems: Object.freeze(problems),
+      errors: problems.filter((p) => p.severity === "error").length,
+      warnings: problems.filter((p) => p.severity === "warning").length,
+      infos: problems.filter((p) => p.severity === "info").length,
+      ok: problems.filter((p) => p.severity === "error").length === 0,
     });
   }
 
@@ -418,12 +680,12 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     headActions.append(presetPop);
     headActions.append(
       button("Save draft", {
-        title: "Keep this setup without staging anything.",
+        title: "Keep this setup, including the creatives and their mappings, without staging anything.",
         onClick: () => {
-          const drafts = readJson(DRAFT_KEY, []);
-          const draft = { id: `draft_${Date.now().toString(36)}`, at: new Date().toISOString(), state: { ...state, open: undefined, creatives: undefined } };
-          writeJson(DRAFT_KEY, [draft, ...drafts].slice(0, 20));
-          ctx.say("Draft saved locally. Nothing was staged or sent.");
+          const saved = saveDraft({ approval: "editing" });
+          ctx.say(
+            `Draft saved with ${formatInt(saved.creatives.length)} creative${saved.creatives.length === 1 ? "" : "s"} and ${formatInt(draftAdCount(saved))} planned ads. Nothing was staged or sent.`,
+          );
         },
       }),
     );
@@ -819,6 +1081,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     for (const label of ["Creative", "Asset", "Headline", "Destination", "utm_content"]) hr.append(el("th", "", label));
     thead.append(hr);
     const tbody = el("tbody");
+    headlineControls = [];
     for (const creative of chosen) {
       const mapping = state.mapping[creative.id] || {};
       const tr = el("tr");
@@ -838,9 +1101,10 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
         headlineSelect.append(opt);
       });
       headlineSelect.addEventListener("change", () => {
-        state.mapping = { ...state.mapping, [creative.id]: { ...mapping, headlineIndex: headlineSelect.value === "" ? null : Number(headlineSelect.value) } };
+        setMapping(creative.id, { headlineIndex: headlineSelect.value === "" ? null : Number(headlineSelect.value) });
         renderSteps();
       });
+      headlineControls.push({ select: headlineSelect, creativeId: String(creative.id) });
       headlineCell.append(headlineSelect);
       tr.append(headlineCell);
 
@@ -850,7 +1114,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
       dest.placeholder = state.config.destination || "https://…";
       dest.setAttribute("aria-label", `Destination for ${creative.name}`);
       dest.addEventListener("change", () => {
-        state.mapping = { ...state.mapping, [creative.id]: { ...mapping, destination: dest.value } };
+        setMapping(creative.id, { destination: dest.value });
         renderSteps();
       });
       destCell.append(dest);
@@ -861,7 +1125,8 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
       content.value = mapping.utmContent ?? creative.internalId ?? creative.id;
       content.setAttribute("aria-label", `utm_content for ${creative.name}`);
       content.addEventListener("change", () => {
-        state.mapping = { ...state.mapping, [creative.id]: { ...mapping, utmContent: content.value } };
+        setMapping(creative.id, { utmContent: content.value });
+        renderSteps();
       });
       contentCell.append(content);
       tr.append(contentCell);
@@ -874,6 +1139,31 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
 
     // Placement previews.
     container.append(placementPreview(chosen));
+  }
+
+  /** Merge one mapping field, reading the current record at merge time. The rule
+   *  lives in the shared draft model so it can be tested without a browser. */
+  function setMapping(creativeId, patch) {
+    state.mapping = mergeMapping(state.mapping, creativeId, patch);
+  }
+
+  /** Rebuild the headline option lists in place, keeping a selection that still
+   *  exists and falling back to "use all headlines" when it does not. */
+  function refreshHeadlineOptions() {
+    const available = state.headlines
+      .map((headline, index) => ({ headline: String(headline ?? ""), index }))
+      .filter((entry) => entry.headline.trim().length > 0);
+    for (const control of headlineControls) {
+      const previous = control.select.value;
+      clear(control.select);
+      control.select.append(el("option", "", "Use all headlines"));
+      for (const entry of available) {
+        const option = el("option", "", entry.headline);
+        option.value = String(entry.index);
+        control.select.append(option);
+      }
+      control.select.value = available.some((entry) => String(entry.index) === String(previous)) ? previous : "";
+    }
   }
 
   function repaintCombo() {
@@ -899,6 +1189,10 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
         repaintCombo();
         renderFoot();
         renderSteps();
+        // The mapping grid lists the headlines, so it has to learn about a new
+        // one. Re-rendering the whole step here would take the cursor out of the
+        // box being typed in, so only the option lists are refreshed.
+        if (key === "headlines") refreshHeadlineOptions();
       });
       row.append(input);
       row.append(
@@ -1033,14 +1327,20 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
 
     const resolved = el("div", "ads-block");
     resolved.append(el("h3", "ads-block-title", "Resolved URL preview"));
-    resolved.append(el("p", "ads-block-note", "The first three ads in the plan, with their parameters resolved."));
+    resolved.append(
+      el(
+        "p",
+        "ads-block-note",
+        "The first three planned ads, with their parameters resolved. These are the exact strings that validation checks, so a URL that appears here is the URL that was tested.",
+      ),
+    );
     const list = el("div", "ads-flow-strip ads-flow-strip-column");
     // Three examples is enough to catch a broken placeholder; more is noise.
-    for (const ad of chosenCreatives().slice(0, 3)) {
-      const url = buildUrl(ad);
+    for (const row of currentRows().slice(0, 3)) {
+      const url = buildUrl(row);
       const line = el("div", "ads-url-line");
-      line.append(el("span", "ads-cell-sub", ad.name));
-      line.append(el("code", "ads-prompt", url));
+      line.append(el("span", "ads-cell-sub", row.name));
+      line.append(el("code", "ads-prompt", url || "This destination is not a URL, so no tracking link can be built."));
       list.append(line);
     }
     resolved.append(list);
@@ -1056,30 +1356,17 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     container.append(section);
   }
 
-  function buildUrl(creative) {
-    const mapping = state.mapping[creative.id] || {};
-    const base = mapping.destination || state.config.destination || "https://example.invalid/";
-    let url;
-    try {
-      url = new URL(base);
-    } catch {
-      return `${base}?utm_source=…`;
-    }
-    for (const f of state.tracking.fields) {
-      if (!String(f.value || "").trim()) continue;
-      url.searchParams.set(f.key, resolvePlaceholder(f.value, creative, mapping));
-    }
-    return url.toString();
-  }
-
-  function resolvePlaceholder(value, creative, mapping) {
-    return String(value)
-      .replace(/\{\{creative\.internal_id\}\}/g, String(mapping.utmContent || creative.internalId || creative.id))
-      .replace(/\{\{ad\.internal_id\}\}/g, `ad_${String(creative.internalId || creative.id)}`)
-      .replace(/\{\{campaign\.internal_id\}\}/g, state.config.campaignName ? `cmp_${state.config.campaignName.toLowerCase().replace(/[^a-z0-9]+/g, "_")}` : "cmp_draft")
-      .replace(/\{\{(campaign|ad)\.name\}\}/g, state.config.campaignName || "unstable_name")
-      .replace(/\{\{platform\}\}/g, "meta")
-      .replace(/\{\{audience\.key\}\}/g, String(state.config.audience || "").toLowerCase().replace(/[^a-z0-9]+/g, "_"));
+  /** The exact string shown to the operator and handed to validation. One
+   *  builder, so a preview can never disagree with what is checked. */
+  function buildUrl(row) {
+    return buildTrackingUrl({
+      base: row.destination || state.config.destination || "https://example.invalid/",
+      fields: state.tracking.fields,
+      row,
+      campaignId: state.campaignId,
+      campaignName: state.config.campaignName,
+      audience: state.config.audience,
+    });
   }
 
   function problemRow(p) {
@@ -1115,6 +1402,42 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     summary.append(reviewStat("Validation problems", formatInt(validation.problems.length), `${validation.errors} blocking, ${validation.warnings} warning`));
     container.append(summary);
 
+    // The exact records this would create, with the tracking identity each one
+    // would carry. The count above and the rows below come from one plan, so
+    // they cannot disagree, and the operator can see what "20 ads" means.
+    const planned = currentRows();
+    const plannedBlock = el("div", "ads-block");
+    plannedBlock.append(el("h3", "ads-block-title", `Planned ads (${formatInt(planned.length)})`));
+    plannedBlock.append(
+      el(
+        "p",
+        "ads-block-note",
+        planned.length > 25
+          ? `Showing the first 25 of ${formatInt(planned.length)}. Every row carries its own stable tracking identity; none is derived from a name.`
+          : "Every row carries its own stable tracking identity; none is derived from a name.",
+      ),
+    );
+    const plannedGrid = el("div", "ads-map-grid");
+    const plannedTable = el("table", "ads-map-table");
+    const plannedHead = el("thead");
+    const plannedHeadRow = el("tr");
+    for (const label of ["Ad", "Tracking identity", "Destination"]) plannedHeadRow.append(el("th", "", label));
+    plannedHead.append(plannedHeadRow);
+    const plannedBody = el("tbody");
+    for (const row of planned.slice(0, 25)) {
+      const tr = el("tr");
+      if (row.problems.length) tr.dataset.invalid = "true";
+      tr.append(el("td", "ads-map-fixed", row.name));
+      tr.append(el("td", "", row.trackingKey));
+      const url = buildUrl(row);
+      tr.append(el("td", "", url || "Not a valid URL"));
+      plannedBody.append(tr);
+    }
+    plannedTable.append(plannedHead, plannedBody);
+    plannedGrid.append(plannedTable);
+    plannedBlock.append(plannedGrid);
+    container.append(plannedBlock);
+
     if (plan.multiplies && !state.crossConfirmed) {
       const guard = el("div", "ads-banner");
       guard.dataset.tone = "bad";
@@ -1142,6 +1465,7 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
     const dl = el("dl", "ads-defs");
     dl.append(
       definitionRow("Campaign", state.config.campaignName || "Unnamed draft"),
+      definitionRow("Campaign identity", state.campaignId),
       definitionRow("Objective", state.config.objective || "—"),
       definitionRow("Optimisation event", state.config.optimisation || "—"),
       definitionRow("Destination", state.config.destination || "—"),
@@ -1220,6 +1544,8 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
       button("Start another", {
         onClick: () => {
           state.queued = null;
+          state.draftId = null;
+          state.campaignId = newAdsId("cmp");
           state.step = 0;
           selection.clear();
           render();
@@ -1257,45 +1583,136 @@ export function createPublishFlow(ctx, { seed = null, host = null } = {}) {
 
   // ---------------------------------------------------------------- stage --
 
-  function stage() {
+  /**
+   * Everything this flow would stage, as one draft record. The rows come from
+   * the same `plan.rows` the counter displays, so the number on screen and the
+   * number of rows in the queue are the same fact.
+   */
+  function draftFromState({ approval = "editing" } = {}) {
     const plan = currentPlan();
     const validation = currentValidation();
-    if (!validation.ok) return;
-    const chosen = chosenCreatives();
-    const problemsByCreative = new Map();
-    for (const p of validation.problems) {
-      if (p.scope !== "creative") continue;
-      if (!problemsByCreative.has(p.scopeName)) problemsByCreative.set(p.scopeName, []);
-      problemsByCreative.get(p.scopeName).push(p.detail);
-    }
-    const rows = [];
-    if (state.mode === "cross_product") {
-      for (const creative of chosen) {
-        for (const headline of state.headlines.filter(Boolean)) {
-          for (const body of state.bodies.filter(Boolean)) {
-            const detail = [...(problemsByCreative.get(creative.name) || [])];
-            if (!headline) detail.push("No headline.");
-            rows.push({ name: `${creative.name} — ${headline || "(no headline)"}${body ? ` — ${body.slice(0, 24)}` : ""}`, problems: detail.length > 0, detail: detail.join(" ") });
-          }
-        }
-      }
-    } else {
-      for (const creative of chosen) {
-        const detail = problemsByCreative.get(creative.name) || [];
-        rows.push({ name: creative.name, problems: detail.length > 0, detail: detail.join(" ") });
-      }
-    }
-    state.queued = {
-      id: `draft_${Date.now().toString(36)}`,
-      at: Date.now(),
-      total: plan.total,
-      problemRows: rows.filter((r) => r.problems).length,
+    return {
+      id: state.draftId || undefined,
+      kind: "launch",
+      approval,
+      state: approval === "staged" ? "queued" : "draft",
+      title: state.config.campaignName || "Untitled launch",
+      campaign: {
+        campaignId: state.campaignId,
+        name: state.config.campaignName,
+        objective: state.config.objective,
+        optimisation: state.config.optimisation,
+        destination: state.config.destination,
+        placements: state.config.placements,
+        budget: state.config.budget,
+        budgetKind: state.config.budgetKind,
+        adsetCount: state.config.adsetCount,
+        currency: ctx.context?.account?.currency || "GBP",
+      },
+      creatives: chosenCreatives().map((creative) => ({
+        id: String(creative.id),
+        internalId: String(creative.internalId || creative.id),
+        name: creative.name,
+        format: creative.format,
+        ratio: creative.preview?.ratio || "",
+        hasImage: creative.preview?.hasImage ?? null,
+        hasVideo: creative.preview?.hasVideo ?? null,
+        mappings: { ...(state.mapping[creative.id] || {}) },
+      })),
+      headlines: state.headlines.map((headline) => String(headline ?? "")),
+      bodies: state.bodies.map((body) => String(body ?? "")),
+      mode: state.mode,
+      tracking: { templateId: state.tracking.templateId, fields: state.tracking.fields.map((field) => ({ ...field })) },
+      plan: { mode: state.mode, total: plan.total, equation: plan.equation, rows: plan.rows },
+      validation: { ok: validation.ok, errors: validation.errors, warnings: validation.warnings, problems: validation.problems },
+    };
+  }
+
+  function saveDraft({ approval = "editing" } = {}) {
+    const saved = ctx.drafts.save(draftFromState({ approval }));
+    state.draftId = saved.id;
+    return saved;
+  }
+
+  /** The queue's view of a staged draft, kept in the shape the queue step and
+   *  the review already render. */
+  function queuedView(draft) {
+    const rows = draft.plan.rows.map((row) => ({
+      name: row.name,
+      problems: row.problems.length > 0,
+      detail: row.detail || "",
+      trackingKey: row.trackingKey,
+    }));
+    return {
+      id: draft.id,
+      at: Date.parse(draft.updatedAt) || Date.now(),
+      total: draft.plan.total,
+      problemRows: rows.filter((row) => row.problems).length,
       rows,
     };
+  }
+
+  function stage() {
+    const validation = currentValidation();
+    if (!validation.ok) return;
+    const saved = saveDraft({ approval: "staged" });
+    state.queued = queuedView(saved);
     state.step = STEPS.length - 1;
-    ctx.say(`Staged ${plan.total} ads as a draft in the publishing queue. Nothing was sent to the provider.`);
+    ctx.say(`Staged ${formatInt(draftAdCount(saved))} ads in the publishing queue as a draft. Nothing was sent to the provider.`);
     render();
   }
 
-  return Object.freeze({ open, close, root, state });
+  /**
+   * Reopen a saved launch: creatives, their mappings, the campaign
+   * configuration, tracking, the planned rows and the approval state all come
+   * back exactly as they were saved.
+   */
+  function loadDraft(draft) {
+    if (!draft) return;
+    state.draftId = draft.id;
+    state.campaignId = draft.campaign.campaignId;
+    state.config = {
+      ...state.config,
+      campaignName: draft.campaign.name,
+      objective: draft.campaign.objective || state.config.objective,
+      optimisation: draft.campaign.optimisation || state.config.optimisation,
+      destination: draft.campaign.destination,
+      placements: draft.campaign.placements.length ? [...draft.campaign.placements] : state.config.placements,
+      budget: draft.campaign.budget ?? state.config.budget,
+      budgetKind: draft.campaign.budgetKind || state.config.budgetKind,
+      adsetCount: draft.campaign.adsetCount || state.config.adsetCount,
+    };
+    state.mode = draft.mode;
+    // Empty axes are restored as the empty rows the operator left behind, not
+    // as a fresh default: the plan count must come back identical.
+    state.headlines = draft.headlines.length ? [...draft.headlines] : state.headlines;
+    state.bodies = draft.bodies.length ? [...draft.bodies] : state.bodies;
+    state.tracking = {
+      templateId: draft.tracking.templateId || state.tracking.templateId,
+      fields: draft.tracking.fields.length ? draft.tracking.fields.map((field) => ({ ...field })) : state.tracking.fields,
+    };
+    state.mapping = Object.fromEntries(draft.creatives.map((creative) => [creative.id, { ...creative.mappings }]));
+    // The draft's own creatives seed the picker before the library answers, so
+    // the restored plan never briefly reads as an empty selection.
+    state.creatives = draft.creatives.map((creative) => ({
+      id: creative.id,
+      internalId: creative.internalId || creative.id,
+      name: creative.name,
+      format: creative.format,
+      preview: { ratio: creative.ratio, hasImage: creative.hasImage, hasVideo: creative.hasVideo },
+    }));
+    selection.setMatching(state.creatives);
+    // Select them now rather than waiting for the asset reader: the plan is the
+    // draft's, and a reopened plan must not read as empty while a read is in
+    // flight or unavailable.
+    selection.clear();
+    for (const creative of draft.creatives) selection.toggle(String(creative.id));
+    pendingSelection = draft.creatives.map((creative) => creative.id);
+    state.queued = draft.approval === "staged" ? queuedView(draft) : null;
+    // A staged draft opens on its receipt; a draft still being edited opens on
+    // the mapping step, where the variation decisions live.
+    state.step = draft.approval === "staged" ? STEPS.length - 1 : 2;
+  }
+
+  return Object.freeze({ open, close, root, state, loadDraft });
 }

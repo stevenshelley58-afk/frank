@@ -54,6 +54,7 @@ import {
 } from "./ads-ui.js";
 import { createTable, column, createSelection, columnChooser, sortControl } from "./ads-table.js";
 import { field, filterBar, bulkBar, applyFilters, hiddenSelectionNotice } from "./ads-views.js";
+import { draftSummary } from "./ads-drafts.js";
 import { ADS_ENDPOINT_BASE, READER_PATHS, READER_REQUIREMENTS } from "./ads-source.js";
 
 // ---------------------------------------------------------------------------
@@ -306,7 +307,6 @@ export function createQueueScreen(ctx, host) {
     selection: null,
     table: null,
     review: null, // the bulk change being reviewed locally
-    staged: [], // local staged changes; nothing here has been sent
     decisions: new Map(), // pending change id -> the operator's local decision
     view: {
       columns: normalizeColumns(stored.columns),
@@ -993,12 +993,13 @@ export function createQueueScreen(ctx, host) {
   /**
    * Keep the selection honest across a filter change: selected batches that the
    * filters hide stay selected (the operator asked for them), the bulk bar says
-   * how many are hidden, and "select every row" only ever means the rows the
-   * table is currently showing.
+   * how many are hidden, "select this page" means only the rows the table is
+   * showing, and selecting every matching row is a separate named action.
    */
   function syncSelection(visible) {
     const kept = state.selection ? state.selection.keys() : [];
-    state.selection = createSelection({ rows: visible, getKey: batchKey });
+    state.selection = createSelection({ getKey: batchKey });
+    state.selection.setMatching(visible);
     for (const key of kept) state.selection.toggle(key);
   }
 
@@ -1294,31 +1295,49 @@ export function createQueueScreen(ctx, host) {
     renderBulk();
   }
 
+  /**
+   * Stage a reviewed change into the shared draft model. It is the same record
+   * the publishing flow writes, so the queue, the campaigns table and the launch
+   * flow all agree on what is waiting and on how many rows it touches.
+   */
   function stageChange(review) {
     const selected = selectedBatches();
     const plan = reviewPlan(review, selected);
     const isPause = review.kind === "pause";
-    state.staged.push({
-      id: nextId("staged"),
-      kind: review.kind,
-      direction: review.direction,
-      amount: isPause ? null : plan.amount,
-      batches: selected.map((batch) => rowName(batch)),
-      ads: plan.entries.length,
-      changed: plan.changed,
-      total: isPause ? null : plan.total,
-      gaps: plan.gaps,
-      at: Date.now(),
+    const currency = ctx.context?.account?.currency || "GBP";
+    const rows = plan.entries.map((entry) => ({
+      key: String(rowKey(entry.row)),
+      name: rowName(entry.row),
+      level: "ad",
+      state: String(entry.before ?? ""),
+      before: num(entry.before),
+      after: isPause ? null : num(entry.after),
+    }));
+    const saved = ctx.drafts.save({
+      kind: isPause ? "pause" : "budget",
+      approval: "staged",
+      state: "queued",
+      title: isPause ? `Pause ${formatInt(plan.changed)} ads` : `Budget change across ${formatInt(plan.entries.length)} ads`,
+      campaign: { budget: null, currency, budgetKind: "daily" },
+      changes: {
+        kind: isPause ? "pause" : "budget",
+        percent: 0,
+        amount: isPause ? null : plan.amount,
+        direction: review.direction,
+        batches: selected.map((batch) => rowName(batch)),
+        gaps: plan.gaps,
+        rows,
+      },
     });
     state.review = null;
     state.selection?.clear();
     renderTable();
     renderBulk();
-    renderAttention();
+    renderAll();
     ctx.say(
       isPause
-        ? `Staged here only: pause ${formatInt(plan.changed)} ads. Nothing was sent to the provider.`
-        : `Staged here only: a budget change across ${formatInt(plan.entries.length)} ads. Nothing was sent to the provider.`,
+        ? `Staged ${formatInt(saved.changes.rows.length)} rows for a pause. Nothing was sent to the provider.`
+        : `Staged a budget change across ${formatInt(saved.changes.rows.length)} ads. Nothing was sent to the provider.`,
     );
   }
 
@@ -1346,11 +1365,28 @@ export function createQueueScreen(ctx, host) {
     box.append(
       bulkBar({
         count: selected.length,
+        matchingCount: state.selection ? state.selection.matchingSize() : 0,
+        pageCount: state.selection ? state.selection.pageSize() : 0,
+        hiddenCount: state.selection ? state.selection.hiddenKeys().length : 0,
         // The shared bar appends a bare "s" to the noun, so the noun is one that
         // pluralises that way: "2 batchs selected" would be a visible typo in a
         // screen that is otherwise careful about its words.
         noun: "queue item",
         note: parts.join(" · "),
+        onSelectMatching: () => {
+          if (!state.selection) return;
+          const total = state.selection.matchingSize();
+          state.selection.selectMatching();
+          ctx.say(`Selected all ${formatInt(total)} queue items the current filters match.`);
+          renderTable();
+          renderBulk();
+        },
+        onSelectPage: () => {
+          if (!state.selection) return;
+          state.selection.retain(state.selection.pageKeys());
+          renderTable();
+          renderBulk();
+        },
         actions: [
           button("Pause", { title: "Review a pause for every ad in the selected batches, before and after.", onClick: () => openReview("pause") }),
           button("Change budget", { title: "Review a budget change for every ad in the selected batches, before and after.", onClick: () => openReview("budget") }),
@@ -1512,36 +1548,58 @@ export function createQueueScreen(ctx, host) {
     return section;
   }
 
+  /**
+   * Everything staged in Frank, read from the shared draft model. This renders
+   * in every mode, including Not connected: a staged draft is a fact about this
+   * workspace, not about the provider reader.
+   */
   function stagedBlock() {
-    if (!state.staged.length) return null;
-    const section = block("Staged on this screen", {
-      note: "These changes are recorded here and nowhere else. Frank has no write endpoint for the queue in this build, so none of them has been sent to the provider.",
+    const drafts = ctx.drafts.list();
+    if (!drafts.length) return null;
+    const section = block("Staged in Frank", {
+      note: "One shared record per staged change, written by the launch flow, the campaigns table and this queue alike. Frank has no write endpoint in this build, so none of them has been sent to Meta and none of them is claimed as delivered.",
     });
-    for (const item of state.staged) {
+    for (const draft of drafts) {
       const list = el("dl");
-      const step = money(Math.abs(num(item.amount) ?? 0));
-      list.append(
-        defRow(
-          "Change",
-          item.kind === "pause"
-            ? `Pause ${formatInt(item.changed)} ads`
-            : `${item.direction === "decrease" ? "Decrease" : "Increase"} every budget by ${step === null ? "—" : step}`,
-        ),
-        defRow("Batches", item.batches.join(", ") || "—"),
-        defRow("Ads covered here", formatInt(item.ads)),
-        defRow("Total change", item.kind === "pause" ? `${formatInt(item.changed)} ads stop delivering` : item.total === null ? "—" : `${moneyDelta(item.total)} per day`),
-        defRow("Staged", formatWhen(item.at)),
-      );
-      if (item.gaps.length) list.append(defRow("Not covered", item.gaps.join("; ")));
+      if (draft.kind === "launch") {
+        list.append(
+          defRow("Launch", draft.title || "Untitled launch"),
+          defRow("Ads in the plan", formatInt(draft.plan.total)),
+          defRow("Planned rows stored", formatInt(draft.plan.rows.length)),
+          defRow("Creatives", formatInt(draft.creatives.length)),
+          defRow("Campaign identity", draft.campaign.campaignId),
+          defRow("State", draft.approval === "staged" ? "Staged — waiting for a write path" : "Still being edited"),
+          defRow("Updated", formatWhen(Date.parse(draft.updatedAt) || Date.now())),
+        );
+      } else {
+        const changes = draft.changes || {};
+        list.append(
+          defRow("Change", draft.title || draftSummary(draft)),
+          defRow("Rows covered", formatInt((changes.rows || []).length)),
+          defRow("Batches", (changes.batches || []).join(", ") || "—"),
+          defRow("State", draft.approval === "staged" ? "Staged — waiting for a write path" : "Still being edited"),
+          defRow("Updated", formatWhen(Date.parse(draft.updatedAt) || Date.now())),
+        );
+        if ((changes.gaps || []).length) list.append(defRow("Not covered", changes.gaps.join("; ")));
+      }
       const actions = el("div", "ads-state-strip");
+      if (draft.kind === "launch") {
+        actions.append(
+          button("Open draft", {
+            variant: "ink",
+            title: "Reopen this launch in the publishing flow, exactly as it was saved.",
+            onClick: () => ctx.openDraft(draft.id),
+          }),
+        );
+      }
       actions.append(
         button("Discard", {
           variant: "quiet",
-          title: "Remove this staged change. Nothing was sent, so there is nothing to undo at the provider.",
+          title: "Remove this staged draft. Nothing was sent, so there is nothing to undo at the provider.",
           onClick: () => {
-            state.staged = state.staged.filter((entry) => entry.id !== item.id);
-            renderAttention();
-            ctx.say("Staged change discarded. Nothing was sent to the provider.");
+            ctx.drafts.remove(draft.id);
+            renderAll();
+            ctx.say("Staged draft discarded. Nothing was sent to the provider.");
           },
         }),
       );
@@ -1721,6 +1779,14 @@ export function createQueueScreen(ctx, host) {
 
   // ----------------------------------------------------------------- render --
 
+  /** The shared staged drafts, above whatever the provider reader answered. */
+  function renderStaged() {
+    const box = region("staged");
+    clear(box);
+    const section = stagedBlock();
+    if (section) box.append(section);
+  }
+
   function renderNotConnected() {
     const box = region("message");
     box.append(
@@ -1759,6 +1825,7 @@ export function createQueueScreen(ctx, host) {
     clear(root);
     regions = {};
     renderHeader();
+    renderStaged();
     // Before the first answer there is nothing to count and nothing to claim, so
     // the screen shows its own shape and a skeleton rather than empty blocks.
     if (state.mode === "loading") {
@@ -1783,13 +1850,20 @@ export function createQueueScreen(ctx, host) {
   renderAll();
   loadPromise = load();
 
+  // A draft staged anywhere in the workspace appears here without a reload.
+  const unsubscribeDrafts = ctx.drafts.subscribe(() => {
+    if (!state.disposed) renderAll();
+  });
+
   return {
     node: root,
     dispose() {
       state.disposed = true;
+      unsubscribeDrafts?.();
       controller.abort();
       drawer.close({ restoreFocus: false });
     },
+    reload: (options = {}) => load({ force: Boolean(options.force) }),
     // The shell waits on this before tearing the screen down. Returning the
     // in-flight promise rather than the loader keeps that wait from starting a
     // second read.

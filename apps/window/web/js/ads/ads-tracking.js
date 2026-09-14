@@ -36,11 +36,12 @@ import {
   errorPanel,
   skeleton,
   staleBanner,
+  rowsReadNote,
 } from "./ads-ui.js";
 import { column, createTable, columnChooser } from "./ads-table.js";
 import { field, filterBar, applyFilters } from "./ads-views.js";
 import { rowsOf, READER_REQUIREMENTS } from "./ads-source.js";
-import { formatWhen, rowName } from "./ads-contracts.js";
+import { formatWhen, rowKey, rowName } from "./ads-contracts.js";
 
 // ---------------------------------------------------------------------------
 // Vocabulary
@@ -94,6 +95,7 @@ const CHECK_KINDS = Object.freeze({
   encoding: Object.freeze({ label: "Encoding", severity: "error" }),
   duplicate_parameter: Object.freeze({ label: "Duplicate parameter", severity: "error" }),
   missing_term: Object.freeze({ label: "Optional parameter absent", severity: "info" }),
+  shared_identifier: Object.freeze({ label: "Shared tracking identity", severity: "warning" }),
   unstable_identifier: Object.freeze({ label: "Unstable identifier", severity: "warning" }),
   unresolved_placeholder: Object.freeze({ label: "Placeholder has no sample", severity: "warning" }),
   unknown_placeholder: Object.freeze({ label: "Unknown placeholder", severity: "warning" }),
@@ -146,7 +148,7 @@ function safeDecode(value) {
  * Raw parameter pairs, deliberately undecoded. The encoding check has to see a
  * value as it will be written, not as a parser would tidy it up.
  */
-function rawParams(url) {
+export function rawParams(url) {
   const query = String(url ?? "").split("#")[0].split("?")[1];
   if (!query) return [];
   const pairs = [];
@@ -159,7 +161,7 @@ function rawParams(url) {
 }
 
 /** The same utm_ parameter twice is the classic silent data loss. */
-function duplicateParams(url) {
+export function duplicateParams(url) {
   const counts = new Map();
   for (const { key } of rawParams(url)) {
     if (!key.startsWith("utm_")) continue;
@@ -184,7 +186,13 @@ const UNSAFE_PATTERN = /[<>{}|\\^`"[\]]/;
 const NON_ASCII_PATTERN = /[^\u0020-\u007e]/;
 const STRAY_PERCENT_PATTERN = /%(?![0-9A-Fa-f]{2})/;
 
-function encodingFindings(label, fieldKey, value) {
+/** Percent-encode only the characters a pattern matches, so a value that
+ *  already carries a valid escape is not encoded a second time. */
+function percentEncodeMatches(text, pattern) {
+  return String(text).replace(new RegExp(pattern.source, "g"), (character) => encodeURIComponent(character));
+}
+
+function encodingFindings(label, fieldKey, value, { structural = true } = {}) {
   const text = String(value ?? "");
   if (!text) return [];
   const findings = [];
@@ -193,18 +201,20 @@ function encodingFindings(label, fieldKey, value) {
       makeFinding(
         "encoding",
         fieldKey,
-        `${label} contains a raw space. Some servers truncate a parameter at the space, so the value arrives half-written. Percent-encode it as ${encodeURIComponent(text)}.`,
+        `${label} contains a raw space. Some servers truncate a parameter at the space, so the value arrives half-written. Percent-encode it as ${percentEncodeMatches(text, /\s/)}.`,
       ),
     );
   }
   if (STRAY_PERCENT_PATTERN.test(text)) {
     findings.push(makeFinding("encoding", fieldKey, `${label} contains a percent sign that is not an escape sequence. It will be read as one and the value will come out mangled.`));
   }
-  if (STRUCTURAL_PATTERN.test(text)) {
-    findings.push(makeFinding("encoding", fieldKey, `${label} contains a query character (& = ? #) inside the value, which ends the parameter early or starts a new one. Percent-encode it as ${encodeURIComponent(text)}.`));
+  // `& = ? #` are query syntax, and inside an anchor they are legal address
+  // syntax: an anchor is checked for the characters that are never legal.
+  if (structural && STRUCTURAL_PATTERN.test(text)) {
+    findings.push(makeFinding("encoding", fieldKey, `${label} contains a query character (& = ? #) inside the value, which ends the parameter early or starts a new one. Percent-encode it as ${percentEncodeMatches(text, STRUCTURAL_PATTERN)}.`));
   }
   if (UNSAFE_PATTERN.test(text) || NON_ASCII_PATTERN.test(text)) {
-    findings.push(makeFinding("encoding", fieldKey, `${label} contains characters that must be percent-encoded before they go in a URL: ${encodeURIComponent(text)}.`, "warning"));
+    findings.push(makeFinding("encoding", fieldKey, `${label} contains characters that must be percent-encoded before they go in a URL: ${percentEncodeMatches(text, /[<>{}|\\^`"[\]]|[^\u0020-\u007e]/)}.`, "warning"));
   }
   return findings;
 }
@@ -235,7 +245,7 @@ function piiFindings(label, fieldKey, value) {
  * destination being edited and for the address a template's preview is built
  * onto, so the same rules answer for both.
  */
-function urlFindings(url, { label = "The destination", fieldKey = "url", duplicates = true } = {}) {
+export function urlFindings(url, { label = "The destination", fieldKey = "url", duplicates = true } = {}) {
   const text = String(url ?? "").trim();
   if (!text) return [makeFinding("missing_required", fieldKey, `${label} is empty, and an ad cannot point at nothing.`)];
   const findings = [];
@@ -245,7 +255,14 @@ function urlFindings(url, { label = "The destination", fieldKey = "url", duplica
   findings.push(...encodingFindings(label, fieldKey, path));
   for (const { key, raw } of rawParams(text)) {
     findings.push(...encodingFindings(key, fieldKey, raw));
-    findings.push(...piiFindings(key, fieldKey, raw));
+    // An escaped address is the same address: `lead%40example.invalid` is
+    // `lead@example.invalid`, and personal information does not become
+    // impersonal by being percent-encoded.
+    findings.push(...piiFindings(key, fieldKey, safeDecode(raw)));
+  }
+  const hash = text.indexOf("#");
+  if (hash !== -1 && text.slice(hash + 1)) {
+    findings.push(...encodingFindings(`${label} (the anchor)`, fieldKey, text.slice(hash + 1), { structural: false }));
   }
   if (duplicates) {
     for (const dupe of duplicateParams(text)) {
@@ -266,6 +283,166 @@ function tidyFindings(findings) {
     unique.push(item);
   }
   return unique.sort((a, b) => SEVERITY_ORDER.indexOf(a.severity) - SEVERITY_ORDER.indexOf(b.severity));
+}
+
+// ---------------------------------------------------------------------------
+// Value resolution and the address a template writes
+// ---------------------------------------------------------------------------
+
+/** A literal the ad's saved tracking already carries, for the one context
+ *  token the read can supply. A value that still holds a placeholder is not
+ *  a literal. */
+export function literalTracking(ad, key) {
+  const value = ad?.tracking && typeof ad.tracking === "object" ? ad.tracking[key] : null;
+  if (typeof value !== "string" || !value.trim()) return "";
+  return tokensIn(value).length ? "" : value.trim();
+}
+
+/**
+ * The sample values a template's placeholders resolve against. Every id comes
+ * from the shared row identity (`rowKey`), not from a name and not from a
+ * provider id that happens to sit in `id`, so `{{…internal_id}}` resolves to
+ * the value the rest of the workspace joins on.
+ */
+export function sampleMap(context) {
+  const sample = new Map();
+  const campaignId = rowKey(context.campaign);
+  const creativeId = rowKey(context.creative);
+  const adId = rowKey(context.ad);
+  if (campaignId) sample.set("campaign.internal_id", campaignId);
+  if (context.campaign?.name) sample.set("campaign.name", context.campaign.name);
+  if (creativeId) sample.set("creative.internal_id", creativeId);
+  if (adId) sample.set("ad.internal_id", adId);
+  if (context.ad?.name) sample.set("ad.name", context.ad.name);
+  // The platform key is whatever this ad's saved tracking already resolved
+  // to. Assuming "meta" would be inventing a value the account may not use.
+  const platform = literalTracking(context.ad, "utm_source");
+  if (platform) sample.set("platform", platform);
+  return sample;
+}
+
+/** A stable value two ads can still share: the creative's id, when several ads
+ *  in the read run that creative. Stability is not the same as uniqueness. */
+export function sharedIdentifier(value, sampledCreative, adsSharing) {
+  if (!(Number(adsSharing) > 1)) return false;
+  const text = String(value ?? "");
+  if (tokensIn(text).includes("creative.internal_id")) return true;
+  return Boolean(sampledCreative) && text.trim() === String(sampledCreative);
+}
+
+/**
+ * The value an editor shows: an unsaved edit wins over a saved local draft,
+ * which wins over the value the read returned. The order is the whole point —
+ * the preview has to be built from what is in the box.
+ */
+export function editorValueFrom(draft, local, saved) {
+  if (draft !== undefined) return String(draft);
+  if (local !== undefined) return String(local);
+  return String(saved ?? "");
+}
+
+/** One destination draft per ad, kept by the shared row identity, so tracing
+ *  another ad does not drop the draft this one is holding. */
+export function destinationDraftEntry(drafts, ad) {
+  const id = rowKey(ad);
+  let entry = drafts.get(id);
+  if (!entry) {
+    entry = { adId: id, value: String(ad?.destination ?? ""), acknowledged: false, saved: null };
+    drafts.set(id, entry);
+  }
+  return entry;
+}
+
+/**
+ * Build the preview address.
+ *
+ * The destination may already carry query parameters and a `#anchor`. The
+ * tracking parameters belong in the query, before the fragment: an address
+ * that appends them after the `#` sends the browser to the same page, but
+ * every parameter lands in the fragment, which no server and no analytics
+ * tool ever receives. Existing parameters and the anchor are both kept.
+ */
+export function buildPreviewUrl(values, sample, base) {
+  const pairs = [];
+  for (const entry of values) {
+    const value = resolveValue(entry.value, sample).trim();
+    // An empty parameter is not written: a trailing `utm_term=` helps nobody.
+    if (!value) continue;
+    pairs.push({ key: entry.key, value });
+  }
+  const query = pairs.map(({ key, value }) => `${key}=${value}`).join("&");
+  const encodedQuery = pairs.map(({ key, value }) => `${key}=${encodeURIComponent(value)}`).join("&");
+  const hash = base ? base.indexOf("#") : -1;
+  const head = base ? (hash === -1 ? base : base.slice(0, hash)) : "";
+  const fragment = hash === -1 ? "" : base.slice(hash);
+  const glue = !head || /[?&]$/.test(head) ? "" : head.includes("?") ? "&" : "?";
+  return { pairs, query, url: `${head}${glue}${query}${fragment}`, encoded: `${head}${glue}${encodedQuery}${fragment}` };
+}
+
+/** Build the preview address and every finding about the values behind it. */
+export function evaluate(values, sample, base, { sharedCreative = 0 } = {}) {
+  const findings = [];
+  const prepared = values.map((entry) => ({ ...entry, resolved: resolveValue(entry.value, sample).trim() }));
+
+  for (const entry of prepared) {
+    const label = entry.label || entry.key;
+    for (const token of tokensIn(entry.value)) {
+      if (STABLE_TOKENS[token] || UNSTABLE_TOKENS[token]) {
+        // A stable token with no sample is still unresolved in the address:
+        // saying nothing would let `{{ad.internal_id}}` reach a URL unread.
+        if (!sample.has(token)) {
+          findings.push(makeFinding("unresolved_placeholder", entry.key, `${label} uses {{${token}}} and this read carries no value to fill it, so the placeholder stays in the URL unresolved.`));
+        }
+        continue;
+      }
+      if (!(token in CONTEXT_TOKENS)) findings.push(makeFinding("unknown_placeholder", entry.key, `${label} uses {{${token}}}, which is not a placeholder this workspace defines.`));
+      else if (!sample.has(token)) {
+        findings.push(makeFinding("unresolved_placeholder", entry.key, `${label} uses {{${token}}} and this read carries no ${CONTEXT_TOKENS[token]}, so the placeholder stays in the URL unresolved.`));
+      }
+    }
+    const kind = identifierKind(entry.value);
+    if (kind.level === "unstable") findings.push(makeFinding("unstable_identifier", entry.key, `${label}: ${kind.reason}`));
+    if (entry.required === true && !entry.resolved) findings.push(makeFinding("missing_required", entry.key, `${label} is required and empty, so it will not appear in the URL at all.`));
+    if (entry.required === false && entry.key === "utm_term" && !entry.resolved) {
+      findings.push(makeFinding("missing_term", entry.key, `${label} is optional and empty. Without it, placement-level reporting falls back to the provider only.`));
+    }
+    // A stable id is stable, not unique: a creative several ads run writes one
+    // value for all of them, and that is a reporting collision, not an id.
+    if (sharedIdentifier(entry.value, sample.get("creative.internal_id"), sharedCreative)) {
+      findings.push(
+        makeFinding(
+          "shared_identifier",
+          entry.key,
+          `${label} resolves to the creative's id, and ${sharedCreative} ads in this read run that creative, so they all write the same tracking value. Use {{ad.internal_id}} where the reporting has to tell the ads apart.`,
+        ),
+      );
+    }
+    // A value that still holds a placeholder is not a URL value yet; the
+    // placeholder finding covers it, and flagging its braces as unencoded
+    // would be noise about syntax that never reaches a server.
+    if (!entry.resolved || tokensIn(entry.resolved).length) continue;
+    findings.push(...encodingFindings(label, entry.key, entry.resolved));
+    // The percent-encoded form of an address is the same address.
+    findings.push(...piiFindings(label, entry.key, safeDecode(entry.resolved)));
+  }
+
+  const preview = buildPreviewUrl(prepared, sample, base);
+  // The destination is scanned as the address it is; the built string's
+  // parameters are the values already checked above, and the duplicate scan
+  // below reads base and template together.
+  if (base) findings.push(...urlFindings(base, { label: "The sample ad's destination", fieldKey: "url", duplicates: false }));
+  for (const dupe of duplicateParams(preview.url)) {
+    const fromBase = rawParams(base || "").some((pair) => pair.key === dupe.key);
+    findings.push(
+      makeFinding(
+        "duplicate_parameter",
+        dupe.key,
+        `${dupe.key} appears ${times(dupe.count)} in the built URL${fromBase ? ", because the sample ad's destination already sets it" : ""}. Most analytics tools keep the first value and silently ignore the rest.`,
+      ),
+    );
+  }
+
+  return { values: prepared, preview, findings: tidyFindings(findings) };
 }
 
 /**
@@ -385,6 +562,7 @@ export function createTrackingScreen(ctx, host) {
 
   const state = {
     status: "loading",
+    readStatus: "",
     detail: "",
     fetchedAt: null,
     templates: null,
@@ -401,7 +579,9 @@ export function createTrackingScreen(ctx, host) {
     search: "",
     focus: null,
     subject: { kind: "ad", id: "" },
-    destination: { adId: "", value: "", acknowledged: false, saved: null },
+    // One destination draft per ad, keyed by the shared row identity, so a
+    // draft survives tracing another ad and coming back to this one.
+    destination: new Map(),
     columns: Array.isArray(storedColumns) ? storedColumns.filter((label) => TEMPLATE_LABELS.includes(label)) : TEMPLATE_LABELS.slice(),
     table: {
       sort: storedSort && typeof storedSort.id === "string" ? { id: storedSort.id, dir: storedSort.dir === "desc" ? "desc" : "asc" } : { id: "name", dir: "asc" },
@@ -550,13 +730,16 @@ export function createTrackingScreen(ctx, host) {
     return row ? String(row.value ?? "") : "";
   }
 
-  /** What a value is now: saved local draft first, then unsaved edit, then the read. */
+  /** What a value is now: the unsaved edit first, then the saved local draft,
+   *  then the read. Typing beats a draft that was saved before the keystroke. */
   function currentValue(template, key) {
-    const local = state.local.get(template.id);
-    if (local && key in local) return String(local[key]);
     const draft = state.drafts.get(template.id);
-    if (draft && key in draft) return String(draft[key]);
-    return readValue(template, key);
+    const local = state.local.get(template.id);
+    return editorValueFrom(
+      draft && key in draft ? draft[key] : undefined,
+      local && key in local ? local[key] : undefined,
+      readValue(template, key),
+    );
   }
 
   function baselineValue(template, key) {
@@ -618,38 +801,18 @@ export function createTrackingScreen(ctx, host) {
     const ads = rows("ads");
     const creatives = rows("creatives");
     if (state.subject.kind === "creative") {
-      const creative = creatives.find((row) => String(row.id) === String(state.subject.id)) || creatives[0] || null;
+      const creative = creatives.find((row) => String(rowKey(row)) === String(state.subject.id)) || creatives[0] || null;
       const carrying = creative ? ads.filter((row) => String(row.creativeId) === String(creative.id)) : [];
       return { kind: "creative", creative, ad: carrying[0] || null, carries: carrying };
     }
-    const ad = ads.find((row) => String(row.id) === String(state.subject.id)) || ads[0] || null;
+    const ad = ads.find((row) => String(rowKey(row)) === String(state.subject.id)) || ads[0] || null;
     const creative = ad ? creatives.find((row) => String(row.id) === String(ad.creativeId)) || null : null;
     return { kind: "ad", ad, creative, carries: [] };
-  }
-
-  function literalTracking(ad, key) {
-    const value = ad?.tracking && typeof ad.tracking === "object" ? ad.tracking[key] : null;
-    if (typeof value !== "string" || !value.trim()) return "";
-    return tokensIn(value).length ? "" : value.trim();
   }
 
   function sampleContext() {
     const subject = resolveSubject();
     return { ad: subject.ad, creative: subject.creative, campaign: campaignForAd(subject.ad), adset: adsetForAd(subject.ad) };
-  }
-
-  function sampleMap(context) {
-    const sample = new Map();
-    if (context.campaign?.id) sample.set("campaign.internal_id", context.campaign.id);
-    if (context.campaign?.name) sample.set("campaign.name", context.campaign.name);
-    if (context.creative?.id) sample.set("creative.internal_id", context.creative.id);
-    if (context.ad?.id) sample.set("ad.internal_id", context.ad.id);
-    if (context.ad?.name) sample.set("ad.name", context.ad.name);
-    // The platform key is whatever this ad's saved tracking already resolved
-    // to. Assuming "meta" would be inventing a value the account may not use.
-    const platform = literalTracking(context.ad, "utm_source");
-    if (platform) sample.set("platform", platform);
-    return sample;
   }
 
   function blogFor(creative) {
@@ -665,72 +828,6 @@ export function createTrackingScreen(ctx, host) {
   }
 
   // --------------------------------------------------------------- checks --
-
-  /**
-   * Build the preview address and every finding about the values behind it.
-   *
-   * Concatenation is deliberately naive: this is the address an operator would
-   * paste, and the duplicate check has to be able to see the collision that
-   * produces when the destination already carries one of the parameters.
-   */
-  function buildPreviewUrl(values, sample, base) {
-    const pairs = [];
-    for (const entry of values) {
-      const value = resolveValue(entry.value, sample).trim();
-      // An empty parameter is not written: a trailing `utm_term=` helps nobody.
-      if (!value) continue;
-      pairs.push({ key: entry.key, value });
-    }
-    const query = pairs.map(({ key, value }) => `${key}=${value}`).join("&");
-    const encodedQuery = pairs.map(({ key, value }) => `${key}=${encodeURIComponent(value)}`).join("&");
-    const glue = base ? (base.includes("?") ? "&" : "?") : "";
-    return { pairs, query, url: `${base || ""}${glue}${query}`, encoded: `${base || ""}${glue}${encodedQuery}` };
-  }
-
-  function evaluate(values, sample, base) {
-    const findings = [];
-    const prepared = values.map((entry) => ({ ...entry, resolved: resolveValue(entry.value, sample).trim() }));
-
-    for (const entry of prepared) {
-      const label = entry.label || entry.key;
-      for (const token of tokensIn(entry.value)) {
-        if (STABLE_TOKENS[token] || UNSTABLE_TOKENS[token]) continue;
-        if (!(token in CONTEXT_TOKENS)) findings.push(makeFinding("unknown_placeholder", entry.key, `${label} uses {{${token}}}, which is not a placeholder this workspace defines.`));
-        else if (!sample.has(token)) {
-          findings.push(makeFinding("unresolved_placeholder", entry.key, `${label} uses {{${token}}} and this read carries no ${CONTEXT_TOKENS[token]}, so the placeholder stays in the URL unresolved.`));
-        }
-      }
-      const kind = identifierKind(entry.value);
-      if (kind.level === "unstable") findings.push(makeFinding("unstable_identifier", entry.key, `${label}: ${kind.reason}`));
-      if (entry.required === true && !entry.resolved) findings.push(makeFinding("missing_required", entry.key, `${label} is required and empty, so it will not appear in the URL at all.`));
-      if (entry.required === false && entry.key === "utm_term" && !entry.resolved) {
-        findings.push(makeFinding("missing_term", entry.key, `${label} is optional and empty. Without it, placement-level reporting falls back to the provider only.`));
-      }
-      // A value that still holds a placeholder is not a URL value yet; the
-      // placeholder finding covers it, and flagging its braces as unencoded
-      // would be noise about syntax that never reaches a server.
-      if (!entry.resolved || tokensIn(entry.resolved).length) continue;
-      findings.push(...encodingFindings(label, entry.key, entry.resolved));
-      findings.push(...piiFindings(label, entry.key, entry.resolved));
-    }
-
-    const preview = buildPreviewUrl(prepared, sample, base);
-    // Duplicates in the base address are reported once, by the scan of the
-    // built address below, which sees the base and the template together.
-    if (base) findings.push(...urlFindings(base, { label: "The sample ad's destination", fieldKey: "url", duplicates: false }));
-    for (const dupe of duplicateParams(preview.url)) {
-      const fromBase = rawParams(base || "").some((pair) => pair.key === dupe.key);
-      findings.push(
-        makeFinding(
-          "duplicate_parameter",
-          dupe.key,
-          `${dupe.key} appears ${times(dupe.count)} in the built URL${fromBase ? ", because the sample ad's destination already sets it" : ""}. Most analytics tools keep the first value and silently ignore the rest.`,
-        ),
-      );
-    }
-
-    return { values: prepared, preview, findings: tidyFindings(findings) };
-  }
 
   /**
    * Re-run the reader's claim about one of its own rows against the URL that
@@ -789,6 +886,9 @@ export function createTrackingScreen(ctx, host) {
     const result = await ctx.reader.read("tracking", ctx.params, { signal: controller.signal, force });
     if (disposed || token !== loadToken) return;
     state.fetchedAt = result.fetchedAt || null;
+    // Which read actually failed, when the record on screen came from an earlier
+    // one the reader kept.
+    state.readStatus = result.failedStatus || result.status;
     state.detail = result.detail || "";
     const meta = result.data?.meta ?? null;
     const renderable = ["ready", "stale", "throttled", "syncing"].includes(result.status) && Boolean(meta) && Array.isArray(meta.templates);
@@ -875,7 +975,9 @@ export function createTrackingScreen(ctx, host) {
     if (state.status !== "ready") {
       root.append(
         staleBanner({
-          status: state.status,
+          // The read that actually failed: a kept record is `stale`, but the
+          // reason it is stale is the throttle or error behind it.
+          status: state.readStatus || state.status,
           fetchedAt: state.fetchedAt,
           detail: state.detail,
           onRefresh: () => {
@@ -893,6 +995,9 @@ export function createTrackingScreen(ctx, host) {
     root.append(traceBlock());
     root.append(destinationBlock());
     root.append(historyBlock());
+    // When the rows were observed, on every read, so the age is stated in the
+    // good state as well as under the banner.
+    root.append(rowsReadNote(state.fetchedAt, { suffix: "Nothing on this screen calls the provider." }));
   }
 
   /**
@@ -1076,6 +1181,9 @@ export function createTrackingScreen(ctx, host) {
     const context = sampleContext();
     const sample = sampleMap(context);
     const base = typeof context.ad?.destination === "string" ? context.ad.destination.trim() : "";
+    // How many ads in this read run the creative the sample resolves from. One
+    // ad cannot collide with itself; two can.
+    const sharedCreative = context.creative ? rows("ads").filter((row) => String(row.creativeId) === String(context.creative.id)).length : 0;
     const local = state.local.get(template.id);
     const hasLocal = Boolean(local && Object.keys(local).length);
 
@@ -1193,7 +1301,7 @@ export function createTrackingScreen(ctx, host) {
     const derived = el("div", "ads-block");
     section.append(derived);
 
-    const refs = { template, values, sample, base, context, saveBtn, discardBtn, dirtyHost, derived, identifierCells, inputs };
+    const refs = { template, values, sample, base, context, sharedCreative, saveBtn, discardBtn, dirtyHost, derived, identifierCells, inputs };
     editorRefs.set(String(template.id), refs);
     refreshEditor(refs);
     claimFocus("editor", () => inputs[0]?.focus());
@@ -1207,7 +1315,7 @@ export function createTrackingScreen(ctx, host) {
    */
   function refreshEditor(refs) {
     const values = refs.values.map((entry) => ({ ...entry, value: currentValue(refs.template, entry.key) }));
-    const evaluation = evaluate(values, refs.sample, refs.base);
+    const evaluation = evaluate(values, refs.sample, refs.base, { sharedCreative: refs.sharedCreative });
     const dirty = dirtyKeys(refs.template);
     const local = state.local.get(refs.template.id);
     const hasLocal = Boolean(local && Object.keys(local).length);
@@ -1215,10 +1323,18 @@ export function createTrackingScreen(ctx, host) {
     for (const cell of refs.identifierCells) {
       const entry = values.find((candidate) => candidate.key === cell.key);
       const kind = identifierKind(entry?.value);
+      const shared = sharedIdentifier(entry?.value, refs.sample.get("creative.internal_id"), refs.sharedCreative);
       clear(cell.host);
       const stack = el("div", "ads-cell-name");
-      stack.append(toneBadge(kind.label, kind.tone, { title: kind.reason }));
-      if (kind.short) stack.append(el("span", "ads-cell-sub", kind.short));
+      stack.append(
+        shared
+          ? toneBadge(`Shared with ${refs.sharedCreative} ads`, "warn", {
+              title: `This value is the id of a creative that ${refs.sharedCreative} ads in this read run, so all of them write the same tracking value and reporting cannot tell them apart. {{ad.internal_id}} separates them.`,
+            })
+          : toneBadge(kind.label, kind.tone, { title: kind.reason }),
+      );
+      if (shared) stack.append(el("span", "ads-cell-sub", "Same on every ad that runs it."));
+      else if (kind.short) stack.append(el("span", "ads-cell-sub", kind.short));
       cell.host.append(stack);
     }
 
@@ -1513,9 +1629,9 @@ export function createTrackingScreen(ctx, host) {
       select.append(el("option", "", subject.kind === "creative" ? "No creative rows" : "No ad rows"));
     } else {
       for (const row of options) {
-        const option = el("option", "", `${rowName(row)} · ${row.id || "id not reported"}`);
-        option.value = String(row.id ?? "");
-        if (chosen && String(row.id) === String(chosen.id)) option.selected = true;
+        const option = el("option", "", `${rowName(row)} · ${rowKey(row) || "id not reported"}`);
+        option.value = String(rowKey(row));
+        if (chosen && String(rowKey(row)) === String(rowKey(chosen))) option.selected = true;
         select.append(option);
       }
       select.addEventListener("change", () => {
@@ -1698,11 +1814,7 @@ export function createTrackingScreen(ctx, host) {
   // --------------------------------------------------------- destination ---
 
   function destinationDraft(ad) {
-    const id = String(ad?.id ?? "");
-    if (state.destination.adId !== id) {
-      state.destination = { adId: id, value: String(ad?.destination ?? ""), acknowledged: false, saved: null };
-    }
-    return state.destination;
+    return destinationDraftEntry(state.destination, ad);
   }
 
   /**
@@ -1962,5 +2074,6 @@ export function createTrackingScreen(ctx, host) {
       root.remove();
     },
     settled: () => Promise.allSettled(inFlight),
+    reload: (options = {}) => start({ force: Boolean(options.force) }),
   };
 }
