@@ -6,12 +6,12 @@ return [
     'routes' => [
         'main' => [
             'mautic_frank_owner_session' => [
-                'path' => '/s/frank/session',
-                'controller' => 'FrankOwnerEntryBundle:Entry:sessionAction',
+                'path' => '/frank/session',
+                'controller' => 'MauticPlugin\\FrankOwnerEntryBundle\\Controller\\EntryController::sessionAction',
             ],
             'mautic_frank_owner_return' => [
-                'path' => '/s/frank/return',
-                'controller' => 'FrankOwnerEntryBundle:Entry:returnAction',
+                'path' => '/frank/return',
+                'controller' => 'MauticPlugin\\FrankOwnerEntryBundle\\Controller\\EntryController::returnAction',
             ],
         ],
     ],

@@ -36,7 +36,18 @@ def test_native_entry_packages_have_fixed_allowlisted_returns():
 def test_mautic_session_proof_requires_exact_native_owner():
     controller = (ROOT / "native/mautic_frank_owner_entry/Controller/EntryController.php").read_text()
     config = (ROOT / "native/mautic_frank_owner_entry/Config/config.php").read_text()
-    assert "/s/frank/session" in config
+    assert "'/frank/session'" in config
     assert "getUserIdentifier() === 'owner'" in controller
     assert "['authenticated' => $authenticated]" in controller
     assert "403" in controller
+
+def test_mautic_main_route_does_not_duplicate_native_s_prefix():
+    config = (ROOT / "native/mautic_frank_owner_entry/Config/config.php").read_text()
+    assert "'/frank/session'" in config and "'/frank/return'" in config
+    assert "'/s/frank" not in config
+    assert "EntryController::sessionAction" in config
+
+def test_frappe_app_has_installer_required_metadata_files():
+    app = ROOT / "native/frappe_owner_entry/frank_owner_entry"
+    assert (app / "modules.txt").is_file()
+    assert (app / "patches.txt").is_file()
