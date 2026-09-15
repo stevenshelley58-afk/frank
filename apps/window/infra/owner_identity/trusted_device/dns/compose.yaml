@@ -1,0 +1,47 @@
+# Private resolver for the owner's trusted devices.
+#
+# The trusted-device verifier only recognises a device whose request reaches
+# Caddy over Tailscale. A laptop can pin auth.frank.fail to the VPS's Tailscale
+# address in its hosts file; a phone cannot. This resolver answers that one
+# name with the Tailscale address and forwards every other frank.fail name to
+# public DNS unchanged. It listens only on the VPS's Tailscale address, so only
+# tailnet peers can reach it, and it is meant to be wired in the Tailscale admin
+# console as a nameserver restricted to the frank.fail domain (split DNS).
+#
+# Deploy with ./deploy.sh from a clean checkout; the Corefile is passed inline
+# so no release path has to survive on disk for the container to restart.
+services:
+  resolver:
+    image: coredns/coredns:1.12.2@sha256:af8c8d35a5d184b386c4a6d1a012c8b218d40d1376474c7d071bb6c07201f47d
+    container_name: frank-trusted-device-dns
+    restart: unless-stopped
+    command: ["-conf", "/etc/coredns/Corefile"]
+    configs:
+      - source: corefile
+        target: /etc/coredns/Corefile
+    ports:
+      - "${OWNER_TAILSCALE_ADDRESS:?required}:53:53/udp"
+      - "${OWNER_TAILSCALE_ADDRESS:?required}:53:53/tcp"
+    read_only: true
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
+    labels:
+      org.frank.source-sha: "${OWNER_DNS_SOURCE_SHA:?required}"
+    healthcheck:
+      test: ["CMD", "/coredns", "-version"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+configs:
+  corefile:
+    content: |
+      frank.fail {
+          hosts {
+              ${OWNER_TAILSCALE_ADDRESS:?required} auth.frank.fail
+              ttl 60
+              fallthrough
+          }
+          forward . 1.1.1.1 1.0.0.1
+          errors
+      }

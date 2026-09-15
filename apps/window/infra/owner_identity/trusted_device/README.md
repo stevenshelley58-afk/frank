@@ -16,7 +16,7 @@ Create `/srv/frank/secrets/owner-trusted-devices.json` as a root-owned `0600` re
 {"gate_secret":"edge-to-verifier-secret","proof_secret":"verifier-to-caddy-secret","devices":[{"node_id":"n6HvGtfdy221CNTRL","user_id":"6781099988612671","label":"owner laptop"}]}
 ```
 
-Do not add a phone until its actual StableID and user IDs are verified. Systemd passes this file as `$CREDENTIALS_DIRECTORY/config` through `LoadCredential`; the service does not read the host secret path.
+Do not add a phone until its actual StableID and user IDs are verified (`tailscale status --json`, the peer's `ID` and `UserID`). A phone also needs the private resolver in [`dns/`](dns/README.md) so `auth.frank.fail` reaches Caddy over Tailscale; restart the service after editing the file, it reads the credential at start. Systemd passes this file as `$CREDENTIALS_DIRECTORY/config` through `LoadCredential`; the service does not read the host secret path.
 
 ## Install
 
