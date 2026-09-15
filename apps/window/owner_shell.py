@@ -1,19 +1,23 @@
 """Which document answers a Window page request: the owner shell or the vanilla Window.
 
 The React owner shell built from ``apps/window/ui`` is Frank's front door and is
-served at the owner routes themselves. The vanilla Window keeps every other
-route until those views are converted, so exactly one place has to decide which
-index document a page request gets.
+served at the owner routes themselves. Frank is the hub for every project the
+owner runs, so the shell owns two kinds of address: the hub at "/", and each
+project's home at "/project/<id>". Blockwise additionally owns the sections that
+have been built, because they are nested under its project home. The vanilla
+Window keeps every other route until those views are converted, so exactly one
+place has to decide which index document a page request gets.
 
-The grammar here mirrors ``OWNER_SECTIONS``, ``OWNER_CUSTOMER_SEGMENT`` and
-``validId`` in ``apps/window/web/js/view-routing.js``: a section is always one of
-a fixed allowlist, and the only variable segment is an opaque customer
-identifier. Keep the two in step, or a deep link resolves on one side only.
+The grammar here mirrors ``OWNER_SECTIONS``, ``validId`` and ``routeForPath`` in
+``apps/window/web/js/view-routing.js``: the hub is the root, a project home is
+one opaque identifier, a section is always one of a fixed allowlist, and the
+only other variable segment is an opaque customer identifier. Keep the two in
+step, or a deep link resolves on one side only.
 
 The split is not path-only: the vanilla Window still owns the technical view of
-the Blockwise project at ``?technical=1``, which is the same address as the
-owner home. ``isOwnerDashboardProject`` in ``view-routing.js`` reads that flag
-the same way, so the two sides agree on which surface a link opens.
+every project at ``?technical=1``, which is the same address as that project's
+shell home. ``isOwnerShellProject`` in ``view-routing.js`` reads that flag the
+same way, so the two sides agree on which surface a link opens.
 
 Everything in this module is pure and free of Flask, so the grammar is testable
 on its own and the server keeps no second copy of it.
@@ -25,11 +29,17 @@ import re
 from pathlib import Path
 from urllib.parse import parse_qsl
 
+#: The project whose built sections the shell also owns. Every other project
+#: gets its home in the shell and nothing below it yet.
 OWNER_SHELL_PROJECT = "blockwise"
 OWNER_SHELL_SECTIONS = frozenset({
     "mail", "crm", "support", "campaigns", "ads", "revenue", "results", "notifications",
 })
 OWNER_SHELL_CUSTOMER_SEGMENT = "customer"
+
+#: An opaque identifier, exactly as ``validId`` in ``view-routing.js`` accepts
+#: it. It names a project at "/project/<id>" and a customer at
+#: "/project/blockwise/customer/<id>", and it is never an arbitrary user string.
 OWNER_SHELL_ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9._~-]{0,127}")
 
 #: Query flag that keeps a request on the vanilla Window.
@@ -46,19 +56,28 @@ def owner_shell_route(path: str) -> bool:
     """Return True when this request path belongs to the owner shell.
 
     Leading and trailing slashes are tolerated so a caller may pass either the
-    Flask catch-all variable or a full pathname. Everything outside the
-    allowlist is False, including an unknown section, another project, and a
-    customer path carrying more than one identifier, so the vanilla Window keeps
-    every other route rather than losing one to a typo.
+    Flask catch-all variable or a full pathname. The shell owns the root, and it
+    owns "/project/<id>" for every identifier the route grammar accepts, because
+    the shell is the hub for every project and each project home is one screen
+    of it. Below a project home only Blockwise has anything built, so its
+    allowlisted sections and its opaque customer segment are the only deeper
+    paths that stay here. Everything else is False, including an unknown
+    section, another project's section, and a customer path carrying more than
+    one identifier, so the vanilla Window keeps every other route rather than
+    losing one to a typo.
     """
     candidate = str(path or "").strip("/")
     if candidate == "":
         return True
     segments = candidate.split("/")
-    if len(segments) < 2 or segments[0] != "project" or segments[1] != OWNER_SHELL_PROJECT:
+    if len(segments) < 2 or segments[0] != "project":
+        return False
+    if OWNER_SHELL_ID.fullmatch(segments[1]) is None:
         return False
     if len(segments) == 2:
         return True
+    if segments[1] != OWNER_SHELL_PROJECT:
+        return False
     if len(segments) == 3:
         return segments[2] in OWNER_SHELL_SECTIONS
     if len(segments) == 4:
@@ -74,7 +93,7 @@ def technical_view(query: str | bytes | None) -> bool:
 
     Only the exact value "1" counts, and only the first ``technical`` parameter
     is read, so this matches what ``new URLSearchParams(search).get("technical")``
-    gives ``isOwnerDashboardProject`` in ``view-routing.js``. A leading "?" is
+    gives ``isOwnerShellProject`` in ``view-routing.js``. A leading "?" is
     tolerated so a caller may pass either a raw query string or a full search.
     """
     if query is None:
@@ -108,9 +127,9 @@ def resolve_spa_document(web_root: Path, path: str, query: str | bytes = "") -> 
     bundle is built, and everything else gets the vanilla Window index.
 
     ``?technical=1`` keeps an owner-shell route on the vanilla Window, because
-    the technical view of the Blockwise project shares its address with the
-    owner home. That also means the classic hub stays reachable two ways: at
-    "/hub", and at "/?technical=1".
+    the technical view of a project shares its address with that project's shell
+    home. That also means the classic hub stays reachable two ways: at "/hub",
+    and at "/?technical=1".
 
     A path that escapes ``web_root``, by traversal or by an absolute segment,
     never names a file here: it falls through to the vanilla index, and the

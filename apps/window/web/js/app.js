@@ -13,7 +13,7 @@ import { mountBlogStudio } from "./blog-studio.js?v=20260915-approved-system-v3"
 import { mountAdRadar, unmountAdRadar } from "./ad-radar.js?v=20260831-observation-timeline-v1";
 import { adTemplateGeneratorBriefValidation } from "./ad-template-generator-brief.js?v=20260906-ad-template-generator-v1";
 import { adTemplateGeneratorStartError } from "./ad-template-generator-api.js?v=20260906-generator-startup-error-v1";
-import { isOwnerDashboardProject, pathForView, routeForPath } from "./view-routing.js?v=20260914-owner-workspace-v1";
+import { isOwnerShellProject, pathForView, routeForPath } from "./view-routing.js?v=20260916-owner-hub-v1";
 import { mountAdDb, setAdDbActive } from "./ad-db.js?v=20260915-approved-system-v3";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
@@ -130,11 +130,12 @@ function showProject(id, options = {}) {
   const project = projects.projects.find((x) => x.id === id);
   if (!project) { show("hub", options); return false; }
   currentProject = project;
-  if (isOwnerDashboardProject(id, window.location.search)) {
-    // The owner workspace is the shell the server serves at these very
-    // addresses, so the vanilla Window hands the browser over instead of
-    // rendering a second, retired copy of the same surface. The section or
-    // customer stays in the address, so a deep link opens where it points.
+  if (isOwnerShellProject(id, window.location.search)) {
+    // The owner shell is the shell the server serves at these very addresses,
+    // for every project and not only Blockwise, so the vanilla Window hands the
+    // browser over instead of rendering a second, retired copy of the same
+    // surface. The section or customer stays in the address, so a deep link
+    // opens where it points.
     const ownerPath = pathForView("project", {
       projectId: id,
       ownerSection: options.ownerSection,

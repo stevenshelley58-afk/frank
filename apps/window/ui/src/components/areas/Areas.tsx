@@ -50,15 +50,12 @@ function AreaFrame({ title, purpose, children }: { title: string; purpose: strin
 
 const CLASSIC_NOTE = "These open in the classic Frank window until each one is rebuilt here."
 
-// On a wide screen the secondary menu already lists these destinations, so
-// the pane only repeats them where there is no secondary menu.
+// The secondary menu lists the current project's sections, not these
+// destinations, so the pane lists them at every width.
 export function ContentArea() {
   return (
     <AreaFrame title="Content" purpose="Blogs, templates, research and assets.">
-      <p className="hidden text-sm text-muted-foreground lg:block">{CLASSIC_NOTE} Pick one from the menu.</p>
-      <div className="lg:hidden">
-        <LinkList links={CONTENT_LINKS} note={CLASSIC_NOTE} />
-      </div>
+      <LinkList links={CONTENT_LINKS} note={CLASSIC_NOTE} />
     </AreaFrame>
   )
 }
@@ -66,10 +63,7 @@ export function ContentArea() {
 export function ToolsArea() {
   return (
     <AreaFrame title="Tools" purpose="Chats, files, connections and the technical surfaces.">
-      <p className="hidden text-sm text-muted-foreground lg:block">{CLASSIC_NOTE} Pick one from the menu.</p>
-      <div className="lg:hidden">
-        <LinkList links={TOOL_LINKS} note={CLASSIC_NOTE} />
-      </div>
+      <LinkList links={TOOL_LINKS} note={CLASSIC_NOTE} />
     </AreaFrame>
   )
 }

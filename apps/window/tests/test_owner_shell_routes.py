@@ -1,10 +1,10 @@
 """Which document answers a Window page request.
 
 The owner shell and the vanilla Window now share one origin, so the property
-under test is that the split is exact: the owner routes, and only those, get the
-React index, every other route keeps the vanilla Window, a real file is still
-served as itself, and a checkout with no built bundle degrades to the vanilla
-Window instead of failing.
+under test is that the split is exact: the hub, every project home and
+Blockwise's built sections get the React index, every other route keeps the
+vanilla Window, a real file is still served as itself, and a checkout with no
+built bundle degrades to the vanilla Window instead of failing.
 """
 
 from __future__ import annotations
@@ -16,6 +16,9 @@ from pathlib import Path
 import owner_shell
 
 
+#: The hub, every project home, and Blockwise's built sections. A project home
+#: is one opaque identifier, so an id that is not registered still belongs to
+#: the shell: the shell is what says the project is unknown.
 OWNER_PATHS = [
     "",
     "/",
@@ -35,14 +38,25 @@ OWNER_PATHS = [
     "project/blockwise/customer/a",
     "project/blockwise/customer/" + "a" * 128,
     "project/blockwise/customer/A0._~-",
+    "project/other",
+    "/project/other",
+    "/project/other/",
+    "project/mini-frank",
+    "project/business-os",
+    "project/merrypaws",
+    "project/elfwonder",
+    "project/pavone",
+    "project/A0._~-",
 ]
 
 VANILLA_PATHS = [
+    "project",
     "project/blockwise/unknown",
     "project/blockwise/Crm",
-    "project/other",
     "project/other/crm",
-    "project",
+    "project/other/unknown",
+    "project/other/customer/abc",
+    "project/other/mail",
     "project/blockwise/customer",
     "project/blockwise/customer/",
     "project/blockwise/customer/a/b",
@@ -84,6 +98,21 @@ class OwnerShellGrammar(unittest.TestCase):
             with self.subTest(section=section):
                 self.assertIn(f'"{section}"', routing)
 
+    def test_a_project_home_is_one_identifier_and_no_more(self):
+        # The shell serves every project home, so a deeper path under a project
+        # the shell has nothing built for must not be claimed by a wildcard.
+        for project in ("blockwise", "mini-frank", "merrypaws", "business-os"):
+            with self.subTest(project=project):
+                self.assertTrue(owner_shell.owner_shell_route(f"project/{project}"))
+        for path in ("project/mini-frank/mail", "project/mini-frank/customer/abc", "project/merrypaws/x"):
+            with self.subTest(path=path):
+                self.assertFalse(owner_shell.owner_shell_route(path))
+
+    def test_a_project_identifier_is_never_an_arbitrary_string(self):
+        for path in ("project/-nope", "project/.", "project/a b", "project/" + "a" * 129):
+            with self.subTest(path=path):
+                self.assertFalse(owner_shell.owner_shell_route(path))
+
 
 class TechnicalViewFlag(unittest.TestCase):
     def test_only_the_exact_value_one_asks_for_the_vanilla_window(self):
@@ -97,7 +126,7 @@ class TechnicalViewFlag(unittest.TestCase):
                 self.assertFalse(owner_shell.technical_view(query))
 
     def test_the_first_flag_wins_as_it_does_in_the_browser(self):
-        # URLSearchParams.get returns the first value, and isOwnerDashboardProject
+        # URLSearchParams.get returns the first value, and isOwnerShellProject
         # reads it that way, so a repeated flag must not resolve differently here.
         self.assertFalse(owner_shell.technical_view("technical=0&technical=1"))
         self.assertTrue(owner_shell.technical_view("technical=1&technical=0"))
@@ -119,17 +148,25 @@ class ResolveSpaDocument(unittest.TestCase):
         return (Path(directory) / filename).read_text()
 
     def test_owner_routes_resolve_to_the_shell_index(self):
-        for path in ["/", "", "/project/blockwise", "/project/blockwise/crm", "/project/blockwise/customer/abc"]:
+        for path in [
+            "/",
+            "",
+            "/project/blockwise",
+            "/project/blockwise/crm",
+            "/project/blockwise/customer/abc",
+            "/project/mini-frank",
+            "/project/business-os",
+        ]:
             with self.subTest(path=path):
                 self.assertEqual(self.served(path), "shell")
 
     def test_every_other_route_resolves_to_the_vanilla_index(self):
-        for path in ["/project/other", "/blog-studio", "/hub", "/project/blockwise/unknown"]:
+        for path in ["/project/other/crm", "/blog-studio", "/hub", "/project/blockwise/unknown"]:
             with self.subTest(path=path):
                 self.assertEqual(self.served(path), "vanilla")
 
-    def test_the_technical_view_keeps_every_owner_route_on_the_vanilla_window(self):
-        for path in ["/", "/project/blockwise", "/project/blockwise/crm", "/project/blockwise/customer/abc"]:
+    def test_the_technical_view_keeps_every_project_on_the_vanilla_window(self):
+        for path in ["/", "/project/blockwise", "/project/blockwise/crm", "/project/blockwise/customer/abc", "/project/mini-frank"]:
             with self.subTest(path=path):
                 self.assertEqual(self.served(path, "technical=1"), "vanilla")
 
@@ -153,7 +190,7 @@ class ResolveSpaDocument(unittest.TestCase):
     def test_owner_routes_fall_back_to_the_vanilla_index_without_a_bundle(self):
         (self.web / "ui" / "index.html").unlink()
         self.assertIsNone(owner_shell.owner_shell_index(self.web))
-        for path in ["/", "/project/blockwise", "/project/blockwise/crm"]:
+        for path in ["/", "/project/blockwise", "/project/blockwise/crm", "/project/mini-frank"]:
             with self.subTest(path=path):
                 self.assertEqual(self.served(path), "vanilla")
 
@@ -199,16 +236,28 @@ class ServedRoutes(unittest.TestCase):
             self.assertEqual(response.get_data(as_text=True), "// bundle")
 
     def test_owner_routes_serve_the_shell_uncached(self):
-        for path in ["/", "/project/blockwise", "/project/blockwise/crm", "/project/blockwise/customer/abc"]:
+        for path in [
+            "/",
+            "/project/blockwise",
+            "/project/blockwise/crm",
+            "/project/blockwise/customer/abc",
+            "/project/mini-frank",
+            "/project/business-os",
+        ]:
             with self.subTest(path=path), self.client.get(path) as response:
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.get_data(as_text=True), "shell")
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
 
-    def test_the_technical_view_is_reachable_at_the_owner_addresses(self):
-        # The technical project home shares its address with the owner home, and
+    def test_the_technical_view_is_reachable_at_every_owner_address(self):
+        # The technical project home shares its address with the shell home, and
         # the classic hub is reachable both at "/hub" and at "/?technical=1".
-        for path in ["/project/blockwise?technical=1", "/?technical=1", "/project/blockwise/crm?technical=1"]:
+        for path in [
+            "/project/blockwise?technical=1",
+            "/?technical=1",
+            "/project/blockwise/crm?technical=1",
+            "/project/mini-frank?technical=1",
+        ]:
             with self.subTest(path=path), self.client.get(path) as response:
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.get_data(as_text=True), "vanilla")
@@ -222,7 +271,7 @@ class ServedRoutes(unittest.TestCase):
                 self.assertEqual(response.headers["Cache-Control"], "no-store")
 
     def test_every_other_route_serves_the_vanilla_window(self):
-        for path in ["/hub", "/blog-studio", "/project/other"]:
+        for path in ["/hub", "/blog-studio", "/project/other/crm", "/project/blockwise/unknown"]:
             with self.subTest(path=path), self.client.get(path) as response:
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.get_data(as_text=True), "vanilla")

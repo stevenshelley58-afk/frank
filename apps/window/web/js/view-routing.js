@@ -19,10 +19,12 @@ const ENTITY_IDS = new Set([
   "tool:ad-template-generator", "agent:hermes", "service:umami", "service:activepieces", "service:frank-window",
 ]);
 
-// The owner workspace lives inside the Blockwise project home so the existing
+// Frank is the hub for every project the owner runs, so the shell is the front
+// door for the root and for every project home. Blockwise additionally carries
+// its built sections, which are nested under its project home so the existing
 // project, rail and technical-view contracts stay intact. Each section is a
 // fixed allowlisted identifier: a section is never an arbitrary user string,
-// and the only variable segment is an opaque customer identifier.
+// and the only other variable segment is an opaque customer identifier.
 const OWNER_PROJECT_ID = "blockwise";
 export const OWNER_SECTIONS = Object.freeze([
   "mail", "crm", "support", "campaigns", "ads", "revenue", "results", "notifications",
@@ -34,8 +36,17 @@ function validId(value) {
   return /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/.test(String(value || ""));
 }
 
-export function isOwnerDashboardProject(projectId, search = "") {
-  return projectId === "blockwise" && new URLSearchParams(search).get("technical") !== "1";
+/**
+ * Does the owner shell answer this project's home address?
+ *
+ * The shell owns "/" and "/project/<id>" for every identifier the grammar
+ * accepts, because it is the hub for every project rather than a workspace for
+ * one of them. `?technical=1` is the one escape: it keeps the classic project
+ * home, which shares the address, on the vanilla Window. The server's
+ * `owner_shell.py` reads the same flag, so the two sides agree.
+ */
+export function isOwnerShellProject(projectId, search = "") {
+  return validId(projectId) && new URLSearchParams(search).get("technical") !== "1";
 }
 
 function ownerRoute(segment) {

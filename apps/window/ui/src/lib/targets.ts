@@ -2,9 +2,9 @@
 // renderer. Kept outside the component files so fast refresh stays intact.
 import { nativeRecordPath } from "@legacy/owner-app-host.js"
 import type { SourceStatus, SourceTarget } from "@/lib/api"
-import type { SectionId } from "@/lib/routes"
+import type { NavigateOptions, SectionId } from "@/lib/routes"
 
-export type Navigate = (section: SectionId, options?: { customerId?: string; appPath?: string; replace?: boolean }) => void
+export type Navigate = (section: SectionId, options?: NavigateOptions) => void
 const NATIVE_SECTION: Record<string, SectionId> = { mail: "mail", crm: "crm", support: "support", campaigns: "campaigns" }
 const OWNER_SECTION = new Set<SectionId>(["overview", "ads", "crm", "support", "mail", "campaigns", "revenue", "results", "notifications"])
 
@@ -56,4 +56,3 @@ export function statusWord(status: SourceStatus | string): string {
       return "Not connected"
   }
 }
-

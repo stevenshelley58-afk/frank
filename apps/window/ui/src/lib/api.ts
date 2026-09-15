@@ -1,7 +1,8 @@
 // Authorized Frank read endpoints the shell renders from. Every payload here is
 // a dated observation from a declared source (`owner_sources.py`,
-// `owner_app_readiness.py`, `owner_customers.py`). The shell never invents a
-// number: a source that is not connected renders its own unavailable state.
+// `owner_app_readiness.py`, `owner_customers.py`, `server.py`'s project and
+// chat registries). The shell never invents a number: a source that is not
+// connected renders its own unavailable state.
 import * as React from "react"
 
 export type SourceStatus = "ready" | "recorded" | "verified" | "empty" | "attention" | "error" | "unavailable" | "cached" | "stale"
@@ -69,10 +70,50 @@ export type CustomerPayload = SourcePayload & {
   unavailable_sources?: string[]
 }
 
+/** One project from the Window's project registry (`GET /api/projects`). */
+export type ProjectSummary = {
+  id: string
+  name: string
+  blurb: string
+  setup_state: string
+  live: string
+  capabilities: string[]
+  default_widgets: string[]
+  workspace: string
+  memory_scope: string
+  hermes_profile: string
+}
+
+export type ProjectsResponse = {
+  schema: string
+  projects: ProjectSummary[]
+  archived_projects: ProjectSummary[]
+}
+
+/** One Hermes conversation, as the classic window lists it. */
+export type ChatSession = {
+  id: string
+  title: string
+  preview: string
+  model: string
+  source: string
+  message_count: number
+  created_at: number
+  updated_at: number
+}
+
+export type ChatSessionsResponse = {
+  sessions: ChatSession[]
+  profile: string
+}
+
 export type Loaded<T> =
   | { state: "loading"; data: null; error: null; at: number | null }
   | { state: "ready"; data: T; error: null; at: number }
   | { state: "error"; data: T | null; error: string; at: number | null }
+
+/** A loaded endpoint plus its manual refresh, so a parent can own one fetch. */
+export type Endpoint<T> = Loaded<T> & { refresh: () => void }
 
 async function readJson<T>(url: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(url, { credentials: "same-origin", cache: "no-store", headers: { Accept: "application/json" }, signal })
@@ -91,7 +132,7 @@ async function readJson<T>(url: string, signal?: AbortSignal): Promise<T> {
  * Load one authorized endpoint and keep it fresh. Errors keep the last good
  * payload visible and dated rather than blanking the section.
  */
-export function useEndpoint<T>(url: string | null, { refreshMs = 0 }: { refreshMs?: number } = {}) {
+export function useEndpoint<T>(url: string | null, { refreshMs = 0 }: { refreshMs?: number } = {}): Endpoint<T> {
   const [value, setValue] = React.useState<Loaded<T>>({ state: "loading", data: null, error: null, at: null })
   const [tick, setTick] = React.useState(0)
   const refresh = React.useCallback(() => setTick((n) => n + 1), [])
@@ -119,6 +160,8 @@ export function useEndpoint<T>(url: string | null, { refreshMs = 0 }: { refreshM
 
 export const SOURCES_URL = "/api/owner/workspace/sources"
 export const READINESS_URL = "/api/owner/workspace/readiness"
+export const PROJECTS_URL = "/api/projects"
+export const CHAT_SESSIONS_URL = "/api/chat/sessions"
 export function customerUrl(customerId: string) {
   return `/api/owner/workspace/customers/${encodeURIComponent(customerId)}`
 }
@@ -128,4 +171,19 @@ export function formatObserved(epochSeconds: number | null | undefined) {
   const date = new Date(epochSeconds * 1000)
   if (Number.isNaN(date.getTime())) return "not observed yet"
   return date.toLocaleString(undefined, { hour: "2-digit", minute: "2-digit", day: "numeric", month: "short" })
+}
+
+/** A compact "when" for a list row: minutes, hours, days, or a date. */
+export function formatSince(epochSeconds: number | null | undefined) {
+  if (!epochSeconds) return ""
+  const date = new Date(epochSeconds * 1000)
+  if (Number.isNaN(date.getTime())) return ""
+  const minutes = Math.round((Date.now() - date.getTime()) / 60000)
+  if (minutes < 1) return "just now"
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.round(minutes / 60)
+  if (hours < 24) return `${hours}h ago`
+  const days = Math.round(hours / 24)
+  if (days < 7) return `${days}d ago`
+  return date.toLocaleDateString(undefined, { day: "numeric", month: "short" })
 }

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isOwnerDashboardProject, blockwiseTemplateUrl, OWNER_SECTIONS, ownerPathForCustomer, ownerPathForSection, pathForView, routeForPath, viewForPath } from "../web/js/view-routing.js";
+import { isOwnerShellProject, blockwiseTemplateUrl, OWNER_SECTIONS, ownerPathForCustomer, ownerPathForSection, pathForView, routeForPath, viewForPath } from "../web/js/view-routing.js";
 
 test("Ad Template Generator has a canonical deep link and every other view returns home", () => {
   assert.equal(viewForPath("/ad-template-generator"), "ad-template-generator");
@@ -78,12 +78,21 @@ test("Blockwise editor links require a safe imported template identity", () => {
 });
 
 
-test("owner frontend belongs only to Blockwise and retains technical home", () => {
-  assert.equal(isOwnerDashboardProject("blockwise"), true);
-  assert.equal(isOwnerDashboardProject("blockwise", "?preview=blockwise-operations"), true);
-  assert.equal(isOwnerDashboardProject("blockwise", "?technical=1"), false);
-  assert.equal(isOwnerDashboardProject("mini-frank"), false);
-  assert.equal(isOwnerDashboardProject("other", "?preview=blockwise-operations"), false);
+test("the owner shell answers every project home and keeps the technical escape", () => {
+  // Frank is the hub for every project, so the shell owns each project home.
+  assert.equal(isOwnerShellProject("blockwise"), true);
+  assert.equal(isOwnerShellProject("blockwise", "?preview=blockwise-operations"), true);
+  assert.equal(isOwnerShellProject("mini-frank"), true);
+  assert.equal(isOwnerShellProject("business-os", "?preview=blockwise-operations"), true);
+  assert.equal(isOwnerShellProject("merrypaws"), true);
+  // ?technical=1 is the one escape, for every project, including Blockwise.
+  assert.equal(isOwnerShellProject("blockwise", "?technical=1"), false);
+  assert.equal(isOwnerShellProject("mini-frank", "?technical=1"), false);
+  // An identifier the route grammar rejects has no shell home to hand over to.
+  assert.equal(isOwnerShellProject(""), false);
+  assert.equal(isOwnerShellProject("-nope"), false);
+  assert.equal(isOwnerShellProject("a b"), false);
+  assert.equal(isOwnerShellProject("a".repeat(129)), false);
   assert.equal(pathForView("blockwise-dashboard"), "/project/blockwise");
 });
 

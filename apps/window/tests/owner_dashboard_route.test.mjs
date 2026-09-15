@@ -24,9 +24,9 @@ test("the vanilla Window no longer renders the owner workspace", () => {
   assert.match(html, /owner-dashboard\.css\?v=/);
 });
 
-test("Blockwise branches before the technical project home and hands off to the owner path", () => {
+test("every project branches before the technical project home and hands off to the owner path", () => {
   const project = showProjectSource();
-  assert.ok(project.indexOf("isOwnerDashboardProject") < project.indexOf("openProjectHome"));
+  assert.ok(project.indexOf("isOwnerShellProject") < project.indexOf("openProjectHome"));
   assert.match(project, /pathForView\("project", \{/);
   assert.match(project, /ownerSection: options\.ownerSection,/);
   assert.match(project, /ownerCustomerId: options\.ownerCustomerId,/);
@@ -39,14 +39,14 @@ test("the handoff cannot loop on a tab already parked on the owner address", () 
 });
 
 test("the handoff sits inside the owner branch, so ?technical=1 keeps the vanilla home", () => {
-  // isOwnerDashboardProject is false for ?technical=1, and the server serves the
+  // isOwnerShellProject is false for ?technical=1, and the server serves the
   // vanilla Window for that query, so the technical project home must still be
   // rendered here rather than bounced back to the shell.
   const project = showProjectSource();
-  const branch = project.indexOf("isOwnerDashboardProject");
+  const branch = project.indexOf("isOwnerShellProject");
   const assign = project.indexOf("window.location.assign");
   const technicalHome = project.indexOf('document.body.classList.toggle("blockwise-operations-preview"');
-  assert.ok(branch >= 0, "showProject still branches on isOwnerDashboardProject");
+  assert.ok(branch >= 0, "showProject still branches on isOwnerShellProject");
   assert.ok(assign > branch, "the assign sits inside the owner branch");
   assert.ok(technicalHome > assign, "the technical project home comes after the owner branch returns");
   assert.doesNotMatch(project.slice(technicalHome), /window\.location\.assign/);

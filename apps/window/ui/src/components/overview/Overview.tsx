@@ -7,35 +7,11 @@ import { ArrowUpRight, RefreshCw } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { formatObserved, READINESS_URL, SOURCES_URL, useEndpoint, type ReadinessResponse, type SourceItem, type SourcePayload, type SourcesResponse } from "@/lib/api"
+import { formatObserved, READINESS_URL, SOURCES_URL, useEndpoint, type ReadinessResponse, type SourcePayload, type SourcesResponse } from "@/lib/api"
+import { APP_ORDER, attentionItems, CONNECTED, SOURCE_LABEL, SOURCE_ORDER, SOURCE_SECTION } from "@/lib/sources"
 import type { SectionId } from "@/lib/routes"
 import { ItemRow, MetricList, StatusBadge, Unavailable } from "@/components/sources/source-ui"
 import { openTarget, statusWord, type Navigate } from "@/lib/targets"
-
-const SOURCE_ORDER = ["mail", "crm", "support", "campaigns", "ads", "revenue", "results", "notifications"]
-const SOURCE_LABEL: Record<string, string> = {
-  mail: "Mail",
-  crm: "CRM",
-  support: "Support",
-  campaigns: "Email flows",
-  ads: "Ads",
-  revenue: "Revenue",
-  results: "Results",
-  notifications: "Notifications",
-}
-const SOURCE_SECTION: Record<string, SectionId> = {
-  mail: "mail",
-  crm: "crm",
-  support: "support",
-  campaigns: "campaigns",
-  ads: "ads",
-  revenue: "revenue",
-  results: "results",
-  notifications: "notifications",
-}
-const CONNECTED = new Set(["ready", "recorded", "verified", "attention", "empty", "cached", "stale"])
-const APP_ORDER = ["crm", "support", "mail", "campaigns"]
-const MAX_ATTENTION = 8
 
 function hostOf(origin: string) {
   try {
@@ -43,18 +19,6 @@ function hostOf(origin: string) {
   } catch {
     return origin || "unknown host"
   }
-}
-
-function attentionItems(sources: Record<string, SourcePayload>): Array<SourceItem & { source: string }> {
-  const rows: Array<SourceItem & { source: string }> = []
-  for (const id of SOURCE_ORDER) {
-    const payload = sources[id]
-    if (!payload) continue
-    for (const item of payload.items) {
-      if (item.attention || payload.status === "attention") rows.push({ ...item, source: id })
-    }
-  }
-  return rows.slice(0, MAX_ATTENTION)
 }
 
 export function Overview({ navigate }: { navigate: Navigate }) {
@@ -118,8 +82,8 @@ export function Overview({ navigate }: { navigate: Navigate }) {
               <Unavailable title="Frank could not read its sources" detail={sources.error || "No source payload was returned."} />
             ) : null}
             {ids.map((id) => {
-              const payload = payloads[id]
-              const section = SOURCE_SECTION[id]
+              const payload: SourcePayload = payloads[id]
+              const section: SectionId | undefined = SOURCE_SECTION[id]
               return (
                 <Card key={id} className="rounded-2xl">
                   <CardHeader className="flex flex-row items-start justify-between gap-3 space-y-0">
