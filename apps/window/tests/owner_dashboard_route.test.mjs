@@ -30,12 +30,12 @@ test("Blockwise branches before the technical project home and hands off to the 
   assert.match(project, /pathForView\("project", \{/);
   assert.match(project, /ownerSection: options\.ownerSection,/);
   assert.match(project, /ownerCustomerId: options\.ownerCustomerId,/);
-  assert.match(project, /window\.location\.assign\(ownerPath\)[\s\S]*?return true;[\s\S]*?openProjectHome/);
+  assert.match(project, /window\.location\.assign\(ownerPath\);\s*return true;[\s\S]*?show\("hub"[\s\S]*?openProjectHome/);
 });
 
 test("the handoff cannot loop on a tab already parked on the owner address", () => {
   const project = showProjectSource();
-  assert.match(project, /if \(window\.location\.pathname !== ownerPath\) window\.location\.assign\(ownerPath\);/);
+  assert.match(project, /if \(window\.location\.pathname !== ownerPath\) \{\s*window\.location\.assign\(ownerPath\);/);
 });
 
 test("the handoff sits inside the owner branch, so ?technical=1 keeps the vanilla home", () => {

@@ -1,5 +1,10 @@
 # Blockwise owner UI review
 
+**Status: superseded.** The isolated preview described here was replaced by the shell that
+now serves Frank's root and owner routes with live data and the native panels; see
+[`SHADCN-UI.md`](SHADCN-UI.md) §6 and §7. The surface map and preservation gates below remain
+the conversion inventory for the views still rendered by the classic window.
+
 ## Scope
 Interactive UI-only concept. No new backend connection, service authentication, Meta write, notification subscription, payment, email send or production deployment. The existing ads repair and native app code stay unchanged. The concept is not a replacement for their tested business logic and is not functional-parity acceptance.
 

@@ -181,10 +181,17 @@ class ServedRoutes(unittest.TestCase):
         self.client = self.server.app.test_client()
 
     def test_the_old_bundle_entry_point_redirects_to_the_shell(self):
-        for path in ["/ui", "/ui/", "/ui/index.html", "/ui/nope"]:
+        for path in ["/ui", "/ui/", "/ui/index.html"]:
             with self.subTest(path=path), self.client.get(path) as response:
                 self.assertEqual(response.status_code, 308)
                 self.assertEqual(response.headers["Location"], "/")
+
+    def test_a_missing_bundle_asset_is_not_found_rather_than_a_page(self):
+        # A stale document asking for a released bundle's hashed asset must not
+        # receive HTML under a script's name.
+        for path in ["/ui/nope", "/ui/assets/index-old.js", "/ui/../index.html"]:
+            with self.subTest(path=path), self.client.get(path) as response:
+                self.assertEqual(response.status_code, 404)
 
     def test_bundle_assets_are_served_from_their_built_address(self):
         with self.client.get("/ui/assets/x.js") as response:

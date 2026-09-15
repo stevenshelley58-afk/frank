@@ -7,6 +7,14 @@ and it is no longer the contract. The current contract is
 [`OWNER_WORKSPACE.md`](OWNER_WORKSPACE.md); where this file and that one differ,
 that one wins.
 
+## Implementation
+
+Since the shell landed, the owner workspace frontend is the React/shadcn app under
+`apps/window/ui` (see [`SHADCN-UI.md`](SHADCN-UI.md) §6 and §7), served at `/` and at the
+routes below. It reuses the vanilla route grammar, native panel host and Ads workspace modules
+verbatim rather than re-implementing them. The vanilla `web/js/owner-dashboard.js` renderer is
+no longer mounted in production.
+
 ## Scope
 
 Frank's owner-only `/project/blockwise` route is a workspace: a real combined
@@ -27,6 +35,7 @@ and templates, are unchanged.
 
 | Route | Surface |
 | --- | --- |
+| `/` | Overview (Frank's front door) |
 | `/project/blockwise` | Overview |
 | `/project/blockwise/mail` | Mail |
 | `/project/blockwise/crm` | CRM |

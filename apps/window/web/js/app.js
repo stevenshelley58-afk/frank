@@ -143,8 +143,15 @@ function showProject(id, options = {}) {
     // A tab already parked on the target address would otherwise reload itself
     // forever. The server answers that address with the shell, so a stale
     // vanilla tab only ever reaches this handoff once.
-    if (window.location.pathname !== ownerPath) window.location.assign(ownerPath);
-    return true;
+    if (window.location.pathname !== ownerPath) {
+      window.location.assign(ownerPath);
+      return true;
+    }
+    // The vanilla document was served at the shell's own address, which only
+    // happens when the shell bundle is missing from this build. Show the hub
+    // rather than a blank window, and say why.
+    show("hub", { ...options, message: "The owner workspace shell is not available in this build." });
+    return false;
   }
   document.body.classList.toggle("blockwise-operations-preview", id === "blockwise" && isBlockwiseOperationsPreview());
   show("project", { ...options, routeDetail: { projectId: id } });

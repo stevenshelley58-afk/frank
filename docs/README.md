@@ -56,7 +56,9 @@ any owner surface. It records the two rejected implementations as explicit
 anti-examples.
 
 - [Blockwise owner workspace frontend](OWNER_DASHBOARD_FRONTEND.md) covers the
-  frontend routes, native application panels, overview and design.
+  frontend routes, native application panels, overview and design;
+  [SHADCN-UI.md](SHADCN-UI.md) is the shell that renders it at Frank's root and
+  the route split with the classic window.
 - [Owner workspace discovery](OWNER_WORKSPACE_DISCOVERY.md) is a dated,
   evidence-backed inventory of the identity providers, native application auth
   capability, mail connectivity, notification state, ingress seam and existing

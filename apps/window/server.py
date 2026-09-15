@@ -4815,20 +4815,25 @@ def frank_ui(ui_path: str):
 
     The bundle is built with Vite base "/ui/", so its assets are requested at
     "/ui/assets/..." whatever page path the shell itself was served at. Only
-    real files are answered here: an unknown path, and the bundle index itself,
-    go to the shell at "/" instead, so there is never a second entry point.
+    real files are answered here. The bundle index itself goes to the shell at
+    "/" so there is never a second entry point; a missing asset is a 404, not a
+    redirect, so a stale document asking for a released bundle's hashed asset
+    fails loudly instead of receiving HTML under a script's name.
     """
     root = (WEB / owner_shell.OWNER_SHELL_DIR).resolve()
     requested = str(ui_path or "").strip("/")
-    if root.is_dir() and requested and requested != owner_shell.INDEX_DOCUMENT:
-        candidate = (root / requested).resolve()
-        try:
-            candidate.relative_to(root)
-        except ValueError:
-            abort(404)
-        if candidate.is_file():
-            return send_from_directory(root, requested)
-    return redirect("/", code=308)
+    if not requested or requested == owner_shell.INDEX_DOCUMENT:
+        return redirect("/", code=308)
+    if not root.is_dir():
+        abort(404)
+    candidate = (root / requested).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        abort(404)
+    if candidate.is_file():
+        return send_from_directory(root, requested)
+    abort(404)
 
 
 @app.get("/", defaults={"path": ""})
