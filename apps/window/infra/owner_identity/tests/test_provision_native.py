@@ -13,6 +13,10 @@ def test_uses_native_sso_not_proxy_impersonation():
     assert '/application/saml/mautic/metadata/' in source
     assert 'saml_idp_metadata' in source
     assert '"saml_idp_default_role"=>""' in source
+    # The display-name claim is not a login name; Mautic must load the native
+    # owner by Authentik's username claim.
+    assert '"saml_idp_username_attribute"=>"http://schemas.goauthentik.io/2021/02/saml/username"' in source
+    assert '"saml_idp_username_attribute"=>"http://schemas.xmlsoap.org/ws/2005/05/identity/claims/name"' not in source
     assert 'X-Forwarded-User' not in source
     assert 'REMOTE_USER' not in source
 
