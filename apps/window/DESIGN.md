@@ -132,3 +132,8 @@ retained when switching sections, and leaving for sign-in warns about an open
 draft. There are no new-tab escape links. Other Frank routes and the technical
 project home remain unchanged. A passing health check is not native-session
 acceptance; desktop and mobile browser evidence is recorded separately.
+
+
+## Owner workspace UI review, September 2026
+
+The task-owned owner-ui-review-20260915 branch is an isolated UI-only concept. It preserves the installed shadcn/Geist theme at apps/window/ui, adopting the customer product's hierarchy and mobile usability rather than importing customer code or changing the production Window. Group CRM and Frappe Helpdesk under one CRM family. Native mail, Frappe and Mautic keep their native surfaces; the concept previews shell/session/error states without loading live records. Frank-owned ads, content, overview and operations use actual shadcn components. One persistent UI preview banner identifies all sample values and local draft actions. No backend/provider writes, notification permission prompts or production rollout are part of this review. Existing application and model modules remain untouched until functional-parity integration is separately accepted.
