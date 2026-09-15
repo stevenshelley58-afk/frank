@@ -91,12 +91,47 @@
 
 .ad-db-filters {
   display: grid;
-  grid-template-columns: minmax(190px, 1.5fr) repeat(6, minmax(90px, 1fr)) auto;
+  grid-template-columns: minmax(240px, 1fr) auto auto;
   gap: 10px;
   align-items: end;
   padding: 16px 0;
   border-bottom: 1px solid var(--line);
 }
+
+.ad-db-advanced {
+  position: relative;
+  align-self: end;
+}
+
+.ad-db-advanced summary {
+  min-height: 40px;
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  color: var(--ink);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.ad-db-advanced summary:hover { background: var(--chip); }
+.ad-db-advanced summary:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+
+.ad-db-advanced-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(140px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.ad-db-advanced[open] {
+  grid-column: 1 / -1;
+  order: 2;
+}
+
+.ad-db-filter-actions { order: 1; }
+.ad-db-advanced[open] + .ad-db-filter-actions { grid-column: 1 / -1; order: 3; }
 
 .ad-db-filters[hidden] {
   display: none;
@@ -308,7 +343,7 @@
 }
 
 .ad-db-location-help {
-  margin: 10px 0 4px;
+  margin: 10px 0 0;
   color: var(--mute);
   font-size: 13px;
   line-height: 1.45;
@@ -470,12 +505,14 @@
 
 @media (max-width: 1180px) {
   .ad-db-filters {
-    grid-template-columns: repeat(4, minmax(110px, 1fr));
+    grid-template-columns: minmax(200px, 1fr) auto auto;
   }
 
   .ad-db-search {
-    grid-column: span 2;
+    grid-column: auto;
   }
+
+  .ad-db-advanced-fields { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
 
   .ad-db-filter-actions {
     justify-content: flex-end;
@@ -492,16 +529,22 @@
   }
 
   .ad-db-filters {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: 1fr auto;
   }
 
   .ad-db-search {
-    grid-column: 1 / -1;
+    grid-column: 1;
   }
 
   .ad-db-filter-actions {
     grid-column: 1 / -1;
+    justify-content: stretch;
   }
+
+  .ad-db-filter-actions .ad-db-button { flex: 1; }
+  .ad-db-advanced { grid-column: 2; grid-row: 1; }
+  .ad-db-advanced[open] { grid-column: 1 / -1; grid-row: auto; }
+  .ad-db-advanced-fields { grid-template-columns: 1fr; }
 
   .ad-db-ad,
   .ad-db-prospect,

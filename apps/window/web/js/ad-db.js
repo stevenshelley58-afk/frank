@@ -499,6 +499,15 @@ function readFilters(form) {
   return Object.fromEntries(["q", "agent", "agency", "state", "suburb", "postcode", "locationRelation"].map((key) => [key, text(data.get(key))]));
 }
 
+function hasAdvancedFilters(filters) {
+  return ["agent", "agency", "state", "suburb", "postcode", "locationRelation"].some((key) => Boolean(text(filters?.[key])));
+}
+
+function syncAdvancedFilters(form) {
+  const disclosure = form.querySelector("[data-ad-db-advanced]");
+  if (disclosure && hasAdvancedFilters(readFilters(form))) disclosure.open = true;
+}
+
 function scaffold(host) {
   host.innerHTML = [
     '<div class="ad-db-heading">',
@@ -513,12 +522,18 @@ function scaffold(host) {
     '</div>',
     '<form class="ad-db-filters" data-ad-db-filters>',
       '<label class="ad-db-search"><span>Search</span><input name="q" type="search" maxlength="120" placeholder="Ad copy or page"></label>',
-      '<label><span>Agent</span><input name="agent" maxlength="120"></label>',
-      '<label><span>Agency</span><input name="agency" maxlength="120"></label>',
-      '<label><span>State</span><input name="state" maxlength="120" placeholder="WA"></label>',
-      '<label><span>Suburb</span><input name="suburb" maxlength="120"></label>',
-      '<label><span>Postcode</span><input name="postcode" maxlength="120" inputmode="numeric"></label>',
-      '<label><span>Location evidence</span><select name="locationRelation"><option value="">Any evidence</option><option value="office">Office</option><option value="service_area">Service area</option><option value="property">Property</option><option value="copy_mention">Copy mention</option><option value="meta_targeting">Meta targeting</option></select></label>',
+      '<details class="ad-db-advanced" data-ad-db-advanced>',
+        '<summary>More filters</summary>',
+        '<div class="ad-db-advanced-fields">',
+          '<label><span>Agent</span><input name="agent" maxlength="120"></label>',
+          '<label><span>Agency</span><input name="agency" maxlength="120"></label>',
+          '<label><span>State</span><input name="state" maxlength="120" placeholder="WA"></label>',
+          '<label><span>Suburb</span><input name="suburb" maxlength="120"></label>',
+          '<label><span>Postcode</span><input name="postcode" maxlength="120" inputmode="numeric"></label>',
+          '<label><span>Location evidence</span><select name="locationRelation"><option value="">Any evidence</option><option value="office">Office</option><option value="service_area">Service area</option><option value="property">Property</option><option value="copy_mention">Copy mention</option><option value="meta_targeting">Meta targeting</option></select></label>',
+        '</div>',
+        '<p class="ad-db-location-help">Location evidence stays explicit: office, service area, property, copy mention, or Meta targeting. A property location is not ad targeting.</p>',
+      '</details>',
       '<div class="ad-db-filter-actions"><button type="reset">Clear</button><button type="submit" class="ad-db-button">Apply filters</button></div>',
     '</form>',
     '<div class="ad-db-runs-note" data-ad-db-runs-note hidden><strong>Bounded page scan</strong><span data-ad-db-scan-readiness>Checking collection readiness…</span>',
@@ -529,7 +544,6 @@ function scaffold(host) {
         '<span data-ad-db-scan-status aria-live="polite"></span>',
       '</form>',
     '</div>',
-    '<p class="ad-db-location-help">Location evidence stays explicit: office, service area, property, copy mention, or Meta targeting. A property location is not ad targeting.</p>',
     '<p class="sr-only" data-ad-db-status aria-live="polite"></p>',
     '<div class="ad-db-detail" data-ad-db-detail hidden></div>',
     '<div class="ad-db-results" id="ad-db-results" role="tabpanel" data-ad-db-results></div>',
@@ -544,15 +558,20 @@ export function mountAdDb() {
   state.mounted = true;
   host.querySelector("[data-ad-db-scan-form]").addEventListener("submit", submitScan);
   fetchScanReadiness();
-  host.querySelector("[data-ad-db-filters]").addEventListener("submit", (event) => {
+  const filters = host.querySelector("[data-ad-db-filters]");
+  syncAdvancedFilters(filters);
+  requestAnimationFrame(() => syncAdvancedFilters(filters));
+  filters.addEventListener("submit", (event) => {
     event.preventDefault();
     state.filters = readFilters(event.currentTarget);
+    syncAdvancedFilters(event.currentTarget);
     state.pages.ads = { items: [], nextCursor: null, loaded: false };
     state.pages.prospects = { items: [], nextCursor: null, loaded: false };
     fetchPage();
   });
-  host.querySelector("[data-ad-db-filters]").addEventListener("reset", () => {
+  filters.addEventListener("reset", () => {
     queueMicrotask(() => {
+      filters.querySelector("[data-ad-db-advanced]").open = false;
       state.filters = {};
       state.detail = null;
       state.pages.ads = { items: [], nextCursor: null, loaded: false };

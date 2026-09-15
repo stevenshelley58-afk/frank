@@ -41,15 +41,6 @@
   font-size: 13px;
 }
 
-.blog-kicker {
-  display: block;
-  color: var(--faint);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-}
-
 .blog-studio-owner,
 .blog-status-pill,
 .blog-count-pill {
