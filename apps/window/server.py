@@ -4771,17 +4771,19 @@ def mini_legacy_redirect(mini_path: str):
 _owner_shell_bundle_warned = False
 
 
-def _owner_shell_document(path: str) -> tuple[Path, str, bool]:
+def _owner_shell_document(path: str, query: bytes | str) -> tuple[Path, str, bool]:
     """Resolve a Window page request and report whether the owner shell answers it.
 
     The grammar and the file choice live in ``owner_shell``; the only thing the
     server adds is the one-time warning for a checkout with no built bundle, so
     a dev checkout serving the vanilla Window on the owner routes is on the
-    record without repeating on every request.
+    record without repeating on every request. The query matters too: the
+    technical view of the Blockwise project shares its address with the owner
+    home and stays on the vanilla Window.
     """
     global _owner_shell_bundle_warned
-    directory, filename = owner_shell.resolve_spa_document(WEB, path)
-    if not owner_shell.owner_shell_route(path):
+    directory, filename = owner_shell.resolve_spa_document(WEB, path, query)
+    if not owner_shell.owner_shell_route(path) or owner_shell.technical_view(query):
         return directory, filename, False
     shell = owner_shell.owner_shell_index(WEB)
     if shell is None:
@@ -4837,7 +4839,7 @@ def spa(path: str):
         candidate.relative_to(WEB)
     except ValueError:
         abort(400)
-    directory, filename, is_owner_shell = _owner_shell_document(path)
+    directory, filename, is_owner_shell = _owner_shell_document(path, request.query_string)
     response = send_from_directory(directory, filename)
     if is_owner_shell:
         # The document names hashed asset files, so a cached copy would pin a

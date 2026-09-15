@@ -38,6 +38,20 @@ test("the handoff cannot loop on a tab already parked on the owner address", () 
   assert.match(project, /if \(window\.location\.pathname !== ownerPath\) window\.location\.assign\(ownerPath\);/);
 });
 
+test("the handoff sits inside the owner branch, so ?technical=1 keeps the vanilla home", () => {
+  // isOwnerDashboardProject is false for ?technical=1, and the server serves the
+  // vanilla Window for that query, so the technical project home must still be
+  // rendered here rather than bounced back to the shell.
+  const project = showProjectSource();
+  const branch = project.indexOf("isOwnerDashboardProject");
+  const assign = project.indexOf("window.location.assign");
+  const technicalHome = project.indexOf('document.body.classList.toggle("blockwise-operations-preview"');
+  assert.ok(branch >= 0, "showProject still branches on isOwnerDashboardProject");
+  assert.ok(assign > branch, "the assign sits inside the owner branch");
+  assert.ok(technicalHome > assign, "the technical project home comes after the owner branch returns");
+  assert.doesNotMatch(project.slice(technicalHome), /window\.location\.assign/);
+});
+
 test("no owner surface opens an external tab", () => {
   // The launcher must not return: every owner surface stays inside Frank.
   assert.doesNotMatch(app, /target\s*=\s*["']_blank["'][\s\S]{0,120}owner/i);

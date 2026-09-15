@@ -85,6 +85,24 @@ class OwnerShellGrammar(unittest.TestCase):
                 self.assertIn(f'"{section}"', routing)
 
 
+class TechnicalViewFlag(unittest.TestCase):
+    def test_only_the_exact_value_one_asks_for_the_vanilla_window(self):
+        for query in ["technical=1", "?technical=1", "foo=2&technical=1", b"technical=1"]:
+            with self.subTest(query=query):
+                self.assertTrue(owner_shell.technical_view(query))
+
+    def test_every_other_query_leaves_the_owner_shell_in_place(self):
+        for query in ["", None, b"", "technical=0", "technical", "technical=11", "technical=true", "foo=1", "?foo=1"]:
+            with self.subTest(query=query):
+                self.assertFalse(owner_shell.technical_view(query))
+
+    def test_the_first_flag_wins_as_it_does_in_the_browser(self):
+        # URLSearchParams.get returns the first value, and isOwnerDashboardProject
+        # reads it that way, so a repeated flag must not resolve differently here.
+        self.assertFalse(owner_shell.technical_view("technical=0&technical=1"))
+        self.assertTrue(owner_shell.technical_view("technical=1&technical=0"))
+
+
 class ResolveSpaDocument(unittest.TestCase):
     def setUp(self):
         self._temp = tempfile.TemporaryDirectory()
@@ -96,8 +114,8 @@ class ResolveSpaDocument(unittest.TestCase):
         (self.web / "js" / "app.js").write_text("// app")
         self.addCleanup(self._temp.cleanup)
 
-    def served(self, path: str) -> str:
-        directory, filename = owner_shell.resolve_spa_document(self.web, path)
+    def served(self, path: str, query: str = "") -> str:
+        directory, filename = owner_shell.resolve_spa_document(self.web, path, query)
         return (Path(directory) / filename).read_text()
 
     def test_owner_routes_resolve_to_the_shell_index(self):
@@ -109,6 +127,16 @@ class ResolveSpaDocument(unittest.TestCase):
         for path in ["/project/other", "/blog-studio", "/hub", "/project/blockwise/unknown"]:
             with self.subTest(path=path):
                 self.assertEqual(self.served(path), "vanilla")
+
+    def test_the_technical_view_keeps_every_owner_route_on_the_vanilla_window(self):
+        for path in ["/", "/project/blockwise", "/project/blockwise/crm", "/project/blockwise/customer/abc"]:
+            with self.subTest(path=path):
+                self.assertEqual(self.served(path, "technical=1"), "vanilla")
+
+    def test_any_other_query_still_reaches_the_owner_shell(self):
+        for query in ["", "technical=0", "foo=1", "technicalities=1"]:
+            with self.subTest(query=query):
+                self.assertEqual(self.served("/project/blockwise", query), "shell")
 
     def test_a_real_file_resolves_to_itself(self):
         directory, filename = owner_shell.resolve_spa_document(self.web, "js/app.js")
@@ -165,6 +193,22 @@ class ServedRoutes(unittest.TestCase):
 
     def test_owner_routes_serve_the_shell_uncached(self):
         for path in ["/", "/project/blockwise", "/project/blockwise/crm", "/project/blockwise/customer/abc"]:
+            with self.subTest(path=path), self.client.get(path) as response:
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_data(as_text=True), "shell")
+                self.assertEqual(response.headers["Cache-Control"], "no-store")
+
+    def test_the_technical_view_is_reachable_at_the_owner_addresses(self):
+        # The technical project home shares its address with the owner home, and
+        # the classic hub is reachable both at "/hub" and at "/?technical=1".
+        for path in ["/project/blockwise?technical=1", "/?technical=1", "/project/blockwise/crm?technical=1"]:
+            with self.subTest(path=path), self.client.get(path) as response:
+                self.assertEqual(response.status_code, 200)
+                self.assertEqual(response.get_data(as_text=True), "vanilla")
+                self.assertNotIn("no-store", response.headers.get("Cache-Control", ""))
+
+    def test_a_query_that_is_not_the_technical_flag_still_serves_the_shell(self):
+        for path in ["/project/blockwise?technical=0", "/project/blockwise?foo=1"]:
             with self.subTest(path=path), self.client.get(path) as response:
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.get_data(as_text=True), "shell")
