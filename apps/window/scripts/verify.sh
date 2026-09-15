@@ -13,6 +13,9 @@ export MINI_PREVIEW_ROOT="$verify_tmp/previews"
 export MINI_LEGACY_PROJECT_ROOT="$verify_tmp/legacy"
 mkdir -p "$CHAT_STORE_DIR" "$MINI_PREVIEW_ROOT" "$MINI_LEGACY_PROJECT_ROOT"
 
+echo "Shared shadcn theme parity"
+node scripts/sync-window-theme.mjs --check
+
 echo "Python syntax and unit tests"
 python -m py_compile server.py mini_frank.py
 python -m compileall -q mini

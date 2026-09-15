@@ -1,5 +1,5 @@
 import { mount, mountAll } from "./registry.js";
-import "./widgets.js?v=20260906-ad-template-generator-v1";
+import "./widgets.js?v=20260915-approved-system-v2";
 import { clearHomeActions, closeHomeEditors, openConnections, openEntityHome, openProjectHome, openWidgetBuilder, setupHomePlatform } from "./homes.js?v=20260905-blockwise-operations-preview-v1";
 import { SseEventParser } from "./chat-stream.js";
 import * as hubApi from "./chat/api.js";
@@ -18,7 +18,7 @@ import { mountAdDb, setAdDbActive } from "./ad-db.js?v=20260907-ad-db-v2";
 import { mountLive } from "./live.js?v=20260830-step5";
 import { mountMap } from "./map.js?v=20260830-step5";
 import { mountControl } from "./control.js?v=20260830-step5";
-import { mountOwnerDashboard } from "./owner-dashboard.js?v=20260914-owner-workspace-v1";
+import { mountOwnerDashboard } from "./owner-dashboard.js?v=20260915-approved-system-v2";
 import { mountOps } from "./ops.js?v=20260904-ops-v1";
 import { isBlockwiseOperationsPreview } from "./blockwise-operations-preview.js";
 import { operationsTool } from "./operations-tools.js?v=20260914-native-owner-apps-v1";
@@ -32,10 +32,10 @@ const TITLES = {
   project: ["Project", ""],
   "blockwise-dashboard": ["Blockwise", ""],
   files: ["Files", ""],
-  tools: ["Tools", "Start a factory, watch its trace"],
-  "ad-template-generator": ["Ad Template Generator", "Source image → ad template"],
+  tools: ["Tools", "Your apps and workspaces"],
+  "ad-template-generator": ["Ad Template Generator", "Create and review ad templates"],
   "ad-db": ["Ad database", "Verified ad archive and collection evidence"],
-  "blog-studio": ["Blog Studio", "Topic or sources → QA-verified article"],
+  "blog-studio": ["Blog Studio", "Create and review articles"],
   "ad-radar": ["Ad Radar", "Public creative observation and evidence"],
   "entity-home": ["Home", "Live, capability-aware widgets"],
   "widget-builder": ["Widget Builder", "Reusable widgets for every Frank home"],
@@ -82,7 +82,7 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
     ? (chatSessions.find((chat) => chat.id === currentChatId)?.title || "")
     : sub;
   const railView = ["accounts", "entity-home", "widget-builder", "connections", "operations-tool"].includes(id) ? "tools" : id;
-  $$(".rail-item[data-view]").forEach((b) => b.classList.toggle("is-on", b.dataset.view === railView));
+  $$(".rail-item[data-view]").forEach((b) => { const active = b.dataset.view === railView; b.classList.toggle("is-on", active); if (active) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current"); });
   $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", false));
   $$(".view[data-view]").forEach((v) => v.classList.toggle("is-on", v.dataset.view === id));
   if (id === "project" || id === "blockwise-dashboard") $$(".rail-item[data-project]").forEach((b) => b.classList.toggle("is-on", b.dataset.project === currentProject.id));
@@ -233,6 +233,8 @@ window.addEventListener("frank:operations-tool", (event) => {
   }
   showProject("blockwise");
 });
+
+document.getElementById("shell-alerts")?.addEventListener("click", () => showProject("blockwise", { ownerSection: "notifications" }));
 
 window.addEventListener("frank:project-home", (event) => {
   showProject(String(event.detail || "blockwise"));
@@ -645,7 +647,7 @@ async function refreshChatSessions(reloadCurrent = false) {
     await fetchChatSessions();
     const selected = chatSessions.find((chat) => chat.id === currentChatId);
     if (selected) {
-      $("#view-sub").textContent = selected.title || "";
+      if ($(".view[data-view=hub]").classList.contains("is-on")) $("#view-sub").textContent = selected.title || "";
       if (reloadCurrent && !turnStream?.active && chatVersion(selected) !== loadedChatVersion) {
         await loadChatMessages(selected.id);
       }

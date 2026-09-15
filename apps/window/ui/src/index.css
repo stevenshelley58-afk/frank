@@ -146,3 +146,14 @@
     @apply font-sans;
     }
 }
+/* Owner review: preserve the installed shadcn theme, add browser-surface states. */
+@layer base {
+  html { color-scheme: light; }
+  html.dark { color-scheme: dark; }
+  ::selection { background: color-mix(in oklch, var(--chart-1) 22%, transparent); }
+  input, textarea { caret-color: var(--foreground); }
+  * { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
+  }
+}

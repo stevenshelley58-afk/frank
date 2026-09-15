@@ -1,134 +1,52 @@
----
-version: alpha
-name: Frank Window
-description: White window. No scroll. Hermes thinks, Frank shows.
-colors:
-  primary: "#111111"
-  secondary: "#666666"
-  tertiary: "#E53C1F"
-  neutral: "#FFFFFF"
-  paper: "#FFFFFF"
-  ink: "#111111"
-  mute: "#666666"
-  faint: "#999999"
-  line: "#ECECEC"
-  card: "#FFFFFF"
-  chip: "#F5F5F5"
-typography:
-  h1:
-    fontFamily: Inter
-    fontSize: 2.125rem
-    fontWeight: 500
-    lineHeight: 1.1
-    letterSpacing: "-0.04em"
-  h2:
-    fontFamily: Inter
-    fontSize: 1.25rem
-    fontWeight: 500
-    lineHeight: 1.25
-    letterSpacing: "-0.02em"
-  body-md:
-    fontFamily: Inter
-    fontSize: 0.875rem
-    fontWeight: 400
-    lineHeight: 1.5
-  label:
-    fontFamily: Inter
-    fontSize: 0.8125rem
-    fontWeight: 400
-    lineHeight: 1.4
-rounded:
-  sm: 8px
-  md: 12px
-  pill: 999px
-spacing:
-  sm: 8px
-  md: 16px
-  lg: 24px
-components:
-  button-primary:
-    backgroundColor: "{colors.primary}"
-    textColor: "{colors.neutral}"
-    rounded: "{rounded.pill}"
-    padding: 12px
-  card:
-    backgroundColor: "{colors.card}"
-    textColor: "{colors.primary}"
-    rounded: "{rounded.md}"
-    padding: 16px
-  chip:
-    backgroundColor: "{colors.chip}"
-    textColor: "{colors.secondary}"
-    rounded: "{rounded.pill}"
-    padding: 8px
-  rail-item:
-    backgroundColor: "{colors.neutral}"
-    textColor: "{colors.secondary}"
-    rounded: "{rounded.sm}"
-    padding: 8px
----
+# Frank design system
 
-## Overview
+Approved 15 September 2026. The owner accepted the design in `owner-ui-review-20260915` and requested this exact system across Frank. This replaces the earlier Inter-only, red-dot, icon-only-mobile design rules. Impeccable `extract` governs shared-token consolidation; `polish` was used for specialist surfaces.
 
-Frank is a window, not a brochure. One viewport, no page scroll. A left rail of workspaces and window surfaces; a top bar naming where you are; content that fills the rest. Pure white. The mark carries the only red.
+## Product and architecture
+Frank is the owner's Window and Hub. Home/chat, projects, tools, files, connections, studios and operator views belong to Frank. Blockwise remains one project workspace, not a new Frank application. Customers remain in Blockwise. Hermes keeps reasoning, tools and execution.
 
-## Colors
+The approved preview is a design reference, not a production data source. Never import its sample metrics or replace working features with sample interactions. The current production Window keeps its existing DOM modules, routes, event handlers, IDs, native panels and APIs. New React features use the installed `ui/src/components/ui` shadcn primitives. Existing Window controls consume the same theme through the generated token bridge; they are not falsely described as migrated React/shadcn components.
 
-- **Ink (#111111):** text, active states, the composer send.
-- **White (#FFFFFF):** every surface. No tinted paper.
-- **Secondary (#666666) / Faint (#999999):** copy and hints.
-- **Tertiary (#E53C1F):** the slash in the mark, the active dot in the rail. Nothing else.
-- **Line (#ECECEC):** hairline separators only.
+## One authoritative theme
+`apps/window/ui/src/index.css` is the source for the approved shadcn semantic palette and chart colors. `scripts/sync-window-theme.mjs` extracts its light and dark theme into `web/tokens.css` and maps legacy names to those exact values. Run it after changing theme values; `--check`, the verification runner and the parity regression test reject drift. Never independently tune a second legacy palette.
 
-## Logo
+- Font: self-hosted Geist Variable, 100–900, with its OFL license retained. UI 14px/1.5; metadata normally 12px; form help at least 12px.
+- Background and cards: `--background` / `--card`, white in the approved light theme.
+- Main text: `--foreground`, oklch(.145 0 0).
+- Secondary text: `--muted-foreground`, oklch(.556 0 0).
+- Primary controls: `--primary`, oklch(.205 0 0), with `--primary-foreground`.
+- Dividers and inputs: `--border`, oklch(.922 0 0).
+- Hover/selected/subtle surface: `--muted` / `--accent`, oklch(.97 0 0).
+- Rail: `--sidebar`, oklch(.985 0 0).
+- Radius base 10px. Controls 8px; cards 14px; larger panels/dialogs 18px. Pills only for badges/tags, not every button.
+- Spacing: 4/8/12/16/24/32px. Content padding 32px desktop, 16px mobile; restrained 20px grid gaps.
+- Data uses tabular numbers. Chart colors come from the existing ten-color semantic chart palette; never use colors as the only evidence of state.
+- Frank's red mark remains branding. Destructive, warning and successful states retain semantic colors; routine navigation is neutral.
 
-An inline SVG, transparent, drawn in `currentColor` plus one red slash. It sits on white like every other surface. Use `brand/mark.svg` (mark) and `brand/wordmark.svg` (mark + name) anywhere.
+The legacy runtime currently presents the approved light theme. Its token bridge includes the matching dark palette for parity, but a global dark-mode control is not exposed until every owned surface has dark-mode acceptance. Native applications control their own themes.
 
-## Typography
+## Layout and hierarchy
+Use the approved quiet shell: 240px pale rail, 64px header, flat white working canvas, rounded controls and subtle borders. Preserve one viewport; long working regions scroll internally. Work should fill the available width without nesting the same control hierarchy repeatedly.
 
-Inter only. Headings 500, never italic, never decorative. Labels are lowercase with a 10px uppercase group caption in the rail.
+Home remains the Hermes conversation surface. Keep projects/chats visible and searchable. Tools contains specialist applications; Connections is directly reachable. Technical Live/Map/Control/Trace/Releases remain under More. Never remove a route or capability merely to shorten the menu.
 
-## Layout
+On small screens, replace the 60px icon rail with a labelled modal navigation drawer. The same original rail moves into that drawer so project/chat listeners and existing route behavior survive. Native dialog handling provides Escape, focus trapping and background inertness. Reopening and resizing must restore the rail correctly. Touch actions should be at least 44px where practical; dense desktop controls may be 40px.
 
-`height: 100dvh`, `overflow: hidden` on html and body. The rail is fixed 220px (collapses to icons on mobile). The content column fills the rest; only internal lists (files tree, a long doc) scroll inside their own pane. A widget grid uses `auto-fill, minmax(300px, 1fr)`.
+Page search uses existing navigation labels and conversation titles only. It neither searches private message bodies nor stores the query. Ctrl/Cmd K opens it; blocked navigation must not bypass unsaved-work protection.
 
-## Components
+## Components and content
+For React screens, reuse installed shadcn buttons, inputs, dialogs, sheets, selects, tables and tabs. Do not add another framework. For existing vanilla Window screens, update their owning styles and semantic controls rather than injecting Tailwind preflight or an override stylesheet. Preserve native browser controls where a rewrite would needlessly risk behavior.
 
-A widget is a white card with a hairline border and an isolated failure state. Rail items are flat; the selected one gets a red dot, never a filled slab. The composer is a pill with a round send.
+Headings describe the working area. One main action per context; routine controls stay quiet. Details, IDs, receipts and provenance remain available without dominating the first viewport. Use functional copy, no decorative eyebrows or em dashes in new copy. Show unavailable, loading, empty, denied, stale and failure states honestly. Missing data is not zero. A successful UI click is not provider completion.
 
-## Do's and Don'ts
+The content editor, ad review canvas and timeline are specialist layouts, not generic dashboard cards. Preserve source images, aspect ratios, annotations, artifact evidence, drafts, version guards and approval controls. Do not repaint actual creative artwork, graph canvases, video or native application interiors.
 
-- Do keep everything in one viewport.
-- Do read the same folders Hermes reads.
-- Do show an empty state when a source is missing — never fake data.
-- Don't add a second brain, scheduler, or memory store.
-- Don't tint the background.
-- Don't invent metrics.
+## Native applications and alerts
+Frappe CRM and Helpdesk have one primary CRM family entry; Support is an internal family view. Preserve `/project/blockwise/support` and existing native-panel sessions. Roundcube and Mautic keep their specialist UIs in the shared shell. Native authentication, origin validation, session readiness, preloading and unsaved-mail protection are unchanged. Never inject global CSS into native frames.
 
-## Current route and performance notes
+Alerts must distinguish unread from unresolved and use real action identities before adding counts. Do not transplant sample badges from the approved preview. No new notification permissions, push subscription, OS badging, provider connection or campaign activation is part of this visual rollout.
 
-The current Window keeps the existing one-viewport rail and content-pane route
-model. Graph workbench code is built separately and its browser validation is
-separate from the non-browser verification runner. Cleanup measurements on
-2026-09-05 reduced the minified graph workbench bundle from 12,232,201 to
-5,570,436 bytes and the dashboard bundle from 1,587,380 to 600,235 bytes.
-Lazy graph loading remains a planned frontend improvement, not a shipped claim.
+## Verification and boundaries
+Check desktop and 390px: shell, search, drawer open/close, back/refresh, forms, tables/cards, native CRM-family navigation and overflow. Review real working and error states. Keep the old backend/behavior tests and shared-token parity test. Release from the exact committed revision through the canonical Frank release path; do not apply a live CSS overlay.
 
-
-## Blockwise owner workspace
-
-The current owner instruction replaces the earlier links-only launch page.
-Frank keeps its white Inter shell and combined owner overview, with native CRM,
-Helpdesk, email and campaign panels inside the same workspace.
-
-A trusted device establishes the normal shared owner session. A small,
-native-origin bridge checks the application's own protected session before
-showing its UI. Required sign-in uses a bounded same-tab round trip, never an
-identity-provider form in a frame, and returns to the original section.
-Passwords and tokens never enter dashboard storage or frame messages.
-
-Connecting, connected, failure and retry states are explicit. Native mail is
-retained when switching sections, and leaving for sign-in warns about an open
-draft. There are no new-tab escape links. Other Frank routes and the technical
-project home remain unchanged. A passing health check is not native-session
-acceptance; desktop and mobile browser evidence is recorded separately.
+The separate `/ui/` component playground remains available and is not the app's new entry point. The approved sample owner preview remains a reference until its full behavior can be migrated safely. Theme alignment is not a claim that every old screen has been converted to React, that native apps have been redesigned, or that backend launch gates have passed.
