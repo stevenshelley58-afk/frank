@@ -11,7 +11,9 @@ RUN npm run build:dashboard
 RUN npm run build:graph
 RUN node vendor/archify/archify/bin/archify.mjs validate architecture archify/ad-template-process.json --json
 RUN node vendor/archify/archify/bin/archify.mjs check archify/ad-template-process.html
-RUN node --input-type=module -e 'import fs from "node:fs"; import { createHash } from "node:crypto"; const digest=(path)=>createHash("sha256").update(fs.readFileSync(path)).digest("hex"); fs.writeFileSync("archify/validation-receipt.json", JSON.stringify({schema:"frank.archify-build-validation.v1",validated:true,artifactSha256:digest("archify/ad-template-process.html"),specSha256:digest("archify/ad-template-process.json"),validatorSha256:digest("vendor/archify/archify/bin/archify.mjs")})+"\n");'
+RUN node vendor/archify/archify/bin/archify.mjs validate architecture archify/ad-db-process.json --json
+RUN node vendor/archify/archify/bin/archify.mjs check archify/ad-db-process.html
+RUN node --input-type=module -e 'import fs from "node:fs"; import { createHash } from "node:crypto"; const digest=(path)=>createHash("sha256").update(fs.readFileSync(path)).digest("hex"); const validator=digest("vendor/archify/archify/bin/archify.mjs"); const receipt=(spec,artifact)=>JSON.stringify({schema:"frank.archify-build-validation.v1",validated:true,artifactSha256:digest(artifact),specSha256:digest(spec),validatorSha256:validator})+"\n"; fs.writeFileSync("archify/validation-receipt.json", receipt("archify/ad-template-process.json", "archify/ad-template-process.html")); fs.writeFileSync("archify/ad-db-validation-receipt.json", receipt("archify/ad-db-process.json", "archify/ad-db-process.html"));'
 
 # Frank UI (shadcn/ui + React + Tailwind v4). Separate stage: it has its own
 # dependency tree, and the output is a static bundle copied into /web/ui below.

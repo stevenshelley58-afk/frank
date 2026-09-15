@@ -1,5 +1,17 @@
 # Ad Intelligence (Ad Radar)
 
+> **Superseded orchestration (cutover 2026-09-15).** The fixed
+> `discover -> resolve -> capture -> normalize -> classify -> media-qa -> publish` graph —
+> and the census-first / no-location-discovery rules it came from — are RETIRED as an
+> operating process. Collection now runs under the autonomous Hermes manager
+> (skill `ad-db-manager`); the current process view is the validated "Ad DB process"
+> projection on the Ad DB screen. Keep this package's structural boundaries (closed
+> schemas, allowlists, receipts, no credentials in settings), but do not reinstate the
+> fixed stages, confidence thresholds, or approval gates as collection prerequisites.
+> The declarative `pipelines`, `thresholds`, and `approval_gates` blocks in
+> `manifest.json` still describe the retired flow; they are updated in a dedicated
+> follow-up change.
+
 Ad Radar is a reusable tool package for discovering and comparing public advertising
 creative. It is a contract and policy package, not a scraper. Hermes owns execution;
 adapters can later connect approved browser automation, CDP, OpenTelemetry, and provider

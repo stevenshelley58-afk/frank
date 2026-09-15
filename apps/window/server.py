@@ -148,6 +148,10 @@ ARCHIFY_ARTIFACT = Path(os.environ.get("ARCHIFY_ARTIFACT", str(Path(__file__).re
 ARCHIFY_SPEC = Path(os.environ.get("ARCHIFY_SPEC", str(Path(__file__).resolve().parent / "archify" / "ad-template-process.json"))).resolve()
 ARCHIFY_CLI = Path(os.environ.get("ARCHIFY_CLI", str(Path(__file__).resolve().parent / "vendor" / "archify" / "archify" / "bin" / "archify.mjs"))).resolve()
 ARCHIFY_RECEIPT = Path(os.environ.get("ARCHIFY_RECEIPT", str(Path(__file__).resolve().parent / "archify" / "validation-receipt.json"))).resolve()
+# Ad DB process projection: same pinned CLI, separate spec/artifact/receipt.
+ARCHIFY_AD_DB_ARTIFACT = Path(os.environ.get("ARCHIFY_AD_DB_ARTIFACT", str(Path(__file__).resolve().parent / "archify" / "ad-db-process.html"))).resolve()
+ARCHIFY_AD_DB_SPEC = Path(os.environ.get("ARCHIFY_AD_DB_SPEC", str(Path(__file__).resolve().parent / "archify" / "ad-db-process.json"))).resolve()
+ARCHIFY_AD_DB_RECEIPT = Path(os.environ.get("ARCHIFY_AD_DB_RECEIPT", str(Path(__file__).resolve().parent / "archify" / "ad-db-validation-receipt.json"))).resolve()
 AGENTTRAIL_URL = os.environ.get("AGENTTRAIL_URL", "").strip().rstrip("/")
 ROOTS = {
     # The container receives only the explicitly approved read-only VPS mounts
@@ -2745,14 +2749,14 @@ def ad_template_generator_architecture():
     })
 
 
-def _archify_build_validated() -> bool:
+def _archify_validated(artifact: Path, spec: Path, receipt_path: Path) -> bool:
     files = {
-        "artifactSha256": ARCHIFY_ARTIFACT,
-        "specSha256": ARCHIFY_SPEC,
+        "artifactSha256": artifact,
+        "specSha256": spec,
         "validatorSha256": ARCHIFY_CLI,
     }
     try:
-        receipt = json.loads(ARCHIFY_RECEIPT.read_text(encoding="utf-8"))
+        receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         if receipt.get("schema") != "frank.archify-build-validation.v1" or receipt.get("validated") is not True:
             return False
         for key, path in files.items():
@@ -2766,12 +2770,38 @@ def _archify_build_validated() -> bool:
         return False
 
 
+def _archify_build_validated() -> bool:
+    return _archify_validated(ARCHIFY_ARTIFACT, ARCHIFY_SPEC, ARCHIFY_RECEIPT)
+
+
+def _archify_ad_db_validated() -> bool:
+    return _archify_validated(ARCHIFY_AD_DB_ARTIFACT, ARCHIFY_AD_DB_SPEC, ARCHIFY_AD_DB_RECEIPT)
+
+
 @app.get("/api/ad-studio/architecture/artifact")
 @app.get("/api/ad-template-generator/architecture/artifact")
 def ad_template_generator_architecture_artifact():
     if not _archify_build_validated():
         abort(404, "Archify artifact is not available")
     return send_file(ARCHIFY_ARTIFACT, mimetype="text/html", max_age=0)
+
+
+@app.get("/api/ad-db/process")
+def ad_db_process():
+    validated = _archify_ad_db_validated()
+    return jsonify({
+        "available": validated, "source": "archify",
+        "read_only": True, "validated": validated,
+        "artifact_url": "/api/ad-db/process/artifact" if validated else None,
+        "message": "Ad DB process artifact validation or its content binding is unavailable." if not validated else "Ad DB process typed-IR artifact is validated and available.",
+    })
+
+
+@app.get("/api/ad-db/process/artifact")
+def ad_db_process_artifact():
+    if not _archify_ad_db_validated():
+        abort(404, "Ad DB process artifact is not available")
+    return send_file(ARCHIFY_AD_DB_ARTIFACT, mimetype="text/html", max_age=0)
 
 
 @app.get("/api/ad-studio/implementation-activity")

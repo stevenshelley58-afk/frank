@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   adDbDateLabel,
+  adDbProcessModel,
   archivedMedia,
   adDetailRoute,
   buildAdDbQuery,
@@ -103,4 +104,27 @@ test("Ad DB has a canonical Window route", () => {
   assert.deepEqual(routeForPath("/ad-db"), { view: "ad-db" });
   assert.deepEqual(routeForPath("/ad-db/"), { view: "ad-db" });
   assert.equal(pathForView("ad-db"), "/ad-db");
+});
+
+test("Ad DB process model only advertises the validated same-origin artifact", () => {
+  assert.deepEqual(adDbProcessModel(null), {
+    available: false,
+    artifactUrl: "",
+    message: "Ad DB process view is unavailable.",
+  });
+  assert.deepEqual(adDbProcessModel({ available: false, message: "binding unavailable" }), {
+    available: false,
+    artifactUrl: "",
+    message: "binding unavailable",
+  });
+  assert.deepEqual(adDbProcessModel({ available: true }), {
+    available: true,
+    artifactUrl: "/api/ad-db/process/artifact",
+    message: "Process artifact is validated and available.",
+  });
+  // A hostile envelope never redirects the viewer: the artifact URL is a fixed
+  // same-origin constant, and unknown availability values fail closed.
+  const hostile = adDbProcessModel({ available: true, artifact_url: "https://evil.example/x" });
+  assert.equal(hostile.artifactUrl, "/api/ad-db/process/artifact");
+  assert.equal(adDbProcessModel({ available: "yes" }).available, false);
 });
