@@ -2,7 +2,7 @@
 
 **Status:** adopted. shadcn/ui is the default component system for all Frank UI work.
 **Location:** `apps/window/ui` (Vite + React 19 + Tailwind v4)
-**Served at:** `/ui` (review surface — see §6)
+**Served at:** `https://frank.fail/ui` (behind the owner auth gate) — see §6
 
 ---
 
@@ -153,6 +153,16 @@ for client-side routes.
 existing route still serve `apps/window/web` unchanged, and all native application panels are
 untouched. Shipping `/ui` is therefore independently revertable — removing the route and the
 Docker copy line restores the previous behaviour exactly.
+
+**`/ui` must keep its trailing slash.** The bundle uses relative asset URLs so it can be served
+from any mount path. Relative URLs resolve against the directory of the request, so serving the
+index at `/ui` makes the browser request `/assets/...` instead of `/ui/assets/...`, which hits the
+legacy SPA fallback and fails module loading on a `text/html` MIME type — the page renders its
+title and nothing else. `/ui` therefore 308-redirects to `/ui/`. A `<base href>` is not an option
+here: the `frank_private_response_headers` CSP sets `base-uri 'none'`.
+
+Caddy's CSP for this host allows the bundle: `script-src 'self'`, `style-src 'self' 'unsafe-inline'`,
+`font-src 'self' data:`, `img-src 'self' data: blob:`.
 
 ---
 
