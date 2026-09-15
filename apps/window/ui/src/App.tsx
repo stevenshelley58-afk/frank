@@ -121,7 +121,7 @@ const initialWork: Work[] = [
   },
   {
     id: "content-101",
-    title: "Check the local lead-generation guide",
+    title: "Review: Turn local expertise into your next lead",
     reason: "Draft and source checks ready to review",
     app: "content",
     sub: "blogs",
@@ -555,6 +555,10 @@ export default function App() {
                   section={route.section}
                   subsection={route.sub}
                   onNavigate={navigate}
+                  onExampleReviewed={(id) => {
+                    if (id === "blog-101")
+                      change("content-101", { done: true, seen: true })
+                  }}
                 />
               )}
             </div>

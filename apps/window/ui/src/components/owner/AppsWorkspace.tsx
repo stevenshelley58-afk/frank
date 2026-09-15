@@ -48,6 +48,7 @@ type Props = {
   section: string
   subsection: string
   onNavigate: (section: string, subsection?: string) => void
+  onExampleReviewed: (id: string) => void
 }
 type Item = {
   id: string
@@ -201,7 +202,12 @@ function Empty({
     </div>
   )
 }
-export function AppsWorkspace({ section, subsection, onNavigate }: Props) {
+export function AppsWorkspace({
+  section,
+  subsection,
+  onNavigate,
+  onExampleReviewed,
+}: Props) {
   const [items, setItems] = React.useState<Item[]>(() => {
     try {
       const saved = JSON.parse(
@@ -225,12 +231,36 @@ export function AppsWorkspace({ section, subsection, onNavigate }: Props) {
   const [customerTab, setCustomerTab] = React.useState("account")
   const [nativeState, setNativeState] = React.useState("ready")
   const [notice, setNotice] = React.useState("")
-  const [settings, setSettings] = React.useState({
-    desktop: true,
-    mobile: true,
-    badges: true,
-    private: true,
+  const [settings, setSettings] = React.useState(() => {
+    const defaults = {
+      desktop: true,
+      mobile: true,
+      badges: true,
+      private: true,
+    }
+    try {
+      const saved = JSON.parse(
+        sessionStorage.getItem("frank.ui-review.settings.v1") || "null"
+      )
+      return saved &&
+        Object.keys(defaults).every((key) => typeof saved[key] === "boolean")
+        ? {
+            desktop: saved.desktop as boolean,
+            mobile: saved.mobile as boolean,
+            badges: saved.badges as boolean,
+            private: saved.private as boolean,
+          }
+        : defaults
+    } catch {
+      return defaults
+    }
   })
+  React.useEffect(() => {
+    sessionStorage.setItem(
+      "frank.ui-review.settings.v1",
+      JSON.stringify(settings)
+    )
+  }, [settings])
   const [alertPreview, setAlertPreview] = React.useState(false)
   const [period, setPeriod] = React.useState("7")
   const [metric, setMetric] = React.useState("leads")
@@ -319,7 +349,11 @@ export function AppsWorkspace({ section, subsection, onNavigate }: Props) {
                   key={text}
                   className="flex items-center gap-2 border-b py-3 text-sm"
                 >
-                  <Check className="size-4 shrink-0 text-muted-foreground" />
+                  {detail.status === "Draft" && i === 1 ? (
+                    <CircleAlert className="size-4 shrink-0 text-amber-600" />
+                  ) : (
+                    <Check className="size-4 shrink-0 text-muted-foreground" />
+                  )}
                   {text}
                   {detail.status === "Draft" && i === 1 && (
                     <Badge variant="outline">Pending</Badge>
@@ -345,6 +379,7 @@ export function AppsWorkspace({ section, subsection, onNavigate }: Props) {
                   )
                 )
                 setDetail({ ...detail, status: "Reviewed" })
+                onExampleReviewed(detail.id)
                 setNotice("Example marked reviewed. No content was published.")
               }}
             >
