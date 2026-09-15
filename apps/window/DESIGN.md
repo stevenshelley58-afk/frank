@@ -50,3 +50,61 @@ Alerts must distinguish unread from unresolved and use real action identities be
 Check desktop and 390px: shell, search, drawer open/close, back/refresh, forms, tables/cards, native CRM-family navigation and overflow. Review real working and error states. Keep the old backend/behavior tests and shared-token parity test. Release from the exact committed revision through the canonical Frank release path; do not apply a live CSS overlay.
 
 The separate `/ui/` component playground remains available and is not the app's new entry point. The approved sample owner preview remains a reference until its full behavior can be migrated safely. Theme alignment is not a claim that every old screen has been converted to React, that native apps have been redesigned, or that backend launch gates have passed.
+
+## Blockwise owner native application launch
+
+`/project/blockwise` is now a small owner launch surface, not a dashboard or a replacement application.
+
+- The sole primary action is `Open CRM`.
+- Short labelled lists link to the native CRM, Helpdesk, Purelymail, Mautic, Stripe, reports, ntfy, and ntfy. Custom tools remain in the Frank sidebar.
+- Private Frappe, Mautic, and ntfy links say `Requires Tailscale`. Mautic uses its native login and is not SSO.
+- Links open a separate tab with `noopener noreferrer` and no referrer. There are no iframes, credentials, auto-login claims, copied provider data, fake metrics, or provider actions.
+- Scheduling says that no native interface is deployed. It has no sample or substitute UI.
+
+The surface remains in Frank's incumbent white Inter shell. It uses an ink primary pill, text-first link rows, hairlines, and a single-column mobile composition. It deliberately avoids an owner-local rail, cards, charts, mock records, or a provider-state simulator.
+
+The technical project home stays available at `/project/blockwise?technical=1`; other project homes and real custom Frank applications remain reachable and unchanged.
+
+Frontend acceptance only proves named routes, safe outbound-link attributes, non-embedding, scoped routing, and the preserved technical-home route. It does not prove native authentication, provider delivery, billing, reporting, or scheduling.
+
+## Ads workspace
+
+`/project/blockwise/ads` is the owner's paid-advertising section, beside Mail,
+CRM and Email flows. It is a Frank read model with no native application to
+frame, so it takes the read slot whole rather than being wrapped in the panel
+title every other section gets.
+
+It extends the incumbent white, compact system rather than adding a second one:
+the same tokens, the same Inter steps, the same hairlines, the same pill
+actions. What changes is density. An ads screen is an Operate surface read
+against a table, so it adds:
+
+- **A context strip that never scrolls.** Account, date range, comparison
+  period, attribution setting and last successful sync sit above the screen nav
+  and stay put while the rows move.
+- **One management table, three altitudes.** Campaigns, ad sets and ads share a
+  table with sortable headers, choosable columns, saved filter views, row
+  selection with shift-range, and paging. Numbers are right-aligned with tabular
+  figures so a column can be read down the page.
+- **Measurement labels at the point of display.** Meta-attributed and
+  website/CRM-observed numbers are different facts. They never share a column or
+  a total, and an observed metric carries its source inline.
+- **Evidence instead of a winner badge.** Low volume renders *Insufficient
+  evidence*, not a crown, and a comparison refuses a verdict while the
+  confidence intervals overlap.
+- **A record drawer, not a second page.** Rows open a trailing panel so the list
+  behind it survives; Escape closes it and focus returns to where it was.
+
+The red `--mark` stays what it is everywhere else: the active marker only. No
+new accent, no tinted panel and no chart wall — the overview carries exactly one
+chart, because a screen where every metric has its own sparkline is a screen
+nobody reads.
+
+Motion follows the same restraint: entering surfaces (drawer, popover, bulk bar,
+publish flow) get a short custom ease-out because they explain a state change,
+repeat-use controls get a bounded transition and nothing more, and everything
+collapses under `prefers-reduced-motion`.
+
+`web/ads.css` owns every style, scoped to `.ads-workspace`, so no other Frank
+surface changes.
+

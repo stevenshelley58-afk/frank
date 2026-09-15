@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Ads workspace acceptance harness</title>
+    <!--
+      The acceptance harness for the Ads workspace. It mounts the production
+      modules unchanged and controls only what a server would control: the
+      answers on the wire. Preview mode is the workspace's own labelled fixture
+      source, so most journeys need no stub at all; the stub exists for the
+      states a real server produces and a fixture cannot (throttling, a failed
+      refresh, a slow answer).
+
+      Nothing here ships to production: the page is not linked from the
+      application and lives under acceptance/.
+    -->
+    <link rel="stylesheet" href="../web/tokens.css" />
+    <link rel="stylesheet" href="../web/ads.css" />
+  </head>
+  <body>
+    <div id="host"></div>
+    <script>
+      const harness = {
+        requests: [],
+        mode: "not_connected",
+        rows: [],
+        syncedAt: new Date().toISOString(),
+        delayMs: 0,
+      };
+      window.__adsHarness = harness;
+      window.__adsHarness.reset = () => {
+        harness.requests.length = 0;
+        harness.mode = "not_connected";
+        harness.rows = [];
+        harness.delayMs = 0;
+      };
+      window.__adsHarness.serve = (mode, options = {}) => {
+        harness.mode = mode;
+        if (options.rows) harness.rows = options.rows;
+        if (options.syncedAt) harness.syncedAt = options.syncedAt;
+        if (options.delayMs !== undefined) harness.delayMs = options.delayMs;
+        // Named readers can fail on their own, which is what a partial failure
+        // looks like: the rest of the account answers and one source does not.
+        harness.failReaders = Array.isArray(options.failReaders) ? options.failReaders.map(String) : [];
+        harness.throttleReaders = Array.isArray(options.throttleReaders) ? options.throttleReaders.map(String) : [];
+      };
+      const jsonResponse = (status, payload) =>
+        new Response(JSON.stringify(payload), { status, headers: { "content-type": "application/json" } });
+      const readerOf = (url) => {
+        const match = String(url).match(/\/api\/owner\/ads\/([a-z_]+)/);
+        return match ? match[1] : "";
+      };
+      window.fetch = async (url) => {
+        harness.requests.push(String(url));
+        if (harness.delayMs) await new Promise((resolve) => setTimeout(resolve, harness.delayMs));
+        // A named reader answers on its own, before the mode decides the rest.
+        if (harness.failReaders.includes(readerOf(url))) return jsonResponse(500, { detail: "this reader failed" });
+        if (harness.throttleReaders.includes(readerOf(url))) return jsonResponse(429, {});
+        if (harness.mode === "not_connected") return jsonResponse(404, {});
+        if (harness.mode === "throttled") return jsonResponse(429, {});
+        if (harness.mode === "failed") throw new Error("the read model did not answer");
+        if (harness.mode === "rows") {
+          const wanted = String(url).includes("/context")
+            ? { record: { account: { name: "Harness account", currency: "GBP" }, sync: { status: "ready", lastSuccessAt: harness.syncedAt } } }
+            : { rows: harness.rows, meta: { status: "ready", syncedAt: harness.syncedAt } };
+          return jsonResponse(200, wanted);
+        }
+        return jsonResponse(404, {});
+      };
+    </script>
+    <script type="module">
+      import { mountAdsWorkspace } from "../web/js/ads/ads-workspace.js";
+      let dispose = null;
+      window.__adsHarness.mount = (options = {}) => {
+        dispose?.();
+        document.getElementById("host").innerHTML = "";
+        window.localStorage.setItem("frank.ads.preview", options.preview ? "1" : "0");
+        if (options.previewSize) window.localStorage.setItem("frank.ads.previewSize", options.previewSize);
+        dispose = mountAdsWorkspace(document.getElementById("host"), {});
+        return true;
+      };
+      window.__adsHarness.settle = async (ms = 120) => {
+        await new Promise((resolve) => setTimeout(resolve, ms));
+        return true;
+      };
+    </script>
+  </body>
+</html>
