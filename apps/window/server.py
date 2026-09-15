@@ -4733,7 +4733,20 @@ def mini_legacy_redirect(mini_path: str):
     return _mini_redirect(_mini_legacy_target(mini_path, LEGACY_MINI_ASSETS))
 
 
-@app.get("/ui", defaults={"ui_path": ""}, strict_slashes=False)
+@app.get("/ui", strict_slashes=False)
+def frank_ui_root():
+    """Redirect to the trailing-slash form.
+
+    The bundle uses relative asset URLs ("./assets/...") so it can be served
+    from any mount path. Relative URLs resolve against the *directory* of the
+    request, so serving the index at "/ui" makes the browser request
+    "/assets/..." instead of "/ui/assets/...". Redirecting to "/ui/" keeps
+    resolution correct.
+    """
+    return redirect("/ui/", code=308)
+
+
+@app.get("/ui/", defaults={"ui_path": ""})
 @app.get("/ui/<path:ui_path>")
 def frank_ui(ui_path: str):
     """Serve the shadcn/ui design-system bundle built from apps/window/ui.
