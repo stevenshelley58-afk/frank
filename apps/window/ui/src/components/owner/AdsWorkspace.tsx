@@ -76,7 +76,7 @@ const records: RecordRow[] = [
   {
     id: "cmp_aud_104",
     level: "campaign",
-    name: "Seller guide leads",
+    name: "Agent lead-generation guide",
     status: "Delivering",
     spend: 2860,
     results: 176,
@@ -86,7 +86,7 @@ const records: RecordRow[] = [
   {
     id: "cmp_aud_112",
     level: "campaign",
-    name: "Home appraisal enquiries",
+    name: "Blockwise trial enquiries",
     status: "Delivering",
     spend: 1940,
     results: 101,
@@ -96,7 +96,7 @@ const records: RecordRow[] = [
   {
     id: "cmp_aud_118",
     level: "campaign",
-    name: "Suburb report downloads",
+    name: "Agency growth guide",
     status: "Paused",
     spend: 1224,
     results: 49,
@@ -107,7 +107,7 @@ const records: RecordRow[] = [
     id: "set_104_local",
     parent: "cmp_aud_104",
     level: "adset",
-    name: "Local homeowners · 35–64",
+    name: "Australian real-estate agents",
     status: "Delivering",
     spend: 1730,
     results: 111,
@@ -118,7 +118,7 @@ const records: RecordRow[] = [
     id: "set_104_broad",
     parent: "cmp_aud_104",
     level: "adset",
-    name: "Broad homeowners",
+    name: "Agency owners",
     status: "Delivering",
     spend: 1130,
     results: 65,
@@ -140,7 +140,7 @@ const records: RecordRow[] = [
     id: "ad_104_guide",
     parent: "set_104_local",
     level: "ad",
-    name: "Know your selling options",
+    name: "Find your next listing lead",
     status: "Delivering",
     spend: 1020,
     results: 72,
@@ -151,7 +151,7 @@ const records: RecordRow[] = [
     id: "ad_104_plan",
     parent: "set_104_local",
     level: "ad",
-    name: "Your simple seller plan",
+    name: "Your next campaign, ready",
     status: "Delivering",
     spend: 710,
     results: 39,
@@ -162,7 +162,7 @@ const records: RecordRow[] = [
     id: "ad_112_value",
     parent: "set_112_warm",
     level: "ad",
-    name: "What could your home be worth?",
+    name: "Turn enquiries into conversations",
     status: "Delivering",
     spend: 1940,
     results: 101,
@@ -186,7 +186,7 @@ const creativeItems = [
   {
     id: "crt_204",
     adId: "ad_104_guide",
-    title: "Know your selling options",
+    title: "Find your next listing lead",
     hook: "A calm, practical guide",
     state: "Comparable",
     cpl: 14.17,
@@ -196,7 +196,7 @@ const creativeItems = [
   {
     id: "crt_219",
     adId: "ad_104_plan",
-    title: "Your simple seller plan",
+    title: "Your next campaign, ready",
     hook: "Three steps to feel prepared",
     state: "Comparable",
     cpl: 18.21,
@@ -206,8 +206,8 @@ const creativeItems = [
   {
     id: "crt_227",
     adId: "ad_118_report",
-    title: "Suburb report",
-    hook: "Local numbers, clearly explained",
+    title: "Agency growth guide",
+    hook: "A clearer lead-generation plan",
     state: "Below evidence floor",
     cpl: 24.98,
     results: 12,
@@ -219,21 +219,21 @@ const queueRows = [
   {
     id: "batch_031",
     tab: "review",
-    name: "Seller guide · September refresh",
+    name: "Agent lead-generation guide · September refresh",
     state: "Needs review",
     detail: "Three ads have staged copy and destination changes.",
   },
   {
     id: "batch_032",
     tab: "draft",
-    name: "Appraisal follow-up test",
+    name: "Agent follow-up test",
     state: "Draft",
     detail: "Local preview draft. It has not been sent to a provider.",
   },
   {
     id: "batch_029",
     tab: "uncertain",
-    name: "Suburb report · audience update",
+    name: "Agency growth guide · audience update",
     state: "Uncertain",
     detail:
       "The prior write has no confirmed provider outcome. Inspect before any retry.",
@@ -241,7 +241,7 @@ const queueRows = [
   {
     id: "batch_026",
     tab: "history",
-    name: "Seller guide · August refresh",
+    name: "Agent lead-generation guide · August refresh",
     state: "Recorded",
     detail:
       "Sample history only. This preview does not verify provider delivery.",
@@ -315,13 +315,15 @@ export function AdsWorkspace({ subsection, onNavigate }: Props) {
 
   return (
     <div className="min-h-full bg-background text-[14px] text-foreground">
-      <div className="mx-auto max-w-[1360px] space-y-5 p-4 md:p-8">
+      <div className="mx-auto max-w-[1360px] space-y-5">
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
             <h1 className="text-2xl font-semibold tracking-tight">Ads</h1>
             <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
-              Owner workspace for lead-generation campaigns, creative evidence,
-              destinations and publishing state.
+              Your campaigns, creative and next actions.
+            </p>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Example owner account · AUD · Australia/Perth · 28 days
             </p>
           </div>
           <Button
@@ -408,10 +410,9 @@ function Overview({
       <div className="grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,.6fr)]">
         <Card>
           <CardHeader>
-            <CardTitle>Spend and qualified demand</CardTitle>
+            <CardTitle>Meta spend</CardTitle>
             <p className="text-sm text-muted-foreground">
-              Sample daily observations. Different systems are not combined into
-              one conversion claim.
+              Sample daily spend. CRM-qualified leads are reported separately.
             </p>
           </CardHeader>
           <CardContent>
@@ -443,7 +444,10 @@ function Overview({
                 />
               </AreaChart>
             </ChartContainer>
-            <div className="mt-3 overflow-hidden rounded-lg border">
+            <details className="mt-3 overflow-hidden rounded-lg border">
+              <summary className="cursor-pointer px-4 py-3 text-sm font-medium focus-visible:outline-2">
+                View source values
+              </summary>
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -453,7 +457,7 @@ function Overview({
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {performance.slice(-3).map((point) => (
+                  {performance.map((point) => (
                     <TableRow key={point.date}>
                       <TableCell>{point.date}</TableCell>
                       <TableCell className="text-right tabular-nums">
@@ -466,7 +470,7 @@ function Overview({
                   ))}
                 </TableBody>
               </Table>
-            </div>
+            </details>
           </CardContent>
         </Card>
         <Card>
@@ -544,7 +548,7 @@ function Campaigns({
       <div>
         <h2 className="text-xl font-semibold">Campaign records</h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Select records explicitly before reviewing a proposed sample change.
+          Select records to review changes.
         </p>
       </div>
       <div className="flex flex-wrap items-end gap-3">
@@ -786,21 +790,21 @@ function Blogs({ openDetail }: { openDetail: (id: string) => void }) {
   const destinations = [
     {
       id: "dst_041",
-      title: "A practical guide to selling your home",
+      title: "A practical guide to agent lead generation",
       sessions: 1820,
       forms: 73,
       qualified: 18,
     },
     {
       id: "dst_052",
-      title: "What to prepare before requesting an appraisal",
+      title: "Your first lead-generation campaign",
       sessions: 1244,
       forms: 46,
       qualified: 11,
     },
     {
       id: "dst_067",
-      title: "Your local market report",
+      title: "Follow up with your next listing lead",
       sessions: 890,
       forms: 28,
       qualified: 6,
@@ -896,7 +900,7 @@ function validateTracking(value: string) {
 function Tracking() {
   const storageKey = "frank.ads-preview.tracking-draft.v1"
   const initial =
-    "https://blockwise.sale/guides/seller?utm_source=meta&utm_medium=paid_social&utm_campaign=cmp_aud_104&utm_content=ad_104_guide"
+    "https://blockwise.sale/guides/agent-leads?utm_source=meta&utm_medium=paid_social&utm_campaign=cmp_aud_104&utm_content=ad_104_guide"
   const [value, setValue] = React.useState(() => {
     try {
       return sessionStorage.getItem(storageKey) ?? initial
@@ -965,8 +969,8 @@ function Tracking() {
           </div>
           <div className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
             <p>
-              <b className="text-foreground">Editable names:</b> Seller guide
-              leads · Know your selling options
+              <b className="text-foreground">Editable names:</b> Agent
+              lead-generation guide leads · Find your next listing lead
             </p>
             <p className="mt-1">
               <b className="text-foreground">Immutable sample IDs:</b>{" "}
