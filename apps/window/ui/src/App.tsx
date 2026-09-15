@@ -413,13 +413,13 @@ export default function App() {
                         </h2>
                         <Tabs value={filter} onValueChange={setFilter}>
                           <TabsList className="h-11">
-                            <TabsTrigger value="all" className="min-h-9">
+                            <TabsTrigger value="all" className="min-h-11 min-w-11">
                               All
                             </TabsTrigger>
-                            <TabsTrigger value="Urgent" className="min-h-9">
+                            <TabsTrigger value="Urgent" className="min-h-11">
                               Urgent
                             </TabsTrigger>
-                            <TabsTrigger value="Today" className="min-h-9">
+                            <TabsTrigger value="Today" className="min-h-11">
                               Today
                             </TabsTrigger>
                           </TabsList>
