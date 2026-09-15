@@ -485,13 +485,22 @@ def main() -> int:
     saml_property_mappings = [defaults[n] for n in needed] + [givenname["pk"], surname["pk"]]
 
     # --------------------------------------------------------- Mautic SAML SP --
-    # Mautic derives its SP entityID and ACS URL from its own site_url, which
-    # stays https://mail.blockwise.sale so that opt-out links already in sent
-    # mail keep working. The values below mirror Mautic's own SP metadata.
-    mautic_entity = os.environ.get("OWNER_IDENTITY_MAUTIC_SP_ENTITY_ID", "https://mail.blockwise.sale")
+    # Mautic's LightSAML AuthnRequest carries no ACS override, so Authentik's
+    # configured ACS is what the browser posts to. Mautic then validates the
+    # Response Destination and the bearer Recipient against its own SP
+    # descriptor, whose only ACS is <saml_idp_entity_id>/s/saml/login_check.
+    # The SP entity ID (Authentik audience) must therefore be the native,
+    # owner-gated marketing origin. mautic.site_url stays public for opt-out
+    # links; it is not the SAML authority.
+    mautic_entity = os.environ.get("OWNER_IDENTITY_MAUTIC_SP_ENTITY_ID", MARKETING_ORIGIN)
     mautic_acs = os.environ.get(
-        "OWNER_IDENTITY_MAUTIC_ACS_URL", "https://mail.blockwise.sale/s/saml/login_check"
+        "OWNER_IDENTITY_MAUTIC_ACS_URL", f"{MARKETING_ORIGIN}/s/saml/login_check"
     )
+    if mautic_entity != MARKETING_ORIGIN:
+        raise SystemExit("OWNER_IDENTITY_MAUTIC_SP_ENTITY_ID must be the native marketing origin")
+    expected_mautic_acs = f"{MARKETING_ORIGIN}/s/saml/login_check"
+    if mautic_acs != expected_mautic_acs:
+        raise SystemExit("OWNER_IDENTITY_MAUTIC_ACS_URL must be the native marketing SAML ACS")
     saml = ensure("/providers/saml/", "name", "Mautic", {
         "name": "Mautic",
         "authorization_flow": authz_flow["pk"],

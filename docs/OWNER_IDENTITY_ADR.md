@@ -330,14 +330,21 @@ pages rather than by reasoning:
    paths were relative to the per-application base URL, but
    `/application/o/<slug>/authorize/` does not exist and returns 404.
 2. **Webmail framing is UNVERIFIED**, as recorded in section 9.
-3. **Mautic SAML is configured but not proven end to end.** Mautic 7.2.0 has
-   native SAML 2.0 SP support in core (no plugin; `mautic/plugin-saml` does not
-   exist and is not needed). Its SP entityID and ACS URL are both derived from
-   `mautic.site_url`, which stays `https://mail.blockwise.sale` so that opt-out
-   links already in sent mail keep working — see section 12. The authentik SAML
-   provider, the `givenname`/`surname` property mappings Mautic requires and the
-   application are all created and idempotent; the assertion exchange itself has
-   not been driven in a browser.
+3. **Mautic SAML lives entirely on the native marketing origin.** Mautic
+   7.2.0 has native SAML 2.0 SP support in core (no plugin; `mautic/plugin-saml`
+   does not exist and is not needed). Its LightSAML AuthnRequest carries no ACS
+   override (`ACSUrlAction` is not in `SsoSpSendAuthnRequestActionBuilder`),
+   so the browser posts wherever Authentik's `acs_url` points. On receipt,
+   LightSAML's `DestinationValidatorResponseAction` and
+   `RecipientValidatorAction` compare the Response `Destination` and the
+   bearer `Recipient` against Mautic's own SP descriptor, which
+   `EntityDescriptorProviderFactory` builds with a single ACS at
+   `<saml_idp_entity_id>/s/saml/login_check`. The SP entity ID, the Authentik
+   audience and the Authentik ACS are therefore all
+   `https://marketing.frank.fail` /
+   `https://marketing.frank.fail/s/saml/login_check`. `mautic.site_url` remains
+   `https://mail.blockwise.sale` for recipient opt-out links; it is not the
+   SAML authority.
 4. **No certificate has actually been issued for the four new names**, because
    that requires loading the new config into production `frank-caddy`, which
    this lane is not allowed to do. The *mechanism* is established with the
@@ -349,13 +356,14 @@ pages rather than by reasoning:
 and `/email/dnc/*` public, everything else 404. `marketing.frank.fail` is an
 **additive** hostname. `mautic.site_url` is deliberately **not** changed, because
 Mautic builds every unsubscribe and DNC link from it and repointing it would move
-opt-out behind the owner identity. The cost of that decision is that Mautic's
-SAML entityID and ACS URL remain on `mail.blockwise.sale`
-(`https://mail.blockwise.sale` and
-`https://mail.blockwise.sale/s/saml/login_check`), which is what the authentik
-SAML provider is configured to match; if the login round trip needs to land on
-`mail.blockwise.sale`, that host needs the SAML SP paths added additively, and
-the public opt-out paths must not be disturbed while doing it.
+opt-out behind the owner identity. Mautic's SAML SP entity ID
+(`saml_idp_entity_id`) is `https://marketing.frank.fail`: LightSAML derives
+the SP's only ACS from it and validates every inbound Response `Destination`
+and bearer `Recipient` against that location, so a public entity ID would
+reject an assertion posted to the native host. Authentik's audience and ACS
+match it, the login request has no ACS override, and the assertion POSTs only
+to `https://marketing.frank.fail/s/saml/login_check`. This preserves the public
+opt-out boundary without adding any SAML route to it.
 
 ## 13. Rollback
 
