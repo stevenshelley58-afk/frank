@@ -24,7 +24,7 @@ class TrustedDeviceResolverTests(unittest.TestCase):
         self.assertEqual(re.findall(r"[a-z]+\.frank\.fail", corefile), ["auth.frank.fail"], "only the identity host is answered privately")
         self.assertIn("fallthrough", compose)
         self.assertIn("forward . 1.1.1.1", compose)
-        self.assertIn("read_only: true", compose)
+        self.assertIn("configs:\n      - source: corefile", compose)
         self.assertIn("cap_drop: [ALL]", compose)
         self.assertRegex(compose, r"coredns/coredns:[0-9.]+@sha256:[0-9a-f]{64}")
 

@@ -22,7 +22,9 @@ services:
     ports:
       - "${OWNER_TAILSCALE_ADDRESS:?required}:53:53/udp"
       - "${OWNER_TAILSCALE_ADDRESS:?required}:53:53/tcp"
-    read_only: true
+    # Not read_only: Compose can only materialise an inline `content` config
+    # into a writable service; the image has no shell and drops every capability
+    # except binding port 53.
     security_opt: [no-new-privileges:true]
     cap_drop: [ALL]
     cap_add: [NET_BIND_SERVICE]
