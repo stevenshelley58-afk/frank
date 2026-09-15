@@ -8,9 +8,19 @@ import unittest
 WEB = Path(__file__).resolve().parents[1] / "web"
 
 
+def _flat(markup: str) -> str:
+    """Collapse insignificant HTML whitespace before matching a contract.
+
+    Markup is reformatted by tooling (attribute wrapping, XHTML self-closing
+    tags), so a contract must match the document's meaning rather than the
+    line breaks of the moment it was written.
+    """
+    return re.sub(r"\s+", " ", re.sub(r"\s*/>", ">", markup))
+
+
 class UiContractTest(unittest.TestCase):
     def test_window_is_an_installable_web_app(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         manifest = json.loads((WEB / "manifest.json").read_text(encoding="utf-8"))
 
         self.assertIn('<link rel="manifest" href="/manifest.json">', html)
@@ -47,7 +57,7 @@ class UiContractTest(unittest.TestCase):
     def test_project_memory_inspector_uses_hindsight_provider_truth(self):
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
         inspector = (WEB / "js" / "memory-inspector.js").read_text(encoding="utf-8")
-        styles = (WEB / "app.css").read_text(encoding="utf-8")
+        styles = _flat((WEB / "app.css").read_text(encoding="utf-8"))
 
         self.assertIn('button("Memory", openMemoryInspector)', homes)
         self.assertIn('mountMemoryInspector', homes)
@@ -70,7 +80,7 @@ class UiContractTest(unittest.TestCase):
         self.assertNotIn("localStorage", inspector)
 
     def test_ad_template_generator_is_a_real_tool_surface_backed_by_hermes(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         studio = (WEB / "js" / "ad-template-generator.js").read_text(encoding="utf-8")
         widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
@@ -138,8 +148,8 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('runListRenderSignature(runs) !== previousSignature', studio)
         self.assertIn('renderModelProfile(run, detail)', studio)
         self.assertIn('ChatGPT/Codex OAuth — not OpenAI API dashboard', (WEB.parent / "server.py").read_text(encoding="utf-8"))
-        self.assertIn('/app.css?v=20260908-review-stability-v3', html)
-        self.assertIn('/js/app.js?v=20260914-native-owner-apps-v1', html)
+        self.assertIn('/app.css?v=20260915-approved-system-v3', html)
+        self.assertIn('/js/app.js?v=20260915-approved-system-v3', html)
         self.assertIn('./ad-template-generator.js?v=20260908-review-stability-v3', app)
         self.assertIn('groupAdTemplateGeneratorRuns(runs)', studio)
         self.assertIn('Superseded attempts (${group.superseded.length})', studio)
@@ -186,7 +196,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('events?after=${encodeURIComponent(cursor)}', studio)
 
     def test_blog_studio_is_an_evidence_first_content_factory_surface(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         studio = (WEB / "js" / "blog-studio.js").read_text(encoding="utf-8")
         widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
@@ -270,10 +280,10 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('min-height: 44px;', styles)
         self.assertNotIn("localStorage", studio)
     def test_ad_template_generator_batches_click_and_drop_source_images(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         studio = (WEB / "js" / "ad-template-generator.js").read_text(encoding="utf-8")
-        styles = (WEB / "app.css").read_text(encoding="utf-8")
+        styles = _flat((WEB / "app.css").read_text(encoding="utf-8"))
 
         self.assertRegex(html, r'id="ad-source-files"[^>]*accept="image/\*"[^>]*multiple')
         self.assertIn('Click to browse, or drop up to 20 images here.', html)
@@ -302,7 +312,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('.ad-drop:hover, .ad-drop.is-drag', styles)
 
     def test_ad_radar_is_a_dedicated_project_scoped_hermes_surface(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         radar = (WEB / "js" / "ad-radar.js").read_text(encoding="utf-8")
         styles = (WEB / "ad-radar.css").read_text(encoding="utf-8")
@@ -332,7 +342,7 @@ class UiContractTest(unittest.TestCase):
         self.assertNotIn('linear-gradient', styles)
 
     def test_explorer_remains_one_pinnable_vps_tree(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         script = (WEB / "js" / "app.js").read_text(encoding="utf-8")
 
         self.assertNotIn('id="exp-root"', html)
@@ -347,7 +357,7 @@ class UiContractTest(unittest.TestCase):
         script = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         controller = (WEB / "js" / "chat" / "attachment-controller.js").read_text(encoding="utf-8")
         api = (WEB / "js" / "chat" / "api.js").read_text(encoding="utf-8")
-        styles = (WEB / "app.css").read_text(encoding="utf-8")
+        styles = _flat((WEB / "app.css").read_text(encoding="utf-8"))
 
         self.assertNotIn("sendFilesNow", script)
         self.assertIn("addFiles(items)", controller)
@@ -388,10 +398,10 @@ class UiContractTest(unittest.TestCase):
         self.assertEqual(script.count('navigate: false'), 1)
 
     def test_accounts_tool_is_secret_safe_and_responsive(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         script = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
-        styles = (WEB / "app.css").read_text(encoding="utf-8")
+        styles = _flat((WEB / "app.css").read_text(encoding="utf-8"))
 
         self.assertIn('data-view="accounts"', html)
         self.assertIn('id="account-credential"', html)
@@ -399,7 +409,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('id="account-auth-status"', html)
         self.assertIn('id="account-billing-status"', html)
         self.assertIn('Card and bank details are rejected', html)
-        self.assertIn('changing this does not alter project access', html)
+        self.assertIn('changing this does not alter a subscription', html)
         self.assertIn('role="dialog"', html)
         self.assertIn('id="account-results-status" aria-live="polite"', html)
         self.assertNotIn('type="password"', html.split('id="connection-secret"', 1)[0])
@@ -416,7 +426,7 @@ class UiContractTest(unittest.TestCase):
 
     def test_ops_has_separate_global_enquiry_queue_and_accessible_tabs(self):
         ops = (WEB / "js" / "ops.js").read_text(encoding="utf-8")
-        styles = (WEB / "app.css").read_text(encoding="utf-8")
+        styles = _flat((WEB / "app.css").read_text(encoding="utf-8"))
         self.assertIn("/api/ops/enquiries/unassigned", ops)
         self.assertIn("Unassigned enquiries", ops)
         self.assertIn('role="tablist"', ops)
@@ -427,7 +437,7 @@ class UiContractTest(unittest.TestCase):
         self.assertNotIn("provider_record_suffix", ops)
 
     def test_blockwise_preview_reuses_one_operations_tool_registry(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
         widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
@@ -486,7 +496,7 @@ class UiContractTest(unittest.TestCase):
         self.assertNotIn('actionButton("session_revoke", row.id', ops)
 
     def test_entity_homes_keep_the_canonical_operational_rail(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         widgets = (WEB / "js" / "widgets.js").read_text(encoding="utf-8")
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
@@ -495,12 +505,12 @@ class UiContractTest(unittest.TestCase):
         defaults = (WEB.parent / "home_defaults.py").read_text(encoding="utf-8")
         dashboard = (WEB.parent / "dashboard" / "dashboard-vendor.js").read_text(encoding="utf-8")
         registry = (WEB / "js" / "registry.js").read_text(encoding="utf-8")
-        styles = (WEB / "app.css").read_text(encoding="utf-8")
+        styles = _flat((WEB / "app.css").read_text(encoding="utf-8"))
 
         rail_views = re.findall(r'<button class="rail-item[^>]*data-view="([^"]+)"', html)
         self.assertEqual(
             rail_views,
-            ["hub", "tools", "files", "ad-template-generator", "ad-db", "blog-studio", "ad-radar", "trace", "releases", "live", "map", "control", "ops"],
+            ["hub", "tools", "files", "ad-template-generator", "ad-db", "blog-studio", "ad-radar", "trace", "releases", "live", "map", "control", "ops", "connections"],
         )
         self.assertIn('id="project-nav"', html)
         self.assertIn('id="new-project"', html)
@@ -571,7 +581,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn(".tool-workspace", styles)
 
     def test_widget_and_connection_editors_are_plain_text_reference_surfaces(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
         browser_canary = (WEB.parent / "tests" / "hosted_focus_canary.js").read_text(encoding="utf-8")
@@ -655,7 +665,7 @@ class UiContractTest(unittest.TestCase):
         self.assertIn('homeState.connections.filter((connection) => connection.scope_kind === "global" || (connection.scope_kind === homeState.home.entity.kind && connection.scope_id === homeState.home.entity.id))', homes)
 
     def test_connections_workspace_routes_newest_and_safe_projections(self):
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         homes = (WEB / "js" / "homes.js").read_text(encoding="utf-8")
         self.assertIn('id="connection-overview"', html)
         self.assertIn('id="connection-vault-health"', html)
@@ -684,7 +694,7 @@ class UiContractTest(unittest.TestCase):
 class BlogStudioContractTest(unittest.TestCase):
     def test_blog_studio_route_and_view_wiring(self):
         routing = (WEB / "js" / "view-routing.js").read_text(encoding="utf-8")
-        html = (WEB / "index.html").read_text(encoding="utf-8")
+        html = _flat((WEB / "index.html").read_text(encoding="utf-8"))
         app = (WEB / "js" / "app.js").read_text(encoding="utf-8")
 
         self.assertIn('BLOG_STUDIO_PATH = "/blog-studio"', routing)

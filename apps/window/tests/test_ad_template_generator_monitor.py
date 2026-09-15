@@ -158,7 +158,7 @@ class AdTemplateGeneratorMonitorTest(unittest.TestCase):
                     {"name": "iteration-03-story.png", "placement": "story", "kind": "final-neutral-shippable"},
                 ],
                 "diffs": [{"name": "iteration-02-feed-difference.png", "placement": "feed", "kind": "difference"}],
-                "scores": {"comparator": {"overall": 0.98}},
+                "scores": {"comparator": {"overall": 0.95}},
                 "final_review": {"reviewers": [
                     {"decision": "accept", "scores": {"overall": 0.99}},
                     {"decision": "accept", "scores": {"overall": 9.5}},

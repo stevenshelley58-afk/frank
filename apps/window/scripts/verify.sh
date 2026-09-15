@@ -47,18 +47,18 @@ js_syntax() {
   return "$status"
 }
 
-js_tests() {
-  local -a tests=()
-  mapfile -d '' tests < <(find tests -maxdepth 1 -type f -name '*.test.mjs' \
+run_js_tests() {
+  local -a js_tests=()
+  mapfile -d '' js_tests < <(find tests -maxdepth 1 -type f -name '*.test.mjs' \
     -not -name 'graph_browser.test.mjs' -print0 | sort -z)
-  node --test "${tests[@]}"
+  node --test "${js_tests[@]}"
 }
 
 step "Shared shadcn theme parity" node scripts/sync-window-theme.mjs --check
 step "Python syntax" python_syntax
 step "Python unit tests" python -m unittest discover -s tests
 step "JavaScript/MJS syntax (all Window files, excluding vendored dependencies)" js_syntax
-step "Non-browser JavaScript tests" js_tests
+step "Non-browser JavaScript tests" run_js_tests
 
 echo
 if [ "${#failed[@]}" -gt 0 ]; then

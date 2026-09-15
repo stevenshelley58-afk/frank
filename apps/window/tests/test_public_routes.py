@@ -8,6 +8,30 @@ ROOT = Path(__file__).resolve().parents[3]
 APP = ROOT / "apps" / "window"
 
 
+def _caddy_site_block(caddyfile: str, host: str) -> str:
+    """Return one site block, bounded by its own braces.
+
+    A following-host sentinel is deliberately not used. Additive hostnames are
+    inserted between existing blocks, which silently widened the slice and
+    pulled unrelated directives into the assertions (notably the identity
+    provider's ``forward_auth``, which must never appear on the public
+    opt-out path).
+    """
+    lines = [line for line in caddyfile.splitlines() if not line.lstrip().startswith("#")]
+    body = "\n".join(lines)
+    start = body.index(f"{host} {{")
+    opening = body.index("{", start)
+    depth = 0
+    for index in range(opening, len(body)):
+        if body[index] == "{":
+            depth += 1
+        elif body[index] == "}":
+            depth -= 1
+            if depth == 0:
+                return body[start : index + 1]
+    raise AssertionError(f"unterminated Caddy site block: {host}")
+
+
 class PublicFrankRouteTest(unittest.TestCase):
     def setUp(self):
         self.previous_web = server.WEB
@@ -86,9 +110,7 @@ class PublicFrankRouteTest(unittest.TestCase):
 
     def test_public_mail_optout_is_strictly_allowlisted(self):
         caddyfile = (APP / "Caddyfile").read_text(encoding="utf-8")
-        start = caddyfile.index("mail.blockwise.sale {")
-        end = caddyfile.index("\npreview.frank.fail {", start)
-        route = caddyfile[start:end]
+        route = _caddy_site_block(caddyfile, "mail.blockwise.sale")
 
         self.assertIn("method GET POST", route)
         self.assertIn("path /email/unsubscribe/* /email/dnc/*", route)

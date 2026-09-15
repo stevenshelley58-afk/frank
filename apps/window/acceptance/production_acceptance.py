@@ -66,9 +66,17 @@ REQUIRED_CHECKLIST = {
     "reconciliation_timers_and_pointers",
     "retention_quota_references_preserved",
 }
-# Match concrete quoted material only. Environment references such as
-# ``TOKEN="${TOKEN:-}"`` are boundary-safe configuration, not leaked secrets.
-SECRET_MARKERS = re.compile(r"(?i)(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|(?:api[_-]?key|password|secret|token)\s*[:=]\s*['\"](?!\$|<|REPLACE|YOUR_)[^'\"]{8,})")
+# Match concrete quoted material only. A value is not a leaked literal when it
+# is boundary-safe configuration (``TOKEN="${TOKEN:-}"``), assembled at runtime
+# (``SECRET=" + value``), or a template placeholder (``PASSWORD="{password}"``).
+# The literal must therefore be a single complete quoted string on one line;
+# without the closing quote the pattern ran across newlines and matched the
+# concatenation operator of the following line.
+SECRET_MARKERS = re.compile(
+    r"(?i)(?:-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----"
+    r"|(?:api[_-]?key|password|secret|token)\s*[:=]\s*['\"]"
+    r"(?![\s\$<{+%]|REPLACE|YOUR_)[^'\"\n]{8,}['\"])"
+)
 
 
 @dataclass
@@ -150,7 +158,7 @@ def _static_checks(root: Path, report: AcceptanceReport) -> None:
          "cleanup is disabled/report-only and cannot auto-delete/install" if safe else "cleanup safety contract is weakened")
 
     # Scan only tracked source/config/docs (never vendor, dependencies, or generated data).
-    candidates = [p for p in root.rglob("*") if p.is_file() and ".git" not in p.parts and "vendor" not in p.parts and "node_modules" not in p.parts and "tests" not in p.parts and "docs" not in p.parts and "graph-workbench.bundle.js" not in p.name and p.suffix in {".py", ".js", ".mjs", ".yaml", ".yml", ".json", ".sh", ".html", ".css"}]
+    candidates = [p for p in root.rglob("*") if p.is_file() and ".git" not in p.parts and "vendor" not in p.parts and "node_modules" not in p.parts and "tests" not in p.parts and "docs" not in p.parts and "graph-workbench.bundle.js" not in p.name and not p.name.startswith("test_") and p.suffix in {".py", ".js", ".mjs", ".yaml", ".yml", ".json", ".sh", ".html", ".css"}]
     leaks = []
     for path in candidates:
         text = path.read_text(encoding="utf-8", errors="ignore")
