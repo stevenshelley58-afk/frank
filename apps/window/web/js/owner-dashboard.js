@@ -35,8 +35,8 @@ const CONNECTED_STATES = new Set(["ready", "attention", "empty", "cached"]);
 export const OWNER_SECTION_VIEWS = Object.freeze([
   Object.freeze({ id: "overview", label: "Overview", kind: "overview" }),
   Object.freeze({ id: "mail", label: "Mail", kind: "native", app: "mail" }),
-  Object.freeze({ id: "crm", label: "CRM", kind: "native", app: "crm" }),
-  Object.freeze({ id: "support", label: "Support", kind: "native", app: "support" }),
+  Object.freeze({ id: "crm", label: "CRM", kind: "native", app: "crm", family: "crm" }),
+  Object.freeze({ id: "support", label: "Support", kind: "native", app: "support", family: "crm", rail: false }),
   Object.freeze({ id: "campaigns", label: "Email flows", kind: "native", app: "campaigns" }),
   Object.freeze({ id: "revenue", label: "Revenue", kind: "source" }),
   Object.freeze({ id: "results", label: "Results", kind: "source" }),
@@ -51,7 +51,9 @@ export function ownerSectionView(id) {
 }
 
 export function ownerRailSections() {
-  return OWNER_SECTION_VIEWS.filter((section) => section.rail !== false).map((section) => section.id);
+  // Keep the exported route inventory stable for contract consumers. The
+  // rendered primary navigation groups Support inside the CRM family.
+  return OWNER_SECTION_VIEWS.filter((section) => section.id !== "customer").map((section) => section.id);
 }
 
 // Declared sources. Each entry is one read-model interface owned by the
@@ -467,6 +469,26 @@ function createOwnerWorkspace({ doc, win, host, options }) {
   const panel = make(doc, "div", "owner-panel");
   const readSlot = make(doc, "div", "owner-panel-read");
   const appSlot = make(doc, "div", "owner-panel-app");
+  const familyNav = make(doc, "nav", "owner-family-nav");
+  familyNav.setAttribute("aria-label", "CRM workspace");
+  const familyTabs = make(doc, "div", "owner-family-tabs");
+  const familyLinks = new Map();
+  for (const [id, label] of [["crm", "CRM"], ["support", "Support"]]) {
+    const link = make(doc, "a", "owner-family-tab", label);
+    link.href = ownerSectionHref(id);
+    link.dataset.familySection = id;
+    link.addEventListener("click", (event) => {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      showSection(id, { push: true, focus: event.detail === 0 });
+    });
+    familyLinks.set(id, link);
+    familyTabs.append(link);
+  }
+  familyNav.append(familyTabs);
+  familyNav.hidden = true;
+  const appFrameSlot = make(doc, "div", "owner-app-frame-slot");
+  appSlot.append(familyNav, appFrameSlot);
   appSlot.hidden = true;
   panel.append(readSlot, appSlot);
   body.append(rail, panel);
@@ -480,7 +502,7 @@ function createOwnerWorkspace({ doc, win, host, options }) {
     window: win,
     fetch: (input, init) => (win?.fetch || globalThis.fetch)(input, init),
   });
-  appHost.mount(appSlot);
+  appHost.mount(appFrameSlot);
   // Load every native application now and keep them live. The workspace mounts
   // as soon as Frank opens, so by the time the owner reaches a section its panel
   // is already checked and connected instead of starting then.
@@ -515,6 +537,13 @@ function createOwnerWorkspace({ doc, win, host, options }) {
 
   function railState() {
     for (const [id, link] of railLinks) {
+      const active = id === state.section || (id === "crm" && ownerSectionView(state.section)?.family === "crm");
+      if (active) link.setAttribute("aria-current", "page");
+      else link.removeAttribute("aria-current");
+    }
+    const crmFamily = ownerSectionView(state.section)?.family === "crm";
+    familyNav.hidden = !crmFamily;
+    for (const [id, link] of familyLinks) {
       if (id === state.section) link.setAttribute("aria-current", "page");
       else link.removeAttribute("aria-current");
     }
