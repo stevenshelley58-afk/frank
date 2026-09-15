@@ -59,19 +59,30 @@ def test_mautic_provisioner_repairs_web_owned_cache_and_logs_before_clear():
     assert "docker exec -u www-data" in source
 
 
-def test_mautic_keeps_public_audience_but_idp_posts_to_native_acs():
+def test_mautic_sp_entity_and_acs_are_both_the_native_marketing_origin():
+    # LightSAML derives Mautic's only ACS from saml_idp_entity_id and rejects a
+    # Response whose Destination or bearer Recipient is any other location, so
+    # the SP entity ID, the Authentik audience and the Authentik ACS all sit on
+    # the owner-gated marketing origin. site_url stays public.
     bootstrap = (ROOT / "bin/bootstrap.py").read_text()
     source = SCRIPT.read_text()
     example = (ROOT / ".env.example").read_text()
-    assert '"https://mail.blockwise.sale"' in bootstrap
+    assert '"https://mail.blockwise.sale"' not in bootstrap
+    assert 'os.environ.get("OWNER_IDENTITY_MAUTIC_SP_ENTITY_ID", MARKETING_ORIGIN)' in bootstrap
     assert 'f"{MARKETING_ORIGIN}/s/saml/login_check"' in bootstrap
+    assert 'OWNER_IDENTITY_MAUTIC_SP_ENTITY_ID must be the native marketing origin' in bootstrap
     assert 'OWNER_IDENTITY_MAUTIC_ACS_URL must be the native marketing SAML ACS' in bootstrap
+    assert '[[ "$mautic_entity" == "$marketing_origin" ]]' in source
     assert 'MAUTIC_SAML_ACS_URL="$mautic_acs"' in source
+    assert 'MAUTIC_SAML_SP_ENTITY_ID="$mautic_entity"' in source
     assert 'if saml[0].get("acs_url") != expected_acs' in source
+    assert 'if saml[0].get("audience") != expected_audience' in source
+    assert 'OWNER_IDENTITY_MAUTIC_SP_ENTITY_ID=https://marketing.frank.fail\n' in example
     assert 'OWNER_IDENTITY_MAUTIC_ACS_URL=https://marketing.frank.fail/s/saml/login_check' in example
 
 def test_identity_adr_records_the_native_acs_without_a_public_saml_route():
     adr = (ROOT.parents[3] / "docs/OWNER_IDENTITY_ADR.md").read_text()
-    assert 'LightSAML AuthnRequest does not supply an ACS override' in adr
+    assert 'no ACS override' in adr
+    assert 'Destination' in adr and 'Recipient' in adr
     assert 'https://marketing.frank.fail/s/saml/login_check' in adr
     assert 'without adding any SAML route to it' in adr
