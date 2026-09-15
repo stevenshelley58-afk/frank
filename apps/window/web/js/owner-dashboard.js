@@ -481,6 +481,10 @@ function createOwnerWorkspace({ doc, win, host, options }) {
     fetch: (input, init) => (win?.fetch || globalThis.fetch)(input, init),
   });
   appHost.mount(appSlot);
+  // Load every native application now and keep them live. The workspace mounts
+  // as soon as Frank opens, so by the time the owner reaches a section its panel
+  // is already checked and connected instead of starting then.
+  void appHost.preload();
 
   const railLinks = new Map();
   for (const section of OWNER_SECTION_VIEWS) {

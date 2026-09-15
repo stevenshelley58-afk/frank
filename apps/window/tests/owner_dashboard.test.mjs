@@ -34,6 +34,7 @@ import {
   panelStateFromResponse,
   parseAppBridgeMessage,
   planPanelSwitch,
+  PRELOADED_APP_IDS,
   readinessEndpoint,
   reloadNeedsConfirmation,
 } from "../web/js/owner-app-host.js";
@@ -738,5 +739,135 @@ test("guard actions run while pending, and approved native sign-in bypasses then
   prevented = false;
   win.dispatch("beforeunload", { preventDefault() { prevented = true; } });
   assert.equal(prevented, true, "timeout re-arms normal retained-mail protection");
+  appHost.dispose();
+});
+
+/* --------------------------------------------------- preloaded native panels */
+
+/** A readiness answer for whichever application the URL names. */
+function readinessFor(url) {
+  const app = url.includes("/mail/") ? "mail"
+    : url.includes("/crm/") ? "crm"
+    : url.includes("/support/") ? "support"
+    : "campaigns";
+  return jsonResponse(200, readinessBody(app));
+}
+
+test("every registered application is preloaded and parked, and a section reuses it", async () => {
+  const { doc, win } = world({ fetchImpl: async (url) => (url.includes("/apps/") ? readinessFor(url) : jsonResponse(404, null)) });
+  const appHost = createOwnerAppHost({ document: doc, window: win, fetch: win.fetch });
+  const slot = doc.createElement("div");
+  appHost.mount(slot);
+  assert.deepEqual(appHost.preloadedIds(), [], "nothing is loaded until the workspace asks for it");
+
+  await appHost.preload();
+  assert.deepEqual(appHost.preloadedIds(), [...PRELOADED_APP_IDS], "every registered application is loaded up front");
+  assert.equal(appHost.activeApp(), null, "preloading never opens a section");
+  for (const id of PRELOADED_APP_IDS) {
+    const panel = panelOf(slot, id);
+    assert.ok(panel, `${id} has a panel`);
+    assert.equal(panel.hidden, true, `${id} is parked, not shown`);
+    assert.equal(panel.dataset.retained, "true");
+    assert.equal(appHost.panelState(id), "checking", `${id} is already asking for its native session`);
+  }
+
+  // Opening a section lands on the panel that is already live: the frame is the
+  // same document, so the owner waits for nothing.
+  const warmCrmFrame = frameOf(panelOf(slot, "crm"));
+  appHost.show("crm");
+  assert.equal(appHost.activeApp(), "crm");
+  assert.equal(panelOf(slot, "crm").hidden, false);
+  assert.equal(frameOf(panelOf(slot, "crm")), warmCrmFrame, "the warm frame is reused, not rebuilt");
+  assert.equal(appHost.panelState("crm"), "checking", "opening a warm panel does not restart its check");
+
+  // Switching parks the outgoing panel instead of destroying it.
+  appHost.show("support");
+  await appHost.whenSettled();
+  assert.equal(panelOf(slot, "crm").hidden, true, "the outgoing panel is parked");
+  assert.equal(frameOf(panelOf(slot, "crm")), warmCrmFrame, "and stays live in the background");
+  assert.equal(appHost.activeApp(), "support");
+  assert.equal(panelOf(slot, "mail").hidden, true, "the applications the owner has not opened are still parked");
+  appHost.dispose();
+});
+
+test("a preloaded application is never evicted by a switch", () => {
+  const warm = (id) => id === "crm";
+  // Nothing is destroyed and nothing needs retaining: the outgoing panel was
+  // already parked, and a preloaded one stays that way.
+  assert.deepEqual(planPanelSwitch({ current: "crm", next: "support", retained: ["mail"], keepAlive: warm, retainable: () => false }), {
+    action: "activate", retain: [], evict: [], warning: null,
+  });
+  // A panel that was never preloaded still obeys the retained bound.
+  assert.deepEqual(planPanelSwitch({ current: "crm", next: "support", retained: ["mail"], keepAlive: () => false, retainable: () => false }), {
+    action: "retain-and-activate", retain: [], evict: ["crm"], warning: null,
+  });
+});
+
+test("mounting the workspace preloads every application before any section is opened", async () => {
+  const { root, dispose } = mountWorld({ fetchImpl: async (url) => (url.includes("/apps/") ? readinessFor(url) : jsonResponse(404, null)) });
+  await dispose.whenSettled();
+  const workspace = byDataset(root, "testid", "owner-workspace");
+  const region = byDataset(workspace, "testid", "owner-app-host");
+  const parked = region.children.filter((node) => node.dataset.app);
+  assert.deepEqual(parked.map((node) => node.dataset.app).sort(), [...PRELOADED_APP_IDS].sort());
+  for (const panel of parked) {
+    assert.equal(panel.hidden, true, `${panel.dataset.app} is loaded and parked`);
+    assert.equal(panel.dataset.retained, "true");
+  }
+  // The combined overview is still what the owner sees.
+  assert.equal(walk(workspace).find((node) => node.dataset.section === "overview").getAttribute("aria-current"), "page");
+  dispose();
+});
+
+test("a preloaded panel the owner never opened does not arm the unload guard", async () => {
+  const { doc, win } = world({ fetchImpl: async (url) => (url.includes("/apps/") ? readinessFor(url) : jsonResponse(404, null)) });
+  const appHost = createOwnerAppHost({ document: doc, window: win, fetch: win.fetch });
+  const slot = doc.createElement("div");
+  appHost.mount(slot);
+  await appHost.preload();
+  const mailFrame = frameOf(panelOf(slot, "mail"));
+  win.dispatch("message", {
+    origin: "https://mail.frank.fail", source: mailFrame.contentWindow,
+    data: { channel: "frank.owner-app", version: 1, app: "mail", type: "ready" },
+  });
+  assert.equal(appHost.panelState("mail"), "ready");
+  assert.equal(appHost.hasUnsavedWork(), false, "a background mailbox nobody opened is not unsaved work");
+  let prevented = false;
+  win.dispatch("beforeunload", { preventDefault() { prevented = true; } });
+  assert.equal(prevented, false);
+  // Once the owner opens it, it is theirs to protect again.
+  appHost.show("mail");
+  assert.equal(appHost.hasUnsavedWork(), true);
+  appHost.dispose();
+});
+
+test("a background panel that needs a sign-in is parked instead of navigating Frank away", async () => {
+  const { doc, win } = world({ fetchImpl: async (url) => (url.includes("/apps/") ? readinessFor(url) : jsonResponse(404, null)) });
+  const appHost = createOwnerAppHost({ document: doc, window: win, fetch: win.fetch });
+  const slot = doc.createElement("div");
+  appHost.mount(slot);
+  await appHost.preload();
+  const crmFrame = frameOf(panelOf(slot, "crm"));
+  win.dispatch("message", {
+    origin: "https://crm.frank.fail", source: crmFrame.contentWindow,
+    data: { channel: "frank.owner-app", version: 1, app: "crm", type: "session_required" },
+  });
+  assert.deepEqual(win.location.assigned, [], "a background panel never leaves Frank on its own");
+  assert.equal(appHost.panelState("crm"), "blocked");
+  assert.equal(panelOf(slot, "crm").dataset.state, "blocked");
+
+  // Opening the section is what retries the native session.
+  appHost.show("crm");
+  await appHost.whenSettled();
+  assert.equal(appHost.panelState("crm"), "checking", "opening the section retries the session");
+  assert.equal(frameOf(panelOf(slot, "crm")).src, "https://crm.frank.fail/frank/bridge?app=crm");
+  assert.deepEqual(win.location.assigned, [], "Frank still does not leave without the owner");
+  // The visible panel is the one that offers the same-tab sign-in round trip.
+  const retryFrame = frameOf(panelOf(slot, "crm"));
+  win.dispatch("message", {
+    origin: "https://crm.frank.fail", source: retryFrame.contentWindow,
+    data: { channel: "frank.owner-app", version: 1, app: "crm", type: "session_required" },
+  });
+  assert.equal(win.location.assigned.at(-1), "https://crm.frank.fail/api/method/frank_owner_entry.api.enter?app=crm");
   appHost.dispose();
 });

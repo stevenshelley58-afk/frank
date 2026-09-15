@@ -8,7 +8,9 @@
 //   * the authorized readiness check (never an iframe `load` event)
 //   * the optional app bridge: exact origin, exact source window, version and a
 //     schema-validated payload, and never an authorization to send or mutate
-//   * bounded retained state, so a native draft is not destroyed by a switch
+//   * preloaded, retained state: every registered application is loaded and kept
+//     live from the moment the workspace mounts, so opening a section never
+//     starts a readiness check or a native sign-in round trip
 //   * the dirty-state guard and the conservative warning before destruction
 //
 // Nothing here reads an application document, copies application content into
@@ -17,8 +19,6 @@
 export const OWNER_APP_BRIDGE_CHANNEL = "frank.owner-app";
 export const OWNER_APP_BRIDGE_VERSION = 1;
 export const OWNER_APP_BRIDGE_TYPES = Object.freeze(["ready", "dirty", "route", "session_required"]);
-// Bounded retained state: one hidden native panel, never every app forever.
-export const MAX_RETAINED_NATIVE_PANELS = 1;
 export const MAX_APP_PATH_LENGTH = 512;
 
 // Readiness states a panel can be in. `attention` is reported through the
@@ -113,6 +113,14 @@ export const OWNER_APPS = Object.freeze([
 ]);
 
 const APP_INDEX = new Map(OWNER_APPS.map((app) => [app.id, app]));
+
+// Every registered application is preloaded and kept warm from the moment the
+// owner workspace mounts, so opening a section never starts a readiness check or
+// a native sign-in round trip. `MAX_RETAINED_NATIVE_PANELS` still bounds the
+// panels that were never preloaded, so a lazily created panel cannot accumulate
+// either; a preloaded one is never destroyed by a switch. See `preload()`.
+export const PRELOADED_APP_IDS = Object.freeze(OWNER_APPS.map((app) => app.id));
+export const MAX_RETAINED_NATIVE_PANELS = 1;
 
 export function ownerApp(id) {
   return APP_INDEX.get(String(id || "")) || null;
@@ -347,22 +355,29 @@ export function panelStateFromFailure(appId, error, { online = true, checkedAt =
  * Decide what happens to native panels when the owner moves from one section to
  * another. Pure, so the retention and dirty-state rules are testable without a
  * browser. `retained` is ordered oldest first.
+ *
+ * `keepAlive` names the preloaded panels. Those are never destroyed by a
+ * switch: they are the panels the owner asked Frank to hold live, so the
+ * outgoing one is parked instead of torn down.
  */
-export function planPanelSwitch({ current = null, next = null, retained = [], dirty = [], retainable = null, maxRetained = MAX_RETAINED_NATIVE_PANELS } = {}) {
+export function planPanelSwitch({ current = null, next = null, retained = [], dirty = [], retainable = null, keepAlive = null, maxRetained = MAX_RETAINED_NATIVE_PANELS } = {}) {
   const dirtySet = new Set(dirty);
   const isRetainable = (id) => (typeof retainable === "function" ? Boolean(retainable(id)) : false) || dirtySet.has(id);
+  const isWarm = (id) => typeof keepAlive === "function" && Boolean(keepAlive(id));
   const plan = { action: "activate", retain: [], evict: [], warning: null };
   if (!current || current === next) return plan;
   const keep = isRetainable(current) ? [current] : [];
   const after = [...retained.filter((id) => id !== current), ...keep.filter((id) => !retained.includes(id))];
   const evictable = after.filter((id) => !keep.includes(id));
   const evict = [];
-  // The outgoing panel is destroyed unless it earned the retained slot, so no
-  // application keeps running forever in a hidden frame.
-  if (!keep.includes(current)) evict.push(current);
-  let overflow = after.length - Math.max(0, Number(maxRetained) || 0);
+  // A preloaded application stays live. Anything else is destroyed unless it
+  // earned the retained slot, so no application keeps running forever in a
+  // hidden frame.
+  if (!keep.includes(current) && !isWarm(current)) evict.push(current);
+  let overflow = after.filter((id) => !isWarm(id)).length - Math.max(0, Number(maxRetained) || 0);
   for (const id of evictable) {
     if (overflow <= 0) break;
+    if (isWarm(id)) continue;
     evict.push(id);
     overflow -= 1;
   }
@@ -427,19 +442,37 @@ export function createOwnerAppHost(deps = {}) {
   const panels = new Map(); // appId -> { node, body, frame, state, retained, checkedAt }
   const dirty = new Map(); // appId -> boolean, from the app bridge only
   const bridgeSeen = new Set();
+  const inflight = new Set(); // every readiness check that has not settled yet
   let retainedOrder = [];
   let active = null;
   let pending = null; // { kind: "switch"|"reload", app, next, onConfirm }
-  let controller = null;
   let disposed = false;
   let approvedNativeNavigation = false;
   let host = null;
-  let checkPromise = null;
   let onStateChange = deps.onStateChange || null;
 
   function frameFor(appId) {
     const entry = panels.get(appId);
     return entry?.frame || null;
+  }
+
+  /**
+   * Which panel a bridge message came from. Preloading means several panels are
+   * live at once, so the sender is resolved from the frame that owns the source
+   * window rather than assumed to be the visible one.
+   */
+  function appForBridgeSource(source) {
+    if (!source) return null;
+    for (const [id, entry] of panels) {
+      let frameWindow = null;
+      try {
+        frameWindow = entry.frame?.contentWindow || null;
+      } catch {
+        frameWindow = null;
+      }
+      if (frameWindow && frameWindow === source) return id;
+    }
+    return null;
   }
 
   function dirtyIds() {
@@ -449,6 +482,22 @@ export function createOwnerAppHost(deps = {}) {
   function isRetainable(appId) {
     const app = ownerApp(appId);
     return Boolean(app?.retain && panels.get(appId)?.state === "ready") || dirty.get(appId) === true;
+  }
+
+  /** A panel the host loaded ahead of the owner reaching it. */
+  function isWarm(appId) {
+    return panels.get(appId)?.preloaded === true;
+  }
+
+  /**
+   * A panel is protected only once the owner has taken it up, or when it reports
+   * unsaved work. Preloaded panels sit in the background from the moment the
+   * workspace mounts, and counting those would make every unload warn about a
+   * mailbox nobody opened.
+   */
+  function isProtected(appId) {
+    if (dirty.get(appId) === true) return true;
+    return Boolean(panels.get(appId)?.activated) && isRetainable(appId);
   }
 
   function announcement(text) {
@@ -513,6 +562,16 @@ export function createOwnerAppHost(deps = {}) {
     retainedOrder = retainedOrder.filter((id) => id !== appId);
   }
 
+  /**
+   * Park the panel that is being replaced. The host still shows one application
+   * at a time, and a warm panel is parked rather than destroyed, so hiding it is
+   * what keeps the workspace honest while the document stays alive.
+   */
+  function parkActive() {
+    if (!active || !panels.has(active)) return;
+    retainPanel(active);
+  }
+
   function createPanel(app) {
     const node = make(doc, "section", "owner-app-panel");
     node.dataset.app = app.id;
@@ -536,7 +595,7 @@ export function createOwnerAppHost(deps = {}) {
     bar.append(ident, actions);
     const body = make(doc, "div", "owner-app-body");
     node.append(bar, body);
-    const entry = { node, body, frame: null, state: "checking", retained: false, checkedAt: null, chip, reload, title, framePath: "" };
+    const entry = { node, body, frame: null, state: "checking", retained: false, checkedAt: null, chip, reload, title, framePath: "", controller: null, activated: false, preloaded: false };
     panels.set(app.id, entry);
     region.append(node);
     return entry;
@@ -603,20 +662,45 @@ export function createOwnerAppHost(deps = {}) {
   }
 
   function check(appId) {
-    checkPromise = runCheck(appId).finally(() => { checkPromise = null; });
-    return checkPromise;
+    const run = runCheck(appId).finally(() => { inflight.delete(run); });
+    inflight.add(run);
+    return run;
+  }
+
+  /**
+   * Load and keep every registered native application warm.
+   *
+   * Called as soon as the owner workspace mounts, so opening a section lands on
+   * an already-checked panel instead of starting a readiness check and a native
+   * sign-in round trip. Panels are parked, not shown: nothing here changes which
+   * application the owner is looking at.
+   */
+  function preload() {
+    if (disposed) return Promise.resolve([]);
+    const runs = [];
+    for (const app of OWNER_APPS) {
+      if (!panels.has(app.id)) createPanel(app);
+      panels.get(app.id).preloaded = true;
+      retainPanel(app.id);
+      runs.push(check(app.id));
+    }
+    return Promise.allSettled(runs);
   }
 
   async function runCheck(appId) {
     const app = ownerApp(appId);
     const entry = panels.get(appId);
     if (!app || !entry || disposed) return null;
-    controller?.abort?.();
-    controller = typeof AbortController === "function" ? new AbortController() : null;
-    const signal = controller?.signal;
+    // Each panel owns its abort handle: preloading checks every application at
+    // once, and one panel's check must never cancel another's.
+    entry.controller?.abort?.();
+    entry.controller = typeof AbortController === "function" ? new AbortController() : null;
+    const signal = entry.controller?.signal;
     entry.state = "checking";
     renderBody(entry, app, { state: "checking" });
-    announcement(`Checking ${app.label}.`);
+    // Preloading checks every panel at once; only the visible one may speak for
+    // the workspace bar.
+    if (appId === active) announcement(`Checking ${app.label}.`);
     let state;
     try {
       const response = await fetchImpl(readinessEndpoint(app.id), {
@@ -649,8 +733,30 @@ export function createOwnerAppHost(deps = {}) {
       entry.frame = null;
       renderBody(entry, app, state);
     }
-    announcement(`${app.label}: ${entry.chip.textContent}.`);
+    if (appId === active) announcement(`${app.label}: ${entry.chip.textContent}.`);
     return state;
+  }
+
+  /**
+   * A warm background panel that needs a native sign-in is parked, never
+   * navigated: the sign-in round trip leaves Frank, so it is only offered once
+   * the owner actually opens that section.
+   */
+  function markNeedsConnection(appId) {
+    const entry = panels.get(appId);
+    if (!entry) return;
+    entry.state = "blocked";
+    // The bridge frame has done its job and reported that it needs a sign-in.
+    // Dropping it means opening the section later re-runs the check and can
+    // offer the same-tab sign-in round trip.
+    entry.frame?.remove?.();
+    entry.frame = null;
+    renderBody(entry, ownerApp(appId), {
+      state: "blocked",
+      chip: "Needs connection",
+      reason: "owner_session_required",
+      detail: "Frank needs to sign this application in. Open the section to connect.",
+    });
   }
 
   function connectNative(appId, explicit = false) {
@@ -684,7 +790,7 @@ export function createOwnerAppHost(deps = {}) {
         }
       }, 12000);
     };
-    if (dirtyIds().length || retainedOrder.some((id) => isRetainable(id)) || (active && panels.get(active)?.state === "ready" && isRetainable(active))) {
+    if (hasUnsavedWork()) {
       setGuard("Connecting will briefly leave Frank. Save any open draft first.", [
         {label: "Stay here", primary: true, run: () => {}},
         {label: "Continue sign-in", run},
@@ -695,26 +801,26 @@ export function createOwnerAppHost(deps = {}) {
   function requestReload(appId) {
     const app = ownerApp(appId);
     if (!app) return;
-    if (reloadNeedsConfirmation(appId, { dirty: dirtyIds(), retainable: isRetainable })) {
-      pending = {
-        kind: "reload",
-        app: appId,
-        next: appId,
-        run: () => {
-          destroyPanel(appId);
-          createPanel(app);
-          if (active === appId) void check(appId);
-        },
-      };
+    // A reload replaces the panel, so the replacement inherits the owner's claim
+    // on it: the mailbox the owner asked to reload is still the mailbox Frank
+    // must not discard silently on the way out.
+    const reopen = () => {
+      const wasPreloaded = isWarm(appId);
+      destroyPanel(appId);
+      const replacement = createPanel(app);
+      replacement.activated = true;
+      replacement.preloaded = wasPreloaded;
+      if (active === appId) void check(appId);
+    };
+    if (reloadNeedsConfirmation(appId, { dirty: dirtyIds(), retainable: isProtected })) {
+      pending = { kind: "reload", app: appId, next: appId, run: reopen };
       setGuard(guardMessage(app, "reload"), [
         { label: `Keep ${app.label} open`, primary: true, run: () => {} },
         { label: `Reload ${app.label}`, run: () => pending?.run?.() },
       ]);
       return;
     }
-    destroyPanel(appId);
-    createPanel(app);
-    if (active === appId) void check(appId);
+    reopen();
   }
 
   function applyPlan(plan) {
@@ -727,7 +833,11 @@ export function createOwnerAppHost(deps = {}) {
     const entry = panels.get(app.id);
     if (from) entry.node.dataset.from = from;
     else delete entry.node.dataset.from;
+    // The panel being replaced is parked, not destroyed: a preloaded application
+    // must still be live when the owner comes back to it.
+    if (active && active !== app.id) parkActive();
     active = app.id;
+    entry.activated = true;
     activatePanel(app.id);
     // A requested drill-down path is applied to the panel; without one the
     // panel opens its own work list. Nothing is stored: the path only lives in
@@ -740,7 +850,11 @@ export function createOwnerAppHost(deps = {}) {
         entry.frame.src = url;
       }
     }
-    if (!entry.frame || entry.state === "checking") void check(app.id);
+    // Opening a section must not restart work that preloading already did: a warm
+    // panel keeps its live frame and its in-flight session request. A panel with
+    // no frame is checked, which is how a parked panel that needs a native
+    // sign-in is retried.
+    if (!entry.frame || (entry.state === "checking" && !isWarm(app.id))) void check(app.id);
     announcement(`${app.label} panel opened.`);
     return true;
   }
@@ -757,6 +871,7 @@ export function createOwnerAppHost(deps = {}) {
         retained: [...retainedOrder],
         dirty: dirtyIds(),
         retainable: isRetainable,
+        keepAlive: isWarm,
       });
       if (plan.action === "confirm") {
         const protectedApp = ownerApp(plan.warning.app);
@@ -794,6 +909,7 @@ export function createOwnerAppHost(deps = {}) {
       retained: [...retainedOrder],
       dirty: dirtyIds(),
       retainable: isRetainable,
+      keepAlive: isWarm,
     });
     if (plan.action === "confirm") {
       pending = { kind: "hide", app: plan.warning.app, next: null, run: () => { applyPlan(plan); active = null; } };
@@ -804,37 +920,50 @@ export function createOwnerAppHost(deps = {}) {
       return false;
     }
     applyPlan(plan);
+    // Leaving the applications for a read model parks the open panel. A warm
+    // panel is not destroyed by the plan, so it must still be hidden: the host
+    // shows one application at a time.
+    if (!plan.evict.includes(leaving)) parkActive();
     active = null;
     return true;
   }
 
   function handleBridge(event) {
-    if (!active || disposed) return;
-    const payload = parseAppBridgeMessage(event, frameFor(active), active);
+    if (disposed) return;
+    const appId = appForBridgeSource(event.source);
+    if (!appId) return;
+    const payload = parseAppBridgeMessage(event, frameFor(appId), appId);
     if (!payload) return;
-    bridgeSeen.add(active);
-    const entry = panels.get(active);
+    bridgeSeen.add(appId);
+    const entry = panels.get(appId);
+    if (!entry) return;
+    const label = ownerApp(appId)?.label || appId;
+    const visible = appId === active;
     if (payload.type === "session_required") {
-      connectNative(active);
+      // Only the panel the owner is looking at may leave Frank for a sign-in
+      // round trip; a warm background panel is parked until it is opened.
+      if (visible) connectNative(appId);
+      else markNeedsConnection(appId);
       return;
     }
     if (payload.type === "ready") {
       entry.state = "ready";
-      const app = ownerApp(active);
-      win.sessionStorage?.removeItem("frank.native-connect." + active);
-      mountFrame(entry, app, allowedNativeUrl(active, entry.requestedPath || (active === "mail" ? "/" : app.home)));
+      const app = ownerApp(appId);
+      win.sessionStorage?.removeItem("frank.native-connect." + appId);
+      mountFrame(entry, app, allowedNativeUrl(appId, entry.requestedPath || (appId === "mail" ? "/" : app.home)));
       updateChrome(entry, {state: "ready", chip: "Connected"});
+      if (visible) announcement(`${label}: Connected.`);
       return;
     }
     if (payload.type === "dirty") {
-      dirty.set(active, payload.dirty);
+      dirty.set(appId, payload.dirty);
       entry.node.dataset.dirty = payload.dirty ? "true" : "false";
-      announcement(payload.dirty ? `${ownerApp(active)?.label} reports unsaved work.` : `${ownerApp(active)?.label} reports no unsaved work.`);
+      announcement(payload.dirty ? `${label} reports unsaved work.` : `${label} reports no unsaved work.`);
       return;
     }
     if (payload.type === "route" && entry.frame) {
       entry.frame.dataset.path = payload.path;
-      announcement(`${ownerApp(active)?.label} moved to ${payload.path}.`);
+      if (visible) announcement(`${label} moved to ${payload.path}.`);
     }
   }
 
@@ -854,12 +983,13 @@ export function createOwnerAppHost(deps = {}) {
    */
   function hasUnsavedWork() {
     if (dirtyIds().length) return true;
-    // A panel the owner is looking at right now counts too. Leaving the
-    // workspace destroys the live panel, so a visible retainable application
-    // (the mailbox) is exactly the case the warning exists for; only counting
-    // hidden retained panels would miss it.
-    if (active && panels.get(active)?.state === "ready" && isRetainable(active)) return true;
-    return retainedOrder.some((id) => isRetainable(id));
+    // A panel the owner has actually opened counts too. Leaving the workspace
+    // destroys the live panel, so an open retainable application (the mailbox)
+    // is exactly the case the warning exists for. A preloaded panel the owner
+    // never reached does not, or every unload would warn about a mailbox nobody
+    // opened.
+    if (active && isProtected(active)) return true;
+    return retainedOrder.some((id) => isProtected(id));
   }
 
   function handleBeforeUnload(event) {
@@ -880,6 +1010,7 @@ export function createOwnerAppHost(deps = {}) {
       return this;
     },
     show,
+    preload,
     reload: requestReload,
     check,
     focusHeading() {
@@ -900,6 +1031,9 @@ export function createOwnerAppHost(deps = {}) {
     panelState(appId) {
       return panels.get(appId)?.state || "idle";
     },
+    preloadedIds() {
+      return [...panels.entries()].filter(([, entry]) => entry.preloaded).map(([id]) => id);
+    },
     retainedIds() {
       return [...retainedOrder];
     },
@@ -915,12 +1049,11 @@ export function createOwnerAppHost(deps = {}) {
     hasUnsavedWork,
     hideAll,
     whenSettled() {
-      return checkPromise ? checkPromise.catch(() => null) : Promise.resolve(null);
+      return inflight.size ? Promise.allSettled([...inflight]).then(() => null) : Promise.resolve(null);
     },
     dispose() {
       disposed = true;
-      controller?.abort?.();
-      controller = null;
+      for (const entry of panels.values()) entry.controller?.abort?.();
       win?.removeEventListener?.("message", handleBridge);
       win?.removeEventListener?.("online", handleOnline);
       win?.removeEventListener?.("beforeunload", handleBeforeUnload);

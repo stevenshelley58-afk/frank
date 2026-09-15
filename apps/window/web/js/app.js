@@ -66,8 +66,13 @@ function show(id, { syncHistory = true, routeDetail = {}, viewDetail = {} } = {}
   if (id !== "blockwise-dashboard" && disposeOwnerDashboard?.hasUnsavedWork?.()) {
     if (!window.confirm("The mailbox is still open with work Frank cannot check. Leave the owner workspace?")) return;
   }
-  disposeOwnerDashboard?.();
-  disposeOwnerDashboard = null;
+  // The owner workspace owns its own lifecycle: `showProject` either mounts it or
+  // hands the resolved route to the running host. Tearing it down here would
+  // discard the preloaded native panels, so only leaving it disposes it.
+  if (id !== "blockwise-dashboard") {
+    disposeOwnerDashboard?.();
+    disposeOwnerDashboard = null;
+  }
   if (id !== "ad-radar") unmountAdRadar();
   const editorWasOpen = closeHomeEditors({ restoreFocus: false });
   if (id !== "project" && id !== "entity-home") clearHomeActions();
@@ -151,21 +156,31 @@ function showProject(id, options = {}) {
       technical.textContent = "Technical view";
       $("#top-actions").replaceChildren(technical);
     };
-    // Moving between owner sections must not rebuild the workspace: the host
-    // already keeps the mailbox panel alive for an unsaved draft, and a remount
-    // would discard it. Hand the resolved route to the live host instead.
-    if (disposeOwnerDashboard && currentProject.id === id && $("#owner-dashboard")?.classList.contains("is-on")) {
-      technicalView();
-      window.dispatchEvent(new CustomEvent("frank:owner-route", {
-        detail: { section: options.ownerSection, customerId: options.ownerCustomerId },
-      }));
-      return true;
-    }
     // Carry the owner route detail so the workspace address bar keeps the
     // section or customer in the URL instead of collapsing to the project home.
     const ownerDetail = { projectId: id };
     if (options.ownerSection) ownerDetail.ownerSection = options.ownerSection;
     if (options.ownerCustomerId) ownerDetail.ownerCustomerId = options.ownerCustomerId;
+    // Moving between owner sections must not rebuild the workspace: the host
+    // keeps every native panel live, and a remount would discard them. A
+    // workspace that is already on screen just receives the resolved route.
+    if (disposeOwnerDashboard && currentProject.id === id) {
+      technicalView();
+      if ($("#owner-dashboard")?.classList.contains("is-on")) {
+        window.dispatchEvent(new CustomEvent("frank:owner-route", {
+          detail: { section: options.ownerSection, customerId: options.ownerCustomerId },
+        }));
+        return true;
+      }
+      // The workspace was warmed ahead of the owner reaching it, so it is
+      // mounted but not yet on screen: select the view without rebuilding it,
+      // then hand the route to the live host.
+      show("blockwise-dashboard", { ...options, routeDetail: ownerDetail });
+      window.dispatchEvent(new CustomEvent("frank:owner-route", {
+        detail: { section: options.ownerSection, customerId: options.ownerCustomerId },
+      }));
+      return true;
+    }
     show("blockwise-dashboard", { ...options, routeDetail: ownerDetail });
     technicalView();
     disposeOwnerDashboard = mountOwnerDashboard($("#owner-dashboard"), {
@@ -1716,6 +1731,30 @@ function setupAccounts() {
 
 /* ---------------- boot ---------------- */
 
+/**
+ * Mount the owner workspace ahead of the owner reaching it.
+ *
+ * The workspace preloads every native application panel, so mounting it at boot
+ * is what makes those applications loaded and live from the moment Frank opens
+ * rather than starting when a section is first opened. The section stays hidden
+ * until it is routed to: nothing here shows it or changes the current view.
+ */
+function warmOwnerWorkspace() {
+  if (disposeOwnerDashboard) return;
+  if (!isOwnerDashboardProject("blockwise", window.location.search)) return;
+  if (!(projects.projects || []).some((project) => project.id === "blockwise")) return;
+  const host = $("#owner-dashboard");
+  if (!host) return;
+  try {
+    disposeOwnerDashboard = mountOwnerDashboard(host, {});
+  } catch (error) {
+    // Warming is an optimisation: if the workspace cannot mount ahead of time,
+    // Frank still opens and `showProject` mounts it on demand as before.
+    disposeOwnerDashboard = null;
+    console.error("owner workspace warm-up failed", error);
+  }
+}
+
 setupChat();
 setupExplorer();
 setupAccounts();
@@ -1725,4 +1764,12 @@ setupProjectSettings();
 
 fetchProjects()
   .then(openPathView)
-  .catch(openPathView);
+  .catch(openPathView)
+  .then(() => {
+    // Warm after the landing view has rendered, so Frank still opens at full
+    // speed and the panels are live by the time the owner reaches for one. A
+    // workspace that is already the landing view mounted and preloaded itself.
+    const warm = () => warmOwnerWorkspace();
+    if (typeof window.requestIdleCallback === "function") window.requestIdleCallback(warm, { timeout: 2000 });
+    else window.setTimeout(warm, 0);
+  });
