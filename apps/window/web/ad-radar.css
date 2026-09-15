@@ -15,12 +15,19 @@
   flex-direction: column;
   background: var(--bg);
   color: var(--ink);
+  font-family: var(--font, "Geist Variable", sans-serif);
+  font-size: 14px;
+  line-height: 1.5;
 }
 
 .radar ::selection {
   background: var(--ink);
   color: var(--bg);
 }
+
+.radar :where(button, input, select, textarea) { font: inherit; }
+.radar :where(button, input, select, textarea):focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+.radar :where(time, code, [data-count], [data-total], [data-number]) { font-variant-numeric: tabular-nums; }
 
 .radar button:disabled,
 .radar input:disabled,
@@ -68,7 +75,7 @@
 .radar-identity span,
 .radar-owner {
   color: var(--mute);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.4;
 }
 
@@ -85,7 +92,7 @@
   min-height: 44px;
   padding: 0 14px;
   color: var(--mute);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .radar-tabs button::after {
@@ -120,18 +127,18 @@
   align-items: center;
   gap: 8px;
   color: var(--mute);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .radar-project-control select {
   max-width: 152px;
-  min-height: 36px;
+  min-height: 40px;
   padding: 0 28px 0 10px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--bg);
   color: var(--ink);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .radar-icon-button {
@@ -156,7 +163,7 @@
   border-bottom: 1px solid var(--line);
   background: var(--chip);
   color: var(--ink);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .radar-notice[data-tone="error"] {
@@ -211,19 +218,19 @@
 .radar-filter-ledger > span {
   margin-right: 4px;
   color: var(--faint);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: .055em;
   text-transform: uppercase;
   white-space: nowrap;
 }
 
 .radar-filter-ledger button {
-  min-height: 34px;
+  min-height: 40px;
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   color: var(--mute);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -260,7 +267,7 @@
 .radar-library-head strong,
 .radar-run-list-pane header strong {
   display: block;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 550;
 }
 
@@ -268,16 +275,16 @@
 .radar-library-head span,
 .radar-run-list-pane header span {
   color: var(--mute);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .radar-quiet-button {
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 12px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   color: var(--ink);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -296,7 +303,7 @@
   border-radius: var(--r-sm);
   background: var(--ink);
   color: var(--bg);
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -350,7 +357,7 @@
 .radar-observation time {
   padding-top: 2px;
   color: var(--mute);
-  font-size: 11px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -379,7 +386,7 @@
   border-radius: var(--r-pill);
   background: var(--chip);
   color: #4f4f4f;
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 550;
   letter-spacing: .04em;
   text-transform: uppercase;
@@ -392,7 +399,7 @@
 .radar-observation-copy strong {
   display: block;
   overflow: hidden;
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -403,7 +410,7 @@
   margin-top: 5px;
   overflow: hidden;
   color: var(--mute);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -412,13 +419,13 @@
   display: block;
   margin-top: 8px;
   color: var(--faint);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .radar-observation-refs {
   min-width: 0;
   color: var(--mute);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.55;
   font-variant-numeric: tabular-nums;
 }
@@ -444,13 +451,13 @@
 
 .radar-empty strong {
   color: var(--ink);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 550;
 }
 
 .radar-empty span {
   max-width: 52ch;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .radar-library-tools {
@@ -470,7 +477,7 @@
   display: block;
   margin-bottom: 2px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: 11px;
   letter-spacing: .04em;
   text-transform: uppercase;
 }
@@ -478,12 +485,12 @@
 .radar-library-tools select,
 .radar-library-tools input {
   width: 100%;
-  min-height: 38px;
+  min-height: 40px;
   padding: 0 10px;
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--bg);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .radar-search {
@@ -564,7 +571,7 @@
 
 .radar-media-placeholder {
   color: var(--faint);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: .04em;
   text-transform: uppercase;
 }
@@ -576,7 +583,7 @@
 .radar-creative-meta strong {
   display: block;
   overflow: hidden;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -587,7 +594,7 @@
   margin-top: 3px;
   overflow: hidden;
   color: var(--mute);
-  font-size: 9px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -624,7 +631,7 @@
 .radar-inspector > header span {
   display: block;
   color: var(--mute);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 550;
   letter-spacing: .05em;
   text-transform: uppercase;
@@ -669,7 +676,7 @@
   border-radius: var(--r-pill);
   background: var(--bg);
   color: var(--ink);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 550;
   letter-spacing: .05em;
   text-transform: uppercase;
@@ -688,7 +695,7 @@
   display: inline-flex;
   align-items: center;
   color: var(--mute);
-  font-size: 10px;
+  font-size: 12px;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
@@ -701,7 +708,7 @@
 
 .radar-evidence-section h4 {
   margin-bottom: 9px;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -709,7 +716,7 @@
   display: grid;
   grid-template-columns: minmax(100px, 42%) minmax(0, 1fr);
   gap: 5px 10px;
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .radar-evidence-section dt {
@@ -732,7 +739,7 @@
   grid-template-columns: minmax(70px, 1fr) minmax(0, 2fr);
   gap: 8px;
   color: var(--mute);
-  font-size: 9px;
+  font-size: 11px;
   list-style: none;
 }
 
@@ -740,7 +747,7 @@
   overflow: hidden;
   color: var(--ink);
   font-family: var(--font);
-  font-size: 9px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -767,14 +774,14 @@
   gap: 8px;
   padding: 0 8px;
   color: var(--mute);
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: .04em;
   text-transform: uppercase;
 }
 
 .radar-compare-label b {
   color: var(--ink);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -806,7 +813,7 @@
   place-items: center;
   background: #f1f1f1;
   color: var(--faint);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .radar-compare-copy {
@@ -822,13 +829,13 @@
 }
 
 .radar-compare-copy strong {
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 550;
 }
 
 .radar-compare-copy span {
   color: var(--mute);
-  font-size: 8px;
+  font-size: 11px;
 }
 
 .radar-compare-remove {
@@ -908,7 +915,7 @@
 }
 
 .radar-run-row strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -916,7 +923,7 @@
 .radar-run-row time {
   margin-top: 4px;
   color: var(--mute);
-  font-size: 9px;
+  font-size: 11px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -943,7 +950,7 @@
 .radar-run-summary p {
   margin-top: 5px;
   color: var(--mute);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .radar-run-facts,
@@ -962,7 +969,7 @@
 .radar-run-facts dt,
 .radar-run-metrics dt {
   color: var(--mute);
-  font-size: 9px;
+  font-size: 11px;
   text-transform: uppercase;
 }
 
@@ -970,7 +977,7 @@
 .radar-run-metrics dd {
   margin-top: 5px;
   overflow: hidden;
-  font-size: 12px;
+  font-size: 13px;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -994,7 +1001,7 @@
 
 .radar-event-log h4 {
   margin-bottom: 8px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 550;
 }
 
@@ -1004,7 +1011,7 @@
   gap: 12px;
   padding: 9px 0;
   border-top: 1px solid var(--line);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .radar-event-row time,
@@ -1055,7 +1062,7 @@
   max-width: 52ch;
   margin-top: 5px;
   color: var(--mute);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .radar-run-form > label,
@@ -1069,7 +1076,7 @@
   display: block;
   margin-bottom: 5px;
   color: var(--mute);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .radar-run-form input[type="text"],
@@ -1081,7 +1088,7 @@
   border: 1px solid var(--line);
   border-radius: var(--r-sm);
   background: var(--bg);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .radar-run-form input::placeholder,
@@ -1093,7 +1100,7 @@
 .radar-field-help {
   margin-top: 7px;
   color: var(--faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .radar-form-row {
@@ -1134,7 +1141,7 @@
 
 .radar-form-actions > span {
   color: var(--mute);
-  font-size: 10px;
+  font-size: 12px;
 }
 
 .radar-pipeline {
@@ -1180,14 +1187,14 @@
 
 .radar-pipeline strong {
   display: block;
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
   text-transform: capitalize;
 }
 
 .radar-pipeline span {
   color: var(--mute);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .radar-run-actions {
@@ -1215,7 +1222,7 @@
 }
 
 .radar-release-item strong {
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 550;
 }
 
@@ -1225,7 +1232,7 @@
   overflow-wrap: anywhere;
   color: var(--mute);
   font-family: var(--font);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .radar-release-item .radar-primary,
