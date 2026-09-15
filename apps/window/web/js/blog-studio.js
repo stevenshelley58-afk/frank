@@ -45,6 +45,20 @@ let selectedStage = null;
 let selectedFiles = [];
 let graphHandle = null;
 let eventStream = null;
+
+function simplifyStudioHeadings() {
+  document.querySelectorAll("#blog-studio .blog-kicker").forEach((label) => label.remove());
+  const headings = [
+    ["#blog-create-form .blog-section-heading h3", "Create an article"],
+    ["#blog-proof-rail h3", "Proof checks"],
+    ["#blog-review-heading", "Review checks"],
+    [".blog-workflow-toolbar h3", "Article workflow"],
+  ];
+  for (const [selector, label] of headings) {
+    const heading = document.querySelector(selector);
+    if (heading) heading.textContent = label;
+  }
+}
 let eventRunId = "";
 const eventsByRun = new Map();
 
@@ -906,7 +920,7 @@ function mountWorkflow() {
   graphHandle?.destroy();
   graphHandle = mountGraphWorkbench(root, {
     entityId: TOOL_ID,
-    title: "Content factory",
+    title: "Article workflow",
     load: loadWorkflowGraph,
     onSelect(node) {
       selectedStage = node;
@@ -1062,6 +1076,7 @@ function setupResponsiveDrillIns() {
 export function mountBlogStudio() {
   if (mounted) { void refreshRunsSafe(); return; }
   mounted = true;
+  simplifyStudioHeadings();
   setupTabs();
   setupCreateForm();
   setupFilters();
