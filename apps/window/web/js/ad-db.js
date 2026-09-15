@@ -17,6 +17,70 @@ const state = {
   },
 };
 
+const PROCESS_ENDPOINT = "/api/ad-db/process";
+const PROCESS_ARTIFACT_URL = "/api/ad-db/process/artifact";
+
+/**
+ * Read-only Ad DB process projection (validated Archify artifact). Pure model so
+ * the UI test can pin the envelope rules without a DOM.
+ */
+export function adDbProcessModel(payload) {
+  const fallback = "Ad DB process view is unavailable.";
+  if (!payload || typeof payload !== "object" || payload.available !== true) {
+    const message = payload && typeof payload === "object" ? String(payload.message ?? "").trim() : "";
+    return { available: false, artifactUrl: "", message: message || fallback };
+  }
+  return {
+    available: true,
+    artifactUrl: PROCESS_ARTIFACT_URL,
+    message: String(payload.message ?? "").trim() || "Process artifact is validated and available.",
+  };
+}
+
+async function fetchProcessStatus() {
+  const host = root();
+  const status = host?.querySelector("[data-ad-db-process-status]");
+  const button = host?.querySelector("[data-ad-db-process-toggle]");
+  if (!status) return;
+  try {
+    const response = await fetch(PROCESS_ENDPOINT, { credentials: "same-origin", headers: { Accept: "application/json" } });
+    const payload = await response.json().catch(() => ({}));
+    const model = adDbProcessModel(payload);
+    status.textContent = model.message;
+    status.dataset.kind = model.available ? "ready" : "error";
+    if (button) button.hidden = !model.available;
+  } catch (error) {
+    const model = adDbProcessModel(null);
+    status.textContent = model.message;
+    status.dataset.kind = "error";
+    if (button) button.hidden = true;
+  }
+}
+
+function toggleProcessView() {
+  const host = root();
+  const button = host?.querySelector("[data-ad-db-process-toggle]");
+  const frame = host?.querySelector("[data-ad-db-process-frame]");
+  if (!button || !frame) return;
+  if (!frame.hidden) {
+    frame.hidden = true;
+    button.setAttribute("aria-expanded", "false");
+    button.textContent = "Show process view";
+    return;
+  }
+  if (!frame.firstElementChild) {
+    const iframe = document.createElement("iframe");
+    iframe.title = "Ad DB process view (validated Archify artifact)";
+    iframe.loading = "lazy";
+    iframe.referrerPolicy = "same-origin";
+    iframe.src = PROCESS_ARTIFACT_URL;
+    frame.append(iframe);
+  }
+  frame.hidden = false;
+  button.setAttribute("aria-expanded", "true");
+  button.textContent = "Hide process view";
+}
+
 function text(value, fallback = "") {
   const result = String(value ?? "").trim();
   return result || fallback;
@@ -513,7 +577,13 @@ function scaffold(host) {
     '<div class="ad-db-heading">',
       '<div><span class="ad-db-eyebrow">Verified archive</span><h2>Ad database</h2>',
       '<p>Observed ads, contact-safe prospects and collection evidence from Hermes.</p></div>',
-      '<span class="ad-db-readonly">Read only</span>',
+      '<div class="ad-db-heading-aside">',
+        '<span class="ad-db-readonly">Read only</span>',
+        '<div class="ad-db-process" data-ad-db-process>',
+          '<span data-ad-db-process-status>Checking process artifact…</span>',
+          '<button type="button" class="ad-db-button" data-ad-db-process-toggle aria-expanded="false" hidden>Show process view</button>',
+        '</div>',
+      '</div>',
     '</div>',
     '<div class="ad-db-tabs" role="tablist" aria-label="Ad database views">',
       '<button type="button" role="tab" data-ad-db-tab="ads" aria-controls="ad-db-results" aria-selected="true">Ads</button>',
@@ -548,6 +618,7 @@ function scaffold(host) {
     '<div class="ad-db-detail" data-ad-db-detail hidden></div>',
     '<div class="ad-db-results" id="ad-db-results" role="tabpanel" data-ad-db-results></div>',
     '<div class="ad-db-more-row"><button type="button" class="ad-db-button" data-ad-db-more hidden>Load more</button></div>',
+    '<div class="ad-db-process-frame" data-ad-db-process-frame hidden></div>',
   ].join("");
 }
 
@@ -557,6 +628,8 @@ export function mountAdDb() {
   scaffold(host);
   state.mounted = true;
   host.querySelector("[data-ad-db-scan-form]").addEventListener("submit", submitScan);
+  host.querySelector("[data-ad-db-process-toggle]").addEventListener("click", toggleProcessView);
+  fetchProcessStatus();
   fetchScanReadiness();
   const filters = host.querySelector("[data-ad-db-filters]");
   syncAdvancedFilters(filters);

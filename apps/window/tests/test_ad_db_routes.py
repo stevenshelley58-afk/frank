@@ -1,6 +1,10 @@
+import hashlib
 import io
+import json
+import tempfile
 import unittest
 import urllib.error
+from pathlib import Path
 from unittest import mock
 
 import server
@@ -80,6 +84,60 @@ class AdDbRoutesTest(unittest.TestCase):
             self.assertEqual(self.client.get("/api/ad-db/ads?locationType=target").status_code, 400)
             self.assertEqual(self.client.get("/api/ad-db/ads/%2E%2E").status_code, 404)
         upstream.assert_not_called()
+
+    def test_process_projection_routes_require_their_own_validated_receipt(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            files = {
+                "artifactSha256": root / "diagram.html",
+                "specSha256": root / "diagram.json",
+                "validatorSha256": root / "archify.mjs",
+            }
+            for key, path in files.items():
+                path.write_bytes(key.encode())
+            receipt = root / "ad-db-validation-receipt.json"
+            receipt.write_text(json.dumps({
+                "schema": "frank.archify-build-validation.v1",
+                "validated": True,
+                **{key: hashlib.sha256(path.read_bytes()).hexdigest() for key, path in files.items()},
+            }), encoding="utf-8")
+            previous = (
+                server.ARCHIFY_AD_DB_ARTIFACT, server.ARCHIFY_AD_DB_SPEC,
+                server.ARCHIFY_AD_DB_RECEIPT, server.ARCHIFY_CLI,
+            )
+            try:
+                server.ARCHIFY_AD_DB_ARTIFACT = files["artifactSha256"]
+                server.ARCHIFY_AD_DB_SPEC = files["specSha256"]
+                server.ARCHIFY_AD_DB_RECEIPT = receipt
+                server.ARCHIFY_CLI = files["validatorSha256"]
+                status = self.client.get("/api/ad-db/process")
+                self.assertEqual(status.status_code, 200)
+                body = status.get_json()
+                self.assertTrue(body["available"])
+                self.assertTrue(body["read_only"])
+                self.assertEqual(body["artifact_url"], "/api/ad-db/process/artifact")
+                artifact = self.client.get("/api/ad-db/process/artifact")
+                self.assertEqual(artifact.status_code, 200)
+                self.assertEqual(artifact.mimetype, "text/html")
+                files["artifactSha256"].write_bytes(b"changed")
+                self.assertFalse(self.client.get("/api/ad-db/process").get_json()["available"])
+                self.assertEqual(self.client.get("/api/ad-db/process/artifact").status_code, 404)
+            finally:
+                (
+                    server.ARCHIFY_AD_DB_ARTIFACT, server.ARCHIFY_AD_DB_SPEC,
+                    server.ARCHIFY_AD_DB_RECEIPT, server.ARCHIFY_CLI,
+                ) = previous
+
+    def test_process_projection_fails_closed_without_receipt(self):
+        previous = server.ARCHIFY_AD_DB_RECEIPT
+        try:
+            server.ARCHIFY_AD_DB_RECEIPT = Path("/nonexistent/ad-db-validation-receipt.json")
+            body = self.client.get("/api/ad-db/process").get_json()
+            self.assertFalse(body["available"])
+            self.assertIsNone(body["artifact_url"])
+            self.assertEqual(self.client.get("/api/ad-db/process/artifact").status_code, 404)
+        finally:
+            server.ARCHIFY_AD_DB_RECEIPT = previous
 
     def _media(self, upstream, *, method="GET", headers=None):
         opener = mock.Mock()

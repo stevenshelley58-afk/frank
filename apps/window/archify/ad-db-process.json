@@ -1,0 +1,183 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Ad DB process",
+    "subtitle": "One autonomous manager \u00b7 $0 capture path \u00b7 WA first",
+    "output": "ad-db-process.html"
+  },
+  "layout": {
+    "mode": "grid",
+    "origin": [
+      60,
+      120
+    ],
+    "cols": 3,
+    "gapX": 80,
+    "gapY": 80,
+    "cellW": 240,
+    "cellH": 110
+  },
+  "components": [
+    {
+      "id": "manager",
+      "type": "backend",
+      "label": "Ad DB Manager",
+      "sublabel": "Sole authority",
+      "row": 0,
+      "col": 0
+    },
+    {
+      "id": "workers",
+      "type": "backend",
+      "label": "Cheap workers",
+      "sublabel": "Bounded tasks",
+      "row": 0,
+      "col": 1
+    },
+    {
+      "id": "capture",
+      "type": "cloud",
+      "label": "Capture path",
+      "sublabel": "$0 browser \u00b7 Chrome",
+      "row": 0,
+      "col": 2
+    },
+    {
+      "id": "frank",
+      "type": "frontend",
+      "label": "Frank",
+      "sublabel": "Process inspection",
+      "row": 1,
+      "col": 0
+    },
+    {
+      "id": "prospects",
+      "type": "backend",
+      "label": "Private prospects",
+      "sublabel": "Never published",
+      "row": 1,
+      "col": 1
+    },
+    {
+      "id": "research",
+      "type": "database",
+      "label": "Research DB",
+      "sublabel": "Ads + media archive",
+      "row": 1,
+      "col": 2
+    },
+    {
+      "id": "retired",
+      "type": "external",
+      "label": "Retired process",
+      "sublabel": "Masked \u00b7 never restart",
+      "row": 2,
+      "col": 0
+    },
+    {
+      "id": "readmodel",
+      "type": "cloud",
+      "label": "Customer read model",
+      "sublabel": "Published projection",
+      "row": 2,
+      "col": 1
+    },
+    {
+      "id": "blockwise",
+      "type": "frontend",
+      "label": "Blockwise",
+      "sublabel": "Customer surface",
+      "row": 2,
+      "col": 2
+    }
+  ],
+  "connections": [
+    {
+      "id": "manager-workers",
+      "from": "manager",
+      "to": "workers",
+      "label": "delegates",
+      "variant": "emphasis"
+    },
+    {
+      "id": "workers-capture",
+      "from": "workers",
+      "to": "capture",
+      "label": "runs serially",
+      "variant": "emphasis"
+    },
+    {
+      "id": "capture-research",
+      "from": "capture",
+      "to": "research",
+      "label": "observations + creative",
+      "labelDy": 24
+    },
+    {
+      "id": "research-readmodel",
+      "from": "research",
+      "to": "readmodel",
+      "label": "publish"
+    },
+    {
+      "id": "readmodel-blockwise",
+      "from": "readmodel",
+      "to": "blockwise",
+      "label": "serves"
+    },
+    {
+      "id": "manager-frank",
+      "from": "manager",
+      "to": "frank",
+      "label": "maintains",
+      "variant": "dashed",
+      "labelDy": 24
+    },
+    {
+      "id": "manager-prospects",
+      "from": "manager",
+      "to": "prospects",
+      "label": "separate track",
+      "variant": "dashed"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Live now",
+      "items": [
+        "Manager wakes every 2h; workers get bounded assignments",
+        "Capture runs on the $0 browser path, serial, landed with truthful states",
+        "Media backlog drains before classification; archive outlives live status"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Never restart",
+      "items": [
+        "Old worker, watchdog, Xvfb unit and retention timer are masked at the unit level",
+        "ScrapingBee deleted; Apify is capped and paid captures are forbidden",
+        "A failed check is never recorded as zero ads"
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Planned",
+      "items": [
+        "Live status counters per node (coverage, freshness, spend) inside this view",
+        "Website and email display checks on real captured ads",
+        "WA-wide discovery loop feeding the register"
+      ]
+    },
+    {
+      "dot": "slate",
+      "title": "This diagram explains; it never schedules",
+      "items": [
+        "Hermes owns execution and strategy; Frank renders a pinned artifact",
+        "Process text updates when the manager's strategy or tools change",
+        "Runtime status comes from Hermes records, not from the arrows"
+      ]
+    }
+  ]
+}
