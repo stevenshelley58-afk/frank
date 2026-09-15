@@ -361,7 +361,7 @@ export function overviewState(views) {
   return Object.freeze({
     state: items.length ? "attention" : "empty",
     reason: items.length ? "" : "no_attention_items",
-    detail: items.length ? "" : "Nothing needs you in the sources Frank can read.",
+    detail: items.length ? "" : "No items are listed in this queue. Check the source summaries below for follow-ups.",
     items: Object.freeze(items.slice(0, MAX_ATTENTION_ITEMS)),
     truncated: items.length > MAX_ATTENTION_ITEMS,
     missing: Object.freeze(missing.map((view) => view.source.id)),

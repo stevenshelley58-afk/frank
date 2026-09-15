@@ -357,7 +357,7 @@ test("the combined overview never claims nothing needs you while a source is unr
   const ready = sourceStateFromResponse("crm", 200, { status: "empty", summary: "No open leads." });
   const quiet = overviewState([unreadable, { source: OWNER_SOURCES[1], state: ready }]);
   assert.equal(quiet.state, "empty");
-  assert.match(quiet.detail, /Nothing needs you in the sources Frank can read/);
+  assert.match(quiet.detail, /No items are listed in this queue/);
   assert.deepEqual(quiet.missing, ["mail"]);
 
   const busy = sourceStateFromResponse("crm", 200, {
