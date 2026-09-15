@@ -22,6 +22,68 @@ Decisions already made by the owner, do not reopen them:
   more than one section, content pane. The phone gets its own layout (below).
 - No em dashes in any text, copy or docs.
 
+## Addendum, 16 September 2026: Frank's home is the hub, not Blockwise
+
+Owner correction, and it changes the order of work. Do this first, before the
+phone layout and push, because both of those hang off the shell's structure.
+
+### What is wrong today
+
+The shell at `/` is the Blockwise owner workspace. Frank is the hub for every
+project the owner runs: Frank itself, Blockwise, Mini Frank, Pavone,
+Merrypaws, Elf & Wonder, Business OS (`GET /api/projects` is the list; ids
+`blockwise`, `merrypaws`, `elfwonder`, `pavone`, `mini-frank`, `business-os`).
+The hub and the Hermes chats still exist in the classic window at `/hub`,
+which is the wrong way round. Blockwise is one project inside Frank.
+
+### Required structure (same shell, one level up)
+
+1. `/` is the hub: every project as a card (name, setup state from
+   `/api/projects`, what needs the owner from that project where a read
+   model exists; for Blockwise that is the attention count from
+   `/api/owner/workspace/sources`), and the Hermes chat list from
+   `/api/chat/sessions`. Opening a chat goes to the classic window
+   (`/hub` keeps working) until chats are converted; say so on the card.
+2. The icon rail becomes the project switcher: Frank (home), then each
+   project. Tools and Settings stay at the bottom. On the phone this is the
+   "More" sheet plus a Home tab.
+3. The secondary menu becomes the current project's sections. For Blockwise
+   they are the ones already built: Overview, Ads, Content, CRM (Leads,
+   Support), Mail, Email flows, Customers, Reports. Everything under
+   `/project/blockwise/...` keeps its URL and its behaviour; only the root
+   changes. The Blockwise overview moves from `/` to `/project/blockwise`.
+4. Every other project gets `/project/<id>` in the shell: a project home
+   with the same information the classic project home shows today
+   (`openProjectHome` in `web/js/homes.js`: name, blurb, status, setup
+   state) and links into the classic window for the rest
+   (`/project/<id>?technical=1`). No fixture data; a project with no read
+   model says so.
+5. Server split: `owner_shell.py` must serve the shell for `/` and
+   `/project/<id>` for every id in the project registry grammar
+   (`validId` in `view-routing.js`), not only `blockwise`; `?technical=1`
+   still goes to the classic window for every project. Update the tests.
+   The classic window's `showProject` hand-off (`web/js/app.js`) then
+   applies to every project, not only Blockwise, with the same
+   `?technical=1` escape.
+
+### Preserve
+
+- The trusted-device entry, native panels, drill-downs, Ads island and
+  route grammar exactly as they are. This is a re-parenting, not a rebuild.
+- `/hub` keeps serving the classic hub until chats are converted; the shell
+  links to it, it is not removed.
+- The hPanel rule: icon rail, secondary menu, content pane, on every screen
+  that has more than one section.
+
+### Acceptance
+
+On the laptop and the Pixel: open `frank.fail`, see the hub with every
+project and the chats; tap Blockwise, see its sections in the secondary
+menu and the overview in the pane; tap Mail, see the mailbox inside Frank;
+tap another project, see its home; Back returns through each step. Anonymous
+and forged-proof requests to `/` and `/project/<id>` still reach the
+identification stage.
+
 ## 1. Bootstrap and source rules
 
 Use `ssh vps` (root). Read, in this order:
@@ -184,7 +246,7 @@ extend sessions to make push "work".
 ## 4. Work order
 
 Ship each step on its own, verified, before the next. One worktree per step
-is fine.
+is fine. Step 0 is the addendum above (hub as home); do it first.
 
 1. Manifest, icons, service worker, install. Acceptance: Chrome on the Pixel
    shows the install prompt (or Add to Home screen installs a standalone
