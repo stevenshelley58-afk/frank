@@ -198,7 +198,7 @@ function readinessBody(app, path) {
 /* ------------------------------------------------------------------ routes */
 
 test("the owner workspace rails the frozen route allowlist and nothing else", () => {
-  assert.deepEqual(OWNER_SECTIONS, ["mail", "crm", "support", "campaigns", "revenue", "results", "notifications"]);
+  assert.deepEqual(OWNER_SECTIONS, ["mail", "crm", "support", "campaigns", "ads", "revenue", "results", "notifications"]);
   assert.deepEqual(ownerRailSections(), ["overview", ...OWNER_SECTIONS]);
   assert.equal(ownerSectionView("customer").rail, false);
   assert.equal(ownerSectionView("not-a-section"), null);

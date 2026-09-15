@@ -51,22 +51,6 @@ Check desktop and 390px: shell, search, drawer open/close, back/refresh, forms, 
 
 The separate `/ui/` component playground remains available and is not the app's new entry point. The approved sample owner preview remains a reference until its full behavior can be migrated safely. Theme alignment is not a claim that every old screen has been converted to React, that native apps have been redesigned, or that backend launch gates have passed.
 
-## Blockwise owner native application launch
-
-`/project/blockwise` is now a small owner launch surface, not a dashboard or a replacement application.
-
-- The sole primary action is `Open CRM`.
-- Short labelled lists link to the native CRM, Helpdesk, Purelymail, Mautic, Stripe, reports, ntfy, and ntfy. Custom tools remain in the Frank sidebar.
-- Private Frappe, Mautic, and ntfy links say `Requires Tailscale`. Mautic uses its native login and is not SSO.
-- Links open a separate tab with `noopener noreferrer` and no referrer. There are no iframes, credentials, auto-login claims, copied provider data, fake metrics, or provider actions.
-- Scheduling says that no native interface is deployed. It has no sample or substitute UI.
-
-The surface remains in Frank's incumbent white Inter shell. It uses an ink primary pill, text-first link rows, hairlines, and a single-column mobile composition. It deliberately avoids an owner-local rail, cards, charts, mock records, or a provider-state simulator.
-
-The technical project home stays available at `/project/blockwise?technical=1`; other project homes and real custom Frank applications remain reachable and unchanged.
-
-Frontend acceptance only proves named routes, safe outbound-link attributes, non-embedding, scoped routing, and the preserved technical-home route. It does not prove native authentication, provider delivery, billing, reporting, or scheduling.
-
 ## Ads workspace
 
 `/project/blockwise/ads` is the owner's paid-advertising section, beside Mail,
@@ -107,4 +91,3 @@ collapses under `prefers-reduced-motion`.
 
 `web/ads.css` owns every style, scoped to `.ads-workspace`, so no other Frank
 surface changes.
-
