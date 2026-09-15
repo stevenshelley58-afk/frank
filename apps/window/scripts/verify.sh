@@ -43,7 +43,7 @@ js_syntax() {
   while IFS= read -r -d '' file; do
     node --check "$file" || status=1
   done < <(find . -type f \( -name '*.js' -o -name '*.mjs' \) \
-    -not -path './node_modules/*' -not -path './ui/node_modules/*' -not -path './ui/dist/*' -not -path './vendor/*' -print0 | sort -z)
+    -not -path './node_modules/*' -not -path './vendor/*' -not -path './ui/node_modules/*' -not -path './ui/dist/*' -print0 | sort -z)
   return "$status"
 }
 
