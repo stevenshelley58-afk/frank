@@ -1,22 +1,1250 @@
 import * as React from "react"
-import { ArrowUpRight, BarChart3, Check, CircleAlert, Eye, Filter, Image as ImageIcon, Link2, MoreHorizontal, Pencil, Search, ShieldCheck } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet"
+import {
+  AlertTriangle,
+  ArrowRight,
+  CheckCircle2,
+  Clock3,
+  Filter,
+  MoreHorizontal,
+  Search,
+} from "lucide-react"
+import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts"
 
-type Props={subsection:string;onNavigate:(section:string,subsection?:string)=>void}
-const tabs=[["overview","Overview"],["campaigns","Campaigns"],["creative","Creative intelligence"],["blogs","Blogs & destinations"],["tracking","Tracking"],["queue","Publishing queue"]]
-const rows=[["cmp_004","Leads · Q3 push","£1,417","152","£9.32","18"],["cmp_002","Engagement · Seasonal","£4,839","518","£9.34","12"],["cmp_001","Engagement · Q3 push","£3,170","339","£9.35","9"],["cmp_005","Traffic · New audience","£4,092","431","£9.49","-4"]]
-function Status({children,tone="green"}:{children:React.ReactNode;tone?:string}){const c=tone==="red"?"bg-rose-50 text-rose-700 ring-rose-200":tone==="amber"?"bg-amber-50 text-amber-700 ring-amber-200":"bg-emerald-50 text-emerald-700 ring-emerald-200";return <Badge variant="outline" className={"rounded-full px-2 py-0.5 text-[11px] ring-1 ring-inset "+c}>{children}</Badge>}
-function Metric({label,value,delta}:{label:string;value:string;delta?:string}){return <div className="rounded-xl border bg-card p-4"><div className="flex justify-between text-xs text-muted-foreground"><span>{label}</span><span className="text-emerald-700">{delta&&"↗ "+delta}</span></div><div className="mt-2 text-2xl font-semibold">{value}</div></div>}
-function Banner(){return <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-950"><span><Eye className="mr-2 inline size-4"/><strong>Sample workspace</strong> · example AUD Perth account. Nothing connects to Meta.</span><Status>Preview only</Status></div>}
-function Chart(){return <div className="h-36 rounded-xl bg-slate-50 p-3"><svg viewBox="0 0 640 120" className="h-full w-full" aria-label="Spend trend"><path d="M0 100 C90 88 120 78 190 86 S280 92 340 58 S430 63 490 48 S570 30 640 36" fill="none" stroke="#2563eb" strokeWidth="3" strokeLinecap="round"/><path d="M0 100 C90 88 120 78 190 86 S280 92 340 58 S430 63 490 48 S570 30 640 36 V120 H0Z" fill="#dbeafe"/><path d="M0 120H640" stroke="#cbd5e1"/></svg></div>}
-export function AdsWorkspace({subsection,onNavigate}:Props){const [sel,setSel]=React.useState<string[]>([]);const [sheet,setSheet]=React.useState<string|null>(null);const [q,setQ]=React.useState("");const [draft,setDraft]=React.useState("{{campaign.internal_id}}/{{ad.internal_id}}");const active=tabs.some(t=>t[0]===subsection)?subsection:"overview";const filtered=rows.filter(r=>r[1].toLowerCase().includes(q.toLowerCase()));const go=(id:string)=>onNavigate("ads",id);return <div className="min-h-full bg-background"><div className="mx-auto max-w-[1440px] space-y-5 p-4 sm:p-6 lg:p-8"><div className="flex flex-wrap justify-between gap-4"><div><div className="flex items-center gap-2 text-sm text-muted-foreground"><BarChart3 className="size-4 text-blue-600"/> Ads workspace · Owner view</div><h1 className="mt-2 text-2xl font-semibold tracking-tight">Make the next campaign easier to trust.</h1><p className="mt-1 text-sm text-muted-foreground">Review performance, creative and publishing state in one calm workspace.</p></div><div className="flex gap-2"><Button variant="outline" className="min-h-11">↻ Refresh</Button><Button className="min-h-11 bg-slate-900" onClick={()=>setSheet("bulk")}>Review changes</Button></div></div><Banner/><div className="flex gap-1 overflow-x-auto border-b" role="tablist">{tabs.map(([id,label])=><button key={id} role="tab" aria-selected={active===id} onClick={()=>go(id)} className={"min-h-11 shrink-0 px-3 text-sm "+(active===id?"border-b-2 border-blue-600 font-medium":"text-muted-foreground")}>{label}</button>)}</div>{active==="overview"&&<Overview go={go} setSheet={setSheet}/>} {active==="campaigns"&&<Campaigns filtered={filtered} q={q} setQ={setQ} sel={sel} setSel={setSel}/>} {active==="creative"&&<Creative setSheet={setSheet}/>} {active==="blogs"&&<Blogs/>} {active==="tracking"&&<Tracking draft={draft} setDraft={setDraft} setSheet={setSheet}/>} {active==="queue"&&<Queue/>}{sel.length>0&&<div className="sticky bottom-4 flex items-center justify-between rounded-xl bg-slate-950 px-4 py-3 text-white shadow-lg"><span className="text-sm">{sel.length} campaign{sel.length>1?"s":""} selected</span><Button className="min-h-11 bg-white text-slate-950" onClick={()=>setSheet("bulk")}>Open review <ArrowUpRight className="ml-2 size-4"/></Button></div>}<Sheet open={!!sheet} onOpenChange={o=>!o&&setSheet(null)}><SheetContent className="w-full overflow-y-auto sm:max-w-lg"><SheetHeader><SheetTitle>{sheet==="bulk"?"Review staged changes":sheet==="creative"?"Creative provenance":"Tracking draft"}</SheetTitle><SheetDescription>{sheet==="bulk"?"Sample proposal only. No provider action is available.":sheet==="creative"?"Artwork to immutable sample identity.":"Saved in this browser only until queued."}</SheetDescription></SheetHeader>{sheet==="bulk"&&<div className="space-y-3 px-4 pb-6">{(sel.length?rows.filter(r=>sel.includes(r[0])):rows.slice(0,2)).map(r=><div key={r[0]} className="rounded-xl border p-4"><div className="flex justify-between"><div><p className="font-medium">{r[1]}</p><p className="text-xs text-muted-foreground">{r[0]} · Current {r[4]} CPL</p></div><Status>Ready to review</Status></div><p className="mt-3 text-sm text-blue-700">Proposal: keep live · test a new hook</p></div>)}<Button className="min-h-11 w-full" onClick={()=>setSheet(null)}>Close review</Button></div>}{sheet==="creative"&&<div className="space-y-4 px-4 pb-6"><div className="rounded-xl border p-4"><p className="font-medium">Before / after</p><p className="mt-1 text-xs text-muted-foreground">creative_014 · cmp_004_set_1_ad_3</p><p className="mt-4 text-sm">£8.29 cost / result · 109 results</p></div><div className="rounded-xl border border-dashed p-4 text-sm text-muted-foreground"><ImageIcon className="mb-2 size-5"/>Asset preview unavailable for this sample record.</div></div>}{sheet==="tracking"&&<div className="space-y-4 px-4 pb-6"><label className="text-sm font-medium">UTM template</label><Input className="min-h-11" value={draft} onChange={e=>setDraft(e.target.value)}/><div className="rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800"><Check className="mr-2 inline size-4"/>Valid stable IDs. Browser-local draft.</div><Button className="min-h-11 w-full" onClick={()=>setSheet(null)}>Save local draft</Button></div>}</SheetContent></Sheet></div></div>}
-function Overview({go,setSheet}:{go:(x:string)=>void;setSheet:(x:string)=>void}){return <div className="space-y-5"><div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4"><Metric label="Spend" value="£14,318" delta="8.4%"/><Metric label="Meta results" value="1,862" delta="12.1%"/><Metric label="CRM-qualified leads" value="74" delta="5.7%"/><Metric label="Cost per lead" value="£193" delta="3.2%"/></div><div className="grid gap-5 lg:grid-cols-[1.3fr_.7fr]"><Card><CardHeader><CardTitle>Spend and qualified demand</CardTitle><p className="text-sm text-muted-foreground">Last 28 days · example account</p></CardHeader><CardContent><Chart/><p className="mt-3 text-xs text-muted-foreground">Meta-attributed spend and CRM-observed leads are separate facts.</p></CardContent></Card><Card><CardHeader><CardTitle>Needs a decision</CardTitle></CardHeader><CardContent className="space-y-3">{[["Tracking value contains personal information","error"],["July batch needs reconciliation","uncertain"],["Creative asset is missing","warning"]].map(([t,s],i)=><button key={t} onClick={()=>i===2&&setSheet("creative")} className="flex min-h-14 w-full items-center justify-between rounded-lg border p-3 text-left"><span className="flex items-center gap-2 text-sm"><CircleAlert className="size-4 text-amber-600"/>{t}</span><Status tone={s==="error"?"red":"amber"}>{s}</Status></button>)}<Button variant="outline" className="min-h-11 w-full" onClick={()=>go("queue")}>Open publishing queue</Button></CardContent></Card></div></div>}
-function Campaigns({filtered,q,setQ,sel,setSel}:{filtered:string[][];q:string;setQ:(x:string)=>void;sel:string[];setSel:React.Dispatch<React.SetStateAction<string[]>>}){return <div className="space-y-4"><div className="flex flex-wrap justify-between gap-3"><div><h2 className="text-xl font-semibold">Campaigns</h2><p className="text-sm text-muted-foreground">Compare outcomes without losing the record behind them.</p></div><div className="flex gap-2"><div className="relative"><Search className="absolute left-3 top-3 size-4 text-muted-foreground"/><Input aria-label="Search campaigns" value={q} onChange={e=>setQ(e.target.value)} placeholder="Search" className="min-h-11 pl-9"/></div><Button variant="outline" className="min-h-11"><Filter className="mr-2 size-4"/>Filter</Button></div></div><div className="flex gap-2"><Status>Campaigns</Status><Button variant="ghost" className="min-h-11">Ad sets</Button><Button variant="ghost" className="min-h-11">Ads</Button></div><Card><div className="overflow-x-auto"><table className="w-full min-w-[760px] text-sm"><thead className="border-b bg-muted/30 text-left text-xs text-muted-foreground"><tr>{["","Campaign","Status","Spend","Results","CPL","Trend",""].map((x,i)=><th key={i} className="px-4 py-3">{x}</th>)}</tr></thead><tbody>{filtered.map(r=><tr key={r[0]} className="border-b last:border-0"><td className="px-4 py-4"><input type="checkbox" aria-label={"Select "+r[1]} checked={sel.includes(r[0])} onChange={()=>setSel(s=>s.includes(r[0])?s.filter(x=>x!==r[0]):[...s,r[0]])} className="size-4 accent-blue-600"/></td><td className="px-4 py-4 font-medium">{r[1]}<span className="block text-xs text-muted-foreground">{r[0]} · Lead generation</span></td><td className="px-4 py-4"><Status>Delivering</Status></td><td className="px-4 py-4">{r[2]}</td><td className="px-4 py-4">{r[3]}</td><td className="px-4 py-4">{r[4]}</td><td className={"px-4 py-4 "+(Number(r[5])>0?"text-emerald-700":"text-rose-700")}>{Number(r[5])>0?"↗":"↘"} {Math.abs(Number(r[5]))}%</td><td className="px-4 py-4"><Button variant="ghost" size="icon" className="size-11"><MoreHorizontal/></Button></td></tr>)}</tbody></table></div></Card></div>}
-function Creative({setSheet}:{setSheet:(x:string)=>void}){return <div className="space-y-4"><h2 className="text-xl font-semibold">Creative intelligence</h2><p className="text-sm text-muted-foreground">Spot distinct ideas, then connect them to evidence.</p><div className="grid gap-4 md:grid-cols-3">{["Before / after","Seasonal checks","Three questions"].map((x,i)=><Card key={x}><div className={"flex h-40 items-end whitespace-pre-line p-5 text-xl font-semibold "+["bg-[#dfe8f2]","bg-[#f2eadc]","bg-[#dfe3dc]"][i]}>{x}</div><CardContent className="space-y-3 pt-4"><div className="flex justify-between"><span className="font-medium">{x}</span><Status tone={i===2?"amber":"green"}>{i===2?"Asset missing":"Ready"}</Status></div><p className="text-xs text-muted-foreground">Sample graphic preview · not live creative</p><Button variant="outline" className="min-h-11 w-full" onClick={()=>setSheet("creative")}>View provenance</Button></CardContent></Card>)}</div><div className="grid gap-3 sm:grid-cols-3"><Metric label="Comparable concepts" value="8"/><Metric label="Near duplicates" value="2"/><Metric label="Below evidence floor" value="6"/></div></div>}
-function Blogs(){return <div className="space-y-4"><h2 className="text-xl font-semibold">Blogs & destinations</h2><p className="text-sm text-muted-foreground">See which articles turn paid attention into useful next steps.</p><div className="grid gap-3 sm:grid-cols-3"><Metric label="Website sessions" value="43,583" delta="14%"/><Metric label="Onward clicks" value="4,477" delta="9%"/><Metric label="CRM-qualified leads" value="55"/></div><Card><CardHeader><CardTitle>Article destinations</CardTitle></CardHeader><CardContent className="space-y-3">{["What changed in 2026 regulations","Case study: a 1930s terrace","Seasonal checks worth paying for"].map((x,i)=><div key={x} className="flex min-h-16 flex-wrap items-center justify-between gap-2 rounded-lg border p-3"><div><p className="font-medium">{x}</p><p className="text-xs text-muted-foreground">post_00{i+6} · {i?"Insufficient evidence":"Comparable"}</p></div><span className="text-sm">{i?"2":"8"} qualified leads</span></div>)}</CardContent></Card></div>}
-function Tracking({draft,setDraft,setSheet}:{draft:string;setDraft:(x:string)=>void;setSheet:(x:string)=>void}){return <div className="space-y-4"><h2 className="text-xl font-semibold">Tracking</h2><p className="text-sm text-muted-foreground">Stable IDs, clean URLs, and a draft you can inspect before queueing.</p><Card><CardHeader><CardTitle>Standard paid social</CardTitle><p className="text-sm text-muted-foreground">Account template · browser-local draft</p></CardHeader><CardContent className="space-y-4"><div className="grid gap-3 sm:grid-cols-3"><div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800"><ShieldCheck className="mb-1 size-4"/>No personal data</div><div className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800"><Link2 className="mb-1 size-4"/>Stable IDs</div><div className="rounded-lg bg-slate-100 p-3 text-sm">Local draft</div></div><div className="rounded-lg border p-4"><p className="text-sm font-medium">Example ad · cmp_004_set_1_ad_3</p><p className="mt-1 break-all text-xs text-muted-foreground">?utm_campaign={draft}</p><Status>URL valid</Status></div><Button className="min-h-11" onClick={()=>setSheet("tracking")}><Pencil className="mr-2 size-4"/>Edit local draft</Button></CardContent></Card></div>}
-function Queue(){return <div className="space-y-4"><h2 className="text-xl font-semibold">Publishing queue</h2><p className="text-sm text-muted-foreground">Every state tells you what is known, what is not, and what to do next.</p><div className="flex flex-wrap gap-2">{["Draft 1","Needs review 2","Uncertain 1","History 8"].map(x=><button key={x} className="min-h-11 rounded-lg border px-4 text-sm">{x}</button>)}</div><Card><CardHeader><CardTitle>Needs review</CardTitle><p className="text-sm text-muted-foreground">Nothing is sent from this preview.</p></CardHeader><CardContent className="space-y-3">{[["Evergreen · July pack","batch_011","Uncertain","Reconcile before retrying. Delivery was never confirmed."],["Evergreen · August pack","batch_010","Rejected","5 rows failed. Duplicate creative detected."]].map(x=><div key={x[1]} className="rounded-xl border p-4"><div className="flex justify-between"><div><p className="font-medium">{x[0]}</p><p className="text-xs text-muted-foreground">{x[1]}</p></div><Status tone={x[2]==="Rejected"?"amber":"red"}>{x[2]}</Status></div><p className="mt-3 text-sm text-muted-foreground">{x[3]}</p><Button variant="outline" className="mt-4 min-h-11">Open reconcile view</Button></div>)}</CardContent></Card></div>}
+import { Badge } from "@/components/ui/badge"
+import { Button } from "@/components/ui/button"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  ChartContainer,
+  ChartTooltip,
+  ChartTooltipContent,
+  type ChartConfig,
+} from "@/components/ui/chart"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+
+type Props = {
+  subsection: string
+  onNavigate: (section: string, subsection?: string) => void
+}
+type Level = "campaign" | "adset" | "ad"
+type RecordRow = {
+  id: string
+  parent?: string
+  level: Level
+  name: string
+  status: "Delivering" | "Paused" | "Draft"
+  spend: number
+  results: number
+  cpl: number
+  trend: number
+}
+
+const navigation = [
+  ["overview", "Overview"],
+  ["campaigns", "Campaigns"],
+  ["creative", "Creative intelligence"],
+  ["blogs", "Blogs & destinations"],
+  ["tracking", "Tracking"],
+  ["queue", "Publishing queue"],
+] as const
+
+const records: RecordRow[] = [
+  {
+    id: "cmp_aud_104",
+    level: "campaign",
+    name: "Seller guide leads",
+    status: "Delivering",
+    spend: 2860,
+    results: 176,
+    cpl: 16.25,
+    trend: 11,
+  },
+  {
+    id: "cmp_aud_112",
+    level: "campaign",
+    name: "Home appraisal enquiries",
+    status: "Delivering",
+    spend: 1940,
+    results: 101,
+    cpl: 19.21,
+    trend: 4,
+  },
+  {
+    id: "cmp_aud_118",
+    level: "campaign",
+    name: "Suburb report downloads",
+    status: "Paused",
+    spend: 1224,
+    results: 49,
+    cpl: 24.98,
+    trend: -8,
+  },
+  {
+    id: "set_104_local",
+    parent: "cmp_aud_104",
+    level: "adset",
+    name: "Local homeowners · 35–64",
+    status: "Delivering",
+    spend: 1730,
+    results: 111,
+    cpl: 15.59,
+    trend: 9,
+  },
+  {
+    id: "set_104_broad",
+    parent: "cmp_aud_104",
+    level: "adset",
+    name: "Broad homeowners",
+    status: "Delivering",
+    spend: 1130,
+    results: 65,
+    cpl: 17.38,
+    trend: 3,
+  },
+  {
+    id: "set_112_warm",
+    parent: "cmp_aud_112",
+    level: "adset",
+    name: "Website visitors · 90 days",
+    status: "Delivering",
+    spend: 1940,
+    results: 101,
+    cpl: 19.21,
+    trend: 4,
+  },
+  {
+    id: "ad_104_guide",
+    parent: "set_104_local",
+    level: "ad",
+    name: "Know your selling options",
+    status: "Delivering",
+    spend: 1020,
+    results: 72,
+    cpl: 14.17,
+    trend: 14,
+  },
+  {
+    id: "ad_104_plan",
+    parent: "set_104_local",
+    level: "ad",
+    name: "Your simple seller plan",
+    status: "Delivering",
+    spend: 710,
+    results: 39,
+    cpl: 18.21,
+    trend: -2,
+  },
+  {
+    id: "ad_112_value",
+    parent: "set_112_warm",
+    level: "ad",
+    name: "What could your home be worth?",
+    status: "Delivering",
+    spend: 1940,
+    results: 101,
+    cpl: 19.21,
+    trend: 4,
+  },
+]
+
+const performance = [
+  { date: "19 Aug", spend: 190, qualified: 3 },
+  { date: "23 Aug", spend: 248, qualified: 4 },
+  { date: "27 Aug", spend: 220, qualified: 3 },
+  { date: "31 Aug", spend: 310, qualified: 6 },
+  { date: "4 Sep", spend: 286, qualified: 5 },
+  { date: "8 Sep", spend: 352, qualified: 7 },
+  { date: "12 Sep", spend: 331, qualified: 6 },
+  { date: "15 Sep", spend: 388, qualified: 8 },
+]
+
+const creativeItems = [
+  {
+    id: "crt_204",
+    adId: "ad_104_guide",
+    title: "Know your selling options",
+    hook: "A calm, practical guide",
+    state: "Comparable",
+    cpl: 14.17,
+    results: 72,
+    palette: "bg-sky-100 dark:bg-sky-950",
+  },
+  {
+    id: "crt_219",
+    adId: "ad_104_plan",
+    title: "Your simple seller plan",
+    hook: "Three steps to feel prepared",
+    state: "Comparable",
+    cpl: 18.21,
+    results: 39,
+    palette: "bg-amber-100 dark:bg-amber-950",
+  },
+  {
+    id: "crt_227",
+    adId: "ad_118_report",
+    title: "Suburb report",
+    hook: "Local numbers, clearly explained",
+    state: "Below evidence floor",
+    cpl: 24.98,
+    results: 12,
+    palette: "bg-emerald-100 dark:bg-emerald-950",
+  },
+]
+
+const queueRows = [
+  {
+    id: "batch_031",
+    tab: "review",
+    name: "Seller guide · September refresh",
+    state: "Needs review",
+    detail: "Three ads have staged copy and destination changes.",
+  },
+  {
+    id: "batch_032",
+    tab: "draft",
+    name: "Appraisal follow-up test",
+    state: "Draft",
+    detail: "Local preview draft. It has not been sent to a provider.",
+  },
+  {
+    id: "batch_029",
+    tab: "uncertain",
+    name: "Suburb report · audience update",
+    state: "Uncertain",
+    detail:
+      "The prior write has no confirmed provider outcome. Inspect before any retry.",
+  },
+  {
+    id: "batch_026",
+    tab: "history",
+    name: "Seller guide · August refresh",
+    state: "Recorded",
+    detail:
+      "Sample history only. This preview does not verify provider delivery.",
+  },
+] as const
+
+const chartConfig = {
+  spend: { label: "Meta spend (AUD)", color: "var(--chart-1)" },
+  qualified: { label: "CRM-qualified leads", color: "var(--chart-2)" },
+} satisfies ChartConfig
+
+function money(value: number) {
+  return new Intl.NumberFormat("en-AU", {
+    style: "currency",
+    currency: "AUD",
+    maximumFractionDigits: value % 1 ? 2 : 0,
+  }).format(value)
+}
+
+function Status({
+  children,
+  tone = "neutral",
+}: {
+  children: React.ReactNode
+  tone?: "neutral" | "good" | "warn" | "bad"
+}) {
+  const tones = {
+    neutral: "",
+    good: "border-emerald-300 text-emerald-700 dark:text-emerald-300",
+    warn: "border-amber-300 text-amber-700 dark:text-amber-300",
+    bad: "border-red-300 text-red-700 dark:text-red-300",
+  }
+  return (
+    <Badge
+      variant="outline"
+      className={`rounded-full font-normal ${tones[tone]}`}
+    >
+      {children}
+    </Badge>
+  )
+}
+
+function Metric({
+  label,
+  value,
+  note,
+}: {
+  label: string
+  value: string
+  note: string
+}) {
+  return (
+    <div className="border-b pb-4 last:border-0 sm:border-r sm:border-b-0 sm:pr-5">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="mt-1 text-2xl font-semibold tracking-tight tabular-nums">
+        {value}
+      </p>
+      <p className="mt-1 text-xs text-muted-foreground">{note}</p>
+    </div>
+  )
+}
+
+export function AdsWorkspace({ subsection, onNavigate }: Props) {
+  const active = navigation.some(([id]) => id === subsection)
+    ? subsection
+    : "overview"
+  const [selected, setSelected] = React.useState<string[]>([])
+  const [detail, setDetail] = React.useState<string | null>(null)
+  const [reviewOpen, setReviewOpen] = React.useState(false)
+  const go = (id: string) => onNavigate("ads", id)
+
+  return (
+    <div className="min-h-full bg-background text-[14px] text-foreground">
+      <div className="mx-auto max-w-[1360px] space-y-5 p-4 md:p-8">
+        <div className="flex flex-wrap items-end justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Ads</h1>
+            <p className="mt-1 max-w-2xl text-sm text-muted-foreground">
+              Owner workspace for lead-generation campaigns, creative evidence,
+              destinations and publishing state.
+            </p>
+          </div>
+          <Button
+            className="min-h-11"
+            disabled={!selected.length}
+            onClick={() => setReviewOpen(true)}
+          >
+            Review {selected.length ? `${selected.length} selected` : "changes"}
+          </Button>
+        </div>
+
+        <Tabs value={active} onValueChange={go} className="min-w-0">
+          <TabsList
+            variant="line"
+            className="h-auto w-full justify-start overflow-x-auto border-b pb-1"
+          >
+            {navigation.map(([id, label]) => (
+              <TabsTrigger
+                key={id}
+                value={id}
+                className="min-h-11 shrink-0 px-3"
+              >
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </Tabs>
+
+        {active === "overview" && <Overview go={go} openDetail={setDetail} />}
+        {active === "campaigns" && (
+          <Campaigns
+            selected={selected}
+            setSelected={setSelected}
+            openDetail={setDetail}
+          />
+        )}
+        {active === "creative" && <Creative openDetail={setDetail} />}
+        {active === "blogs" && <Blogs openDetail={setDetail} />}
+        {active === "tracking" && <Tracking />}
+        {active === "queue" && <Queue openDetail={setDetail} />}
+
+        <RecordSheet id={detail} close={() => setDetail(null)} />
+        <ReviewSheet
+          ids={selected}
+          open={reviewOpen}
+          close={() => setReviewOpen(false)}
+        />
+      </div>
+    </div>
+  )
+}
+
+function Overview({
+  go,
+  openDetail,
+}: {
+  go: (id: string) => void
+  openDetail: (id: string) => void
+}) {
+  return (
+    <div className="space-y-6">
+      <div className="grid gap-4 rounded-xl border p-4 sm:grid-cols-2 lg:grid-cols-4">
+        <Metric
+          label="Meta spend"
+          value={money(6024)}
+          note="Sample Meta observation · 28 days"
+        />
+        <Metric
+          label="Meta leads"
+          value="326"
+          note="Provider-attributed lead events"
+        />
+        <Metric
+          label="Website form leads"
+          value="184"
+          note="Separate website observation"
+        />
+        <Metric
+          label="CRM-qualified leads"
+          value="42"
+          note="Separate CRM observation"
+        />
+      </div>
+      <div className="grid gap-5 lg:grid-cols-[minmax(0,1.4fr)_minmax(280px,.6fr)]">
+        <Card>
+          <CardHeader>
+            <CardTitle>Spend and qualified demand</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              Sample daily observations. Different systems are not combined into
+              one conversion claim.
+            </p>
+          </CardHeader>
+          <CardContent>
+            <ChartContainer
+              config={chartConfig}
+              className="h-64 w-full"
+              aria-label="Daily Meta spend in Australian dollars"
+            >
+              <AreaChart
+                data={performance}
+                accessibilityLayer
+                margin={{ left: 6, right: 8 }}
+              >
+                <CartesianGrid vertical={false} />
+                <XAxis dataKey="date" tickLine={false} axisLine={false} />
+                <YAxis
+                  tickFormatter={(v) => `$${v}`}
+                  tickLine={false}
+                  axisLine={false}
+                  width={44}
+                />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <Area
+                  type="monotone"
+                  dataKey="spend"
+                  stroke="var(--color-spend)"
+                  fill="var(--color-spend)"
+                  fillOpacity={0.14}
+                />
+              </AreaChart>
+            </ChartContainer>
+            <div className="mt-3 overflow-hidden rounded-lg border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead className="text-right">Meta spend</TableHead>
+                    <TableHead className="text-right">CRM qualified</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {performance.slice(-3).map((point) => (
+                    <TableRow key={point.date}>
+                      <TableCell>{point.date}</TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {money(point.spend)}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">
+                        {point.qualified}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>Needs a decision</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <Button
+              variant="outline"
+              className="h-auto min-h-14 w-full justify-between px-3 py-3 text-left whitespace-normal"
+              onClick={() => go("tracking")}
+            >
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="size-4 shrink-0 text-amber-600" />
+                Tracking draft needs validation
+              </span>
+              <ArrowRight className="size-4 shrink-0" />
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto min-h-14 w-full justify-between px-3 py-3 text-left whitespace-normal"
+              onClick={() => openDetail("batch_029")}
+            >
+              <span className="flex items-center gap-2">
+                <Clock3 className="size-4 shrink-0 text-amber-600" />
+                Uncertain provider outcome
+              </span>
+              <ArrowRight className="size-4 shrink-0" />
+            </Button>
+            <Button
+              variant="outline"
+              className="h-auto min-h-14 w-full justify-between px-3 py-3 text-left whitespace-normal"
+              onClick={() => openDetail("crt_227")}
+            >
+              <span className="flex items-center gap-2">
+                <AlertTriangle className="size-4 shrink-0 text-amber-600" />
+                Creative below evidence floor
+              </span>
+              <ArrowRight className="size-4 shrink-0" />
+            </Button>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  )
+}
+
+function Campaigns({
+  selected,
+  setSelected,
+  openDetail,
+}: {
+  selected: string[]
+  setSelected: React.Dispatch<React.SetStateAction<string[]>>
+  openDetail: (id: string) => void
+}) {
+  const [level, setLevel] = React.useState<Level>("campaign")
+  const [query, setQuery] = React.useState("")
+  const [status, setStatus] = React.useState("all")
+  const shown = records.filter(
+    (row) =>
+      row.level === level &&
+      row.name.toLowerCase().includes(query.toLowerCase()) &&
+      (status === "all" || row.status.toLowerCase() === status)
+  )
+  React.useEffect(() => setSelected([]), [level, setSelected])
+  const toggle = (id: string) =>
+    setSelected((current) =>
+      current.includes(id)
+        ? current.filter((value) => value !== id)
+        : [...current, id]
+    )
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">Campaign records</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Select records explicitly before reviewing a proposed sample change.
+        </p>
+      </div>
+      <div className="flex flex-wrap items-end gap-3">
+        <Tabs value={level} onValueChange={(value) => setLevel(value as Level)}>
+          <TabsList className="h-11">
+            <TabsTrigger value="campaign" className="min-h-10 px-3">
+              Campaigns
+            </TabsTrigger>
+            <TabsTrigger value="adset" className="min-h-10 px-3">
+              Ad sets
+            </TabsTrigger>
+            <TabsTrigger value="ad" className="min-h-10 px-3">
+              Ads
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+        <div className="relative min-w-56 flex-1">
+          <Search className="pointer-events-none absolute top-3.5 left-3 size-4 text-muted-foreground" />
+          <Input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            className="min-h-11 pl-9"
+            placeholder={`Search ${level === "adset" ? "ad sets" : `${level}s`}`}
+            aria-label={`Search ${level} records`}
+          />
+        </div>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger
+            className="min-h-11 w-40"
+            aria-label="Filter by status"
+          >
+            <Filter className="size-4" />
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            <SelectItem value="delivering">Delivering</SelectItem>
+            <SelectItem value="paused">Paused</SelectItem>
+            <SelectItem value="draft">Draft</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+      {!shown.length ? (
+        <div className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">
+          No sample records match these filters.
+        </div>
+      ) : (
+        <>
+          <div className="hidden overflow-hidden rounded-xl border md:block">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-12">
+                    <span className="sr-only">Select</span>
+                  </TableHead>
+                  <TableHead>Record</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Spend</TableHead>
+                  <TableHead className="text-right">Meta leads</TableHead>
+                  <TableHead className="text-right">Cost per lead</TableHead>
+                  <TableHead className="text-right">28-day change</TableHead>
+                  <TableHead className="w-14">
+                    <span className="sr-only">Actions</span>
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {shown.map((row) => (
+                  <TableRow
+                    key={row.id}
+                    data-state={
+                      selected.includes(row.id) ? "selected" : undefined
+                    }
+                  >
+                    <TableCell>
+                      <Checkbox
+                        checked={selected.includes(row.id)}
+                        onCheckedChange={() => toggle(row.id)}
+                        aria-label={`Select ${row.name}`}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <span className="font-medium">{row.name}</span>
+                      <span className="block text-xs text-muted-foreground">
+                        {row.id}
+                        {row.parent ? ` · Parent ${row.parent}` : ""}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <Status
+                        tone={row.status === "Delivering" ? "good" : "neutral"}
+                      >
+                        {row.status}
+                      </Status>
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {money(row.spend)}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {row.results}
+                    </TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {money(row.cpl)}
+                    </TableCell>
+                    <TableCell
+                      className={`text-right tabular-nums ${row.trend < 0 ? "text-red-700 dark:text-red-300" : "text-emerald-700 dark:text-emerald-300"}`}
+                    >
+                      {row.trend > 0 ? "+" : ""}
+                      {row.trend}%
+                    </TableCell>
+                    <TableCell>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="size-11"
+                        onClick={() => openDetail(row.id)}
+                        aria-label={`Open ${row.name}`}
+                      >
+                        <MoreHorizontal />
+                      </Button>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+          <div className="space-y-3 md:hidden">
+            {shown.map((row) => (
+              <Card key={row.id}>
+                <CardContent className="space-y-3 p-4">
+                  <div className="flex items-start gap-3">
+                    <Checkbox
+                      checked={selected.includes(row.id)}
+                      onCheckedChange={() => toggle(row.id)}
+                      aria-label={`Select ${row.name}`}
+                      className="mt-1"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="font-medium">{row.name}</p>
+                      <p className="truncate text-xs text-muted-foreground">
+                        {row.id}
+                      </p>
+                    </div>
+                    <Status
+                      tone={row.status === "Delivering" ? "good" : "neutral"}
+                    >
+                      {row.status}
+                    </Status>
+                  </div>
+                  <div className="grid grid-cols-3 gap-2 text-sm">
+                    <div>
+                      <p className="text-xs text-muted-foreground">Spend</p>
+                      <p className="tabular-nums">{money(row.spend)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">
+                        Meta leads
+                      </p>
+                      <p className="tabular-nums">{row.results}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground">CPL</p>
+                      <p className="tabular-nums">{money(row.cpl)}</p>
+                    </div>
+                  </div>
+                  <Button
+                    variant="outline"
+                    className="min-h-11 w-full"
+                    onClick={() => openDetail(row.id)}
+                  >
+                    Open record
+                  </Button>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+function Creative({ openDetail }: { openDetail: (id: string) => void }) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">Creative intelligence</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Sample artwork and record-level evidence. Small samples stay below the
+          evidence floor.
+        </p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-3">
+        {creativeItems.map((item) => (
+          <Card key={item.id} className="overflow-hidden">
+            <div
+              className={`flex aspect-[4/3] flex-col justify-between p-5 ${item.palette}`}
+            >
+              <div className="h-1 w-12 rounded-full bg-foreground" />
+              <div>
+                <p className="max-w-[16ch] text-2xl font-semibold tracking-tight">
+                  {item.title}
+                </p>
+                <p className="mt-2 text-sm opacity-70">{item.hook}</p>
+              </div>
+              <span className="text-xs font-medium">
+                BLOCKWISE · SAMPLE ARTWORK
+              </span>
+            </div>
+            <CardContent className="space-y-3 pt-4">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">
+                  {item.id} · {item.adId}
+                </span>
+                <Status tone={item.state === "Comparable" ? "good" : "warn"}>
+                  {item.state}
+                </Status>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span>{item.results} Meta leads</span>
+                <span className="tabular-nums">{money(item.cpl)} CPL</span>
+              </div>
+              <Button
+                variant="outline"
+                className="min-h-11 w-full"
+                onClick={() => openDetail(item.id)}
+              >
+                View provenance
+              </Button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function Blogs({ openDetail }: { openDetail: (id: string) => void }) {
+  const destinations = [
+    {
+      id: "dst_041",
+      title: "A practical guide to selling your home",
+      sessions: 1820,
+      forms: 73,
+      qualified: 18,
+    },
+    {
+      id: "dst_052",
+      title: "What to prepare before requesting an appraisal",
+      sessions: 1244,
+      forms: 46,
+      qualified: 11,
+    },
+    {
+      id: "dst_067",
+      title: "Your local market report",
+      sessions: 890,
+      forms: 28,
+      qualified: 6,
+    },
+  ]
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">Blogs & destinations</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Website and CRM observations stay separate from Meta results.
+        </p>
+      </div>
+      <div className="grid gap-4 rounded-xl border p-4 sm:grid-cols-3">
+        <Metric
+          label="Website sessions"
+          value="3,954"
+          note="Sample analytics observation"
+        />
+        <Metric
+          label="Website form leads"
+          value="147"
+          note="Sample website observation"
+        />
+        <Metric
+          label="CRM-qualified leads"
+          value="35"
+          note="Sample CRM observation"
+        />
+      </div>
+      <div className="space-y-2">
+        {destinations.map((item) => (
+          <Card key={item.id}>
+            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+              <div className="min-w-0 flex-1">
+                <p className="font-medium">{item.title}</p>
+                <p className="text-xs text-muted-foreground">{item.id}</p>
+              </div>
+              <div className="grid grid-cols-3 gap-4 text-sm sm:text-right">
+                <span>
+                  <b className="block tabular-nums">{item.sessions}</b>
+                  <small className="text-muted-foreground">sessions</small>
+                </span>
+                <span>
+                  <b className="block tabular-nums">{item.forms}</b>
+                  <small className="text-muted-foreground">forms</small>
+                </span>
+                <span>
+                  <b className="block tabular-nums">{item.qualified}</b>
+                  <small className="text-muted-foreground">qualified</small>
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                className="min-h-11"
+                onClick={() => openDetail(item.id)}
+              >
+                Open detail
+              </Button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function validateTracking(value: string) {
+  const problems: string[] = []
+  if (!value.trim()) problems.push("Enter a destination URL.")
+  let parsed: URL | null = null
+  try {
+    parsed = new URL(value)
+  } catch {
+    if (value.trim()) problems.push("Use a complete https URL.")
+  }
+  if (parsed && parsed.protocol !== "https:")
+    problems.push("Use https for the destination.")
+  const query = parsed?.searchParams
+  if (query && !query.get("utm_campaign"))
+    problems.push("Add utm_campaign with an immutable campaign ID.")
+  if (query && !query.get("utm_content"))
+    problems.push("Add utm_content with an immutable ad ID.")
+  const campaignId = query?.get("utm_campaign")
+  const adId = query?.get("utm_content")
+  if (campaignId && !/^cmp_[a-z0-9_]+$/.test(campaignId))
+    problems.push("utm_campaign must use an immutable cmp_ ID, not a name.")
+  if (adId && !/^ad_[a-z0-9_]+$/.test(adId))
+    problems.push("utm_content must use an immutable ad_ ID, not a name.")
+  return problems
+}
+
+function Tracking() {
+  const storageKey = "frank.ads-preview.tracking-draft.v1"
+  const initial =
+    "https://blockwise.sale/guides/seller?utm_source=meta&utm_medium=paid_social&utm_campaign=cmp_aud_104&utm_content=ad_104_guide"
+  const [value, setValue] = React.useState(() => {
+    try {
+      return sessionStorage.getItem(storageKey) ?? initial
+    } catch {
+      return initial
+    }
+  })
+  const [saved, setSaved] = React.useState(false)
+  const problems = validateTracking(value)
+  const save = () => {
+    try {
+      sessionStorage.setItem(storageKey, value)
+      setSaved(true)
+    } catch {
+      setSaved(false)
+    }
+  }
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">Tracking</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Names can change. The campaign and ad IDs in the URL must remain
+          stable.
+        </p>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>Paid social destination</CardTitle>
+          <p className="text-sm text-muted-foreground">
+            Session-only preview draft. No provider or backend request is made.
+          </p>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label htmlFor="tracking-url">Destination URL</Label>
+            <Input
+              id="tracking-url"
+              className="min-h-11"
+              value={value}
+              onChange={(event) => {
+                setValue(event.target.value)
+                setSaved(false)
+              }}
+              aria-invalid={problems.length > 0}
+            />
+          </div>
+          <div
+            className={`rounded-lg border p-3 text-sm ${problems.length ? "border-red-300 text-red-700 dark:text-red-300" : "border-emerald-300 text-emerald-700 dark:text-emerald-300"}`}
+          >
+            {problems.length ? (
+              <>
+                <p className="font-medium">Fix before saving</p>
+                <ul className="mt-1 list-disc pl-5">
+                  {problems.map((problem) => (
+                    <li key={problem}>{problem}</li>
+                  ))}
+                </ul>
+              </>
+            ) : (
+              <p className="flex items-center gap-2">
+                <CheckCircle2 className="size-4" />
+                Valid https URL with stable sample campaign and ad IDs.
+              </p>
+            )}
+          </div>
+          <div className="rounded-lg bg-muted p-3 text-xs text-muted-foreground">
+            <p>
+              <b className="text-foreground">Editable names:</b> Seller guide
+              leads · Know your selling options
+            </p>
+            <p className="mt-1">
+              <b className="text-foreground">Immutable sample IDs:</b>{" "}
+              cmp_aud_104 · ad_104_guide
+            </p>
+          </div>
+          <Button
+            className="min-h-11"
+            disabled={problems.length > 0}
+            onClick={save}
+          >
+            Save for this session
+          </Button>
+          {saved && (
+            <span className="ml-3 text-sm text-emerald-700 dark:text-emerald-300">
+              Saved in this tab session.
+            </span>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  )
+}
+
+function Queue({ openDetail }: { openDetail: (id: string) => void }) {
+  const [tab, setTab] = React.useState("review")
+  const shown = queueRows.filter((row) => row.tab === tab)
+  const counts = Object.fromEntries(
+    ["draft", "review", "uncertain", "history"].map((key) => [
+      key,
+      queueRows.filter((row) => row.tab === key).length,
+    ])
+  )
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className="text-xl font-semibold">Publishing queue</h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Preview states only. Nothing here confirms or performs a provider
+          write.
+        </p>
+      </div>
+      <Tabs value={tab} onValueChange={setTab}>
+        <TabsList className="h-auto flex-wrap">
+          <TabsTrigger value="draft" className="min-h-11 px-3">
+            Draft {counts.draft}
+          </TabsTrigger>
+          <TabsTrigger value="review" className="min-h-11 px-3">
+            Needs review {counts.review}
+          </TabsTrigger>
+          <TabsTrigger value="uncertain" className="min-h-11 px-3">
+            Uncertain {counts.uncertain}
+          </TabsTrigger>
+          <TabsTrigger value="history" className="min-h-11 px-3">
+            History {counts.history}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
+      <div className="space-y-3">
+        {shown.map((row) => (
+          <Card key={row.id}>
+            <CardContent className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="font-medium">{row.name}</p>
+                  <Status
+                    tone={
+                      row.state === "Uncertain"
+                        ? "bad"
+                        : row.state === "Needs review"
+                          ? "warn"
+                          : "neutral"
+                    }
+                  >
+                    {row.state}
+                  </Status>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">{row.id}</p>
+                <p className="mt-2 text-sm text-muted-foreground">
+                  {row.detail}
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                className="min-h-11"
+                onClick={() => openDetail(row.id)}
+              >
+                {row.tab === "uncertain"
+                  ? "Inspect uncertainty"
+                  : "Open detail"}
+              </Button>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function RecordSheet({ id, close }: { id: string | null; close: () => void }) {
+  const record = records.find((row) => row.id === id)
+  const creative = creativeItems.find((row) => row.id === id)
+  const queue = queueRows.find((row) => row.id === id)
+  const destination = id?.startsWith("dst_") ? id : null
+  const title =
+    record?.name ??
+    creative?.title ??
+    queue?.name ??
+    (destination ? "Destination detail" : "Record detail")
+  return (
+    <Sheet open={Boolean(id)} onOpenChange={(open) => !open && close()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-lg">
+        <SheetHeader>
+          <SheetTitle>{title}</SheetTitle>
+          <SheetDescription>{id} · sample UX preview record</SheetDescription>
+        </SheetHeader>
+        <div className="space-y-4 px-4 pb-6">
+          {record && (
+            <>
+              <div className="grid grid-cols-2 gap-3 rounded-xl border p-4 text-sm">
+                <span>
+                  <small className="block text-muted-foreground">Level</small>
+                  {record.level}
+                </span>
+                <span>
+                  <small className="block text-muted-foreground">Status</small>
+                  {record.status}
+                </span>
+                <span>
+                  <small className="block text-muted-foreground">
+                    Meta spend
+                  </small>
+                  {money(record.spend)}
+                </span>
+                <span>
+                  <small className="block text-muted-foreground">
+                    Meta leads
+                  </small>
+                  {record.results}
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                className="min-h-11 w-full"
+                onClick={close}
+              >
+                Close record
+              </Button>
+            </>
+          )}
+          {creative && (
+            <>
+              <div
+                className={`aspect-[4/3] rounded-xl p-5 ${creative.palette}`}
+              >
+                <p className="max-w-[16ch] text-2xl font-semibold">
+                  {creative.title}
+                </p>
+                <p className="mt-2">{creative.hook}</p>
+              </div>
+              <div className="rounded-xl border p-4 text-sm">
+                <p>
+                  <b>Creative ID:</b> {creative.id}
+                </p>
+                <p className="mt-2">
+                  <b>Ad ID:</b> {creative.adId}
+                </p>
+                <p className="mt-2">
+                  <b>Evidence:</b> {creative.results} sample Meta leads at{" "}
+                  {money(creative.cpl)} CPL.
+                </p>
+              </div>
+            </>
+          )}
+          {queue && (
+            <>
+              <div className="rounded-xl border p-4 text-sm">
+                <Status tone={queue.state === "Uncertain" ? "bad" : "warn"}>
+                  {queue.state}
+                </Status>
+                <p className="mt-3">{queue.detail}</p>
+                {queue.state === "Uncertain" && (
+                  <p className="mt-3 font-medium">
+                    Do not retry from this preview. Verify provider history and
+                    the idempotency record first.
+                  </p>
+                )}
+              </div>
+              <Button
+                variant="outline"
+                className="min-h-11 w-full"
+                onClick={close}
+              >
+                Close detail
+              </Button>
+            </>
+          )}
+          {destination && (
+            <>
+              <div className="rounded-xl border p-4 text-sm">
+                <p>
+                  <b>Destination ID:</b> {destination}
+                </p>
+                <p className="mt-2">
+                  Website sessions, forms and CRM qualification are separate
+                  sample observations.
+                </p>
+              </div>
+              <Button
+                variant="outline"
+                className="min-h-11 w-full"
+                onClick={close}
+              >
+                Close detail
+              </Button>
+            </>
+          )}
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
+
+function ReviewSheet({
+  ids,
+  open,
+  close,
+}: {
+  ids: string[]
+  open: boolean
+  close: () => void
+}) {
+  const selected = records.filter((row) => ids.includes(row.id))
+  return (
+    <Sheet open={open} onOpenChange={(value) => !value && close()}>
+      <SheetContent className="w-full overflow-y-auto sm:max-w-xl">
+        <SheetHeader>
+          <SheetTitle>Review sample changes</SheetTitle>
+          <SheetDescription>
+            Explicit selection only. This preview cannot submit changes to Meta
+            or any backend.
+          </SheetDescription>
+        </SheetHeader>
+        <div className="space-y-4 px-4 pb-6">
+          {selected.map((row) => (
+            <Card key={row.id}>
+              <CardHeader>
+                <CardTitle className="text-base">{row.name}</CardTitle>
+                <p className="text-xs text-muted-foreground">{row.id}</p>
+              </CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-lg bg-muted p-3 text-sm">
+                  <p className="font-medium">Before</p>
+                  <p className="mt-2">Status: {row.status}</p>
+                  <p>
+                    Daily sample budget: {money(Math.round(row.spend / 28))}
+                  </p>
+                </div>
+                <div className="rounded-lg border p-3 text-sm">
+                  <p className="font-medium">Proposed after</p>
+                  <p className="mt-2">Status: {row.status}</p>
+                  <p>
+                    Daily sample budget: {money(Math.round(row.spend / 28) + 5)}
+                  </p>
+                </div>
+              </CardContent>
+            </Card>
+          ))}
+          {!selected.length && (
+            <p className="rounded-xl border border-dashed p-6 text-center text-sm text-muted-foreground">
+              No records selected.
+            </p>
+          )}
+          <Button variant="outline" className="min-h-11 w-full" onClick={close}>
+            Close review
+          </Button>
+        </div>
+      </SheetContent>
+    </Sheet>
+  )
+}
