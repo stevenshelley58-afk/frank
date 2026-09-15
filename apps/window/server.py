@@ -4733,6 +4733,30 @@ def mini_legacy_redirect(mini_path: str):
     return _mini_redirect(_mini_legacy_target(mini_path, LEGACY_MINI_ASSETS))
 
 
+@app.get("/ui", defaults={"ui_path": ""}, strict_slashes=False)
+@app.get("/ui/<path:ui_path>")
+def frank_ui(ui_path: str):
+    """Serve the shadcn/ui design-system bundle built from apps/window/ui.
+
+    This is a review surface, not a replacement for the main Window: the
+    existing routes and every native application panel are untouched. The
+    bundle is a static SPA, so unknown paths fall back to its index.html.
+    """
+    root = (WEB / "ui").resolve()
+    if not root.is_dir():
+        abort(404)
+    requested = str(ui_path or "").strip("/")
+    if requested:
+        candidate = (root / requested).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError:
+            abort(404)
+        if candidate.is_file():
+            return send_from_directory(root, requested)
+    return send_from_directory(root, "index.html")
+
+
 @app.get("/", defaults={"path": ""})
 @app.get("/<path:path>")
 def spa(path: str):

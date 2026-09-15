@@ -13,6 +13,15 @@ RUN node vendor/archify/archify/bin/archify.mjs validate architecture archify/ad
 RUN node vendor/archify/archify/bin/archify.mjs check archify/ad-template-process.html
 RUN node --input-type=module -e 'import fs from "node:fs"; import { createHash } from "node:crypto"; const digest=(path)=>createHash("sha256").update(fs.readFileSync(path)).digest("hex"); fs.writeFileSync("archify/validation-receipt.json", JSON.stringify({schema:"frank.archify-build-validation.v1",validated:true,artifactSha256:digest("archify/ad-template-process.html"),specSha256:digest("archify/ad-template-process.json"),validatorSha256:digest("vendor/archify/archify/bin/archify.mjs")})+"\n");'
 
+# Frank UI (shadcn/ui + React + Tailwind v4). Separate stage: it has its own
+# dependency tree, and the output is a static bundle copied into /web/ui below.
+FROM node:22-alpine AS ui-build
+WORKDIR /build
+COPY apps/window/ui/package.json apps/window/ui/package-lock.json ./
+RUN npm ci --ignore-scripts
+COPY apps/window/ui ./
+RUN npm run build
+
 FROM node:22-alpine AS agenttrail-runtime
 # Release provenance: deploy.sh verifies the revision label on every image it
 # deploys, so the agenttrail runtime must carry it too.
@@ -85,6 +94,7 @@ COPY governance/control-plane/capabilities ./governance/control-plane/capabiliti
 COPY governance/control-plane/schema ./governance/control-plane/schema
 COPY --from=graph-build /build/web/dashboard /web/dashboard
 COPY --from=graph-build /build/web/graph /web/graph
+COPY --from=ui-build /build/dist /web/ui
 COPY --from=graph-build /build/archify ./archify
 COPY --from=graph-build /build/vendor/archify/archify ./vendor/archify/archify
 ENV FRANK_WEB=/web
