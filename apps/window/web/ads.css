@@ -1867,8 +1867,12 @@
   gap: 8px;
 }
 .ads-chart {
+  /* A fixed height against a stretched viewBox: the figure keeps its vertical
+     scale at every width, so a phone gets narrower bars rather than smaller
+     labels. Every label on this chart is HTML beside the figure for the same
+     reason — text inside a stretched SVG distorts, and geometry does not. */
   width: 100%;
-  height: auto;
+  height: 232px;
   display: block;
 }
 .ads-chart-axis {
@@ -1876,7 +1880,7 @@
   stroke-width: 1;
 }
 .ads-chart-bar {
-  fill: var(--ink);
+  fill: var(--chart-1);
   opacity: 0.82;
 }
 .ads-chart-bar:hover {
@@ -1884,7 +1888,7 @@
 }
 .ads-chart-line {
   fill: none;
-  stroke: var(--rule-line, var(--loop));
+  stroke: var(--chart-2);
   stroke-width: 1.5;
   stroke-linejoin: round;
   stroke-linecap: round;
@@ -1914,15 +1918,50 @@
   display: inline-block;
 }
 .ads-chart-swatch-bar {
-  background: var(--ink);
+  background: var(--chart-1);
   opacity: 0.82;
 }
 .ads-chart-swatch-line {
   height: 2px;
   border-radius: 2px;
-  background: var(--loop);
+  background: var(--chart-2);
 }
 .ads-chart-peak {
+  color: var(--faint);
+}
+
+/* The rest of the one chart, scoped to the workspace so no other Frank surface
+   picks it up. Colour is taken from the semantic chart palette and is never the
+   only evidence of state: the legend names each series and carries the source
+   of its number, and the swatch shape matches the mark it stands for. */
+.ads-workspace .ads-chart-figure {
+  display: block;
+}
+.ads-workspace .ads-chart-point {
+  fill: var(--chart-2);
+}
+.ads-workspace .ads-chart-xaxis {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.ads-workspace .ads-chart-label {
+  color: var(--faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.ads-workspace .ads-chart-legend-label {
+  color: var(--mute);
+}
+.ads-workspace .ads-chart-legend-value {
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+.ads-workspace .ads-chart-note {
+  margin: 0;
+  max-width: 78ch;
+  font-size: 11px;
+  line-height: 1.5;
   color: var(--faint);
 }
 

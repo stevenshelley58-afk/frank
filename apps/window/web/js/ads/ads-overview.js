@@ -45,6 +45,7 @@ import {
   relativeAge,
   createDrawer,
 } from "./ads-ui.js";
+import { overviewDeliveryChart } from "./ads-chart.js";
 import {
   EVIDENCE_FLOOR,
   METRICS,
@@ -211,6 +212,7 @@ export function createOverviewScreen(ctx, host) {
     }
 
     node.append(readStateStrip(coverage));
+    node.append(deliveryChartBlock());
     node.append(attentionBlock(state.decisions.attention));
     node.append(outcomesBlock(state.decisions.outcomes));
     node.append(recommendationsBlock(state.decisions.recommendations));
@@ -315,6 +317,19 @@ export function createOverviewScreen(ctx, host) {
     delta.append(svg(a >= b ? ICONS.arrowUp : ICONS.arrowDown, { size: 11, width: 2 }), el("span", "", text));
     delta.title = `${text} against the comparison period, from the read model's own previous rollup.`;
     return delta;
+  }
+
+  /**
+   * The one chart this screen carries.
+   *
+   * `DESIGN.md` allows the overview exactly one chart, and this is it: the
+   * window's daily delivery, drawn once from the overview reader's own series.
+   * `ads-chart.js` owns what it draws and, just as much, what it refuses to
+   * draw — a reader that has not answered gets the honest not-connected state
+   * rather than a series nobody measured.
+   */
+  function deliveryChartBlock() {
+    return overviewDeliveryChart(state.reads.overview?.data?.meta || null, { currency: currency() });
   }
 
   // ------------------------------------------------ 1. what needs me --
