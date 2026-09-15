@@ -481,7 +481,8 @@ test("the mounted workspace rails real links, and no application is framed befor
   const workspace = byDataset(root, "testid", "owner-workspace");
   assert.ok(workspace, "the workspace root is mounted");
   const links = walk(workspace).filter((node) => node.dataset.section !== undefined);
-  assert.deepEqual(links.map((link) => link.dataset.section), ["overview", ...OWNER_SECTIONS]);
+  assert.deepEqual(links.map((link) => link.dataset.section), ["overview", ...OWNER_SECTIONS.filter((section) => section !== "support")]);
+  assert.deepEqual(allByDataset(workspace, "familySection").map((link) => link.dataset.familySection), ["crm", "support"]);
   assert.equal(links.find((link) => link.dataset.section === "mail").href, "/project/blockwise/mail");
   assert.equal(links.find((link) => link.dataset.section === "overview").getAttribute("aria-current"), "page");
   assert.equal(links.find((link) => link.dataset.section === "crm").getAttribute("aria-current"), null);
