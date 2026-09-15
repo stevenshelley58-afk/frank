@@ -31,6 +31,7 @@ import owner_sources
 import owner_sources_setup
 import owner_app_readiness
 import owner_ads
+import owner_shell
 import home_platform
 import home_defaults
 import mini_frank
@@ -4767,41 +4768,72 @@ def mini_legacy_redirect(mini_path: str):
     return _mini_redirect(_mini_legacy_target(mini_path, LEGACY_MINI_ASSETS))
 
 
-@app.get("/ui", strict_slashes=False)
-def frank_ui_root():
-    """Redirect to the trailing-slash form.
+_owner_shell_bundle_warned = False
 
-    The bundle uses relative asset URLs ("./assets/...") so it can be served
-    from any mount path. Relative URLs resolve against the *directory* of the
-    request, so serving the index at "/ui" makes the browser request
-    "/assets/..." instead of "/ui/assets/...". Redirecting to "/ui/" keeps
-    resolution correct.
+
+def _owner_shell_document(path: str, query: bytes | str) -> tuple[Path, str, bool]:
+    """Resolve a Window page request and report whether the owner shell answers it.
+
+    The grammar and the file choice live in ``owner_shell``; the only thing the
+    server adds is the one-time warning for a checkout with no built bundle, so
+    a dev checkout serving the vanilla Window on the owner routes is on the
+    record without repeating on every request. The query matters too: the
+    technical view of the Blockwise project shares its address with the owner
+    home and stays on the vanilla Window.
     """
-    return redirect("/ui/", code=308)
+    global _owner_shell_bundle_warned
+    directory, filename = owner_shell.resolve_spa_document(WEB, path, query)
+    if not owner_shell.owner_shell_route(path) or owner_shell.technical_view(query):
+        return directory, filename, False
+    shell = owner_shell.owner_shell_index(WEB)
+    if shell is None:
+        if not _owner_shell_bundle_warned:
+            _owner_shell_bundle_warned = True
+            app.logger.warning(
+                "owner shell bundle missing under %s: serving the vanilla Window on the owner routes",
+                WEB / owner_shell.OWNER_SHELL_DIR,
+            )
+        return directory, filename, False
+    return directory, filename, (directory, filename) == (shell.parent, shell.name)
 
 
-@app.get("/ui/", defaults={"ui_path": ""})
+@app.get("/ui")
+@app.get("/ui/")
+def frank_ui_root():
+    """Send the old bundle entry point to the shell's real address.
+
+    The shell used to be mounted under "/ui/" as a review surface. It is now the
+    owner front door and is served at the owner routes themselves, starting at
+    "/", so this path exists only to carry old links and bookmarks there.
+    """
+    return redirect("/", code=308)
+
+
 @app.get("/ui/<path:ui_path>")
 def frank_ui(ui_path: str):
-    """Serve the shadcn/ui design-system bundle built from apps/window/ui.
+    """Serve the built owner-shell assets from apps/window/ui.
 
-    This is a review surface, not a replacement for the main Window: the
-    existing routes and every native application panel are untouched. The
-    bundle is a static SPA, so unknown paths fall back to its index.html.
+    The bundle is built with Vite base "/ui/", so its assets are requested at
+    "/ui/assets/..." whatever page path the shell itself was served at. Only
+    real files are answered here. The bundle index itself goes to the shell at
+    "/" so there is never a second entry point; a missing asset is a 404, not a
+    redirect, so a stale document asking for a released bundle's hashed asset
+    fails loudly instead of receiving HTML under a script's name.
     """
-    root = (WEB / "ui").resolve()
+    root = (WEB / owner_shell.OWNER_SHELL_DIR).resolve()
+    requested = str(ui_path or "").strip("/")
+    if not requested or requested == owner_shell.INDEX_DOCUMENT:
+        return redirect("/", code=308)
     if not root.is_dir():
         abort(404)
-    requested = str(ui_path or "").strip("/")
-    if requested:
-        candidate = (root / requested).resolve()
-        try:
-            candidate.relative_to(root)
-        except ValueError:
-            abort(404)
-        if candidate.is_file():
-            return send_from_directory(root, requested)
-    return send_from_directory(root, "index.html")
+    candidate = (root / requested).resolve()
+    try:
+        candidate.relative_to(root)
+    except ValueError:
+        abort(404)
+    if candidate.is_file():
+        return send_from_directory(root, requested)
+    abort(404)
 
 
 @app.get("/", defaults={"path": ""})
@@ -4812,9 +4844,13 @@ def spa(path: str):
         candidate.relative_to(WEB)
     except ValueError:
         abort(400)
-    if path and candidate.is_file():
-        return send_from_directory(WEB, path)
-    return send_from_directory(WEB, "index.html")
+    directory, filename, is_owner_shell = _owner_shell_document(path, request.query_string)
+    response = send_from_directory(directory, filename)
+    if is_owner_shell:
+        # The document names hashed asset files, so a cached copy would pin a
+        # browser to a released bundle whose assets are already gone.
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 if __name__ == "__main__":

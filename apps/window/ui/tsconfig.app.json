@@ -22,7 +22,8 @@
     "erasableSyntaxOnly": true,
     "noFallthroughCasesInSwitch": true,
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@legacy/*": ["../web/js/*"]
     }
   },
   "include": ["src"]

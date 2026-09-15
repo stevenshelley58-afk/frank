@@ -2,7 +2,7 @@
 
 **Status:** adopted. shadcn/ui is the default component system for all Frank UI work.
 **Location:** `apps/window/ui` (Vite + React 19 + Tailwind v4)
-**Served at:** `https://frank.fail/ui` (behind the owner auth gate) — see §6
+**Served at:** `https://frank.fail/` and the owner routes under `/project/blockwise/` (behind the owner auth gate); assets at `/ui/assets/` (see §6)
 
 ---
 
@@ -85,35 +85,17 @@ From `apps/window`: `npm run build:ui` and `npm run test:ui`.
 
 ## 4. Charts
 
-`src/components/frank/smooth-charts.tsx` exports:
+`src/components/ui/chart.tsx` (shadcn's Recharts wrapper) is the chart primitive. The earlier
+`smooth-charts.tsx` helpers were removed with the fixture overview; add a chart component beside
+the screen that needs it, under `src/components/`, and use `type="natural"` on Recharts
+`Area`/`Line` for smooth curves.
 
-| Export | Use |
-|---|---|
-| `SmoothAreaChart` | Multi-series trend, gradient fill + legend. Owner overview "Source activity". |
-| `SmoothLineChart` | Single/multi line, optional axes. Response-time style panels. |
-| `Sparkline` | 40px, no axes, no chrome. Inside metric cards. |
-| `FRANK_DOMAINS` | Frank's five domain series, pre-bound to `--chart-1..5`. |
+### The chart palette was replaced
 
-**Smooth curves come from `type="natural"`** on Recharts `Area`/`Line`. Without it Recharts
-draws straight segments between points. Fills use a vertical gradient (35% → 2% alpha)
-rather than a flat colour, so overlapping series stay readable.
-
-### ⚠️ The chart palette had to be replaced
-
-The `radix-nova` preset ships a **greyscale** chart palette — every value has chroma `0`:
-
-```css
---chart-1: oklch(0.87 0 0);   /* chroma 0 = grey */
---chart-2: oklch(0.556 0 0);
-```
-
-It is also **identical between light and dark**, so `--chart-1` is near-white in light mode.
-On a multi-series dashboard that is unusable: five series render as five
-indistinguishable greys. The first build hit exactly this.
-
-`src/index.css` now carries a real categorical palette (Carbon-derived, Apache-2.0)
-converted to OKLCH, with separate light and dark sets — `--chart-1..10`. Verified: five
-series render five distinct stroke colours. **Do not revert these to the preset defaults.**
+The `radix-nova` preset ships a **greyscale** chart palette (chroma `0`, identical in light and
+dark). `src/index.css` carries a real categorical palette (Carbon-derived, Apache-2.0) converted to
+OKLCH with separate light and dark sets, `--chart-1..10`. **Do not revert these to the preset
+defaults.**
 
 ---
 
@@ -145,57 +127,86 @@ Carried over from the earlier design research:
 
 ## 6. Deployment and scope
 
-The bundle is built in the `ui-build` Docker stage and copied to `/web/ui` in the image.
-`server.py` serves it at **`/ui`** (and `/ui/<path>`), falling back to its own `index.html`
-for client-side routes.
+The bundle is built in the `ui-build` Docker stage (which also copies `apps/window/web/js`
+beside it, see §7) and copied to `/web/ui` in the image. Vite's `base` is `/ui/`, so every
+asset URL is absolute (`/ui/assets/...`) whatever path the document was requested from.
 
-**This is an additive review surface.** `/ui` does not replace the main Window: `/` and every
-existing route still serve `apps/window/web` unchanged, and all native application panels are
-untouched. Shipping `/ui` is therefore independently revertable — removing the route and the
-Docker copy line restores the previous behaviour exactly.
+**The shell is Frank's front door.** `apps/window/owner_shell.py` decides which document the
+SPA catch-all in `server.py` serves:
 
-**`/ui` must keep its trailing slash.** The bundle uses relative asset URLs so it can be served
-from any mount path. Relative URLs resolve against the directory of the request, so serving the
-index at `/ui` makes the browser request `/assets/...` instead of `/ui/assets/...`, which hits the
-legacy SPA fallback and fails module loading on a `text/html` MIME type — the page renders its
-title and nothing else. `/ui` therefore 308-redirects to `/ui/`. A `<base href>` is not an option
-here: the `frank_private_response_headers` CSP sets `base-uri 'none'`.
+| Request | Document |
+|---|---|
+| `/`, `/project/blockwise`, `/project/blockwise/<section>`, `/project/blockwise/customer/<id>` | the shell (`/web/ui/index.html`, `Cache-Control: no-store`) |
+| any of those with `?technical=1` | the classic window (`/web/index.html`) |
+| `/hub`, `/tools`, `/files`, `/blog-studio`, every other route | the classic window |
+| `/ui`, `/ui/`, unknown `/ui/<path>` | 308 to `/` |
+| `/ui/<real file>` | the bundle asset |
 
-Caddy's CSP for this host allows the bundle: `script-src 'self'`, `style-src 'self' 'unsafe-inline'`,
-`font-src 'self' data:`, `img-src 'self' data: blob:`.
+The section allowlist is the one in `web/js/view-routing.js`, which the shell imports, so the
+server and the browser agree about which URLs belong to the shell. `/hub` is the classic chats
+and projects home; the classic window itself now navigates there instead of `/`.
+
+The classic window hands the Blockwise project over: `showProject("blockwise")` performs a full
+navigation to the owner route rather than mounting its own owner dashboard. The vanilla owner
+dashboard module (`web/js/owner-dashboard.js`) is no longer mounted in production; it stays in
+the tree only because other modules and tests import its exports.
+
+Caddy's CSP for this host already allows the bundle and the native panels: `script-src 'self'`,
+`style-src 'self' 'unsafe-inline'`, `font-src 'self' data:`, `img-src 'self' data: blob:`,
+`frame-src 'self' https://crm.frank.fail https://marketing.frank.fail https://mail.frank.fail`.
 
 ---
 
-## 7. Migration path for the existing UI
+## 7. What the shell reuses, and what still renders in the classic window
 
-`apps/window/web` is ~28 raw ES modules and ~6,000 lines of hand-written CSS, served
-directly by the Python host with no build step. It coexists with `apps/window/ui` during
-migration.
+The shell does not carry a second implementation of anything the vanilla Window already
+implements and tests. Three vanilla modules are bundled verbatim through the `@legacy` alias
+(`ui/vite.config.ts`, typed in `ui/src/legacy.d.ts`):
 
-| Step | Work |
+| Module | Role in the shell |
 |---|---|
-| 1 | Shell — rail, header, routing (done: `App.tsx`) |
-| 2 | Owner overview rebuilt (done: `owner-overview.tsx`) |
-| 3 | Port one real view at a time, starting with **Ad database** — strongest current surface, natural `table` fit |
-| 4 | Move each migrated route from `/` to `/ui` |
-| 5 | Delete each `web/js/*.js` module and its `*.css` as its replacement ships |
-| 6 | Retire `tokens.css` once nothing reads it |
+| `web/js/view-routing.js` | the owner route grammar (`lib/routes.ts`) |
+| `web/js/owner-app-host.js` | the native panel host: readiness check, bridge protocol, sign-in hand-off, preloading, retained panels, unsaved-work guard (`components/native/NativeHost.tsx`) |
+| `web/js/ads/ads-workspace.js` | the Ads workspace, mounted as an island (`components/ads/AdsIsland.tsx`) |
 
-**Do not port all 19 views at once.** Each should ship and be verified independently.
+Their stylesheets (`/tokens.css`, `/owner-dashboard.css`, `/ads.css`, `/ads-controls.css`) are
+linked from `ui/index.html` and served by the Window host, so the shell and the classic window
+read the same files. `tokens.css` is generated from `ui/src/index.css` and is what gives those
+modules the `--ink`/`--line`/`--bg` aliases.
+
+Layout: a narrow icon rail names the areas (Overview, Ads, Content, CRM, Mail, Email flows,
+Customers, Reports; Tools and Settings below), a secondary menu lists the sections inside an
+area that has more than one (CRM: Leads, Support; Reports: Results, Revenue, Notifications;
+Content and Tools: their destinations), and the content pane renders the section. Under `lg`
+the rail and secondary menu collapse into one drawer.
+
+Data: Overview, Customers and Reports render `/api/owner/workspace/sources` and
+`/api/owner/workspace/readiness`; a customer record renders
+`/api/owner/workspace/customers/<id>`. A source that is not connected renders its own
+unavailable state; nothing is invented.
+
+Still in the classic window, reached from the Content and Tools menus as full navigations:
+chats and projects (`/hub`), Files, Connections, Accounts, Trace, Releases, Ops, Live, Map,
+Control, Blog Studio, Ad Template Generator, Ad Radar, Ad database, and the Blockwise
+technical view (`/project/blockwise?technical=1`). Convert one at a time; each conversion
+removes its entry from `components/areas/Areas.tsx` and its `web/js` module once nothing else
+imports it.
 
 ---
 
 ## 8. Verification
 
 ```bash
-cd apps/window/ui && npm run build
+cd apps/window/ui && npm run typecheck && npm run build
+cd apps/window && bash scripts/verify.sh
 ```
 
-Current output: **2,573 modules, ~886 KB JS (263 KB gzip), 114 KB CSS (18 KB gzip)**,
-builds in <1s. Zero TypeScript errors, zero console errors at runtime.
-
-Screenshot harness: `design-system/lib/shoot-ui.mjs` — captures both themes, asserts chart
-and curve counts, fails loudly on page errors.
+`verify.sh` covers the theme parity check, the Python route split tests
+(`tests/test_owner_shell_routes.py`), and the vanilla hand-off tests
+(`tests/owner_dashboard_route.test.mjs`, `tests/view_routing.test.mjs`). Live acceptance is a
+browser on the deployed revision: the shell at `/`, CRM, Support, Mail and Email flows opening
+inside it, Back and Forward across sections, and the 390px layout with no page-level horizontal
+scroll and no control under 44px.
 
 ---
 

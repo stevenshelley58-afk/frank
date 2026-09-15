@@ -77,6 +77,8 @@ class InfraContractTest(unittest.TestCase):
         self.assertIn("python -m unittest discover -s tests", runner)
         self.assertIn("python -m compileall -q mini", runner)
         self.assertIn("-not -path './node_modules/*' -not -path './vendor/*'", runner)
+        # The shell's own dependency tree and build output are not Window source.
+        self.assertIn("-not -path './ui/node_modules/*' -not -path './ui/dist/*'", runner)
         self.assertIn("node --check \"$file\"", runner)
         self.assertIn("-not -name 'graph_browser.test.mjs'", runner)
         self.assertIn('node --test "${js_tests[@]}"', runner)

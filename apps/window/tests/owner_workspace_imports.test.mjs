@@ -99,13 +99,15 @@ test("the owner workspace modules import without a browser and keep the mount co
 
 test("the shell, the legacy shortcut and app.js still agree on the owner entry point", () => {
   const app = readFileSync(new URL("../web/js/app.js", import.meta.url), "utf8");
-  assert.match(app, /import \{ mountOwnerDashboard \} from "\.\/owner-dashboard\.js/);
-  assert.match(app, /disposeOwnerDashboard = mountOwnerDashboard\(\$\("#owner-dashboard"\), \{/);
-  assert.match(app, /disposeOwnerDashboard\?\.\(\)/);
+  // The vanilla Window hands the owner routes to the shell the server serves
+  // there, so it no longer mounts the workspace itself.
+  assert.doesNotMatch(app, /mountOwnerDashboard/);
+  assert.match(app, /window\.location\.assign\(ownerPath\)/);
   const legacy = readFileSync(new URL("../web/js/operations-tools.js", import.meta.url), "utf8");
   assert.match(legacy, /import \{ mountOwnerDashboard \} from "\.\/owner-dashboard\.js/);
   assert.match(legacy, /return mountOwnerDashboard\(root\)/);
   const html = readFileSync(new URL("../web/index.html", import.meta.url), "utf8");
-  assert.match(html, /data-view="blockwise-dashboard" id="owner-dashboard"/);
+  assert.doesNotMatch(html, /id="owner-dashboard"/);
+  // The shared operations tool still renders owner workspace markup.
   assert.match(html, /owner-dashboard\.css\?v=/);
 });
