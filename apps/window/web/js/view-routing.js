@@ -4,11 +4,15 @@ const BLOG_STUDIO_PATH = "/blog-studio";
 const AD_RADAR_PATH = "/ad-radar";
 const AD_DB_PATH = "/ad-db";
 const OPS_PATH = "/ops";
+// The owner shell holds "/", so the vanilla hub has its own address. Unknown
+// paths still resolve to the hub view, and this is the address they canonicalise
+// to rather than the shell's front door.
+const HUB_PATH = "/hub";
 const BLOCKWISE_ORIGIN = "https://blockwise.sale";
 const TEMPLATE_PATH = "/ad-studio/templates/";
 const TEMPLATE_ID = /^[A-Za-z0-9][A-Za-z0-9._~-]{0,127}$/;
 const OPERATE_PATHS = { "/live": "live", "/map": "map", "/control": "control" };
-const STATIC_PATHS = { "/tools": "tools", "/files": "files", "/connections": "connections", "/accounts": "accounts", "/trace": "trace", "/releases": "releases" };
+const STATIC_PATHS = { "/hub": "hub", "/tools": "tools", "/files": "files", "/connections": "connections", "/accounts": "accounts", "/trace": "trace", "/releases": "releases" };
 const HOME_PATH = /^\/(project|entity)\/([^/]+)(?:\/([^/]+))?(?:\/([^/]+))?\/?$/;
 const ENTITY_IDS = new Set([
   "tool:connections", "tool:accounts", "tool:mail", "tool:widget-builder", "tool:campaigns", "tool:ad-templates",
@@ -125,7 +129,7 @@ export function pathForView(view, detail = {}) {
   }
   if (view === "project" && validId(detail.projectId)) return `/project/${encodeURIComponent(detail.projectId)}`;
   if (view === "entity-home" && validId(detail.entity?.kind) && validId(detail.entity?.id)) return `/entity/${encodeURIComponent(detail.entity.kind)}/${encodeURIComponent(detail.entity.id)}`;
-  return "/";
+  return HUB_PATH;
 }
 
 export function blockwiseTemplateUrl(value) {

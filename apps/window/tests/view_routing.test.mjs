@@ -39,6 +39,20 @@ test("Ad Template Generator has a canonical deep link and every other view retur
   }
 });
 
+test("the vanilla hub has its own address now that the owner shell holds the root", () => {
+  assert.equal(pathForView("hub"), "/hub");
+  assert.deepEqual(routeForPath("/hub"), { view: "hub" });
+  assert.deepEqual(routeForPath("/hub/"), { view: "hub" });
+  // An unknown path still resolves to the hub view, and canonicalises to the
+  // hub address rather than to the shell's front door.
+  assert.equal(viewForPath("/not-a-view"), "hub");
+  assert.equal(pathForView(viewForPath("/not-a-view")), "/hub");
+  // A view with no address of its own falls back to the hub, not to "/".
+  assert.equal(pathForView("widget-builder"), "/hub");
+  // A stale tab landing on the root still reads as the hub.
+  assert.equal(viewForPath("/"), "hub");
+});
+
 test("Blockwise editor links require a safe imported template identity", () => {
   assert.equal(
     blockwiseTemplateUrl({ template_id: "meta-006", status: "imported" }),
